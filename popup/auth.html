@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Swarm ID Authentication</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        padding: 20px;
+      }
+
+      .auth-container {
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        padding: 40px;
+        max-width: 450px;
+        width: 100%;
+        text-align: center;
+      }
+
+      .logo {
+        font-size: 64px;
+        margin-bottom: 20px;
+      }
+
+      h1 {
+        color: #667eea;
+        font-size: 28px;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        color: #666;
+        font-size: 16px;
+        margin-bottom: 30px;
+        line-height: 1.5;
+      }
+
+      .app-info {
+        background: #f8f9fa;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 30px;
+      }
+
+      .app-info-label {
+        font-size: 12px;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 5px;
+      }
+
+      .app-info-value {
+        font-size: 16px;
+        font-weight: 600;
+        color: #333;
+        font-family: 'Courier New', monospace;
+        word-break: break-all;
+      }
+
+      .identity-info {
+        background: #e7f3ff;
+        border: 2px solid #2196F3;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 30px;
+        text-align: left;
+      }
+
+      .identity-info-label {
+        font-size: 12px;
+        color: #1565C0;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+
+      .identity-info-value {
+        font-size: 14px;
+        color: #333;
+        font-family: 'Courier New', monospace;
+        word-break: break-all;
+        background: white;
+        padding: 10px;
+        border-radius: 4px;
+      }
+
+      .auth-button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 16px 40px;
+        border-radius: 8px;
+        font-size: 18px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: transform 0.2s, box-shadow 0.2s;
+        width: 100%;
+        box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+      }
+
+      .auth-button:hover:not(:disabled) {
+        transform: translateY(-2px);
+        box-shadow: 0 6px 20px rgba(102, 126, 234, 0.6);
+      }
+
+      .auth-button:active:not(:disabled) {
+        transform: translateY(0);
+      }
+
+      .auth-button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      .status-message {
+        margin-top: 20px;
+        padding: 12px;
+        border-radius: 6px;
+        font-size: 14px;
+      }
+
+      .status-message.success {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+
+      .status-message.error {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+
+      .status-message.info {
+        background: #d1ecf1;
+        border: 1px solid #bee5eb;
+        color: #0c5460;
+      }
+
+      .setup-link {
+        margin-top: 20px;
+        padding-top: 20px;
+        border-top: 1px solid #e0e0e0;
+      }
+
+      .setup-link a {
+        color: #667eea;
+        text-decoration: none;
+        font-size: 14px;
+      }
+
+      .setup-link a:hover {
+        text-decoration: underline;
+      }
+
+      .loading {
+        display: inline-block;
+        width: 20px;
+        height: 20px;
+        border: 3px solid rgba(255,255,255,.3);
+        border-radius: 50%;
+        border-top-color: white;
+        animation: spin 1s ease-in-out infinite;
+      }
+
+      @keyframes spin {
+        to { transform: rotate(360deg); }
+      }
+    </style>
+  </head>
+  <body>
+    <div class="auth-container">
+      <div class="logo">🔐</div>
+      <h1>Swarm ID Authentication</h1>
+      <p class="subtitle">
+        Authenticate with your Swarm Identity to grant this app secure access to Swarm storage.
+      </p>
+
+      <div class="app-info">
+        <div class="app-info-label">Requesting Access</div>
+        <div class="app-info-value" id="app-origin">Loading...</div>
+      </div>
+
+      <div class="identity-info">
+        <div class="identity-info-label">Your Master Identity</div>
+        <div class="identity-info-value" id="master-key">Loading...</div>
+      </div>
+
+      <button id="auth-button" class="auth-button" onclick="authenticate()">
+        Authenticate
+      </button>
+
+      <div id="status-message"></div>
+
+      <div class="setup-link">
+        <a href="#" onclick="setupNewIdentity(); return false;">
+          Don't have an identity? Set one up
+        </a>
+      </div>
+    </div>
+
+    <script type="module">
+      import { deriveSecret, generateMasterKey } from './key-derivation.js';
+
+      // Security: Validate that opener is from our own origin
+      if (!window.opener) {
+        console.error('[Auth] Security: No opener window found');
+        showStatus('Security error: This page must be opened by Swarm ID iframe', 'error');
+        document.getElementById('auth-button').disabled = true;
+      } else {
+        // Check opener origin by trying to access its location
+        try {
+          const openerOrigin = window.opener.location.origin;
+          if (openerOrigin !== window.location.origin) {
+            console.error('[Auth] Security: Opener origin mismatch:', openerOrigin);
+            showStatus(`Security error: Opener origin (${openerOrigin}) does not match expected origin`, 'error');
+            document.getElementById('auth-button').disabled = true;
+          } else {
+            console.log('[Auth] Security: Opener origin validated ✓');
+          }
+        } catch (e) {
+          // If we can't access opener.location, it's cross-origin - this is suspicious
+          console.error('[Auth] Security: Cannot access opener origin (cross-origin?):', e);
+          showStatus('Security error: Cannot verify opener origin', 'error');
+          document.getElementById('auth-button').disabled = true;
+        }
+      }
+
+      // Get app origin from URL parameter
+      let appOrigin = null;
+      let iframeReference = null;
+
+      // Parse URL parameter
+      const urlParams = new URLSearchParams(window.location.search);
+      appOrigin = urlParams.get('origin');
+
+      if (appOrigin) {
+        console.log('[Auth] Got app origin from URL parameter:', appOrigin);
+      } else {
+        console.warn('[Auth] No origin parameter found in URL');
+        appOrigin = 'Unknown (no origin parameter)';
+      }
+
+      // Display app origin
+      document.getElementById('app-origin').textContent = appOrigin;
+
+      // Load or generate master identity
+      let masterKey = localStorage.getItem('swarm-master-key');
+
+      if (!masterKey) {
+        console.log('[Auth] No master key found, showing setup message');
+        showStatus('No Swarm Identity found. Click "Set one up" below to create one.', 'info');
+        document.getElementById('auth-button').disabled = true;
+        document.getElementById('master-key').textContent = 'No identity found';
+      } else {
+        console.log('[Auth] Master key loaded from localStorage');
+        document.getElementById('master-key').textContent = masterKey.substring(0, 16) + '...';
+      }
+
+      // Show status message
+      function showStatus(message, type = 'info') {
+        const statusEl = document.getElementById('status-message');
+        statusEl.className = `status-message ${type}`;
+        statusEl.textContent = message;
+      }
+
+      // Setup new identity
+      window.setupNewIdentity = async function() {
+        console.log('[Auth] Setting up new identity...');
+        showStatus('Generating new Swarm Identity...', 'info');
+
+        try {
+          const newMasterKey = await generateMasterKey();
+          localStorage.setItem('swarm-master-key', newMasterKey);
+          masterKey = newMasterKey;
+
+          document.getElementById('master-key').textContent = masterKey.substring(0, 16) + '...';
+          document.getElementById('auth-button').disabled = false;
+
+          showStatus('✓ New Swarm Identity created! You can now authenticate.', 'success');
+          console.log('[Auth] New master key generated and stored');
+        } catch (error) {
+          console.error('[Auth] Failed to generate master key:', error);
+          showStatus('Failed to generate identity: ' + error.message, 'error');
+        }
+      };
+
+      // Authenticate
+      window.authenticate = async function() {
+        if (!masterKey) {
+          showStatus('No master key available. Please set up an identity first.', 'error');
+          return;
+        }
+
+        if (!appOrigin) {
+          showStatus('Unknown app origin. Cannot authenticate.', 'error');
+          return;
+        }
+
+        console.log('[Auth] Starting authentication for app:', appOrigin);
+        showStatus('Deriving app-specific secret...', 'info');
+
+        const button = document.getElementById('auth-button');
+        button.disabled = true;
+        button.innerHTML = '<span class="loading"></span>';
+
+        try {
+          // Derive app-specific secret
+          const appSecret = await deriveSecret(masterKey, appOrigin);
+          console.log('[Auth] App secret derived:', appSecret.substring(0, 16) + '...');
+
+          // Send secret to opener (the iframe that opened this popup)
+          if (!window.opener) {
+            throw new Error('No opener window found. This popup must be opened by the iframe.');
+          }
+
+          console.log('[Auth] Sending secret to iframe...');
+
+          // Send secret to iframe via postMessage
+          window.opener.postMessage(
+            {
+              type: 'setSecret',
+              appOrigin: appOrigin,
+              secret: appSecret
+            },
+            window.location.origin  // Target the iframe's origin (same as this popup)
+          );
+
+          showStatus('✓ Authentication successful! Closing window...', 'success');
+          console.log('[Auth] Secret sent to iframe');
+
+          // Close popup after short delay
+          setTimeout(() => {
+            window.close();
+          }, 1500);
+
+        } catch (error) {
+          console.error('[Auth] Authentication failed:', error);
+          showStatus('Authentication failed: ' + error.message, 'error');
+          button.disabled = false;
+          button.textContent = 'Authenticate';
+        }
+      };
+
+      console.log('[Auth] Authentication popup loaded');
+    </script>
+  </body>
+</html>
