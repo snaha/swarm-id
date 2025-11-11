@@ -35,9 +35,9 @@ export class SwarmIdClient {
     string,
     {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      resolve: (value: any) => void;
-      reject: (error: Error) => void;
-      timeoutId: NodeJS.Timeout;
+      resolve: (value: any) => void
+      reject: (error: Error) => void
+      timeoutId: NodeJS.Timeout
     }
   > = new Map()
   private requestIdCounter = 0
@@ -248,9 +248,7 @@ export class SwarmIdClient {
    */
   private ensureReady(): void {
     if (!this.ready) {
-      throw new Error(
-        "SwarmIdClient not initialized. Call initialize() first.",
-      )
+      throw new Error("SwarmIdClient not initialized. Call initialize() first.")
     }
   }
 
@@ -338,10 +336,10 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "uploadDataResponse";
-      requestId: string;
-      reference: Reference;
-      tagUid?: number;
+      type: "uploadDataResponse"
+      requestId: string
+      reference: Reference
+      tagUid?: number
     }>({
       type: "uploadData",
       requestId,
@@ -367,9 +365,9 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "downloadDataResponse";
-      requestId: string;
-      data: number[];
+      type: "downloadDataResponse"
+      requestId: string
+      data: number[]
     }>({
       type: "downloadData",
       requestId,
@@ -407,10 +405,10 @@ export class SwarmIdClient {
     }
 
     const response = await this.sendRequest<{
-      type: "uploadFileResponse";
-      requestId: string;
-      reference: Reference;
-      tagUid?: number;
+      type: "uploadFileResponse"
+      requestId: string
+      reference: Reference
+      tagUid?: number
     }>({
       type: "uploadFile",
       requestId,
@@ -438,10 +436,10 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "downloadFileResponse";
-      requestId: string;
-      name: string;
-      data: number[];
+      type: "downloadFileResponse"
+      requestId: string
+      name: string
+      data: number[]
     }>({
       type: "downloadFile",
       requestId,
@@ -472,9 +470,9 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "uploadChunkResponse";
-      requestId: string;
-      reference: Reference;
+      type: "uploadChunkResponse"
+      requestId: string
+      reference: Reference
     }>({
       type: "uploadChunk",
       requestId,
@@ -499,9 +497,9 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "downloadChunkResponse";
-      requestId: string;
-      data: number[];
+      type: "downloadChunkResponse"
+      requestId: string
+      data: number[]
     }>({
       type: "downloadChunk",
       requestId,
@@ -523,20 +521,20 @@ export class SwarmIdClient {
     amount: string,
     depth: number,
     options?: {
-      gasPrice?: string;
-      immutableFlag?: boolean;
-      label?: string;
-      waitForUsable?: boolean;
-      waitForUsableTimeout?: number;
+      gasPrice?: string
+      immutableFlag?: boolean
+      label?: string
+      waitForUsable?: boolean
+      waitForUsableTimeout?: number
     },
   ): Promise<BatchId> {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "createPostageBatchResponse";
-      requestId: string;
-      batchId: BatchId;
+      type: "createPostageBatchResponse"
+      requestId: string
+      batchId: BatchId
     }>({
       type: "createPostageBatch",
       requestId,
@@ -556,9 +554,9 @@ export class SwarmIdClient {
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "getPostageBatchResponse";
-      requestId: string;
-      batch: PostageBatch;
+      type: "getPostageBatchResponse"
+      requestId: string
+      batch: PostageBatch
     }>({
       type: "getPostageBatch",
       requestId,

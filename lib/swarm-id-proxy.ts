@@ -162,10 +162,7 @@ export class SwarmIdProxy {
     this.parentOrigin = event.origin
     this.parentIdentified = true
 
-    console.log(
-      "[Proxy] Parent identified via postMessage:",
-      this.parentOrigin,
-    )
+    console.log("[Proxy] Parent identified via postMessage:", this.parentOrigin)
     console.log("[Proxy] Parent locked in - cannot be changed")
 
     // Validate parent is in allowlist (if allowlist is configured)
@@ -173,10 +170,7 @@ export class SwarmIdProxy {
       this.allowedOrigins.length > 0 &&
       !this.isAllowedOrigin(this.parentOrigin)
     ) {
-      console.warn(
-        "[Proxy] Parent origin not in allowlist:",
-        this.parentOrigin,
-      )
+      console.warn("[Proxy] Parent origin not in allowlist:", this.parentOrigin)
       return
     }
 
@@ -199,7 +193,7 @@ export class SwarmIdProxy {
 
     // Acknowledge receipt
     if (event.source) {
-      (event.source as WindowProxy).postMessage(
+      ;(event.source as WindowProxy).postMessage(
         {
           type: "proxyReady",
           authenticated: this.authenticated,
@@ -349,7 +343,7 @@ export class SwarmIdProxy {
     error: string,
   ): void {
     if (event.source && requestId) {
-      (event.source as WindowProxy).postMessage(
+      ;(event.source as WindowProxy).postMessage(
         {
           type: "error",
           requestId,
@@ -380,7 +374,7 @@ export class SwarmIdProxy {
     console.log("[Proxy] Checking authentication status...")
 
     if (event.source) {
-      (event.source as WindowProxy).postMessage(
+      ;(event.source as WindowProxy).postMessage(
         {
           type: "authStatusResponse",
           authenticated: this.authenticated,
@@ -453,9 +447,7 @@ export class SwarmIdProxy {
     // Click handler - open auth popup or window
     button.addEventListener("click", () => {
       if (!this.parentOrigin) {
-        console.error(
-          "[Proxy] Cannot open auth window - parent origin not set",
-        )
+        console.error("[Proxy] Cannot open auth window - parent origin not set")
         return
       }
       console.log(
@@ -547,7 +539,7 @@ export class SwarmIdProxy {
 
     // Respond to popup (if still open)
     if (event.source && !(event.source as Window).closed) {
-      (event.source as WindowProxy).postMessage(
+      ;(event.source as WindowProxy).postMessage(
         {
           type: "secretReceived",
           success: true,
@@ -579,7 +571,7 @@ export class SwarmIdProxy {
       const reference = await this.simulateUpload(data)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadDataResponse",
             requestId,
@@ -616,7 +608,7 @@ export class SwarmIdProxy {
       const data = await this.simulateDownload(reference)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "downloadDataResponse",
             requestId,
@@ -664,7 +656,7 @@ export class SwarmIdProxy {
       const reference = await this.simulateUpload(data)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadFileResponse",
             requestId,
@@ -706,7 +698,7 @@ export class SwarmIdProxy {
       const data = await this.simulateDownload(reference)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "downloadFileResponse",
             requestId,
@@ -749,7 +741,7 @@ export class SwarmIdProxy {
       const reference = await this.simulateUpload(data)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadChunkResponse",
             requestId,
@@ -786,7 +778,7 @@ export class SwarmIdProxy {
       const data = await this.simulateDownload(reference)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "downloadChunkResponse",
             requestId,
@@ -829,7 +821,7 @@ export class SwarmIdProxy {
       const batchId = "0".repeat(64)
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "createPostageBatchResponse",
             requestId,
@@ -878,7 +870,7 @@ export class SwarmIdProxy {
       }
 
       if (event.source) {
-        (event.source as WindowProxy).postMessage(
+        ;(event.source as WindowProxy).postMessage(
           {
             type: "getPostageBatchResponse",
             requestId,

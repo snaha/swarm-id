@@ -6,13 +6,13 @@
  */
 
 // Main client for parent windows
-export { SwarmIdClient } from './swarm-id-client'
+export { SwarmIdClient } from "./swarm-id-client"
 
 // Proxy for iframe
-export { SwarmIdProxy, initProxy } from './swarm-id-proxy'
+export { SwarmIdProxy, initProxy } from "./swarm-id-proxy"
 
 // Auth popup
-export { SwarmIdAuth, initAuth } from './swarm-id-auth'
+export { SwarmIdAuth, initAuth } from "./swarm-id-auth"
 
 // Key derivation utilities
 export {
@@ -21,8 +21,8 @@ export {
   hexToUint8Array,
   uint8ArrayToHex,
   verifySecret,
-  utils
-} from './utils/key-derivation'
+  utils,
+} from "./utils/key-derivation"
 
 // Type exports
 export type {
@@ -41,8 +41,8 @@ export type {
   Address,
   ParentToIframeMessage,
   IframeToParentMessage,
-  PopupToIframeMessage
-} from './types'
+  PopupToIframeMessage,
+} from "./types"
 
 // Schema exports (for validation)
 export {
@@ -58,5 +58,5 @@ export {
   ButtonStylesSchema,
   ParentToIframeMessageSchema,
   IframeToParentMessageSchema,
-  PopupToIframeMessageSchema
-} from './types'
+  PopupToIframeMessageSchema,
+} from "./types"
