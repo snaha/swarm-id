@@ -1,12 +1,35 @@
 # Swarm Identity Management
 
-This project implements a cross-browser compatible authentication and identity management system for Swarm dApps.
+This monorepo implements a cross-browser compatible authentication and identity management system for Swarm dApps.
+
+## Packages
+
+- **[lib/](./lib/README.md)** - The Swarm ID TypeScript library for authentication and Bee API operations
+- **popup/** - Demo implementation with OAuth-style popup authentication
 
 ## Architecture
 
 The project uses an OAuth-style popup authentication flow that works across all browsers (Chrome, Firefox, Safari) without requiring the Storage Access API. See the [popup folder](./popup) for detailed documentation.
 
 **Quick Overview**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
+
+## Library Quick Start
+
+```bash
+# Install dependencies
+pnpm install
+
+# Build the library
+pnpm build
+
+# Watch mode for development
+pnpm build:watch
+
+# Lint code
+pnpm lint
+```
+
+See [lib/README.md](./lib/README.md) for detailed library documentation.
 
 ## Local Development Setup
 

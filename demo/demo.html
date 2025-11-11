@@ -1,0 +1,356 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Swarm ID Demo dApp</title>
+    <style>
+      * {
+        margin: 0;
+        padding: 0;
+        box-sizing: border-box;
+      }
+
+      body {
+        font-family:
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        min-height: 100vh;
+        padding: 40px 20px;
+      }
+
+      .container {
+        max-width: 800px;
+        margin: 0 auto;
+        background: white;
+        border-radius: 16px;
+        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+        padding: 40px;
+      }
+
+      h1 {
+        color: #667eea;
+        font-size: 32px;
+        margin-bottom: 10px;
+      }
+
+      .subtitle {
+        color: #666;
+        font-size: 16px;
+        margin-bottom: 30px;
+        line-height: 1.5;
+      }
+
+      .section {
+        margin-bottom: 30px;
+        padding: 20px;
+        background: #f8f9fa;
+        border-radius: 8px;
+      }
+
+      .section h2 {
+        color: #333;
+        font-size: 20px;
+        margin-bottom: 15px;
+      }
+
+      .status {
+        padding: 12px;
+        border-radius: 6px;
+        margin-bottom: 15px;
+      }
+
+      .status.authenticated {
+        background: #d4edda;
+        border: 1px solid #c3e6cb;
+        color: #155724;
+      }
+
+      .status.unauthenticated {
+        background: #f8d7da;
+        border: 1px solid #f5c6cb;
+        color: #721c24;
+      }
+
+      button {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        color: white;
+        border: none;
+        padding: 12px 24px;
+        border-radius: 6px;
+        font-size: 14px;
+        font-weight: 600;
+        cursor: pointer;
+        transition:
+          transform 0.2s,
+          box-shadow 0.2s;
+        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+      }
+
+      button:hover:not(:disabled) {
+        transform: translateY(-1px);
+        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+      }
+
+      button:disabled {
+        background: #ccc;
+        cursor: not-allowed;
+        box-shadow: none;
+      }
+
+      input,
+      textarea {
+        width: 100%;
+        padding: 10px;
+        border: 1px solid #ddd;
+        border-radius: 4px;
+        font-family: inherit;
+        margin-bottom: 10px;
+      }
+
+      textarea {
+        min-height: 100px;
+        font-family: "Courier New", monospace;
+      }
+
+      .result {
+        background: white;
+        padding: 15px;
+        border-radius: 6px;
+        border: 1px solid #ddd;
+        margin-top: 15px;
+        word-break: break-all;
+        font-family: "Courier New", monospace;
+        font-size: 13px;
+      }
+
+      .log {
+        background: #2d2d2d;
+        color: #f8f8f8;
+        padding: 15px;
+        border-radius: 6px;
+        max-height: 300px;
+        overflow-y: auto;
+        font-family: "Courier New", monospace;
+        font-size: 12px;
+        margin-top: 15px;
+      }
+
+      .log-entry {
+        margin-bottom: 5px;
+      }
+
+      .log-entry .time {
+        color: #888;
+      }
+
+      .log-entry .type {
+        font-weight: bold;
+      }
+
+      .log-entry.info .type {
+        color: #4caf50;
+      }
+
+      .log-entry.error .type {
+        color: #f44336;
+      }
+
+      .log-entry.warn .type {
+        color: #ff9800;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <h1>🐝 Swarm ID Demo dApp</h1>
+      <p class="subtitle">
+        This demo application shows how to use the Swarm ID library for
+        authentication and Bee API operations.
+      </p>
+
+      <!-- Authentication Section -->
+      <div class="section">
+        <h2>Authentication</h2>
+        <div id="auth-status" class="status unauthenticated">
+          Status: Not authenticated
+        </div>
+        <p style="font-size: 14px; color: #666; margin-top: 10px">
+          The authentication button will appear in the iframe below when not
+          authenticated.
+        </p>
+      </div>
+
+      <!-- Upload Section -->
+      <div class="section">
+        <h2>Upload Data</h2>
+        <input
+          type="text"
+          id="postage-batch"
+          placeholder="Postage Batch ID (64 hex chars)"
+        />
+        <textarea id="upload-data" placeholder="Enter data to upload...">
+Hello, Swarm!</textarea
+        >
+        <button id="upload-button" disabled>Upload Data</button>
+        <div id="upload-result"></div>
+      </div>
+
+      <!-- Download Section -->
+      <div class="section">
+        <h2>Download Data</h2>
+        <input
+          type="text"
+          id="reference"
+          placeholder="Reference (64 hex chars)"
+        />
+        <button id="download-button" disabled>Download Data</button>
+        <div id="download-result"></div>
+      </div>
+
+      <!-- Log Section -->
+      <div class="section">
+        <h2>Console Log</h2>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
+
+    <script type="module">
+      import { SwarmIdClient } from "../lib/dist/swarm-id-client.js";
+
+      const PROXY_ORIGIN = "https://swarm-id.local:8081";
+      const BEE_API_URL = "http://localhost:1633";
+
+      // Logging
+      const logContainer = document.getElementById("log");
+      function log(message, type = "info") {
+        const time = new Date().toLocaleTimeString();
+        const entry = document.createElement("div");
+        entry.className = `log-entry ${type}`;
+        entry.innerHTML = `<span class="time">[${time}]</span> <span class="type">[${type.toUpperCase()}]</span> ${message}`;
+        logContainer.appendChild(entry);
+        logContainer.scrollTop = logContainer.scrollHeight;
+        console.log(`[${type}]`, message);
+      }
+
+      // Initialize the Swarm ID client
+      log("Initializing Swarm ID client...", "info");
+
+      const client = new SwarmIdClient({
+        iframeOrigin: PROXY_ORIGIN,
+        iframePath: "/demo/proxy.html",
+        beeApiUrl: BEE_API_URL,
+        timeout: 30000,
+        onAuthChange: (authenticated) => {
+          log(`Auth status changed: ${authenticated}`, "info");
+          updateAuthStatus(authenticated);
+        },
+      });
+
+      try {
+        await client.initialize();
+        log("Swarm ID client initialized successfully", "info");
+
+        // Check initial auth status
+        const status = await client.checkAuthStatus();
+        log(`Initial auth status: ${status.authenticated}`, "info");
+        updateAuthStatus(status.authenticated);
+      } catch (error) {
+        log(`Failed to initialize: ${error.message}`, "error");
+      }
+
+      function updateAuthStatus(authenticated) {
+        const statusEl = document.getElementById("auth-status");
+        const uploadBtn = document.getElementById("upload-button");
+        const downloadBtn = document.getElementById("download-button");
+
+        if (authenticated) {
+          statusEl.className = "status authenticated";
+          statusEl.textContent = "✓ Status: Authenticated";
+          uploadBtn.disabled = false;
+          downloadBtn.disabled = false;
+        } else {
+          statusEl.className = "status unauthenticated";
+          statusEl.textContent = "✗ Status: Not authenticated";
+          uploadBtn.disabled = true;
+          downloadBtn.disabled = true;
+        }
+      }
+
+      // Upload handler
+      document
+        .getElementById("upload-button")
+        .addEventListener("click", async () => {
+          const batchId = document.getElementById("postage-batch").value.trim();
+          const data = document.getElementById("upload-data").value;
+          const resultEl = document.getElementById("upload-result");
+
+          if (!batchId || batchId.length !== 64) {
+            log("Invalid postage batch ID", "error");
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Invalid postage batch ID (must be 64 hex chars)</div>';
+            return;
+          }
+
+          if (!data) {
+            log("No data to upload", "error");
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter data to upload</div>';
+            return;
+          }
+
+          try {
+            log(`Uploading data (${data.length} bytes)...`, "info");
+            const encoder = new TextEncoder();
+            const uint8Data = encoder.encode(data);
+
+            const result = await client.uploadData(batchId, uint8Data, {
+              pin: true,
+            });
+            log(`Upload successful! Reference: ${result.reference}`, "info");
+            resultEl.innerHTML = `<div class="result"><strong>Reference:</strong><br/>${result.reference}</div>`;
+
+            // Auto-fill reference in download section
+            document.getElementById("reference").value = result.reference;
+          } catch (error) {
+            log(`Upload failed: ${error.message}`, "error");
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
+          }
+        });
+
+      // Download handler
+      document
+        .getElementById("download-button")
+        .addEventListener("click", async () => {
+          const reference = document.getElementById("reference").value.trim();
+          const resultEl = document.getElementById("download-result");
+
+          if (!reference || reference.length !== 64) {
+            log("Invalid reference", "error");
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Invalid reference (must be 64 hex chars)</div>';
+            return;
+          }
+
+          try {
+            log(`Downloading data from reference: ${reference}`, "info");
+            const data = await client.downloadData(reference);
+            const decoder = new TextDecoder();
+            const text = decoder.decode(data);
+            log(`Download successful! (${data.length} bytes)`, "info");
+            resultEl.innerHTML = `<div class="result"><strong>Downloaded Data:</strong><br/>${text}</div>`;
+          } catch (error) {
+            log(`Download failed: ${error.message}`, "error");
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
+          }
+        });
+
+      log("Demo application ready", "info");
+
+      // Cleanup on page unload
+      window.addEventListener("beforeunload", () => {
+        client.destroy();
+      });
+    </script>
+  </body>
+</html>
