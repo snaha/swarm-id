@@ -344,7 +344,7 @@ export class SwarmIdClient {
       type: "uploadData",
       requestId,
       postageBatchId,
-      data: Array.from(data),
+      data: new Uint8Array(data),
       options,
     })
 
@@ -367,7 +367,7 @@ export class SwarmIdClient {
     const response = await this.sendRequest<{
       type: "downloadDataResponse"
       requestId: string
-      data: number[]
+      data: Uint8Array
     }>({
       type: "downloadData",
       requestId,
@@ -375,7 +375,7 @@ export class SwarmIdClient {
       options,
     })
 
-    return new Uint8Array(response.data)
+    return response.data
   }
 
   // ============================================================================
@@ -413,7 +413,7 @@ export class SwarmIdClient {
       type: "uploadFile",
       requestId,
       postageBatchId,
-      data: Array.from(data),
+      data: data as Uint8Array,
       name: fileName,
       options,
     })
@@ -477,7 +477,7 @@ export class SwarmIdClient {
       type: "uploadChunk",
       requestId,
       postageBatchId,
-      data: Array.from(data),
+      data: data as Uint8Array,
       options,
     })
 

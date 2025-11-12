@@ -19,6 +19,7 @@ import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
 } from "./types"
+import { Bee } from "@ethersphere/bee-js"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -41,11 +42,13 @@ export class SwarmIdProxy {
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
   private popupMode: "popup" | "window" = "window"
+  private bee: Bee
 
   constructor(options: ProxyOptions) {
     this.defaultBeeApiUrl = options.beeApiUrl
     this.beeApiUrl = options.beeApiUrl
     this.allowedOrigins = options.allowedOrigins || []
+    this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     console.log(
       "[Proxy] Proxy initialized with default Bee API:",
@@ -177,6 +180,7 @@ export class SwarmIdProxy {
     // Use parent's Bee API URL if provided, otherwise use default
     if (parentBeeApiUrl) {
       this.beeApiUrl = parentBeeApiUrl
+      this.bee = new Bee(this.beeApiUrl)
       console.log("[Proxy] Using Bee API URL from parent:", this.beeApiUrl)
     } else {
       console.log("[Proxy] Using default Bee API URL:", this.beeApiUrl)
@@ -555,33 +559,38 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      postageBatchId: _postageBatchId,
+      postageBatchId,
       data,
-      options: _options,
+      options,
     } = message
 
     console.log("[Proxy] Upload data request, size:", data ? data.length : 0)
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
-      // TODO: Implement actual Bee API call with bee-js
-      const reference = await this.simulateUpload(data)
+
+      console.log("[Proxy] Uploading to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
+
+      // Upload data using bee-js (data is already Uint8Array)
+      const uploadResult = await this.bee.uploadData(postageBatchId, data, options as any)
+
+      console.log("[Proxy] Upload successful, reference:", uploadResult.reference.toHex())
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadDataResponse",
             requestId,
-            reference,
+            reference: uploadResult.reference.toHex(),
+            tagUid: uploadResult.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
       }
 
-      console.log("[Proxy] Data uploaded:", reference)
+      console.log("[Proxy] Data uploaded:", uploadResult.reference.toHex())
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -595,24 +604,31 @@ export class SwarmIdProxy {
     message: DownloadDataMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, options: _options } = message
+    const { requestId, reference, options } = message
 
     console.log("[Proxy] Download data request, reference:", reference)
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
-      // TODO: Implement actual Bee API call with bee-js
-      const data = await this.simulateDownload(reference)
+
+      console.log("[Proxy] Downloading from Bee at:", this.beeApiUrl)
+
+      // Download data using bee-js
+      const bytesData = await this.bee.downloadData(reference, options as any)
+
+      console.log("[Proxy] Download successful, data size:", bytesData.toUint8Array().length)
+
+      // Convert Bytes to Uint8Array for postMessage
+      const data = bytesData.toUint8Array()
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "downloadDataResponse",
             requestId,
-            data,
+            data: data as Uint8Array,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
@@ -646,12 +662,12 @@ export class SwarmIdProxy {
       "size:",
       data ? data.length : 0,
     )
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
+
       // TODO: Implement actual Bee API call with bee-js
       const reference = await this.simulateUpload(data)
 
@@ -688,12 +704,12 @@ export class SwarmIdProxy {
       "path:",
       path,
     )
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
+
       // TODO: Implement actual Bee API call with bee-js
       const data = await this.simulateDownload(reference)
 
@@ -703,7 +719,7 @@ export class SwarmIdProxy {
             type: "downloadFileResponse",
             requestId,
             name: path || "file",
-            data,
+            data: data as Uint8Array,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
@@ -731,12 +747,12 @@ export class SwarmIdProxy {
     } = message
 
     console.log("[Proxy] Upload chunk request, size:", data ? data.length : 0)
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
+
       // TODO: Implement actual Bee API call with bee-js
       const reference = await this.simulateUpload(data)
 
@@ -768,12 +784,12 @@ export class SwarmIdProxy {
     const { requestId, reference, options: _options } = message
 
     console.log("[Proxy] Download chunk request, reference:", reference)
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
+
       // TODO: Implement actual Bee API call with bee-js
       const data = await this.simulateDownload(reference)
 
@@ -782,7 +798,7 @@ export class SwarmIdProxy {
           {
             type: "downloadChunkResponse",
             requestId,
-            data,
+            data: data as Uint8Array,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
@@ -810,12 +826,12 @@ export class SwarmIdProxy {
       "depth:",
       depth,
     )
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
+
       // TODO: Implement actual Bee API call with bee-js
       // For now, return a dummy batch ID
       const batchId = "0".repeat(64)
@@ -848,12 +864,12 @@ export class SwarmIdProxy {
     const { requestId, postageBatchId } = message
 
     console.log("[Proxy] Get postage batch request, batchId:", postageBatchId)
-
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
+
       // TODO: Implement actual Bee API call with bee-js
       // For now, return dummy batch info
       const batch = {
@@ -891,13 +907,12 @@ export class SwarmIdProxy {
   }
 
   // ============================================================================
-  // Placeholder Methods (to be replaced with real bee-js integration)
+  // Placeholder Methods for File/Chunk operations (not yet implemented)
   // ============================================================================
 
-  private async simulateUpload(data: number[]): Promise<string> {
+  private async simulateUpload(data: Uint8Array): Promise<string> {
     // Hash the data using SHA-256
-    const uint8Data = new Uint8Array(data)
-    const hashBuffer = await crypto.subtle.digest("SHA-256", uint8Data)
+    const hashBuffer = await crypto.subtle.digest("SHA-256", data)
     const hashArray = Array.from(new Uint8Array(hashBuffer))
     const hashHex = hashArray
       .map((b) => b.toString(16).padStart(2, "0"))
@@ -907,12 +922,11 @@ export class SwarmIdProxy {
     return hashHex
   }
 
-  private async simulateDownload(reference: string): Promise<number[]> {
+  private async simulateDownload(reference: string): Promise<Uint8Array> {
     console.log("[Proxy] Simulated download, reference:", reference)
 
     // Return dummy data for now
-    const dummyData = new Uint8Array([1, 2, 3, 4, 5])
-    return Array.from(dummyData)
+    return new Uint8Array([1, 2, 3, 4, 5])
   }
 }
 

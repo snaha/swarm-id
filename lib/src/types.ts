@@ -124,7 +124,7 @@ export const UploadDataMessageSchema = z.object({
   type: z.literal("uploadData"),
   requestId: z.string(),
   postageBatchId: BatchIdSchema,
-  data: z.array(z.number()),
+  data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
 })
 
@@ -139,7 +139,7 @@ export const UploadFileMessageSchema = z.object({
   type: z.literal("uploadFile"),
   requestId: z.string(),
   postageBatchId: BatchIdSchema,
-  data: z.array(z.number()),
+  data: z.instanceof(Uint8Array),
   name: z.string().optional(),
   options: UploadOptionsSchema,
 })
@@ -156,7 +156,7 @@ export const UploadChunkMessageSchema = z.object({
   type: z.literal("uploadChunk"),
   requestId: z.string(),
   postageBatchId: BatchIdSchema,
-  data: z.array(z.number()),
+  data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
 })
 
@@ -251,7 +251,7 @@ export const UploadDataResponseMessageSchema = z.object({
 export const DownloadDataResponseMessageSchema = z.object({
   type: z.literal("downloadDataResponse"),
   requestId: z.string(),
-  data: z.array(z.number()),
+  data: z.instanceof(Uint8Array),
 })
 
 export const UploadFileResponseMessageSchema = z.object({
@@ -265,7 +265,7 @@ export const DownloadFileResponseMessageSchema = z.object({
   type: z.literal("downloadFileResponse"),
   requestId: z.string(),
   name: z.string(),
-  data: z.array(z.number()),
+  data: z.instanceof(Uint8Array),
 })
 
 export const UploadChunkResponseMessageSchema = z.object({
@@ -277,7 +277,7 @@ export const UploadChunkResponseMessageSchema = z.object({
 export const DownloadChunkResponseMessageSchema = z.object({
   type: z.literal("downloadChunkResponse"),
   requestId: z.string(),
-  data: z.array(z.number()),
+  data: z.instanceof(Uint8Array),
 })
 
 export const CreatePostageBatchResponseMessageSchema = z.object({
