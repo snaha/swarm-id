@@ -27,17 +27,16 @@
   },
   "files": [
     "dist",
-    "*.ts",
-    "utils"
+    "src"
   ],
   "scripts": {
     "build": "rollup -c",
     "build:watch": "rollup -c -w",
     "clean": "rm -rf dist",
-    "lint": "eslint *.ts utils/**/*.ts",
-    "lint:fix": "eslint *.ts utils/**/*.ts --fix",
-    "format": "prettier --write \"**/*.ts\"",
-    "format:check": "prettier --check \"**/*.ts\"",
+    "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts --fix",
+    "format": "prettier --write \"src/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit"
   },
   "keywords": [
