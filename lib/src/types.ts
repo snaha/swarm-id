@@ -28,8 +28,12 @@ export const UploadOptionsSchema = z
 
 export const DownloadOptionsSchema = z
   .object({
-    decrypt: z.boolean().optional(),
-    cache: z.boolean().optional(),
+    redundancyStrategy: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    fallback: z.boolean().optional(),
+    timeoutMs: z.number().optional(),
+    actPublisher: z.union([z.instanceof(Uint8Array), z.string()]),
+    actHistoryAddress: z.union([z.instanceof(Uint8Array), z.string()]),
+    actTimestamp: z.union([z.number(), z.string()]),
   })
   .optional()
 

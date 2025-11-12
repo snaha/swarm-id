@@ -30,7 +30,7 @@ export async function deriveSecret(
   // Import the master key for HMAC
   const cryptoKey = await crypto.subtle.importKey(
     "raw",
-    new Uint8Array(keyData),
+    keyData,
     { name: "HMAC", hash: "SHA-256" },
     false,
     ["sign"],

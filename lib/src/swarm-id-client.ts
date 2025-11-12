@@ -394,14 +394,15 @@ export class SwarmIdClient {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
-    let data: Uint8Array
+    let data: Uint8Array<ArrayBuffer>
     let fileName: string | undefined = name
 
     if (file instanceof File) {
-      data = new Uint8Array(await file.arrayBuffer())
+      const buffer = await file.arrayBuffer()
+      data = new Uint8Array(buffer)
       fileName = fileName || file.name
     } else {
-      data = file
+      data = new Uint8Array(file.buffer.slice(0), file.byteOffset, file.byteLength)
     }
 
     const response = await this.sendRequest<{
@@ -413,7 +414,7 @@ export class SwarmIdClient {
       type: "uploadFile",
       requestId,
       postageBatchId,
-      data: data as Uint8Array,
+      data,
       name: fileName,
       options,
     })

@@ -574,7 +574,7 @@ export class SwarmIdProxy {
       console.log("[Proxy] Uploading to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
 
       // Upload data using bee-js (data is already Uint8Array)
-      const uploadResult = await this.bee.uploadData(postageBatchId, data, options as any)
+      const uploadResult = await this.bee.uploadData(postageBatchId, data, options)
 
       console.log("[Proxy] Upload successful, reference:", uploadResult.reference.toHex())
 
@@ -616,7 +616,7 @@ export class SwarmIdProxy {
       console.log("[Proxy] Downloading from Bee at:", this.beeApiUrl)
 
       // Download data using bee-js
-      const bytesData = await this.bee.downloadData(reference, options as any)
+      const bytesData = await this.bee.downloadData(reference, options)
 
       console.log("[Proxy] Download successful, data size:", bytesData.toUint8Array().length)
 
