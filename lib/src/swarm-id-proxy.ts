@@ -12,8 +12,6 @@ import type {
   DownloadFileMessage,
   UploadChunkMessage,
   DownloadChunkMessage,
-  CreatePostageBatchMessage,
-  GetPostageBatchMessage,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
@@ -250,14 +248,6 @@ export class SwarmIdProxy {
 
       case "downloadChunk":
         await this.handleDownloadChunk(message, event)
-        break
-
-      case "createPostageBatch":
-        await this.handleCreatePostageBatch(message, event)
-        break
-
-      case "getPostageBatch":
-        await this.handleGetPostageBatch(message, event)
         break
 
       default:
@@ -650,10 +640,10 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      postageBatchId: _postageBatchId,
+      postageBatchId,
       data,
       name,
-      options: _options,
+      options,
     } = message
 
     console.log(
@@ -667,22 +657,26 @@ export class SwarmIdProxy {
     }
 
     try {
+      console.log("[Proxy] Uploading file to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
 
-      // TODO: Implement actual Bee API call with bee-js
-      const reference = await this.simulateUpload(data)
+      // Upload file using bee-js
+      const uploadResult = await this.bee.uploadFile(postageBatchId, data, name, options)
+
+      console.log("[Proxy] File upload successful, reference:", uploadResult.reference.toHex())
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadFileResponse",
             requestId,
-            reference,
+            reference: uploadResult.reference.toHex(),
+            tagUid: uploadResult.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
       }
 
-      console.log("[Proxy] File uploaded:", reference)
+      console.log("[Proxy] File uploaded:", uploadResult.reference.toHex())
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -696,7 +690,7 @@ export class SwarmIdProxy {
     message: DownloadFileMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, path, options: _options } = message
+    const { requestId, reference, path, options } = message
 
     console.log(
       "[Proxy] Download file request, reference:",
@@ -709,16 +703,22 @@ export class SwarmIdProxy {
     }
 
     try {
+      console.log("[Proxy] Downloading file from Bee at:", this.beeApiUrl)
 
-      // TODO: Implement actual Bee API call with bee-js
-      const data = await this.simulateDownload(reference)
+      // Download file using bee-js
+      const fileData = await this.bee.downloadFile(reference, path, options)
+
+      console.log("[Proxy] File download successful, data size:", fileData.data.toUint8Array().length)
+
+      // Convert Bytes to Uint8Array for postMessage
+      const data = fileData.data.toUint8Array()
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "downloadFileResponse",
             requestId,
-            name: path || "file",
+            name: fileData.name || "file",
             data: data as Uint8Array,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
@@ -741,9 +741,9 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      postageBatchId: _postageBatchId,
+      postageBatchId,
       data,
-      options: _options,
+      options,
     } = message
 
     console.log("[Proxy] Upload chunk request, size:", data ? data.length : 0)
@@ -752,22 +752,30 @@ export class SwarmIdProxy {
     }
 
     try {
+      // Validate chunk size (must be between 1 and 4096 bytes)
+      if (data.length < 1 || data.length > 4096) {
+        throw new Error(`Invalid chunk size: ${data.length} bytes. Chunks must be between 1 and 4096 bytes.`)
+      }
 
-      // TODO: Implement actual Bee API call with bee-js
-      const reference = await this.simulateUpload(data)
+      console.log("[Proxy] Uploading chunk to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
+
+      // Upload chunk using bee-js
+      const uploadResult = await this.bee.uploadChunk(postageBatchId, data, options)
+
+      console.log("[Proxy] Chunk upload successful, reference:", uploadResult.reference.toHex())
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadChunkResponse",
             requestId,
-            reference,
+            reference: uploadResult.reference.toHex(),
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
       }
 
-      console.log("[Proxy] Chunk uploaded:", reference)
+      console.log("[Proxy] Chunk uploaded:", uploadResult.reference.toHex())
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -781,7 +789,7 @@ export class SwarmIdProxy {
     message: DownloadChunkMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, options: _options } = message
+    const { requestId, reference, options } = message
 
     console.log("[Proxy] Download chunk request, reference:", reference)
     if (!this.authenticated || !this.appSecret) {
@@ -789,9 +797,12 @@ export class SwarmIdProxy {
     }
 
     try {
+      console.log("[Proxy] Downloading chunk from Bee at:", this.beeApiUrl)
 
-      // TODO: Implement actual Bee API call with bee-js
-      const data = await this.simulateDownload(reference)
+      // Download chunk using bee-js (returns Uint8Array directly)
+      const data = await this.bee.downloadChunk(reference, options)
+
+      console.log("[Proxy] Chunk download successful, data size:", data.length)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -814,120 +825,6 @@ export class SwarmIdProxy {
     }
   }
 
-  private async handleCreatePostageBatch(
-    message: CreatePostageBatchMessage,
-    event: MessageEvent,
-  ): Promise<void> {
-    const { requestId, amount, depth, options: _options } = message
-
-    console.log(
-      "[Proxy] Create postage batch request, amount:",
-      amount,
-      "depth:",
-      depth,
-    )
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
-    try {
-
-      // TODO: Implement actual Bee API call with bee-js
-      // For now, return a dummy batch ID
-      const batchId = "0".repeat(64)
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "createPostageBatchResponse",
-            requestId,
-            batchId,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
-
-      console.log("[Proxy] Postage batch created:", batchId)
-    } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Create batch failed",
-      )
-    }
-  }
-
-  private async handleGetPostageBatch(
-    message: GetPostageBatchMessage,
-    event: MessageEvent,
-  ): Promise<void> {
-    const { requestId, postageBatchId } = message
-
-    console.log("[Proxy] Get postage batch request, batchId:", postageBatchId)
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
-    try {
-
-      // TODO: Implement actual Bee API call with bee-js
-      // For now, return dummy batch info
-      const batch = {
-        batchID: postageBatchId,
-        utilization: 0,
-        usable: true,
-        label: "",
-        depth: 20,
-        amount: "10000000",
-        bucketDepth: 16,
-        blockNumber: 1,
-        immutableFlag: false,
-        exists: true,
-      }
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "getPostageBatchResponse",
-            requestId,
-            batch,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
-
-      console.log("[Proxy] Postage batch retrieved:", postageBatchId)
-    } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error ? error.message : "Get batch failed",
-      )
-    }
-  }
-
-  // ============================================================================
-  // Placeholder Methods for File/Chunk operations (not yet implemented)
-  // ============================================================================
-
-  private async simulateUpload(data: Uint8Array): Promise<string> {
-    // Hash the data using SHA-256
-    const hashBuffer = await crypto.subtle.digest("SHA-256", data)
-    const hashArray = Array.from(new Uint8Array(hashBuffer))
-    const hashHex = hashArray
-      .map((b) => b.toString(16).padStart(2, "0"))
-      .join("")
-
-    console.log("[Proxy] Simulated upload, hash:", hashHex)
-    return hashHex
-  }
-
-  private async simulateDownload(reference: string): Promise<Uint8Array> {
-    console.log("[Proxy] Simulated download, reference:", reference)
-
-    // Return dummy data for now
-    return new Uint8Array([1, 2, 3, 4, 5])
-  }
 }
 
 /**

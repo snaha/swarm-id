@@ -4,7 +4,6 @@ import type {
   ButtonStyles,
   UploadResult,
   FileData,
-  PostageBatch,
   UploadOptions,
   DownloadOptions,
   Reference,
@@ -509,62 +508,6 @@ export class SwarmIdClient {
     })
 
     return new Uint8Array(response.data)
-  }
-
-  // ============================================================================
-  // Postage Stamp Methods
-  // ============================================================================
-
-  /**
-   * Create postage batch
-   */
-  async createPostageBatch(
-    amount: string,
-    depth: number,
-    options?: {
-      gasPrice?: string
-      immutableFlag?: boolean
-      label?: string
-      waitForUsable?: boolean
-      waitForUsableTimeout?: number
-    },
-  ): Promise<BatchId> {
-    this.ensureReady()
-    const requestId = this.generateRequestId()
-
-    const response = await this.sendRequest<{
-      type: "createPostageBatchResponse"
-      requestId: string
-      batchId: BatchId
-    }>({
-      type: "createPostageBatch",
-      requestId,
-      amount,
-      depth,
-      options,
-    })
-
-    return response.batchId
-  }
-
-  /**
-   * Get postage batch information
-   */
-  async getPostageBatch(postageBatchId: BatchId): Promise<PostageBatch> {
-    this.ensureReady()
-    const requestId = this.generateRequestId()
-
-    const response = await this.sendRequest<{
-      type: "getPostageBatchResponse"
-      requestId: string
-      batch: PostageBatch
-    }>({
-      type: "getPostageBatch",
-      requestId,
-      postageBatchId,
-    })
-
-    return response.batch
   }
 
   // ============================================================================

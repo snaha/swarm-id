@@ -171,28 +171,6 @@ export const DownloadChunkMessageSchema = z.object({
   options: DownloadOptionsSchema,
 })
 
-export const CreatePostageBatchMessageSchema = z.object({
-  type: z.literal("createPostageBatch"),
-  requestId: z.string(),
-  amount: z.string(),
-  depth: z.number(),
-  options: z
-    .object({
-      gasPrice: z.string().optional(),
-      immutableFlag: z.boolean().optional(),
-      label: z.string().optional(),
-      waitForUsable: z.boolean().optional(),
-      waitForUsableTimeout: z.number().optional(),
-    })
-    .optional(),
-})
-
-export const GetPostageBatchMessageSchema = z.object({
-  type: z.literal("getPostageBatch"),
-  requestId: z.string(),
-  postageBatchId: BatchIdSchema,
-})
-
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -203,8 +181,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DownloadFileMessageSchema,
   UploadChunkMessageSchema,
   DownloadChunkMessageSchema,
-  CreatePostageBatchMessageSchema,
-  GetPostageBatchMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -216,12 +192,6 @@ export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
 export type DownloadFileMessage = z.infer<typeof DownloadFileMessageSchema>
 export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>
 export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>
-export type CreatePostageBatchMessage = z.infer<
-  typeof CreatePostageBatchMessageSchema
->
-export type GetPostageBatchMessage = z.infer<
-  typeof GetPostageBatchMessageSchema
->
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -284,18 +254,6 @@ export const DownloadChunkResponseMessageSchema = z.object({
   data: z.instanceof(Uint8Array),
 })
 
-export const CreatePostageBatchResponseMessageSchema = z.object({
-  type: z.literal("createPostageBatchResponse"),
-  requestId: z.string(),
-  batchId: BatchIdSchema,
-})
-
-export const GetPostageBatchResponseMessageSchema = z.object({
-  type: z.literal("getPostageBatchResponse"),
-  requestId: z.string(),
-  batch: PostageBatchSchema,
-})
-
 export const ErrorMessageSchema = z.object({
   type: z.literal("error"),
   requestId: z.string(),
@@ -312,8 +270,6 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DownloadFileResponseMessageSchema,
   UploadChunkResponseMessageSchema,
   DownloadChunkResponseMessageSchema,
-  CreatePostageBatchResponseMessageSchema,
-  GetPostageBatchResponseMessageSchema,
   ErrorMessageSchema,
 ])
 
@@ -339,12 +295,6 @@ export type UploadChunkResponseMessage = z.infer<
 >
 export type DownloadChunkResponseMessage = z.infer<
   typeof DownloadChunkResponseMessageSchema
->
-export type CreatePostageBatchResponseMessage = z.infer<
-  typeof CreatePostageBatchResponseMessageSchema
->
-export type GetPostageBatchResponseMessage = z.infer<
-  typeof GetPostageBatchResponseMessageSchema
 >
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
