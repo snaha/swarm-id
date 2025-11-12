@@ -129,6 +129,7 @@ export const UploadDataMessageSchema = z.object({
   requestId: z.string(),
   data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
+  enableProgress: z.boolean().optional(),
 })
 
 export const DownloadDataMessageSchema = z.object({
@@ -251,6 +252,13 @@ export const DownloadChunkResponseMessageSchema = z.object({
   data: z.instanceof(Uint8Array),
 })
 
+export const UploadProgressMessageSchema = z.object({
+  type: z.literal("uploadProgress"),
+  requestId: z.string(),
+  total: z.number(),
+  processed: z.number(),
+})
+
 export const ErrorMessageSchema = z.object({
   type: z.literal("error"),
   requestId: z.string(),
@@ -267,6 +275,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DownloadFileResponseMessageSchema,
   UploadChunkResponseMessageSchema,
   DownloadChunkResponseMessageSchema,
+  UploadProgressMessageSchema,
   ErrorMessageSchema,
 ])
 
@@ -293,6 +302,7 @@ export type UploadChunkResponseMessage = z.infer<
 export type DownloadChunkResponseMessage = z.infer<
   typeof DownloadChunkResponseMessageSchema
 >
+export type UploadProgressMessage = z.infer<typeof UploadProgressMessageSchema>
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
@@ -302,8 +312,21 @@ export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
 export const AuthDataSchema = z.object({
   secret: z.string(),
-  postageBatchId: BatchIdSchema,
-})
+  postageBatchId: BatchIdSchema.optional(),
+  signerKey: z.string().length(64).optional(),
+}).refine(
+  data => {
+    // Must have at least postageBatchId
+    if (!data.postageBatchId) {
+      return false
+    }
+    // If signerKey is provided, it must be used with postageBatchId
+    return true
+  },
+  {
+    message: "postageBatchId is required. signerKey is optional for client-side signing."
+  }
+)
 
 export type AuthData = z.infer<typeof AuthDataSchema>
 

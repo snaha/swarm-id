@@ -240,7 +240,7 @@
       </div>
 
       <div class="input-group">
-        <label class="input-label" for="postage-batch-id">Postage Batch ID</label>
+        <label class="input-label" for="postage-batch-id">Postage Batch ID (Required)</label>
         <input
           type="text"
           id="postage-batch-id"
@@ -249,6 +249,21 @@
           maxlength="64"
           pattern="[a-fA-F0-9]{64}"
         />
+      </div>
+
+      <div class="input-group">
+        <label class="input-label" for="signer-key">Postage Stamp Signer Key (Optional)</label>
+        <input
+          type="text"
+          id="signer-key"
+          class="input-field"
+          placeholder="Enter 64-character private key for signing"
+          maxlength="64"
+          pattern="[a-fA-F0-9]{64}"
+        />
+        <p style="font-size: 11px; color: #666; margin-top: 5px;">
+          Postage Batch ID is required. Signer key is optional and enables client-side chunk signing.
+        </p>
       </div>
 
       <button id="auth-button" class="auth-button">
@@ -317,36 +332,55 @@
         }
       })
 
-      // Validate postage batch ID format
-      function validatePostageBatchId(batchId) {
-        return /^[a-fA-F0-9]{64}$/.test(batchId)
+      // Validate hex string format (64 characters)
+      function validateHex64(value) {
+        return /^[a-fA-F0-9]{64}$/.test(value)
       }
 
       // Enable/disable authenticate button based on input
       const postageBatchInput = document.getElementById('postage-batch-id')
+      const signerKeyInput = document.getElementById('signer-key')
       const authButton = document.getElementById('auth-button')
 
-      postageBatchInput.addEventListener('input', () => {
-        const batchId = postageBatchInput.value.trim()
-        if (batchId && auth && auth.hasMasterKey()) {
-          authButton.disabled = !validatePostageBatchId(batchId)
-        } else {
+      function updateAuthButtonState() {
+        if (!auth || !auth.hasMasterKey()) {
           authButton.disabled = true
+          return
         }
-      })
+
+        const batchId = postageBatchInput.value.trim()
+        const signerKey = signerKeyInput.value.trim()
+
+        // Postage batch ID is required
+        const batchIdValid = batchId && validateHex64(batchId)
+        // Signer key is optional but must be valid if provided
+        const signerKeyValid = !signerKey || validateHex64(signerKey)
+
+        authButton.disabled = !(batchIdValid && signerKeyValid)
+      }
+
+      postageBatchInput.addEventListener('input', updateAuthButtonState)
+      signerKeyInput.addEventListener('input', updateAuthButtonState)
 
       // Authenticate
       document.getElementById('auth-button').addEventListener('click', async () => {
         const postageBatchId = postageBatchInput.value.trim()
+        const signerKey = signerKeyInput.value.trim()
 
-        // Validate postage batch ID
-        if (!postageBatchId) {
-          showStatus('Please enter a postage batch ID', 'error')
+        // Validate at least one is provided
+        if (!postageBatchId && !signerKey) {
+          showStatus('Please enter either a postage batch ID or signer key', 'error')
           return
         }
 
-        if (!validatePostageBatchId(postageBatchId)) {
+        // Validate formats if provided
+        if (postageBatchId && !validateHex64(postageBatchId)) {
           showStatus('Invalid postage batch ID format (must be 64 hex characters)', 'error')
+          return
+        }
+
+        if (signerKey && !validateHex64(signerKey)) {
+          showStatus('Invalid signer key format (must be 64 hex characters)', 'error')
           return
         }
 
@@ -358,8 +392,11 @@
         button.innerHTML = '<span class="loading"></span>'
 
         try {
-          // Set the postage batch ID before authenticating
-          auth.setPostageBatchId(postageBatchId)
+          // Set authentication data before authenticating
+          auth.setAuthData({
+            postageBatchId: postageBatchId || undefined,
+            signerKey: signerKey || undefined
+          })
 
           await auth.authenticate()
           showStatus('✓ Authentication successful! Closing window...', 'success')

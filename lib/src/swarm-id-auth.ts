@@ -15,6 +15,7 @@ export class SwarmIdAuth {
   private masterKey: string | undefined
   private masterKeyStorageKey: string
   private postageBatchId: string | undefined
+  private signerKey: string | undefined
 
   constructor(options: AuthOptions = {}) {
     this.masterKeyStorageKey = options.masterKeyStorageKey || "swarm-master-key"
@@ -103,6 +104,28 @@ export class SwarmIdAuth {
   }
 
   /**
+   * Set the signer key
+   */
+  setSignerKey(key: string): void {
+    this.signerKey = key
+  }
+
+  /**
+   * Get the signer key
+   */
+  getSignerKey(): string | undefined {
+    return this.signerKey
+  }
+
+  /**
+   * Set authentication data (batch ID and/or signer key)
+   */
+  setAuthData({ postageBatchId, signerKey }: { postageBatchId?: string; signerKey?: string }): void {
+    this.postageBatchId = postageBatchId
+    this.signerKey = signerKey
+  }
+
+  /**
    * Setup new identity (generate and store master key)
    */
   async setupNewIdentity(): Promise<string> {
@@ -130,8 +153,8 @@ export class SwarmIdAuth {
       throw new Error("Unknown app origin. Cannot authenticate.")
     }
 
-    if (!this.postageBatchId) {
-      throw new Error("No postage batch ID provided. Cannot authenticate.")
+    if (!this.postageBatchId && !this.signerKey) {
+      throw new Error("No postage batch ID or signer key provided. Cannot authenticate.")
     }
 
     console.log("[Auth] Starting authentication for app:", this.appOrigin)
@@ -158,6 +181,7 @@ export class SwarmIdAuth {
         data: {
           secret: appSecret,
           postageBatchId: this.postageBatchId,
+          signerKey: this.signerKey,
         },
       },
       window.location.origin, // Target the iframe's origin (same as this popup)

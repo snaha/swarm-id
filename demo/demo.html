@@ -235,7 +235,7 @@ Hello, Swarm!</textarea
         iframeOrigin: PROXY_ORIGIN,
         iframePath: "/demo/proxy.html",
         beeApiUrl: BEE_API_URL,
-        timeout: 30000,
+        timeout: 60000, // 60 seconds to account for Bee sync delays
         onAuthChange: (authenticated) => {
           log(`Auth status changed: ${authenticated}`, "info");
           updateAuthStatus(authenticated);

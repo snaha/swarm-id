@@ -328,25 +328,58 @@ export class SwarmIdClient {
   async uploadData(
     data: Uint8Array,
     options?: UploadOptions,
+    onProgress?: (progress: { total: number; processed: number }) => void,
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
-    const response = await this.sendRequest<{
-      type: "uploadDataResponse"
-      requestId: string
-      reference: Reference
-      tagUid?: number
-    }>({
-      type: "uploadData",
-      requestId,
-      data: new Uint8Array(data),
-      options,
-    })
+    // Setup progress listener if callback provided
+    let progressListener: ((event: MessageEvent) => void) | undefined
+    if (onProgress) {
+      progressListener = (event: MessageEvent) => {
+        if (event.origin !== this.iframeOrigin) return
 
-    return {
-      reference: response.reference,
-      tagUid: response.tagUid,
+        try {
+          const message = IframeToParentMessageSchema.parse(event.data)
+          if (
+            message.type === "uploadProgress" &&
+            message.requestId === requestId
+          ) {
+            onProgress({
+              total: message.total,
+              processed: message.processed,
+            })
+          }
+        } catch {
+          // Ignore invalid messages
+        }
+      }
+      window.addEventListener("message", progressListener)
+    }
+
+    try {
+      const response = await this.sendRequest<{
+        type: "uploadDataResponse"
+        requestId: string
+        reference: Reference
+        tagUid?: number
+      }>({
+        type: "uploadData",
+        requestId,
+        data: new Uint8Array(data),
+        options,
+        enableProgress: !!onProgress,
+      })
+
+      return {
+        reference: response.reference,
+        tagUid: response.tagUid,
+      }
+    } finally {
+      // Clean up progress listener
+      if (progressListener) {
+        window.removeEventListener("message", progressListener)
+      }
     }
   }
 
