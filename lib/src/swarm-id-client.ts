@@ -7,7 +7,6 @@ import type {
   UploadOptions,
   DownloadOptions,
   Reference,
-  BatchId,
   ParentToIframeMessage,
   IframeToParentMessage,
 } from "./types"
@@ -327,7 +326,6 @@ export class SwarmIdClient {
    * Upload data to Swarm
    */
   async uploadData(
-    postageBatchId: BatchId,
     data: Uint8Array,
     options?: UploadOptions,
   ): Promise<UploadResult> {
@@ -342,7 +340,6 @@ export class SwarmIdClient {
     }>({
       type: "uploadData",
       requestId,
-      postageBatchId,
       data: new Uint8Array(data),
       options,
     })
@@ -385,7 +382,6 @@ export class SwarmIdClient {
    * Upload file to Swarm
    */
   async uploadFile(
-    postageBatchId: BatchId,
     file: File | Uint8Array,
     name?: string,
     options?: UploadOptions,
@@ -412,7 +408,6 @@ export class SwarmIdClient {
     }>({
       type: "uploadFile",
       requestId,
-      postageBatchId,
       data,
       name: fileName,
       options,
@@ -462,7 +457,6 @@ export class SwarmIdClient {
    * Upload chunk to Swarm
    */
   async uploadChunk(
-    postageBatchId: BatchId,
     data: Uint8Array,
     options?: UploadOptions,
   ): Promise<UploadResult> {
@@ -476,7 +470,6 @@ export class SwarmIdClient {
     }>({
       type: "uploadChunk",
       requestId,
-      postageBatchId,
       data: data as Uint8Array,
       options,
     })

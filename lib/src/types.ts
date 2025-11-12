@@ -127,7 +127,6 @@ export const RequestAuthMessageSchema = z.object({
 export const UploadDataMessageSchema = z.object({
   type: z.literal("uploadData"),
   requestId: z.string(),
-  postageBatchId: BatchIdSchema,
   data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
 })
@@ -142,7 +141,6 @@ export const DownloadDataMessageSchema = z.object({
 export const UploadFileMessageSchema = z.object({
   type: z.literal("uploadFile"),
   requestId: z.string(),
-  postageBatchId: BatchIdSchema,
   data: z.instanceof(Uint8Array),
   name: z.string().optional(),
   options: UploadOptionsSchema,
@@ -159,7 +157,6 @@ export const DownloadFileMessageSchema = z.object({
 export const UploadChunkMessageSchema = z.object({
   type: z.literal("uploadChunk"),
   requestId: z.string(),
-  postageBatchId: BatchIdSchema,
   data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
 })
@@ -303,10 +300,17 @@ export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 // Message Types: Popup → Iframe
 // ============================================================================
 
+export const AuthDataSchema = z.object({
+  secret: z.string(),
+  postageBatchId: BatchIdSchema,
+})
+
+export type AuthData = z.infer<typeof AuthDataSchema>
+
 export const SetSecretMessageSchema = z.object({
   type: z.literal("setSecret"),
   appOrigin: z.string(),
-  secret: z.string(),
+  data: AuthDataSchema,
 })
 
 export const PopupToIframeMessageSchema = z.discriminatedUnion("type", [

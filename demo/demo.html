@@ -184,11 +184,6 @@
       <!-- Upload Section -->
       <div class="section">
         <h2>Upload Data</h2>
-        <input
-          type="text"
-          id="postage-batch"
-          placeholder="Postage Batch ID (64 hex chars)"
-        />
         <textarea id="upload-data" placeholder="Enter data to upload...">
 Hello, Swarm!</textarea
         >
@@ -281,16 +276,8 @@ Hello, Swarm!</textarea
       document
         .getElementById("upload-button")
         .addEventListener("click", async () => {
-          const batchId = document.getElementById("postage-batch").value.trim();
           const data = document.getElementById("upload-data").value;
           const resultEl = document.getElementById("upload-result");
-
-          if (!batchId || batchId.length !== 64) {
-            log("Invalid postage batch ID", "error");
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Invalid postage batch ID (must be 64 hex chars)</div>';
-            return;
-          }
 
           if (!data) {
             log("No data to upload", "error");
@@ -304,7 +291,8 @@ Hello, Swarm!</textarea
             const encoder = new TextEncoder();
             const uint8Data = encoder.encode(data);
 
-            const result = await client.uploadData(batchId, uint8Data, {
+            // Proxy will use stored batch ID from authentication
+            const result = await client.uploadData(uint8Data, {
               pin: true,
             });
             log(`Upload successful! Reference: ${result.reference}`, "info");

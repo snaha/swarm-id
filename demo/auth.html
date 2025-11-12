@@ -101,6 +101,40 @@
         border-radius: 4px;
       }
 
+      .input-group {
+        margin-bottom: 30px;
+        text-align: left;
+      }
+
+      .input-label {
+        display: block;
+        font-size: 12px;
+        color: #666;
+        text-transform: uppercase;
+        letter-spacing: 0.5px;
+        margin-bottom: 8px;
+        font-weight: 600;
+      }
+
+      .input-field {
+        width: 100%;
+        padding: 12px;
+        border: 2px solid #e0e0e0;
+        border-radius: 8px;
+        font-size: 14px;
+        font-family: 'Courier New', monospace;
+        transition: border-color 0.2s;
+      }
+
+      .input-field:focus {
+        outline: none;
+        border-color: #667eea;
+      }
+
+      .input-field::placeholder {
+        color: #999;
+      }
+
       .auth-button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -205,6 +239,18 @@
         <div class="identity-info-value" id="master-key">Loading...</div>
       </div>
 
+      <div class="input-group">
+        <label class="input-label" for="postage-batch-id">Postage Batch ID</label>
+        <input
+          type="text"
+          id="postage-batch-id"
+          class="input-field"
+          placeholder="Enter 64-character postage batch ID"
+          maxlength="64"
+          pattern="[a-fA-F0-9]{64}"
+        />
+      </div>
+
       <button id="auth-button" class="auth-button">
         Authenticate
       </button>
@@ -271,8 +317,39 @@
         }
       })
 
+      // Validate postage batch ID format
+      function validatePostageBatchId(batchId) {
+        return /^[a-fA-F0-9]{64}$/.test(batchId)
+      }
+
+      // Enable/disable authenticate button based on input
+      const postageBatchInput = document.getElementById('postage-batch-id')
+      const authButton = document.getElementById('auth-button')
+
+      postageBatchInput.addEventListener('input', () => {
+        const batchId = postageBatchInput.value.trim()
+        if (batchId && auth && auth.hasMasterKey()) {
+          authButton.disabled = !validatePostageBatchId(batchId)
+        } else {
+          authButton.disabled = true
+        }
+      })
+
       // Authenticate
       document.getElementById('auth-button').addEventListener('click', async () => {
+        const postageBatchId = postageBatchInput.value.trim()
+
+        // Validate postage batch ID
+        if (!postageBatchId) {
+          showStatus('Please enter a postage batch ID', 'error')
+          return
+        }
+
+        if (!validatePostageBatchId(postageBatchId)) {
+          showStatus('Invalid postage batch ID format (must be 64 hex characters)', 'error')
+          return
+        }
+
         console.log('[Auth] Starting authentication...')
         showStatus('Deriving app-specific secret...', 'info')
 
@@ -281,6 +358,9 @@
         button.innerHTML = '<span class="loading"></span>'
 
         try {
+          // Set the postage batch ID before authenticating
+          auth.setPostageBatchId(postageBatchId)
+
           await auth.authenticate()
           showStatus('✓ Authentication successful! Closing window...', 'success')
           console.log('[Auth] Authentication successful')

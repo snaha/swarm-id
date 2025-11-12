@@ -14,6 +14,7 @@ export class SwarmIdAuth {
   private appOrigin: string | undefined
   private masterKey: string | undefined
   private masterKeyStorageKey: string
+  private postageBatchId: string | undefined
 
   constructor(options: AuthOptions = {}) {
     this.masterKeyStorageKey = options.masterKeyStorageKey || "swarm-master-key"
@@ -88,6 +89,20 @@ export class SwarmIdAuth {
   }
 
   /**
+   * Set the postage batch ID
+   */
+  setPostageBatchId(batchId: string): void {
+    this.postageBatchId = batchId
+  }
+
+  /**
+   * Get the postage batch ID
+   */
+  getPostageBatchId(): string | undefined {
+    return this.postageBatchId
+  }
+
+  /**
    * Setup new identity (generate and store master key)
    */
   async setupNewIdentity(): Promise<string> {
@@ -115,6 +130,10 @@ export class SwarmIdAuth {
       throw new Error("Unknown app origin. Cannot authenticate.")
     }
 
+    if (!this.postageBatchId) {
+      throw new Error("No postage batch ID provided. Cannot authenticate.")
+    }
+
     console.log("[Auth] Starting authentication for app:", this.appOrigin)
 
     // Derive app-specific secret
@@ -129,19 +148,22 @@ export class SwarmIdAuth {
       throw new Error("Opener window not available")
     }
 
-    console.log("[Auth] Sending secret to iframe...")
+    console.log("[Auth] Sending auth data to iframe...")
 
-    // Send secret to iframe via postMessage
+    // Send structured auth data to iframe via postMessage
     ;(window.opener as WindowProxy).postMessage(
       {
         type: "setSecret",
         appOrigin: this.appOrigin,
-        secret: appSecret,
+        data: {
+          secret: appSecret,
+          postageBatchId: this.postageBatchId,
+        },
       },
       window.location.origin, // Target the iframe's origin (same as this popup)
     )
 
-    console.log("[Auth] Secret sent to iframe")
+    console.log("[Auth] Auth data sent to iframe")
   }
 
   /**

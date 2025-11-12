@@ -34,6 +34,7 @@ export class SwarmIdProxy {
   private parentIdentified: boolean = false
   private authenticated: boolean = false
   private appSecret: string | undefined
+  private postageBatchId: string | undefined
   private beeApiUrl: string
   private defaultBeeApiUrl: string
   private allowedOrigins: string[]
@@ -52,6 +53,13 @@ export class SwarmIdProxy {
       "[Proxy] Proxy initialized with default Bee API:",
       this.defaultBeeApiUrl,
     )
+  }
+
+  /**
+   * Get the stored postage batch ID
+   */
+  getPostageBatchId(): string | undefined {
+    return this.postageBatchId
   }
 
   /**
@@ -191,7 +199,7 @@ export class SwarmIdProxy {
     }
 
     // Load existing secret if available
-    this.loadSecret()
+    this.loadAuthData()
 
     // Acknowledge receipt
     if (event.source) {
@@ -284,25 +292,32 @@ export class SwarmIdProxy {
   /**
    * Load secret from localStorage
    */
-  private loadSecret(): void {
+  private loadAuthData(): void {
     if (!this.parentOrigin) {
-      console.log("[Proxy] No parent origin, cannot load secret")
+      console.log("[Proxy] No parent origin, cannot load auth data")
       return
     }
 
     const storageKey = `swarm-secret-${this.parentOrigin}`
-    const secret = localStorage.getItem(storageKey)
+    const storedData = localStorage.getItem(storageKey)
 
-    if (secret) {
-      console.log(
-        "[Proxy] Secret loaded from localStorage for:",
-        this.parentOrigin,
-      )
-      this.appSecret = secret
-      this.authenticated = true
-      this.hideAuthButton()
+    if (storedData) {
+      try {
+        const data = JSON.parse(storedData)
+        console.log(
+          "[Proxy] Auth data loaded from localStorage for:",
+          this.parentOrigin,
+        )
+        this.appSecret = data.secret
+        this.postageBatchId = data.postageBatchId
+        this.authenticated = true
+        this.hideAuthButton()
+      } catch (error) {
+        console.error("[Proxy] Failed to parse auth data:", error)
+        this.showAuthButton()
+      }
     } else {
-      console.log("[Proxy] No secret found for:", this.parentOrigin)
+      console.log("[Proxy] No auth data found for:", this.parentOrigin)
       this.showAuthButton()
     }
   }
@@ -322,10 +337,10 @@ export class SwarmIdProxy {
   /**
    * Save secret to localStorage
    */
-  private saveSecret(origin: string, secret: string): void {
+  private saveAuthData(origin: string, data: { secret: string; postageBatchId: string }): void {
     const storageKey = `swarm-secret-${origin}`
-    localStorage.setItem(storageKey, secret)
-    console.log("[Proxy] Secret saved to localStorage for:", origin)
+    localStorage.setItem(storageKey, JSON.stringify(data))
+    console.log("[Proxy] Auth data saved to localStorage for:", origin)
   }
 
   /**
@@ -503,9 +518,9 @@ export class SwarmIdProxy {
     message: SetSecretMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { appOrigin, secret } = message
+    const { appOrigin, data } = message
 
-    console.log("[Proxy] Received secret for app:", appOrigin)
+    console.log("[Proxy] Received auth data for app:", appOrigin)
 
     // Validate that appOrigin matches parent origin
     if (appOrigin !== this.parentOrigin) {
@@ -518,9 +533,10 @@ export class SwarmIdProxy {
       // Still save it, but log warning
     }
 
-    // Save secret to partitioned localStorage
-    this.saveSecret(appOrigin, secret)
-    this.appSecret = secret
+    // Save auth data to partitioned localStorage
+    this.saveAuthData(appOrigin, data)
+    this.appSecret = data.secret
+    this.postageBatchId = data.postageBatchId
     this.updateAuthStatus(true)
 
     // Notify parent dApp
@@ -549,7 +565,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      postageBatchId,
       data,
       options,
     } = message
@@ -559,12 +574,16 @@ export class SwarmIdProxy {
       throw new Error("Not authenticated. Please login first.")
     }
 
+    if (!this.postageBatchId) {
+      throw new Error("No postage batch ID available. Please authenticate with a valid batch ID.")
+    }
+
     try {
 
-      console.log("[Proxy] Uploading to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
+      console.log("[Proxy] Uploading to Bee at:", this.beeApiUrl, "with batch:", this.postageBatchId)
 
       // Upload data using bee-js (data is already Uint8Array)
-      const uploadResult = await this.bee.uploadData(postageBatchId, data, options)
+      const uploadResult = await this.bee.uploadData(this.postageBatchId, data, options)
 
       console.log("[Proxy] Upload successful, reference:", uploadResult.reference.toHex())
 
@@ -640,7 +659,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      postageBatchId,
       data,
       name,
       options,
@@ -656,11 +674,15 @@ export class SwarmIdProxy {
       throw new Error("Not authenticated. Please login first.")
     }
 
+    if (!this.postageBatchId) {
+      throw new Error("No postage batch ID available. Please authenticate with a valid batch ID.")
+    }
+
     try {
-      console.log("[Proxy] Uploading file to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
+      console.log("[Proxy] Uploading file to Bee at:", this.beeApiUrl, "with batch:", this.postageBatchId)
 
       // Upload file using bee-js
-      const uploadResult = await this.bee.uploadFile(postageBatchId, data, name, options)
+      const uploadResult = await this.bee.uploadFile(this.postageBatchId, data, name, options)
 
       console.log("[Proxy] File upload successful, reference:", uploadResult.reference.toHex())
 
@@ -741,7 +763,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const {
       requestId,
-      postageBatchId,
       data,
       options,
     } = message
@@ -751,16 +772,20 @@ export class SwarmIdProxy {
       throw new Error("Not authenticated. Please login first.")
     }
 
+    if (!this.postageBatchId) {
+      throw new Error("No postage batch ID available. Please authenticate with a valid batch ID.")
+    }
+
     try {
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
         throw new Error(`Invalid chunk size: ${data.length} bytes. Chunks must be between 1 and 4096 bytes.`)
       }
 
-      console.log("[Proxy] Uploading chunk to Bee at:", this.beeApiUrl, "with batch:", postageBatchId)
+      console.log("[Proxy] Uploading chunk to Bee at:", this.beeApiUrl, "with batch:", this.postageBatchId)
 
       // Upload chunk using bee-js
-      const uploadResult = await this.bee.uploadChunk(postageBatchId, data, options)
+      const uploadResult = await this.bee.uploadChunk(this.postageBatchId, data, options)
 
       console.log("[Proxy] Chunk upload successful, reference:", uploadResult.reference.toHex())
 
