@@ -24,3 +24,11 @@ export interface UploadProgress {
 export interface ChunkReference {
   address: Uint8Array  // 32-byte chunk address
 }
+
+/**
+ * Encrypted chunk reference (64-byte reference: address + encryption key)
+ */
+export interface EncryptedChunkReference {
+  address: Uint8Array  // 32-byte chunk address
+  key: Uint8Array      // 32-byte encryption key
+}

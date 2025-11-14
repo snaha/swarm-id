@@ -4,7 +4,11 @@ import { z } from "zod"
 // Base Types
 // ============================================================================
 
-export const ReferenceSchema = z.string().length(64)
+// Support both regular (32-byte = 64 hex chars) and encrypted (64-byte = 128 hex chars) references
+export const ReferenceSchema = z.string().refine(
+  (val) => val.length === 64 || val.length === 128,
+  { message: "Reference must be 64 chars (32 bytes) or 128 chars (64 bytes for encrypted)" }
+)
 export const BatchIdSchema = z.string().length(64)
 export const AddressSchema = z.string().length(40)
 

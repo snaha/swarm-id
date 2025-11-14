@@ -19,6 +19,8 @@ import {
 } from "./types"
 import { Bee, Stamper, makeContentAddressedChunk } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
+import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
+import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
 
 /**
@@ -723,15 +725,29 @@ export class SwarmIdProxy {
 
       if (this.signerKey) {
         // Client-side chunking and signing
-        console.log("[Proxy] Using client-side signing for uploadData")
-        uploadResult = await uploadDataWithSigning(context, data, options, onProgress)
+        if (options?.encrypt) {
+          console.log("[Proxy] Using client-side signing with encryption for uploadData")
+          uploadResult = await uploadEncryptedDataWithSigning(context, data, options, onProgress)
+        } else {
+          console.log("[Proxy] Using client-side signing for uploadData")
+          uploadResult = await uploadDataWithSigning(context, data, options, onProgress)
+        }
       } else if (this.postageBatchId) {
         // Fallback to bee.uploadData (node-side stamping)
-        console.log("[Proxy] Using node-side stamping for uploadData")
-        const result = await this.bee.uploadData(this.postageBatchId, data, options)
-        uploadResult = {
-          reference: result.reference.toHex(),
-          tagUid: result.tagUid,
+        if (options?.encrypt) {
+          console.log("[Proxy] Using node-side stamping with encryption for uploadData")
+          const result = await this.bee.uploadData(this.postageBatchId, data, options)
+          uploadResult = {
+            reference: result.reference.toHex(),
+            tagUid: result.tagUid,
+          }
+        } else {
+          console.log("[Proxy] Using node-side stamping for uploadData")
+          const result = await this.bee.uploadData(this.postageBatchId, data, options)
+          uploadResult = {
+            reference: result.reference.toHex(),
+            tagUid: result.tagUid,
+          }
         }
       } else {
         throw new Error("No authentication method available")
@@ -780,13 +796,10 @@ export class SwarmIdProxy {
 
       console.log("[Proxy] Downloading from Bee at:", this.beeApiUrl)
 
-      // Download data using bee-js
-      const bytesData = await this.bee.downloadData(reference, options)
+      // Download data using chunk API only (supports both regular and encrypted references)
+      const data = await downloadDataWithChunkAPI(this.bee, reference, options)
 
-      console.log("[Proxy] Download successful, data size:", bytesData.toUint8Array().length)
-
-      // Convert Bytes to Uint8Array for postMessage
-      const data = bytesData.toUint8Array()
+      console.log("[Proxy] Download successful, data size:", data.length)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
