@@ -56,7 +56,7 @@ export async function buildEncryptedMerkleTree(
 
     // Encrypt the chunk ONCE to get address and key
     const encrypter = newChunkEncrypter()
-    const { key, encryptedSpan, encryptedData } = await encrypter.encryptChunk(chunkData)
+    const { key, encryptedSpan, encryptedData } = encrypter.encryptChunk(chunkData)
     const encryptedChunkData = Binary.concatBytes(encryptedSpan, encryptedData)
 
     console.log(`[BuildEncryptedTree] Encrypted chunk data size: ${encryptedChunkData.length} bytes (encryptedSpan=${encryptedSpan.length} + encryptedData=${encryptedData.length})`)

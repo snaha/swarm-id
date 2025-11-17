@@ -92,7 +92,7 @@ export async function uploadEncryptedDataWithSigning(
 
   for (const payload of chunkPayloads) {
     // Create and encrypt content-addressed chunk
-    const encryptedChunk = await makeEncryptedContentAddressedChunk(payload)
+    const encryptedChunk = makeEncryptedContentAddressedChunk(payload)
 
     console.log(`[UploadEncryptedData] Leaf chunk ${encryptedChunkRefs.length}: address=${encryptedChunk.address.toHex()}, span=${payload.length}, data size=${encryptedChunk.data.length}`)
 
