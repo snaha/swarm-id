@@ -29,6 +29,7 @@ export class SwarmIdClient {
   private ready: boolean = false
   private readyPromise: Promise<void>
   private readyResolve?: () => void
+  private readyReject?: (error: Error) => void
   private pendingRequests: Map<
     string,
     {
@@ -50,8 +51,14 @@ export class SwarmIdClient {
     this.popupMode = options.popupMode || "window"
 
     // Create promise that resolves when iframe is ready
-    this.readyPromise = new Promise<void>((resolve) => {
+    this.readyPromise = new Promise<void>((resolve, reject) => {
       this.readyResolve = resolve
+      this.readyReject = reject
+
+      // Timeout after 10 seconds if proxy doesn't respond
+      setTimeout(() => {
+        reject(new Error("Proxy initialization timeout - proxy did not respond within 10 seconds"))
+      }, 10000)
     })
 
     this.setupMessageListener()
@@ -168,6 +175,14 @@ export class SwarmIdClient {
         }
         if (this.onAuthChange) {
           this.onAuthChange(true)
+        }
+        break
+
+      case "initError":
+        // Initialization error from proxy (e.g., origin validation failed)
+        console.error("[SwarmIdClient] Proxy initialization error:", message.error)
+        if (this.readyReject) {
+          this.readyReject(new Error(message.error))
         }
         break
 
