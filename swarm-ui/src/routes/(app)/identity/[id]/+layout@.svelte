@@ -1,24 +1,12 @@
 <script lang="ts">
-	import Vertical from '$lib/components/ui/vertical.svelte'
-	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
-	import Hashicon from '$lib/components/hashicon.svelte'
-	import SwarmLogo from '$lib/components/swarm-logo.svelte'
-	import { SidePanelOpen } from 'carbon-icons-svelte'
 	import { page } from '$app/stores'
 	import routes from '$lib/routes'
-	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { accountsStore } from '$lib/stores/accounts.svelte'
 
 	let { children } = $props()
 
 	const identityId = $derived($page.params.id)
 	const currentPath = $derived($page.url.pathname)
-	const identity = $derived(identitiesStore.getIdentity(identityId))
-	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
-
-	let drawerOpen = $state(false)
 
 	const tabs = $derived([
 		{ label: 'Apps', href: routes.IDENTITY_APPS(identityId) },
@@ -50,15 +38,6 @@
 </div>
 
 <style>
-	.page-wrapper {
-		display: flex;
-		flex-direction: row;
-		min-height: 100vh;
-		background: var(--colors-ultra-low);
-		position: relative;
-		align-items: flex-start;
-		justify-content: space-around;
-	}
 	.page-content {
 		flex: 1;
 		display: flex;
@@ -68,15 +47,6 @@
 		justify-content: flex-start;
 		align-items: center;
 		gap: var(--double-padding);
-	}
-	.drawer {
-		width: 360px;
-		min-height: 100vh;
-		background: var(--colors-base);
-		border-left: 1px solid var(--colors-low);
-		padding: var(--double-padding);
-		overflow-y: auto;
-		z-index: 50;
 	}
 
 	.content-area {
@@ -97,13 +67,6 @@
 
 	li {
 		flex: 1;
-		margin: 0;
-		padding: 0;
-	}
-
-	li a {
-		text-decoration: none;
-		display: block;
 		margin: 0;
 		padding: 0;
 	}

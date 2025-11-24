@@ -3,6 +3,7 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
+	import Badge from '$lib/components/ui/badge.svelte'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
@@ -12,10 +13,11 @@
 
 	interface Props {
 		identities: Identity[]
+		currentIdentityId?: string
 		onIdentityClick?: (identity: Identity) => void
 	}
 
-	let { identities, onIdentityClick }: Props = $props()
+	let { identities, currentIdentityId, onIdentityClick }: Props = $props()
 
 	let hoveredIndex = $state<number | undefined>(undefined)
 	let focusedIndex = $state<number | undefined>(undefined)
@@ -25,6 +27,7 @@
 	}
 
 	function handleIdentityClick(identity: Identity) {
+		if (identity.id === currentIdentityId) return
 		onIdentityClick?.(identity)
 	}
 </script>
@@ -35,6 +38,7 @@
 		{#if account}
 			<div
 				class="identity-item"
+				class:active={identity.id === currentIdentityId}
 				role="button"
 				tabindex="0"
 				onmouseenter={() => (hoveredIndex = index)}
@@ -67,19 +71,23 @@
 							{:else if account.type === 'ethereum'}
 								<EthereumLogo fill="var(--colors-ultra-high)" width={20} height={20} />
 							{/if}
-							<Typography variant="small">{identity.name}</Typography>
+							<Typography variant="small">{account.name}</Typography>
 						</Horizontal>
 						<Typography>
 							{identity.name}
 						</Typography>
 					</Vertical>
-					<Button
-						variant="ghost"
-						dimension="compact"
-						hover={hoveredIndex === index || focusedIndex === index}
-					>
-						<ArrowRight />
-					</Button>
+					{#if identity.id === currentIdentityId}
+						<Badge>Current</Badge>
+					{:else}
+						<Button
+							variant="ghost"
+							dimension="compact"
+							hover={hoveredIndex === index || focusedIndex === index}
+						>
+							<ArrowRight />
+						</Button>
+					{/if}
 				</Horizontal>
 			</div>
 		{/if}
@@ -94,9 +102,14 @@
 		cursor: pointer;
 	}
 
-	.identity-item:hover,
-	.identity-item:focus {
+	.identity-item:hover:not(.active),
+	.identity-item:focus:not(.active) {
 		background: var(--colors-base);
+	}
+
+	.identity-item.active {
+		background: var(--colors-ultra-low);
+		pointer-events: none;
 	}
 
 	.identity-item:focus {

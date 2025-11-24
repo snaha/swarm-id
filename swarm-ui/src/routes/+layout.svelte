@@ -8,17 +8,45 @@
 	import SwarmLogo from '$lib/components/swarm-logo.svelte'
 	import { SidePanelOpen } from 'carbon-icons-svelte'
 	import { page } from '$app/state'
+	import { goto } from '$app/navigation'
 	import routes from '$lib/routes'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import IdentityList from '$lib/components/identity-list.svelte'
 
 	let { children } = $props()
 
 	const identityId = $derived(page.params.id)
 	const identity = $derived(identitiesStore.getIdentity(identityId))
+	const identities = $derived(identitiesStore.identities)
 	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
 
-	let drawerOpen = $state(false)
+	// Initialize drawer state from localStorage
+	let drawerOpen = $state(
+		typeof window !== 'undefined' ? localStorage.getItem('drawerOpen') === 'true' : false,
+	)
+
+	// Persist drawer state to localStorage whenever it changes
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			localStorage.setItem('drawerOpen', String(drawerOpen))
+		}
+	})
+
+	function handleIdentityClick(clickedIdentity: (typeof identities)[number]) {
+		const currentPath = page.url.pathname
+
+		// Determine which page we're on and navigate to the same page type with the new identity
+		if (currentPath.includes('/apps')) {
+			goto(routes.IDENTITY_APPS(clickedIdentity.id))
+		} else if (currentPath.includes('/stamps')) {
+			goto(routes.IDENTITY_STAMPS(clickedIdentity.id))
+		} else if (currentPath.includes('/settings')) {
+			goto(routes.IDENTITY_SETTINGS(clickedIdentity.id))
+		} else {
+			goto(routes.IDENTITY_APPS(clickedIdentity.id))
+		}
+	}
 </script>
 
 <div class="page-wrapper">
@@ -80,6 +108,12 @@
 						</Vertical>
 					</Horizontal>
 				</Horizontal>
+
+				<IdentityList
+					{identities}
+					currentIdentityId={identityId}
+					onIdentityClick={handleIdentityClick}
+				/>
 			</Vertical>
 		</div>
 	{/if}

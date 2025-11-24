@@ -4,7 +4,6 @@
 	import Input from '$lib/components/ui/input/input.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Grid from '$lib/components/ui/grid.svelte'
-	import Vertical from '$lib/components/ui/vertical.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import { goto } from '$app/navigation'
 	import { page } from '$app/stores'
