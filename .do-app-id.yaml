@@ -15,7 +15,7 @@ static_sites:
     output_dir: swarm-id-build
 
     # Build using monorepo scripts
-    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-id
+    build_command: git submodule update --init --recursive && npm install -g pnpm && pnpm install && pnpm build:swarm-id
 
     # SPA routing - all routes go to index.html except /demo
     catchall_document: index.html
