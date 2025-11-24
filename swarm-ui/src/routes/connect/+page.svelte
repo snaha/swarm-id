@@ -3,7 +3,8 @@
 	import { page } from '$app/stores'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
-	import IdentityList from '$lib/components/identity-list.svelte'
+	import IdentityGroups from '$lib/components/identity-groups.svelte'
+	import RecentApps from '$lib/components/recent-apps.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
@@ -12,6 +13,7 @@
 	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import type { Identity } from '$lib/types'
 
 	let appOrigin = $state('')
@@ -125,6 +127,13 @@
 				window.location.origin,
 			)
 
+			// Track this app connection
+			connectedAppsStore.addOrUpdateApp({
+				appUrl: appOrigin,
+				appName: appName,
+				identityId: selectedIdentity.id,
+			})
+
 			authenticated = true
 
 			// Close popup after a short delay
@@ -187,22 +196,10 @@
 				<Button dimension="compact" onclick={handleAuthenticate}>Authenticate and Connect</Button>
 			</Vertical>
 		</Vertical>
-	{:else if showCreateMode}
-		<!-- Show create new identity form -->
-		<Vertical --vertical-gap="var(--double-padding)">
-			{#if hasIdentities}
-				<Horizontal --horizontal-justify-content="flex-start">
-					<Button variant="ghost" dimension="compact" onclick={handleBackToList}
-						>Back to identities</Button
-					>
-				</Horizontal>
-			{/if}
-			<CreateNewIdentity />
-		</Vertical>
-	{:else if hasIdentities}
+	{:else if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
-			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
+			<IdentityGroups {identities} appUrl={appOrigin} onIdentityClick={handleIdentityClick} />
 			<Horizontal --horizontal-justify-content="flex-start">
 				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
 					>Connect another account</Button

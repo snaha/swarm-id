@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { onMount } from 'svelte'
 	import AppLogo from '$lib/components/app-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 
@@ -9,33 +10,65 @@
 
 	let { appName, appUrl }: Props = $props()
 
-	let faviconError = $state(false)
 	let faviconUrl = $state<string | undefined>(undefined)
+	let isLoading = $state(true)
 
-	// Extract domain from app URL for favicon fetching
-	$effect(() => {
-		try {
-			const url = new URL(appUrl)
-			const domain = url.hostname
-
-			// Try multiple favicon sources in order of preference
-			// 1. Try the direct favicon.ico from the origin
-			// 2. Use Google's favicon service as fallback (more reliable, no CORS)
-			faviconUrl = `https://www.google.com/s2/favicons?domain=${domain}&sz=128`
-		} catch {
-			// If URL parsing fails, don't show favicon
-			faviconUrl = undefined
-		}
+	onMount(() => {
+		detectFavicon()
 	})
 
-	function handleFaviconError() {
-		faviconError = true
+	async function detectFavicon() {
+		try {
+			const url = new URL(appUrl)
+			const origin = url.origin
+			const domain = url.hostname
+
+			// Try different favicon sources in order of preference
+			const faviconCandidates = [
+				// Modern formats first (SVG is scalable, PNG is common)
+				`${origin}/favicon.svg`,
+				`${origin}/favicon.png`,
+				`${origin}/apple-touch-icon.png`,
+				`${origin}/favicon.ico`,
+				// Google's favicon service as final fallback (works cross-origin)
+				`https://www.google.com/s2/favicons?domain=${domain}&sz=128`,
+			]
+
+			// Try each candidate until one loads successfully
+			for (const candidate of faviconCandidates) {
+				const success = await tryLoadImage(candidate)
+				if (success) {
+					faviconUrl = candidate
+					isLoading = false
+					return
+				}
+			}
+
+			// If all fail, show default logo
+			faviconUrl = undefined
+			isLoading = false
+		} catch {
+			// If URL parsing fails, show default logo
+			faviconUrl = undefined
+			isLoading = false
+		}
+	}
+
+	function tryLoadImage(url: string): Promise<boolean> {
+		return new Promise((resolve) => {
+			const img = new Image()
+			img.onload = () => resolve(true)
+			img.onerror = () => resolve(false)
+			// Set timeout to avoid waiting too long
+			setTimeout(() => resolve(false), 3000)
+			img.src = url
+		})
 	}
 </script>
 
 <div class="header">
-	{#if faviconUrl && !faviconError}
-		<img src={faviconUrl} alt="{appName} favicon" class="favicon" onerror={handleFaviconError} />
+	{#if !isLoading && faviconUrl}
+		<img src={faviconUrl} alt="{appName} favicon" class="favicon" />
 	{:else}
 		<AppLogo width={40} height={40} />
 	{/if}
