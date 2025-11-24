@@ -61,12 +61,6 @@ static_sites:
       allow_credentials: true
       max_age: "600"
 
-    headers:
-      - pattern: /*
-        headers:
-          X-Frame-Options: ALLOW-FROM https://swarm-demo.snaha.net
-          Content-Security-Policy: "frame-ancestors 'self' https://swarm-demo.snaha.net"
-
 # Environment variables (shared across both sites)
 envs:
   - key: NODE_ENV
