@@ -8,7 +8,6 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import Input from '$lib/components/ui/input/input.svelte'
 	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -18,8 +17,6 @@
 	let appOrigin = $state('')
 	let appName = $state('')
 	let selectedIdentity = $state<Identity | undefined>(undefined)
-	let postageBatchId = $state('')
-	let signerKey = $state('')
 	let error = $state<string | undefined>(undefined)
 	let authenticated = $state(false)
 	let showCreateMode = $state(false)
@@ -66,15 +63,21 @@
 
 	function handleIdentityClick(identity: Identity) {
 		selectedIdentity = identity
+		handleAuthenticate()
 	}
 
 	function handleCreateNew() {
 		showCreateMode = true
 	}
 
-	function handleBackToList() {
-		showCreateMode = false
-		selectedIdentity = undefined
+	// FIXME: Temporary function to generate random postage batch ID for testing
+	// In production, this should come from the identity's actual postage stamps
+	function generateRandomPostageBatchId(): string {
+		const bytes = new Uint8Array(32) // 32 bytes = 64 hex chars
+		crypto.getRandomValues(bytes)
+		return Array.from(bytes)
+			.map((b) => b.toString(16).padStart(2, '0'))
+			.join('')
 	}
 
 	async function handleAuthenticate() {
@@ -94,11 +97,6 @@
 			return
 		}
 
-		if (!postageBatchId && !signerKey) {
-			error = 'Please provide at least a postage batch ID or signer key'
-			return
-		}
-
 		try {
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
@@ -106,6 +104,10 @@
 
 			// Step 2: Derive app-specific secret from identity master key
 			const appSecret = await deriveSecret(identityMasterKey, appOrigin)
+
+			// FIXME: Generate random postage batch ID for testing
+			// In production, use the identity's default postage stamp or let user choose
+			const postageBatchId = generateRandomPostageBatchId()
 
 			// Send secret to opener (the iframe that opened this popup)
 			if (!window.opener || (window.opener as Window).closed) {
@@ -119,8 +121,7 @@
 					appOrigin: appOrigin,
 					data: {
 						secret: appSecret,
-						postageBatchId: postageBatchId || undefined,
-						signerKey: signerKey || undefined,
+						postageBatchId, // FIXME: Should come from identity's actual stamps
 					},
 				},
 				window.location.origin,
@@ -158,44 +159,7 @@
 {:else}
 	<ConnectedAppHeader {appName} appUrl={appOrigin} />
 
-	{#if selectedIdentity}
-		<!-- User selected an identity, show authentication form -->
-		<Vertical --vertical-gap="var(--double-padding)">
-			<Horizontal --horizontal-justify-content="flex-start">
-				<Button variant="ghost" dimension="compact" onclick={handleBackToList}
-					>Back to identities</Button
-				>
-			</Horizontal>
-
-			<Vertical --vertical-gap="var(--padding)">
-				<Typography variant="h4">Authenticate as {selectedIdentity.name}</Typography>
-
-				<Vertical --vertical-gap="var(--half-padding)">
-					<Typography>Postage Batch ID (optional)</Typography>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="postage-batch-id"
-						bind:value={postageBatchId}
-						placeholder="Enter postage batch ID"
-					/>
-				</Vertical>
-
-				<Vertical --vertical-gap="var(--half-padding)">
-					<Typography>Signer Key (optional)</Typography>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="signer-key"
-						bind:value={signerKey}
-						placeholder="Enter signer key"
-					/>
-				</Vertical>
-
-				<Button dimension="compact" onclick={handleAuthenticate}>Authenticate and Connect</Button>
-			</Vertical>
-		</Vertical>
-	{:else if hasIdentities && !showCreateMode}
+	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
 			<IdentityGroups {identities} appUrl={appOrigin} onIdentityClick={handleIdentityClick} />

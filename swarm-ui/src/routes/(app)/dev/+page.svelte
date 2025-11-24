@@ -7,6 +7,7 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+	import { generateMasterKey } from '$lib/utils/key-derivation'
 
 	let message = $state('')
 
@@ -15,24 +16,28 @@
 	const connectionCount = $derived(connectedAppsStore.apps.length)
 	const stampCount = $derived(postageStampsStore.stamps.length)
 
-	function resetTestData() {
+	async function resetTestData() {
 		// Clear existing data
 		accountsStore.clear()
 		identitiesStore.clear()
 		connectedAppsStore.clear()
 		postageStampsStore.clear()
 
+		// Generate proper hex master keys for testing
+		const masterKey1 = await generateMasterKey()
+		const masterKey2 = await generateMasterKey()
+
 		// Create test accounts
 		const account1 = accountsStore.addAccount({
 			name: 'Test Account 1',
 			type: 'passkey',
-			masterKey: 'test-master-key-1',
+			masterKey: masterKey1,
 		})
 
 		const account2 = accountsStore.addAccount({
 			name: 'Test Account 2',
 			type: 'ethereum',
-			masterKey: 'test-master-key-2',
+			masterKey: masterKey2,
 			ethereumAddress: '0x1234567890123456789012345678901234567890',
 		})
 

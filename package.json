@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "build": "pnpm -r --workspace-concurrency=1 build",
-    "build:lib": "pnpm --filter @swarm-id/lib build",
+    "build:bee-js": "pnpm --filter @ethersphere/bee-js build",
+    "build:lib": "pnpm build:bee-js && pnpm --filter @swarm-id/lib build",
     "build:demo": "pnpm --filter @swarm-id/demo build",
     "build:swarm-ui": "pnpm --filter swarm-identity build",
     "build:swarm-demo": "pnpm build:lib && pnpm build:demo",
