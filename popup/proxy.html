@@ -173,7 +173,7 @@
         console.log('[Proxy] Opening authentication popup for parent:', parentOrigin);
 
         // Pass parent origin as URL parameter
-        const authUrl = `${window.location.origin}/popup/auth.html?origin=${encodeURIComponent(parentOrigin)}`;
+        const authUrl = `${window.location.origin}/connect?origin=${encodeURIComponent(parentOrigin)}`;
         window.open(authUrl);
       };
 

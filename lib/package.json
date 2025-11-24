@@ -49,7 +49,7 @@
   "author": "",
   "license": "ISC",
   "dependencies": {
-    "@ethersphere/bee-js": "link:../bee-js",
+    "@ethersphere/bee-js": "^7.0.0",
     "zod": "^4.0.0"
   },
   "devDependencies": {

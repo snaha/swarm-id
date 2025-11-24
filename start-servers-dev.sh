@@ -1,23 +1,30 @@
 #!/bin/bash
 
-# Start local production servers for Swarm iframe storage demo
+# Start local development servers with proxy to dev server
 #
 # This script starts TWO servers:
 #   1. server-app.js (port 8080) - Serves demo HTML files
-#   2. server-id.js (port 8081)  - Serves built SvelteKit app from swarm-ui/build/
+#   2. server-id.js (port 8081)  - Proxies to your dev server (default: localhost:5173)
 #
-# Prerequisites:
-#   cd swarm-ui && pnpm build    # Build the SvelteKit app first!
+# Usage:
+#   ./start-servers-dev.sh                           # Uses default localhost:5173
+#   PROXY_TARGET=http://localhost:3000 ./start-servers-dev.sh
 #
-# For development mode with hot reload, use: ./start-servers-dev.sh
+# Before running:
+#   cd swarm-ui && pnpm dev    # Start your SvelteKit dev server first!
+
+PROXY_TARGET="${PROXY_TARGET:-http://localhost:5173}"
 
 echo "========================================================================"
-echo "Starting Swarm Iframe Storage Demo Servers (PRODUCTION MODE)"
+echo "Starting Swarm Iframe Storage Demo Servers (DEV MODE)"
 echo "========================================================================"
 echo ""
 echo "This will start TWO HTTPS servers:"
 echo "  - https://swarm-app.local:8080  (serves demo HTML - server-app.js)"
-echo "  - https://swarm-id.local:8081   (serves swarm-ui/build/ - server-id.js)"
+echo "  - https://swarm-id.local:8081   (proxies to ${PROXY_TARGET} - server-id.js)"
+echo ""
+echo "⚠️  IMPORTANT: Make sure your dev server is running at ${PROXY_TARGET}!"
+echo "   Run: cd swarm-ui && pnpm dev"
 echo ""
 echo "Note: You'll see browser security warnings due to self-signed certs."
 echo "      Click 'Advanced' and 'Accept Risk' to proceed (safe for local dev)"
@@ -53,23 +60,29 @@ PID_APP=$!
 # Give it a moment to start
 sleep 1
 
-# Start id server in background
-node server-id.js &
+# Start id server with PROXY_TARGET set
+PROXY_TARGET="${PROXY_TARGET}" node server-id.js &
 PID_ID=$!
 
 # Wait for both processes
 echo ""
 echo "========================================================================"
-echo "✓ Both HTTPS servers started!"
+echo "✓ Both HTTPS servers started successfully!"
 echo "========================================================================"
 echo ""
-echo "Access the demo at:"
+echo "Server Setup:"
+echo "  • Port 8080: Demo HTML files (server-app.js)"
+echo "  • Port 8081: Proxy to ${PROXY_TARGET} (server-id.js)"
+echo ""
+echo "Access the demo:"
 echo "  https://swarm-app.local:8080/demo-iframe-storage.html"
 echo ""
-echo "The iframe will be loaded from:"
-echo "  https://swarm-id.local:8081/iframe-storage.html"
+echo "The iframe inside will load from:"
+echo "  https://swarm-id.local:8081/ → proxies to ${PROXY_TARGET}"
 echo ""
-echo "IMPORTANT: Accept the security warnings in your browser for both domains!"
+echo "⚠️  IMPORTANT:"
+echo "  1. Make sure 'pnpm dev' is running in swarm-ui/ at ${PROXY_TARGET}"
+echo "  2. Accept security warnings in your browser for BOTH domains"
 echo ""
 echo "Press Ctrl+C to stop both servers"
 echo "========================================================================"

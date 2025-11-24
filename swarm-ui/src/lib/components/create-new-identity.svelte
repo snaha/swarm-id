@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { page } from '$app/stores'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import AuthCard from '$lib/components/auth-card.svelte'
@@ -8,6 +9,25 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import { goto } from '$app/navigation'
 	import routes from '$lib/routes'
+
+	// Get the origin parameter from the URL if it exists (we're in /connect route)
+	const origin = $page.url.searchParams.get('origin')
+
+	function handlePasskeyClick() {
+		const url = origin
+			? `${routes.PASSKEY_NEW}?origin=${encodeURIComponent(origin)}`
+			: routes.PASSKEY_NEW
+		goto(url)
+	}
+
+	function handleEthClick() {
+		const url = origin ? `${routes.ETH_NEW}?origin=${encodeURIComponent(origin)}` : routes.ETH_NEW
+		goto(url)
+	}
+
+	function handleImportClick() {
+		console.log('Import from file')
+	}
 </script>
 
 <Vertical --vertical-gap="0" class="content-box">
@@ -17,7 +37,7 @@
 				title="Use Ethereum"
 				description="Connect an Ethereum wallet to create a new Swarm ID account"
 				buttonText="Connect wallet"
-				onclick={() => goto(routes.ETH_NEW)}
+				onclick={handleEthClick}
 			>
 				{#snippet icon()}
 					<EthereumLogo fill="#242424" width={64} height={64} />
@@ -32,7 +52,7 @@
 				title="Use Passkey"
 				description="Use Passkey on this device to create a new Swarm ID account"
 				buttonText="Use Passkey"
-				onclick={() => goto(routes.PASSKEY_NEW)}
+				onclick={handlePasskeyClick}
 			>
 				{#snippet icon()}
 					<PasskeyLogo fill="#242424" width={64} height={64} />
@@ -43,7 +63,7 @@
 			</AuthCard>
 		</div>
 	</Horizontal>
-	<ImportSwarmIdentity onclick={() => console.log('Import from file')} />
+	<ImportSwarmIdentity onclick={handleImportClick} />
 </Vertical>
 
 <style>
