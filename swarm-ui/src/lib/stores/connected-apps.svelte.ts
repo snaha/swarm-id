@@ -81,6 +81,11 @@ export const connectedAppsStore = {
 		return [...connectedApps].sort((a, b) => b.lastConnectedAt - a.lastConnectedAt)
 	},
 
+	// Get apps for a specific identity
+	getAppsByIdentityId(identityId: string): ConnectedApp[] {
+		return connectedApps.filter((app) => app.identityId === identityId)
+	},
+
 	removeApp(id: string) {
 		connectedApps = connectedApps.filter((app) => app.id !== id)
 		saveConnectedApps(connectedApps)

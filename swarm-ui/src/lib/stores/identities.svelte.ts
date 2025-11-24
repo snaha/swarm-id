@@ -2,6 +2,7 @@ export type Identity = {
 	id: string
 	accountId: string
 	name: string
+	defaultPostageStampId?: string
 	createdAt: number
 }
 
@@ -50,6 +51,13 @@ export const identitiesStore = {
 
 	getIdentitiesByAccount(accountId: string): Identity[] {
 		return identities.filter((i) => i.accountId === accountId)
+	},
+
+	setDefaultStamp(identityId: string, stampId: string | undefined) {
+		identities = identities.map((i) =>
+			i.id === identityId ? { ...i, defaultPostageStampId: stampId } : i,
+		)
+		saveIdentities(identities)
 	},
 
 	clear() {

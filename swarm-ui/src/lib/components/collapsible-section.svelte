@@ -9,13 +9,14 @@
 
 	interface Props {
 		title: string
-		count?: number
+		subtitle?: string
+		count?: string | number
 		expanded?: boolean
 		onToggle?: () => void
 		children: Snippet
 	}
 
-	let { title, count, expanded = true, onToggle, children }: Props = $props()
+	let { title, subtitle, count, expanded = true, onToggle, children }: Props = $props()
 
 	let isExpanded = $state(expanded)
 
@@ -39,10 +40,17 @@
 				<ChevronRight size={16} />
 			{/if}
 		</Button>
-		<Typography variant="h5">{title}</Typography>
-		{#if count !== undefined}
-			<Badge>{count}</Badge>
-		{/if}
+		<Vertical --vertical-gap="0">
+			<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+				<Typography variant="h5">{title}</Typography>
+				{#if count !== undefined}
+					<Badge>{count}</Badge>
+				{/if}
+			</Horizontal>
+			{#if subtitle}
+				<Typography variant="small">{subtitle}</Typography>
+			{/if}
+		</Vertical>
 	</Horizontal>
 
 	{#if isExpanded}

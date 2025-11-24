@@ -1,12 +1,15 @@
 <script lang="ts">
 	import '../app.pcss'
 	import SwarmLogo from '$lib/components/swarm-logo.svelte'
+	import routes from '$lib/routes'
 
 	let { children } = $props()
 </script>
 
 <div class="logo">
-	<SwarmLogo fill="#242424" height={30} />
+	<a href={routes.HOME}>
+		<SwarmLogo fill="#242424" height={30} />
+	</a>
 </div>
 
 <div class="container">
@@ -20,6 +23,12 @@
 		position: fixed;
 		top: 30px;
 		left: 30px;
+	}
+
+	.logo a {
+		display: flex;
+		text-decoration: none;
+		cursor: pointer;
 	}
 
 	.container {

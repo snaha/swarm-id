@@ -6,6 +6,9 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
+	import { goto } from '$app/navigation'
+	import type { Identity } from '$lib/types'
+	import routes from '$lib/routes'
 
 	// Get identities from store
 	const identities = $derived(identitiesStore.identities)
@@ -16,6 +19,10 @@
 	function handleCreateNew() {
 		showCreateMode = true
 	}
+
+	function handleIdentityClick(identity: Identity) {
+		goto(routes.IDENTITY(identity.id))
+	}
 </script>
 
 <Vertical>
@@ -24,7 +31,7 @@
 	{#if hasIdentities && !showCreateMode}
 		<Typography variant="small">Choose an identity to continue</Typography>
 		<Vertical --vertical-gap="var(--double-padding)">
-			<IdentityList {identities} />
+			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
 			<Horizontal --justify-content="flex-start">
 				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
 					>Connect another account</Button
