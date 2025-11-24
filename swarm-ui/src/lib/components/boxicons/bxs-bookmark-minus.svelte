@@ -1,0 +1,21 @@
+<script lang="ts">
+	import type { Props } from '.'
+
+	const {
+		size = '24',
+		color = 'currentColor',
+		viewBox = '0 0 24 24',
+		...restProps
+	}: Props = $props()
+</script>
+
+<svg
+	xmlns="http://www.w3.org/2000/svg"
+	width={size}
+	height={size}
+	fill={color}
+	{viewBox}
+	{...restProps}
+>
+	<path d="M17 2H7a2 2 0 0 0-2 2v18l7-4.848L19 22V4a2 2 0 0 0-2-2zm-1 9H8V9h8v2z" />
+</svg>

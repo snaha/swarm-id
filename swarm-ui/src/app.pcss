@@ -1,0 +1,139 @@
+:root {
+	/* Dark Mode Colors */
+	--colors-dark-top: #ffffff;
+	--colors-dark-ultra-high: #e8e8e8;
+	--colors-dark-high: #dd7200;
+	--colors-dark-low: #3f3f3f;
+	--colors-dark-ultra-low: #242424;
+	--colors-dark-base: #000000;
+
+	--colors-dark-green: #36c450;
+	--colors-dark-red: #ff6e4e;
+
+	/* Light Mode Colors (explicit) */
+	--colors-light-top: #000000;
+	--colors-light-ultra-high: #242424;
+	--colors-light-high: #dd7200;
+	--colors-light-low: #e7e7e7;
+	--colors-light-ultra-low: #fafafa;
+	--colors-light-base: #ffffff;
+
+	--colors-light-green: #008800;
+	--colors-light-red: #cc0000;
+
+	/* Default Colors (defaults to light mode) */
+	--colors-top: #000000;
+	--colors-ultra-high: #242424;
+	--colors-high: #dd7200;
+	--colors-low: #e7e7e7;
+	--colors-ultra-low: #fafafa;
+	--colors-base: #ffffff;
+
+	--colors-green: #008800;
+	--colors-red: #cc0000;
+
+	--colors-light: #ffffff;
+	--colors-dark: #000000;
+	--colors-light-75: rgba(255, 255, 255, 0.75);
+	--colors-dark-75: rgba(0, 0, 0, 0.75);
+	--colors-light-25: rgba(255, 255, 255, 0.25);
+	--colors-dark-25: rgba(0, 0, 0, 0.25);
+
+	/* Overlays */
+	--colors-dark-overlay: rgba(26, 26, 26, 0.8);
+	--colors-light-overlay: rgba(255, 255, 255, 0.8);
+
+	--font-family-sans-serif: 'IA Writer Quattro V', sans-serif;
+	--font-family-serif: serif;
+	--font-family-monospace: monospace;
+
+	--font-size-large: 1.5rem;
+	--font-size: 1rem;
+	--font-size-small: 0.75rem;
+
+	--line-height-large: 2rem;
+	--line-height: 1.5rem;
+	--line-height-small: 1rem;
+
+	--letter-spacing-large: 0.03rem;
+	--letter-spacing: 0.02rem;
+	--letter-spacing-small: 0.0375rem;
+
+	--font-size-h1: 3rem;
+	--font-size-h2: 2.5rem;
+	--font-size-h3: 2rem;
+	--font-size-h4: 1.5rem;
+	--font-size-h5: 1rem;
+	--font-size-h6: 0.75rem;
+
+	--font-weight-h1: 700;
+	--font-weight-h2: 700;
+	--font-weight-h3: 700;
+	--font-weight-h4: 700;
+	--font-weight-h5: 700;
+	--font-weight-h6: 700;
+
+	--line-height-h1: 3.5rem;
+	--line-height-h2: 3rem;
+	--line-height-h3: 2.5rem;
+	--line-height-h4: 2rem;
+	--line-height-h5: 1.5rem;
+	--line-height-h6: 1rem;
+
+	--letter-spacing-h4: 0.03rem;
+	--letter-spacing-h5: 0.02rem;
+	--letter-spacing-h6: 0.0375rem;
+
+	--padding: var(--font-size);
+	--quarter-padding: calc(var(--padding) / 4);
+	--half-padding: calc(var(--padding) / 2);
+	--three-quarters-padding: calc(var(--quarter-padding) * 3);
+	--one-and-half-padding: calc(var(--padding) * 1.5);
+	--double-padding: calc(2 * var(--padding));
+	--border-radius: 0rem;
+	--border-radius-small: 1rem;
+	--border-radius-compact: 1.25rem;
+	--border-radius-default: 1.5rem;
+	--border-radius-large: 1.75rem;
+	--focus-outline: 4px solid var(--colors-top);
+	--focus-outline-offset: -4px;
+}
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	font-feature-settings: 'tnum';
+}
+html,
+body {
+	margin: 0;
+	padding: 0;
+	background-color: var(--colors-ultra-low);
+	font-family: var(--font-family-sans-serif);
+	display: flex;
+	flex-direction: column;
+	min-height: 100vh;
+}
+
+body:has(dialog[open]) {
+	overflow: hidden;
+}
+
+a {
+	color: var(--colors-ultra-high);
+	text-decoration: underline;
+}
+
+a:hover {
+	color: var(--colors-high);
+}
+
+@font-face {
+	src: url('/fonts/iAWriterQuattroV.ttf') format('truetype');
+	font-family: 'IA Writer Quattro V';
+	font-weight: 200 900;
+	font-style: normal;
+	font-feature-settings: 'tnum';
+	font-optical-sizing: auto;
+	font-display: swap;
+}

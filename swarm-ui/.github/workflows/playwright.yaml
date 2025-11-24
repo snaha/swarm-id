@@ -1,0 +1,129 @@
+name: Playwright Tests
+
+on:
+  push:
+    branches:
+      - 'main'
+  pull_request:
+    branches:
+      - '**'
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  playwright-tests:
+    name: Playwright Tests
+    timeout-minutes: 30
+    runs-on: ubuntu-latest
+    container:
+      image: mcr.microsoft.com/playwright:v1.55.0-noble
+
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - name: Check for component changes
+        id: changes
+        shell: bash
+        run: |
+          # Ensure we have git configuration
+          git config --global --add safe.directory $GITHUB_WORKSPACE
+
+          # For PRs, fetch the base branch to ensure we have the base SHA
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+            BASE_REF="${{ github.event.pull_request.base.ref }}"
+
+            echo "Fetching base branch: $BASE_REF"
+            git fetch origin $BASE_REF:refs/remotes/origin/$BASE_REF || true
+
+            # Also fetch the specific base SHA if not available
+            if ! git cat-file -e $BASE_SHA 2>/dev/null; then
+              echo "Base SHA not found, fetching it specifically"
+              git fetch origin $BASE_SHA || true
+            fi
+          else
+            BASE_SHA="HEAD~1"
+          fi
+
+          echo "Event: ${{ github.event_name }}"
+          echo "Base SHA: $BASE_SHA"
+          echo "Current SHA: ${{ github.sha }}"
+
+          # Get changed files with better error handling
+          if git cat-file -e $BASE_SHA 2>/dev/null; then
+            CHANGED_FILES=$(git diff --name-only $BASE_SHA ${{ github.sha }})
+          else
+            echo "⚠️ Base SHA not available, using origin/main as fallback"
+            git fetch origin main:refs/remotes/origin/main || true
+            CHANGED_FILES=$(git diff --name-only origin/main ${{ github.sha }} || echo "")
+          fi
+
+          echo "Changed files:"
+          echo "$CHANGED_FILES"
+
+          if echo "$CHANGED_FILES" | grep -E "(src/lib/components/|playwright-ct\.config\.ts|\.ct\.spec\.ts)" > /dev/null; then
+            echo "run_component_tests=true" >> $GITHUB_OUTPUT
+            echo "✅ Component changes detected - will run component tests"
+          else
+            echo "run_component_tests=false" >> $GITHUB_OUTPUT
+            echo "⏭️ No component changes detected - skipping component tests"
+          fi
+
+      - uses: pnpm/action-setup@v4
+        name: Install pnpm
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Cache pnpm store
+        uses: actions/cache@v4
+        with:
+          path: ~/.local/share/pnpm/store
+          key: ${{ runner.os }}-pnpm-store-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pnpm-store-
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile --dangerously-allow-all-builds
+
+      - name: Generate SvelteKit files
+        run: pnpm exec svelte-kit sync
+
+      - name: Run Unit Tests
+        run: pnpm test:unit run
+
+      - name: Run Component Tests
+        if: steps.changes.outputs.run_component_tests == 'true'
+        run: |
+          echo "🧩 Running component tests..."
+          pnpm test:ct
+        env:
+          CI: true
+          HOME: /root
+
+      - name: Run Integration Tests
+        run: |
+          echo "🔄 Running integration tests..."
+          pnpm test:integration
+        env:
+          CI: true
+
+      - name: Upload Test Reports
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: playwright-test-reports
+          path: |
+            playwright-report/
+            test-results/
+          retention-days: 30
