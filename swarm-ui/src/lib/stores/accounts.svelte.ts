@@ -1,11 +1,4 @@
-export type Account = {
-	id: string
-	name: string
-	type: 'passkey' | 'ethereum'
-	masterKey: string
-	ethereumAddress?: string
-	createdAt: number
-}
+import type { Account } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-accounts'
 

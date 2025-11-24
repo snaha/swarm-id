@@ -40,7 +40,7 @@
 		</Horizontal>
 
 		<Vertical --vertical-gap="0" style="border: 1px solid var(--colors-low);">
-			{#each recentApps as app (app.id)}
+			{#each recentApps as app (app.appUrl + app.identityId)}
 				<div class="app-item">
 					<Vertical --vertical-gap="var(--quarter-padding)">
 						<Typography>{app.appName}</Typography>

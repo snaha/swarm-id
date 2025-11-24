@@ -1,11 +1,4 @@
-export type ConnectedApp = {
-	id: string
-	appUrl: string
-	appName: string
-	lastConnectedAt: number
-	identityId: string
-	favicon?: string
-}
+import type { ConnectedApp } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-connected-apps'
 
@@ -32,7 +25,7 @@ export const connectedAppsStore = {
 
 	// Add or update a connected app (updates lastConnectedAt if app already exists with same identity)
 	addOrUpdateApp(
-		appData: Omit<ConnectedApp, 'id' | 'lastConnectedAt'> & { favicon?: string },
+		appData: Omit<ConnectedApp, 'lastConnectedAt'> & { favicon?: string },
 	): ConnectedApp {
 		const existingApp = connectedApps.find(
 			(app) => app.appUrl === appData.appUrl && app.identityId === appData.identityId,
@@ -46,13 +39,16 @@ export const connectedAppsStore = {
 				favicon: appData.favicon ?? existingApp.favicon,
 				lastConnectedAt: Date.now(),
 			}
-			connectedApps = connectedApps.map((app) => (app.id === existingApp.id ? updatedApp : app))
+			connectedApps = connectedApps.map((app) =>
+				app.appUrl === existingApp.appUrl && app.identityId === existingApp.identityId
+					? updatedApp
+					: app,
+			)
 			saveConnectedApps(connectedApps)
 			return updatedApp
 		} else {
 			// Add new app
 			const newApp: ConnectedApp = {
-				id: crypto.randomUUID(),
 				appUrl: appData.appUrl,
 				appName: appData.appName,
 				identityId: appData.identityId,
@@ -86,8 +82,10 @@ export const connectedAppsStore = {
 		return connectedApps.filter((app) => app.identityId === identityId)
 	},
 
-	removeApp(id: string) {
-		connectedApps = connectedApps.filter((app) => app.id !== id)
+	removeApp(appUrl: string, identityId: string) {
+		connectedApps = connectedApps.filter(
+			(app) => !(app.appUrl === appUrl && app.identityId === identityId),
+		)
 		saveConnectedApps(connectedApps)
 	},
 

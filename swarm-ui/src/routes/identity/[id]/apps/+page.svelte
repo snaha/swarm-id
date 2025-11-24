@@ -45,7 +45,7 @@
 			<Typography>Default postage stamp</Typography>
 			<Select
 				dimension="compact"
-				value={identity?.defaultPostageStampId}
+				value={identity?.defaultPostageStampBatchID}
 				items={stamps.map((s) => ({ value: s.batchID, label: formatBatchId(s.batchID) }))}
 			></Select>
 		</Grid>

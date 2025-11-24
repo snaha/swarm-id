@@ -14,8 +14,8 @@
 	const identity = $derived(identitiesStore.getIdentity(identityId))
 	const stamps = $derived(postageStampsStore.getStampsByIdentity(identityId))
 
-	function makeDefaultStamp(stampId: string) {
-		identitiesStore.setDefaultStamp(identityId, stampId)
+	function makeDefaultStamp(batchID: string) {
+		identitiesStore.setDefaultStamp(identityId, batchID)
 	}
 
 	function formatCapacity(utilization: number, depth: number): string {
@@ -38,12 +38,12 @@
 		return batchId.slice(0, 8)
 	}
 
-	function removeStamp(stampId: string) {
+	function removeStamp(batchID: string) {
 		// If this is the default stamp, clear the default stamp first
-		if (identity?.defaultPostageStampId === stampId) {
+		if (identity?.defaultPostageStampBatchID === batchID) {
 			identitiesStore.setDefaultStamp(identityId, undefined)
 		}
-		postageStampsStore.removeStamp(stampId)
+		postageStampsStore.removeStamp(batchID)
 	}
 </script>
 
@@ -56,7 +56,7 @@
 		<Vertical --vertical-gap="0">
 			<Divider />
 			{#each stamps as stamp}
-				{@const isDefault = identity?.defaultPostageStampId === stamp.id}
+				{@const isDefault = identity?.defaultPostageStampBatchID === stamp.batchID}
 				<CollapsibleSection
 					title={formatBatchId(stamp.batchID)}
 					count={isDefault ? 'default' : undefined}
@@ -84,14 +84,18 @@
 								<Button
 									dimension="compact"
 									variant="ghost"
-									onclick={() => makeDefaultStamp(stamp.id)}
+									onclick={() => makeDefaultStamp(stamp.batchID)}
 									disabled={isDefault}
 								>
 									Make default
 								</Button>
 								<Button dimension="compact" variant="ghost">Top up stamp</Button>
 							</Horizontal>
-							<Button dimension="compact" variant="ghost" onclick={() => removeStamp(stamp.id)}>
+							<Button
+								dimension="compact"
+								variant="ghost"
+								onclick={() => removeStamp(stamp.batchID)}
+							>
 								Remove stamp
 							</Button>
 						</Horizontal>

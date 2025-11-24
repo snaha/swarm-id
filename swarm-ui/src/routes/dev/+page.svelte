@@ -160,8 +160,8 @@
 		})
 
 		// Set default stamps
-		identitiesStore.setDefaultStamp(identity1.id, aliceStamp1.id)
-		identitiesStore.setDefaultStamp(identity2.id, bobStamp1.id)
+		identitiesStore.setDefaultStamp(identity1.id, aliceStamp1.batchID)
+		identitiesStore.setDefaultStamp(identity2.id, bobStamp1.batchID)
 
 		message = `✅ Test data created:
 - 2 accounts (1 passkey, 1 ethereum)

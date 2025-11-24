@@ -1,18 +1,4 @@
-export type PostageStamp = {
-	id: string
-	identityId: string
-	batchID: string
-	utilization: number
-	usable: boolean
-	depth: number
-	amount: string
-	bucketDepth: number
-	blockNumber: number
-	immutableFlag: boolean
-	exists: boolean
-	batchTTL?: number
-	createdAt: number
-}
+import type { PostageStamp } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-postage-stamps'
 
@@ -37,10 +23,9 @@ export const postageStampsStore = {
 		return postageStamps
 	},
 
-	addStamp(stamp: Omit<PostageStamp, 'id' | 'createdAt'>): PostageStamp {
+	addStamp(stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {
 		const newStamp: PostageStamp = {
 			...stamp,
-			id: crypto.randomUUID(),
 			createdAt: Date.now(),
 		}
 		postageStamps = [...postageStamps, newStamp]
@@ -48,13 +33,13 @@ export const postageStampsStore = {
 		return newStamp
 	},
 
-	removeStamp(id: string) {
-		postageStamps = postageStamps.filter((s) => s.id !== id)
+	removeStamp(batchID: string) {
+		postageStamps = postageStamps.filter((s) => s.batchID !== batchID)
 		savePostageStamps(postageStamps)
 	},
 
-	getStamp(id: string): PostageStamp | undefined {
-		return postageStamps.find((s) => s.id === id)
+	getStamp(batchID: string): PostageStamp | undefined {
+		return postageStamps.find((s) => s.batchID === batchID)
 	},
 
 	getStampsByIdentity(identityId: string): PostageStamp[] {
