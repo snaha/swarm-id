@@ -1,13 +1,24 @@
 <script lang="ts">
 	import Vertical from '$lib/components/ui/vertical.svelte'
+	import Horizontal from '$lib/components/ui/horizontal.svelte'
+	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
+	import Hashicon from '$lib/components/hashicon.svelte'
+	import SwarmLogo from '$lib/components/swarm-logo.svelte'
+	import { SidePanelOpen } from 'carbon-icons-svelte'
 	import { page } from '$app/stores'
 	import routes from '$lib/routes'
+	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 
 	let { children } = $props()
 
 	const identityId = $derived($page.params.id)
 	const currentPath = $derived($page.url.pathname)
+	const identity = $derived(identitiesStore.getIdentity(identityId))
+	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+
+	let drawerOpen = $state(false)
 
 	const tabs = $derived([
 		{ label: 'Apps', href: routes.IDENTITY_APPS(identityId) },
@@ -16,44 +27,60 @@
 	])
 </script>
 
-<div class="container">
-	<div class="content-area">
-		<Vertical>
-			<div class="tab-container">
-				<ul>
-					{#each tabs as tab}
-						<li>
-							<Button
-								variant="ghost"
-								dimension="default"
-								active={currentPath === tab.href}
-								href={tab.href}
-							>
-								{tab.label}
-							</Button>
-						</li>
-					{/each}
-				</ul>
-
-				<div class="tab-content">
-					{@render children()}
-				</div>
-			</div>
-		</Vertical>
+<div class="page-content">
+	<div class="content-area tab-container">
+		<ul>
+			{#each tabs as tab}
+				<li>
+					<Button
+						variant="ghost"
+						dimension="default"
+						active={currentPath === tab.href}
+						href={tab.href}
+					>
+						{tab.label}
+					</Button>
+				</li>
+			{/each}
+		</ul>
+		<div class="tab-content">
+			{@render children()}
+		</div>
 	</div>
 </div>
 
 <style>
-	.container {
+	.page-wrapper {
+		display: flex;
+		flex-direction: row;
+		min-height: 100vh;
+		background: var(--colors-ultra-low);
+		position: relative;
+		align-items: flex-start;
+		justify-content: space-around;
+	}
+	.page-content {
+		flex: 1;
 		display: flex;
 		justify-content: center;
-		align-items: flex-start;
+		padding-top: var(--double-padding);
+		flex-direction: column;
+		justify-content: flex-start;
+		align-items: center;
+		gap: var(--double-padding);
+	}
+	.drawer {
+		width: 360px;
 		min-height: 100vh;
-		padding: 2rem;
+		background: var(--colors-base);
+		border-left: 1px solid var(--colors-low);
+		padding: var(--double-padding);
+		overflow-y: auto;
+		z-index: 50;
 	}
 
 	.content-area {
-		width: 560px;
+		max-width: 560px;
 	}
 
 	ul {
