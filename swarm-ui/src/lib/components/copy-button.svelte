@@ -1,8 +1,7 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/button.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
-	import BxCopy from '$lib/components/boxicons/bx-copy.svelte'
-	import BxCheck from '$lib/components/boxicons/bx-check.svelte'
+	import { Copy, Checkmark } from 'carbon-icons-svelte'
 
 	interface Props {
 		text: string
@@ -49,9 +48,9 @@
 <Tooltip helperText="Copied!" show={copied} variant={dimension} position="top">
 	<Button {dimension} {variant} onclick={handleCopy}>
 		{#if copied}
-			<BxCheck size={20} />
+			<Checkmark size={20} />
 		{:else}
-			<BxCopy size={20} />
+			<Copy size={20} />
 		{/if}
 	</Button>
 </Tooltip>

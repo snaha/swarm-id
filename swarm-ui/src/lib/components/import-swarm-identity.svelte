@@ -2,8 +2,7 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import BxInfoCircle from '$lib/components/boxicons/bx-info-circle.svelte'
-	import BxUpload from '$lib/components/boxicons/bx-upload.svelte'
+	import { Information, Upload } from 'carbon-icons-svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 
 	interface Props {
@@ -47,7 +46,7 @@
 							showTooltip = !showTooltip
 						}}
 					>
-						<BxInfoCircle width={20} height={20} />
+						<Information size={20} />
 					</Button>
 				{/snippet}
 				{#snippet helperText()}
@@ -58,7 +57,7 @@
 			</Tooltip>
 		</div>
 		<Button variant="ghost" dimension="compact" hover={isHovered || isFocused}>
-			<BxUpload width={20} height={20} />
+			<Upload size={20} />
 			Import from file
 		</Button>
 	</Horizontal>

@@ -3,21 +3,28 @@
 	import { page } from '$app/stores'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
+	import IdentityList from '$lib/components/identity-list.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
+	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import { deriveSecret } from '$lib/utils/key-derivation'
-	import { sessionStore } from '$lib/stores/session.svelte'
+	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
+	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import type { Identity } from '$lib/types'
 
 	let appOrigin = $state('')
 	let appName = $state('')
-	let masterKey = $state<string | undefined>(undefined)
+	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let postageBatchId = $state('')
 	let signerKey = $state('')
 	let error = $state<string | undefined>(undefined)
 	let authenticated = $state(false)
+	let showCreateMode = $state(false)
+
+	const identities = $derived(identitiesStore.identities)
+	const hasIdentities = $derived(identities.length > 0)
 
 	onMount(() => {
 		// Validate opener window
@@ -54,20 +61,30 @@
 		} catch {
 			appName = origin
 		}
-
-		// Load master key from current account
-		const currentAccountId = sessionStore.data.currentAccountId
-		if (currentAccountId) {
-			const account = accountsStore.getAccount(currentAccountId)
-			if (account) {
-				masterKey = account.masterKey
-			}
-		}
 	})
 
+	function handleIdentityClick(identity: Identity) {
+		selectedIdentity = identity
+	}
+
+	function handleCreateNew() {
+		showCreateMode = true
+	}
+
+	function handleBackToList() {
+		showCreateMode = false
+		selectedIdentity = undefined
+	}
+
 	async function handleAuthenticate() {
-		if (!masterKey) {
-			error = 'No master key available. Please set up an identity first.'
+		if (!selectedIdentity) {
+			error = 'No identity selected. Please select an identity first.'
+			return
+		}
+
+		const account = accountsStore.getAccount(selectedIdentity.accountId)
+		if (!account || !account.masterKey) {
+			error = 'No master key available for selected identity.'
 			return
 		}
 
@@ -82,8 +99,12 @@
 		}
 
 		try {
-			// Derive app-specific secret
-			const appSecret = await deriveSecret(masterKey, appOrigin)
+			// Hierarchical key derivation: Account → Identity → App
+			// Step 1: Derive identity-specific master key
+			const identityMasterKey = await deriveIdentityKey(account.masterKey, selectedIdentity.id)
+
+			// Step 2: Derive app-specific secret from identity master key
+			const appSecret = await deriveSecret(identityMasterKey, appOrigin)
 
 			// Send secret to opener (the iframe that opened this popup)
 			if (!window.opener || (window.opener as Window).closed) {
@@ -91,7 +112,7 @@
 				return
 			}
 
-			;(window.opener as WindowProxy).postMessage(
+			;(window.opener as Window).postMessage(
 				{
 					type: 'setSecret',
 					appOrigin: appOrigin,
@@ -129,38 +150,67 @@
 {:else}
 	<ConnectedAppHeader {appName} appUrl={appOrigin} />
 
-	{#if masterKey}
-		<!-- User has a master key, show authentication form -->
-		<Vertical --vertical-gap="var(--padding)">
-			<Typography variant="h4">Authenticate</Typography>
-			<Typography variant="small">Master Key: {masterKey.substring(0, 16)}...</Typography>
+	{#if selectedIdentity}
+		<!-- User selected an identity, show authentication form -->
+		<Vertical --vertical-gap="var(--double-padding)">
+			<Horizontal --horizontal-justify-content="flex-start">
+				<Button variant="ghost" dimension="compact" onclick={handleBackToList}
+					>Back to identities</Button
+				>
+			</Horizontal>
 
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Typography>Postage Batch ID (optional)</Typography>
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="postage-batch-id"
-					bind:value={postageBatchId}
-					placeholder="Enter postage batch ID"
-				/>
+			<Vertical --vertical-gap="var(--padding)">
+				<Typography variant="h4">Authenticate as {selectedIdentity.name}</Typography>
+
+				<Vertical --vertical-gap="var(--half-padding)">
+					<Typography>Postage Batch ID (optional)</Typography>
+					<Input
+						variant="outline"
+						dimension="compact"
+						name="postage-batch-id"
+						bind:value={postageBatchId}
+						placeholder="Enter postage batch ID"
+					/>
+				</Vertical>
+
+				<Vertical --vertical-gap="var(--half-padding)">
+					<Typography>Signer Key (optional)</Typography>
+					<Input
+						variant="outline"
+						dimension="compact"
+						name="signer-key"
+						bind:value={signerKey}
+						placeholder="Enter signer key"
+					/>
+				</Vertical>
+
+				<Button dimension="compact" onclick={handleAuthenticate}>Authenticate and Connect</Button>
 			</Vertical>
-
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Typography>Signer Key (optional)</Typography>
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="signer-key"
-					bind:value={signerKey}
-					placeholder="Enter signer key"
-				/>
-			</Vertical>
-
-			<Button dimension="compact" onclick={handleAuthenticate}>Authenticate and Connect</Button>
+		</Vertical>
+	{:else if showCreateMode}
+		<!-- Show create new identity form -->
+		<Vertical --vertical-gap="var(--double-padding)">
+			{#if hasIdentities}
+				<Horizontal --horizontal-justify-content="flex-start">
+					<Button variant="ghost" dimension="compact" onclick={handleBackToList}
+						>Back to identities</Button
+					>
+				</Horizontal>
+			{/if}
+			<CreateNewIdentity />
+		</Vertical>
+	{:else if hasIdentities}
+		<!-- Show identity list -->
+		<Vertical --vertical-gap="var(--double-padding)">
+			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
+			<Horizontal --horizontal-justify-content="flex-start">
+				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
+					>Connect another account</Button
+				>
+			</Horizontal>
 		</Vertical>
 	{:else}
-		<!-- No master key, show setup options -->
+		<!-- No identities, show create form -->
 		<CreateNewIdentity />
 	{/if}
 {/if}

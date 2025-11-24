@@ -6,6 +6,48 @@
  */
 
 /**
+ * Derive an identity-specific master key from account master key and identity ID
+ *
+ * Uses HMAC-SHA256 to create a deterministic, unique key for each identity.
+ * This enables hierarchical key derivation: Account → Identity → App.
+ * The same account master key + identity ID will always produce the same identity key.
+ *
+ * @param accountMasterKey - The account's master key (hex string)
+ * @param identityId - The identity's unique identifier
+ * @returns The derived identity master key as a hex string
+ */
+export async function deriveIdentityKey(
+	accountMasterKey: string,
+	identityId: string,
+): Promise<string> {
+	console.log('[KeyDerivation] Deriving identity key for:', identityId)
+
+	const encoder = new TextEncoder()
+
+	// Convert account master key from hex string to Uint8Array
+	const keyData = hexToUint8Array(accountMasterKey)
+	const message = encoder.encode(identityId)
+
+	// Import the account master key for HMAC
+	const cryptoKey = await crypto.subtle.importKey(
+		'raw',
+		keyData,
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		['sign'],
+	)
+
+	// Sign the identity ID with the account master key
+	const signature = await crypto.subtle.sign('HMAC', cryptoKey, message)
+
+	// Convert to hex string
+	const identityKeyHex = uint8ArrayToHex(new Uint8Array(signature))
+	console.log('[KeyDerivation] Identity key derived:', identityKeyHex.substring(0, 16) + '...')
+
+	return identityKeyHex
+}
+
+/**
  * Derive an app-specific secret from a master key and app origin
  *
  * Uses HMAC-SHA256 to create a deterministic, unique secret for each app.

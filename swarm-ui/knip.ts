@@ -11,7 +11,6 @@ const config: KnipConfig = {
 		'playwright/index.ts',
 		// TODO: Remove ignores below after implementing the functionality
 		'src/lib/components/ui/**/*',
-		'src/lib/components/boxicons/**/*',
 		'src/lib/utils/**/*',
 		'src/lib/routes.ts',
 		'src/lib/types.ts',

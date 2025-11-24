@@ -23,6 +23,3 @@ typesdb.ts
 .cache
 playwright-report
 test-results
-
-# Ignore boxicons
-src/lib/components/boxicons

@@ -1,28 +1,39 @@
 <script lang="ts">
-	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
+	import { onMount } from 'svelte'
+	import { page } from '$app/stores'
+	import { goto } from '$app/navigation'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import { authenticateWithPasskey } from '$lib/passkey'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import BxRightArrowAlt from '$lib/components/boxicons/bx-right-arrow-alt.svelte'
-	import { FolderShared, WorkflowAutomation } from 'carbon-icons-svelte'
+	import { FolderShared, WorkflowAutomation, ArrowRight } from 'carbon-icons-svelte'
 	import routes from '$lib/routes'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
-	import Grid from '$lib/components/ui/grid.svelte'
-	import { goto } from '$app/navigation'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import GenerateSeedModal from '$lib/components/generate-seed-modal.svelte'
 	import ConfirmSaveModal from '$lib/components/confirm-save-modal.svelte'
+	import { connectAndSign } from '$lib/ethereum'
+	import { sessionStore } from '$lib/stores/session.svelte'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
 	let showConfirmModal = $state(false)
 	let accountName = $state('Ethereum')
 	let secretSeed = $state('')
+	let appOrigin = $state<string | undefined>(undefined)
+	let error = $state<string | undefined>(undefined)
+	let isProcessing = $state(false)
+
+	onMount(() => {
+		// Check if we have an origin parameter (coming from /connect)
+		const origin = $page.url.searchParams.get('origin')
+		if (origin) {
+			appOrigin = origin
+		}
+	})
 
 	let secretSeedError = $derived.by(() => {
 		if (!secretSeed) return undefined
@@ -42,47 +53,77 @@
 
 	let isFormDisabled = $derived(!accountName || !secretSeed || !!secretSeedError)
 
-	async function handlePasskeyConnect() {
+	async function handleConfirm() {
+		if (!accountName.trim() || !secretSeed.trim()) {
+			error = 'Please fill in all fields'
+			return
+		}
+
 		try {
-			console.log('🔐 Authenticating with passkey...')
-			const identity = await authenticateWithPasskey({
-				rpId: window.location.hostname,
+			isProcessing = true
+			error = undefined
+			console.log('🔐 Connecting to Ethereum wallet...')
+
+			// Connect wallet and sign SIWE message
+			const signed = await connectAndSign({ secretSeed: secretSeed.trim() })
+
+			console.log('✅ Wallet connected and message signed')
+			console.log('📍 Ethereum Address:', signed.address)
+
+			// Store account creation data in session store
+			sessionStore.setAccountCreationData({
+				accountName: accountName.trim(),
+				accountType: 'ethereum',
+				prfOutput: signed.masterKey,
+				ethereumAddress: signed.address,
 			})
 
-			console.log('✅ Passkey authenticated successfully')
-			console.log('Credential ID:', identity.credentialId)
-			console.log('PRF Available:', identity.prfAvailable)
-			if (identity.prfOutput) {
-				console.log(
-					'PRF Output (hex):',
-					Array.from(identity.prfOutput.slice(0, 8))
-						.map((b) => b.toString(16).padStart(2, '0'))
-						.join('') + '...',
-				)
+			// Navigate to identity creation page
+			if (appOrigin) {
+				goto(`${routes.IDENTITY_NEW}?origin=${encodeURIComponent(appOrigin)}`)
+			} else {
+				goto(routes.IDENTITY_NEW)
 			}
-			console.log('Ethereum Address:', identity.ethereumAddress)
-		} catch (error) {
-			console.error('❌ Passkey authentication failed:', error)
-			if (error instanceof Error) {
-				console.error('Error message:', error.message)
-			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Failed to connect wallet'
+			console.error('❌ Wallet connection failed:', err)
+			isProcessing = false
 		}
 	}
 </script>
 
 <CreationLayout
-	title="Create account"
-	description="Create a new Swarm ID account"
-	onClose={() => goto(routes.HOME)}
+	title="Create account with Ethereum"
+	description="Create a new Swarm ID account using your Ethereum wallet"
+	onClose={() =>
+		appOrigin
+			? goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
+			: goto(routes.HOME)}
 >
 	{#snippet content()}
 		<Vertical --vertical-gap="var(--padding)">
+			{#if error}
+				<Vertical
+					--vertical-gap="var(--half-padding)"
+					style="background: #fee; padding: var(--padding); border-radius: 4px; border: 1px solid #fcc;"
+				>
+					<Typography variant="small" style="color: #c00;">Error</Typography>
+					<Typography variant="small">{error}</Typography>
+				</Vertical>
+			{/if}
+
 			<!-- Row 1 -->
 			<Vertical --vertical-gap="var(--quarter-padding)">
 				<Horizontal --horizontal-gap="var(--half-padding)">
 					<FolderShared size={20} /><Typography>Account name</Typography>
 				</Horizontal>
-				<Input variant="outline" dimension="compact" name="account-name" bind:value={accountName} />
+				<Input
+					variant="outline"
+					dimension="compact"
+					name="account-name"
+					bind:value={accountName}
+					disabled={isProcessing}
+				/>
 			</Vertical>
 
 			<!-- Row 2 -->
@@ -96,9 +137,15 @@
 							name="secret-seed"
 							bind:value={secretSeed}
 							error={secretSeedError}
+							disabled={isProcessing}
 						/>
 					</div>
-					<Button dimension="compact" variant="ghost" onclick={() => (showSeedModal = true)}>
+					<Button
+						dimension="compact"
+						variant="ghost"
+						onclick={() => (showSeedModal = true)}
+						disabled={isProcessing}
+					>
 						<WorkflowAutomation size={20} />
 					</Button>
 				</Horizontal>
@@ -114,11 +161,12 @@
 							maxWidth="287px"
 						>
 							{#snippet children()}
-								<a
-									href="#"
+								<button
+									type="button"
 									onmouseenter={() => (showTooltip = true)}
 									onmouseleave={() => (showTooltip = false)}
-									onclick={(e) => e.preventDefault()}>Learn more</a
+									style="background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; padding: 0;"
+									>Learn more</button
 								>
 							{/snippet}
 							{#snippet helperText()}
@@ -150,18 +198,25 @@
 					</Horizontal>
 				</Horizontal>
 			</Vertical>
+
+			<Typography variant="small"
+				>When you click "Connect wallet", you'll be able to connect via MetaMask (browser extension)
+				or WalletConnect (mobile wallet via QR code). After connecting, you'll be prompted to sign a
+				message. This signature will be used to derive your Swarm ID master key.</Typography
+			>
 		</Vertical>
 	{/snippet}
 
 	{#snippet buttonContent()}
 		<Button dimension="compact" onclick={() => (showConfirmModal = true)} disabled={isFormDisabled}
-			>Confirm and proceed <BxRightArrowAlt /></Button
+			>{isProcessing ? 'Processing...' : 'Confirm and proceed'}
+			{#if !isProcessing}<ArrowRight />{/if}</Button
 		>
 	{/snippet}
 </CreationLayout>
 
 <GenerateSeedModal bind:open={showSeedModal} onUseSeed={(seed) => (secretSeed = seed)} />
-<ConfirmSaveModal bind:open={showConfirmModal} onConfirm={() => goto(routes.IDENTITY_NEW)} />
+<ConfirmSaveModal bind:open={showConfirmModal} onConfirm={handleConfirm} />
 
 <style>
 	.secret-seed-input :global(.error-message) {

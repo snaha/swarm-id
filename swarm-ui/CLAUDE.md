@@ -143,21 +143,22 @@ This project uses Svelte 5 with runes for reactive state management:
 - Use CSS custom properties (e.g., `--padding`, `--half-padding`, `--double-padding`) for spacing
 - Follow Diete patterns for layout, typography, and interactions
 
-### Icons (Boxicons)
+### Icons (Carbon Icons)
 
-- Icon library located in `src/lib/components/boxicons/`
-- Uses Boxicons (https://boxicons.com/) - a comprehensive open-source icon set
-- Icon naming convention: `bx-icon-name` for regular icons, `bxs-icon-name` for solid variants
+- Icon library: `carbon-icons-svelte` - IBM's Carbon Design System icon set
+- Comprehensive library with 2000+ icons designed for enterprise applications
 - Icon components accept props:
-  - `size` (number | string): Icon size in pixels (default: `24`)
-  - `color` (string): Icon color (default: `currentColor` - inherits from parent text color)
-  - `width` and `height`: Override size individually
+  - `size` (number | string): Icon size in pixels (default: `16`)
   - All standard SVG attributes are also supported
 - Usage examples:
-  - `<BxInfoCircle width={16} height={16} />` - 16px info icon
-  - `<BxWallet width={20} height={20} />` - 20px wallet icon
+  - `<Information size={20} />` - 20px info icon
+  - `<Wallet size={20} />` - 20px wallet icon
+  - `<ArrowRight size={16} />` - 16px right arrow icon
+  - `<Copy size={20} />` - 20px copy icon
+  - `<Checkmark size={20} />` - 20px checkmark icon
   - `<PasskeyLogo fill="#242424" width={64} height={64} />` - Custom logo with fill color
-- Browse available icons at https://boxicons.com/ or in `src/lib/components/boxicons/`
+- Browse available icons at https://carbondesignsystem.com/guidelines/icons/library/
+- Import icons from `carbon-icons-svelte` package: `import { IconName } from 'carbon-icons-svelte'`
 
 ### Important Layout Component Properties
 

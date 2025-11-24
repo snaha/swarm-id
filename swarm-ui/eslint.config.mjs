@@ -37,7 +37,6 @@ export default typescriptEslint.config(
 			'**/.cache',
 			'**/playwright-report',
 			'**/test-results',
-			'src/lib/components/boxicons/**',
 		],
 	},
 )

@@ -3,10 +3,9 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import { FolderShared } from 'carbon-icons-svelte'
+	import { FolderShared, Checkmark } from 'carbon-icons-svelte'
 	import routes from '$lib/routes'
 	import Hashicon from '$lib/components/hashicon.svelte'
-	import BxCheck from '$lib/components/boxicons/bx-check.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Grid from '$lib/components/ui/grid.svelte'
 	import { goto } from '$app/navigation'
@@ -53,10 +52,15 @@
 			return
 		}
 
+		if (!sessionData.accountType) {
+			console.error('❌ No account type available')
+			return
+		}
+
 		// Create the account with the master key
 		const account = accountsStore.addAccount({
 			name: sessionData.accountName,
-			type: 'passkey',
+			type: sessionData.accountType,
 			masterKey: sessionData.prfOutput,
 			ethereumAddress: sessionData.ethereumAddress,
 		})
@@ -114,7 +118,7 @@
 
 	{#snippet buttonContent()}
 		<Button dimension="compact" onclick={handleCreateIdentity}>
-			<BxCheck />Create and connect</Button
+			<Checkmark />Create and connect</Button
 		>
 	{/snippet}
 </CreationLayout>

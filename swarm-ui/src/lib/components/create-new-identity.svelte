@@ -4,7 +4,7 @@
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import AuthCard from '$lib/components/auth-card.svelte'
 	import ImportSwarmIdentity from '$lib/components/import-swarm-identity.svelte'
-	import BxWallet from '$lib/components/boxicons/bx-wallet.svelte'
+	import { Wallet } from 'carbon-icons-svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import { goto } from '$app/navigation'
@@ -43,7 +43,7 @@
 					<EthereumLogo fill="#242424" width={64} height={64} />
 				{/snippet}
 				{#snippet buttonIcon()}
-					<BxWallet width={20} height={20} />
+					<Wallet size={20} />
 				{/snippet}
 			</AuthCard>
 		</div>

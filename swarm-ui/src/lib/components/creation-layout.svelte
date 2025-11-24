@@ -2,9 +2,8 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
-	import BxX from '$lib/components/boxicons/bx-x.svelte'
+	import { Close, ArrowLeft } from 'carbon-icons-svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
-	import BxLeftArrowAlt from '$lib/components/boxicons/bx-left-arrow-alt.svelte'
 
 	interface Props {
 		title: string
@@ -27,14 +26,14 @@
 		>
 			{#if onBack}
 				<Horizontal --horizontal-gap="var(--half-padding)">
-					<Button dimension="compact" variant="ghost" onclick={onBack}><BxLeftArrowAlt /></Button>
+					<Button dimension="compact" variant="ghost" onclick={onBack}><ArrowLeft /></Button>
 					<Typography variant="h4">{title}</Typography>
 				</Horizontal>
 			{:else}
 				<Typography variant="h4">{title}</Typography>
 			{/if}
 			{#if onClose}
-				<Button dimension="compact" variant="ghost" onclick={onClose}><BxX /></Button>
+				<Button dimension="compact" variant="ghost" onclick={onClose}><Close /></Button>
 			{/if}
 		</Horizontal>
 		<Typography>{description}</Typography>

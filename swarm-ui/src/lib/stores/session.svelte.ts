@@ -3,6 +3,7 @@
 export type SessionData = {
 	// Temporary data during account creation
 	accountName?: string
+	accountType?: 'passkey' | 'ethereum'
 	prfOutput?: string
 	ethereumAddress?: string
 
@@ -21,6 +22,7 @@ export const sessionStore = {
 
 	setAccountCreationData(data: {
 		accountName: string
+		accountType: 'passkey' | 'ethereum'
 		prfOutput: string
 		ethereumAddress?: string
 	}) {
@@ -28,8 +30,10 @@ export const sessionStore = {
 	},
 
 	clearAccountCreationData() {
-		const { accountName, prfOutput, ethereumAddress, ...rest } = session
-		session = rest
+		session = {
+			currentAccountId: session.currentAccountId,
+			currentIdentityId: session.currentIdentityId,
+		}
 	},
 
 	setCurrentAccount(accountId: string) {

@@ -9,8 +9,7 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import BxRightArrowAlt from '$lib/components/boxicons/bx-right-arrow-alt.svelte'
-	import { FolderShared } from 'carbon-icons-svelte'
+	import { FolderShared, ArrowRight } from 'carbon-icons-svelte'
 	import routes from '$lib/routes'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Grid from '$lib/components/ui/grid.svelte'
@@ -72,6 +71,7 @@
 			// Store account creation data in session store
 			sessionStore.setAccountCreationData({
 				accountName: accountName.trim(),
+				accountType: 'passkey',
 				prfOutput: prfHex,
 				ethereumAddress: identity.ethereumAddress,
 			})
@@ -141,7 +141,7 @@
 	{#snippet buttonContent()}
 		<Button dimension="compact" onclick={handleCreatePasskey} disabled={isProcessing}>
 			{isProcessing ? 'Creating...' : 'Create Identity'}
-			{#if !isProcessing}<BxRightArrowAlt />{/if}
+			{#if !isProcessing}<ArrowRight />{/if}
 		</Button>
 	{/snippet}
 </CreationLayout>
