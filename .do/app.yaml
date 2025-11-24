@@ -30,7 +30,7 @@ static_sites:
       allow_headers:
         - Content-Type
       allow_credentials: true
-      max_age: 600
+      max_age: "600"
 
   # Identity app - swarm-id.snaha.net
   - name: identity
@@ -59,7 +59,7 @@ static_sites:
       allow_headers:
         - Content-Type
       allow_credentials: true
-      max_age: 600
+      max_age: "600"
 
     headers:
       - pattern: /*
