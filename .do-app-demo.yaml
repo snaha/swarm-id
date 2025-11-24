@@ -17,9 +17,6 @@ static_sites:
     # Build using monorepo scripts
     build_command: git submodule update --init --recursive && npm install -g pnpm && pnpm install && pnpm build:swarm-demo
 
-    # Serve as SPA with index.html fallback
-    catchall_document: index.html
-
     # CORS headers for cross-origin communication with swarm-id
     cors:
       allow_origins:

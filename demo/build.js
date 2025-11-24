@@ -27,8 +27,8 @@ console.log(`ID_DOMAIN: ${ID_DOMAIN}`)
 const buildDir = join(__dirname, 'build')
 mkdirSync(buildDir, { recursive: true })
 
-// Read the library bundle (ESM)
-const libPath = join(__dirname, '..', 'lib', 'dist', 'swarm-id-client.js')
+// Read the library bundle (UMD for inline use)
+const libPath = join(__dirname, '..', 'lib', 'dist', 'swarm-id.umd.js')
 const libCode = readFileSync(libPath, 'utf-8')
 
 // Process demo.html
@@ -45,13 +45,14 @@ const configScript = `
 `
 demoHtml = demoHtml.replace('</head>', configScript + '</head>')
 
-// Inject library code inline (replace the script import with inline script)
+// Inject library code inline (replace the import statement only)
 demoHtml = demoHtml.replace(
-  /<script type="module">\s*import \{ SwarmIdClient \} from ['"]\.\.\/lib\/dist\/swarm-id-client\.js['"];?\s*<\/script>/s,
-  `<script type="module">
-// Bundled Swarm ID Client Library
+  /import \{ SwarmIdClient \} from ['"]\.\.\/lib\/dist\/swarm-id-client\.js['"];?\s*/,
+  `// Bundled Swarm ID Client Library (UMD)
 ${libCode}
-</script>`
+// Extract SwarmIdClient from UMD global
+const SwarmIdClient = window.SwarmId?.SwarmIdClient || SwarmId?.SwarmIdClient;
+`
 )
 
 writeFileSync(join(buildDir, 'demo.html'), demoHtml)
