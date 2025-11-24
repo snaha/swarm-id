@@ -6,6 +6,7 @@ This monorepo implements a cross-browser compatible authentication and identity 
 
 - **[lib/](./lib/README.md)** - The Swarm ID TypeScript library for authentication and Bee API operations
 - **popup/** - Demo implementation with OAuth-style popup authentication
+- **[bee-js/](https://github.com/agazso/bee-js/tree/feat/encrypted-chunk-streams)** - A custom fork of the [bee-js](https://github.com/ethersphere/bee-js) library, containing encrypted, streaming chunked upload and download functionality.
 
 ## Architecture
 
@@ -16,6 +17,12 @@ The project uses an OAuth-style popup authentication flow that works across all 
 ## Library Quick Start
 
 ```bash
+# Clone the forked bee-js library
+git clone https://github.com/agazso/bee-js
+
+# Build the forked bee-js library
+cd bee-js && git checkout feat/encrypted-chunk-streams && npm install && npm build
+
 # Install dependencies
 pnpm install
 
