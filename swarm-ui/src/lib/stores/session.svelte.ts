@@ -19,7 +19,11 @@ export const sessionStore = {
 		return session
 	},
 
-	setAccountCreationData(data: { accountName: string; prfOutput: string; ethereumAddress?: string }) {
+	setAccountCreationData(data: {
+		accountName: string
+		prfOutput: string
+		ethereumAddress?: string
+	}) {
 		session = { ...session, ...data }
 	},
 

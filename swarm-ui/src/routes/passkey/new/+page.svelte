@@ -93,7 +93,10 @@
 <CreationLayout
 	title="Create account with Passkey"
 	description="Create a new Swarm ID account using Passkey"
-	onClose={() => (appOrigin ? goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`) : goto(routes.HOME))}
+	onClose={() =>
+		appOrigin
+			? goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
+			: goto(routes.HOME)}
 >
 	{#snippet content()}
 		<Vertical --vertical-gap="var(--padding)">
@@ -129,8 +132,8 @@
 			</Grid>
 
 			<Typography variant="small"
-				>Your passkey will be used to derive a deterministic master key for your Swarm ID. This key is
-				secured by your device's biometric authentication.</Typography
+				>Your passkey will be used to derive a deterministic master key for your Swarm ID. This key
+				is secured by your device's biometric authentication.</Typography
 			>
 		</Vertical>
 	{/snippet}

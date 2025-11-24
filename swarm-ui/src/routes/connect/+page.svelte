@@ -127,42 +127,40 @@
 		<Typography>This window will close automatically...</Typography>
 	</Vertical>
 {:else}
-		<ConnectedAppHeader {appName} appUrl={appOrigin} />
+	<ConnectedAppHeader {appName} appUrl={appOrigin} />
 
-		{#if masterKey}
-			<!-- User has a master key, show authentication form -->
-			<Vertical --vertical-gap="var(--padding)">
-				<Typography variant="h4">Authenticate</Typography>
-				<Typography variant="small">Master Key: {masterKey.substring(0, 16)}...</Typography>
+	{#if masterKey}
+		<!-- User has a master key, show authentication form -->
+		<Vertical --vertical-gap="var(--padding)">
+			<Typography variant="h4">Authenticate</Typography>
+			<Typography variant="small">Master Key: {masterKey.substring(0, 16)}...</Typography>
 
-				<Vertical --vertical-gap="var(--half-padding)">
-					<Typography>Postage Batch ID (optional)</Typography>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="postage-batch-id"
-						bind:value={postageBatchId}
-						placeholder="Enter postage batch ID"
-					/>
-				</Vertical>
-
-				<Vertical --vertical-gap="var(--half-padding)">
-					<Typography>Signer Key (optional)</Typography>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="signer-key"
-						bind:value={signerKey}
-						placeholder="Enter signer key"
-					/>
-				</Vertical>
-
-				<Button dimension="compact" onclick={handleAuthenticate}>
-					Authenticate and Connect
-				</Button>
+			<Vertical --vertical-gap="var(--half-padding)">
+				<Typography>Postage Batch ID (optional)</Typography>
+				<Input
+					variant="outline"
+					dimension="compact"
+					name="postage-batch-id"
+					bind:value={postageBatchId}
+					placeholder="Enter postage batch ID"
+				/>
 			</Vertical>
-		{:else}
-			<!-- No master key, show setup options -->
-			<CreateNewIdentity />
-		{/if}
+
+			<Vertical --vertical-gap="var(--half-padding)">
+				<Typography>Signer Key (optional)</Typography>
+				<Input
+					variant="outline"
+					dimension="compact"
+					name="signer-key"
+					bind:value={signerKey}
+					placeholder="Enter signer key"
+				/>
+			</Vertical>
+
+			<Button dimension="compact" onclick={handleAuthenticate}>Authenticate and Connect</Button>
+		</Vertical>
+	{:else}
+		<!-- No master key, show setup options -->
+		<CreateNewIdentity />
+	{/if}
 {/if}

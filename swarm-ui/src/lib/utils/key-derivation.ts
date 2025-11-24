@@ -15,38 +15,32 @@
  * @param appOrigin - The app's origin (e.g., "https://swarm-app.local:8080")
  * @returns The derived secret as a hex string
  */
-export async function deriveSecret(
-  masterKey: string,
-  appOrigin: string,
-): Promise<string> {
-  console.log("[KeyDerivation] Deriving secret for app:", appOrigin)
+export async function deriveSecret(masterKey: string, appOrigin: string): Promise<string> {
+	console.log('[KeyDerivation] Deriving secret for app:', appOrigin)
 
-  const encoder = new TextEncoder()
+	const encoder = new TextEncoder()
 
-  // Convert master key from hex string to Uint8Array
-  const keyData = hexToUint8Array(masterKey)
-  const message = encoder.encode(appOrigin)
+	// Convert master key from hex string to Uint8Array
+	const keyData = hexToUint8Array(masterKey)
+	const message = encoder.encode(appOrigin)
 
-  // Import the master key for HMAC
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    keyData,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  )
+	// Import the master key for HMAC
+	const cryptoKey = await crypto.subtle.importKey(
+		'raw',
+		keyData,
+		{ name: 'HMAC', hash: 'SHA-256' },
+		false,
+		['sign'],
+	)
 
-  // Sign the app origin with the master key
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
+	// Sign the app origin with the master key
+	const signature = await crypto.subtle.sign('HMAC', cryptoKey, message)
 
-  // Convert to hex string
-  const secretHex = uint8ArrayToHex(new Uint8Array(signature))
-  console.log(
-    "[KeyDerivation] Secret derived:",
-    secretHex.substring(0, 16) + "...",
-  )
+	// Convert to hex string
+	const secretHex = uint8ArrayToHex(new Uint8Array(signature))
+	console.log('[KeyDerivation] Secret derived:', secretHex.substring(0, 16) + '...')
 
-  return secretHex
+	return secretHex
 }
 
 /**
@@ -58,18 +52,15 @@ export async function deriveSecret(
  * @returns A random 32-byte key as a hex string
  */
 export async function generateMasterKey(): Promise<string> {
-  console.log("[KeyDerivation] Generating random master key...")
+	console.log('[KeyDerivation] Generating random master key...')
 
-  const randomBytes = new Uint8Array(32)
-  crypto.getRandomValues(randomBytes)
+	const randomBytes = new Uint8Array(32)
+	crypto.getRandomValues(randomBytes)
 
-  const masterKey = uint8ArrayToHex(randomBytes)
-  console.log(
-    "[KeyDerivation] Master key generated:",
-    masterKey.substring(0, 16) + "...",
-  )
+	const masterKey = uint8ArrayToHex(randomBytes)
+	console.log('[KeyDerivation] Master key generated:', masterKey.substring(0, 16) + '...')
 
-  return masterKey
+	return masterKey
 }
 
 /**
@@ -79,18 +70,18 @@ export async function generateMasterKey(): Promise<string> {
  * @returns Uint8Array
  */
 export function hexToUint8Array(hexString: string): Uint8Array {
-  // Remove any whitespace and ensure even length
-  const hex = hexString.replace(/\s/g, "")
-  if (hex.length % 2 !== 0) {
-    throw new Error("Invalid hex string: length must be even")
-  }
+	// Remove any whitespace and ensure even length
+	const hex = hexString.replace(/\s/g, '')
+	if (hex.length % 2 !== 0) {
+		throw new Error('Invalid hex string: length must be even')
+	}
 
-  const bytes = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
-  }
+	const bytes = new Uint8Array(hex.length / 2)
+	for (let i = 0; i < hex.length; i += 2) {
+		bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
+	}
 
-  return bytes
+	return bytes
 }
 
 /**
@@ -100,9 +91,9 @@ export function hexToUint8Array(hexString: string): Uint8Array {
  * @returns Hex string (e.g., "deadbeef")
  */
 export function uint8ArrayToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
+	return Array.from(bytes)
+		.map((b) => b.toString(16).padStart(2, '0'))
+		.join('')
 }
 
 /**
@@ -116,16 +107,16 @@ export function uint8ArrayToHex(bytes: Uint8Array): string {
  * @returns true if the derived secret matches the expected secret
  */
 export async function verifySecret(
-  masterKey: string,
-  appOrigin: string,
-  expectedSecret: string,
+	masterKey: string,
+	appOrigin: string,
+	expectedSecret: string,
 ): Promise<boolean> {
-  const derived = await deriveSecret(masterKey, appOrigin)
-  return derived === expectedSecret
+	const derived = await deriveSecret(masterKey, appOrigin)
+	return derived === expectedSecret
 }
 
 // Export utility functions for testing
 export const utils = {
-  hexToUint8Array,
-  uint8ArrayToHex,
+	hexToUint8Array,
+	uint8ArrayToHex,
 }
