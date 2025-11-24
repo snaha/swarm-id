@@ -1,0 +1,4 @@
+[submodule "bee-js"]
+	path = bee-js
+	url = https://github.com/agazso/bee-js.git
+	branch = feat/encrypted-chunk-streams

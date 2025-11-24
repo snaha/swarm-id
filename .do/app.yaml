@@ -1,0 +1,86 @@
+name: swarm-id-platform
+region: fra
+
+# Two static sites in one app
+static_sites:
+  # Demo app - swarm-demo.snaha.net
+  - name: demo
+    github:
+      repo: snaha/swarm-id-explorations
+      branch: feat/create-swarm-ui
+      deploy_on_push: true
+
+    source_dir: /
+    output_dir: demo/build
+
+    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-demo
+
+    catchall_document: index.html
+
+    routes:
+      - path: /
+
+    cors:
+      allow_origins:
+        - exact: https://swarm-id.snaha.net
+      allow_methods:
+        - GET
+        - POST
+        - OPTIONS
+      allow_headers:
+        - Content-Type
+      allow_credentials: true
+      max_age: 600
+
+  # Identity app - swarm-id.snaha.net
+  - name: identity
+    github:
+      repo: snaha/swarm-id-explorations
+      branch: feat/create-swarm-ui
+      deploy_on_push: true
+
+    source_dir: /
+    output_dir: swarm-id-build
+
+    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-id
+
+    catchall_document: index.html
+
+    routes:
+      - path: /
+
+    cors:
+      allow_origins:
+        - exact: https://swarm-demo.snaha.net
+      allow_methods:
+        - GET
+        - POST
+        - OPTIONS
+      allow_headers:
+        - Content-Type
+      allow_credentials: true
+      max_age: 600
+
+    headers:
+      - pattern: /*
+        headers:
+          X-Frame-Options: ALLOW-FROM https://swarm-demo.snaha.net
+          Content-Security-Policy: "frame-ancestors 'self' https://swarm-demo.snaha.net"
+
+# Environment variables (shared across both sites)
+envs:
+  - key: NODE_ENV
+    value: production
+    scope: BUILD_TIME
+
+  - key: APP_DOMAIN
+    value: https://swarm-demo.snaha.net
+    scope: BUILD_TIME
+
+  - key: ID_DOMAIN
+    value: https://swarm-id.snaha.net
+    scope: BUILD_TIME
+
+  - key: ORIGIN
+    value: https://swarm-id.snaha.net
+    scope: BUILD_TIME
