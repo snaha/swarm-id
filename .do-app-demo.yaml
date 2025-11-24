@@ -1,6 +1,11 @@
 name: swarm-demo
 region: fra
 
+# Domain configuration
+domains:
+  - domain: swarm-demo.snaha.net
+    type: PRIMARY
+
 # Static site for swarm-demo.snaha.net
 # Serves demo pages with bundled library
 static_sites:

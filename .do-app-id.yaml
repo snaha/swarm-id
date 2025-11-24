@@ -1,6 +1,11 @@
 name: swarm-id
 region: fra
 
+# Domain configuration
+domains:
+  - domain: swarm-id.snaha.net
+    type: PRIMARY
+
 # Static site for swarm-id.snaha.net
 # Serves SvelteKit identity management UI plus proxy/auth pages
 static_sites:
