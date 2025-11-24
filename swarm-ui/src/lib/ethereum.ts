@@ -7,7 +7,6 @@
 
 import { BrowserProvider, JsonRpcSigner, hashMessage } from 'ethers'
 import { createWeb3Modal, defaultConfig } from '@web3modal/ethers'
-import { PUBLIC_WALLETCONNECT_PROJECT_ID } from '$env/static/public'
 
 export interface EthereumProvider {
 	request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
@@ -28,14 +27,9 @@ function getWeb3Modal(): any {
 		return web3Modal
 	}
 
-	// WalletConnect Project ID - Get yours at https://cloud.walletconnect.com
-	const projectId = PUBLIC_WALLETCONNECT_PROJECT_ID
-
-	if (!projectId) {
-		throw new Error(
-			'WalletConnect Project ID not found. Please set PUBLIC_WALLETCONNECT_PROJECT_ID in .env file',
-		)
-	}
+	// WalletConnect Project ID - Optional, uses placeholder if not set
+	// Get your own at https://cloud.walletconnect.com
+	const projectId = import.meta.env.PUBLIC_WALLETCONNECT_PROJECT_ID || 'placeholder-project-id'
 
 	// Metadata for the app
 	const metadata = {
