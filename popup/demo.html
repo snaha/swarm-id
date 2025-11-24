@@ -279,7 +279,6 @@
           <div class="iframe-container">
             <iframe
               id="proxy-iframe"
-              src="https://swarm-id.local:8081/popup/proxy.html"
               title="Swarm ID Proxy"
             ></iframe>
           </div>
@@ -340,7 +339,12 @@
        * 3. App-specific secret storage in partitioned localStorage
        */
 
-      const PROXY_ORIGIN = 'https://swarm-id.local:8081';
+      // Auto-detect local vs production environment
+      const PROXY_ORIGIN = window.__ID_DOMAIN__ || (
+        window.location.hostname.includes('local')
+          ? 'https://swarm-id.local:8081'
+          : 'https://swarm-id.snaha.net'
+      );
       const AUTH_POPUP_URL = `${PROXY_ORIGIN}/connect`;
 
       let proxyIframe = null;
@@ -348,8 +352,9 @@
       let messageId = 0;
       let pendingRequests = new Map();
 
-      // Get iframe reference
+      // Get iframe reference and set src
       proxyIframe = document.getElementById('proxy-iframe');
+      proxyIframe.src = `${PROXY_ORIGIN}/demo/proxy.html`;
 
       // Send identification message when iframe loads
       proxyIframe.addEventListener('load', () => {

@@ -68,6 +68,9 @@ export class SwarmIdClient {
     // Create iframe for proxy (hidden by default, shown only if not authenticated)
     this.iframe = document.createElement("iframe")
     this.iframe.src = `${this.iframeOrigin}${this.iframePath}`
+    console.log('[SwarmIdClient] Creating iframe with src:', this.iframe.src)
+    console.log('[SwarmIdClient] iframeOrigin:', this.iframeOrigin)
+    console.log('[SwarmIdClient] iframePath:', this.iframePath)
     this.iframe.style.display = "none"
     this.iframe.style.position = "fixed"
     this.iframe.style.bottom = "20px"

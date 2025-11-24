@@ -1,0 +1,5 @@
+packages:
+  - 'lib'
+  - 'demo'
+  - 'swarm-ui'
+  - 'bee-js'

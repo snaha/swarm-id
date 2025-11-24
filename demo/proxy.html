@@ -76,13 +76,18 @@
     <script type="module">
       import { initProxy } from '../lib/dist/swarm-id-proxy.js'
 
-      // Configuration
+      // Configuration - auto-detect local vs production
+      const APP_DOMAIN = window.__APP_DOMAIN__ || (
+        window.location.hostname.includes('local')
+          ? 'https://swarm-app.local:8080'
+          : 'https://swarm-demo.snaha.net'
+      )
       const ALLOWED_PARENT_ORIGINS = [
-        'https://swarm-app.local:8080',
+        APP_DOMAIN,
         // Add more allowed origins here
       ]
 
-      const BEE_API_URL = 'http://localhost:1633'
+      const BEE_API_URL = window.__BEE_API_URL__ || 'http://localhost:1633'
 
       // Initialize the proxy with the library
       const proxy = initProxy({
@@ -96,7 +101,15 @@
         proxy.setAuthButtonContainer(container)
       }
 
+      console.log('[Proxy HTML] ========================================')
+      console.log('[Proxy HTML] Proxy page loaded successfully!')
+      console.log('[Proxy HTML] Location:', window.location.href)
+      console.log('[Proxy HTML] Hostname:', window.location.hostname)
+      console.log('[Proxy HTML] APP_DOMAIN:', APP_DOMAIN)
+      console.log('[Proxy HTML] ALLOWED_PARENT_ORIGINS:', ALLOWED_PARENT_ORIGINS)
+      console.log('[Proxy HTML] BEE_API_URL:', BEE_API_URL)
       console.log('[Proxy HTML] Proxy initialized using library')
+      console.log('[Proxy HTML] ========================================')
     </script>
   </body>
 </html>

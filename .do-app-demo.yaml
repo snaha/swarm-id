@@ -1,8 +1,8 @@
 name: swarm-demo
 region: fra
 
-# Static site for demo.swarm.snaha.net
-# Serves demo pages and library files
+# Static site for swarm-demo.snaha.net
+# Serves demo pages with bundled library
 static_sites:
   - name: demo-app
     # GitHub auto-deploy configuration
@@ -12,27 +12,25 @@ static_sites:
       deploy_on_push: true
 
     source_dir: /
-    output_dir: /
+    output_dir: demo/build
 
-    # Build the library first
-    build_command: cd lib && pnpm install && pnpm build
+    # Build using monorepo scripts
+    build_command: pnpm install && pnpm build:swarm-demo
 
-    # Static routes
-    routes:
-      - path: /lib/dist
-      - path: /demo
-      - path: /popup
+    # Serve as SPA with index.html fallback
+    catchall_document: index.html
 
-    # CORS headers - UPDATE THESE FOR YOUR DOMAINS
+    # CORS headers for cross-origin communication with swarm-id
     cors:
       allow_origins:
-        - exact: https://id.swarm.snaha.net
+        - exact: https://swarm-id.snaha.net
       allow_methods:
         - GET
         - POST
         - OPTIONS
       allow_headers:
         - Content-Type
+      allow_credentials: true
       max_age: 600
 
 # Environment variables
@@ -40,9 +38,8 @@ envs:
   - key: NODE_ENV
     value: production
 
-  # Easy to update domain references
   - key: APP_DOMAIN
-    value: demo.swarm.snaha.net
+    value: https://swarm-demo.snaha.net
 
   - key: ID_DOMAIN
-    value: id.swarm.snaha.net
+    value: https://swarm-id.snaha.net

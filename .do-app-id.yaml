@@ -1,8 +1,8 @@
 name: swarm-id
 region: fra
 
-# Static site for id.swarm.snaha.net
-# Serves SvelteKit identity management UI
+# Static site for swarm-id.snaha.net
+# Serves SvelteKit identity management UI plus proxy/auth pages
 static_sites:
   - name: id-app
     # GitHub auto-deploy configuration
@@ -11,33 +11,34 @@ static_sites:
       branch: feat/create-swarm-ui
       deploy_on_push: true
 
-    source_dir: swarm-ui
-    output_dir: build
+    source_dir: /
+    output_dir: swarm-id-build
 
-    # Build SvelteKit app
-    build_command: pnpm install && pnpm build
+    # Build using monorepo scripts
+    build_command: pnpm install && pnpm build:swarm-id
 
-    # SPA routing - all routes go to index.html
+    # SPA routing - all routes go to index.html except /demo
     catchall_document: index.html
 
-    # CORS headers - UPDATE THESE FOR YOUR DOMAINS
+    # CORS headers for cross-origin communication with swarm-demo
     cors:
       allow_origins:
-        - exact: https://demo.swarm.snaha.net
+        - exact: https://swarm-demo.snaha.net
       allow_methods:
         - GET
         - POST
         - OPTIONS
       allow_headers:
         - Content-Type
+      allow_credentials: true
       max_age: 600
 
     # Additional headers for iframe embedding
     headers:
       - pattern: /*
         headers:
-          X-Frame-Options: ALLOW-FROM https://demo.swarm.snaha.net
-          Content-Security-Policy: "frame-ancestors https://demo.swarm.snaha.net"
+          X-Frame-Options: ALLOW-FROM https://swarm-demo.snaha.net
+          Content-Security-Policy: "frame-ancestors 'self' https://swarm-demo.snaha.net"
 
 # Environment variables
 envs:
@@ -45,11 +46,10 @@ envs:
     value: production
 
   - key: ORIGIN
-    value: https://id.swarm.snaha.net
+    value: https://swarm-id.snaha.net
 
-  # Easy to update domain references
   - key: APP_DOMAIN
-    value: demo.swarm.snaha.net
+    value: https://swarm-demo.snaha.net
 
   - key: ID_DOMAIN
-    value: id.swarm.snaha.net
+    value: https://swarm-id.snaha.net

@@ -1,0 +1,14 @@
+{
+  "name": "@swarm-id/demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Swarm ID demo application",
+  "scripts": {
+    "build": "node build.js",
+    "clean": "rm -rf build"
+  },
+  "devDependencies": {
+    "esbuild": "^0.24.2"
+  }
+}
