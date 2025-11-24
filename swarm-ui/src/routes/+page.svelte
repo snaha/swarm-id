@@ -1,11 +1,11 @@
 <script lang="ts">
-	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
 	import IdentityList from '$lib/components/identity-list.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import Typography from '$lib/components/ui/typography.svelte'
 
 	// Get identities from store
 	const identities = $derived(identitiesStore.identities)
@@ -16,32 +16,23 @@
 	function handleCreateNew() {
 		showCreateMode = true
 	}
-
-	function handleBackToList() {
-		showCreateMode = false
-	}
 </script>
 
-<ConnectedAppHeader appName="Coucou" appUrl="https://coucou.mail" />
+<Vertical>
+	<Typography variant="h4">Welcome to Swarm ID</Typography>
 
-{#if hasIdentities && !showCreateMode}
-	<Vertical --vertical-gap="var(--double-padding)">
-		<IdentityList {identities} />
-		<Horizontal --justify-content="flex-start">
-			<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
-				>Connect another account</Button
-			>
-		</Horizontal>
-	</Vertical>
-{:else}
-	<Vertical --vertical-gap="var(--double-padding)">
-		{#if hasIdentities}
+	{#if hasIdentities && !showCreateMode}
+		<Typography variant="small">Choose an identity to continue</Typography>
+		<Vertical --vertical-gap="var(--double-padding)">
+			<IdentityList {identities} />
 			<Horizontal --justify-content="flex-start">
-				<Button variant="ghost" dimension="compact" onclick={handleBackToList}
-					>Back to identities</Button
+				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
+					>Connect another account</Button
 				>
 			</Horizontal>
-		{/if}
+		</Vertical>
+	{:else}
+		<Typography variant="small">Create or import an account to continue</Typography>
 		<CreateNewIdentity />
-	</Vertical>
-{/if}
+	{/if}
+</Vertical>

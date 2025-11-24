@@ -4,7 +4,6 @@
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
 	import IdentityGroups from '$lib/components/identity-groups.svelte'
-	import RecentApps from '$lib/components/recent-apps.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
