@@ -254,15 +254,18 @@ Hello, Swarm!</textarea
       });
 
       try {
+        log("Starting client initialization...", "info");
         await client.initialize();
-        log("Swarm ID client initialized successfully", "info");
+        log("Client initialized successfully", "info");
 
         // Check initial auth status
+        log("Checking auth status...", "info");
         const status = await client.checkAuthStatus();
-        log(`Initial auth status: ${status.authenticated}`, "info");
+        log(`Auth status: ${status.authenticated ? "authenticated" : "not authenticated"}`, "info");
         updateAuthStatus(status.authenticated);
       } catch (error) {
-        log(`Failed to initialize: ${error.message}`, "error");
+        log(`Initialization failed: ${error.message}`, "error");
+        alert(`Failed to initialize Swarm ID: ${error.message}\n\nPlease check the console for details.`);
       }
 
       function updateAuthStatus(authenticated) {
