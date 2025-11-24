@@ -1,0 +1,55 @@
+name: swarm-id
+region: fra
+
+# Static site for id.swarm.snaha.net
+# Serves SvelteKit identity management UI
+static_sites:
+  - name: id-app
+    # GitHub auto-deploy configuration
+    github:
+      repo: snaha/swarm-id-explorations
+      branch: feat/create-swarm-ui
+      deploy_on_push: true
+
+    source_dir: swarm-ui
+    output_dir: build
+
+    # Build SvelteKit app
+    build_command: pnpm install && pnpm build
+
+    # SPA routing - all routes go to index.html
+    catchall_document: index.html
+
+    # CORS headers - UPDATE THESE FOR YOUR DOMAINS
+    cors:
+      allow_origins:
+        - exact: https://demo.swarm.snaha.net
+      allow_methods:
+        - GET
+        - POST
+        - OPTIONS
+      allow_headers:
+        - Content-Type
+      max_age: 600
+
+    # Additional headers for iframe embedding
+    headers:
+      - pattern: /*
+        headers:
+          X-Frame-Options: ALLOW-FROM https://demo.swarm.snaha.net
+          Content-Security-Policy: "frame-ancestors https://demo.swarm.snaha.net"
+
+# Environment variables
+envs:
+  - key: NODE_ENV
+    value: production
+
+  - key: ORIGIN
+    value: https://id.swarm.snaha.net
+
+  # Easy to update domain references
+  - key: APP_DOMAIN
+    value: demo.swarm.snaha.net
+
+  - key: ID_DOMAIN
+    value: id.swarm.snaha.net
