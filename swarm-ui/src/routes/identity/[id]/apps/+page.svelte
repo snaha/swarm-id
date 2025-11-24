@@ -17,6 +17,20 @@
 	const apps = $derived(connectedAppsStore.getAppsByIdentityId(identityId))
 	const stamps = $derived(postageStampsStore.getStampsByIdentity(identityId))
 
+	let defaultStampBatchID = $state<string | undefined>(undefined)
+
+	// Sync local state with store
+	$effect(() => {
+		defaultStampBatchID = identity?.defaultPostageStampBatchID
+	})
+
+	// Update store when local state changes
+	$effect(() => {
+		if (defaultStampBatchID && defaultStampBatchID !== identity?.defaultPostageStampBatchID) {
+			identitiesStore.setDefaultStamp(identityId, defaultStampBatchID)
+		}
+	})
+
 	function formatBatchId(batchId: string): string {
 		return batchId.slice(0, 8)
 	}
@@ -45,8 +59,10 @@
 			<Typography>Default postage stamp</Typography>
 			<Select
 				dimension="compact"
-				value={identity?.defaultPostageStampBatchID}
+				bind:value={defaultStampBatchID}
 				items={stamps.map((s) => ({ value: s.batchID, label: formatBatchId(s.batchID) }))}
+				placeholder={stamps.length === 0 ? 'No stamps available' : undefined}
+				disabled={stamps.length === 0}
 			></Select>
 		</Grid>
 		<Vertical --vertical-gap="0">

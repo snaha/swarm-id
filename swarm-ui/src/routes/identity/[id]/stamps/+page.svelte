@@ -9,6 +9,7 @@
 	import { page } from '$app/stores'
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
+	import { goto } from '$app/navigation'
 
 	const identityId = $derived($page.params.id)
 	const identity = $derived(identitiesStore.getIdentity(identityId))
@@ -109,6 +110,12 @@
 	{/if}
 
 	<Horizontal>
-		<Button dimension="compact" variant="ghost">Add postage stamp</Button>
+		<Button
+			dimension="compact"
+			variant="ghost"
+			onclick={() => goto(`/identity/${identityId}/stamps/new`)}
+		>
+			Add postage stamp
+		</Button>
 	</Horizontal>
 </Vertical>
