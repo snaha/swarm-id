@@ -15,7 +15,7 @@
 	import Grid from '$lib/components/ui/grid.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 
-	let accountName = $state('')
+	let accountName = $state('Passkey')
 	let appOrigin = $state<string | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)

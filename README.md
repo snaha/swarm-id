@@ -14,6 +14,13 @@ The project uses an OAuth-style popup authentication flow that works across all 
 
 **Quick Overview**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
+## Live Demos
+
+The applications are deployed and available at:
+
+- **Demo App**: [https://swarm-demo.snaha.net](https://swarm-demo.snaha.net)
+- **Identity UI**: [https://swarm-id.snaha.net](https://swarm-id.snaha.net)
+
 ## Library Quick Start
 
 ```bash

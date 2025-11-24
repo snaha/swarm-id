@@ -46,9 +46,3 @@ jobs:
             echo "Updating identity app (ID: $APP_ID)..."
             doctl apps update $APP_ID --spec .do-app-id.yaml
           fi
-
-      - name: Wait for deployment
-        run: |
-          APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "swarm-id-platform" | awk '{print $1}')
-          echo "Waiting for deployment to complete..."
-          doctl apps list --format ID,ActiveDeployment.Phase

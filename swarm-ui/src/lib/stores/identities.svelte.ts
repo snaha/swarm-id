@@ -23,10 +23,10 @@ export const identitiesStore = {
 		return identities
 	},
 
-	addIdentity(identity: Omit<Identity, 'id' | 'createdAt'>): Identity {
+	addIdentity(identity: Omit<Identity, 'id' | 'createdAt'> & { id?: string }): Identity {
 		const newIdentity: Identity = {
 			...identity,
-			id: crypto.randomUUID(),
+			id: identity.id ?? crypto.randomUUID(),
 			createdAt: Date.now(),
 		}
 		identities = [...identities, newIdentity]

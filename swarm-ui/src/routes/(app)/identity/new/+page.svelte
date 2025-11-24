@@ -15,7 +15,9 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 
-	let idName = $state('')
+	// Generate identity ID upfront
+	const identityId = crypto.randomUUID()
+	let idName = $state(identityId)
 	let appOrigin = $state<string | undefined>(undefined)
 	let accountName = $state('')
 
@@ -30,8 +32,6 @@
 		const sessionData = sessionStore.data
 		if (sessionData.accountName) {
 			accountName = sessionData.accountName
-			// Derive initial ID name from account name
-			idName = sessionData.accountName
 		}
 
 		if (!sessionData.prfOutput) {
@@ -69,6 +69,7 @@
 
 		// Create the identity
 		const identity = identitiesStore.addIdentity({
+			id: identityId,
 			accountId: account.id,
 			name: idName,
 		})
