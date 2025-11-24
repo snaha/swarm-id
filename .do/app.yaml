@@ -17,9 +17,6 @@ static_sites:
 
     catchall_document: index.html
 
-    routes:
-      - path: /
-
     cors:
       allow_origins:
         - exact: https://swarm-id.snaha.net
@@ -45,9 +42,6 @@ static_sites:
     build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-id
 
     catchall_document: index.html
-
-    routes:
-      - path: /
 
     cors:
       allow_origins:

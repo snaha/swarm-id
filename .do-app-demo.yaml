@@ -15,7 +15,7 @@ static_sites:
     output_dir: demo/build
 
     # Build using monorepo scripts
-    build_command: pnpm install && pnpm build:swarm-demo
+    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-demo
 
     # Serve as SPA with index.html fallback
     catchall_document: index.html
@@ -31,7 +31,7 @@ static_sites:
       allow_headers:
         - Content-Type
       allow_credentials: true
-      max_age: 600
+      max_age: "600s"
 
 # Environment variables
 envs:

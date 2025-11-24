@@ -15,7 +15,7 @@ static_sites:
     output_dir: swarm-id-build
 
     # Build using monorepo scripts
-    build_command: pnpm install && pnpm build:swarm-id
+    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-id
 
     # SPA routing - all routes go to index.html except /demo
     catchall_document: index.html
@@ -31,14 +31,7 @@ static_sites:
       allow_headers:
         - Content-Type
       allow_credentials: true
-      max_age: 600
-
-    # Additional headers for iframe embedding
-    headers:
-      - pattern: /*
-        headers:
-          X-Frame-Options: ALLOW-FROM https://swarm-demo.snaha.net
-          Content-Security-Policy: "frame-ancestors 'self' https://swarm-demo.snaha.net"
+      max_age: "600s"
 
 # Environment variables
 envs:
