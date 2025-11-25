@@ -91,9 +91,14 @@
        * 5. Returns responses to the parent dApp
        */
 
-      // Configuration
+      // Configuration - auto-detect local vs production
+      const APP_DOMAIN = window.__APP_DOMAIN__ || (
+        window.location.hostname.includes('local')
+          ? 'https://swarm-app.local:8080'
+          : 'https://swarm-demo.snaha.net'
+      )
       const ALLOWED_PARENT_ORIGINS = [
-        'https://swarm-app.local:8080',
+        APP_DOMAIN,
         // Add more allowed origins here
       ];
 
@@ -173,7 +178,7 @@
         console.log('[Proxy] Opening authentication popup for parent:', parentOrigin);
 
         // Pass parent origin as URL parameter
-        const authUrl = `${window.location.origin}/popup/auth.html?origin=${encodeURIComponent(parentOrigin)}`;
+        const authUrl = `${window.location.origin}/connect?origin=${encodeURIComponent(parentOrigin)}`;
         window.open(authUrl);
       };
 

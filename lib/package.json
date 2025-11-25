@@ -50,6 +50,7 @@
   "license": "ISC",
   "dependencies": {
     "@ethersphere/bee-js": "link:../bee-js",
+    "cafe-utility": "^33.3.2",
     "zod": "^4.0.0"
   },
   "devDependencies": {

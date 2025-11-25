@@ -605,7 +605,7 @@ export class SwarmIdProxy {
         document.head.appendChild(style)
       }
 
-      const authUrl = `${window.location.origin}/demo/auth.html?origin=${encodeURIComponent(this.parentOrigin)}`
+      const authUrl = `${window.location.origin}/connect?origin=${encodeURIComponent(this.parentOrigin)}`
 
       // Open as popup or full window based on popupMode
       if (this.popupMode === "popup") {

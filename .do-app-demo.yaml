@@ -1,0 +1,47 @@
+name: swarm-demo
+region: fra
+
+# Domain configuration
+domains:
+  - domain: swarm-demo.snaha.net
+    type: PRIMARY
+
+# Static site for swarm-demo.snaha.net
+# Serves demo pages with bundled library
+static_sites:
+  - name: demo-app
+    # GitHub auto-deploy configuration
+    github:
+      repo: snaha/swarm-id-explorations
+      branch: feat/create-swarm-ui
+      deploy_on_push: true
+
+    source_dir: /
+    output_dir: demo/build
+
+    # Build using monorepo scripts
+    build_command: git submodule update --init --recursive && npm install -g pnpm && pnpm install && pnpm build:swarm-demo
+
+    # CORS headers for cross-origin communication with swarm-id
+    cors:
+      allow_origins:
+        - exact: https://swarm-id.snaha.net
+      allow_methods:
+        - GET
+        - POST
+        - OPTIONS
+      allow_headers:
+        - Content-Type
+      allow_credentials: true
+      max_age: "600s"
+
+# Environment variables
+envs:
+  - key: NODE_ENV
+    value: production
+
+  - key: APP_DOMAIN
+    value: https://swarm-demo.snaha.net
+
+  - key: ID_DOMAIN
+    value: https://swarm-id.snaha.net

@@ -1,0 +1,20 @@
+# On each new commit to master, create/update a PR with release
+# automatically bumps version and creates changelog as per conventional commits
+name: Release Github
+
+on:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          release-type: node

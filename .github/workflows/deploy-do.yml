@@ -1,0 +1,48 @@
+name: Deploy to Digital Ocean
+
+on:
+  push:
+    branches:
+      - feat/create-swarm-ui
+      - main
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    name: Deploy to Digital Ocean App Platform
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Deploy Demo App
+        run: |
+          # Check if demo app exists
+          APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "swarm-demo" | awk '{print $1}')
+
+          if [ -z "$APP_ID" ]; then
+            echo "Creating demo app..."
+            doctl apps create --spec .do-app-demo.yaml
+          else
+            echo "Updating demo app (ID: $APP_ID)..."
+            doctl apps update $APP_ID --spec .do-app-demo.yaml
+          fi
+
+      - name: Deploy Identity App
+        run: |
+          # Check if identity app exists
+          APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "swarm-id" | grep -v "swarm-id-platform" | awk '{print $1}')
+
+          if [ -z "$APP_ID" ]; then
+            echo "Creating identity app..."
+            doctl apps create --spec .do-app-id.yaml
+          else
+            echo "Updating identity app (ID: $APP_ID)..."
+            doctl apps update $APP_ID --spec .do-app-id.yaml
+          fi

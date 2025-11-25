@@ -1,0 +1,29 @@
+{
+  "name": "swarm-id-explorations",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Swarm Identity Management - Monorepo",
+  "type": "module",
+  "scripts": {
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "build:bee-js": "pnpm --filter @ethersphere/bee-js build",
+    "build:lib": "pnpm build:bee-js && pnpm --filter @swarm-id/lib build",
+    "build:demo": "pnpm --filter @swarm-id/demo build",
+    "build:swarm-ui": "pnpm --filter swarm-identity build",
+    "build:swarm-demo": "pnpm build:lib && pnpm build:demo",
+    "build:swarm-id": "pnpm build:lib && pnpm build:swarm-ui && node build-swarm-id.js",
+    "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
+    "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
+    "dev:swarm-ui": "pnpm --filter swarm-identity dev",
+    "install:all": "pnpm install"
+  },
+  "keywords": [
+    "swarm",
+    "identity",
+    "authentication",
+    "web3",
+    "monorepo"
+  ],
+  "author": "",
+  "license": "ISC"
+}

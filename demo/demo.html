@@ -222,10 +222,7 @@ Hello, Swarm!</textarea
     </div>
 
     <script type="module">
-      import { SwarmIdClient } from "../lib/dist/swarm-id-client.js";
-
-      const PROXY_ORIGIN = "https://swarm-id.local:8081";
-      const BEE_API_URL = "http://localhost:1633";
+      import { SwarmIdClient } from "/lib/swarm-id-client.js";
 
       // Logging
       const logContainer = document.getElementById("log");
@@ -239,12 +236,27 @@ Hello, Swarm!</textarea
         console.log(`[${type}]`, message);
       }
 
+      // Auto-detect local vs production environment
+      const PROXY_ORIGIN = window.__ID_DOMAIN__ || (
+        window.location.hostname.includes('local')
+          ? 'https://swarm-id.local:8081'
+          : 'https://swarm-id.snaha.net'
+      );
+
+      // Always use /demo/proxy.html for both local and production
+      const PROXY_PATH = '/demo/proxy.html'
+
+      const BEE_API_URL = "http://localhost:1633";
+
       // Initialize the Swarm ID client
       log("Initializing Swarm ID client...", "info");
+      log(`PROXY_ORIGIN: ${PROXY_ORIGIN}`, "info");
+      log(`PROXY_PATH: ${PROXY_PATH}`, "info");
+      log(`Full Proxy URL: ${PROXY_ORIGIN}${PROXY_PATH}`, "info");
 
       const client = new SwarmIdClient({
         iframeOrigin: PROXY_ORIGIN,
-        iframePath: "/demo/proxy.html",
+        iframePath: PROXY_PATH,
         beeApiUrl: BEE_API_URL,
         timeout: 60000, // 60 seconds to account for Bee sync delays
         onAuthChange: (authenticated) => {

@@ -1,15 +1,28 @@
 #!/bin/bash
 
-# Start local development servers for Swarm iframe storage demo
-# This script starts two Node.js servers on different domains
+# Start local servers for Swarm ID development
+#
+# This script starts TWO servers:
+#   1. server-app.js (port 8080) - Serves demo HTML files
+#   2. server-id.js (port 8081)  - Serves SvelteKit app
+#
+# Prerequisites:
+#   - Library must be built: cd lib && pnpm build
+#   - SvelteKit app (optional): cd swarm-ui && pnpm build
+#     (If not built, demo/proxy pages won't have identity UI)
+#
+# For SvelteKit development with hot reload, use: ./start-servers-dev.sh
 
 echo "========================================================================"
-echo "Starting Swarm Iframe Storage Demo Servers (HTTPS)"
+echo "Starting Swarm ID Local Servers"
 echo "========================================================================"
 echo ""
-echo "This will start two HTTPS servers:"
-echo "  - https://swarm-app.local:8080  (demo-iframe-storage.html)"
-echo "  - https://swarm-id.local:8081   (iframe-storage.html)"
+echo "This starts TWO HTTPS servers:"
+echo "  - https://swarm-app.local:8080  (demo app)"
+echo "  - https://swarm-id.local:8081   (identity app + proxy)"
+echo ""
+echo "Library files are served from lib/dist/ (build library with: cd lib && pnpm build)"
+echo "Optional: Build SvelteKit UI first with: cd swarm-ui && pnpm build"
 echo ""
 echo "Note: You'll see browser security warnings due to self-signed certs."
 echo "      Click 'Advanced' and 'Accept Risk' to proceed (safe for local dev)"
@@ -55,13 +68,16 @@ echo "========================================================================"
 echo "✓ Both HTTPS servers started!"
 echo "========================================================================"
 echo ""
-echo "Access the demo at:"
-echo "  https://swarm-app.local:8080/demo-iframe-storage.html"
+echo "Access demos:"
+echo "  • Landing:      https://swarm-app.local:8080/"
+echo "  • Library demo: https://swarm-app.local:8080/demo/demo.html"
+echo "  • Popup demo:   https://swarm-app.local:8080/popup/demo.html"
 echo ""
-echo "The iframe will be loaded from:"
-echo "  https://swarm-id.local:8081/iframe-storage.html"
+echo "Identity app:"
+echo "  • UI:    https://swarm-id.local:8081/"
+echo "  • Proxy: https://swarm-id.local:8081/demo/proxy.html (used by iframe)"
 echo ""
-echo "IMPORTANT: Accept the security warnings in your browser for both domains!"
+echo "IMPORTANT: Accept security warnings in your browser for BOTH domains!"
 echo ""
 echo "Press Ctrl+C to stop both servers"
 echo "========================================================================"

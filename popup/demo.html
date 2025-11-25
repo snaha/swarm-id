@@ -276,10 +276,18 @@
         <!-- Authentication Section -->
         <div class="auth-section">
           <h2>Authentication</h2>
+          <div class="auth-status">
+            <div class="status-indicator">
+              <div class="status-dot unauthenticated" id="status-dot"></div>
+              <span id="auth-status-text">Not authenticated</span>
+            </div>
+            <button class="login-button" id="login-button" onclick="loginWithSwarmId()">
+              Login with Swarm ID
+            </button>
+          </div>
           <div class="iframe-container">
             <iframe
               id="proxy-iframe"
-              src="https://swarm-id.local:8081/popup/proxy.html"
               title="Swarm ID Proxy"
             ></iframe>
           </div>
@@ -340,16 +348,22 @@
        * 3. App-specific secret storage in partitioned localStorage
        */
 
-      const PROXY_ORIGIN = 'https://swarm-id.local:8081';
-      const AUTH_POPUP_URL = `${PROXY_ORIGIN}/popup/auth.html`;
+      // Auto-detect local vs production environment
+      const PROXY_ORIGIN = window.__ID_DOMAIN__ || (
+        window.location.hostname.includes('local')
+          ? 'https://swarm-id.local:8081'
+          : 'https://swarm-id.snaha.net'
+      );
+      const AUTH_POPUP_URL = `${PROXY_ORIGIN}/connect`;
 
       let proxyIframe = null;
       let authenticated = false;
       let messageId = 0;
       let pendingRequests = new Map();
 
-      // Get iframe reference
+      // Get iframe reference and set src
       proxyIframe = document.getElementById('proxy-iframe');
+      proxyIframe.src = `${PROXY_ORIGIN}/demo/proxy.html`;
 
       // Send identification message when iframe loads
       proxyIframe.addEventListener('load', () => {

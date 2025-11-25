@@ -1,0 +1,61 @@
+{
+	"name": "swarm-identity",
+	"version": "0.1.0",
+	"private": true,
+	"license": "MIT",
+	"scripts": {
+		"dev": "vite dev",
+		"build": "vite build",
+		"preview": "vite preview",
+		"test": "vitest run && playwright test -c playwright-ct.config.ts && playwright test",
+		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+		"check:all": "pnpm lint && pnpm check && pnpm knip",
+		"check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+		"lint": "prettier --check . && eslint .",
+		"format": "prettier --write .",
+		"test:integration": "playwright test",
+		"test:unit": "vitest",
+		"test:ct": "playwright test -c playwright-ct.config.ts"
+	},
+	"devDependencies": {
+		"@emeraldpay/hashicon": "^0.5.2",
+		"@eslint/js": "^9.19.0",
+		"@playwright/experimental-ct-svelte": "1.55.0",
+		"@playwright/test": "1.55.0",
+		"@sveltejs/adapter-static": "^3.0.8",
+		"@sveltejs/kit": "^2.16.1",
+		"@sveltejs/vite-plugin-svelte": "5.0.3",
+		"@types/node": "^22.10.10",
+		"autoprefixer": "^10.4.20",
+		"carbon-icons-svelte": "^13.6.0",
+		"date-fns": "^4.1.0",
+		"eslint": "^9.19.0",
+		"eslint-config-prettier": "^10.0.1",
+		"eslint-plugin-svelte": "^2.46.1",
+		"globals": "^15.14.0",
+		"knip": "5.43.3",
+		"postcss": "^8.5.1",
+		"postcss-nesting": "^13.0.1",
+		"prettier": "^3.4.2",
+		"prettier-plugin-svelte": "^3.3.3",
+		"svelte": "5.19.2",
+		"svelte-check": "^4.1.4",
+		"svelte-eslint-parser": "^0.43.0",
+		"tsx": "^4.19.3",
+		"typescript": "^5.7.3",
+		"typescript-eslint": "8.21.0",
+		"vite": "^6.0.11",
+		"vitest": "^3.0.4"
+	},
+	"type": "module",
+	"engines": {
+		"node": ">=22",
+		"pnpm": ">=10"
+	},
+	"dependencies": {
+		"@simplewebauthn/browser": "^13.2.2",
+		"@walletconnect/ethereum-provider": "^2.23.0",
+		"@web3modal/ethers": "^5.1.11",
+		"ethers": "^6.15.0"
+	}
+}
