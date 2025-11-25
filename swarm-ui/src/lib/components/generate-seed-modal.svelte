@@ -6,7 +6,7 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import CopyButton from '$lib/components/copy-button.svelte'
-	import { Renew } from 'carbon-icons-svelte'
+	import Renew from 'carbon-icons-svelte/lib/Renew.svelte'
 
 	interface Props {
 		open?: boolean

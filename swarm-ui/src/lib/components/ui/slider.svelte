@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Information } from 'carbon-icons-svelte'
+	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import type { Snippet } from 'svelte'
 	import type { HTMLInputAttributes } from 'svelte/elements'
 	type Dimension = 'default' | 'large' | 'compact' | 'small'

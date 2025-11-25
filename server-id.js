@@ -87,12 +87,19 @@ const server = https.createServer(sslOptions, (req, res) => {
 
   // Parse URL to remove query string
   const url = new URL(req.url, `https://${HOST}:${PORT}`)
-  const pathname = url.pathname
+  let pathname = url.pathname
 
   // Check if requesting demo/, popup/, or lib/ files
   // These are always served from disk, even when proxying
   if (pathname.startsWith('/demo/') || pathname.startsWith('/popup/') || pathname.startsWith('/lib/')) {
-    const filePath = path.join(__dirname, pathname)
+    // Map /lib/* to lib/dist/* for local development
+    // This allows HTML files to use production-style imports without building
+    let mappedPath = pathname
+    if (pathname.startsWith('/lib/')) {
+      mappedPath = pathname.replace('/lib/', '/lib/dist/')
+    }
+
+    const filePath = path.join(__dirname, mappedPath)
     serveStaticFile(req, res, filePath, pathname)
     return
   }

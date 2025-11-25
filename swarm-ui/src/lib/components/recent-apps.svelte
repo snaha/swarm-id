@@ -4,7 +4,7 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import { Time } from 'carbon-icons-svelte'
+	import Time from 'carbon-icons-svelte/lib/Time.svelte'
 
 	let { limit = 5, currentAppUrl }: { limit?: number; currentAppUrl?: string } = $props()
 

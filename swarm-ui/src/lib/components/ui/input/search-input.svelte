@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Search } from 'carbon-icons-svelte'
+	import Search from 'carbon-icons-svelte/lib/Search.svelte'
 	import Input, { type Props } from './input.svelte'
 	import type { HTMLInputAttributes } from 'svelte/elements'
 

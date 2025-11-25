@@ -1,5 +1,9 @@
 <script lang="ts">
-	import { CaretDown, CaretUp, ChevronLeft, ChevronRight, Calendar } from 'carbon-icons-svelte'
+	import CaretDown from 'carbon-icons-svelte/lib/CaretDown.svelte'
+	import CaretUp from 'carbon-icons-svelte/lib/CaretUp.svelte'
+	import ChevronLeft from 'carbon-icons-svelte/lib/ChevronLeft.svelte'
+	import ChevronRight from 'carbon-icons-svelte/lib/ChevronRight.svelte'
+	import Calendar from 'carbon-icons-svelte/lib/Calendar.svelte'
 	import Button from '../../button.svelte'
 	import Divider from '../../divider.svelte'
 	import { type Props as ButtonProps } from '../../button.svelte'

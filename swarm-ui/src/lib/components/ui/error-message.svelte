@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { WarningAltFilled } from 'carbon-icons-svelte'
+	import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
 
 	interface Props {
 		message: string

@@ -27,11 +27,15 @@ console.log(`ID_DOMAIN: ${ID_DOMAIN}`)
 const buildDir = join(__dirname, 'build')
 mkdirSync(buildDir, { recursive: true })
 
-// Read the library bundle (UMD for inline use)
-const libPath = join(__dirname, '..', 'lib', 'dist', 'swarm-id.umd.js')
-const libCode = readFileSync(libPath, 'utf-8')
+// Copy library dist files
+console.log('Copying library files...')
+const libDistDir = join(__dirname, '..', 'lib', 'dist')
+const buildLibDir = join(buildDir, 'lib')
+mkdirSync(buildLibDir, { recursive: true })
+cpSync(libDistDir, buildLibDir, { recursive: true })
+console.log('✓ Library files copied')
 
-// Process demo.html
+// Process demo.html - just inject environment config
 console.log('Processing demo.html...')
 let demoHtml = readFileSync(join(__dirname, 'demo.html'), 'utf-8')
 
@@ -45,18 +49,8 @@ const configScript = `
 `
 demoHtml = demoHtml.replace('</head>', configScript + '</head>')
 
-// Inject library code inline (replace the import statement only)
-demoHtml = demoHtml.replace(
-  /import \{ SwarmIdClient \} from ['"]\.\.\/lib\/dist\/swarm-id-client\.js['"];?\s*/,
-  `// Bundled Swarm ID Client Library (UMD)
-${libCode}
-// Extract SwarmIdClient from UMD global
-const SwarmIdClient = window.SwarmId?.SwarmIdClient || SwarmId?.SwarmIdClient;
-`
-)
-
 writeFileSync(join(buildDir, 'demo.html'), demoHtml)
-console.log('✓ demo.html built')
+console.log('✓ demo.html processed')
 
 // Process auth.html (if needed in the demo app)
 console.log('Processing auth.html...')

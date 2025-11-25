@@ -1,7 +1,8 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/button.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
-	import { Copy, Checkmark } from 'carbon-icons-svelte'
+	import Copy from 'carbon-icons-svelte/lib/Copy.svelte'
+	import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
 
 	interface Props {
 		text: string

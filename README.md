@@ -21,21 +21,65 @@ The applications are deployed and available at:
 - **Demo App**: [https://swarm-demo.snaha.net](https://swarm-demo.snaha.net)
 - **Identity UI**: [https://swarm-id.snaha.net](https://swarm-id.snaha.net)
 
-## Library Quick Start
+### Deployment
+
+Both apps are deployed to Digital Ocean App Platform as separate static sites:
+
+**swarm-demo.snaha.net** (`demo/build/`)
+- Simple HTML demos with SwarmIdClient library
+- Library files served from `/lib/` directory
+- Standard ES6 module imports
+
+**swarm-id.snaha.net** (`swarm-id-build/`)
+- SvelteKit identity management UI
+- Proxy/auth pages for iframe communication
+- Library files served from `/lib/` directory
+
+See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for detailed deployment configuration.
+
+## Quick Start
+
+### Build Everything
 
 ```bash
-# Install dependencies
+# Install all workspace dependencies
 pnpm install
 
-# Build the library
+# Build library + both apps
 pnpm build
 
-# Watch mode for development
-pnpm build:watch
-
-# Lint code
-pnpm lint
+# Or build specific apps
+pnpm build:swarm-demo    # Builds lib + demo app
+pnpm build:swarm-id      # Builds lib + identity UI
 ```
+
+### Build Outputs
+
+**demo/build/** (Demo App)
+```
+demo/build/
+├── index.html          # Landing page
+├── demo.html           # Library demo (12KB)
+├── auth.html           # Auth page (12KB)
+├── lib/                # Library files (~8MB with source maps)
+│   ├── swarm-id-client.js
+│   ├── swarm-id-proxy.js
+│   ├── swarm-id-auth.js
+│   └── ... (types, maps, etc.)
+└── popup/              # Popup demo files
+```
+
+**swarm-id-build/** (Identity UI)
+```
+swarm-id-build/
+├── [SvelteKit app files]
+├── lib/                # Library files (~8MB with source maps)
+└── demo/               # Proxy/auth pages
+    ├── proxy.html      # Iframe proxy (3.4KB)
+    └── auth.html       # Auth popup (12KB)
+```
+
+**Note:** Library files use standard ES6 module imports, not inline bundling. HTML files are small (~3-12KB) and import from `/lib/` at runtime.
 
 See [lib/README.md](./lib/README.md) for detailed library documentation.
 
@@ -86,52 +130,62 @@ See [lib/README.md](./lib/README.md) for detailed library documentation.
 
 ### Starting the Development Servers
 
-The project includes two Node.js HTTPS servers that serve content on different domains:
+The project includes two Node.js HTTPS servers that serve content on different domains to simulate production cross-origin behavior.
 
-#### Production Mode (serve built files)
+#### Quick Start (no build required!)
 
 ```bash
-# Build the SvelteKit UI first
-cd swarm-ui
+# 1. Install and build library
 pnpm install
-pnpm build
-cd ..
+cd lib && pnpm build
 
-# Start both servers
+# 2. Start both HTTPS servers
 ./start-servers.sh
 ```
 
-This convenience script:
-- Checks if `/etc/hosts` is properly configured
-- Starts both servers in the background
-- Serves the built SvelteKit app from `swarm-ui/build/`
-- Provides clear status messages
-- Handles graceful shutdown on Ctrl+C
+This starts:
+- **server-app.js** on `https://swarm-app.local:8080` - serves demo files
+- **server-id.js** on `https://swarm-id.local:8081` - serves identity UI
+
+**Library serving:** Both servers map `/lib/*` → `lib/dist/*` automatically, so no build step needed for local development!
+
+**Optional:** Build SvelteKit UI for full experience:
+```bash
+cd swarm-ui && pnpm build
+```
 
 #### Development Mode (with hot reload)
 
 For SvelteKit development with hot module replacement:
 
 ```bash
-# Terminal 1: Start the SvelteKit dev server
+# Terminal 1: Build library in watch mode (optional)
+cd lib
+pnpm build:watch
+
+# Terminal 2: Start SvelteKit dev server
 cd swarm-ui
-pnpm install
 pnpm dev
 
-# Terminal 2: Start the HTTPS proxy servers
+# Terminal 3: Start HTTPS proxy servers
 ./start-servers-dev.sh
 ```
 
-The dev mode script:
-- Starts `server-app.js` on port 8080 (serves demo HTML)
-- Starts `server-id.js` on port 8081 (proxies to `localhost:5173`)
-- Enables hot reload for the SvelteKit UI
-- `/demo/` and `/popup/` files are served from disk
+The dev mode setup:
+- **server-app.js** serves demo files from `demo/` (not build)
+- **server-id.js** proxies to SvelteKit dev server (`localhost:5173`)
+- Library changes require rebuild (use `pnpm build:watch`)
+- HTML/CSS changes are served directly from disk
 
 **Custom proxy target:**
 ```bash
 PROXY_TARGET=http://localhost:3000 ./start-servers-dev.sh
 ```
+
+**Important:**
+- Demo HTML files import from `/lib/` which automatically maps to `lib/dist/`
+- If you change library code, rebuild it: `cd lib && pnpm build`
+- Use `cd lib && pnpm build:watch` for automatic rebuilds during development
 
 #### Server Details
 
@@ -156,52 +210,95 @@ Both servers:
 
 ### Testing the Setup
 
-1. Start the servers:
+1. **Quick start** (just library):
    ```bash
-   ./start-servers.sh
+   cd lib && pnpm build   # Build library once
+   ./start-servers.sh     # Start servers
    ```
 
-2. Open the demo in your browser:
-   ```
-   https://swarm-app.local:8080/popup/demo.html
+2. **Full experience** (with SvelteKit UI):
+   ```bash
+   pnpm build            # Build everything
+   ./start-servers.sh    # Start servers
    ```
 
-3. **Important**: Accept the browser security warnings
-   - The warnings appear because we're using self-signed certificates
+3. Open demos in your browser:
+   - **Library Demo (Recommended)**: `https://swarm-app.local:8080/demo.html`
+   - **Popup Demo**: `https://swarm-app.local:8080/popup/demo.html`
+   - **Identity UI**: `https://swarm-id.local:8081/`
+
+4. **Accept browser security warnings**
+   - Self-signed certificates trigger warnings
    - This is safe for local development
-   - Click "Advanced" → "Accept Risk and Continue" (or equivalent)
-   - You may need to accept warnings for both domains
+   - Click "Advanced" → "Accept Risk and Continue"
+   - Accept warnings for BOTH domains (swarm-app.local and swarm-id.local)
 
-4. Test the authentication flow:
+5. Test the authentication flow:
    - Click "Login with Swarm ID"
-   - A popup opens on `swarm-id.local`
+   - Popup opens on `swarm-id.local`
    - Complete authentication
-   - The popup closes and you're authenticated
+   - Popup closes and you're authenticated
+   - Try uploading/downloading data
 
 ## Project Structure
 
 ```
 .
-├── swarm-ui/              # SvelteKit identity management UI
-│   ├── src/              # SvelteKit source code
-│   ├── build/            # Production build output
-│   └── README.md         # SvelteKit documentation
-├── popup/                # OAuth-style popup authentication system
-│   ├── auth.html         # Authentication popup UI (legacy)
-│   ├── proxy.html        # Hidden iframe proxy for API calls
-│   ├── demo.html         # Demo dApp page
-│   └── README.md         # Detailed documentation
 ├── lib/                  # Swarm ID TypeScript library
-├── bee/                  # Bee project source code
-├── bee-js/               # bee-js project source code
-├── swarm-cli/           # Swarm CLI tools
-├── server-app.js        # HTTPS server for swarm-app.local:8080
-├── server-id.js         # HTTPS server for swarm-id.local:8081 (with proxy support)
-├── start-servers.sh     # Start servers in production mode
-├── start-servers-dev.sh # Start servers in dev mode (with proxy)
-├── swarm-app.local+1.pem           # SSL certificate (mkcert)
-└── swarm-app.local+1-key.pem       # SSL private key (mkcert)
+│   ├── src/              # Library source code
+│   ├── dist/             # Built library files (ES6 modules)
+│   └── README.md         # Library documentation
+├── demo/                 # Demo app package
+│   ├── demo.html         # Library demo HTML
+│   ├── auth.html         # Auth page HTML
+│   ├── proxy.html        # Iframe proxy HTML
+│   ├── build.js          # Build script (copies lib, injects config)
+│   └── build/            # Build output (deployed to swarm-demo.snaha.net)
+│       ├── index.html    # Landing page
+│       ├── demo.html     # Built demo (~12KB)
+│       ├── lib/          # Library files (~8MB)
+│       └── popup/        # Popup demo files
+├── swarm-ui/             # SvelteKit identity management UI
+│   ├── src/              # SvelteKit source code
+│   └── build/            # SvelteKit production build
+├── popup/                # OAuth-style popup demos (local dev only)
+│   ├── demo.html         # Popup demo dApp
+│   ├── auth.html         # Auth popup UI
+│   └── proxy.html        # Iframe proxy
+├── bee-js/               # bee-js library (linked dependency)
+├── build-swarm-id.js     # Build script for swarm-id app
+├── swarm-id-build/       # Build output (deployed to swarm-id.snaha.net)
+│   ├── [SvelteKit app]   # SvelteKit production files
+│   ├── lib/              # Library files (~8MB)
+│   └── demo/             # Proxy/auth HTML files
+│       ├── proxy.html    # Iframe proxy (~3.4KB)
+│       └── auth.html     # Auth popup (~12KB)
+├── server-app.js         # Local HTTPS server for swarm-app.local:8080
+├── server-id.js          # Local HTTPS server for swarm-id.local:8081
+├── start-servers.sh      # Start both servers (production mode)
+├── start-servers-dev.sh  # Start both servers (dev mode with proxy)
+└── swarm-app.local+1*.pem  # SSL certificates (mkcert)
 ```
+
+### Key Build Artifacts
+
+**Library Distribution** (`lib/dist/`)
+- ES6 modules with TypeScript definitions
+- Source maps for debugging
+- ~350KB per module (uncompressed)
+- Imported via standard `<script type="module">`
+
+**Demo App Build** (`demo/build/`)
+- Copies library files to `lib/`
+- Injects environment config into HTML
+- No inline bundling - uses module imports
+- Deployed to swarm-demo.snaha.net
+
+**Identity UI Build** (`swarm-id-build/`)
+- Full SvelteKit production build
+- Copies library files to `lib/`
+- Proxy/auth HTML pages in `demo/`
+- Deployed to swarm-id.snaha.net
 
 ## Documentation
 
@@ -211,7 +308,7 @@ Both servers:
 
 ## Development Workflow
 
-### Quick Start (Development Mode)
+### Quick Start
 
 ```bash
 # 1. One-time setup
@@ -219,21 +316,26 @@ mkcert -install
 mkcert swarm-app.local swarm-id.local
 sudo bash -c 'echo "127.0.0.1 swarm-app.local swarm-id.local" >> /etc/hosts'
 
-# 2. Install dependencies
-cd swarm-ui
+# 2. Install and build
 pnpm install
+cd lib && pnpm build   # Build library
 cd ..
 
-# 3. Terminal 1: Start SvelteKit dev server
-cd swarm-ui
-pnpm dev
+# 3. Start servers
+./start-servers.sh
 
-# 4. Terminal 2: Start HTTPS proxy servers
-./start-servers-dev.sh
-
-# 5. Open browser
-# Visit: https://swarm-app.local:8080/demo-iframe-storage.html
+# 4. Open browser
+# Visit: https://swarm-app.local:8080/demo.html
 # Accept security warnings for both domains
+```
+
+**With SvelteKit development:**
+```bash
+# Terminal 1: SvelteKit dev server with hot reload
+cd swarm-ui && pnpm dev
+
+# Terminal 2: HTTPS proxy servers
+./start-servers-dev.sh
 ```
 
 ### Architecture Overview

@@ -1,25 +1,28 @@
 #!/bin/bash
 
-# Start local production servers for Swarm iframe storage demo
+# Start local servers for Swarm ID development
 #
 # This script starts TWO servers:
 #   1. server-app.js (port 8080) - Serves demo HTML files
-#   2. server-id.js (port 8081)  - Serves built SvelteKit app from swarm-ui/build/
+#   2. server-id.js (port 8081)  - Serves SvelteKit app
 #
 # Prerequisites:
-#   cd swarm-ui && pnpm build    # Build the SvelteKit app first!
+#   - Library must be built: cd lib && pnpm build
+#   - SvelteKit app (optional): cd swarm-ui && pnpm build
+#     (If not built, demo/proxy pages won't have identity UI)
 #
-# For development mode with hot reload, use: ./start-servers-dev.sh
+# For SvelteKit development with hot reload, use: ./start-servers-dev.sh
 
 echo "========================================================================"
-echo "Starting Swarm ID Local Servers (PRODUCTION MODE)"
+echo "Starting Swarm ID Local Servers"
 echo "========================================================================"
 echo ""
 echo "This starts TWO HTTPS servers:"
 echo "  - https://swarm-app.local:8080  (demo app)"
 echo "  - https://swarm-id.local:8081   (identity app + proxy)"
 echo ""
-echo "Prerequisites: Run 'pnpm build' first to build all apps"
+echo "Library files are served from lib/dist/ (build library with: cd lib && pnpm build)"
+echo "Optional: Build SvelteKit UI first with: cd swarm-ui && pnpm build"
 echo ""
 echo "Note: You'll see browser security warnings due to self-signed certs."
 echo "      Click 'Advanced' and 'Accept Risk' to proceed (safe for local dev)"

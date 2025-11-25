@@ -8,7 +8,7 @@
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
-	import { ArrowRight } from 'carbon-icons-svelte'
+	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import type { Identity } from '$lib/types'
 
 	interface Props {

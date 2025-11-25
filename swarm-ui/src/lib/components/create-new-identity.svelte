@@ -4,7 +4,7 @@
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import AuthCard from '$lib/components/auth-card.svelte'
 	import ImportSwarmIdentity from '$lib/components/import-swarm-identity.svelte'
-	import { Wallet } from 'carbon-icons-svelte'
+	import Wallet from 'carbon-icons-svelte/lib/Wallet.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import { goto } from '$app/navigation'

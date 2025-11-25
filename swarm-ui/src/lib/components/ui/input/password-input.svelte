@@ -1,5 +1,6 @@
 <script lang="ts">
-	import { ViewFilled, ViewOff } from 'carbon-icons-svelte'
+	import ViewFilled from 'carbon-icons-svelte/lib/ViewFilled.svelte'
+	import ViewOff from 'carbon-icons-svelte/lib/ViewOff.svelte'
 	import Input, { type Props } from './input.svelte'
 	import type { HTMLInputAttributes } from 'svelte/elements'
 	import Button from '$lib/components/ui/button.svelte'

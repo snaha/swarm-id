@@ -36,21 +36,23 @@ const svelteKitBuildDir = join(__dirname, 'swarm-ui', 'build')
 cpSync(svelteKitBuildDir, outputDir, { recursive: true })
 console.log('✓ SvelteKit build copied')
 
-// Read library bundles
-const proxyLibPath = join(__dirname, 'lib', 'dist', 'swarm-id-proxy.js')
-const authLibPath = join(__dirname, 'lib', 'dist', 'swarm-id-auth.js')
-const proxyLibCode = readFileSync(proxyLibPath, 'utf-8')
-const authLibCode = readFileSync(authLibPath, 'utf-8')
+// Copy library dist files
+console.log('Copying library files...')
+const libDistDir = join(__dirname, 'lib', 'dist')
+const outputLibDir = join(outputDir, 'lib')
+mkdirSync(outputLibDir, { recursive: true })
+cpSync(libDistDir, outputLibDir, { recursive: true })
+console.log('✓ Library files copied')
 
-// Create demo directory for proxy files
+// Create demo directory for HTML files
 const proxyDir = join(outputDir, 'demo')
 mkdirSync(proxyDir, { recursive: true })
 
-// Process proxy.html
+// Process proxy.html - just inject environment config
 console.log('Processing proxy.html...')
 let proxyHtml = readFileSync(join(__dirname, 'demo', 'proxy.html'), 'utf-8')
 
-// Inject environment config
+// Inject environment config before closing </head> tag
 const configScript = `
     <script>
       // Environment configuration
@@ -58,45 +60,22 @@ const configScript = `
       window.__ID_DOMAIN__ = '${ID_DOMAIN}';
       window.__BEE_API_URL__ = '${BEE_API_URL}';
     </script>
-`
+  </head>`
 
-// Replace library import with inline bundled code
-proxyHtml = proxyHtml.replace(
-  /<script type="module">\s*import \{ initProxy \} from ['"]\.\.\/lib\/dist\/swarm-id-proxy\.js['"];?\s*/s,
-  configScript + `<script type="module">
-// Bundled Swarm ID Proxy Library
-${proxyLibCode}
-
-const { initProxy } = window.SwarmIdProxy || {};
-if (!initProxy) {
-  console.error('[Proxy] Library not loaded correctly');
-}
-`
-)
+proxyHtml = proxyHtml.replace('</head>', configScript)
 
 writeFileSync(join(proxyDir, 'proxy.html'), proxyHtml)
-console.log('✓ proxy.html built')
+console.log('✓ proxy.html processed')
 
-// Process auth.html
+// Process auth.html - just inject environment config
 console.log('Processing auth.html...')
 let authHtml = readFileSync(join(__dirname, 'demo', 'auth.html'), 'utf-8')
 
-// Check if auth.html imports the library
-if (authHtml.includes('swarm-id-auth.js')) {
-  authHtml = authHtml.replace(
-    /<script type="module">\s*import.*?from ['"]\.\.\/lib\/dist\/swarm-id-auth\.js['"];?\s*/s,
-    configScript + `<script type="module">
-// Bundled Swarm ID Auth Library
-${authLibCode}
-`
-  )
-} else {
-  // Just inject config if no library import
-  authHtml = authHtml.replace('</head>', configScript + '</head>')
-}
+// Inject environment config (reuse the same configScript)
+authHtml = authHtml.replace('</head>', configScript)
 
 writeFileSync(join(proxyDir, 'auth.html'), authHtml)
-console.log('✓ auth.html built')
+console.log('✓ auth.html processed')
 
 console.log('')
 console.log('Build complete! Output in swarm-id-build/')

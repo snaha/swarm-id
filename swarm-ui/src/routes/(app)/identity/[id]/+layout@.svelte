@@ -8,11 +8,15 @@
 	const identityId = $derived($page.params.id)
 	const currentPath = $derived($page.url.pathname)
 
-	const tabs = $derived([
-		{ label: 'Apps', href: routes.IDENTITY_APPS(identityId) },
-		{ label: 'Stamps', href: routes.IDENTITY_STAMPS(identityId) },
-		{ label: 'Settings', href: routes.IDENTITY_SETTINGS(identityId) },
-	])
+	const tabs = $derived(
+		identityId
+			? [
+					{ label: 'Apps', href: routes.IDENTITY_APPS(identityId) },
+					{ label: 'Stamps', href: routes.IDENTITY_STAMPS(identityId) },
+					{ label: 'Settings', href: routes.IDENTITY_SETTINGS(identityId) },
+				]
+			: [],
+	)
 </script>
 
 <div class="page-content">

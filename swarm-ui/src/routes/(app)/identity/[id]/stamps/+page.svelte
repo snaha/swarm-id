@@ -12,10 +12,11 @@
 	import { goto } from '$app/navigation'
 
 	const identityId = $derived($page.params.id)
-	const identity = $derived(identitiesStore.getIdentity(identityId))
-	const stamps = $derived(postageStampsStore.getStampsByIdentity(identityId))
+	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
+	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
 
 	function makeDefaultStamp(batchID: string) {
+		if (!identityId) return
 		identitiesStore.setDefaultStamp(identityId, batchID)
 	}
 
@@ -40,6 +41,7 @@
 	}
 
 	function removeStamp(batchID: string) {
+		if (!identityId) return
 		// If this is the default stamp, clear the default stamp first
 		if (identity?.defaultPostageStampBatchID === batchID) {
 			identitiesStore.setDefaultStamp(identityId, undefined)

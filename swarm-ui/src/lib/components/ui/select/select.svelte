@@ -1,6 +1,7 @@
 <script lang="ts">
 	import type { HTMLInputAttributes } from 'svelte/elements'
-	import { CaretDown, CaretUp } from 'carbon-icons-svelte'
+	import CaretDown from 'carbon-icons-svelte/lib/CaretDown.svelte'
+	import CaretUp from 'carbon-icons-svelte/lib/CaretUp.svelte'
 	import { type Snippet } from 'svelte'
 	import { withSelectStore } from './select-store.svelte'
 	import Option from './option.svelte'

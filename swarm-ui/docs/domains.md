@@ -115,7 +115,6 @@ git push origin main  # Or your deployment branch
 ### Initial Setup (One-time)
 
 1. **Connect GitHub to DigitalOcean:**
-
    - Go to DigitalOcean Dashboard → Apps
    - Click "Create App" → Choose "GitHub"
    - Authorize DigitalOcean to access your repository

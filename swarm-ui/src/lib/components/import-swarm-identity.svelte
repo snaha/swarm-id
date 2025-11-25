@@ -2,7 +2,8 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import { Information, Upload } from 'carbon-icons-svelte'
+	import Information from 'carbon-icons-svelte/lib/Information.svelte'
+	import Upload from 'carbon-icons-svelte/lib/Upload.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 
 	interface Props {

@@ -4,7 +4,8 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Badge from '$lib/components/ui/badge.svelte'
-	import { ChevronDown, ChevronRight } from 'carbon-icons-svelte'
+	import ChevronDown from 'carbon-icons-svelte/lib/ChevronDown.svelte'
+	import ChevronRight from 'carbon-icons-svelte/lib/ChevronRight.svelte'
 	import type { Snippet } from 'svelte'
 
 	interface Props {

@@ -85,7 +85,6 @@ This project is focused on **research and architecture design**. The implementat
 ### **Project Milestones (Research Phase)**
 
 - **Phase 1: Research & Architecture**
-
   - Conduct a deep dive into the current Swarm ACT and postage stamp architecture.
   - Analyze existing decentralized identity (DID) solutions and their potential applicability.
   - Design the technical architecture for linking an external private key to the upload process and signing content.

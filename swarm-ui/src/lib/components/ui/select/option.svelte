@@ -1,5 +1,5 @@
 <script lang="ts">
-	import { Checkmark } from 'carbon-icons-svelte'
+	import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
 	import type { SelectStore } from './select-store.svelte'
 	import type { HTMLButtonAttributes } from 'svelte/elements'
 

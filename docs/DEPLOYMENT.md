@@ -125,42 +125,56 @@ Both apps use these environment variables (injected at build time):
 ### Build Process
 
 1. **Library Build** (`lib/`)
-   - Rollup bundles TypeScript to ESM/UMD
+   - Rollup bundles TypeScript to ES6 modules
    - Outputs to `lib/dist/`
+   - Produces separate module files (not bundled together)
+   - Includes TypeScript definitions and source maps
 
-2. **Demo Build** (`demo/`)
-   - Reads HTML files (demo.html, auth.html)
-   - Injects environment config via `window.__APP_DOMAIN__`, etc.
-   - Bundles library code inline (no external library files exposed)
+2. **Demo Build** (`demo/build.js`)
+   - Copies `lib/dist/` → `demo/build/lib/`
+   - Injects environment config into HTML files
+   - HTML files use standard `<script type="module">` imports
    - Outputs to `demo/build/`
-   - **Note:** Popup demos (`popup/`) are not included in build
+   - **Result:** Small HTML files (3-12KB) + library files (~8MB)
+   - **Note:** Popup demos (`popup/`) are included for local testing
 
-3. **Identity Build** (`swarm-id/`)
+3. **Identity Build** (`build-swarm-id.js`)
    - Builds SvelteKit app to `swarm-ui/build/`
    - Copies SvelteKit build to `swarm-id-build/`
+   - Copies `lib/dist/` → `swarm-id-build/lib/`
    - Processes `demo/proxy.html` and `demo/auth.html`:
-     - Injects environment config
-     - Bundles library code inline
-   - Outputs to `swarm-id-build/proxy/`
+     - Injects environment config only
+     - No inline bundling
+   - Outputs to `swarm-id-build/demo/`
+
+### Key Architectural Decision
+
+**Library Distribution:**
+- Library files are served as separate ES6 modules from `/lib/` path
+- HTML files import via standard module syntax: `import { initProxy } from '/lib/swarm-id-proxy.js'`
+- This provides better debugging, proper source maps, and follows web standards
+- Previous inline bundling approach was removed due to complexity and special character issues
 
 ### Cross-Origin Communication
 
 **Demo App** (swarm-demo.snaha.net):
-- Embeds hidden iframe from `swarm-id.snaha.net/proxy/proxy.html`
-- Opens auth popup to `swarm-id.snaha.net/connect` (SvelteKit route) or `/proxy/auth.html`
+- Embeds hidden iframe from `swarm-id.snaha.net/demo/proxy.html`
+- Opens auth popup to `swarm-id.snaha.net/connect` (SvelteKit route)
 - Uses postMessage for cross-origin communication
+- Imports library from `/lib/swarm-id-client.js`
 
 **Identity App** (swarm-id.snaha.net):
-- Serves proxy iframe that handles Bee API calls
+- Serves proxy iframe (`/demo/proxy.html`) that handles Bee API calls
 - Serves auth pages for popup authentication
 - Stores secrets in first-party localStorage (partitioned by browser)
+- Library files accessible at `/lib/` path
 
 ### Security
 
 - **CORS:** Both apps whitelist each other's origins
 - **CSP:** Identity app allows iframe embedding from demo app
 - **Storage Partitioning:** Browser enforces isolation per `(iframe-origin, parent-origin)` pair
-- **No Exposed Library:** Library code is bundled inline, not exposed as separate files
+- **Library Distribution:** Library files served as standard ES6 modules (publicly accessible but open source)
 
 ## Local Development
 

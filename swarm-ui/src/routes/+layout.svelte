@@ -6,7 +6,7 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import SwarmLogo from '$lib/components/swarm-logo.svelte'
-	import { SidePanelOpen } from 'carbon-icons-svelte'
+	import SidePanelOpen from 'carbon-icons-svelte/lib/SidePanelOpen.svelte'
 	import { page } from '$app/state'
 	import { goto } from '$app/navigation'
 	import routes from '$lib/routes'
@@ -17,7 +17,7 @@
 	let { children } = $props()
 
 	const identityId = $derived(page.params.id)
-	const identity = $derived(identitiesStore.getIdentity(identityId))
+	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
 	const identities = $derived(identitiesStore.identities)
 	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
 

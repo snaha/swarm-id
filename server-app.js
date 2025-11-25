@@ -40,6 +40,13 @@ const server = https.createServer(sslOptions, (req, res) => {
 
   // Default to index.html
   let filePath = req.url === '/' ? '/index.html' : req.url
+
+  // Map /lib/* to lib/dist/* for local development
+  // This allows HTML files to use production-style imports without building
+  if (filePath.startsWith('/lib/')) {
+    filePath = filePath.replace('/lib/', '/lib/dist/')
+  }
+
   filePath = path.join(__dirname, filePath)
 
   // Check if file exists

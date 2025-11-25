@@ -13,9 +13,9 @@
 	import Toggle from '$lib/components/ui/toggle.svelte'
 
 	const identityId = $derived($page.params.id)
-	const identity = $derived(identitiesStore.getIdentity(identityId))
-	const apps = $derived(connectedAppsStore.getAppsByIdentityId(identityId))
-	const stamps = $derived(postageStampsStore.getStampsByIdentity(identityId))
+	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
+	const apps = $derived(identityId ? connectedAppsStore.getAppsByIdentityId(identityId) : [])
+	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
 
 	let defaultStampBatchID = $state<string | undefined>(undefined)
 
@@ -26,7 +26,11 @@
 
 	// Update store when local state changes
 	$effect(() => {
-		if (defaultStampBatchID && defaultStampBatchID !== identity?.defaultPostageStampBatchID) {
+		if (
+			identityId &&
+			defaultStampBatchID &&
+			defaultStampBatchID !== identity?.defaultPostageStampBatchID
+		) {
 			identitiesStore.setDefaultStamp(identityId, defaultStampBatchID)
 		}
 	})

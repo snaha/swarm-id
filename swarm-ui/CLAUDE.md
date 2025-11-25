@@ -158,7 +158,9 @@ This project uses Svelte 5 with runes for reactive state management:
   - `<Checkmark size={20} />` - 20px checkmark icon
   - `<PasskeyLogo fill="#242424" width={64} height={64} />` - Custom logo with fill color
 - Browse available icons at https://carbondesignsystem.com/guidelines/icons/library/
-- Import icons from `carbon-icons-svelte` package: `import { IconName } from 'carbon-icons-svelte'`
+- **IMPORTANT**: Always use direct imports, NOT barrel imports:
+  - ✅ `import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'`
+  - ❌ `import { ArrowRight } from 'carbon-icons-svelte'` (causes SSR issues with name conflicts)
 
 ### Important Layout Component Properties
 

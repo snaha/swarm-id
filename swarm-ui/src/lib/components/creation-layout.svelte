@@ -2,7 +2,8 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
-	import { Close, ArrowLeft } from 'carbon-icons-svelte'
+	import Close from 'carbon-icons-svelte/lib/Close.svelte'
+	import ArrowLeft from 'carbon-icons-svelte/lib/ArrowLeft.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 
 	interface Props {

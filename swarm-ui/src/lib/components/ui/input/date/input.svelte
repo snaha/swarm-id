@@ -4,7 +4,7 @@
 	import Typography from '../../typography.svelte'
 	import Input from '../input.svelte'
 	import Calendar from './calendar.svelte'
-	import { WarningAltFilled } from 'carbon-icons-svelte'
+	import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
 
 	type Dimension = 'default' | 'large' | 'compact' | 'small'
 

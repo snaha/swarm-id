@@ -51,6 +51,8 @@
 
 		const depthNum = parseInt(depth)
 
+		if (!identityId) return
+
 		// Create the postage stamp with guestimated defaults
 		const stamp = postageStampsStore.addStamp({
 			identityId,

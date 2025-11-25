@@ -3,7 +3,7 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Button from '$lib/components/ui/button.svelte'
-	import { ArrowRight } from 'carbon-icons-svelte'
+	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import type { ConnectedApp } from '$lib/types'
 
 	interface Props {

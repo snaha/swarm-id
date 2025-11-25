@@ -276,6 +276,15 @@
         <!-- Authentication Section -->
         <div class="auth-section">
           <h2>Authentication</h2>
+          <div class="auth-status">
+            <div class="status-indicator">
+              <div class="status-dot unauthenticated" id="status-dot"></div>
+              <span id="auth-status-text">Not authenticated</span>
+            </div>
+            <button class="login-button" id="login-button" onclick="loginWithSwarmId()">
+              Login with Swarm ID
+            </button>
+          </div>
           <div class="iframe-container">
             <iframe
               id="proxy-iframe"
