@@ -206,6 +206,11 @@ export const ProxyReadyMessageSchema = z.object({
   parentOrigin: z.string(),
 })
 
+export const InitErrorMessageSchema = z.object({
+  type: z.literal("initError"),
+  error: z.string(),
+})
+
 export const AuthStatusResponseMessageSchema = z.object({
   type: z.literal("authStatusResponse"),
   authenticated: z.boolean(),
@@ -271,6 +276,7 @@ export const ErrorMessageSchema = z.object({
 
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
+  InitErrorMessageSchema,
   AuthStatusResponseMessageSchema,
   AuthSuccessMessageSchema,
   UploadDataResponseMessageSchema,
@@ -284,6 +290,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
+export type InitErrorMessage = z.infer<typeof InitErrorMessageSchema>
 export type AuthStatusResponseMessage = z.infer<
   typeof AuthStatusResponseMessageSchema
 >

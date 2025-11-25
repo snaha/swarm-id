@@ -287,7 +287,19 @@ export class SwarmIdProxy {
       this.allowedOrigins.length > 0 &&
       !this.isAllowedOrigin(this.parentOrigin)
     ) {
-      console.warn("[Proxy] Parent origin not in allowlist:", this.parentOrigin)
+      const errorMsg = `Origin validation failed! Expected one of: ${this.allowedOrigins.join(", ")}, but received: ${this.parentOrigin}`
+      console.error("[Proxy]", errorMsg)
+
+      // Send error to parent so it doesn't hang
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "initError",
+            error: errorMsg,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
       return
     }
 
@@ -626,7 +638,7 @@ export class SwarmIdProxy {
   setAuthButtonContainer(container: HTMLElement): void {
     this.authButtonContainer = container
     console.log("[Proxy] Auth button container set")
-    // Don't show button here - let loadSecret() handle it after checking auth status
+    // Don't show button here - let loadAuthData() handle it after checking auth status
   }
 
   private async handleSetSecret(
