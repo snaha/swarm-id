@@ -71,6 +71,7 @@
 					--horizontal-gap="var(--half-padding)"
 					--horizontal-align-items="center"
 					onclick={() => (drawerOpen = true)}
+					class="clickable"
 				>
 					<Hashicon value={identity.id} size={32} />
 					<Vertical --vertical-gap="0">
@@ -137,5 +138,8 @@
 		padding: var(--double-padding);
 		overflow-y: auto;
 		z-index: 50;
+	}
+	:global(.clickable) {
+		cursor: pointer;
 	}
 </style>

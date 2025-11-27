@@ -26,7 +26,7 @@ export const accountsStore = {
 	addAccount(account: Omit<Account, 'id' | 'createdAt'>): Account {
 		const newAccount: Account = {
 			...account,
-			id: crypto.randomUUID(),
+			id: account.masterAddress,
 			createdAt: Date.now(),
 		}
 		accounts = [...accounts, newAccount]

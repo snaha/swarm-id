@@ -5,7 +5,7 @@
  * and implementing Sign-In with Ethereum (SIWE) for account creation.
  */
 
-import { BrowserProvider, JsonRpcSigner, hashMessage } from 'ethers'
+import { BrowserProvider, JsonRpcSigner, hashMessage, SigningKey, BaseWallet } from 'ethers'
 import { createWeb3Modal, defaultConfig } from '@web3modal/ethers'
 
 export interface EthereumProvider {
@@ -79,6 +79,7 @@ export interface SignedMessage {
 	signature: string
 	address: string
 	masterKey: string
+	masterAddress: string
 }
 
 /**
@@ -218,11 +219,13 @@ export async function signSIWEMessage(params: {
 		// Sign the message
 		console.log('📝 Requesting signature...')
 		const signature = await signer.signMessage(message)
-		console.log('✅ Message signed')
-
-		// Hash the signature to create a deterministic master key
-		// This ensures the same signature always produces the same key
-		const masterKey = hashMessage(signature).slice(2) // Remove '0x' prefix
+		const digest = hashMessage(message)
+		const publicKey = SigningKey.recoverPublicKey(digest, signature)
+		const seedHash = hashMessage(secretSeed)
+		const masterKey = hashMessage(`${seedHash} ${publicKey}`)
+		const signingKey = new SigningKey(masterKey)
+		const baseWallet = new BaseWallet(signingKey)
+		const masterAddress = baseWallet.address
 
 		console.log('🔑 Master key derived from signature:', masterKey.substring(0, 16) + '...')
 
@@ -231,6 +234,7 @@ export async function signSIWEMessage(params: {
 			signature,
 			address,
 			masterKey,
+			masterAddress,
 		}
 	} catch (error) {
 		if (error instanceof Error) {
@@ -259,4 +263,17 @@ export async function connectAndSign(params: {
 	})
 
 	return signed
+}
+
+async function isConnected() {
+	const ethereum = getEthereumProvider()
+	if (!ethereum) {
+		return false
+	}
+	const accounts = (await ethereum.request({ method: 'eth_accounts' })) as Array<string>
+	if (accounts.length) {
+		return true
+	} else {
+		return false
+	}
 }

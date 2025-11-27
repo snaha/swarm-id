@@ -71,7 +71,7 @@
 							{:else if account.type === 'ethereum'}
 								<EthereumLogo fill="var(--colors-ultra-high)" width={20} height={20} />
 							{/if}
-							<Typography variant="small">{account.name}</Typography>
+							<Typography variant="small">{account.name}-{account.id.slice(2, 8)}</Typography>
 						</Horizontal>
 						<Typography>
 							{identity.name}

@@ -4,7 +4,8 @@ export type SessionData = {
 	// Temporary data during account creation
 	accountName?: string
 	accountType?: 'passkey' | 'ethereum'
-	prfOutput?: string
+	masterKey?: string // Credential ID for passkey or derived key for Ethereum
+	masterAddress?: string
 	ethereumAddress?: string
 
 	// Active account and identity
@@ -23,7 +24,8 @@ export const sessionStore = {
 	setAccountCreationData(data: {
 		accountName: string
 		accountType: 'passkey' | 'ethereum'
-		prfOutput: string
+		masterKey?: string // Credential ID for passkey or derived key for Ethereum
+		masterAddress?: string,
 		ethereumAddress?: string
 	}) {
 		session = { ...session, ...data }

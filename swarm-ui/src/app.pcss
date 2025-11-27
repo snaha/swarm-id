@@ -55,9 +55,9 @@
 	--line-height: 1.5rem;
 	--line-height-small: 1rem;
 
-	--letter-spacing-large: 0.03rem;
-	--letter-spacing: 0.02rem;
-	--letter-spacing-small: 0.0375rem;
+	--letter-spacing-large: 0.0rem;
+	--letter-spacing: 0.0rem;
+	--letter-spacing-small: 0.0rem;
 
 	--font-size-h1: 3rem;
 	--font-size-h2: 2.5rem;
@@ -80,9 +80,9 @@
 	--line-height-h5: 1.5rem;
 	--line-height-h6: 1rem;
 
-	--letter-spacing-h4: 0.03rem;
-	--letter-spacing-h5: 0.02rem;
-	--letter-spacing-h6: 0.0375rem;
+	--letter-spacing-h4: 0.0rem;
+	--letter-spacing-h5: 0.0rem;
+	--letter-spacing-h6: 0.0rem;
 
 	--padding: var(--font-size);
 	--quarter-padding: calc(var(--padding) / 4);
@@ -136,4 +136,11 @@ a:hover {
 	font-feature-settings: 'tnum';
 	font-optical-sizing: auto;
 	font-display: swap;
+}
+
+/* Global styles */
+.grower {
+	flex-grow: 1;
+	flex-shrink: 1;
+	min-width: 0;
 }

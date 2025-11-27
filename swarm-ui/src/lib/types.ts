@@ -13,6 +13,7 @@ export type Account = {
 	name: string
 	type: 'passkey' | 'ethereum'
 	masterKey: string
+	masterAddress: string
 	ethereumAddress?: string
 	createdAt: number
 }

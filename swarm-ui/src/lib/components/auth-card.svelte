@@ -2,6 +2,7 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import type { Snippet } from 'svelte'
+	import Vertical from './ui/vertical.svelte'
 
 	interface Props {
 		icon: Snippet
@@ -36,18 +37,18 @@
 	<div class="icon">
 		{@render icon()}
 	</div>
-	<Typography variant="h5">{title}</Typography>
-	<Typography variant="small" center>
-		{description}
-	</Typography>
-	<div class="button-wrapper">
-		<Button variant="strong" dimension="compact" hover={isHovered || isFocused}>
-			{#if buttonIcon}
-				{@render buttonIcon()}
-			{/if}
-			{buttonText}
-		</Button>
-	</div>
+	<Vertical --vertical-gap="var(--quarter-padding)" --vertical-align-items="center">
+		<Typography variant="h5">{title}</Typography>
+		<Typography variant="small" center>
+			{description}
+		</Typography>
+	</Vertical>
+	<Button variant="strong" dimension="compact" hover={isHovered || isFocused}>
+		{#if buttonIcon}
+			{@render buttonIcon()}
+		{/if}
+		{buttonText}
+	</Button>
 </div>
 
 <style>
@@ -56,7 +57,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: center;
-		padding: var(--double-padding);
+		padding: var(--padding);
 		background: var(--colors-card-bg);
 		gap: var(--padding);
 		cursor: pointer;
@@ -76,11 +77,7 @@
 		display: flex;
 		justify-content: center;
 		align-items: center;
-		width: 52px;
-		height: 52px;
-	}
-
-	.button-wrapper {
-		margin-top: var(--padding);
+		width: 64px;
+		height: 64px;
 	}
 </style>

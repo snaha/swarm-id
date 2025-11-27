@@ -19,12 +19,18 @@
 </script>
 
 <Modal bind:open>
-	<Vertical --vertical-gap="var(--padding)" style="padding: var(--padding)" tabindex={-1}>
+	<Vertical
+		--vertical-gap="var(--one-and-half-padding)"
+		style="padding: var(--padding)"
+		tabindex={-1}
+	>
 		<Typography variant="h5">Confirm saving</Typography>
-		<Typography>Have you saved your secret seed?</Typography>
-		<Horizontal --horizontal-gap="var(--half-padding)">
-			<Button dimension="compact" onclick={handleConfirm}>Yes I saved it</Button>
-			<Button dimension="compact" variant="ghost" onclick={() => (open = false)}>Nope</Button>
-		</Horizontal>
+		<Vertical --vertical-gap="var(--padding)">
+			<Typography>Have you saved your secret seed?</Typography>
+			<Horizontal --horizontal-gap="var(--half-padding)">
+				<Button dimension="compact" onclick={handleConfirm}>Yes I saved it</Button>
+				<Button dimension="compact" variant="ghost" onclick={() => (open = false)}>Nope</Button>
+			</Horizontal>
+		</Vertical>
 	</Vertical>
 </Modal>

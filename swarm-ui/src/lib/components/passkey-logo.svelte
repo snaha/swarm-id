@@ -6,7 +6,7 @@
 		size?: number
 	}
 
-	let { fill = '#242424', width = 65, height = 64, size = 20 }: Props = $props()
+	let { fill = '#242424', width = 65, height = 64, size }: Props = $props()
 </script>
 
 <svg

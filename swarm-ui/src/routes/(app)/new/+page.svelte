@@ -70,13 +70,15 @@
 			const signed = await connectAndSign({ secretSeed: secretSeed.trim() })
 
 			console.log('✅ Wallet connected and message signed')
-			console.log('📍 Ethereum Address:', signed.address)
+			console.log('📍 Wallet address:', signed.address)
+			console.log('📍 Account address:', signed.masterAddress)
 
 			// Store account creation data in session store
 			sessionStore.setAccountCreationData({
 				accountName: accountName.trim(),
 				accountType: 'ethereum',
-				prfOutput: signed.masterKey,
+				masterKey: signed.masterKey,
+				masterAddress: signed.masterAddress,
 				ethereumAddress: signed.address,
 			})
 
@@ -163,12 +165,17 @@
 							maxWidth="287px"
 						>
 							{#snippet children()}
-								<button
-									type="button"
+								<!-- svelte-ignore a11y_invalid_attribute -->
+								<a
+									href="#"
 									onmouseenter={() => (showTooltip = true)}
 									onmouseleave={() => (showTooltip = false)}
-									style="background: none; border: none; color: inherit; text-decoration: underline; cursor: pointer; padding: 0;"
-									>Learn more</button
+									onclick={(e: MouseEvent) => {
+										e.stopPropagation()
+										showTooltip = !showTooltip
+									}}
+
+									>Learn more</a
 								>
 							{/snippet}
 							{#snippet helperText()}

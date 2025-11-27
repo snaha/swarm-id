@@ -12,15 +12,16 @@
 	import { goto } from '$app/navigation'
 	import { onMount } from 'svelte'
 	import { page } from '$app/stores'
-	import { sessionStore } from '$lib/stores/session.svelte'
+	import { sessionStore, type SessionData } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import type { Identity } from '$lib/types'
+	import { HDNodeWallet } from 'ethers'
 
-	// Generate identity ID upfront
-	const identityId = crypto.randomUUID()
-	let idName = $state(identityId)
+	let idName = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
 	let accountName = $state('')
+	const derivedIdentity = deriveIdentityFromAccount(sessionStore.data, identitiesStore.identities.length)
 
 	onMount(() => {
 		// Get origin parameter if coming from /connect
@@ -34,17 +35,46 @@
 		if (sessionData.accountName) {
 			accountName = sessionData.accountName
 		}
-
-		if (!sessionData.prfOutput) {
-			console.error('❌ No PRF output available in session')
-		}
+		
+		idName = derivedIdentity?.name ?? ''
 	})
+
+	function deriveIdentityFromAccount(sessionData: SessionData, index: number) {
+		if (!sessionData.masterKey) {
+			console.error('❌ No master key available')
+			return
+		}
+		if (!sessionData.masterAddress) {
+			console.error('❌ No master address available')
+			return
+		}
+
+		console.debug({ sessionData })
+
+		const identityWallet = HDNodeWallet.fromSeed(sessionData.masterKey).deriveChild(index)
+		const id = identityWallet.address
+		const name = id.slice(2, 10)
+		const accountId = sessionData.masterAddress
+		const createdAt = Date.now()
+		const identity: Identity = {
+			id,
+			accountId,
+			name,
+			createdAt
+		}
+		return identity
+	}
 
 	function handleCreateIdentity() {
 		const sessionData = sessionStore.data
 
-		if (!sessionData.prfOutput) {
-			console.error('❌ No PRF output available')
+		if (!sessionData.masterKey) {
+			console.error('❌ No master key available')
+			return
+		}
+
+		if (!sessionData.masterAddress) {
+			console.error('❌ No master address available')
 			return
 		}
 
@@ -58,11 +88,17 @@
 			return
 		}
 
+		if (!derivedIdentity) {
+			console.error('❌ No derived identity available')
+			return
+		}
+
 		// Create the account with the master key
 		const account = accountsStore.addAccount({
 			name: sessionData.accountName,
 			type: sessionData.accountType,
-			masterKey: sessionData.prfOutput,
+			masterKey: sessionData.masterKey,
+			masterAddress: sessionData.masterAddress,
 			ethereumAddress: sessionData.ethereumAddress,
 		})
 
@@ -70,9 +106,7 @@
 
 		// Create the identity
 		const identity = identitiesStore.addIdentity({
-			id: identityId,
-			accountId: account.id,
-			name: idName,
+			...derivedIdentity,
 		})
 
 		console.log('✅ Identity created:', identity.id)
@@ -88,7 +122,7 @@
 		if (appOrigin) {
 			goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
 		} else {
-			goto(routes.CONNECT)
+			goto(routes.HOME)
 		}
 	}
 </script>
@@ -111,15 +145,15 @@
 			<Typography>ID name</Typography>
 			<Horizontal --horizontal-gap="var(--half-padding)">
 				<Input variant="outline" dimension="compact" name="id-name" bind:value={idName} />
-				{#if idName}
-					<Hashicon value={idName} size={40} />
+				{#if derivedIdentity}
+					<Hashicon value={derivedIdentity.id} size={40} />
 				{/if}
 			</Horizontal>
 		</Grid>
 	{/snippet}
 
 	{#snippet buttonContent()}
-		<Button dimension="compact" onclick={handleCreateIdentity}>
+		<Button dimension="compact" onclick={handleCreateIdentity} disabled={!derivedIdentity}>
 			<Checkmark />Create and connect</Button
 		>
 	{/snippet}

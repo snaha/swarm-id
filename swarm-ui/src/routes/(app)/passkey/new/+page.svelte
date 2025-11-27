@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import { authenticateWithPasskey, createPasskeyIdentity } from '$lib/passkey'
+	import { createPasskeyAccount } from '$lib/passkey'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Button from '$lib/components/ui/button.svelte'
@@ -15,6 +15,9 @@
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Grid from '$lib/components/ui/grid.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { keccak256 } from 'ethers'
+	import { hexToUint8Array } from '$lib/utils/key-derivation'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 
 	let accountName = $state('Passkey')
 	let appOrigin = $state<string | undefined>(undefined)
@@ -38,43 +41,31 @@
 		try {
 			isProcessing = true
 			error = undefined
-			console.log('🔐 Creating passkey identity...')
+			console.log('🔐 Creating passkey account...')
 
-			// Create a new passkey
+			// Create a new passkey - this will derive the Ethereum address from the credential
 			console.log('📝 Creating new passkey for:', accountName)
-			let identity = await createPasskeyIdentity({
+			const swarmIdDomain = window.location.hostname
+			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
+			const userIdIndex = accountsStore.accounts.filter(account => account.type === 'passkey').length
+			const userId = `Swarm ID User / ${userIdIndex}`
+			const account = await createPasskeyAccount({
 				rpName: 'Swarm ID',
-				rpId: window.location.hostname,
+				rpId: swarmIdDomain,
+				challenge,
+				userId,
 				userName: accountName.trim(),
 				userDisplayName: accountName.trim(),
 			})
 			console.log('✅ Passkey created successfully')
 
-			// After creating, authenticate to get the PRF output
-			identity = await authenticateWithPasskey({
-				rpId: window.location.hostname,
-			})
-
-			if (!identity.prfOutput) {
-				throw new Error(
-					'PRF extension not available. Please use a modern browser (Chrome 128+, Safari 18+) with passkey support.',
-				)
-			}
-
-			// Convert PRF output to hex string
-			const prfHex = Array.from(identity.prfOutput)
-				.map((b) => b.toString(16).padStart(2, '0'))
-				.join('')
-
-			console.log('🔑 PRF output from passkey:', prfHex.substring(0, 16) + '...')
-			console.log('📍 Ethereum Address:', identity.ethereumAddress)
-
 			// Store account creation data in session store
 			sessionStore.setAccountCreationData({
 				accountName: accountName.trim(),
 				accountType: 'passkey',
-				prfOutput: prfHex,
-				ethereumAddress: identity.ethereumAddress,
+				masterKey: account.credentialId,
+				masterAddress: account.ethereumAddress,
+				ethereumAddress: account.ethereumAddress,
 			})
 
 			// Navigate to identity creation page
@@ -133,8 +124,8 @@
 			</Grid>
 
 			<Typography variant="small"
-				>Your passkey will be used to derive a deterministic master key for your Swarm ID. This key
-				is secured by your device's biometric authentication.</Typography
+				>Your passkey will be used to derive a deterministic master key for your Swarm ID. Works
+				with your device's biometric authentication or hardware security keys.</Typography
 			>
 		</Vertical>
 	{/snippet}
