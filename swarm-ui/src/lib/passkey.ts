@@ -1,6 +1,6 @@
 /**
  * Passkey-based identity management using WebAuthn
- * Derives deterministic Ethereum addresses from passkey credentials
+ * Derives deterministic Ethereum addresses from platform authenticator PRF output
  */
 
 import {
@@ -12,11 +12,24 @@ import {
 	type AuthenticationResponseJSON,
 } from '@simplewebauthn/browser'
 import { HDNodeWallet } from 'ethers'
-import { hexToUint8Array, uint8ArrayToHex } from './utils/key-derivation'
+
+// Type augmentation for PRF extension (not in standard types)
+declare module '@simplewebauthn/browser' {
+	interface AuthenticationExtensionsClientOutputs {
+		prf?: {
+			enabled?: boolean
+			results?: {
+				first?: ArrayBuffer
+				second?: ArrayBuffer
+			}
+		}
+	}
+}
 
 export interface PasskeyAccount {
 	credentialId: string
 	ethereumAddress: string
+	masterKey: string // Hex-encoded seed for HD wallet derivation
 }
 
 export interface PasskeyRegistrationOptions {
@@ -40,6 +53,14 @@ function generateChallenge(): Uint8Array {
 	return challenge
 }
 
+async function generatePRFSalt(): Promise<ArrayBuffer> {
+	// Domain-specific salt prevents cross-domain key derivation
+	const saltString = `${window.location.hostname}:ethereum-wallet-v1`
+	const encoder = new TextEncoder()
+	const saltBytes = encoder.encode(saltString)
+	return await crypto.subtle.digest('SHA-256', saltBytes)
+}
+
 function bufferToBase64url(buffer: Uint8Array): string {
 	const base64 = btoa(String.fromCharCode(...buffer))
 	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
@@ -57,7 +78,29 @@ function base64urlToBuffer(base64url: string): Uint8Array {
 }
 
 /**
- * Create a new passkey credential
+ * Get existing passkey account or create new one if none exists
+ * This is the main entry point for passkey-based authentication
+ */
+export async function getOrCreatePasskeyAccount(
+	options: PasskeyRegistrationOptions,
+): Promise<PasskeyAccount> {
+	try {
+		console.log('🔍 Checking for existing passkey credential...')
+		// Try to authenticate with existing credential (usernameless)
+		const account = await authenticateWithPasskey({
+			rpId: options.rpId,
+		})
+		console.log('✅ Found existing credential')
+		return account
+	} catch (error) {
+		console.log('📝 No existing credential found, creating new one...')
+		// No credential exists, create new one
+		return await createPasskeyAccount(options)
+	}
+}
+
+/**
+ * Create a new passkey credential with platform authenticator (Touch ID/Face ID)
  */
 export async function createPasskeyAccount(
 	options: PasskeyRegistrationOptions,
@@ -80,13 +123,13 @@ export async function createPasskeyAccount(
 			{ alg: -257, type: 'public-key' }, // RS256 (RSA with SHA-256)
 		],
 		authenticatorSelection: {
-			authenticatorAttachment: 'cross-platform', // Allow hardware keys like YubiKey
+			authenticatorAttachment: 'cross-platform', // Touch ID/Face ID/Windows Hello
 			requireResidentKey: true,
 			residentKey: 'required',
-			userVerification: 'required',
+			userVerification: 'preferred',
 		},
 		extensions: {
-			prf: {},
+			prf: {}, // Enable PRF extension for deterministic key derivation
 		} as AuthenticationExtensionsClientInputs,
 		timeout: 60000,
 		attestation: 'none',
@@ -94,22 +137,53 @@ export async function createPasskeyAccount(
 
 	const registrationResponse = await startRegistration({ optionsJSON: registrationOptions })
 
-	return processRegistrationResponse(registrationResponse)
+	// Check if PRF extension is available
+	const prfEnabled = registrationResponse.clientExtensionResults?.prf?.enabled ?? false
+	console.log('📝 PRF extension:', prfEnabled ? 'enabled ✅' : 'not available ❌')
+
+	if (!prfEnabled) {
+		throw new Error(
+			'PRF extension not available on this device. Please use a device with Touch ID, Face ID, or Windows Hello.',
+		)
+	}
+
+	const credentialId = registrationResponse.id
+	console.log('📝 Registration: Credential created successfully')
+	console.log('🔑 Credential ID:', credentialId)
+
+	// Immediately authenticate to derive Ethereum address from PRF output
+	console.log('🔐 Authenticating to derive Ethereum address... (biometric verification)')
+	const account = await authenticateWithPasskey({
+		rpId: options.rpId,
+		allowCredentials: [{ id: credentialId, type: 'public-key' }],
+	})
+
+	console.log('✅ Passkey account created with address:', account.ethereumAddress)
+
+	return account
 }
 
 /**
- * Authenticate with passkey and derive Ethereum address from credential
+ * Authenticate with passkey and derive Ethereum address from PRF output
  */
 export async function authenticateWithPasskey(
 	options: PasskeyAuthenticationOptions = {},
 ): Promise<PasskeyAccount> {
 	const challenge = options.challenge || generateChallenge()
+	const prfSalt = await generatePRFSalt()
 
 	const authenticationOptions: PublicKeyCredentialRequestOptionsJSON = {
 		challenge: bufferToBase64url(challenge),
 		rpId: options.rpId || window.location.hostname,
 		timeout: 60000,
 		userVerification: 'required',
+		extensions: {
+			prf: {
+				eval: {
+					first: prfSalt,
+				},
+			},
+		} as AuthenticationExtensionsClientInputs,
 	}
 
 	if (options.allowCredentials) {
@@ -125,59 +199,109 @@ export async function authenticateWithPasskey(
 	return processAuthenticationResponse(authenticationResponse)
 }
 
-async function processResponse(responseId: string) {
-	const credentialId = '0x' + uint8ArrayToHex(base64urlToBuffer(responseId))
-
-	console.log('📝 Registration: Credential created successfully')
-	console.log('🔑 Credential ID:', credentialId)
-
-	// Derive Ethereum address from credential ID
-	const ethereumAddress = await deriveEthereumAddressFromCredentialId(credentialId)
-
-	return {
-		credentialId,
-		ethereumAddress,
-	}
-}
-
-async function processRegistrationResponse(
-	response: RegistrationResponseJSON,
-): Promise<PasskeyAccount> {
-	console.debug({ response })
-	return processResponse(response.response.publicKey)
-}
-
 async function processAuthenticationResponse(
 	response: AuthenticationResponseJSON,
 ): Promise<PasskeyAccount> {
-	console.debug({ response })
-	return processResponse(response.response.signature)
+	const credentialId = response.id
+
+	// Extract PRF output
+	const clientExtensionResults = response.clientExtensionResults || {}
+	const prfResult = (clientExtensionResults as {
+		prf?: { results?: { first?: ArrayBuffer } }
+	})?.prf
+	const prfOutput = prfResult?.results?.first
+
+	if (!prfOutput) {
+		throw new Error(
+			'PRF extension did not return results. Please use a device with Touch ID, Face ID, or Windows Hello.',
+		)
+	}
+
+	const prfBytes = new Uint8Array(prfOutput)
+	console.log('🔑 PRF output received:', prfBytes.length, 'bytes')
+
+	// Derive Ethereum wallet from PRF output
+	const wallet = await deriveWalletFromPRF(prfBytes)
+
+	return {
+		credentialId,
+		ethereumAddress: wallet.address,
+		masterKey: wallet.masterKey,
+	}
 }
 
 /**
- * Derive Ethereum address from credential ID
- * Uses the credential ID as deterministic entropy to generate an Ethereum address
+ * Derive master key from PRF output using importKey + deriveKey pattern
+ * Follows Yubico's best practice guide for PRF key derivation
  */
-async function deriveEthereumAddressFromCredentialId(credentialId: string): Promise<string> {
-	const credentialBytes = hexToUint8Array(credentialId)
+async function deriveMasterKeyFromPRF(prfOutput: Uint8Array): Promise<Uint8Array> {
+	// Step 1: Import PRF result as master key
+	const masterKey = await crypto.subtle.importKey(
+		'raw',
+		prfOutput,
+		'HKDF',
+		false, // non-extractable
+		['deriveKey'], // only for key derivation
+	)
 
-	// Hash the credential ID to get 32 bytes of entropy
-	const entropy = await crypto.subtle.digest('SHA-256', credentialBytes)
-	const entropyBytes = new Uint8Array(entropy)
+	// Step 2: Derive purpose-specific key for Ethereum wallet
+	const derivedKey = await crypto.subtle.deriveKey(
+		{
+			name: 'HKDF',
+			salt: new Uint8Array(), // empty salt (PRF already provides entropy)
+			hash: 'SHA-256',
+			info: new TextEncoder().encode('ethereum-hd-wallet-v1'), // purpose binding
+		},
+		masterKey,
+		{ name: 'HMAC', hash: 'SHA-256', length: 256 }, // output: 256-bit key
+		true, // extractable (need to export for HDNodeWallet)
+		['sign'], // usage
+	)
 
-	// Convert entropy to hex string for HDNodeWallet
+	// Step 3: Export derived key as raw bytes
+	const exportedKey = await crypto.subtle.exportKey('raw', derivedKey)
+	return new Uint8Array(exportedKey)
+}
+
+/**
+ * Create Ethereum wallet from seed bytes
+ * Converts seed to HD wallet and returns address + master key
+ */
+export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
+	address: string
+	masterKey: string
+} {
+	// Convert to hex for HDNodeWallet
 	const entropyHex =
 		'0x' +
-		Array.from(entropyBytes)
+		Array.from(seedBytes)
 			.map((b) => b.toString(16).padStart(2, '0'))
 			.join('')
 
-	// Create HD wallet from entropy
+	// Create HD wallet from seed
 	const wallet = HDNodeWallet.fromSeed(entropyHex)
 
 	console.log('📍 Ethereum Address:', wallet.address)
+	console.log('🔑 Master Key:', entropyHex)
 
-	return wallet.address
+	return {
+		address: wallet.address,
+		masterKey: entropyHex,
+	}
+}
+
+/**
+ * Derive Ethereum wallet from PRF output
+ * Returns both the Ethereum address and master key for HD wallet derivation
+ */
+async function deriveWalletFromPRF(
+	prfOutput: Uint8Array,
+): Promise<{ address: string; masterKey: string }> {
+	// Step 1: Derive master key using importKey + deriveKey
+	const seedBytes = await deriveMasterKeyFromPRF(prfOutput)
+
+	// Step 2: Create Ethereum wallet from seed
+	return createEthereumWalletFromSeed(seedBytes)
 }
 
 /**

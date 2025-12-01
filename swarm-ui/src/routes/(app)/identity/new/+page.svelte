@@ -12,16 +12,18 @@
 	import { goto } from '$app/navigation'
 	import { onMount } from 'svelte'
 	import { page } from '$app/stores'
-	import { sessionStore, type SessionData } from '$lib/stores/session.svelte'
+	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import type { Identity } from '$lib/types'
+	import type { Identity, Account, DistributiveOmit } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
 
 	let idName = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
 	let accountName = $state('')
-	const derivedIdentity = deriveIdentityFromAccount(sessionStore.data, identitiesStore.identities.length)
+	const derivedIdentity = sessionStore.data.account
+		? deriveIdentityFromAccount(sessionStore.data.account, identitiesStore.identities.length)
+		: undefined
 
 	onMount(() => {
 		// Get origin parameter if coming from /connect
@@ -31,30 +33,25 @@
 		}
 
 		// Retrieve account creation data from session store
-		const sessionData = sessionStore.data
-		if (sessionData.accountName) {
-			accountName = sessionData.accountName
+		const account = sessionStore.data.account
+		if (account) {
+			accountName = account.name
 		}
-		
+
 		idName = derivedIdentity?.name ?? ''
 	})
 
-	function deriveIdentityFromAccount(sessionData: SessionData, index: number) {
-		if (!sessionData.masterKey) {
-			console.error('❌ No master key available')
-			return
-		}
-		if (!sessionData.masterAddress) {
-			console.error('❌ No master address available')
-			return
-		}
+	function deriveIdentityFromAccount(
+		account: DistributiveOmit<Account, 'id' | 'createdAt'>,
+		index: number
+	) {
+		// No null checks needed - account object is already validated
+		console.debug({ account })
 
-		console.debug({ sessionData })
-
-		const identityWallet = HDNodeWallet.fromSeed(sessionData.masterKey).deriveChild(index)
+		const identityWallet = HDNodeWallet.fromSeed(account.masterKey).deriveChild(index)
 		const id = identityWallet.address
 		const name = id.slice(2, 10)
-		const accountId = sessionData.masterAddress
+		const accountId = account.masterAddress
 		const createdAt = Date.now()
 		const identity: Identity = {
 			id,
@@ -66,25 +63,9 @@
 	}
 
 	function handleCreateIdentity() {
-		const sessionData = sessionStore.data
-
-		if (!sessionData.masterKey) {
-			console.error('❌ No master key available')
-			return
-		}
-
-		if (!sessionData.masterAddress) {
-			console.error('❌ No master address available')
-			return
-		}
-
-		if (!sessionData.accountName) {
-			console.error('❌ No account name available')
-			return
-		}
-
-		if (!sessionData.accountType) {
-			console.error('❌ No account type available')
+		const sessionAccount = sessionStore.data.account
+		if (!sessionAccount) {
+			console.error('❌ No account data in session')
 			return
 		}
 
@@ -94,13 +75,7 @@
 		}
 
 		// Create the account with the master key
-		const account = accountsStore.addAccount({
-			name: sessionData.accountName,
-			type: sessionData.accountType,
-			masterKey: sessionData.masterKey,
-			masterAddress: sessionData.masterAddress,
-			ethereumAddress: sessionData.ethereumAddress,
-		})
+		const account = accountsStore.addAccount(sessionAccount)
 
 		console.log('✅ Account created:', account.id)
 
@@ -115,8 +90,8 @@
 		sessionStore.setCurrentAccount(account.id)
 		sessionStore.setCurrentIdentity(identity.id)
 
-		// Clear the temporary account creation data
-		sessionStore.clearAccountCreationData()
+		// Clear the account creation data
+		sessionStore.clearAccount()
 
 		// Navigate back to /connect
 		if (appOrigin) {

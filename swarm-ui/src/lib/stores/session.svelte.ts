@@ -1,12 +1,10 @@
 // Session store for tracking current account/identity creation flow
 
+import type { Account, DistributiveOmit } from '$lib/types'
+
 export type SessionData = {
-	// Temporary data during account creation
-	accountName?: string
-	accountType?: 'passkey' | 'ethereum'
-	masterKey?: string // Credential ID for passkey or derived key for Ethereum
-	masterAddress?: string
-	ethereumAddress?: string
+	// Account during creation flow (ready to be persisted)
+	account?: DistributiveOmit<Account, 'id' | 'createdAt'>
 
 	// Active account and identity
 	currentAccountId?: string
@@ -21,17 +19,11 @@ export const sessionStore = {
 		return session
 	},
 
-	setAccountCreationData(data: {
-		accountName: string
-		accountType: 'passkey' | 'ethereum'
-		masterKey?: string // Credential ID for passkey or derived key for Ethereum
-		masterAddress?: string,
-		ethereumAddress?: string
-	}) {
-		session = { ...session, ...data }
+	setAccount(account: DistributiveOmit<Account, 'id' | 'createdAt'>) {
+		session = { ...session, account }
 	},
 
-	clearAccountCreationData() {
+	clearAccount() {
 		session = {
 			currentAccountId: session.currentAccountId,
 			currentIdentityId: session.currentIdentityId,

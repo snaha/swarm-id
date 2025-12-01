@@ -8,15 +8,24 @@ export type Identity = {
 	createdAt: number
 }
 
-export type Account = {
+type AccountBase = {
 	id: string
 	name: string
-	type: 'passkey' | 'ethereum'
 	masterKey: string
 	masterAddress: string
-	ethereumAddress?: string
 	createdAt: number
 }
+
+export type PasskeyAccount = AccountBase & {
+	type: 'passkey'
+}
+
+export type EthereumAccount = AccountBase & {
+	type: 'ethereum'
+	ethereumAddress: string
+}
+
+export type Account = PasskeyAccount | EthereumAccount
 
 export type ConnectedApp = {
 	appUrl: string
@@ -40,3 +49,10 @@ export type PostageStamp = {
 	batchTTL?: number
 	createdAt: number
 }
+
+// Distributive Omit that preserves discriminated unions
+// TypeScript's built-in Omit doesn't distribute over unions, which breaks
+// discriminated unions. This helper applies Omit to each union member separately.
+export type DistributiveOmit<T, K extends PropertyKey> = T extends unknown
+	? Omit<T, K>
+	: never

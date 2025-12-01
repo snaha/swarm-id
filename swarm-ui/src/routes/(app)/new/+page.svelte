@@ -74,9 +74,9 @@
 			console.log('📍 Account address:', signed.masterAddress)
 
 			// Store account creation data in session store
-			sessionStore.setAccountCreationData({
-				accountName: accountName.trim(),
-				accountType: 'ethereum',
+			sessionStore.setAccount({
+				name: accountName.trim(),
+				type: 'ethereum',
 				masterKey: signed.masterKey,
 				masterAddress: signed.masterAddress,
 				ethereumAddress: signed.address,

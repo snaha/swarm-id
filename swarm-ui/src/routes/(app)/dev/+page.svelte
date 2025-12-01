@@ -8,6 +8,7 @@
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { generateMasterKey } from '$lib/utils/key-derivation'
+	import { createEthereumWalletFromSeed } from '$lib/passkey'
 
 	let message = $state('')
 
@@ -24,21 +25,23 @@
 		postageStampsStore.clear()
 
 		// Generate proper hex master keys for testing
-		const masterKey1 = await generateMasterKey()
-		const masterKey2 = await generateMasterKey()
+		const ethereumWallet1 = await createEthereumWalletFromSeed(crypto.getRandomValues(new Uint8Array(32)))
+		const ethereumWallet2 = await createEthereumWalletFromSeed(crypto.getRandomValues(new Uint8Array(32)))
 
 		// Create test accounts
 		const account1 = accountsStore.addAccount({
 			name: 'Test Account 1',
 			type: 'passkey',
-			masterKey: masterKey1,
+			masterKey: ethereumWallet1.masterKey,
+			masterAddress: ethereumWallet1.address,
 		})
 
 		const account2 = accountsStore.addAccount({
 			name: 'Test Account 2',
 			type: 'ethereum',
-			masterKey: masterKey2,
-			ethereumAddress: '0x1234567890123456789012345678901234567890',
+			masterKey: ethereumWallet2.masterKey,
+			masterAddress: ethereumWallet2.address,
+			ethereumAddress: ethereumWallet2.address,
 		})
 
 		// Create identities
