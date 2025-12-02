@@ -6,12 +6,18 @@ export default defineConfig({
 	plugins: [
 		sveltekit(),
 		nodePolyfills({
-			// Whether to polyfill `node:` protocol imports
 			protocolImports: true,
 		}),
 	],
+	build: {
+		rollupOptions: {
+			external: [
+				/^vite-plugin-node-polyfills\/.*/,
+			],
+		},
+	},
 	ssr: {
-		noExternal: ['carbon-icons-svelte'],
+		noExternal: ['carbon-icons-svelte', '@swarm-id/lib', '@ethersphere/bee-js'],
 	},
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}'],
