@@ -29,13 +29,17 @@ jobs:
         run: pnpm install
 
       - name: Build bee-js dependency
-        run: pnpm build --filter @ethersphere/bee-js
+        working-directory: ./bee-js
+        run: pnpm build
 
       - name: Build lib dependency
-        run: pnpm build --filter @swarm-id/lib
+        working-directory: ./lib
+        run: pnpm build
 
       - name: Build swarm-ui
-        run: pnpm build --filter swarm-identity
+        working-directory: ./swarm-ui
+        run: pnpm build
 
       - name: Run swarm-ui unit tests
-        run: pnpm test:unit --filter swarm-identity
+        working-directory: ./swarm-ui
+        run: pnpm test:unit
