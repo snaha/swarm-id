@@ -7,16 +7,8 @@ const config: KnipConfig = {
 		'$env/*': ['.svelte-kit/ambient.d.ts'],
 		'$lib/*': ['src/lib/*'],
 	},
-	ignore: [
-		'playwright/index.ts',
-		// TODO: Remove ignores below after implementing the functionality
-		'src/lib/components/ui/**/*',
-		'src/lib/utils/**/*',
-		'src/lib/routes.ts',
-		'src/lib/types.ts',
-		'src/lib/passkey.ts',
-	],
-	ignoreDependencies: ['date-fns'],
+	ignore: ['playwright/index.ts'],
+	ignoreDependencies: ['@swarm-id/lib', '@walletconnect/ethereum-provider', 'zod'],
 	ignoreExportsUsedInFile: true,
 	'playwright-ct': false,
 }

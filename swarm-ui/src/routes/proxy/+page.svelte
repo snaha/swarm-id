@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
-	import { initProxy } from '@swarm-id/lib/proxy'
+	import { initProxy } from '@swarm-id/lib'
 
 	let appDomain: string
 	let beeApiUrl: string

@@ -16,11 +16,34 @@ export default typescriptEslint.config(
 			ecmaVersion: 2022,
 			sourceType: 'module',
 			globals: { ...globals.node, ...globals.browser },
+		},
+	},
+	{
+		files: ['**/*.svelte'],
+		languageOptions: {
 			parser: svelteParser,
 			parserOptions: {
 				parser: typescriptEslint.parser,
 				extraFileExtensions: ['.svelte'],
 			},
+		},
+		rules: {
+			'svelte/no-navigation-without-resolve': 'off',
+			'svelte/prefer-svelte-reactivity': 'off',
+			'svelte/require-each-key': 'off',
+			'svelte/no-useless-children-snippet': 'off',
+			'svelte/prefer-writable-derived': 'off',
+			'svelte/no-dom-manipulating': 'off',
+			'svelte/no-useless-mustaches': 'off',
+		},
+	},
+	{
+		files: ['**/*.svelte.ts'],
+		languageOptions: {
+			parser: typescriptEslint.parser,
+		},
+		rules: {
+			'svelte/prefer-svelte-reactivity': 'off',
 		},
 	},
 	{
