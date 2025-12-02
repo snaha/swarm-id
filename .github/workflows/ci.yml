@@ -18,15 +18,17 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 24
+          cache: 'pnpm'
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
         with:
           version: 10
+          run_install: false
 
       - name: Install dependencies
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
 
       - name: Build bee-js dependency
         working-directory: ./bee-js
@@ -39,6 +41,18 @@ jobs:
       - name: Build swarm-ui
         working-directory: ./swarm-ui
         run: pnpm build
+
+      - name: Check the build
+        working-directory: ./swarm-ui
+        run: pnpm run check
+
+      - name: Code linting
+        working-directory: ./swarm-ui
+        run: pnpm run lint
+
+      - name: Check dependencies and unused files
+        working-directory: ./swarm-ui
+        run: pnpm knip
 
       - name: Run swarm-ui unit tests
         working-directory: ./swarm-ui
