@@ -17,7 +17,7 @@ export default defineConfig({
 		},
 	},
 	ssr: {
-		noExternal: ['carbon-icons-svelte', '@swarm-id/lib', '@ethersphere/bee-js'],
+		noExternal: ['carbon-icons-svelte'],
 	},
 	test: {
 		include: ['src/**/*.{test,spec}.{js,ts}'],
