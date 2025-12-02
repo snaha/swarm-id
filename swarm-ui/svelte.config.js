@@ -7,6 +7,9 @@ const config = {
 
 	kit: {
 		adapter: staticAdapter({ fallback: 'index.html' }),
+		prerender: {
+			handleUnseenRoutes: 'warn',
+		},
 	},
 }
 

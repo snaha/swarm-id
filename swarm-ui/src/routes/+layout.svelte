@@ -49,76 +49,80 @@
 	}
 </script>
 
-<div class="page-wrapper">
-	<Vertical
-		--vertical-justify-content="flex-start"
-		--vertical-gap="var(--double-padding)"
-		style="flex: 1; padding: var(--double-padding);"
-	>
-		<Horizontal
-			--horizontal-justify-content="space-between"
-			--horizontal-align-items="center"
-			style="width: 100%;"
+{#if page.url.pathname === '/proxy'}
+	{@render children()}
+{:else}
+	<div class="page-wrapper">
+		<Vertical
+			--vertical-justify-content="flex-start"
+			--vertical-gap="var(--double-padding)"
+			style="flex: 1; padding: var(--double-padding);"
 		>
-			<div class="logo">
-				<a href={routes.HOME}>
-					<SwarmLogo fill="#242424" height={30} />
-				</a>
-			</div>
+			<Horizontal
+				--horizontal-justify-content="space-between"
+				--horizontal-align-items="center"
+				style="width: 100%;"
+			>
+				<div class="logo">
+					<a href={routes.HOME}>
+						<SwarmLogo fill="#242424" height={30} />
+					</a>
+				</div>
 
-			{#if identity && account && !drawerOpen}
-				<Horizontal
-					--horizontal-gap="var(--half-padding)"
-					--horizontal-align-items="center"
-					onclick={() => (drawerOpen = true)}
-					class="clickable"
-				>
-					<Hashicon value={identity.id} size={32} />
-					<Vertical --vertical-gap="0">
-						<Typography variant="small">{account.name}</Typography>
-						<Typography>{identity.name}</Typography>
-					</Vertical>
-				</Horizontal>
-			{/if}
-		</Horizontal>
-
-		{@render children()}
-	</Vertical>
-
-	{#if identity && account && drawerOpen}
-		<div class="drawer">
-			<Vertical --vertical-gap="var(--double-padding)">
-				<Horizontal
-					--horizontal-gap="var(--double-padding)"
-					--horizontal-justify-content="space-between"
-					--horizontal-align-items="center"
-				>
-					<Button
-						variant="ghost"
-						dimension="compact"
-						onclick={() => (drawerOpen = false)}
-						aria-label="Close drawer"
+				{#if identity && account && !drawerOpen}
+					<Horizontal
+						--horizontal-gap="var(--half-padding)"
+						--horizontal-align-items="center"
+						onclick={() => (drawerOpen = true)}
+						class="clickable"
 					>
-						<SidePanelOpen size={20} />
-					</Button>
-					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
 						<Hashicon value={identity.id} size={32} />
 						<Vertical --vertical-gap="0">
 							<Typography variant="small">{account.name}</Typography>
 							<Typography>{identity.name}</Typography>
 						</Vertical>
 					</Horizontal>
-				</Horizontal>
+				{/if}
+			</Horizontal>
 
-				<IdentityList
-					{identities}
-					currentIdentityId={identityId}
-					onIdentityClick={handleIdentityClick}
-				/>
-			</Vertical>
-		</div>
-	{/if}
-</div>
+			{@render children()}
+		</Vertical>
+
+		{#if identity && account && drawerOpen}
+			<div class="drawer">
+				<Vertical --vertical-gap="var(--double-padding)">
+					<Horizontal
+						--horizontal-gap="var(--double-padding)"
+						--horizontal-justify-content="space-between"
+						--horizontal-align-items="center"
+					>
+						<Button
+							variant="ghost"
+							dimension="compact"
+							onclick={() => (drawerOpen = false)}
+							aria-label="Close drawer"
+						>
+							<SidePanelOpen size={20} />
+						</Button>
+						<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+							<Hashicon value={identity.id} size={32} />
+							<Vertical --vertical-gap="0">
+								<Typography variant="small">{account.name}</Typography>
+								<Typography>{identity.name}</Typography>
+							</Vertical>
+						</Horizontal>
+					</Horizontal>
+
+					<IdentityList
+						{identities}
+						currentIdentityId={identityId}
+						onIdentityClick={handleIdentityClick}
+					/>
+				</Vertical>
+			</div>
+		{/if}
+	</div>
+{/if}
 
 <style>
 	.page-wrapper {
