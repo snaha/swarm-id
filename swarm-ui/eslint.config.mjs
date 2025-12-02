@@ -30,7 +30,6 @@ export default typescriptEslint.config(
 		rules: {
 			'svelte/no-navigation-without-resolve': 'off',
 			'svelte/prefer-svelte-reactivity': 'off',
-			'svelte/prefer-writable-derived': 'off',
 			'svelte/no-dom-manipulating': 'off',
 		},
 	},

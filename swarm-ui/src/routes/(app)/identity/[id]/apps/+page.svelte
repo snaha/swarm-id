@@ -17,6 +17,7 @@
 	const apps = $derived(identityId ? connectedAppsStore.getAppsByIdentityId(identityId) : [])
 	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
 
+	// eslint-disable-next-line svelte/prefer-writable-derived -- defaultStampBatchID is bound to Select, must be writable
 	let defaultStampBatchID = $state<string | undefined>(undefined)
 
 	// Sync local state with store
