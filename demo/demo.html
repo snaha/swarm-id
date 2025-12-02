@@ -239,12 +239,12 @@ Hello, Swarm!</textarea
       // Auto-detect local vs production environment
       const PROXY_ORIGIN = window.__ID_DOMAIN__ || (
         window.location.hostname.includes('local')
-          ? 'https://swarm-id.local:8081'
+          ? 'http://localhost:5174'
           : 'https://swarm-id.snaha.net'
       );
 
       // Always use /demo/proxy.html for both local and production
-      const PROXY_PATH = '/demo/proxy.html'
+      const PROXY_PATH = '/proxy'
 
       const BEE_API_URL = "http://localhost:1633";
 

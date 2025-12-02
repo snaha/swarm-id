@@ -55,6 +55,7 @@
 	},
 	"dependencies": {
 		"@simplewebauthn/browser": "^13.2.2",
+		"@swarm-id/lib": "workspace:*",
 		"@walletconnect/ethereum-provider": "^2.23.0",
 		"@web3modal/ethers": "^5.1.11",
 		"ethers": "^6.15.0"
