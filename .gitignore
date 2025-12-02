@@ -1,0 +1,20 @@
+# Build outputs
+dist/
+demo/build/
+swarm-id-build/
+
+# Dependencies
+node_modules/
+demo/node_modules/
+popup/node_modules/
+
+# Lock files from non-root packages (root pnpm-lock.yaml is kept for workspace)
+demo/pnpm-lock.yaml
+popup/pnpm-lock.yaml
+
+# Local settings
+settings.local.json
+
+# OS files
+.DS_Store
+Thumbs.db
