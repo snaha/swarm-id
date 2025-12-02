@@ -13,7 +13,7 @@ static_sites:
     # GitHub auto-deploy configuration
     github:
       repo: snaha/swarm-id-explorations
-      branch: feat/create-swarm-ui
+      branch: main
       deploy_on_push: true
 
     source_dir: /
