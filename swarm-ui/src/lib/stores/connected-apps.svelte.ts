@@ -68,6 +68,7 @@ export const connectedAppsStore = {
 	// Get identity IDs that have connected to a specific app URL
 	getConnectedIdentityIds(appUrl: string): string[] {
 		return [
+			// eslint-disable-next-line svelte/prefer-svelte-reactivity -- Set is ephemeral, used only for deduplication
 			...new Set(connectedApps.filter((app) => app.appUrl === appUrl).map((app) => app.identityId)),
 		]
 	},

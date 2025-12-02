@@ -29,7 +29,6 @@ export default typescriptEslint.config(
 		},
 		rules: {
 			'svelte/no-navigation-without-resolve': 'off',
-			'svelte/prefer-svelte-reactivity': 'off',
 			'svelte/no-dom-manipulating': 'off',
 		},
 	},
@@ -37,9 +36,6 @@ export default typescriptEslint.config(
 		files: ['**/*.svelte.ts'],
 		languageOptions: {
 			parser: typescriptEslint.parser,
-		},
-		rules: {
-			'svelte/prefer-svelte-reactivity': 'off',
 		},
 	},
 	{
