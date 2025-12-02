@@ -1,7 +1,7 @@
 lockfileVersion: '9.0'
 
 settings:
-  autoInstallPeers: false
+  autoInstallPeers: true
   excludeLinksFromLockfile: false
 
 importers:
@@ -209,10 +209,10 @@ importers:
         version: link:../lib
       '@walletconnect/ethereum-provider':
         specifier: 2.23.0
-        version: 2.23.0(typescript@5.8.3)(zod@4.1.13)
+        version: 2.23.0(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
       '@web3modal/ethers':
         specifier: 5.1.11
-        version: 5.1.11(ethers@6.15.0)
+        version: 5.1.11(@types/react@19.2.7)(ethers@6.15.0)(react@18.3.1)
       ethers:
         specifier: 6.15.0
         version: 6.15.0
@@ -228,19 +228,19 @@ importers:
         version: 9.39.1
       '@playwright/experimental-ct-svelte':
         specifier: 1.57.0
-        version: 1.57.0(@types/node@24.10.1)(jiti@2.6.1)(svelte@5.45.3)(tsx@4.21.0)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+        version: 1.57.0(@types/node@24.10.1)(jiti@2.6.1)(svelte@5.45.3)(terser@5.44.1)(tsx@4.21.0)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       '@playwright/test':
         specifier: 1.57.0
         version: 1.57.0
       '@sveltejs/adapter-static':
         specifier: 3.0.10
-        version: 3.0.10(@sveltejs/kit@2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))
+        version: 3.0.10(@sveltejs/kit@2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))
       '@sveltejs/kit':
         specifier: 2.49.0
-        version: 2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+        version: 2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       '@sveltejs/vite-plugin-svelte':
         specifier: 6.2.1
-        version: 6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+        version: 6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       '@types/node':
         specifier: 24.10.1
         version: 24.10.1
@@ -258,7 +258,7 @@ importers:
         version: 10.1.8(eslint@9.39.1(jiti@2.6.1))
       eslint-plugin-svelte:
         specifier: 3.13.0
-        version: 3.13.0(eslint@9.39.1(jiti@2.6.1))(svelte@5.45.3)
+        version: 3.13.0(eslint@9.39.1(jiti@2.6.1))(svelte@5.45.3)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.8.3))
       globals:
         specifier: 16.5.0
         version: 16.5.0
@@ -297,10 +297,10 @@ importers:
         version: 8.48.1(eslint@9.39.1(jiti@2.6.1))(typescript@5.8.3)
       vite:
         specifier: 7.2.6
-        version: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+        version: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
       vitest:
         specifier: 4.0.14
-        version: 4.0.14(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+        version: 4.0.14(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
 
 packages:
 
@@ -1742,6 +1742,8 @@ packages:
 
   '@reown/appkit-utils@1.8.11':
     resolution: {integrity: sha512-6Wplz7LNe2HoxHmGGYT6FIp8saa0DzVP/427jlNuWpkL65/azPyYjA8tKptxbFWViQ4VYBsqLoQxivXC/xNMBg==}
+    peerDependencies:
+      valtio: 2.1.7
 
   '@reown/appkit-wallet@1.8.11':
     resolution: {integrity: sha512-tCzrieMuOD4tDcNQjMe83T38tJUfRdv4LG+cYGyGK1RpPGaszbq06TQVbCPkRrGiTELwkrKwXjSg1XAuHktS2w==}
@@ -2155,6 +2157,9 @@ packages:
 
   '@types/parse-json@4.0.2':
     resolution: {integrity: sha512-dISoDXWWQwUquiKsyZ4Ng+HX2KsPL7LyHKHQwgGFEA3IaKac4Obd+h2a/a6waisAoepJlBcx9paWqjA8/HVjCw==}
+
+  '@types/react@19.2.7':
+    resolution: {integrity: sha512-MWtvHrGZLFttgeEj28VXHxpmwYbor/ATPYbBfSFZEIRK0ecCFLl2Qo55z52Hss+UV9CRN7trSeq1zbgx7YDWWg==}
 
   '@types/resolve@1.20.2':
     resolution: {integrity: sha512-60BCwRFOZCQhDncwQdxxeOEEkbc5dIMccYLwbxsS4TUNeVECQ/pBJ0j09mrHOl/JJvpRPGwO9SvE4nR2Nb/a4Q==}
@@ -2651,6 +2656,11 @@ packages:
 
   ajv-formats@2.1.1:
     resolution: {integrity: sha512-Wx0Kx52hxE7C18hkMEggYlEifqWZtYaRgouJor+WMdPnQyEK13vgEWyVNup7SoeeoLMsr4kf5h6dOW11I15MUA==}
+    peerDependencies:
+      ajv: ^8.0.0
+    peerDependenciesMeta:
+      ajv:
+        optional: true
 
   ajv-keywords@5.1.0:
     resolution: {integrity: sha512-YCS/JNFAUyr5vAuhk1DWm1CBxRHW9LbJ2ozWeemrIqpbsqKjHVxYPyi5GC0rjZIT5JxJ3virVTS8wk4i/Z+krw==}
@@ -3095,6 +3105,9 @@ packages:
     resolution: {integrity: sha512-/Tb/JcjK111nNScGob5MNtsntNM1aCNUDipB/TkwZFhyDrrE47SOx/18wF2bbjgc3ZzCSKW1T5nt5EbFoAz/Vg==}
     engines: {node: '>=4'}
     hasBin: true
+
+  csstype@3.2.3:
+    resolution: {integrity: sha512-z1HGKcYy2xA8AGQfwrn0PAy+PB7X/GSj3UVJW9qKyn43xWa+gl5nXmU4qqLMRzWVLFC8KusUX8T/0kCiOYpAIQ==}
 
   dargs@7.0.0:
     resolution: {integrity: sha512-2iy1EkLdlBzQGvbweYRFxmFath8+K7+AKB0TlhHWkNuH+TmovaMH/Wp7V7R4u7f4SnX3OgLsU9t1NI9ioDnUpg==}
@@ -4223,6 +4236,10 @@ packages:
   lodash@4.17.21:
     resolution: {integrity: sha512-v2kDEe57lecTulaDIuNTPy3Ry4gLGJ6Z1O3vE1krgXZNrsQ+LFTGHVxVjcXPs17LhbZVGedAJv8XZ1tvj5FvSg==}
 
+  loose-envify@1.4.0:
+    resolution: {integrity: sha512-lyuxPGr/Wfhrlem2CL/UcnUc1zcqKAImBDzukY7Y5F/yQiNdko6+fRLevlw1HgMySw7f611UIY408EtxRSoK3Q==}
+    hasBin: true
+
   lru-cache@10.4.3:
     resolution: {integrity: sha512-JNAzZcXrCt42VGLuYz0zfAzDfAvJWW6AfYlDBQyDV5DClI2m5sAmK+OIO7s59XfsRsWHp02jAJrRadPRGTt6SQ==}
 
@@ -4707,6 +4724,10 @@ packages:
 
   react-is@18.3.1:
     resolution: {integrity: sha512-/LLMVyas0ljjAtoYiPqYiL8VWXzUUdThrmU5+n20DZv+a+ClRoevUzw5JxU+Ieh5/c87ytoTBV9G1FiKfNJdmg==}
+
+  react@18.3.1:
+    resolution: {integrity: sha512-wS+hAgJShR0KhEvPJArfuPVN1+Hz1t0Y6n5jLrGQbkb4urgPE/0Rve+1kMB1v/oWgHgm4WIcV+i7F2pTVj+2iQ==}
+    engines: {node: '>=0.10.0'}
 
   read-pkg-up@7.0.1:
     resolution: {integrity: sha512-zK0TB7Xd6JpCLmlLmufqykGE+/TlOePD6qKClNW7hHDKFh/J7/7gCWGR7joEQEW1bKq3a3yUZSObOoWLFQ4ohg==}
@@ -7167,7 +7188,9 @@ snapshots:
 
   '@lit-labs/ssr-dom-shim@1.4.0': {}
 
-  '@lit/react@1.0.8':
+  '@lit/react@1.0.8(@types/react@19.2.7)':
+    dependencies:
+      '@types/react': 19.2.7
     optional: true
 
   '@lit/reactive-element@1.6.3':
@@ -7342,11 +7365,11 @@ snapshots:
     dependencies:
       lit: 3.3.0
 
-  '@playwright/experimental-ct-core@1.57.0(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)':
+  '@playwright/experimental-ct-core@1.57.0(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)':
     dependencies:
       playwright: 1.57.0
       playwright-core: 1.57.0
-      vite: 6.4.1(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 6.4.1(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
     transitivePeerDependencies:
       - '@types/node'
       - jiti
@@ -7360,10 +7383,10 @@ snapshots:
       - tsx
       - yaml
 
-  '@playwright/experimental-ct-svelte@1.57.0(@types/node@24.10.1)(jiti@2.6.1)(svelte@5.45.3)(tsx@4.21.0)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@playwright/experimental-ct-svelte@1.57.0(@types/node@24.10.1)(jiti@2.6.1)(svelte@5.45.3)(terser@5.44.1)(tsx@4.21.0)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
-      '@playwright/experimental-ct-core': 1.57.0(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
-      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@playwright/experimental-ct-core': 1.57.0(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
+      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
     transitivePeerDependencies:
       - '@types/node'
       - jiti
@@ -7408,12 +7431,12 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@reown/appkit-controllers@1.8.11(typescript@5.8.3)(zod@4.1.13)':
+  '@reown/appkit-controllers@1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)':
     dependencies:
       '@reown/appkit-common': 1.8.11(typescript@5.8.3)(zod@4.1.13)
       '@reown/appkit-wallet': 1.8.11(typescript@5.8.3)
       '@walletconnect/universal-provider': 2.22.4(typescript@5.8.3)(zod@4.1.13)
-      valtio: 2.1.7
+      valtio: 2.1.7(@types/react@19.2.7)(react@18.3.1)
       viem: 2.40.0(typescript@5.8.3)(zod@4.1.13)
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -7443,14 +7466,14 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@reown/appkit-pay@1.8.11(typescript@5.8.3)(zod@4.1.13)':
+  '@reown/appkit-pay@1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)':
     dependencies:
       '@reown/appkit-common': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-controllers': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-ui': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-utils': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-controllers': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-ui': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-utils': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(valtio@2.1.7(@types/react@19.2.7)(react@18.3.1))(zod@4.1.13)
       lit: 3.3.0
-      valtio: 2.1.7
+      valtio: 2.1.7(@types/react@19.2.7)(react@18.3.1)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -7483,12 +7506,12 @@ snapshots:
     dependencies:
       buffer: 6.0.3
 
-  '@reown/appkit-scaffold-ui@1.8.11(typescript@5.8.3)(zod@4.1.13)':
+  '@reown/appkit-scaffold-ui@1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(valtio@2.1.7(@types/react@19.2.7)(react@18.3.1))(zod@4.1.13)':
     dependencies:
       '@reown/appkit-common': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-controllers': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-ui': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-utils': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-controllers': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-ui': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-utils': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(valtio@2.1.7(@types/react@19.2.7)(react@18.3.1))(zod@4.1.13)
       '@reown/appkit-wallet': 1.8.11(typescript@5.8.3)
       lit: 3.3.0
     transitivePeerDependencies:
@@ -7517,13 +7540,14 @@ snapshots:
       - typescript
       - uploadthing
       - utf-8-validate
+      - valtio
       - zod
 
-  '@reown/appkit-ui@1.8.11(typescript@5.8.3)(zod@4.1.13)':
+  '@reown/appkit-ui@1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)':
     dependencies:
       '@phosphor-icons/webcomponents': 2.1.5
       '@reown/appkit-common': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-controllers': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-controllers': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
       '@reown/appkit-wallet': 1.8.11(typescript@5.8.3)
       lit: 3.3.0
       qrcode: 1.5.3
@@ -7555,16 +7579,16 @@ snapshots:
       - utf-8-validate
       - zod
 
-  '@reown/appkit-utils@1.8.11(typescript@5.8.3)(zod@4.1.13)':
+  '@reown/appkit-utils@1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(valtio@2.1.7(@types/react@19.2.7)(react@18.3.1))(zod@4.1.13)':
     dependencies:
       '@reown/appkit-common': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-controllers': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-controllers': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
       '@reown/appkit-polyfills': 1.8.11
       '@reown/appkit-wallet': 1.8.11(typescript@5.8.3)
       '@wallet-standard/wallet': 1.1.0
       '@walletconnect/logger': 3.0.0
       '@walletconnect/universal-provider': 2.22.4(typescript@5.8.3)(zod@4.1.13)
-      valtio: 2.1.7
+      valtio: 2.1.7(@types/react@19.2.7)(react@18.3.1)
       viem: 2.40.0(typescript@5.8.3)(zod@4.1.13)
     transitivePeerDependencies:
       - '@azure/app-configuration'
@@ -7605,23 +7629,23 @@ snapshots:
       - typescript
       - utf-8-validate
 
-  '@reown/appkit@1.8.11(typescript@5.8.3)(zod@4.1.13)':
+  '@reown/appkit@1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)':
     dependencies:
       '@reown/appkit-common': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-controllers': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-pay': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-controllers': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-pay': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
       '@reown/appkit-polyfills': 1.8.11
-      '@reown/appkit-scaffold-ui': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-ui': 1.8.11(typescript@5.8.3)(zod@4.1.13)
-      '@reown/appkit-utils': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-scaffold-ui': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(valtio@2.1.7(@types/react@19.2.7)(react@18.3.1))(zod@4.1.13)
+      '@reown/appkit-ui': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit-utils': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(valtio@2.1.7(@types/react@19.2.7)(react@18.3.1))(zod@4.1.13)
       '@reown/appkit-wallet': 1.8.11(typescript@5.8.3)
       '@walletconnect/universal-provider': 2.22.4(typescript@5.8.3)(zod@4.1.13)
       bs58: 6.0.0
       semver: 7.7.2
-      valtio: 2.1.7
+      valtio: 2.1.7(@types/react@19.2.7)(react@18.3.1)
       viem: 2.40.0(typescript@5.8.3)(zod@4.1.13)
     optionalDependencies:
-      '@lit/react': 1.0.8
+      '@lit/react': 1.0.8(@types/react@19.2.7)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -7893,15 +7917,15 @@ snapshots:
     dependencies:
       acorn: 8.15.0
 
-  '@sveltejs/adapter-static@3.0.10(@sveltejs/kit@2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))':
+  '@sveltejs/adapter-static@3.0.10(@sveltejs/kit@2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))':
     dependencies:
-      '@sveltejs/kit': 2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@sveltejs/kit': 2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
 
-  '@sveltejs/kit@2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@sveltejs/kit@2.49.0(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
       '@standard-schema/spec': 1.0.0
       '@sveltejs/acorn-typescript': 1.0.7(acorn@8.15.0)
-      '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       '@types/cookie': 0.6.0
       acorn: 8.15.0
       cookie: 0.6.0
@@ -7914,48 +7938,48 @@ snapshots:
       set-cookie-parser: 2.7.2
       sirv: 3.0.2
       svelte: 5.45.3
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
 
-  '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@sveltejs/vite-plugin-svelte-inspector@4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@sveltejs/vite-plugin-svelte': 5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       debug: 4.4.3
       svelte: 5.45.3
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
     transitivePeerDependencies:
       - supports-color
 
-  '@sveltejs/vite-plugin-svelte-inspector@5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@sveltejs/vite-plugin-svelte-inspector@5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@sveltejs/vite-plugin-svelte': 6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       debug: 4.4.3
       svelte: 5.45.3
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
     transitivePeerDependencies:
       - supports-color
 
-  '@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@sveltejs/vite-plugin-svelte-inspector': 4.0.1(@sveltejs/vite-plugin-svelte@5.1.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       debug: 4.4.3
       deepmerge: 4.3.1
       kleur: 4.1.5
       magic-string: 0.30.21
       svelte: 5.45.3
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
-      vitefu: 1.1.1(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
+      vitefu: 1.1.1(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
     transitivePeerDependencies:
       - supports-color
 
-  '@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
-      '@sveltejs/vite-plugin-svelte-inspector': 5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@sveltejs/vite-plugin-svelte-inspector': 5.0.1(@sveltejs/vite-plugin-svelte@6.2.1(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)))(svelte@5.45.3)(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       debug: 4.4.3
       deepmerge: 4.3.1
       magic-string: 0.30.21
       svelte: 5.45.3
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
-      vitefu: 1.1.1(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
+      vitefu: 1.1.1(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
     transitivePeerDependencies:
       - supports-color
 
@@ -8066,6 +8090,11 @@ snapshots:
   '@types/normalize-package-data@2.4.4': {}
 
   '@types/parse-json@4.0.2': {}
+
+  '@types/react@19.2.7':
+    dependencies:
+      csstype: 3.2.3
+    optional: true
 
   '@types/resolve@1.20.2': {}
 
@@ -8272,13 +8301,13 @@ snapshots:
       chai: 6.2.1
       tinyrainbow: 3.0.3
 
-  '@vitest/mocker@4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))':
+  '@vitest/mocker@4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))':
     dependencies:
       '@vitest/spy': 4.0.14
       estree-walker: 3.0.3
       magic-string: 0.30.21
     optionalDependencies:
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
 
   '@vitest/pretty-format@4.0.14':
     dependencies:
@@ -8473,13 +8502,13 @@ snapshots:
     dependencies:
       tslib: 1.14.1
 
-  '@walletconnect/ethereum-provider@2.16.1':
+  '@walletconnect/ethereum-provider@2.16.1(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
       '@walletconnect/jsonrpc-http-connection': 1.0.8
       '@walletconnect/jsonrpc-provider': 1.0.14
       '@walletconnect/jsonrpc-types': 1.0.4
       '@walletconnect/jsonrpc-utils': 1.0.8
-      '@walletconnect/modal': 2.6.2
+      '@walletconnect/modal': 2.6.2(@types/react@19.2.7)(react@18.3.1)
       '@walletconnect/sign-client': 2.16.1
       '@walletconnect/types': 2.16.1
       '@walletconnect/universal-provider': 2.16.1
@@ -8511,9 +8540,9 @@ snapshots:
       - uploadthing
       - utf-8-validate
 
-  '@walletconnect/ethereum-provider@2.23.0(typescript@5.8.3)(zod@4.1.13)':
+  '@walletconnect/ethereum-provider@2.23.0(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)':
     dependencies:
-      '@reown/appkit': 1.8.11(typescript@5.8.3)(zod@4.1.13)
+      '@reown/appkit': 1.8.11(@types/react@19.2.7)(react@18.3.1)(typescript@5.8.3)(zod@4.1.13)
       '@walletconnect/jsonrpc-http-connection': 1.0.8
       '@walletconnect/jsonrpc-provider': 1.0.14
       '@walletconnect/jsonrpc-types': 1.0.4
@@ -8645,16 +8674,16 @@ snapshots:
       '@walletconnect/safe-json': 1.0.2
       pino: 10.0.0
 
-  '@walletconnect/modal-core@2.6.2':
+  '@walletconnect/modal-core@2.6.2(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
-      valtio: 1.11.2
+      valtio: 1.11.2(@types/react@19.2.7)(react@18.3.1)
     transitivePeerDependencies:
       - '@types/react'
       - react
 
-  '@walletconnect/modal-ui@2.6.2':
+  '@walletconnect/modal-ui@2.6.2(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
-      '@walletconnect/modal-core': 2.6.2
+      '@walletconnect/modal-core': 2.6.2(@types/react@19.2.7)(react@18.3.1)
       lit: 2.8.0
       motion: 10.16.2
       qrcode: 1.5.3
@@ -8662,10 +8691,10 @@ snapshots:
       - '@types/react'
       - react
 
-  '@walletconnect/modal@2.6.2':
+  '@walletconnect/modal@2.6.2(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
-      '@walletconnect/modal-core': 2.6.2
-      '@walletconnect/modal-ui': 2.6.2
+      '@walletconnect/modal-core': 2.6.2(@types/react@19.2.7)(react@18.3.1)
+      '@walletconnect/modal-ui': 2.6.2(@types/react@19.2.7)(react@18.3.1)
     transitivePeerDependencies:
       - '@types/react'
       - react
@@ -9145,15 +9174,15 @@ snapshots:
       '@walletconnect/window-getters': 1.0.1
       tslib: 1.14.1
 
-  '@web3modal/base@5.1.11':
+  '@web3modal/base@5.1.11(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
       '@walletconnect/utils': 2.16.1
       '@web3modal/common': 5.1.11
-      '@web3modal/core': 5.1.11
+      '@web3modal/core': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/polyfills': 5.1.11
-      '@web3modal/scaffold-ui': 5.1.11
-      '@web3modal/scaffold-utils': 5.1.11
-      '@web3modal/siwe': 5.1.11
+      '@web3modal/scaffold-ui': 5.1.11(@types/react@19.2.7)(react@18.3.1)
+      '@web3modal/scaffold-utils': 5.1.11(@types/react@19.2.7)(react@18.3.1)
+      '@web3modal/siwe': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/ui': 5.1.11
       '@web3modal/wallet': 5.1.11
     optionalDependencies:
@@ -9187,28 +9216,30 @@ snapshots:
       bignumber.js: 9.1.2
       dayjs: 1.11.10
 
-  '@web3modal/core@5.1.11':
+  '@web3modal/core@5.1.11(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
       '@web3modal/common': 5.1.11
       '@web3modal/wallet': 5.1.11
-      valtio: 1.11.2
+      valtio: 1.11.2(@types/react@19.2.7)(react@18.3.1)
     transitivePeerDependencies:
       - '@types/react'
       - react
 
-  '@web3modal/ethers@5.1.11(ethers@6.15.0)':
+  '@web3modal/ethers@5.1.11(@types/react@19.2.7)(ethers@6.15.0)(react@18.3.1)':
     dependencies:
       '@coinbase/wallet-sdk': 4.0.3
-      '@walletconnect/ethereum-provider': 2.16.1
+      '@walletconnect/ethereum-provider': 2.16.1(@types/react@19.2.7)(react@18.3.1)
       '@walletconnect/utils': 2.16.1
-      '@web3modal/base': 5.1.11
+      '@web3modal/base': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/common': 5.1.11
       '@web3modal/polyfills': 5.1.11
-      '@web3modal/scaffold-utils': 5.1.11
-      '@web3modal/siwe': 5.1.11
+      '@web3modal/scaffold-utils': 5.1.11(@types/react@19.2.7)(react@18.3.1)
+      '@web3modal/siwe': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/wallet': 5.1.11
       ethers: 6.15.0
-      valtio: 1.11.2
+      valtio: 1.11.2(@types/react@19.2.7)(react@18.3.1)
+    optionalDependencies:
+      react: 18.3.1
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -9238,12 +9269,12 @@ snapshots:
     dependencies:
       buffer: 6.0.3
 
-  '@web3modal/scaffold-ui@5.1.11':
+  '@web3modal/scaffold-ui@5.1.11(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
       '@web3modal/common': 5.1.11
-      '@web3modal/core': 5.1.11
-      '@web3modal/scaffold-utils': 5.1.11
-      '@web3modal/siwe': 5.1.11
+      '@web3modal/core': 5.1.11(@types/react@19.2.7)(react@18.3.1)
+      '@web3modal/scaffold-utils': 5.1.11(@types/react@19.2.7)(react@18.3.1)
+      '@web3modal/siwe': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/ui': 5.1.11
       '@web3modal/wallet': 5.1.11
       lit: 3.1.0
@@ -9270,27 +9301,27 @@ snapshots:
       - react
       - uploadthing
 
-  '@web3modal/scaffold-utils@5.1.11':
+  '@web3modal/scaffold-utils@5.1.11(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
       '@web3modal/common': 5.1.11
-      '@web3modal/core': 5.1.11
+      '@web3modal/core': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/polyfills': 5.1.11
       '@web3modal/wallet': 5.1.11
-      valtio: 1.11.2
+      valtio: 1.11.2(@types/react@19.2.7)(react@18.3.1)
     transitivePeerDependencies:
       - '@types/react'
       - react
 
-  '@web3modal/siwe@5.1.11':
+  '@web3modal/siwe@5.1.11(@types/react@19.2.7)(react@18.3.1)':
     dependencies:
       '@walletconnect/utils': 2.16.1
       '@web3modal/common': 5.1.11
-      '@web3modal/core': 5.1.11
-      '@web3modal/scaffold-utils': 5.1.11
+      '@web3modal/core': 5.1.11(@types/react@19.2.7)(react@18.3.1)
+      '@web3modal/scaffold-utils': 5.1.11(@types/react@19.2.7)(react@18.3.1)
       '@web3modal/ui': 5.1.11
       '@web3modal/wallet': 5.1.11
       lit: 3.1.0
-      valtio: 1.11.2
+      valtio: 1.11.2(@types/react@19.2.7)(react@18.3.1)
     transitivePeerDependencies:
       - '@azure/app-configuration'
       - '@azure/cosmos'
@@ -9462,8 +9493,8 @@ snapshots:
 
   aes-js@4.0.0-beta.5: {}
 
-  ajv-formats@2.1.1:
-    dependencies:
+  ajv-formats@2.1.1(ajv@8.17.1):
+    optionalDependencies:
       ajv: 8.17.1
 
   ajv-keywords@5.1.0(ajv@8.17.1):
@@ -9958,6 +9989,9 @@ snapshots:
 
   cssesc@3.0.0: {}
 
+  csstype@3.2.3:
+    optional: true
+
   dargs@7.0.0: {}
 
   dayjs@1.11.10: {}
@@ -10198,7 +10232,7 @@ snapshots:
     optionalDependencies:
       eslint-config-prettier: 8.10.2(eslint@8.57.1)
 
-  eslint-plugin-svelte@3.13.0(eslint@9.39.1(jiti@2.6.1))(svelte@5.45.3):
+  eslint-plugin-svelte@3.13.0(eslint@9.39.1(jiti@2.6.1))(svelte@5.45.3)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.8.3)):
     dependencies:
       '@eslint-community/eslint-utils': 4.9.0(eslint@9.39.1(jiti@2.6.1))
       '@jridgewell/sourcemap-codec': 1.5.5
@@ -10207,7 +10241,7 @@ snapshots:
       globals: 16.5.0
       known-css-properties: 0.37.0
       postcss: 8.5.6
-      postcss-load-config: 3.1.4(postcss@8.5.6)
+      postcss-load-config: 3.1.4(postcss@8.5.6)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.8.3))
       postcss-safe-parser: 7.0.1(postcss@8.5.6)
       semver: 7.7.3
       svelte-eslint-parser: 1.4.0(svelte@5.45.3)
@@ -11344,6 +11378,10 @@ snapshots:
 
   lodash@4.17.21: {}
 
+  loose-envify@1.4.0:
+    dependencies:
+      js-tokens: 4.0.0
+
   lru-cache@10.4.3: {}
 
   lru-cache@4.1.5:
@@ -11737,12 +11775,13 @@ snapshots:
 
   possible-typed-array-names@1.1.0: {}
 
-  postcss-load-config@3.1.4(postcss@8.5.6):
+  postcss-load-config@3.1.4(postcss@8.5.6)(ts-node@10.9.2(@types/node@24.10.1)(typescript@5.8.3)):
     dependencies:
       lilconfig: 2.1.0
       yaml: 1.10.2
     optionalDependencies:
       postcss: 8.5.6
+      ts-node: 10.9.2(@types/node@24.10.1)(typescript@5.8.3)
 
   postcss-nesting@13.0.2(postcss@8.5.6):
     dependencies:
@@ -11843,6 +11882,10 @@ snapshots:
       safe-buffer: 5.2.1
 
   react-is@18.3.1: {}
+
+  react@18.3.1:
+    dependencies:
+      loose-envify: 1.4.0
 
   read-pkg-up@7.0.1:
     dependencies:
@@ -11988,7 +12031,7 @@ snapshots:
     dependencies:
       '@types/json-schema': 7.0.15
       ajv: 8.17.1
-      ajv-formats: 2.1.1
+      ajv-formats: 2.1.1(ajv@8.17.1)
       ajv-keywords: 5.1.0(ajv@8.17.1)
 
   semver-compare@1.0.0: {}
@@ -12340,6 +12383,25 @@ snapshots:
       v8-compile-cache-lib: 3.0.1
       yn: 3.1.1
 
+  ts-node@10.9.2(@types/node@24.10.1)(typescript@5.8.3):
+    dependencies:
+      '@cspotcode/source-map-support': 0.8.1
+      '@tsconfig/node10': 1.0.12
+      '@tsconfig/node12': 1.0.11
+      '@tsconfig/node14': 1.0.3
+      '@tsconfig/node16': 1.0.4
+      '@types/node': 24.10.1
+      acorn: 8.15.0
+      acorn-walk: 8.3.4
+      arg: 4.1.3
+      create-require: 1.1.1
+      diff: 4.0.2
+      make-error: 1.3.6
+      typescript: 5.8.3
+      v8-compile-cache-lib: 3.0.1
+      yn: 3.1.1
+    optional: true
+
   tslib@1.14.1: {}
 
   tslib@2.7.0: {}
@@ -12456,7 +12518,9 @@ snapshots:
     dependencies:
       punycode: 2.3.1
 
-  use-sync-external-store@1.2.0: {}
+  use-sync-external-store@1.2.0(react@18.3.1):
+    dependencies:
+      react: 18.3.1
 
   util-deprecate@1.0.2: {}
 
@@ -12473,14 +12537,20 @@ snapshots:
       spdx-correct: 3.2.0
       spdx-expression-parse: 3.0.1
 
-  valtio@1.11.2:
+  valtio@1.11.2(@types/react@19.2.7)(react@18.3.1):
     dependencies:
       proxy-compare: 2.5.1
-      use-sync-external-store: 1.2.0
+      use-sync-external-store: 1.2.0(react@18.3.1)
+    optionalDependencies:
+      '@types/react': 19.2.7
+      react: 18.3.1
 
-  valtio@2.1.7:
+  valtio@2.1.7(@types/react@19.2.7)(react@18.3.1):
     dependencies:
       proxy-compare: 3.0.1
+    optionalDependencies:
+      '@types/react': 19.2.7
+      react: 18.3.1
 
   viem@2.40.0(typescript@5.8.3)(zod@3.22.4):
     dependencies:
@@ -12516,7 +12586,7 @@ snapshots:
       - utf-8-validate
       - zod
 
-  vite@6.4.1(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0):
+  vite@6.4.1(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.3)
@@ -12528,9 +12598,10 @@ snapshots:
       '@types/node': 24.10.1
       fsevents: 2.3.3
       jiti: 2.6.1
+      terser: 5.44.1
       tsx: 4.21.0
 
-  vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0):
+  vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0):
     dependencies:
       esbuild: 0.25.12
       fdir: 6.5.0(picomatch@4.0.3)
@@ -12542,16 +12613,17 @@ snapshots:
       '@types/node': 24.10.1
       fsevents: 2.3.3
       jiti: 2.6.1
+      terser: 5.44.1
       tsx: 4.21.0
 
-  vitefu@1.1.1(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)):
+  vitefu@1.1.1(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)):
     optionalDependencies:
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
 
-  vitest@4.0.14(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0):
+  vitest@4.0.14(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0):
     dependencies:
       '@vitest/expect': 4.0.14
-      '@vitest/mocker': 4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0))
+      '@vitest/mocker': 4.0.14(vite@7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0))
       '@vitest/pretty-format': 4.0.14
       '@vitest/runner': 4.0.14
       '@vitest/snapshot': 4.0.14
@@ -12568,7 +12640,7 @@ snapshots:
       tinyexec: 0.3.2
       tinyglobby: 0.2.15
       tinyrainbow: 3.0.3
-      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(tsx@4.21.0)
+      vite: 7.2.6(@types/node@24.10.1)(jiti@2.6.1)(terser@5.44.1)(tsx@4.21.0)
       why-is-node-running: 2.3.0
     optionalDependencies:
       '@types/node': 24.10.1
