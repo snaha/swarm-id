@@ -1,11 +1,14 @@
 // Session store for tracking current account/identity creation flow
 
+import type { Account, DistributiveOmit } from '$lib/types'
+
 export type SessionData = {
-	// Temporary data during account creation
-	accountName?: string
-	accountType?: 'passkey' | 'ethereum'
-	prfOutput?: string
-	ethereumAddress?: string
+	// Account during creation flow (ready to be persisted)
+	account?: Account
+
+	// Temporary masterKey during account/identity creation flow
+	// Cleared immediately after identity is created
+	temporaryMasterKey?: string
 
 	// Active account and identity
 	currentAccountId?: string
@@ -20,16 +23,11 @@ export const sessionStore = {
 		return session
 	},
 
-	setAccountCreationData(data: {
-		accountName: string
-		accountType: 'passkey' | 'ethereum'
-		prfOutput: string
-		ethereumAddress?: string
-	}) {
-		session = { ...session, ...data }
+	setAccount(account: Account) {
+		session = { ...session, account }
 	},
 
-	clearAccountCreationData() {
+	clearAccount() {
 		session = {
 			currentAccountId: session.currentAccountId,
 			currentIdentityId: session.currentIdentityId,
@@ -42,6 +40,14 @@ export const sessionStore = {
 
 	setCurrentIdentity(identityId: string) {
 		session = { ...session, currentIdentityId: identityId }
+	},
+
+	setTemporaryMasterKey(masterKey: string) {
+		session = { ...session, temporaryMasterKey: masterKey }
+	},
+
+	clearTemporaryMasterKey() {
+		session = { ...session, temporaryMasterKey: undefined }
 	},
 
 	clear() {

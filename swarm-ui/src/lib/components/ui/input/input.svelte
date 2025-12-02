@@ -8,7 +8,7 @@
 	type Variant = 'outline' | 'solid'
 
 	export type Props = {
-		label?: string
+		label?: Snippet | string
 		labelFor?: string
 		dimension?: Dimension
 		layout?: Layout
@@ -54,7 +54,11 @@
 <div class="root {layout} {dimension} {className}">
 	{#if label}
 		<label class="label" for={labelFor}>
-			{label}
+			{#if typeof label === 'string'}
+				{label}
+			{:else}
+				{@render label()}
+			{/if}
 		</label>
 	{/if}
 	{#if helperText && layout === 'horizontal'}

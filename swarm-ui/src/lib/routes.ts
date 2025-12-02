@@ -2,7 +2,7 @@ export default {
 	HOME: `/`,
 	CONNECT: `/connect`,
 	PASSKEY_NEW: `/passkey/new`,
-	ETH_NEW: `/eth/new`,
+	ETH_NEW: `/new`,
 	IDENTITY_NEW: `/identity/new`,
 	IDENTITY: (id: string) => `/identity/${id}`,
 	IDENTITY_APPS: (id: string) => `/identity/${id}/apps`,

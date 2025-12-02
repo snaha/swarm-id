@@ -18,40 +18,78 @@
 	let generatedSeed = $state('')
 
 	function generateSecretSeed(): string {
-		const length = 64 // Good balance between security and usability
-		const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-		const lowercase = 'abcdefghijklmnopqrstuvwxyz'
-		const numbers = '0123456789'
-		const special = '!@#$%^&*()_+-=[]{}|;:,.<>?'
-		const allChars = uppercase + lowercase + numbers + special
+		// Configuration - Apple-style seed generation with enhanced security
+		const WORD_COUNT = 6 // Easy to adjust - more words = more entropy
+		const SYLLABLES_PER_WORD = 2 // Consonant-vowel pairs per word
+		const CAPITALIZATION_PROBABILITY = 0.1 // 10% of letters capitalized
+		const DIGIT_SUBSTITUTION_PROBABILITY = 0.1 // 10% of letters become digits
+
+		// Character sets (following Apple's approach)
+		const CONSONANTS = 'bcdfghjkmnprstvxz'
+		const VOWELS = 'aeiou'
+		const DIGITS = '23456789'
 
 		// Helper to get cryptographically secure random index
-		const getRandomIndex = (max: number) => {
+		const getRandomIndex = (max: number): number => {
 			const randomBuffer = new Uint32Array(1)
 			crypto.getRandomValues(randomBuffer)
 			return randomBuffer[0] % max
 		}
 
-		// Ensure at least one of each required character type
-		let seed = ''
-		seed += uppercase[getRandomIndex(uppercase.length)]
-		seed += lowercase[getRandomIndex(lowercase.length)]
-		seed += numbers[getRandomIndex(numbers.length)]
-		seed += special[getRandomIndex(special.length)]
-
-		// Fill the rest randomly
-		for (let i = seed.length; i < length; i++) {
-			seed += allChars[getRandomIndex(allChars.length)]
+		// Helper to get random character from charset
+		const getRandomChar = (charset: string): string => {
+			return charset[getRandomIndex(charset.length)]
 		}
 
-		// Shuffle the seed using Fisher-Yates algorithm with crypto random
-		const chars = seed.split('')
-		for (let i = chars.length - 1; i > 0; i--) {
-			const j = getRandomIndex(i + 1)
-			;[chars[i], chars[j]] = [chars[j], chars[i]]
+		// Helper to check if crypto random passes probability threshold
+		const randomPasses = (probability: number): boolean => {
+			const randomBuffer = new Uint32Array(1)
+			crypto.getRandomValues(randomBuffer)
+			return randomBuffer[0] / 0xffffffff < probability
 		}
 
-		return chars.join('')
+		// Generate a syllable (consonant-vowel-consonant)
+		const generateSyllable = (): string => {
+			const consonant = getRandomChar(CONSONANTS)
+			const vowel = getRandomChar(VOWELS)
+			const consonant2 = getRandomChar(CONSONANTS)
+			return consonant + vowel + consonant2
+		}
+
+		// Generate a word with syllables, capitalization, and digit substitution
+		const generateWord = (): string => {
+			// Generate base syllable-based word
+			let word = ''
+			for (let i = 0; i < SYLLABLES_PER_WORD; i++) {
+				word += generateSyllable()
+			}
+
+			// Apply random capitalization and digit substitution
+			const chars = word.split('')
+			for (let i = 0; i < chars.length; i++) {
+				// Random capitalization
+				if (randomPasses(CAPITALIZATION_PROBABILITY)) {
+					if (['o', 'i'].includes(chars[i])) {
+						continue
+					}
+					chars[i] = chars[i].toUpperCase()
+				}
+				// Random digit substitution (only if still a letter)
+				else if (randomPasses(DIGIT_SUBSTITUTION_PROBABILITY) && /[a-zA-Z]/.test(chars[i])) {
+					chars[i] = getRandomChar(DIGITS)
+				}
+			}
+
+			return chars.join('')
+		}
+
+		// Generate seed with configured number of words
+		const words: string[] = []
+		for (let i = 0; i < WORD_COUNT; i++) {
+			words.push(generateWord())
+		}
+
+		return words.join('-')
 	}
 
 	function handleOpen() {

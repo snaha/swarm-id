@@ -15,12 +15,28 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import type { Identity, Account, DistributiveOmit } from '$lib/types'
+	import { HDNodeWallet } from 'ethers'
 
-	// Generate identity ID upfront
-	const identityId = crypto.randomUUID()
-	let idName = $state(identityId)
+	let idName = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
 	let accountName = $state('')
+
+	// Derive identity using temporary masterKey from session
+	const derivedIdentity = $derived.by(() => {
+		const account = sessionStore.data.account
+		const tempMasterKey = sessionStore.data.temporaryMasterKey
+
+		if (!account || !tempMasterKey) {
+			return undefined
+		}
+
+		const index = identitiesStore.identities.filter(
+			(identity) => identity.accountId === account.id,
+		).length
+
+		return deriveIdentityFromAccount(account, tempMasterKey, index)
+	})
 
 	onMount(() => {
 		// Get origin parameter if coming from /connect
@@ -30,49 +46,53 @@
 		}
 
 		// Retrieve account creation data from session store
-		const sessionData = sessionStore.data
-		if (sessionData.accountName) {
-			accountName = sessionData.accountName
+		const account = sessionStore.data.account
+		if (account) {
+			accountName = account.name
 		}
 
-		if (!sessionData.prfOutput) {
-			console.error('❌ No PRF output available in session')
-		}
+		idName = derivedIdentity?.name ?? ''
 	})
 
+	function deriveIdentityFromAccount(account: Account, masterKey: string, index: number) {
+		console.debug({ account })
+
+		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
+		const id = identityWallet.address
+		const name = id.slice(2, 10)
+		const accountId = account.id
+		const createdAt = Date.now()
+		const identity: Identity = {
+			id,
+			accountId,
+			name,
+			createdAt,
+		}
+		return identity
+	}
+
 	function handleCreateIdentity() {
-		const sessionData = sessionStore.data
+		const sessionAccount = sessionStore.data.account
+		const tempMasterKey = sessionStore.data.temporaryMasterKey
 
-		if (!sessionData.prfOutput) {
-			console.error('❌ No PRF output available')
+		if (!sessionAccount || !tempMasterKey) {
+			console.error('❌ No account data or masterKey in session')
 			return
 		}
 
-		if (!sessionData.accountName) {
-			console.error('❌ No account name available')
+		if (!derivedIdentity) {
+			console.error('❌ No derived identity available')
 			return
 		}
 
-		if (!sessionData.accountType) {
-			console.error('❌ No account type available')
-			return
-		}
-
-		// Create the account with the master key
-		const account = accountsStore.addAccount({
-			name: sessionData.accountName,
-			type: sessionData.accountType,
-			masterKey: sessionData.prfOutput,
-			ethereumAddress: sessionData.ethereumAddress,
-		})
+		// Create the account (encrypted for ethereum, no masterKey for passkey)
+		const account = accountsStore.addAccount(sessionAccount)
 
 		console.log('✅ Account created:', account.id)
 
 		// Create the identity
 		const identity = identitiesStore.addIdentity({
-			id: identityId,
-			accountId: account.id,
-			name: idName,
+			...derivedIdentity,
 		})
 
 		console.log('✅ Identity created:', identity.id)
@@ -81,14 +101,16 @@
 		sessionStore.setCurrentAccount(account.id)
 		sessionStore.setCurrentIdentity(identity.id)
 
-		// Clear the temporary account creation data
-		sessionStore.clearAccountCreationData()
+		// Clear both account AND temporary masterKey
+		sessionStore.clearAccount()
+		sessionStore.clearTemporaryMasterKey()
+		console.log('🧹 Cleared session data (account + masterKey)')
 
-		// Navigate back to /connect
+		// Navigate back to /connect or home
 		if (appOrigin) {
 			goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
 		} else {
-			goto(routes.CONNECT)
+			goto(routes.HOME)
 		}
 	}
 </script>
@@ -111,15 +133,15 @@
 			<Typography>ID name</Typography>
 			<Horizontal --horizontal-gap="var(--half-padding)">
 				<Input variant="outline" dimension="compact" name="id-name" bind:value={idName} />
-				{#if idName}
-					<Hashicon value={idName} size={40} />
+				{#if derivedIdentity}
+					<Hashicon value={derivedIdentity.id} size={40} />
 				{/if}
 			</Horizontal>
 		</Grid>
 	{/snippet}
 
 	{#snippet buttonContent()}
-		<Button dimension="compact" onclick={handleCreateIdentity}>
+		<Button dimension="compact" onclick={handleCreateIdentity} disabled={!derivedIdentity}>
 			<Checkmark />Create and connect</Button
 		>
 	{/snippet}

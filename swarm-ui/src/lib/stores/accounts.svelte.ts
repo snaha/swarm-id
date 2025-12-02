@@ -1,4 +1,4 @@
-import type { Account } from '$lib/types'
+import type { Account, DistributiveOmit } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-accounts'
 
@@ -23,15 +23,10 @@ export const accountsStore = {
 		return accounts
 	},
 
-	addAccount(account: Omit<Account, 'id' | 'createdAt'>): Account {
-		const newAccount: Account = {
-			...account,
-			id: crypto.randomUUID(),
-			createdAt: Date.now(),
-		}
-		accounts = [...accounts, newAccount]
+	addAccount(account: Account): Account {
+		accounts = [...accounts, account]
 		saveAccounts(accounts)
-		return newAccount
+		return account
 	},
 
 	removeAccount(id: string) {

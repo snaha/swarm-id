@@ -7,7 +7,14 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-	import { generateMasterKey } from '$lib/utils/key-derivation'
+	import { createEthereumWalletFromSeed } from '$lib/passkey'
+	import { HDNodeWallet } from 'ethers'
+	import {
+		deriveEncryptionKey,
+		encryptMasterKey,
+		generateEncryptionSalt,
+	} from '$lib/utils/encryption'
+	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
 
 	let message = $state('')
 
@@ -24,21 +31,31 @@
 		postageStampsStore.clear()
 
 		// Generate proper hex master keys for testing
-		const masterKey1 = await generateMasterKey()
-		const masterKey2 = await generateMasterKey()
+		const ethereumWallet1 = createEthereumWalletFromSeed(crypto.getRandomValues(new Uint8Array(32)))
+		const ethereumWallet2 = createEthereumWalletFromSeed(crypto.getRandomValues(new Uint8Array(32)))
 
 		// Create test accounts
 		const account1 = accountsStore.addAccount({
 			name: 'Test Account 1',
 			type: 'passkey',
-			masterKey: masterKey1,
+			id: ethereumWallet1.address,
+			createdAt: Date.now(),
 		})
+
+		const wallet2 = HDNodeWallet.fromSeed(ethereumWallet2.masterKey)
+		const publicKey2 = wallet2.publicKey
+		const encryptionSalt2 = generateEncryptionSalt()
+		const encryptionKey2 = await deriveEncryptionKey(publicKey2, encryptionSalt2)
+		const encryptedMasterKey2 = await encryptMasterKey(ethereumWallet2.masterKey, encryptionKey2)
 
 		const account2 = accountsStore.addAccount({
 			name: 'Test Account 2',
 			type: 'ethereum',
-			masterKey: masterKey2,
-			ethereumAddress: '0x1234567890123456789012345678901234567890',
+			id: ethereumWallet2.address,
+			createdAt: Date.now(),
+			ethereumAddress: ethereumWallet2.address,
+			encryptedMasterKey: encryptedMasterKey2,
+			encryptionSalt: uint8ArrayToHex(encryptionSalt2),
 		})
 
 		// Create identities
