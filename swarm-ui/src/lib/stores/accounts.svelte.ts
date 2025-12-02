@@ -23,15 +23,10 @@ export const accountsStore = {
 		return accounts
 	},
 
-	addAccount(account: DistributiveOmit<Account, 'id' | 'createdAt'>): Account {
-		const newAccount = {
-			...account,
-			id: account.masterAddress,
-			createdAt: Date.now(),
-		} as Account
-		accounts = [...accounts, newAccount]
+	addAccount(account: Account): Account {
+		accounts = [...accounts, account]
 		saveAccounts(accounts)
-		return newAccount
+		return account
 	},
 
 	removeAccount(id: string) {

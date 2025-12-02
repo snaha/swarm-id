@@ -45,7 +45,7 @@
 		const randomPasses = (probability: number): boolean => {
 			const randomBuffer = new Uint32Array(1)
 			crypto.getRandomValues(randomBuffer)
-			return (randomBuffer[0] / 0xffffffff) < probability
+			return randomBuffer[0] / 0xffffffff < probability
 		}
 
 		// Generate a syllable (consonant-vowel-consonant)

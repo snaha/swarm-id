@@ -12,7 +12,12 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import type { Identity } from '$lib/types'
+	import { authenticateWithPasskey } from '$lib/passkey'
+	import { hashMessage, keccak256, SigningKey } from 'ethers'
+	import { hexToUint8Array } from '$lib/utils/key-derivation'
+	import type { Identity, Account } from '$lib/types'
+	import { connectAndSign } from '$lib/ethereum'
+	import { decryptMasterKey, deriveEncryptionKey, encryptMasterKey } from '$lib/utils/encryption'
 
 	let appOrigin = $state('')
 	let appName = $state('')
@@ -80,6 +85,44 @@
 			.join('')
 	}
 
+	/**
+	 * Retrieve masterKey from account based on account type
+	 */
+	async function getMasterKeyFromAccount(account: Account): Promise<string> {
+		if (account.type === 'passkey') {
+			// For passkey accounts: Re-authenticate to get masterKey
+			console.log('🔐 Re-authenticating with passkey...')
+			const swarmIdDomain = window.location.hostname
+			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
+
+			const passkeyAccount = await authenticateWithPasskey({
+				rpId: swarmIdDomain,
+				challenge,
+			})
+
+			console.log('✅ Passkey authentication successful')
+			return passkeyAccount.masterKey
+		} else {
+			const message = ''
+			// Connect wallet and sign SIWE message
+			const signed = await connectAndSign({ secretSeed: message })
+
+			// Recover public key from signature
+			const digest = hashMessage(signed.message)
+			const publicKey = SigningKey.recoverPublicKey(digest, signed.signature)
+			console.log('🔑 Public key recovered:', publicKey.substring(0, 16) + '...')
+
+			// Derive encryption key from public key + salt
+			const encryptionSalt = hexToUint8Array(account.encryptionSalt)
+			const encryptionKey = await deriveEncryptionKey(publicKey, encryptionSalt)
+			console.log('🔑 Encryption key derived')
+
+			const masterKey = await decryptMasterKey(signed.masterKey, encryptionKey)
+
+			return masterKey
+		}
+	}
+
 	async function handleAuthenticate() {
 		if (!selectedIdentity) {
 			error = 'No identity selected. Please select an identity first.'
@@ -87,8 +130,8 @@
 		}
 
 		const account = accountsStore.getAccount(selectedIdentity.accountId)
-		if (!account || !account.masterKey) {
-			error = 'No master key available for selected identity.'
+		if (!account) {
+			error = 'Account not found for selected identity.'
 			return
 		}
 
@@ -98,9 +141,12 @@
 		}
 
 		try {
+			// Retrieve masterKey based on account type
+			const masterKey = await getMasterKeyFromAccount(account)
+
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
-			const identityMasterKey = await deriveIdentityKey(account.masterKey, selectedIdentity.id)
+			const identityMasterKey = await deriveIdentityKey(masterKey, selectedIdentity.id)
 
 			// Step 2: Derive app-specific secret from identity master key
 			const appSecret = await deriveSecret(identityMasterKey, appOrigin)

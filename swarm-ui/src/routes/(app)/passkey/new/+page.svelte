@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import { createPasskeyAccount, getOrCreatePasskeyAccount } from '$lib/passkey'
+	import { getOrCreatePasskeyAccount } from '$lib/passkey'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Button from '$lib/components/ui/button.svelte'
@@ -47,7 +47,10 @@
 			console.log('📝 Creating new passkey for:', accountName)
 			const swarmIdDomain = window.location.hostname
 			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
-			const userIdIndex = accountsStore.accounts.filter(account => account.type === 'passkey').length
+			const userIdIndex = accountsStore.accounts.filter(
+				(account) => account.type === 'passkey',
+			).length
+			console.debug({ userIdIndex })
 			const userId = `Swarm ID User / ${userIdIndex}`
 			const account = await getOrCreatePasskeyAccount({
 				rpName: 'Swarm ID',
@@ -59,13 +62,17 @@
 			})
 			console.log('✅ Passkey created successfully')
 
-			// Store account creation data in session store
+			// Store account WITHOUT masterKey (passkey accounts never persist masterKey)
 			sessionStore.setAccount({
+				id: account.ethereumAddress,
+				createdAt: Date.now(),
 				name: accountName.trim(),
 				type: 'passkey',
-				masterKey: account.masterKey,
-				masterAddress: account.ethereumAddress,
 			})
+
+			// Keep masterKey in session ONLY (not in account)
+			sessionStore.setTemporaryMasterKey(account.masterKey)
+			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
 			if (appOrigin) {

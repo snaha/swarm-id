@@ -21,9 +21,22 @@
 	let idName = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
 	let accountName = $state('')
-	const derivedIdentity = sessionStore.data.account
-		? deriveIdentityFromAccount(sessionStore.data.account, identitiesStore.identities.length)
-		: undefined
+
+	// Derive identity using temporary masterKey from session
+	const derivedIdentity = $derived.by(() => {
+		const account = sessionStore.data.account
+		const tempMasterKey = sessionStore.data.temporaryMasterKey
+
+		if (!account || !tempMasterKey) {
+			return undefined
+		}
+
+		const index = identitiesStore.identities.filter(
+			(identity) => identity.accountId === account.id,
+		).length
+
+		return deriveIdentityFromAccount(account, tempMasterKey, index)
+	})
 
 	onMount(() => {
 		// Get origin parameter if coming from /connect
@@ -41,31 +54,29 @@
 		idName = derivedIdentity?.name ?? ''
 	})
 
-	function deriveIdentityFromAccount(
-		account: DistributiveOmit<Account, 'id' | 'createdAt'>,
-		index: number
-	) {
-		// No null checks needed - account object is already validated
+	function deriveIdentityFromAccount(account: Account, masterKey: string, index: number) {
 		console.debug({ account })
 
-		const identityWallet = HDNodeWallet.fromSeed(account.masterKey).deriveChild(index)
+		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
 		const id = identityWallet.address
 		const name = id.slice(2, 10)
-		const accountId = account.masterAddress
+		const accountId = account.id
 		const createdAt = Date.now()
 		const identity: Identity = {
 			id,
 			accountId,
 			name,
-			createdAt
+			createdAt,
 		}
 		return identity
 	}
 
 	function handleCreateIdentity() {
 		const sessionAccount = sessionStore.data.account
-		if (!sessionAccount) {
-			console.error('❌ No account data in session')
+		const tempMasterKey = sessionStore.data.temporaryMasterKey
+
+		if (!sessionAccount || !tempMasterKey) {
+			console.error('❌ No account data or masterKey in session')
 			return
 		}
 
@@ -74,7 +85,7 @@
 			return
 		}
 
-		// Create the account with the master key
+		// Create the account (encrypted for ethereum, no masterKey for passkey)
 		const account = accountsStore.addAccount(sessionAccount)
 
 		console.log('✅ Account created:', account.id)
@@ -90,10 +101,12 @@
 		sessionStore.setCurrentAccount(account.id)
 		sessionStore.setCurrentIdentity(identity.id)
 
-		// Clear the account creation data
+		// Clear both account AND temporary masterKey
 		sessionStore.clearAccount()
+		sessionStore.clearTemporaryMasterKey()
+		console.log('🧹 Cleared session data (account + masterKey)')
 
-		// Navigate back to /connect
+		// Navigate back to /connect or home
 		if (appOrigin) {
 			goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
 		} else {

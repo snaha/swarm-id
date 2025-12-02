@@ -4,7 +4,11 @@ import type { Account, DistributiveOmit } from '$lib/types'
 
 export type SessionData = {
 	// Account during creation flow (ready to be persisted)
-	account?: DistributiveOmit<Account, 'id' | 'createdAt'>
+	account?: Account
+
+	// Temporary masterKey during account/identity creation flow
+	// Cleared immediately after identity is created
+	temporaryMasterKey?: string
 
 	// Active account and identity
 	currentAccountId?: string
@@ -19,7 +23,7 @@ export const sessionStore = {
 		return session
 	},
 
-	setAccount(account: DistributiveOmit<Account, 'id' | 'createdAt'>) {
+	setAccount(account: Account) {
 		session = { ...session, account }
 	},
 
@@ -36,6 +40,14 @@ export const sessionStore = {
 
 	setCurrentIdentity(identityId: string) {
 		session = { ...session, currentIdentityId: identityId }
+	},
+
+	setTemporaryMasterKey(masterKey: string) {
+		session = { ...session, temporaryMasterKey: masterKey }
+	},
+
+	clearTemporaryMasterKey() {
+		session = { ...session, temporaryMasterKey: undefined }
 	},
 
 	clear() {

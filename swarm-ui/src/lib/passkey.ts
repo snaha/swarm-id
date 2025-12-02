@@ -8,7 +8,6 @@ import {
 	startAuthentication,
 	type PublicKeyCredentialCreationOptionsJSON,
 	type PublicKeyCredentialRequestOptionsJSON,
-	type RegistrationResponseJSON,
 	type AuthenticationResponseJSON,
 } from '@simplewebauthn/browser'
 import { HDNodeWallet } from 'ethers'
@@ -206,9 +205,11 @@ async function processAuthenticationResponse(
 
 	// Extract PRF output
 	const clientExtensionResults = response.clientExtensionResults || {}
-	const prfResult = (clientExtensionResults as {
-		prf?: { results?: { first?: ArrayBuffer } }
-	})?.prf
+	const prfResult = (
+		clientExtensionResults as {
+			prf?: { results?: { first?: ArrayBuffer } }
+		}
+	)?.prf
 	const prfOutput = prfResult?.results?.first
 
 	if (!prfOutput) {

@@ -19,6 +19,13 @@
 	import ConfirmSaveModal from '$lib/components/confirm-save-modal.svelte'
 	import { connectAndSign } from '$lib/ethereum'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { SigningKey, hashMessage } from 'ethers'
+	import {
+		generateEncryptionSalt,
+		deriveEncryptionKey,
+		encryptMasterKey,
+	} from '$lib/utils/encryption'
+	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
@@ -73,14 +80,40 @@
 			console.log('📍 Wallet address:', signed.address)
 			console.log('📍 Account address:', signed.masterAddress)
 
-			// Store account creation data in session store
+			// Encrypt masterKey before storage
+			console.log('🔒 Encrypting masterKey...')
+
+			// Step 1: Recover public key from signature
+			const digest = hashMessage(signed.message)
+			const publicKey = SigningKey.recoverPublicKey(digest, signed.signature)
+			console.log('🔑 Public key recovered:', publicKey.substring(0, 16) + '...')
+
+			// Step 2: Generate encryption salt
+			const encryptionSalt = generateEncryptionSalt()
+			console.log('🎲 Encryption salt generated')
+
+			// Step 3: Derive encryption key from public key + salt
+			const encryptionKey = await deriveEncryptionKey(publicKey, encryptionSalt)
+			console.log('🔑 Encryption key derived')
+
+			// Step 4: Encrypt masterKey
+			const encryptedMasterKey = await encryptMasterKey(signed.masterKey, encryptionKey)
+			console.log('✅ MasterKey encrypted')
+
+			// Store account with encrypted masterKey
 			sessionStore.setAccount({
+				id: signed.masterAddress,
+				createdAt: Date.now(),
 				name: accountName.trim(),
 				type: 'ethereum',
-				masterKey: signed.masterKey,
-				masterAddress: signed.masterAddress,
 				ethereumAddress: signed.address,
+				encryptedMasterKey: encryptedMasterKey,
+				encryptionSalt: uint8ArrayToHex(encryptionSalt),
 			})
+
+			// Keep unencrypted masterKey in session temporarily for identity creation
+			sessionStore.setTemporaryMasterKey(signed.masterKey)
+			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
 			if (appOrigin) {
@@ -173,9 +206,7 @@
 									onclick={(e: MouseEvent) => {
 										e.stopPropagation()
 										showTooltip = !showTooltip
-									}}
-
-									>Learn more</a
+									}}>Learn more</a
 								>
 							{/snippet}
 							{#snippet helperText()}

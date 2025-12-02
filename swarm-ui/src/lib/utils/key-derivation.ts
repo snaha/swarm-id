@@ -113,7 +113,7 @@ export async function generateMasterKey(): Promise<string> {
  */
 export function hexToUint8Array(hexString: string): Uint8Array {
 	// Remove any whitespace and ensure even length
-	const hex = hexString.replace(/\s/g, '')
+	const hex = hexString.replace(/\s/g, '').replace(/^0x/, '')
 	if (hex.length % 2 !== 0) {
 		throw new Error('Invalid hex string: length must be even')
 	}
@@ -133,9 +133,12 @@ export function hexToUint8Array(hexString: string): Uint8Array {
  * @returns Hex string (e.g., "deadbeef")
  */
 export function uint8ArrayToHex(bytes: Uint8Array): string {
-	return Array.from(bytes)
-		.map((b) => b.toString(16).padStart(2, '0'))
-		.join('')
+	return (
+		'0x' +
+		Array.from(bytes)
+			.map((b) => b.toString(16).padStart(2, '0'))
+			.join('')
+	)
 }
 
 /**
