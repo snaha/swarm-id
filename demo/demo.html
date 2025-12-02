@@ -239,7 +239,7 @@ Hello, Swarm!</textarea
       // Auto-detect local vs production environment
       const PROXY_ORIGIN = window.__ID_DOMAIN__ || (
         window.location.hostname.includes('local')
-          ? 'http://localhost:5174'
+          ? 'https://swarm-id.local:8081'
           : 'https://swarm-id.snaha.net'
       );
 
