@@ -98,15 +98,56 @@ export class SwarmIdClient {
       document.body.appendChild(this.iframe!)
     })
 
+    console.log("[SwarmIdClient] Iframe loaded, waiting for proxy initialization...")
+
+    // Wait for proxy to signal it's ready
+    await this.waitForProxyInitialized()
+    console.log("[SwarmIdClient] Proxy initialized and ready")
+
     // Identify ourselves to the iframe
+    console.log(
+      "[SwarmIdClient] Sending parentIdentify to iframe at origin:",
+      this.iframeOrigin,
+    )
     this.sendMessage({
       type: "parentIdentify",
       beeApiUrl: this.beeApiUrl,
       popupMode: this.popupMode,
     })
+    console.log("[SwarmIdClient] parentIdentify sent")
 
     // Wait for iframe to be ready
     await this.readyPromise
+  }
+
+  /**
+   * Wait for proxy to announce it's initialized
+   * Listens for the proxyInitialized message from the iframe
+   */
+  private waitForProxyInitialized(): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        cleanup()
+        reject(new Error("Proxy initialization timeout - proxy did not signal readiness"))
+      }, 10000) // 10 second timeout
+
+      const listener = (event: MessageEvent) => {
+        // Accept proxyInitialized from any origin initially
+        // We'll validate the origin properly after parentIdentify
+        if (event.data?.type === "proxyInitialized") {
+          console.log("[SwarmIdClient] Received proxyInitialized from:", event.origin)
+          cleanup()
+          resolve()
+        }
+      }
+
+      const cleanup = () => {
+        clearTimeout(timeout)
+        window.removeEventListener("message", listener)
+      }
+
+      window.addEventListener("message", listener)
+    })
   }
 
   /**

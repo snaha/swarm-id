@@ -4,16 +4,16 @@
 #
 # This script starts TWO servers:
 #   1. server-app.js (port 8080) - Serves demo HTML files
-#   2. server-id.js (port 8081)  - Proxies to your dev server (default: localhost:5173)
+#   2. server-id.js (port 8081)  - Proxies to your dev server (default: localhost:5174)
 #
 # Usage:
-#   ./start-servers-dev.sh                           # Uses default localhost:5173
+#   ./start-servers-dev.sh                           # Uses default localhost:5174
 #   PROXY_TARGET=http://localhost:3000 ./start-servers-dev.sh
 #
 # Before running:
 #   cd swarm-ui && pnpm dev    # Start your SvelteKit dev server first!
 
-PROXY_TARGET="${PROXY_TARGET:-http://localhost:5173}"
+PROXY_TARGET="${PROXY_TARGET:-http://localhost:5174}"
 
 echo "========================================================================"
 echo "Starting Swarm ID Local Servers (DEV MODE with Hot Reload)"
