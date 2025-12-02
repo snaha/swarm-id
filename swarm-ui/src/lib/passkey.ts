@@ -282,9 +282,6 @@ export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
 	// Create HD wallet from seed
 	const wallet = HDNodeWallet.fromSeed(entropyHex)
 
-	console.log('📍 Ethereum Address:', wallet.address)
-	console.log('🔑 Master Key:', entropyHex)
-
 	return {
 		address: wallet.address,
 		masterKey: entropyHex,
