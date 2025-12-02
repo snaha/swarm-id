@@ -37,7 +37,8 @@
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "check:all": "pnpm format:check && pnpm lint && pnpm typecheck"
   },
   "keywords": [
     "swarm",

@@ -1,5 +1,10 @@
 import { makeContentAddressedChunk, Reference } from "@ethersphere/bee-js"
-import type { Bee, Stamper, Chunk as BeeChunk, UploadOptions } from "@ethersphere/bee-js"
+import type {
+  Bee,
+  Stamper,
+  Chunk as BeeChunk,
+  UploadOptions,
+} from "@ethersphere/bee-js"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
 import type { UploadContext, UploadProgress, ChunkReference } from "./types"
 
@@ -53,7 +58,7 @@ export async function uploadDataWithSigning(
   context: UploadContext,
   data: Uint8Array,
   options?: UploadOptions,
-  onProgress?: (progress: UploadProgress) => void
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<{ reference: string; tagUid?: number }> {
   const { bee, stamper, postageBatchId } = context
 
@@ -74,7 +79,9 @@ export async function uploadDataWithSigning(
   let totalChunks = chunkPayloads.length
   let processedChunks = 0
 
-  console.log(`[UploadData] Splitting ${data.length} bytes into ${totalChunks} chunks`)
+  console.log(
+    `[UploadData] Splitting ${data.length} bytes into ${totalChunks} chunks`,
+  )
 
   // Progress callback helper
   const reportProgress = () => {
@@ -95,11 +102,17 @@ export async function uploadDataWithSigning(
 
     // Store reference
     chunkRefs.push({
-      address: chunk.address.toUint8Array()
+      address: chunk.address.toUint8Array(),
     })
 
     // Upload chunk with signing
-    await uploadSingleChunk(bee, stamper, postageBatchId, chunk, uploadOptionsWithTag)
+    await uploadSingleChunk(
+      bee,
+      stamper,
+      postageBatchId,
+      chunk,
+      uploadOptionsWithTag,
+    )
 
     processedChunks++
     reportProgress()
@@ -111,27 +124,46 @@ export async function uploadDataWithSigning(
   if (chunkRefs.length === 1) {
     // Single chunk - use direct reference
     rootReference = new Reference(chunkRefs[0].address)
-    console.log("[UploadData] Single chunk upload, reference:", rootReference.toHex())
+    console.log(
+      "[UploadData] Single chunk upload, reference:",
+      rootReference.toHex(),
+    )
   } else {
     // Multiple chunks - build tree
-    console.log("[UploadData] Building merkle tree for", chunkRefs.length, "chunks")
+    console.log(
+      "[UploadData] Building merkle tree for",
+      chunkRefs.length,
+      "chunks",
+    )
 
-    rootReference = await buildMerkleTree(chunkRefs, async (intermediateChunk) => {
-      await uploadSingleChunk(bee, stamper, postageBatchId, intermediateChunk, uploadOptionsWithTag)
+    rootReference = await buildMerkleTree(
+      chunkRefs,
+      async (intermediateChunk) => {
+        await uploadSingleChunk(
+          bee,
+          stamper,
+          postageBatchId,
+          intermediateChunk,
+          uploadOptionsWithTag,
+        )
 
-      // Count intermediate chunks in progress
-      totalChunks++
-      processedChunks++
-      reportProgress()
-    })
+        // Count intermediate chunks in progress
+        totalChunks++
+        processedChunks++
+        reportProgress()
+      },
+    )
 
-    console.log("[UploadData] Merkle tree complete, root reference:", rootReference.toHex())
+    console.log(
+      "[UploadData] Merkle tree complete, root reference:",
+      rootReference.toHex(),
+    )
   }
 
   // Return result
   return {
     reference: rootReference.toHex(),
-    tagUid: tag
+    tagUid: tag,
   }
 }
 
@@ -143,7 +175,7 @@ async function uploadSingleChunk(
   stamper: Stamper | undefined,
   postageBatchId: string | undefined,
   chunk: BeeChunk,
-  options?: UploadOptions
+  options?: UploadOptions,
 ): Promise<void> {
   // Force deferred mode for faster uploads (don't wait for sync)
   // Note: pinning is incompatible with deferred mode, so disable it

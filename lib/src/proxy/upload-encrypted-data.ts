@@ -1,5 +1,14 @@
-import { makeEncryptedContentAddressedChunk, Reference, calculateChunkAddress } from "@ethersphere/bee-js"
-import type { Bee, Stamper, EncryptedChunk, UploadOptions } from "@ethersphere/bee-js"
+import {
+  makeEncryptedContentAddressedChunk,
+  Reference,
+  calculateChunkAddress,
+} from "@ethersphere/bee-js"
+import type {
+  Bee,
+  Stamper,
+  EncryptedChunk,
+  UploadOptions,
+} from "@ethersphere/bee-js"
 import { splitDataIntoChunks } from "./chunking"
 import { buildEncryptedMerkleTree } from "./chunking-encrypted"
 import type { UploadContext, UploadProgress } from "./types"
@@ -54,7 +63,7 @@ export async function uploadEncryptedDataWithSigning(
   context: UploadContext,
   data: Uint8Array,
   options?: UploadOptions,
-  onProgress?: (progress: UploadProgress) => void
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<{ reference: string; tagUid?: number }> {
   const { bee, stamper, postageBatchId } = context
 
@@ -75,7 +84,9 @@ export async function uploadEncryptedDataWithSigning(
   let totalChunks = chunkPayloads.length
   let processedChunks = 0
 
-  console.log(`[UploadEncryptedData] Splitting ${data.length} bytes into ${totalChunks} chunks`)
+  console.log(
+    `[UploadEncryptedData] Splitting ${data.length} bytes into ${totalChunks} chunks`,
+  )
 
   // Progress callback helper
   const reportProgress = () => {
@@ -85,7 +96,11 @@ export async function uploadEncryptedDataWithSigning(
   }
 
   // Step 2: Process and encrypt leaf chunks
-  const encryptedChunkRefs: Array<{ address: Uint8Array; key: Uint8Array; span: bigint }> = []
+  const encryptedChunkRefs: Array<{
+    address: Uint8Array
+    key: Uint8Array
+    span: bigint
+  }> = []
 
   // Merge tag into options for all chunk uploads
   const uploadOptionsWithTag = { ...options, tag }
@@ -94,17 +109,25 @@ export async function uploadEncryptedDataWithSigning(
     // Create and encrypt content-addressed chunk
     const encryptedChunk = makeEncryptedContentAddressedChunk(payload)
 
-    console.log(`[UploadEncryptedData] Leaf chunk ${encryptedChunkRefs.length}: address=${encryptedChunk.address.toHex()}, span=${payload.length}, data size=${encryptedChunk.data.length}`)
+    console.log(
+      `[UploadEncryptedData] Leaf chunk ${encryptedChunkRefs.length}: address=${encryptedChunk.address.toHex()}, span=${payload.length}, data size=${encryptedChunk.data.length}`,
+    )
 
     // Store reference with span (payload size for leaf chunks)
     encryptedChunkRefs.push({
       address: encryptedChunk.address.toUint8Array(),
       key: encryptedChunk.encryptionKey,
-      span: BigInt(payload.length)
+      span: BigInt(payload.length),
     })
 
     // Upload chunk with signing
-    await uploadSingleEncryptedChunk(bee, stamper, postageBatchId, encryptedChunk, uploadOptionsWithTag)
+    await uploadSingleEncryptedChunk(
+      bee,
+      stamper,
+      postageBatchId,
+      encryptedChunk,
+      uploadOptionsWithTag,
+    )
 
     processedChunks++
     reportProgress()
@@ -119,53 +142,84 @@ export async function uploadEncryptedDataWithSigning(
     ref.set(encryptedChunkRefs[0].address, 0)
     ref.set(encryptedChunkRefs[0].key, 32)
     rootReference = new Reference(ref)
-    console.log("[UploadEncryptedData] Single chunk upload, reference:", rootReference.toHex())
+    console.log(
+      "[UploadEncryptedData] Single chunk upload, reference:",
+      rootReference.toHex(),
+    )
   } else {
     // Multiple chunks - build encrypted tree using bee-js's implementation
-    console.log("[UploadEncryptedData] Building encrypted merkle tree for", encryptedChunkRefs.length, "chunks")
+    console.log(
+      "[UploadEncryptedData] Building encrypted merkle tree for",
+      encryptedChunkRefs.length,
+      "chunks",
+    )
 
-    rootReference = await buildEncryptedMerkleTree(encryptedChunkRefs, async (encryptedChunkData) => {
-      // Upload the already-encrypted intermediate chunk
-      // encryptedChunkData = encryptedSpan (8 bytes) + encryptedPayload (4096 bytes) = 4104 bytes
-      // We need to upload this without any modification
+    rootReference = await buildEncryptedMerkleTree(
+      encryptedChunkRefs,
+      async (encryptedChunkData) => {
+        // Upload the already-encrypted intermediate chunk
+        // encryptedChunkData = encryptedSpan (8 bytes) + encryptedPayload (4096 bytes) = 4104 bytes
+        // We need to upload this without any modification
 
-      console.log(`[UploadCallback] Received encrypted chunk data, size: ${encryptedChunkData.length} bytes`)
+        console.log(
+          `[UploadCallback] Received encrypted chunk data, size: ${encryptedChunkData.length} bytes`,
+        )
 
-      if (stamper) {
-        // For client-side signing, calculate the address from the encrypted chunk
-        const address = await calculateChunkAddress(encryptedChunkData)
-        console.log(`[UploadCallback] Calculated address for upload: ${address.toHex()}`)
+        if (stamper) {
+          // For client-side signing, calculate the address from the encrypted chunk
+          const address = await calculateChunkAddress(encryptedChunkData)
+          console.log(
+            `[UploadCallback] Calculated address for upload: ${address.toHex()}`,
+          )
 
-        const envelope = stamper.stamp({
-          hash: () => address.toUint8Array(),
-          build: () => encryptedChunkData,
-          span: 0n, // not used by stamper.stamp
-          writer: undefined as any // not used by stamper.stamp
-        })
+          const envelope = stamper.stamp({
+            hash: () => address.toUint8Array(),
+            build: () => encryptedChunkData,
+            span: 0n, // not used by stamper.stamp
+            writer: undefined as any, // not used by stamper.stamp
+          })
 
-        console.log(`[UploadCallback] Uploading intermediate chunk with client-side signing...`)
-        await bee.uploadChunk(envelope, encryptedChunkData, uploadOptionsWithTag)
-        console.log(`[UploadCallback] Upload complete for address: ${address.toHex()}`)
-      } else {
-        // For node-side stamping, just upload directly
-        console.log(`[UploadCallback] Uploading intermediate chunk with node-side stamping...`)
-        await bee.uploadChunk(postageBatchId!, encryptedChunkData, uploadOptionsWithTag)
-        console.log(`[UploadCallback] Upload complete`)
-      }
+          console.log(
+            `[UploadCallback] Uploading intermediate chunk with client-side signing...`,
+          )
+          await bee.uploadChunk(
+            envelope,
+            encryptedChunkData,
+            uploadOptionsWithTag,
+          )
+          console.log(
+            `[UploadCallback] Upload complete for address: ${address.toHex()}`,
+          )
+        } else {
+          // For node-side stamping, just upload directly
+          console.log(
+            `[UploadCallback] Uploading intermediate chunk with node-side stamping...`,
+          )
+          await bee.uploadChunk(
+            postageBatchId!,
+            encryptedChunkData,
+            uploadOptionsWithTag,
+          )
+          console.log(`[UploadCallback] Upload complete`)
+        }
 
-      // Count intermediate chunks in progress
-      totalChunks++
-      processedChunks++
-      reportProgress()
-    })
+        // Count intermediate chunks in progress
+        totalChunks++
+        processedChunks++
+        reportProgress()
+      },
+    )
 
-    console.log("[UploadEncryptedData] Encrypted merkle tree complete, root reference:", rootReference.toHex())
+    console.log(
+      "[UploadEncryptedData] Encrypted merkle tree complete, root reference:",
+      rootReference.toHex(),
+    )
   }
 
   // Return result with 64-byte reference (128 hex chars)
   return {
     reference: rootReference.toHex(),
-    tagUid: tag
+    tagUid: tag,
   }
 }
 
@@ -177,7 +231,7 @@ async function uploadSingleEncryptedChunk(
   stamper: Stamper | undefined,
   postageBatchId: string | undefined,
   encryptedChunk: EncryptedChunk,
-  options?: UploadOptions
+  options?: UploadOptions,
 ): Promise<void> {
   // Force deferred mode for faster uploads (don't wait for sync)
   // Note: pinning is incompatible with deferred mode, so disable it

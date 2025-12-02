@@ -120,7 +120,13 @@ export class SwarmIdAuth {
   /**
    * Set authentication data (batch ID and/or signer key)
    */
-  setAuthData({ postageBatchId, signerKey }: { postageBatchId?: string; signerKey?: string }): void {
+  setAuthData({
+    postageBatchId,
+    signerKey,
+  }: {
+    postageBatchId?: string
+    signerKey?: string
+  }): void {
     this.postageBatchId = postageBatchId
     this.signerKey = signerKey
   }
@@ -154,7 +160,9 @@ export class SwarmIdAuth {
     }
 
     if (!this.postageBatchId && !this.signerKey) {
-      throw new Error("No postage batch ID or signer key provided. Cannot authenticate.")
+      throw new Error(
+        "No postage batch ID or signer key provided. Cannot authenticate.",
+      )
     }
 
     console.log("[Auth] Starting authentication for app:", this.appOrigin)

@@ -57,7 +57,11 @@ export class SwarmIdClient {
 
       // Timeout after 10 seconds if proxy doesn't respond
       setTimeout(() => {
-        reject(new Error("Proxy initialization timeout - proxy did not respond within 10 seconds"))
+        reject(
+          new Error(
+            "Proxy initialization timeout - proxy did not respond within 10 seconds",
+          ),
+        )
       }, 10000)
     })
 
@@ -75,9 +79,9 @@ export class SwarmIdClient {
     // Create iframe for proxy (hidden by default, shown only if not authenticated)
     this.iframe = document.createElement("iframe")
     this.iframe.src = `${this.iframeOrigin}${this.iframePath}`
-    console.log('[SwarmIdClient] Creating iframe with src:', this.iframe.src)
-    console.log('[SwarmIdClient] iframeOrigin:', this.iframeOrigin)
-    console.log('[SwarmIdClient] iframePath:', this.iframePath)
+    console.log("[SwarmIdClient] Creating iframe with src:", this.iframe.src)
+    console.log("[SwarmIdClient] iframeOrigin:", this.iframeOrigin)
+    console.log("[SwarmIdClient] iframePath:", this.iframePath)
     this.iframe.style.display = "none"
     this.iframe.style.position = "fixed"
     this.iframe.style.bottom = "20px"
@@ -98,7 +102,9 @@ export class SwarmIdClient {
       document.body.appendChild(this.iframe!)
     })
 
-    console.log("[SwarmIdClient] Iframe loaded, waiting for proxy initialization...")
+    console.log(
+      "[SwarmIdClient] Iframe loaded, waiting for proxy initialization...",
+    )
 
     // Wait for proxy to signal it's ready
     await this.waitForProxyInitialized()
@@ -128,14 +134,21 @@ export class SwarmIdClient {
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
         cleanup()
-        reject(new Error("Proxy initialization timeout - proxy did not signal readiness"))
+        reject(
+          new Error(
+            "Proxy initialization timeout - proxy did not signal readiness",
+          ),
+        )
       }, 10000) // 10 second timeout
 
       const listener = (event: MessageEvent) => {
         // Accept proxyInitialized from any origin initially
         // We'll validate the origin properly after parentIdentify
         if (event.data?.type === "proxyInitialized") {
-          console.log("[SwarmIdClient] Received proxyInitialized from:", event.origin)
+          console.log(
+            "[SwarmIdClient] Received proxyInitialized from:",
+            event.origin,
+          )
           cleanup()
           resolve()
         }
@@ -224,7 +237,10 @@ export class SwarmIdClient {
 
       case "initError":
         // Initialization error from proxy (e.g., origin validation failed)
-        console.error("[SwarmIdClient] Proxy initialization error:", message.error)
+        console.error(
+          "[SwarmIdClient] Proxy initialization error:",
+          message.error,
+        )
         if (this.readyReject) {
           this.readyReject(new Error(message.error))
         }
@@ -489,7 +505,11 @@ export class SwarmIdClient {
       data = new Uint8Array(buffer)
       fileName = fileName || file.name
     } else {
-      data = new Uint8Array(file.buffer.slice(0), file.byteOffset, file.byteLength)
+      data = new Uint8Array(
+        file.buffer.slice(0),
+        file.byteOffset,
+        file.byteLength,
+      )
     }
 
     const response = await this.sendRequest<{
