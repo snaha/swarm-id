@@ -28,9 +28,11 @@
 	onMount(() => {
 		if (container && value) {
 			// Clear previous icon if any
+			// eslint-disable-next-line svelte/no-dom-manipulating -- Third-party hashicon library requires manual DOM insertion
 			container.innerHTML = ''
 			// Generate and append the hashicon
 			const icon = hashicon(value, hashiconOptions)
+			// eslint-disable-next-line svelte/no-dom-manipulating -- Third-party hashicon library requires manual DOM insertion
 			container.appendChild(icon)
 		}
 	})
@@ -38,8 +40,10 @@
 	$effect(() => {
 		// Re-generate icon when value, size, or options change
 		if (container && value) {
+			// eslint-disable-next-line svelte/no-dom-manipulating -- Third-party hashicon library requires manual DOM insertion
 			container.innerHTML = ''
 			const icon = hashicon(value, hashiconOptions)
+			// eslint-disable-next-line svelte/no-dom-manipulating -- Third-party hashicon library requires manual DOM insertion
 			container.appendChild(icon)
 		}
 	})

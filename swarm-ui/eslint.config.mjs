@@ -29,7 +29,6 @@ export default typescriptEslint.config(
 		},
 		rules: {
 			'svelte/no-navigation-without-resolve': 'off',
-			'svelte/no-dom-manipulating': 'off',
 		},
 	},
 	{
