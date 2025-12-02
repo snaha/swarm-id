@@ -223,6 +223,15 @@ export class SwarmIdClient {
         if (this.onAuthChange) {
           this.onAuthChange(message.authenticated)
         }
+        // Handle as response if there's a matching request
+        if ("requestId" in message) {
+          const pending = this.pendingRequests.get(message.requestId)
+          if (pending) {
+            clearTimeout(pending.timeoutId)
+            this.pendingRequests.delete(message.requestId)
+            pending.resolve(message)
+          }
+        }
         break
 
       case "authSuccess":
@@ -354,35 +363,22 @@ export class SwarmIdClient {
    */
   async checkAuthStatus(): Promise<AuthStatus> {
     this.ensureReady()
+    const requestId = this.generateRequestId()
 
-    // Note: We use a simpler approach by listening for authStatusResponse
-    return new Promise((resolve) => {
-      const listener = (event: MessageEvent) => {
-        if (event.origin !== this.iframeOrigin) return
-
-        try {
-          const message = IframeToParentMessageSchema.parse(event.data)
-          if (message.type === "authStatusResponse") {
-            window.removeEventListener("message", listener)
-            resolve({
-              authenticated: message.authenticated,
-              origin: message.origin,
-            })
-          }
-        } catch {
-          // Ignore invalid messages
-        }
-      }
-
-      window.addEventListener("message", listener)
-      this.sendMessage({ type: "checkAuth" })
-
-      // Timeout after 5 seconds
-      setTimeout(() => {
-        window.removeEventListener("message", listener)
-        resolve({ authenticated: false })
-      }, 5000)
+    const response = await this.sendRequest<{
+      type: "authStatusResponse"
+      requestId: string
+      authenticated: boolean
+      origin?: string
+    }>({
+      type: "checkAuth",
+      requestId,
     })
+
+    return {
+      authenticated: response.authenticated,
+      origin: response.origin,
+    }
   }
 
   /**

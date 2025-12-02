@@ -125,6 +125,7 @@ export const ParentIdentifyMessageSchema = z.object({
 
 export const CheckAuthMessageSchema = z.object({
   type: z.literal("checkAuth"),
+  requestId: z.string(),
 })
 
 export const RequestAuthMessageSchema = z.object({
@@ -217,6 +218,7 @@ export const InitErrorMessageSchema = z.object({
 
 export const AuthStatusResponseMessageSchema = z.object({
   type: z.literal("authStatusResponse"),
+  requestId: z.string(),
   authenticated: z.boolean(),
   origin: z.string().optional(),
 })

@@ -370,7 +370,7 @@ export class SwarmIdProxy {
         break
 
       case "checkAuth":
-        this.handleCheckAuth(event)
+        this.handleCheckAuth(message, event)
         break
 
       case "requestAuth":
@@ -532,13 +532,17 @@ export class SwarmIdProxy {
   // Message Handlers
   // ============================================================================
 
-  private handleCheckAuth(event: MessageEvent): void {
+  private handleCheckAuth(
+    message: { type: "checkAuth"; requestId: string },
+    event: MessageEvent,
+  ): void {
     console.log("[Proxy] Checking authentication status...")
 
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
         {
           type: "authStatusResponse",
+          requestId: message.requestId,
           authenticated: this.authenticated,
           origin: this.authenticated ? this.parentOrigin : undefined,
         } satisfies IframeToParentMessage,
