@@ -4,7 +4,7 @@
 	"private": true,
 	"license": "MIT",
 	"scripts": {
-		"dev": "vite dev",
+		"dev": "vite dev --port 5174",
 		"build": "vite build",
 		"preview": "vite preview",
 		"test": "vitest run && playwright test -c playwright-ct.config.ts && playwright test",
