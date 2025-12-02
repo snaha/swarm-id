@@ -2,13 +2,16 @@
 
 /**
  * Simple HTTPS server for swarm-id.local
- * Serves iframe-storage.html on port 8081
+ * Serves the SvelteKit identity UI on port 8081
  *
  * Modes:
- * - PROXY: Set PROXY_TARGET env var to proxy to dev server (e.g., http://localhost:5173)
+ * - PROXY: Set PROXY_TARGET env var to proxy to dev server (e.g., http://localhost:5174)
  * - PRODUCTION: Serve built files from swarm-ui/build/
  *
- * /demo/ and /popup/ files are always served from disk
+ * Special paths always served from disk:
+ * - /lib/* - Library files (mapped to lib/dist/)
+ * - /demo/* - Demo HTML files for testing
+ * - /popup/* - Popup demo files for testing
  */
 
 import https from 'https'
@@ -183,7 +186,7 @@ server.listen(PORT, '127.0.0.1', () => {
   } else {
     console.log(`Mode: PRODUCTION (serving from swarm-ui/build/)`)
   }
-  console.log(`Serving /demo/, /popup/, and /lib/ from disk`)
+  console.log(`Special paths served from disk: /demo/, /popup/, /lib/`)
   console.log('='.repeat(70))
-  console.log(`\nThis server provides the storage iframe and Service Worker for swarm-app.local\n`)
+  console.log(`\nThis server provides the Swarm ID proxy iframe for swarm-app.local\n`)
 })
