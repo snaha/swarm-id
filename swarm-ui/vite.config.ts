@@ -6,10 +6,16 @@ export default defineConfig({
 	plugins: [
 		sveltekit(),
 		nodePolyfills({
-			// Whether to polyfill `node:` protocol imports
 			protocolImports: true,
 		}),
 	],
+	build: {
+		rollupOptions: {
+			external: [
+				/^vite-plugin-node-polyfills\/.*/,
+			],
+		},
+	},
 	ssr: {
 		noExternal: ['carbon-icons-svelte'],
 	},

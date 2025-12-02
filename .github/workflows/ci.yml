@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+
+jobs:
+  check-and-test:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: 'recursive'
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - name: Install dependencies
+        run: pnpm install
+
+      - name: Build bee-js dependency
+        working-directory: ./bee-js
+        run: pnpm build
+
+      - name: Build lib dependency
+        working-directory: ./lib
+        run: pnpm build
+
+      - name: Build swarm-ui
+        working-directory: ./swarm-ui
+        run: pnpm build
+
+      - name: Run swarm-ui unit tests
+        working-directory: ./swarm-ui
+        run: pnpm test:unit
