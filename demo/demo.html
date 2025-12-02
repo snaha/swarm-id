@@ -243,7 +243,7 @@ Hello, Swarm!</textarea
           : 'https://swarm-id.snaha.net'
       );
 
-      // Always use /demo/proxy.html for both local and production
+      // Use /proxy for both local (SvelteKit dev) and production (static hosting resolves to /proxy.html)
       const PROXY_PATH = '/proxy'
 
       const BEE_API_URL = "http://localhost:1633";

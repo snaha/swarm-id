@@ -60,6 +60,24 @@ export class SwarmIdProxy {
       "[Proxy] Proxy initialized with default Bee API:",
       this.defaultBeeApiUrl,
     )
+
+    // Announce readiness to parent window immediately
+    // This signals that our message listener is ready to receive parentIdentify
+    this.announceReady()
+  }
+
+  /**
+   * Announce that proxy is ready to receive messages
+   * Broadcasts to parent with wildcard origin since we don't know parent origin yet
+   */
+  private announceReady(): void {
+    if (window.parent && window.parent !== window) {
+      console.log("[Proxy] Announcing readiness to parent window")
+      window.parent.postMessage(
+        { type: "proxyInitialized" },
+        "*" // Wildcard since we don't know parent origin yet
+      )
+    }
   }
 
   /**
