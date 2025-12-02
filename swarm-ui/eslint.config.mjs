@@ -34,7 +34,6 @@ export default typescriptEslint.config(
 			'svelte/no-useless-children-snippet': 'off',
 			'svelte/prefer-writable-derived': 'off',
 			'svelte/no-dom-manipulating': 'off',
-			'svelte/no-useless-mustaches': 'off',
 		},
 	},
 	{
