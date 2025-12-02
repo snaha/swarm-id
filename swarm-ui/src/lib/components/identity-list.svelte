@@ -33,7 +33,7 @@
 </script>
 
 <Vertical --vertical-gap="0" style="border: 1px solid var(--colors-low);">
-	{#each identities as identity, index}
+	{#each identities as identity, index (identity.id)}
 		{@const account = getAccount(identity.accountId)}
 		{#if account}
 			<div

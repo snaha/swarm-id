@@ -22,7 +22,7 @@
 <div class="page-content">
 	<div class="content-area tab-container">
 		<ul>
-			{#each tabs as tab}
+			{#each tabs as tab (tab.href)}
 				<li>
 					<Button
 						variant="ghost"

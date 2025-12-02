@@ -22,7 +22,7 @@
 </script>
 
 <Vertical --vertical-gap="0" style="border: 1px solid var(--colors-low);">
-	{#each apps as app, index}
+	{#each apps as app, index (app.appUrl)}
 		<div
 			class="app-item"
 			role="button"
