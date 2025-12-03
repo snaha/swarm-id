@@ -1,86 +1,69 @@
-# Demo2 - Swarm ID Library Demo
+# Swarm ID Library Demo
 
 This folder contains a demo implementation using the Swarm ID library from `../lib/`.
 
 ## Overview
 
-This demo shows how to integrate the Swarm ID library into a dApp for authentication and Bee API operations. It's functionally equivalent to the `popup/` demo but uses the published library instead of inline JavaScript.
+This demo shows how to integrate the Swarm ID library into a dApp for authentication and Bee API operations.
 
 ## Files
 
-- **demo.html** - Demo dApp that uses `SwarmIdClient` from the library
-- **proxy.html** - Iframe proxy that uses `initProxy` from the library
-- **auth.html** - Authentication popup that uses `initAuth` from the library
+- **demo.html** - Demo dApp that uses `SwarmIdClient` from the library (built as `index.html`)
+- **build.js** - Build script that bundles the demo with the library
 
-## Key Differences from popup/ Demo
+## Using the Library
 
-### Using the Library
-
-Instead of inline JavaScript, this demo imports from the built library:
+The demo imports from the built library:
 
 ```javascript
-// In demo.html
 import { SwarmIdClient } from '../lib/dist/swarm-id-client.js'
-
-// In proxy.html
-import { initProxy } from '../lib/dist/swarm-id-proxy.js'
-
-// In auth.html
-import { initAuth } from '../lib/dist/swarm-id-auth.js'
 ```
 
-### Cleaner Code
+The library handles all the complex authentication, message passing, validation, and type safety internally. The demo HTML only needs to:
 
-The library handles all the complex message passing, validation, and type safety internally. The HTML files only need to:
-
-1. Import the library modules
-2. Initialize the components with configuration
+1. Import the library module
+2. Initialize the client with configuration
 3. Handle UI interactions
 
-## Running the Demo
-
-### Prerequisites
-
-1. Build the library first:
-   ```bash
-   cd ../lib
-   pnpm build
-   cd ..
-   ```
-
-2. Ensure you have the local development setup:
-   - SSL certificates for `swarm-app.local` and `swarm-id.local`
-   - `/etc/hosts` entries for both domains
-   - HTTPS servers running on ports 8080 and 8081
-
-### Start the Servers
+## Building the Demo
 
 From the project root:
 
 ```bash
+pnpm build:swarm-demo
+```
+
+This will:
+1. Build the Bee.js fork
+2. Build the Swarm ID library
+3. Bundle the demo with environment configuration
+4. Output to `demo/build/index.html`
+
+## Deployment
+
+The demo is deployed to **swarm-demo.snaha.net** using DigitalOcean App Platform. The deployment configuration is in `.do-app-demo.yaml` at the project root.
+
+## Local Development
+
+For local development, you need:
+- SSL certificates for `swarm-app.local` and `swarm-id.local`
+- `/etc/hosts` entries for both domains
+- HTTPS servers running on ports 8080 and 8081
+
+Start the servers from project root:
+```bash
 ./start-servers.sh
 ```
 
-This will start:
-- `https://swarm-app.local:8080` - Serves the demo dApp
-- `https://swarm-id.local:8081` - Serves the auth popup and proxy
-
-### Access the Demo
-
-Open in your browser:
-```
-https://swarm-app.local:8080/demo/demo.html
-```
+Then access the demo at: `https://swarm-app.local:8080/demo/`
 
 ## How It Works
 
-### 1. Demo Page (demo.html)
-
-The demo page creates a `SwarmIdClient` instance:
+The demo creates a `SwarmIdClient` instance:
 
 ```javascript
 const client = new SwarmIdClient({
-  iframeOrigin: 'https://swarm-id.local:8081',
+  iframeOrigin: window.__ID_DOMAIN__ || 'https://swarm-id.snaha.net',
   beeApiUrl: 'http://localhost:1633',
   timeout: 30000,
   onAuthChange: (authenticated) => {
@@ -92,54 +75,12 @@ await client.initialize()
 ```
 
 The client automatically:
-- Embeds a hidden iframe
-- Handles postMessage communication
+- Embeds a hidden iframe to the identity site
+- Handles secure postMessage communication
 - Validates all messages with Zod schemas
-- Provides a type-safe API
+- Provides a type-safe API for authentication and Bee operations
 
-### 2. Proxy Iframe (proxy.html)
-
-The proxy initializes with simple configuration:
-
-```javascript
-import { initProxy } from '../lib/dist/swarm-id-proxy.js'
-
-const proxy = initProxy({
-  beeApiUrl: 'http://localhost:1633',
-  allowedOrigins: ['https://swarm-app.local:8080']
-})
-```
-
-The proxy library:
-- Accepts the parent's Bee API URL or uses the default
-- Validates all incoming messages
-- Stores app-specific secrets in partitioned localStorage
-- Proxies Bee API calls (currently simulated)
-
-### 3. Auth Popup (auth.html)
-
-The auth popup initializes and handles authentication:
-
-```javascript
-import { initAuth } from '../lib/dist/swarm-id-auth.js'
-
-const auth = await initAuth()
-
-// Check if user has a master key
-if (!auth.hasMasterKey()) {
-  // Setup new identity
-  await auth.setupNewIdentity()
-}
-
-// Authenticate
-await auth.authenticate()
-```
-
-The auth library:
-- Validates the opener window
-- Loads or generates the master key
-- Derives app-specific secrets using HMAC-SHA256
-- Sends the secret to the proxy iframe
+The identity management (authentication, key derivation, storage) is handled by the Swarm ID UI at `swarm-id.snaha.net` (see `../swarm-ui/`)
 
 ## API Examples
 
@@ -190,37 +131,30 @@ const button = client.createAuthButton(container, {
 2. **Validation** - Zod schemas validate all messages at runtime
 3. **Cleaner Code** - No need to write postMessage boilerplate
 4. **Error Handling** - Built-in error handling and timeouts
-5. **Maintainability** - Library updates automatically benefit all users
-6. **Testing** - Library code is tested independently
+5. **Secure** - Cross-origin communication with iframe isolation
+6. **Maintainability** - Library updates automatically benefit all users
 7. **Documentation** - See `../lib/README.md` for full API reference
-
-## Next Steps
-
-- Integrate real Bee API calls in the proxy (currently simulated)
-- Add more Bee operations (file upload, collections, etc.)
-- Implement proper error recovery
-- Add progress callbacks for large uploads/downloads
-- Add unit and integration tests
 
 ## Troubleshooting
 
-### Module not found errors
+### Build errors
 
-Make sure you've built the library first:
+Make sure you've installed dependencies and built the library:
 ```bash
-cd ../lib && pnpm build
+pnpm install
+pnpm build:swarm-demo
 ```
 
-### CORS errors
+### CORS errors in local development
 
 Ensure you're accessing via the correct domains (`swarm-app.local` and `swarm-id.local`), not `localhost`.
 
 ### Authentication not working
 
-1. Check browser console for errors
-2. Verify the popup isn't being blocked
-3. Clear localStorage and try again
-4. Check that parent origin is in the allowed origins list
+1. Check browser console for errors in both the demo and identity site
+2. Verify the identity site iframe can load (check network tab)
+3. Clear localStorage and cookies, then try again
+4. Ensure both sites are served over HTTPS in local development
 
 ## License
 

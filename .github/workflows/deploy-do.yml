@@ -3,7 +3,6 @@ name: Deploy to Digital Ocean
 on:
   push:
     branches:
-      - feat/create-swarm-ui
       - main
   workflow_dispatch:
 
