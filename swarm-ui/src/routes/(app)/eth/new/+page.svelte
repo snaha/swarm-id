@@ -26,6 +26,7 @@
 		encryptMasterKey,
 	} from '$lib/utils/encryption'
 	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
+	import { validateSecretSeed } from '$lib/utils/secret-seed'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
@@ -47,13 +48,7 @@
 	let secretSeedError = $derived.by(() => {
 		if (!secretSeed) return undefined
 
-		const hasUppercase = /[A-Z]/.test(secretSeed)
-		const hasLowercase = /[a-z]/.test(secretSeed)
-		const hasNumber = /[0-9]/.test(secretSeed)
-		const hasSpecialChar = /[^A-Za-z0-9]/.test(secretSeed)
-		const isValidLength = secretSeed.length >= 20 && secretSeed.length <= 128
-
-		if (!isValidLength || !hasUppercase || !hasLowercase || !hasNumber || !hasSpecialChar) {
+		if (!validateSecretSeed(secretSeed)) {
 			return 'Use 20 to 128 characters with a mix of uppercase letters, lowercase letters, numbers, and special characters.'
 		}
 

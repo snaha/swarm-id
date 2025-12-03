@@ -53,7 +53,8 @@
 <Vertical --vertical-gap="var(--padding)" style="padding-top: var(--double-padding);">
 	{#if stamps.length > 0}
 		<Typography
-			>You have {stamps.length} Swarm postage stamp{stamps.length === 1 ? '' : 's'} in use with this identity</Typography
+			>You have {stamps.length} Swarm postage stamp{stamps.length === 1 ? '' : 's'} in use with this
+			identity</Typography
 		>
 		<Vertical --vertical-gap="0">
 			<Divider />
