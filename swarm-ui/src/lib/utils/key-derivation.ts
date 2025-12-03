@@ -86,26 +86,6 @@ export async function deriveSecret(masterKey: string, appOrigin: string): Promis
 }
 
 /**
- * Generate a random master key for testing/demo purposes
- *
- * In production, this would be derived from a user's mnemonic or
- * imported from an existing identity.
- *
- * @returns A random 32-byte key as a hex string
- */
-export async function generateMasterKey(): Promise<string> {
-	console.log('[KeyDerivation] Generating random master key...')
-
-	const randomBytes = new Uint8Array(32)
-	crypto.getRandomValues(randomBytes)
-
-	const masterKey = uint8ArrayToHex(randomBytes)
-	console.log('[KeyDerivation] Master key generated:', masterKey.substring(0, 16) + '...')
-
-	return masterKey
-}
-
-/**
  * Convert a hex string to Uint8Array
  *
  * @param hexString - Hex string (e.g., "deadbeef")
@@ -139,29 +119,4 @@ export function uint8ArrayToHex(bytes: Uint8Array): string {
 			.map((b) => b.toString(16).padStart(2, '0'))
 			.join('')
 	)
-}
-
-/**
- * Verify that a derived secret matches the expected value
- *
- * Useful for testing.
- *
- * @param masterKey - Master key hex string
- * @param appOrigin - App origin
- * @param expectedSecret - Expected secret hex string
- * @returns true if the derived secret matches the expected secret
- */
-export async function verifySecret(
-	masterKey: string,
-	appOrigin: string,
-	expectedSecret: string,
-): Promise<boolean> {
-	const derived = await deriveSecret(masterKey, appOrigin)
-	return derived === expectedSecret
-}
-
-// Export utility functions for testing
-export const utils = {
-	hexToUint8Array,
-	uint8ArrayToHex,
 }

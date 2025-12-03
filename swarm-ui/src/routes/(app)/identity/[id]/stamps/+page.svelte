@@ -57,7 +57,7 @@
 		>
 		<Vertical --vertical-gap="0">
 			<Divider />
-			{#each stamps as stamp}
+			{#each stamps as stamp (stamp.batchID)}
 				{@const isDefault = identity?.defaultPostageStampBatchID === stamp.batchID}
 				<CollapsibleSection
 					title={formatBatchId(stamp.batchID)}

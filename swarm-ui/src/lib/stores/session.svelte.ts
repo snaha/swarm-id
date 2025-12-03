@@ -1,6 +1,6 @@
 // Session store for tracking current account/identity creation flow
 
-import type { Account, DistributiveOmit } from '$lib/types'
+import type { Account } from '$lib/types'
 
 export type SessionData = {
 	// Account during creation flow (ready to be persisted)

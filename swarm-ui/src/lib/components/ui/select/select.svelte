@@ -219,7 +219,7 @@
 					{#if placeholder}
 						<Option class="placeholder" value="" {store}>{placeholder}</Option>
 					{/if}
-					{#each items as item}
+					{#each items as item (item.value)}
 						<Option value={item.value} {store}>{item.label}</Option>
 					{/each}
 				</div>

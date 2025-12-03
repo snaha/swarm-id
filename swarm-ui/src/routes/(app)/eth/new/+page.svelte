@@ -197,18 +197,16 @@
 							color="dark"
 							maxWidth="287px"
 						>
-							{#snippet children()}
-								<!-- svelte-ignore a11y_invalid_attribute -->
-								<a
-									href="#"
-									onmouseenter={() => (showTooltip = true)}
-									onmouseleave={() => (showTooltip = false)}
-									onclick={(e: MouseEvent) => {
-										e.stopPropagation()
-										showTooltip = !showTooltip
-									}}>Learn more</a
-								>
-							{/snippet}
+							<!-- svelte-ignore a11y_invalid_attribute -->
+							<a
+								href="#"
+								onmouseenter={() => (showTooltip = true)}
+								onmouseleave={() => (showTooltip = false)}
+								onclick={(e: MouseEvent) => {
+									e.stopPropagation()
+									showTooltip = !showTooltip
+								}}>Learn more</a
+							>
 							{#snippet helperText()}
 								The secret seed works with your ETH wallet to restore your Swarm ID account. <strong
 									>Store it in a password manager or write it down and keep it in a secure location.

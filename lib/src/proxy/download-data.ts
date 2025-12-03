@@ -14,9 +14,11 @@ export async function downloadDataWithChunkAPI(
   bee: Bee,
   reference: string,
   options?: DownloadOptions,
-  onProgress?: (progress: UploadProgress) => void
+  onProgress?: (progress: UploadProgress) => void,
 ): Promise<Uint8Array> {
-  console.log(`[DownloadData] Downloading from reference: ${reference} (${reference.length} chars)`)
+  console.log(
+    `[DownloadData] Downloading from reference: ${reference} (${reference.length} chars)`,
+  )
 
   // Convert hex string to Reference
   const ref = new Reference(reference)
@@ -24,14 +26,16 @@ export async function downloadDataWithChunkAPI(
   // Create ChunkJoiner with progress callback
   const joiner = new ChunkJoiner(bee, ref, {
     downloadOptions: options,
-    onDownloadProgress: onProgress ? (progress) => {
-      onProgress({
-        total: progress.total,
-        processed: progress.processed
-      })
-    } : undefined,
+    onDownloadProgress: onProgress
+      ? (progress) => {
+          onProgress({
+            total: progress.total,
+            processed: progress.processed,
+          })
+        }
+      : undefined,
     // Use reasonable concurrency for parallel chunk fetching
-    concurrency: 64
+    concurrency: 64,
   })
 
   // Download and assemble all chunks

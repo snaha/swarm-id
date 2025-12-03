@@ -1,4 +1,4 @@
-import type { Account, DistributiveOmit } from '$lib/types'
+import type { Account } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-accounts'
 

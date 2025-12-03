@@ -65,17 +65,6 @@ function bufferToBase64url(buffer: Uint8Array): string {
 	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
 }
 
-function base64urlToBuffer(base64url: string): Uint8Array {
-	const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/')
-	const padded = base64.padEnd(base64.length + ((4 - (base64.length % 4)) % 4), '=')
-	const binary = atob(padded)
-	const bytes = new Uint8Array(binary.length)
-	for (let i = 0; i < binary.length; i++) {
-		bytes[i] = binary.charCodeAt(i)
-	}
-	return bytes
-}
-
 /**
  * Get existing passkey account or create new one if none exists
  * This is the main entry point for passkey-based authentication
@@ -91,7 +80,7 @@ export async function getOrCreatePasskeyAccount(
 		})
 		console.log('✅ Found existing credential')
 		return account
-	} catch (error) {
+	} catch {
 		console.log('📝 No existing credential found, creating new one...')
 		// No credential exists, create new one
 		return await createPasskeyAccount(options)
@@ -300,30 +289,4 @@ async function deriveWalletFromPRF(
 
 	// Step 2: Create Ethereum wallet from seed
 	return createEthereumWalletFromSeed(seedBytes)
-}
-
-/**
- * Check if WebAuthn is supported
- */
-export function isPasskeySupported(): boolean {
-	return (
-		typeof window !== 'undefined' &&
-		window.PublicKeyCredential !== undefined &&
-		typeof window.PublicKeyCredential === 'function'
-	)
-}
-
-/**
- * Check if platform authenticator is available
- */
-export async function isPlatformAuthenticatorAvailable(): Promise<boolean> {
-	if (!isPasskeySupported()) {
-		return false
-	}
-
-	try {
-		return await PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
-	} catch {
-		return false
-	}
 }

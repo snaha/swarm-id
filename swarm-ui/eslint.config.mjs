@@ -16,11 +16,25 @@ export default typescriptEslint.config(
 			ecmaVersion: 2022,
 			sourceType: 'module',
 			globals: { ...globals.node, ...globals.browser },
+		},
+	},
+	{
+		files: ['**/*.svelte'],
+		languageOptions: {
 			parser: svelteParser,
 			parserOptions: {
 				parser: typescriptEslint.parser,
 				extraFileExtensions: ['.svelte'],
 			},
+		},
+		rules: {
+			'svelte/no-navigation-without-resolve': 'off',
+		},
+	},
+	{
+		files: ['**/*.svelte.ts'],
+		languageOptions: {
+			parser: typescriptEslint.parser,
 		},
 	},
 	{

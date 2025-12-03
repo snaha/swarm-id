@@ -14,21 +14,21 @@ export interface UploadContext {
  * Upload progress information
  */
 export interface UploadProgress {
-  total: number      // Total chunks to upload
-  processed: number  // Chunks uploaded so far
+  total: number // Total chunks to upload
+  processed: number // Chunks uploaded so far
 }
 
 /**
  * Chunk reference (32-byte address)
  */
 export interface ChunkReference {
-  address: Uint8Array  // 32-byte chunk address
+  address: Uint8Array // 32-byte chunk address
 }
 
 /**
  * Encrypted chunk reference (64-byte reference: address + encryption key)
  */
 export interface EncryptedChunkReference {
-  address: Uint8Array  // 32-byte chunk address
-  key: Uint8Array      // 32-byte encryption key
+  address: Uint8Array // 32-byte chunk address
+  key: Uint8Array // 32-byte encryption key
 }

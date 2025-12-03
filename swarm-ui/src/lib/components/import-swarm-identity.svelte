@@ -36,20 +36,18 @@
 		<div class="info-text">
 			<Typography variant="small">Use an existing Swarm ID account</Typography>
 			<Tooltip show={showTooltip} position="top" variant="compact" color="dark" maxWidth="360px">
-				{#snippet children()}
-					<Button
-						variant="ghost"
-						dimension="compact"
-						onmouseenter={() => (showTooltip = true)}
-						onmouseleave={() => (showTooltip = false)}
-						onclick={(e: MouseEvent) => {
-							e.stopPropagation()
-							showTooltip = !showTooltip
-						}}
-					>
-						<Information size={20} />
-					</Button>
-				{/snippet}
+				<Button
+					variant="ghost"
+					dimension="compact"
+					onmouseenter={() => (showTooltip = true)}
+					onmouseleave={() => (showTooltip = false)}
+					onclick={(e: MouseEvent) => {
+						e.stopPropagation()
+						showTooltip = !showTooltip
+					}}
+				>
+					<Information size={20} />
+				</Button>
 				{#snippet helperText()}
 					Import an existing Swarm ID account that was previously exported as a <span
 						style="color: var(--colors-high)">.swarmid</span

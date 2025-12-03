@@ -8,12 +8,6 @@
 import { BrowserProvider, JsonRpcSigner, hashMessage, SigningKey, BaseWallet } from 'ethers'
 import { createWeb3Modal, defaultConfig } from '@web3modal/ethers'
 
-export interface EthereumProvider {
-	request: (args: { method: string; params?: unknown[] }) => Promise<unknown>
-	on?: (event: string, callback: (...args: unknown[]) => void) => void
-	removeListener?: (event: string, callback: (...args: unknown[]) => void) => void
-}
-
 // Web3Modal instance (singleton)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let web3Modal: any | undefined
@@ -83,23 +77,6 @@ export interface SignedMessage {
 }
 
 /**
- * Check if Ethereum provider is available (e.g., MetaMask)
- */
-export function isEthereumProviderAvailable(): boolean {
-	return typeof window !== 'undefined' && 'ethereum' in window
-}
-
-/**
- * Get the Ethereum provider from window
- */
-export function getEthereumProvider(): EthereumProvider | undefined {
-	if (!isEthereumProviderAvailable()) {
-		return undefined
-	}
-	return (window as unknown as Window & { ethereum: EthereumProvider }).ethereum
-}
-
-/**
  * Connect to Ethereum wallet using Web3Modal
  *
  * Opens a modal UI allowing users to connect via:
@@ -144,15 +121,6 @@ export async function connectWallet(): Promise<WalletConnection> {
 			}
 		}
 		throw error
-	}
-}
-
-/**
- * Disconnect wallet
- */
-export async function disconnectWallet(): Promise<void> {
-	if (web3Modal) {
-		await web3Modal.disconnect()
 	}
 }
 
@@ -263,17 +231,4 @@ export async function connectAndSign(params: {
 	})
 
 	return signed
-}
-
-async function isConnected() {
-	const ethereum = getEthereumProvider()
-	if (!ethereum) {
-		return false
-	}
-	const accounts = (await ethereum.request({ method: 'eth_accounts' })) as Array<string>
-	if (accounts.length) {
-		return true
-	} else {
-		return false
-	}
 }

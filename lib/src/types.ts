@@ -5,10 +5,12 @@ import { z } from "zod"
 // ============================================================================
 
 // Support both regular (32-byte = 64 hex chars) and encrypted (64-byte = 128 hex chars) references
-export const ReferenceSchema = z.string().refine(
-  (val) => val.length === 64 || val.length === 128,
-  { message: "Reference must be 64 chars (32 bytes) or 128 chars (64 bytes for encrypted)" }
-)
+export const ReferenceSchema = z
+  .string()
+  .refine((val) => val.length === 64 || val.length === 128, {
+    message:
+      "Reference must be 64 chars (32 bytes) or 128 chars (64 bytes for encrypted)",
+  })
 export const BatchIdSchema = z.string().length(64)
 export const AddressSchema = z.string().length(40)
 
@@ -32,7 +34,9 @@ export const UploadOptionsSchema = z
 
 export const DownloadOptionsSchema = z
   .object({
-    redundancyStrategy: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]).optional(),
+    redundancyStrategy: z
+      .union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)])
+      .optional(),
     fallback: z.boolean().optional(),
     timeoutMs: z.number().optional(),
     actPublisher: z.union([z.instanceof(Uint8Array), z.string()]),
@@ -121,6 +125,7 @@ export const ParentIdentifyMessageSchema = z.object({
 
 export const CheckAuthMessageSchema = z.object({
   type: z.literal("checkAuth"),
+  requestId: z.string(),
 })
 
 export const RequestAuthMessageSchema = z.object({
@@ -213,6 +218,7 @@ export const InitErrorMessageSchema = z.object({
 
 export const AuthStatusResponseMessageSchema = z.object({
   type: z.literal("authStatusResponse"),
+  requestId: z.string(),
   authenticated: z.boolean(),
   origin: z.string().optional(),
 })
@@ -321,23 +327,26 @@ export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 // Message Types: Popup → Iframe
 // ============================================================================
 
-export const AuthDataSchema = z.object({
-  secret: z.string(),
-  postageBatchId: BatchIdSchema.optional(),
-  signerKey: z.string().length(64).optional(),
-}).refine(
-  data => {
-    // Must have at least postageBatchId
-    if (!data.postageBatchId) {
-      return false
-    }
-    // If signerKey is provided, it must be used with postageBatchId
-    return true
-  },
-  {
-    message: "postageBatchId is required. signerKey is optional for client-side signing."
-  }
-)
+export const AuthDataSchema = z
+  .object({
+    secret: z.string(),
+    postageBatchId: BatchIdSchema.optional(),
+    signerKey: z.string().length(64).optional(),
+  })
+  .refine(
+    (data) => {
+      // Must have at least postageBatchId
+      if (!data.postageBatchId) {
+        return false
+      }
+      // If signerKey is provided, it must be used with postageBatchId
+      return true
+    },
+    {
+      message:
+        "postageBatchId is required. signerKey is optional for client-side signing.",
+    },
+  )
 
 export type AuthData = z.infer<typeof AuthDataSchema>
 

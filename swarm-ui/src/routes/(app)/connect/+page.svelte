@@ -17,7 +17,7 @@
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
 	import type { Identity, Account } from '$lib/types'
 	import { connectAndSign } from '$lib/ethereum'
-	import { decryptMasterKey, deriveEncryptionKey, encryptMasterKey } from '$lib/utils/encryption'
+	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 
 	let appOrigin = $state('')
 	let appName = $state('')

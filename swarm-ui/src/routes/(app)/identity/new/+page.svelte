@@ -15,7 +15,7 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import type { Identity, Account, DistributiveOmit } from '$lib/types'
+	import type { Identity, Account } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
 
 	let idName = $state('')

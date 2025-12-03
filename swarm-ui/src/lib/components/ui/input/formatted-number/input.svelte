@@ -67,6 +67,7 @@
 	const handleInput = $derived(createInputHandler(config, eventState, () => inputElement))
 
 	// Reactive display value from store
+	// eslint-disable-next-line svelte/prefer-writable-derived -- displayValue is bound bidirectionally, must be writable
 	let displayValue = $state(store.displayValue)
 	$effect(() => {
 		displayValue = store.displayValue

@@ -40,8 +40,8 @@ export class SwarmIdProxy {
   private appSecret: string | undefined
   private postageBatchId: string | undefined
   private signerKey: string | undefined
-  private stamper: any | undefined  // Stamper from bee-js
-  private stamperDepth: number = 23  // Default depth
+  private stamper: any | undefined // Stamper from bee-js
+  private stamperDepth: number = 23 // Default depth
   private beeApiUrl: string
   private defaultBeeApiUrl: string
   private allowedOrigins: string[]
@@ -75,7 +75,7 @@ export class SwarmIdProxy {
       console.log("[Proxy] Announcing readiness to parent window")
       window.parent.postMessage(
         { type: "proxyInitialized" },
-        "*" // Wildcard since we don't know parent origin yet
+        "*", // Wildcard since we don't know parent origin yet
       )
     }
   }
@@ -99,7 +99,9 @@ export class SwarmIdProxy {
    */
   private initializeStamper(): void {
     if (!this.signerKey || !this.postageBatchId) {
-      console.warn("[Proxy] Cannot initialize stamper: missing signer key or batch ID")
+      console.warn(
+        "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
+      )
       return
     }
 
@@ -113,7 +115,7 @@ export class SwarmIdProxy {
           this.signerKey,
           this.postageBatchId,
           bucketState,
-          this.stamperDepth
+          this.stamperDepth,
         )
         console.log("[Proxy] Stamper restored from saved state")
       } else {
@@ -121,9 +123,12 @@ export class SwarmIdProxy {
         this.stamper = Stamper.fromBlank(
           this.signerKey,
           this.postageBatchId,
-          this.stamperDepth
+          this.stamperDepth,
         )
-        console.log("[Proxy] Stamper initialized fresh with depth:", this.stamperDepth)
+        console.log(
+          "[Proxy] Stamper initialized fresh with depth:",
+          this.stamperDepth,
+        )
       }
     } catch (error) {
       console.error("[Proxy] Failed to initialize stamper:", error)
@@ -365,7 +370,7 @@ export class SwarmIdProxy {
         break
 
       case "checkAuth":
-        this.handleCheckAuth(event)
+        this.handleCheckAuth(message, event)
         break
 
       case "requestAuth":
@@ -482,7 +487,10 @@ export class SwarmIdProxy {
   /**
    * Save secret to localStorage
    */
-  private saveAuthData(origin: string, data: { secret: string; postageBatchId?: string; signerKey?: string }): void {
+  private saveAuthData(
+    origin: string,
+    data: { secret: string; postageBatchId?: string; signerKey?: string },
+  ): void {
     const storageKey = `swarm-secret-${origin}`
     localStorage.setItem(storageKey, JSON.stringify(data))
     console.log("[Proxy] Auth data saved to localStorage for:", origin)
@@ -524,13 +532,17 @@ export class SwarmIdProxy {
   // Message Handlers
   // ============================================================================
 
-  private handleCheckAuth(event: MessageEvent): void {
+  private handleCheckAuth(
+    message: { type: "checkAuth"; requestId: string },
+    event: MessageEvent,
+  ): void {
     console.log("[Proxy] Checking authentication status...")
 
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
         {
           type: "authStatusResponse",
+          requestId: message.requestId,
           authenticated: this.authenticated,
           origin: this.authenticated ? this.parentOrigin : undefined,
         } satisfies IframeToParentMessage,
@@ -714,12 +726,7 @@ export class SwarmIdProxy {
     message: UploadDataMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const {
-      requestId,
-      data,
-      options,
-      enableProgress,
-    } = message
+    const { requestId, data, options, enableProgress } = message
 
     console.log("[Proxy] Upload data request, size:", data ? data.length : 0)
     if (!this.authenticated || !this.appSecret) {
@@ -736,19 +743,21 @@ export class SwarmIdProxy {
       }
 
       // Progress callback (if enabled)
-      const onProgress = enableProgress ? (progress: UploadProgress) => {
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "uploadProgress",
-              requestId,
-              total: progress.total,
-              processed: progress.processed,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
-      } : undefined
+      const onProgress = enableProgress
+        ? (progress: UploadProgress) => {
+            if (event.source) {
+              ;(event.source as WindowProxy).postMessage(
+                {
+                  type: "uploadProgress",
+                  requestId,
+                  total: progress.total,
+                  processed: progress.processed,
+                } satisfies IframeToParentMessage,
+                { targetOrigin: event.origin },
+              )
+            }
+          }
+        : undefined
 
       // Use new module for signing, or fallback to bee.uploadData
       let uploadResult
@@ -756,24 +765,46 @@ export class SwarmIdProxy {
       if (this.signerKey) {
         // Client-side chunking and signing
         if (options?.encrypt) {
-          console.log("[Proxy] Using client-side signing with encryption for uploadData")
-          uploadResult = await uploadEncryptedDataWithSigning(context, data, options, onProgress)
+          console.log(
+            "[Proxy] Using client-side signing with encryption for uploadData",
+          )
+          uploadResult = await uploadEncryptedDataWithSigning(
+            context,
+            data,
+            options,
+            onProgress,
+          )
         } else {
           console.log("[Proxy] Using client-side signing for uploadData")
-          uploadResult = await uploadDataWithSigning(context, data, options, onProgress)
+          uploadResult = await uploadDataWithSigning(
+            context,
+            data,
+            options,
+            onProgress,
+          )
         }
       } else if (this.postageBatchId) {
         // Fallback to bee.uploadData (node-side stamping)
         if (options?.encrypt) {
-          console.log("[Proxy] Using node-side stamping with encryption for uploadData")
-          const result = await this.bee.uploadData(this.postageBatchId, data, options)
+          console.log(
+            "[Proxy] Using node-side stamping with encryption for uploadData",
+          )
+          const result = await this.bee.uploadData(
+            this.postageBatchId,
+            data,
+            options,
+          )
           uploadResult = {
             reference: result.reference.toHex(),
             tagUid: result.tagUid,
           }
         } else {
           console.log("[Proxy] Using node-side stamping for uploadData")
-          const result = await this.bee.uploadData(this.postageBatchId, data, options)
+          const result = await this.bee.uploadData(
+            this.postageBatchId,
+            data,
+            options,
+          )
           uploadResult = {
             reference: result.reference.toHex(),
             tagUid: result.tagUid,
@@ -823,7 +854,6 @@ export class SwarmIdProxy {
     }
 
     try {
-
       console.log("[Proxy] Downloading from Bee at:", this.beeApiUrl)
 
       // Download data using chunk API only (supports both regular and encrypted references)
@@ -856,12 +886,7 @@ export class SwarmIdProxy {
     message: UploadFileMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const {
-      requestId,
-      data,
-      name,
-      options,
-    } = message
+    const { requestId, data, name, options } = message
 
     console.log(
       "[Proxy] Upload file request, name:",
@@ -878,22 +903,37 @@ export class SwarmIdProxy {
       this.sendErrorToParent(
         event,
         requestId,
-        "Signed uploads for files not yet implemented. Please use uploadChunk for signed uploads, or provide a postage batch ID for automatic chunking."
+        "Signed uploads for files not yet implemented. Please use uploadChunk for signed uploads, or provide a postage batch ID for automatic chunking.",
       )
       return
     }
 
     if (!this.postageBatchId) {
-      throw new Error("No postage batch ID available. Please authenticate with a valid batch ID.")
+      throw new Error(
+        "No postage batch ID available. Please authenticate with a valid batch ID.",
+      )
     }
 
     try {
-      console.log("[Proxy] Uploading file to Bee at:", this.beeApiUrl, "with batch:", this.postageBatchId)
+      console.log(
+        "[Proxy] Uploading file to Bee at:",
+        this.beeApiUrl,
+        "with batch:",
+        this.postageBatchId,
+      )
 
       // Upload file using bee-js
-      const uploadResult = await this.bee.uploadFile(this.postageBatchId, data, name, options)
+      const uploadResult = await this.bee.uploadFile(
+        this.postageBatchId,
+        data,
+        name,
+        options,
+      )
 
-      console.log("[Proxy] File upload successful, reference:", uploadResult.reference.toHex())
+      console.log(
+        "[Proxy] File upload successful, reference:",
+        uploadResult.reference.toHex(),
+      )
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -939,7 +979,10 @@ export class SwarmIdProxy {
       // Download file using bee-js
       const fileData = await this.bee.downloadFile(reference, path, options)
 
-      console.log("[Proxy] File download successful, data size:", fileData.data.toUint8Array().length)
+      console.log(
+        "[Proxy] File download successful, data size:",
+        fileData.data.toUint8Array().length,
+      )
 
       // Convert Bytes to Uint8Array for postMessage
       const data = fileData.data.toUint8Array()
@@ -970,11 +1013,7 @@ export class SwarmIdProxy {
     message: UploadChunkMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const {
-      requestId,
-      data,
-      options,
-    } = message
+    const { requestId, data, options } = message
 
     console.log("[Proxy] Upload chunk request, size:", data ? data.length : 0)
     if (!this.authenticated || !this.appSecret) {
@@ -983,13 +1022,17 @@ export class SwarmIdProxy {
 
     // Check authentication method (prefer signer over batch ID)
     if (!this.signerKey && !this.postageBatchId) {
-      throw new Error("No postage batch ID or signer key available. Please authenticate.")
+      throw new Error(
+        "No postage batch ID or signer key available. Please authenticate.",
+      )
     }
 
     try {
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
-        throw new Error(`Invalid chunk size: ${data.length} bytes. Chunks must be between 1 and 4096 bytes.`)
+        throw new Error(
+          `Invalid chunk size: ${data.length} bytes. Chunks must be between 1 and 4096 bytes.`,
+        )
       }
 
       let uploadResult
@@ -1016,20 +1059,36 @@ export class SwarmIdProxy {
         const uploadOptions = { ...options, deferred: true, pin: false }
 
         // Upload with envelope signature
-        uploadResult = await this.bee.uploadChunk(envelope, chunk.data, uploadOptions)
+        uploadResult = await this.bee.uploadChunk(
+          envelope,
+          chunk.data,
+          uploadOptions,
+        )
       } else if (this.postageBatchId) {
         // Use batch ID (Bee node will stamp it)
-        console.log("[Proxy] Uploading chunk to Bee at:", this.beeApiUrl, "with batch:", this.postageBatchId)
+        console.log(
+          "[Proxy] Uploading chunk to Bee at:",
+          this.beeApiUrl,
+          "with batch:",
+          this.postageBatchId,
+        )
 
         // Force deferred mode for faster uploads (pinning incompatible with deferred)
         const uploadOptions = { ...options, deferred: true, pin: false }
 
-        uploadResult = await this.bee.uploadChunk(this.postageBatchId, data, uploadOptions)
+        uploadResult = await this.bee.uploadChunk(
+          this.postageBatchId,
+          data,
+          uploadOptions,
+        )
       } else {
         throw new Error("No authentication method available")
       }
 
-      console.log("[Proxy] Chunk upload successful, reference:", uploadResult.reference.toHex())
+      console.log(
+        "[Proxy] Chunk upload successful, reference:",
+        uploadResult.reference.toHex(),
+      )
 
       // Save stamper state after successful upload (if using client-side signing)
       if (this.signerKey && this.stamper) {
@@ -1096,7 +1155,6 @@ export class SwarmIdProxy {
       )
     }
   }
-
 }
 
 /**

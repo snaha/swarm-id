@@ -15,7 +15,8 @@
     "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
     "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
     "dev:swarm-ui": "pnpm --filter swarm-identity dev",
-    "install:all": "pnpm install"
+    "install:all": "pnpm install",
+    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all"
   },
   "keywords": [
     "swarm",
@@ -25,5 +26,9 @@
     "monorepo"
   ],
   "author": "",
-  "license": "ISC"
+  "license": "ISC",
+  "engines": {
+    "node": ">=22",
+    "pnpm": ">=10"
+  }
 }
