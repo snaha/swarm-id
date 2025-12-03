@@ -45,3 +45,8 @@ envs:
 
   - key: ID_DOMAIN
     value: https://swarm-id.snaha.net
+
+# Deployment alerts
+alerts:
+  - rule: DEPLOYMENT_FAILED
+  - rule: DOMAIN_FAILED

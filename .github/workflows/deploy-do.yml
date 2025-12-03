@@ -22,26 +22,34 @@ jobs:
 
       - name: Deploy Demo App
         run: |
+          set -e  # Exit on any error
+
           # Check if demo app exists
           APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "swarm-demo" | awk '{print $1}')
 
           if [ -z "$APP_ID" ]; then
             echo "Creating demo app..."
-            doctl apps create --spec .do/swarm-demo-app.yaml
+            doctl apps create --spec .do/swarm-demo-app.yaml --wait
+            echo "✓ Demo app created and deployed successfully"
           else
             echo "Updating demo app (ID: $APP_ID)..."
-            doctl apps update $APP_ID --spec .do/swarm-demo-app.yaml
+            doctl apps update $APP_ID --spec .do/swarm-demo-app.yaml --wait
+            echo "✓ Demo app updated and deployed successfully"
           fi
 
       - name: Deploy Identity App
         run: |
+          set -e  # Exit on any error
+
           # Check if identity app exists
           APP_ID=$(doctl apps list --format ID,Spec.Name --no-header | grep "swarm-id" | grep -v "swarm-id-platform" | awk '{print $1}')
 
           if [ -z "$APP_ID" ]; then
             echo "Creating identity app..."
-            doctl apps create --spec .do/swarm-id-app.yaml
+            doctl apps create --spec .do/swarm-id-app.yaml --wait
+            echo "✓ Identity app created and deployed successfully"
           else
             echo "Updating identity app (ID: $APP_ID)..."
-            doctl apps update $APP_ID --spec .do/swarm-id-app.yaml
+            doctl apps update $APP_ID --spec .do/swarm-id-app.yaml --wait
+            echo "✓ Identity app updated and deployed successfully"
           fi
