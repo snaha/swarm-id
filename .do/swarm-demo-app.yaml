@@ -20,7 +20,7 @@ static_sites:
     output_dir: demo/build
 
     # Build using monorepo scripts
-    build_command: git submodule update --init --recursive && npm install -g pnpm && pnpm install && pnpm build:swarm-demo
+    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-demo
 
     # CORS headers for cross-origin communication with swarm-id
     cors:
