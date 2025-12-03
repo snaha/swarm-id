@@ -27,10 +27,10 @@ jobs:
 
           if [ -z "$APP_ID" ]; then
             echo "Creating demo app..."
-            doctl apps create --spec .do-app-demo.yaml
+            doctl apps create --spec .do/swarm-demo-app.yaml
           else
             echo "Updating demo app (ID: $APP_ID)..."
-            doctl apps update $APP_ID --spec .do-app-demo.yaml
+            doctl apps update $APP_ID --spec .do/swarm-demo-app.yaml
           fi
 
       - name: Deploy Identity App
@@ -40,8 +40,8 @@ jobs:
 
           if [ -z "$APP_ID" ]; then
             echo "Creating identity app..."
-            doctl apps create --spec .do-app-id.yaml
+            doctl apps create --spec .do/swarm-id-app.yaml
           else
             echo "Updating identity app (ID: $APP_ID)..."
-            doctl apps update $APP_ID --spec .do-app-id.yaml
+            doctl apps update $APP_ID --spec .do/swarm-id-app.yaml
           fi
