@@ -37,6 +37,9 @@ static_sites:
 
 # Environment variables
 envs:
+  - key: NODE_VERSION
+    value: "22"
+
   - key: NODE_ENV
     value: production
 
