@@ -11,7 +11,6 @@
  * Special paths always served from disk:
  * - /lib/* - Library files (mapped to lib/dist/)
  * - /demo/* - Demo HTML files for testing
- * - /popup/* - Popup demo files for testing
  */
 
 import https from 'https'
@@ -92,9 +91,9 @@ const server = https.createServer(sslOptions, (req, res) => {
   const url = new URL(req.url, `https://${HOST}:${PORT}`)
   let pathname = url.pathname
 
-  // Check if requesting demo/, popup/, or lib/ files
+  // Check if requesting demo/ or lib/ files
   // These are always served from disk, even when proxying
-  if (pathname.startsWith('/demo/') || pathname.startsWith('/popup/') || pathname.startsWith('/lib/')) {
+  if (pathname.startsWith('/demo/') || pathname.startsWith('/lib/')) {
     // Map /lib/* to lib/dist/* for local development
     // This allows HTML files to use production-style imports without building
     let mappedPath = pathname
@@ -126,8 +125,8 @@ function serveStaticFile(req, res, filePath, pathname) {
     let finalFilePath = filePath
 
     if (err) {
-      // If file not found in build directory and not a demo/popup file, serve index.html for SPA routing
-      if (!pathname.startsWith('/demo/') && !pathname.startsWith('/popup/')) {
+      // If file not found in build directory and not a demo file, serve index.html for SPA routing
+      if (!pathname.startsWith('/demo/')) {
         finalFilePath = path.join(__dirname, 'swarm-ui', 'build', 'index.html')
       } else {
         res.writeHead(404, { 'Content-Type': 'text/plain' })
@@ -186,7 +185,7 @@ server.listen(PORT, '127.0.0.1', () => {
   } else {
     console.log(`Mode: PRODUCTION (serving from swarm-ui/build/)`)
   }
-  console.log(`Special paths served from disk: /demo/, /popup/, /lib/`)
+  console.log(`Special paths served from disk: /demo/, /lib/`)
   console.log('='.repeat(70))
   console.log(`\nThis server provides the Swarm ID proxy iframe for swarm-app.local\n`)
 })

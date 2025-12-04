@@ -44,7 +44,7 @@ export class SwarmIdClient {
 
   constructor(options: ClientOptions) {
     this.iframeOrigin = options.iframeOrigin
-    this.iframePath = options.iframePath || "/demo/proxy.html"
+    this.iframePath = options.iframePath || "/proxy"
     this.beeApiUrl = options.beeApiUrl || "http://localhost:1633"
     this.timeout = options.timeout || 30000 // 30 seconds default
     this.onAuthChange = options.onAuthChange
