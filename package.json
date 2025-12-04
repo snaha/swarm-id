@@ -28,7 +28,7 @@
   "author": "",
   "license": "ISC",
   "engines": {
-    "node": ">=22",
+    "node": "22.x",
     "pnpm": "10.x"
   }
 }
