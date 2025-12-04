@@ -93,7 +93,7 @@ const server = https.createServer(sslOptions, (req, res) => {
 server.listen(PORT, '127.0.0.1', () => {
   console.log('='.repeat(70))
   console.log(`HTTPS Server running at https://${HOST}:${PORT}/`)
-  console.log(`Serving: demo/, popup/, and root files`)
+  console.log(`Serving: demo/ and root files`)
   console.log('='.repeat(70))
   console.log(`\nAccess the app at: https://${HOST}:${PORT}/\n`)
 })

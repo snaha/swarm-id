@@ -6,14 +6,14 @@ This monorepo implements a cross-browser compatible authentication and identity 
 
 - **[lib/](./lib/README.md)** - The Swarm ID TypeScript library for authentication and Bee API operations
 - **[swarm-ui/](./swarm-ui/)** - SvelteKit-based identity management UI
-- **popup/** - Demo implementation with OAuth-style popup authentication
+- **[demo/](./demo/)** - Demo dApp with library integration examples
 - **[bee-js/](https://github.com/agazso/bee-js/tree/feat/encrypted-chunk-streams)** - A custom fork of the [bee-js](https://github.com/ethersphere/bee-js) library, containing encrypted, streaming chunked upload and download functionality.
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow that works across all browsers (Chrome, Firefox, Safari) without requiring the Storage Access API. See the [popup folder](./popup) for detailed documentation.
+The project uses an OAuth-style popup authentication flow that works across all browsers (Chrome, Firefox, Safari) without requiring the Storage Access API.
 
-**Quick Overview**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
+**Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
 ## Live Demos
 
@@ -65,28 +65,22 @@ pnpm build:swarm-id      # Builds lib + identity UI
 **demo/build/** (Demo App)
 ```
 demo/build/
-├── index.html          # Landing page
-├── demo.html           # Library demo (12KB)
-├── auth.html           # Auth page (12KB)
-├── lib/                # Library files (~8MB with source maps)
-│   ├── swarm-id-client.js
-│   ├── swarm-id-proxy.js
-│   ├── swarm-id-auth.js
-│   └── ... (types, maps, etc.)
-└── popup/              # Popup demo files
+├── index.html          # Demo app (renamed from demo.html during build)
+└── lib/                # Library files (~8MB with source maps)
+    ├── swarm-id-client.js
+    ├── swarm-id-proxy.js
+    ├── swarm-id-auth.js
+    └── ... (types, maps, etc.)
 ```
 
 **swarm-id-build/** (Identity UI)
 ```
 swarm-id-build/
-├── [SvelteKit app files]
-├── lib/                # Library files (~8MB with source maps)
-└── demo/               # Proxy/auth pages
-    ├── proxy.html      # Iframe proxy (3.4KB)
-    └── auth.html       # Auth popup (12KB)
+├── [SvelteKit app files including prerendered routes: /proxy, /connect]
+└── lib/                # Library files (~8MB with source maps)
 ```
 
-**Note:** Library files use standard ES6 module imports, not inline bundling. HTML files are small (~3-12KB) and import from `/lib/` at runtime.
+**Note:** Library files use standard ES6 module imports, not inline bundling.
 
 See [lib/README.md](./lib/README.md) for detailed library documentation.
 
@@ -205,7 +199,7 @@ PROXY_TARGET=http://localhost:3000 ./start-servers-dev.sh
 **server-id.js** (`https://swarm-id.local:8081`)
 - **Production mode**: Serves built SvelteKit app from `swarm-ui/build/`
 - **Dev mode** (`PROXY_TARGET` set): Proxies to dev server (e.g., `localhost:5173`)
-- Always serves `/demo/` and `/popup/` files from disk
+- Always serves `/demo/` and `/lib/` files from disk
 - Includes Service Worker support with proper headers
 - CORS configured for `swarm-app.local`
 
@@ -230,8 +224,7 @@ Both servers:
    ```
 
 3. Open demos in your browser:
-   - **Library Demo (Recommended)**: `https://swarm-app.local:8080/demo.html`
-   - **Popup Demo**: `https://swarm-app.local:8080/popup/demo.html`
+   - **Demo App**: `https://swarm-app.local:8080/` (serves demo/demo.html)
    - **Identity UI**: `https://swarm-id.local:8081/`
 
 4. **Accept browser security warnings**
@@ -257,29 +250,18 @@ Both servers:
 │   └── README.md         # Library documentation
 ├── demo/                 # Demo app package
 │   ├── demo.html         # Library demo HTML
-│   ├── auth.html         # Auth page HTML
-│   ├── proxy.html        # Iframe proxy HTML
 │   ├── build.js          # Build script (copies lib, injects config)
 │   └── build/            # Build output (deployed to swarm-demo.snaha.net)
-│       ├── index.html    # Landing page
-│       ├── demo.html     # Built demo (~12KB)
-│       ├── lib/          # Library files (~8MB)
-│       └── popup/        # Popup demo files
+│       ├── index.html    # Demo app (renamed from demo.html)
+│       └── lib/          # Library files (~8MB)
 ├── swarm-ui/             # SvelteKit identity management UI
 │   ├── src/              # SvelteKit source code
+│   │   └── routes/       # SvelteKit routes including /proxy and /connect
 │   └── build/            # SvelteKit production build
-├── popup/                # OAuth-style popup demos (local dev only)
-│   ├── demo.html         # Popup demo dApp
-│   ├── auth.html         # Auth popup UI
-│   └── proxy.html        # Iframe proxy
 ├── bee-js/               # bee-js library (linked dependency)
-├── build-swarm-id.js     # Build script for swarm-id app
 ├── swarm-id-build/       # Build output (deployed to swarm-id.snaha.net)
-│   ├── [SvelteKit app]   # SvelteKit production files
-│   ├── lib/              # Library files (~8MB)
-│   └── demo/             # Proxy/auth HTML files
-│       ├── proxy.html    # Iframe proxy (~3.4KB)
-│       └── auth.html     # Auth popup (~12KB)
+│   ├── [SvelteKit app]   # SvelteKit production files (includes /proxy and /connect routes)
+│   └── lib/              # Library files (~8MB)
 ├── server-app.js         # Local HTTPS server for swarm-app.local:8080
 ├── server-id.js          # Local HTTPS server for swarm-id.local:8081
 ├── start-servers.sh      # Start both servers (production mode)
@@ -311,7 +293,7 @@ Both servers:
 
 - **[The Book of Swarm](./The-Book-of-Swarm.pdf)**: Comprehensive Swarm documentation
 - **[Swarm Identity Management Proposal](./Swarm%20Identity%20Management%20Proposal.rtf)**: Identity system proposal
-- **[Popup Authentication](./popup/README.md)**: Detailed technical documentation for the popup-based auth system
+- **[Library Documentation](./lib/README.md)**: API reference and usage examples
 
 ## Development Workflow
 

@@ -8,8 +8,8 @@
 #
 # Prerequisites:
 #   - Library must be built: cd lib && pnpm build
-#   - SvelteKit app (optional): cd swarm-ui && pnpm build
-#     (If not built, demo/proxy pages won't have identity UI)
+#   - SvelteKit app must be built: cd swarm-ui && pnpm build
+#     (Provides /proxy and /connect routes required for authentication)
 #
 # For SvelteKit development with hot reload, use: ./start-servers-dev.sh
 
@@ -68,10 +68,8 @@ echo "========================================================================"
 echo "✓ Both HTTPS servers started!"
 echo "========================================================================"
 echo ""
-echo "Access demos:"
-echo "  • Landing:      https://swarm-app.local:8080/"
-echo "  • Library demo: https://swarm-app.local:8080/demo/demo.html"
-echo "  • Popup demo:   https://swarm-app.local:8080/popup/demo.html"
+echo "Access demo:"
+echo "  • Demo app: https://swarm-app.local:8080/ (serves demo/demo.html)"
 echo ""
 echo "Identity app:"
 echo "  • UI:    https://swarm-id.local:8081/"

@@ -145,7 +145,7 @@ console.log('File data:', downloadedFile.data)
 client.destroy()
 ```
 
-### In the Iframe (proxy.html)
+### In the Iframe (SvelteKit `/proxy` route)
 
 ```typescript
 import { initProxy } from 'swarm-id/proxy'
@@ -159,7 +159,7 @@ const proxy = initProxy({
 })
 ```
 
-### In the Auth Popup (auth.html)
+### In the Auth Popup (SvelteKit `/connect` route)
 
 ```typescript
 import { initAuth } from 'swarm-id/auth'

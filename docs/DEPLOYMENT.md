@@ -10,8 +10,9 @@ swarm-id-explorations/
 ├── demo/                  # Demo app package (@swarm-id/demo)
 ├── swarm-ui/              # SvelteKit identity UI (swarm-identity)
 ├── bee-js/                # Bee.js library (linked)
-├── .do-app-demo.yaml      # DO config for swarm-demo.snaha.net
-├── .do-app-id.yaml        # DO config for swarm-id.snaha.net
+├── .do/
+│   ├── swarm-demo-app.yaml  # DO config for swarm-demo.snaha.net
+│   └── swarm-id-app.yaml    # DO config for swarm-id.snaha.net
 └── package.json           # Root monorepo config
 ```
 
@@ -28,12 +29,7 @@ swarm-id-explorations/
 **Output:** `demo/build/`
 
 **Files:**
-- `/index.html` - Landing page with links to both demos
-- `/demo.html` - Library demo (SwarmIdClient) - Recommended
-- `/auth.html` - Auth page (currently unused)
-- `/popup/demo.html` - OAuth-style popup flow demo (Experimental)
-- `/popup/auth.html` - Popup auth page
-- `/popup/proxy.html` - Popup proxy iframe
+- `/index.html` - Demo app (renamed from demo.html during build)
 
 **CORS:** Allows requests from `https://swarm-id.snaha.net`
 
@@ -48,10 +44,10 @@ swarm-id-explorations/
 
 **Output:** `swarm-id-build/`
 
-**Files:**
+**Routes:**
 - `/` - SvelteKit app (identity management UI)
-- `/demo/proxy.html` - Iframe proxy for Bee API calls
-- `/demo/auth.html` - Auth popup page
+- `/proxy` - Iframe proxy for Bee API calls (SvelteKit route)
+- `/connect` - Authentication page (SvelteKit route)
 
 **CORS:** Allows requests from `https://swarm-demo.snaha.net`
 
@@ -97,16 +93,16 @@ cd swarm-ui && pnpm build
 
 **Deploy from GitHub:**
 - Repository: `snaha/swarm-id-explorations`
-- Branch: `feat/create-swarm-ui` (update to `main` when ready)
+- Branch: `main`
 
 **App 1: swarm-demo**
-- Config: `.do-app-demo.yaml`
+- Config: `.do/swarm-demo-app.yaml`
 - Build: `pnpm install && pnpm build:swarm-demo`
 - Output: `demo/build`
 - Domain: `swarm-demo.snaha.net`
 
 **App 2: swarm-id**
-- Config: `.do-app-id.yaml`
+- Config: `.do/swarm-id-app.yaml`
 - Build: `pnpm install && pnpm build:swarm-id`
 - Output: `swarm-id-build`
 - Domain: `swarm-id.snaha.net`
@@ -136,16 +132,12 @@ Both apps use these environment variables (injected at build time):
    - HTML files use standard `<script type="module">` imports
    - Outputs to `demo/build/`
    - **Result:** Small HTML files (3-12KB) + library files (~8MB)
-   - **Note:** Popup demos (`popup/`) are included for local testing
 
-3. **Identity Build** (`build-swarm-id.js`)
+3. **Identity Build** (`pnpm build:swarm-id`)
    - Builds SvelteKit app to `swarm-ui/build/`
    - Copies SvelteKit build to `swarm-id-build/`
    - Copies `lib/dist/` → `swarm-id-build/lib/`
-   - Processes `demo/proxy.html` and `demo/auth.html`:
-     - Injects environment config only
-     - No inline bundling
-   - Outputs to `swarm-id-build/demo/`
+   - SvelteKit prerender generates `/proxy` and `/connect` routes as static HTML
 
 ### Key Architectural Decision
 
@@ -158,14 +150,14 @@ Both apps use these environment variables (injected at build time):
 ### Cross-Origin Communication
 
 **Demo App** (swarm-demo.snaha.net):
-- Embeds hidden iframe from `swarm-id.snaha.net/demo/proxy.html`
-- Opens auth popup to `swarm-id.snaha.net/connect` (SvelteKit route)
+- Embeds hidden iframe from `swarm-id.snaha.net/proxy`
+- Opens auth popup to `swarm-id.snaha.net/connect`
 - Uses postMessage for cross-origin communication
 - Imports library from `/lib/swarm-id-client.js`
 
 **Identity App** (swarm-id.snaha.net):
-- Serves proxy iframe (`/demo/proxy.html`) that handles Bee API calls
-- Serves auth pages for popup authentication
+- Serves `/proxy` route as iframe that handles Bee API calls
+- Serves `/connect` route for authentication
 - Stores secrets in first-party localStorage (partitioned by browser)
 - Library files accessible at `/lib/` path
 
@@ -202,8 +194,7 @@ Both apps use these environment variables (injected at build time):
 ```
 
 Access demos:
-- Library demo: `https://swarm-app.local:8080/demo/demo.html`
-- Popup demo: `https://swarm-app.local:8080/popup/demo.html` (local only)
+- Demo app: `https://swarm-app.local:8080/` (serves demo/demo.html)
 - Identity UI: `https://swarm-id.local:8081/`
 
 ## Troubleshooting
@@ -224,14 +215,7 @@ Access demos:
 ### Iframe Not Loading
 
 **Issue:** CSP or X-Frame-Options blocking iframe
-**Fix:** Verify `.do-app-id.yaml` headers allow frame-ancestors from demo domain
-
-## Next Steps
-
-1. **Update branch:** Change deploy branch from `feat/create-swarm-ui` to `main` in `.do-app-*.yaml`
-2. **Configure domains:** Set up custom domains in Digital Ocean dashboard
-3. **SSL:** Digital Ocean automatically provisions SSL certificates
-4. **Monitor:** Check build logs in Digital Ocean dashboard
+**Fix:** Verify `.do/swarm-id-app.yaml` headers allow frame-ancestors from demo domain
 
 ## Related Documentation
 
