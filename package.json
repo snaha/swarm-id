@@ -11,7 +11,7 @@
     "build:demo": "pnpm --filter @swarm-id/demo build",
     "build:swarm-ui": "pnpm --filter swarm-identity build",
     "build:swarm-demo": "pnpm build:lib && pnpm build:demo",
-    "build:swarm-id": "pnpm build:lib && pnpm build:swarm-ui && node build-swarm-id.js",
+    "build:swarm-id": "pnpm build:lib && pnpm build:swarm-ui && rm -rf swarm-id-build && cp -r swarm-ui/build swarm-id-build && cp -r lib/dist swarm-id-build/lib",
     "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
     "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
     "dev:swarm-ui": "pnpm --filter swarm-identity dev",
