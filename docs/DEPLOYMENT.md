@@ -64,7 +64,7 @@ pnpm build
 
 # Build specific apps
 pnpm build:swarm-demo    # Builds lib + demo
-pnpm build:swarm-id      # Builds lib + swarm-ui + processes proxy files
+pnpm build:swarm-id      # Builds lib + swarm-ui, copies to swarm-id-build/
 
 # Clean all builds
 pnpm clean
@@ -134,10 +134,13 @@ Both apps use these environment variables (injected at build time):
    - **Result:** Small HTML files (3-12KB) + library files (~8MB)
 
 3. **Identity Build** (`pnpm build:swarm-id`)
-   - Builds SvelteKit app to `swarm-ui/build/`
-   - Copies SvelteKit build to `swarm-id-build/`
-   - Copies `lib/dist/` → `swarm-id-build/lib/`
+   - Builds library and SvelteKit app
+   - Uses shell commands to copy build artifacts:
+     - `rm -rf swarm-id-build` - Clean previous build
+     - `cp -r swarm-ui/build swarm-id-build` - Copy SvelteKit build
+     - `cp -r lib/dist swarm-id-build/lib` - Copy library files
    - SvelteKit prerender generates `/proxy` and `/connect` routes as static HTML
+   - **Note:** Build process uses direct shell commands in `package.json`, no separate build script
 
 ### Key Architectural Decision
 
