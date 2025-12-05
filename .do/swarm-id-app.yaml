@@ -11,10 +11,11 @@ domains:
 static_sites:
   - name: id-app
     # GitHub auto-deploy configuration
+    # Note: deploy_on_push disabled - deployments managed by GitHub Actions workflow
     github:
       repo: snaha/swarm-id-explorations
       branch: main
-      deploy_on_push: true
+      deploy_on_push: false
 
     source_dir: /
     output_dir: swarm-id-build
