@@ -13,7 +13,7 @@ static_sites:
     # GitHub auto-deploy configuration
     github:
       repo: snaha/swarm-id-explorations
-      branch: ci/fix-do-deployment  # Temporary: testing deployment fix, will revert to main
+      branch: main
       deploy_on_push: true
 
     source_dir: /
