@@ -41,6 +41,9 @@ export class SwarmIdClient {
   > = new Map()
   private requestIdCounter = 0
   private messageListener: ((event: MessageEvent) => void) | undefined
+  private proxyInitializedPromise: Promise<void>
+  private proxyInitializedResolve?: () => void
+  private proxyInitializedReject?: (error: Error) => void
 
   constructor(options: ClientOptions) {
     this.iframeOrigin = options.iframeOrigin
@@ -62,6 +65,23 @@ export class SwarmIdClient {
             "Proxy initialization timeout - proxy did not respond within 10 seconds",
           ),
         )
+      }, 10000)
+    })
+
+    // Create promise for proxyInitialized message
+    this.proxyInitializedPromise = new Promise<void>((resolve, reject) => {
+      this.proxyInitializedResolve = resolve
+      this.proxyInitializedReject = reject
+
+      // Timeout if proxy doesn't send proxyInitialized within 10 seconds
+      setTimeout(() => {
+        if (this.proxyInitializedReject) {
+          this.proxyInitializedReject(
+            new Error(
+              "Proxy initialization timeout - proxy did not signal readiness",
+            ),
+          )
+        }
       }, 10000)
     })
 
@@ -107,7 +127,7 @@ export class SwarmIdClient {
     )
 
     // Wait for proxy to signal it's ready
-    await this.waitForProxyInitialized()
+    await this.proxyInitializedPromise
     console.log("[SwarmIdClient] Proxy initialized and ready")
 
     // Identify ourselves to the iframe
@@ -127,47 +147,28 @@ export class SwarmIdClient {
   }
 
   /**
-   * Wait for proxy to announce it's initialized
-   * Listens for the proxyInitialized message from the iframe
-   */
-  private waitForProxyInitialized(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const timeout = setTimeout(() => {
-        cleanup()
-        reject(
-          new Error(
-            "Proxy initialization timeout - proxy did not signal readiness",
-          ),
-        )
-      }, 10000) // 10 second timeout
-
-      const listener = (event: MessageEvent) => {
-        // Accept proxyInitialized from any origin initially
-        // We'll validate the origin properly after parentIdentify
-        if (event.data?.type === "proxyInitialized") {
-          console.log(
-            "[SwarmIdClient] Received proxyInitialized from:",
-            event.origin,
-          )
-          cleanup()
-          resolve()
-        }
-      }
-
-      const cleanup = () => {
-        clearTimeout(timeout)
-        window.removeEventListener("message", listener)
-      }
-
-      window.addEventListener("message", listener)
-    })
-  }
-
-  /**
    * Setup message listener for iframe responses
    */
   private setupMessageListener(): void {
     this.messageListener = (event: MessageEvent) => {
+      // Handle proxyInitialized BEFORE any validation to avoid race condition
+      // This message is sent immediately when iframe loads and uses wildcard origin
+      if (event.data?.type === "proxyInitialized") {
+        // Security: Verify message is from OUR iframe (not another window/iframe)
+        if (this.iframe && event.source === this.iframe.contentWindow) {
+          console.log("[SwarmIdClient] Received proxyInitialized from iframe")
+          if (this.proxyInitializedResolve) {
+            this.proxyInitializedResolve()
+            this.proxyInitializedResolve = undefined // Prevent double resolution
+          }
+        } else {
+          console.warn(
+            "[SwarmIdClient] Rejected proxyInitialized from unknown source",
+          )
+        }
+        return
+      }
+
       // Validate origin
       if (event.origin !== this.iframeOrigin) {
         console.warn(
