@@ -18,13 +18,16 @@
 	import type { Identity, Account } from '$lib/types'
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
+	import Hashicon from '$lib/components/hashicon.svelte'
+	import { ArrowRight } from 'carbon-icons-svelte'
+	import { sessionStore } from '$lib/stores/session.svelte'
 
 	let appOrigin = $state('')
 	let appName = $state('')
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
-	let authenticated = $state(false)
 	let showCreateMode = $state(false)
+	let authenticated = $state(false)
 
 	const identities = $derived(identitiesStore.identities)
 	const hasIdentities = $derived(identities.length > 0)
@@ -64,9 +67,17 @@
 		} catch {
 			appName = origin
 		}
+
+		// If there is a new identity set it up
+		if (sessionStore.data.currentIdentityId) {
+			const identity = identitiesStore.getIdentity(sessionStore.data.currentIdentityId)
+			if (identity) {
+				selectIdentityForConnection(identity)
+			}
+		}
 	})
 
-	function handleIdentityClick(identity: Identity) {
+	function selectIdentityForConnection(identity: Identity) {
 		selectedIdentity = identity
 		handleAuthenticate()
 	}
@@ -117,10 +128,42 @@
 			const encryptionKey = await deriveEncryptionKey(publicKey, encryptionSalt)
 			console.log('🔑 Encryption key derived')
 
-			const masterKey = await decryptMasterKey(signed.masterKey, encryptionKey)
+			const masterKey = await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
+			console.log('✅ Ethereum authentication successful')
 
 			return masterKey
 		}
+	}
+
+	function updateSelectedIdentity(appSecret: string) {
+		// FIXME: Generate random postage batch ID for testing
+		// In production, use the identity's default postage stamp or let user choose
+		const postageBatchId = generateRandomPostageBatchId()
+
+		// Send secret to opener (the iframe that opened this popup)
+		if (!window.opener || (window.opener as Window).closed) {
+			error = 'Opener window not available'
+			return
+		}
+
+		;(window.opener as Window).postMessage(
+			{
+				type: 'setSecret',
+				appOrigin: appOrigin,
+				data: {
+					secret: appSecret,
+					postageBatchId, // FIXME: Should come from identity's actual stamps
+				},
+			},
+			window.location.origin,
+		)
+
+		// Track this app connection
+		connectedAppsStore.addOrUpdateApp({
+			appUrl: appOrigin,
+			appName: appName,
+			identityId: selectedIdentity.id,
+		})
 	}
 
 	async function handleAuthenticate() {
@@ -142,7 +185,12 @@
 
 		try {
 			// Retrieve masterKey based on account type
-			const masterKey = await getMasterKeyFromAccount(account)
+			const masterKey =
+				sessionStore.data.temporaryMasterKey ?? (await getMasterKeyFromAccount(account))
+
+			sessionStore.clearTemporaryMasterKey()
+
+			authenticated = true
 
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
@@ -151,41 +199,7 @@
 			// Step 2: Derive app-specific secret from identity master key
 			const appSecret = await deriveSecret(identityMasterKey, appOrigin)
 
-			// FIXME: Generate random postage batch ID for testing
-			// In production, use the identity's default postage stamp or let user choose
-			const postageBatchId = generateRandomPostageBatchId()
-
-			// Send secret to opener (the iframe that opened this popup)
-			if (!window.opener || (window.opener as Window).closed) {
-				error = 'Opener window not available'
-				return
-			}
-
-			;(window.opener as Window).postMessage(
-				{
-					type: 'setSecret',
-					appOrigin: appOrigin,
-					data: {
-						secret: appSecret,
-						postageBatchId, // FIXME: Should come from identity's actual stamps
-					},
-				},
-				window.location.origin,
-			)
-
-			// Track this app connection
-			connectedAppsStore.addOrUpdateApp({
-				appUrl: appOrigin,
-				appName: appName,
-				identityId: selectedIdentity.id,
-			})
-
-			authenticated = true
-
-			// Close popup after a short delay
-			setTimeout(() => {
-				window.close()
-			}, 1500)
+			updateSelectedIdentity(appSecret)
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Authentication failed'
 		}
@@ -197,10 +211,21 @@
 		<Typography variant="h3">Error</Typography>
 		<Typography>{error}</Typography>
 	</Vertical>
-{:else if authenticated}
-	<Vertical --vertical-gap="var(--padding)">
-		<Typography variant="h3">Authentication Successful</Typography>
-		<Typography>This window will close automatically...</Typography>
+{:else if selectedIdentity}
+	<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Hashicon value={selectedIdentity} size={80} />
+			<Typography>{selectedIdentity.name}</Typography>
+		</Vertical>
+		{#if authenticated}
+			<Vertical --vertical-gap="var(--half-padding)">
+				<Typography variant="large">✅ All set!</Typography>
+				<Typography>Your identity {selectedIdentity.name} is ready to use.</Typography>
+			</Vertical>
+			<Button variant="strong" dimension="compact" onclick={() => window.close()}
+				>Continue to app<ArrowRight size={20} /></Button
+			>
+		{/if}
 	</Vertical>
 {:else}
 	<ConnectedAppHeader {appName} appUrl={appOrigin} />
@@ -208,7 +233,11 @@
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
-			<IdentityGroups {identities} appUrl={appOrigin} onIdentityClick={handleIdentityClick} />
+			<IdentityGroups
+				{identities}
+				appUrl={appOrigin}
+				onIdentityClick={selectIdentityForConnection}
+			/>
 			<Horizontal --horizontal-justify-content="flex-start">
 				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
 					>Connect another account</Button
