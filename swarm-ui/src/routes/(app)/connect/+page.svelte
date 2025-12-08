@@ -136,6 +136,10 @@
 	}
 
 	function updateSelectedIdentity(appSecret: string) {
+		if (!selectedIdentity) {
+			return
+		}
+
 		// FIXME: Generate random postage batch ID for testing
 		// In production, use the identity's default postage stamp or let user choose
 		const postageBatchId = generateRandomPostageBatchId()
@@ -214,7 +218,7 @@
 {:else if selectedIdentity}
 	<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
 		<Vertical --vertical-gap="var(--half-padding)">
-			<Hashicon value={selectedIdentity} size={80} />
+			<Hashicon value={selectedIdentity.id} size={80} />
 			<Typography>{selectedIdentity.name}</Typography>
 		</Vertical>
 		{#if authenticated}
