@@ -31,6 +31,7 @@
 
 	const identities = $derived(identitiesStore.identities)
 	const hasIdentities = $derived(identities.length > 0)
+	const origin = window.location.origin
 
 	onMount(() => {
 		// Validate opener window
@@ -224,10 +225,14 @@
 		{#if authenticated}
 			<Vertical --vertical-gap="var(--half-padding)">
 				<Typography variant="large">✅ All set!</Typography>
-				<Typography>Your identity {selectedIdentity.name} is ready to use.</Typography>
+				<Typography>Your identity is ready to use.</Typography>
 			</Vertical>
 			<Button variant="strong" dimension="compact" onclick={() => window.close()}
 				>Continue to app<ArrowRight size={20} /></Button
+			>
+			<Typography variant="small"
+				>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
+				></Typography
 			>
 		{/if}
 	</Vertical>
