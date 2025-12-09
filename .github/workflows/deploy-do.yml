@@ -34,7 +34,11 @@ jobs:
           else
             echo "Updating demo app (ID: $APP_ID)..."
             doctl apps update $APP_ID --spec .do/swarm-demo-app.yaml --wait
-            echo "✓ Demo app updated and deployed successfully"
+            echo "✓ Demo app spec updated successfully"
+
+            echo "Triggering rebuild and deployment for demo app..."
+            doctl apps create-deployment $APP_ID --force-rebuild --wait
+            echo "✓ Demo app rebuild completed"
           fi
 
       - name: Deploy Identity App
@@ -51,5 +55,9 @@ jobs:
           else
             echo "Updating identity app (ID: $APP_ID)..."
             doctl apps update $APP_ID --spec .do/swarm-id-app.yaml --wait
-            echo "✓ Identity app updated and deployed successfully"
+            echo "✓ Identity app spec updated successfully"
+
+            echo "Triggering rebuild and deployment for identity app..."
+            doctl apps create-deployment $APP_ID --force-rebuild --wait
+            echo "✓ Identity app rebuild completed"
           fi
