@@ -101,15 +101,15 @@
 		sessionStore.setCurrentAccount(account.id)
 		sessionStore.setCurrentIdentity(identity.id)
 
-		// Clear both account AND temporary masterKey
-		sessionStore.clearAccount()
-		sessionStore.clearTemporaryMasterKey()
-		console.log('🧹 Cleared session data (account + masterKey)')
-
 		// Navigate back to /connect or home
 		if (appOrigin) {
 			goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
 		} else {
+			// Clear both account AND temporary masterKey
+			sessionStore.clearAccount()
+			sessionStore.clearTemporaryMasterKey()
+			console.log('🧹 Cleared session data (account + masterKey)')
+
 			goto(routes.HOME)
 		}
 	}
