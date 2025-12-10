@@ -385,4 +385,4 @@ cd swarm-ui && pnpm dev
 
 ## License
 
-MIT
+[Apache 2.0](LICENSE)
