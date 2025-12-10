@@ -13,7 +13,7 @@ static_sites:
     # GitHub auto-deploy configuration
     # Note: deploy_on_push disabled - deployments managed by GitHub Actions workflow
     github:
-      repo: snaha/swarm-id-explorations
+      repo: snaha/swarm-id
       branch: main
       deploy_on_push: false
 
