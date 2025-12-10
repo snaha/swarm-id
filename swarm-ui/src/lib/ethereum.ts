@@ -6,122 +6,56 @@
  */
 
 import { BrowserProvider, JsonRpcSigner, hashMessage, SigningKey, BaseWallet } from 'ethers'
-import { createWeb3Modal, defaultConfig } from '@web3modal/ethers'
+import type { Eip1193Provider } from 'ethers'
+import Onboard from '@web3-onboard/core'
+import injectedModule from '@web3-onboard/injected-wallets'
 
-// Web3Modal instance (singleton)
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-let web3Modal: any | undefined
-
-/**
- * Initialize Web3Modal
- */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function getWeb3Modal(): any {
-	if (web3Modal) {
-		return web3Modal
-	}
-
-	// WalletConnect Project ID - Optional, uses placeholder if not set
-	// Get your own at https://cloud.walletconnect.com
-	const projectId = import.meta.env.PUBLIC_WALLETCONNECT_PROJECT_ID || 'placeholder-project-id'
-
-	// Metadata for the app
-	const metadata = {
-		name: 'Swarm ID',
-		description: 'Swarm Identity Management',
-		url: window.location.origin,
-		icons: ['https://avatars.githubusercontent.com/u/34437435'],
-	}
-
-	// Ethereum mainnet config
-	const chains = [
-		{
-			chainId: 1,
-			name: 'Ethereum',
-			currency: 'ETH',
-			explorerUrl: 'https://etherscan.io',
-			rpcUrl: 'https://cloudflare-eth.com',
-		},
-	]
-
-	const ethersConfig = defaultConfig({
-		metadata,
-		enableEIP6963: true, // Enable EIP-6963 for multi-wallet support
-		enableInjected: true, // Enable injected wallets (MetaMask, etc.)
-		enableCoinbase: true, // Enable Coinbase Wallet
-		defaultChainId: 1,
-	})
-
-	web3Modal = createWeb3Modal({
-		ethersConfig,
-		chains,
-		projectId,
-		enableAnalytics: false,
-	})
-
-	return web3Modal
+const injected = injectedModule()
+const wallets = [injected]
+const chains = [
+	{
+		id: '0x1',
+		token: 'ETH',
+		label: 'Ethereum Mainnet',
+		rpcUrl: 'https://swarm-id.snaha.net', // We don't need RPC, there are no blockchain transactions
+	},
+]
+const appMetadata = {
+	name: 'Swarm ID',
+	description: 'The identity system for Swarm',
+	recommendedInjectedWallets: [
+		{ name: 'Coinbase', url: 'https://wallet.coinbase.com/' },
+		{ name: 'MetaMask', url: 'https://metamask.io' },
+	],
 }
 
-export interface WalletConnection {
-	address: string
-	provider: BrowserProvider
-	signer: JsonRpcSigner
+const onboard = Onboard({
+	wallets,
+	chains,
+	appMetadata,
+	connect: {
+		showSidebar: false,
+	},
+	accountCenter: {
+		desktop: {
+			enabled: false,
+		},
+		mobile: {
+			enabled: true,
+		},
+	},
+})
+
+declare let window: Window & {
+	ethereum?: Eip1193Provider & { send: (name: string) => Promise<void> }
 }
 
 export interface SignedMessage {
 	message: string
+	digest: string
 	signature: string
+	publicKey: string
 	address: string
-	masterKey: string
-	masterAddress: string
-}
-
-/**
- * Connect to Ethereum wallet using Web3Modal
- *
- * Opens a modal UI allowing users to connect via:
- * - MetaMask (browser extension)
- * - WalletConnect (mobile wallets via QR code)
- * - Coinbase Wallet
- * - Other supported wallets
- */
-export async function connectWallet(): Promise<WalletConnection> {
-	try {
-		// Get or initialize Web3Modal
-		const modal = getWeb3Modal()
-
-		// Open the modal and wait for user to connect
-		await modal.open()
-
-		// Wait for connection
-		const walletProvider = await modal.getWalletProvider()
-		if (!walletProvider) {
-			throw new Error('No wallet provider available after connection')
-		}
-
-		// Create ethers provider
-		const provider = new BrowserProvider(walletProvider)
-		const signer = await provider.getSigner()
-		const address = await signer.getAddress()
-
-		console.log('✅ Connected to wallet:', address)
-
-		// Close modal after successful connection
-		modal.close()
-
-		return {
-			address,
-			provider,
-			signer,
-		}
-	} catch (error) {
-		if (error instanceof Error) {
-			if (error.message.includes('User rejected') || error.message.includes('rejected')) {
-				throw new Error('Wallet connection rejected by user')
-			}
-		}
-		throw error
-	}
 }
 
 /**
@@ -155,7 +89,6 @@ export function createSIWEMessage(params: {
 		'',
 		`URI: ${uri}`,
 		`Version: 1`,
-		`Chain ID: 1`, // Ethereum mainnet
 		`Nonce: ${nonce}`,
 		`Issued At: ${issuedAt}`,
 	].join('\n')
@@ -171,16 +104,14 @@ export function createSIWEMessage(params: {
 export async function signSIWEMessage(params: {
 	signer: JsonRpcSigner
 	address: string
-	secretSeed: string
 }): Promise<SignedMessage> {
-	const { signer, address, secretSeed } = params
+	const { signer, address } = params
 
 	// Create SIWE message
 	const message = createSIWEMessage({
 		address,
 		domain: window.location.host,
 		uri: window.location.origin,
-		statement: `Sign in to Swarm ID. Secret seed: ${secretSeed}`,
 	})
 
 	try {
@@ -189,20 +120,13 @@ export async function signSIWEMessage(params: {
 		const signature = await signer.signMessage(message)
 		const digest = hashMessage(message)
 		const publicKey = SigningKey.recoverPublicKey(digest, signature)
-		const seedHash = hashMessage(secretSeed)
-		const masterKey = hashMessage(`${seedHash} ${publicKey}`)
-		const signingKey = new SigningKey(masterKey)
-		const baseWallet = new BaseWallet(signingKey)
-		const masterAddress = baseWallet.address
-
-		console.log('🔑 Master key derived from signature:', masterKey.substring(0, 16) + '...')
 
 		return {
 			message,
+			digest,
 			signature,
+			publicKey,
 			address,
-			masterKey,
-			masterAddress,
 		}
 	} catch (error) {
 		if (error instanceof Error) {
@@ -214,20 +138,40 @@ export async function signSIWEMessage(params: {
 	}
 }
 
+export function deriveMasterKey(
+	secretSeed: string,
+	publicKey: string,
+): {
+	masterKey: string
+	masterAddress: string
+} {
+	const seedHash = hashMessage(secretSeed)
+	const masterKey = hashMessage(`${seedHash} ${publicKey}`)
+	const signingKey = new SigningKey(masterKey)
+	const baseWallet = new BaseWallet(signingKey)
+	const masterAddress = baseWallet.address
+
+	return {
+		masterKey,
+		masterAddress,
+	}
+}
+
 /**
  * Full flow: Connect wallet and sign SIWE message
  */
-export async function connectAndSign(params: {
-	secretSeed: string
-}): Promise<SignedMessage & { address: string }> {
-	// Step 1: Connect wallet
-	const wallet = await connectWallet()
+export async function connectAndSign(): Promise<SignedMessage> {
+	const wallets = await onboard.connectWallet()
+	if (wallets.length === 0) {
+		throw new Error('No ethereum wallet found')
+	}
 
-	// Step 2: Sign SIWE message
+	const provider = new BrowserProvider(wallets[0].provider, 'any')
+	const signer = await provider.getSigner()
+
 	const signed = await signSIWEMessage({
-		signer: wallet.signer,
-		address: wallet.address,
-		secretSeed: params.secretSeed,
+		signer: signer,
+		address: signer.address,
 	})
 
 	return signed

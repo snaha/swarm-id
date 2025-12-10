@@ -16,10 +16,8 @@
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import GenerateSeedModal from '$lib/components/generate-seed-modal.svelte'
-	import ConfirmSaveModal from '$lib/components/confirm-save-modal.svelte'
-	import { connectAndSign } from '$lib/ethereum'
+	import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
 	import { sessionStore } from '$lib/stores/session.svelte'
-	import { SigningKey, hashMessage } from 'ethers'
 	import {
 		generateEncryptionSalt,
 		deriveEncryptionKey,
@@ -27,10 +25,10 @@
 	} from '$lib/utils/encryption'
 	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
 	import { validateSecretSeed } from '$lib/utils/secret-seed'
+	import { WarningAlt } from 'carbon-icons-svelte'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
-	let showConfirmModal = $state(false)
 	let accountName = $state('Ethereum')
 	let secretSeed = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
@@ -69,45 +67,41 @@
 			console.log('🔐 Connecting to Ethereum wallet...')
 
 			// Connect wallet and sign SIWE message
-			const signed = await connectAndSign({ secretSeed: secretSeed.trim() })
+			const signed = await connectAndSign()
 
 			console.log('✅ Wallet connected and message signed')
 			console.log('📍 Wallet address:', signed.address)
-			console.log('📍 Account address:', signed.masterAddress)
+
+			const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
 
 			// Encrypt masterKey before storage
 			console.log('🔒 Encrypting masterKey...')
 
-			// Step 1: Recover public key from signature
-			const digest = hashMessage(signed.message)
-			const publicKey = SigningKey.recoverPublicKey(digest, signed.signature)
-			console.log('🔑 Public key recovered:', publicKey.substring(0, 16) + '...')
-
 			// Step 2: Generate encryption salt
-			const encryptionSalt = generateEncryptionSalt()
+			const encryptionSalt = uint8ArrayToHex(generateEncryptionSalt())
 			console.log('🎲 Encryption salt generated')
 
 			// Step 3: Derive encryption key from public key + salt
-			const encryptionKey = await deriveEncryptionKey(publicKey, encryptionSalt)
+			const encryptionKey = await deriveEncryptionKey(signed.publicKey, encryptionSalt)
 			console.log('🔑 Encryption key derived')
 
 			// Step 4: Encrypt masterKey
-			const encryptedMasterKey = await encryptMasterKey(signed.masterKey, encryptionKey)
+			const encryptedMasterKey = await encryptMasterKey(masterKey, encryptionKey)
 			console.log('✅ MasterKey encrypted')
 
 			// Store account with encrypted masterKey
 			sessionStore.setAccount({
-				id: signed.masterAddress,
+				id: masterAddress,
 				createdAt: Date.now(),
 				name: accountName.trim(),
 				type: 'ethereum',
 				ethereumAddress: signed.address,
 				encryptedMasterKey: encryptedMasterKey,
-				encryptionSalt: uint8ArrayToHex(encryptionSalt),
+				encryptionSalt: encryptionSalt,
 			})
 
 			// Keep unencrypted masterKey in session temporarily for identity creation
-			sessionStore.setTemporaryMasterKey(signed.masterKey)
+			sessionStore.setTemporaryMasterKey(masterKey)
 			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
@@ -119,6 +113,7 @@
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to connect wallet'
 			console.error('❌ Wallet connection failed:', err)
+			console.error(error)
 			isProcessing = false
 		}
 	}
@@ -126,7 +121,7 @@
 
 <CreationLayout
 	title="Create account with Ethereum"
-	description="Create a new Swarm ID account using your Ethereum wallet"
+	description="Create a new Swarm ID account using an Ethereum wallet"
 	onClose={() =>
 		appOrigin
 			? goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
@@ -134,16 +129,6 @@
 >
 	{#snippet content()}
 		<Vertical --vertical-gap="var(--padding)">
-			{#if error}
-				<Vertical
-					--vertical-gap="var(--half-padding)"
-					style="background: #fee; padding: var(--padding); border-radius: 4px; border: 1px solid #fcc;"
-				>
-					<Typography variant="small" style="color: #c00;">Error</Typography>
-					<Typography variant="small">{error}</Typography>
-				</Vertical>
-			{/if}
-
 			<!-- Row 1 -->
 			<Vertical --vertical-gap="var(--quarter-padding)">
 				<Horizontal --horizontal-gap="var(--half-padding)">
@@ -232,24 +217,27 @@
 				</Horizontal>
 			</Vertical>
 
-			<Typography variant="small"
-				>When you click "Connect wallet", you'll be able to connect via MetaMask (browser extension)
-				or WalletConnect (mobile wallet via QR code). After connecting, you'll be prompted to sign a
-				message. This signature will be used to derive your Swarm ID master key.</Typography
-			>
+			{#if error}
+				<Horizontal
+					--horizontal-gap="var(--quarter-padding)"
+					style="background: var(--colors-red); padding: var(--half-padding); color: var(--colors-ultra-low)"
+				>
+					<WarningAlt size={20} />
+					<Typography --typography-color="var(--colors-ultra-low)">{error}</Typography>
+				</Horizontal>
+			{/if}
 		</Vertical>
 	{/snippet}
 
 	{#snippet buttonContent()}
-		<Button dimension="compact" onclick={() => (showConfirmModal = true)} disabled={isFormDisabled}
-			>{isProcessing ? 'Processing...' : 'Confirm and proceed'}
+		<Button dimension="compact" onclick={handleConfirm} disabled={isFormDisabled}
+			>{isProcessing ? 'Processing...' : 'Confirm with wallet'}
 			{#if !isProcessing}<ArrowRight />{/if}</Button
 		>
 	{/snippet}
 </CreationLayout>
 
 <GenerateSeedModal bind:open={showSeedModal} onUseSeed={(seed) => (secretSeed = seed)} />
-<ConfirmSaveModal bind:open={showConfirmModal} onConfirm={handleConfirm} />
 
 <style>
 	.secret-seed-input :global(.error-message) {

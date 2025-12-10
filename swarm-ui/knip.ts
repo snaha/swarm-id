@@ -8,7 +8,7 @@ const config: KnipConfig = {
 		'$lib/*': ['src/lib/*'],
 	},
 	ignore: ['playwright/index.ts'],
-	ignoreDependencies: ['@swarm-id/lib', '@walletconnect/ethereum-provider', 'zod'],
+	ignoreDependencies: ['@swarm-id/lib', 'zod'],
 	ignoreExportsUsedInFile: true,
 	'playwright-ct': false,
 }
