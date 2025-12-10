@@ -19,6 +19,8 @@
 	import { generateDockerName } from '$lib/docker-name'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
+	import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
+	import { layoutStore } from '$lib/stores/layout.svelte'
 
 	let idName = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
@@ -120,8 +122,14 @@
 <CreationLayout title="Create identity" onClose={() => goto(routes.HOME)}>
 	{#snippet content()}
 		<Vertical --vertical-gap="var(--padding)">
-			<Horizontal --horizontal-align-items="start" --horizontal-gap="0">
-				<Horizontal class="flex50 input-layout" --horizontal-gap="var(--half-padding)"
+			<ResponsiveLayout
+				--responsive-align-items="start"
+				--responsive-justify-content="stretch"
+				--responsive-gap="var(--quarter-padding)"
+			>
+				<Horizontal
+					class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
+					--horizontal-gap="var(--half-padding)"
 					><FolderShared size={20} /><Typography>Account</Typography></Horizontal
 				>
 				<Input
@@ -132,14 +140,30 @@
 					disabled
 					class="flex50"
 				/>
-			</Horizontal>
+			</ResponsiveLayout>
 
-			<Horizontal --horizontal-align-items="start" --horizontal-gap="0">
+			<ResponsiveLayout
+				--responsive-align-items="start"
+				--responsive-justify-content="stretch"
+				--responsive-gap="var(--quarter-padding)"
+			>
 				<!-- Row 2 -->
-				<Typography class="flex50 input-layout">Identity display name</Typography>
-				<Vertical class="flex50" --vertical-gap="var(--quarter-gap)" --vertical-align-items="start">
+				<Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
+					>Identity display name</Typography
+				>
+				<Vertical
+					class={!layoutStore.mobile ? 'flex50' : ''}
+					--vertical-gap="var(--quarter-gap)"
+					--vertical-align-items={layoutStore.mobile ? 'stretch' : 'start'}
+				>
 					<Horizontal --horizontal-gap="var(--half-padding)">
-						<Input variant="outline" dimension="compact" name="id-name" bind:value={idName} />
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="id-name"
+							bind:value={idName}
+							class="grower"
+						/>
 						{#if derivedIdentity}
 							<Hashicon value={derivedIdentity.id} size={40} />
 						{/if}
@@ -148,7 +172,7 @@
 						This is how your identity will appear in your Swarm ID account and apps you connect to
 					</Typography>
 				</Vertical>
-			</Horizontal>
+			</ResponsiveLayout>
 		</Vertical>
 		<Divider --margin="0" />
 	{/snippet}

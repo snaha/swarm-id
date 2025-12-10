@@ -7,6 +7,44 @@
 
 import { BrowserProvider, JsonRpcSigner, hashMessage, SigningKey, BaseWallet } from 'ethers'
 import type { Eip1193Provider } from 'ethers'
+import Onboard from '@web3-onboard/core'
+import injectedModule from '@web3-onboard/injected-wallets'
+
+const injected = injectedModule()
+const wallets = [injected]
+const chains = [
+	{
+		id: '0x1',
+		token: 'ETH',
+		label: 'Ethereum Mainnet',
+		rpcUrl: 'https://swarm-id.snaha.net', // We don't need RPC, there are no blockchain transactions
+	},
+]
+const appMetadata = {
+	name: 'Swarm ID',
+	description: 'The identity system for Swarm',
+	recommendedInjectedWallets: [
+		{ name: 'Coinbase', url: 'https://wallet.coinbase.com/' },
+		{ name: 'MetaMask', url: 'https://metamask.io' },
+	],
+}
+
+const onboard = Onboard({
+	wallets,
+	chains,
+	appMetadata,
+	connect: {
+		showSidebar: false,
+	},
+	accountCenter: {
+		desktop: {
+			enabled: false,
+		},
+		mobile: {
+			enabled: true,
+		},
+	},
+})
 
 declare let window: Window & {
 	ethereum?: Eip1193Provider & { send: (name: string) => Promise<void> }
@@ -51,7 +89,6 @@ export function createSIWEMessage(params: {
 		'',
 		`URI: ${uri}`,
 		`Version: 1`,
-		`Chain ID: 1`, // Ethereum mainnet
 		`Nonce: ${nonce}`,
 		`Issued At: ${issuedAt}`,
 	].join('\n')
@@ -124,17 +161,14 @@ export function deriveMasterKey(
  * Full flow: Connect wallet and sign SIWE message
  */
 export async function connectAndSign(): Promise<SignedMessage> {
-	// Step 1: Connect wallet
-	if (!window.ethereum) {
+	const wallets = await onboard.connectWallet()
+	if (wallets.length === 0) {
 		throw new Error('No ethereum wallet found')
 	}
 
-	await window.ethereum.send('eth_requestAccounts')
-
-	const provider = new BrowserProvider(window.ethereum)
+	const provider = new BrowserProvider(wallets[0].provider, 'any')
 	const signer = await provider.getSigner()
 
-	// Step 2: Sign SIWE message
 	const signed = await signSIWEMessage({
 		signer: signer,
 		address: signer.address,

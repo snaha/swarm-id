@@ -54,6 +54,8 @@
 	"dependencies": {
 		"@simplewebauthn/browser": "13.2.2",
 		"@swarm-id/lib": "workspace:*",
+		"@web3-onboard/core": "^2.24.1",
+		"@web3-onboard/injected-wallets": "^2.11.3",
 		"ethers": "6.15.0",
 		"zod": "4.1.13"
 	}
