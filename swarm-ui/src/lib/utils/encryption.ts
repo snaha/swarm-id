@@ -31,10 +31,9 @@ export function generateEncryptionSalt(): Uint8Array {
  * @param salt - Random salt used as HKDF salt
  * @returns CryptoKey for AES-GCM encryption/decryption
  */
-export async function deriveEncryptionKey(publicKey: string, salt: Uint8Array): Promise<CryptoKey> {
-	// Remove '0x' prefix if present
-	const cleanPublicKey = publicKey.startsWith('0x') ? publicKey.slice(2) : publicKey
-	const publicKeyBytes = hexToUint8Array(cleanPublicKey)
+export async function deriveEncryptionKey(publicKey: string, salt: string): Promise<CryptoKey> {
+	const publicKeyBytes = hexToUint8Array(publicKey)
+	const saltBytes = hexToUint8Array(salt)
 
 	// Step 1: Import public key as raw key material for HKDF
 	const keyMaterial = await crypto.subtle.importKey('raw', publicKeyBytes, 'HKDF', false, [
@@ -45,7 +44,7 @@ export async function deriveEncryptionKey(publicKey: string, salt: Uint8Array): 
 	const encryptionKey = await crypto.subtle.deriveKey(
 		{
 			name: 'HKDF',
-			salt: salt,
+			salt: saltBytes,
 			hash: 'SHA-256',
 			info: new TextEncoder().encode('swarm-id-masterkey-encryption-v1'),
 		},

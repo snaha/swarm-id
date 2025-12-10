@@ -15,17 +15,14 @@
 
 	let { icon, title, description, buttonText, buttonIcon, onclick }: Props = $props()
 	let isHovered = $state(false)
-	let isFocused = $state(false)
 </script>
 
 <div
 	class="card"
 	role="button"
-	tabindex="0"
+	tabindex="-1"
 	onmouseenter={() => (isHovered = true)}
 	onmouseleave={() => (isHovered = false)}
-	onfocus={() => (isFocused = true)}
-	onblur={() => (isFocused = false)}
 	{onclick}
 	onkeydown={(e) => {
 		if (e.key === 'Enter' || e.key === ' ') {
@@ -43,7 +40,7 @@
 			{description}
 		</Typography>
 	</Vertical>
-	<Button variant="strong" dimension="compact" hover={isHovered || isFocused}>
+	<Button variant="strong" dimension="compact" hover={isHovered}>
 		{#if buttonIcon}
 			{@render buttonIcon()}
 		{/if}
@@ -66,11 +63,6 @@
 	.card:hover,
 	.card:focus {
 		background: var(--colors-base);
-	}
-
-	.card:focus {
-		outline: var(--focus-outline);
-		outline-offset: var(--focus-outline-offset);
 	}
 
 	.icon {

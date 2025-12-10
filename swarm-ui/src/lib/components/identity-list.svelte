@@ -5,8 +5,6 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import Badge from '$lib/components/ui/badge.svelte'
 	import Hashicon from '$lib/components/hashicon.svelte'
-	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
-	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import type { Identity } from '$lib/types'
@@ -66,11 +64,6 @@
 							--horizontal-align-items="center"
 							--horizontal-justify-content="flex-start"
 						>
-							{#if account.type === 'passkey'}
-								<PasskeyLogo fill="var(--colors-ultra-high)" width={20} height={20} />
-							{:else if account.type === 'ethereum'}
-								<EthereumLogo fill="var(--colors-ultra-high)" width={20} height={20} />
-							{/if}
 							<Typography variant="small">{account.name}-{account.id.slice(2, 8)}</Typography>
 						</Horizontal>
 						<Typography>

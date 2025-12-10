@@ -8,7 +8,6 @@
 	import routes from '$lib/routes'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
-	import Grid from '$lib/components/ui/grid.svelte'
 	import { goto } from '$app/navigation'
 	import { onMount } from 'svelte'
 	import { page } from '$app/stores'
@@ -17,6 +16,9 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import type { Identity, Account } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
+	import { generateDockerName } from '$lib/docker-name'
+	import Vertical from '$lib/components/ui/vertical.svelte'
+	import Divider from '$lib/components/ui/divider.svelte'
 
 	let idName = $state('')
 	let appOrigin = $state<string | undefined>(undefined)
@@ -59,7 +61,7 @@
 
 		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
 		const id = identityWallet.address
-		const name = id.slice(2, 10)
+		const name = generateDockerName()
 		const accountId = account.id
 		const createdAt = Date.now()
 		const identity: Identity = {
@@ -115,29 +117,40 @@
 	}
 </script>
 
-<CreationLayout
-	title="Identity"
-	description="Create a first identity associated with your Swarm ID account"
-	onBack={() => history.back()}
-	onClose={() => goto(routes.HOME)}
->
+<CreationLayout title="Create identity" onClose={() => goto(routes.HOME)}>
 	{#snippet content()}
-		<Grid>
-			<!-- Row 1 -->
-			<Horizontal --horizontal-gap="var(--half-padding)"
-				><FolderShared size={20} /><Typography>Account</Typography></Horizontal
-			>
-			<Input variant="outline" dimension="compact" name="account" value={accountName} readonly />
-
-			<!-- Row 2 -->
-			<Typography>ID name</Typography>
-			<Horizontal --horizontal-gap="var(--half-padding)">
-				<Input variant="outline" dimension="compact" name="id-name" bind:value={idName} />
-				{#if derivedIdentity}
-					<Hashicon value={derivedIdentity.id} size={40} />
-				{/if}
+		<Vertical --vertical-gap="var(--padding)">
+			<Horizontal --horizontal-align-items="start" --horizontal-gap="0">
+				<Horizontal class="flex50 input-layout" --horizontal-gap="var(--half-padding)"
+					><FolderShared size={20} /><Typography>Account</Typography></Horizontal
+				>
+				<Input
+					variant="outline"
+					dimension="compact"
+					name="account"
+					value={accountName}
+					disabled
+					class="flex50"
+				/>
 			</Horizontal>
-		</Grid>
+
+			<Horizontal --horizontal-align-items="start" --horizontal-gap="0">
+				<!-- Row 2 -->
+				<Typography class="flex50 input-layout">Identity display name</Typography>
+				<Vertical class="flex50" --vertical-gap="var(--quarter-gap)" --vertical-align-items="start">
+					<Horizontal --horizontal-gap="var(--half-padding)">
+						<Input variant="outline" dimension="compact" name="id-name" bind:value={idName} />
+						{#if derivedIdentity}
+							<Hashicon value={derivedIdentity.id} size={40} />
+						{/if}
+					</Horizontal>
+					<Typography variant="small">
+						This is how your identity will appear in your Swarm ID account and apps you connect to
+					</Typography>
+				</Vertical>
+			</Horizontal>
+		</Vertical>
+		<Divider --margin="0" />
 	{/snippet}
 
 	{#snippet buttonContent()}
@@ -146,3 +159,13 @@
 		>
 	{/snippet}
 </CreationLayout>
+
+<style>
+	:global(.flex50) {
+		flex: 0.5;
+	}
+	:global(.input-layout) {
+		padding: var(--half-padding) 0 !important;
+		border: 1px solid transparent;
+	}
+</style>

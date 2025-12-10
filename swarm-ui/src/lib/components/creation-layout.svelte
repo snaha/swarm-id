@@ -2,13 +2,13 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
-	import Close from 'carbon-icons-svelte/lib/Close.svelte'
 	import ArrowLeft from 'carbon-icons-svelte/lib/ArrowLeft.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
+	import { CloseLarge } from 'carbon-icons-svelte'
 
 	interface Props {
 		title: string
-		description: string
+		description?: string
 		onBack?: () => void
 		onClose?: () => void
 		content: import('svelte').Snippet
@@ -19,7 +19,7 @@
 </script>
 
 <Vertical --vertical-gap="var(--double-padding)">
-	<Vertical --vertical-gap="var(--padding)">
+	<Vertical --vertical-gap="var(--three-quarters-padding)">
 		<Horizontal
 			class="header"
 			--horizontal-justify-content="space-between"
@@ -34,10 +34,14 @@
 				<Typography variant="h4">{title}</Typography>
 			{/if}
 			{#if onClose}
-				<Button dimension="compact" variant="ghost" onclick={onClose}><Close /></Button>
+				<Button dimension="compact" variant="ghost" onclick={onClose}
+					><CloseLarge size={20} /></Button
+				>
 			{/if}
 		</Horizontal>
-		<Typography>{description}</Typography>
+		{#if description}
+			<Typography>{description}</Typography>
+		{/if}
 	</Vertical>
 	{@render content()}
 	<Horizontal>

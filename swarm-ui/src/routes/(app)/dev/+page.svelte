@@ -44,7 +44,7 @@
 
 		const wallet2 = HDNodeWallet.fromSeed(ethereumWallet2.masterKey)
 		const publicKey2 = wallet2.publicKey
-		const encryptionSalt2 = generateEncryptionSalt()
+		const encryptionSalt2 = uint8ArrayToHex(generateEncryptionSalt())
 		const encryptionKey2 = await deriveEncryptionKey(publicKey2, encryptionSalt2)
 		const encryptedMasterKey2 = await encryptMasterKey(ethereumWallet2.masterKey, encryptionKey2)
 
@@ -55,7 +55,7 @@
 			createdAt: Date.now(),
 			ethereumAddress: ethereumWallet2.address,
 			encryptedMasterKey: encryptedMasterKey2,
-			encryptionSalt: uint8ArrayToHex(encryptionSalt2),
+			encryptionSalt: encryptionSalt2,
 		})
 
 		// Create identities

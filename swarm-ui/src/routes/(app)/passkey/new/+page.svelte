@@ -138,7 +138,7 @@
 
 	{#snippet buttonContent()}
 		<Button dimension="compact" onclick={handleCreatePasskey} disabled={isProcessing}>
-			{isProcessing ? 'Creating...' : 'Create Identity'}
+			{isProcessing ? 'Creating...' : 'Confirm with Passkey'}
 			{#if !isProcessing}<ArrowRight />{/if}
 		</Button>
 	{/snippet}

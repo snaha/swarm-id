@@ -13,7 +13,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { authenticateWithPasskey } from '$lib/passkey'
-	import { hashMessage, keccak256, SigningKey } from 'ethers'
+	import { keccak256 } from 'ethers'
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
 	import type { Identity, Account } from '$lib/types'
 	import { connectAndSign } from '$lib/ethereum'
@@ -115,18 +115,11 @@
 			console.log('✅ Passkey authentication successful')
 			return passkeyAccount.masterKey
 		} else {
-			const message = ''
 			// Connect wallet and sign SIWE message
-			const signed = await connectAndSign({ secretSeed: message })
-
-			// Recover public key from signature
-			const digest = hashMessage(signed.message)
-			const publicKey = SigningKey.recoverPublicKey(digest, signed.signature)
-			console.log('🔑 Public key recovered:', publicKey.substring(0, 16) + '...')
+			const signed = await connectAndSign()
 
 			// Derive encryption key from public key + salt
-			const encryptionSalt = hexToUint8Array(account.encryptionSalt)
-			const encryptionKey = await deriveEncryptionKey(publicKey, encryptionSalt)
+			const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
 			console.log('🔑 Encryption key derived')
 
 			const masterKey = await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
