@@ -152,10 +152,6 @@ import { initProxy } from 'swarm-id/proxy'
 
 const proxy = initProxy({
   beeApiUrl: 'http://localhost:1633',
-  allowedOrigins: [
-    'https://swarm-app.local:8080',
-    // Add more allowed parent origins
-  ]
 })
 ```
 
@@ -242,7 +238,6 @@ new SwarmIdProxy(options: ProxyOptions)
 
 Options:
 - `beeApiUrl` (string, required) - Bee node API URL
-- `allowedOrigins` (string[], optional) - Allowed parent origins (empty = allow all)
 
 ### SwarmIdAuth
 

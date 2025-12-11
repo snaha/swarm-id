@@ -44,7 +44,6 @@ export class SwarmIdProxy {
   private stamperDepth: number = 23 // Default depth
   private beeApiUrl: string
   private defaultBeeApiUrl: string
-  private allowedOrigins: string[]
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
   private popupMode: "popup" | "window" = "window"
@@ -53,7 +52,6 @@ export class SwarmIdProxy {
   constructor(options: ProxyOptions) {
     this.defaultBeeApiUrl = options.beeApiUrl
     this.beeApiUrl = options.beeApiUrl
-    this.allowedOrigins = options.allowedOrigins || []
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     console.log(
@@ -305,27 +303,6 @@ export class SwarmIdProxy {
     console.log("[Proxy] Parent identified via postMessage:", this.parentOrigin)
     console.log("[Proxy] Parent locked in - cannot be changed")
 
-    // Validate parent is in allowlist (if allowlist is configured)
-    if (
-      this.allowedOrigins.length > 0 &&
-      !this.isAllowedOrigin(this.parentOrigin)
-    ) {
-      const errorMsg = `Origin validation failed! Expected one of: ${this.allowedOrigins.join(", ")}, but received: ${this.parentOrigin}`
-      console.error("[Proxy]", errorMsg)
-
-      // Send error to parent so it doesn't hang
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "initError",
-            error: errorMsg,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
-      return
-    }
-
     // Use parent's Bee API URL if provided, otherwise use default
     if (parentBeeApiUrl) {
       this.beeApiUrl = parentBeeApiUrl
@@ -420,16 +397,6 @@ export class SwarmIdProxy {
         await this.handleSetSecret(message, event)
         break
     }
-  }
-
-  /**
-   * Check if origin is allowed
-   */
-  private isAllowedOrigin(origin: string): boolean {
-    if (this.allowedOrigins.length === 0) {
-      return true // If no allowlist, allow all
-    }
-    return this.allowedOrigins.includes(origin)
   }
 
   /**

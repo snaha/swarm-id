@@ -378,7 +378,6 @@ export interface ClientOptions {
 
 export interface ProxyOptions {
   beeApiUrl: string
-  allowedOrigins?: string[]
 }
 
 export interface AuthOptions {
