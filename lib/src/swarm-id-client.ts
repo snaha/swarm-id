@@ -207,9 +207,9 @@ export class SwarmIdClient {
         if (this.readyResolve) {
           this.readyResolve()
         }
-        // Show iframe if not authenticated, hide if authenticated
+        // Always show iframe - it will display login or disconnect button
         if (this.iframe) {
-          this.iframe.style.display = message.authenticated ? "none" : "block"
+          this.iframe.style.display = "block"
         }
         if (this.onAuthChange) {
           this.onAuthChange(message.authenticated)
@@ -217,9 +217,9 @@ export class SwarmIdClient {
         break
 
       case "authStatusResponse":
-        // Show iframe if not authenticated, hide if authenticated
+        // Always show iframe - it will display login or disconnect button
         if (this.iframe) {
-          this.iframe.style.display = message.authenticated ? "none" : "block"
+          this.iframe.style.display = "block"
         }
         if (this.onAuthChange) {
           this.onAuthChange(message.authenticated)
@@ -236,9 +236,9 @@ export class SwarmIdClient {
         break
 
       case "authSuccess":
-        // Hide iframe when authentication succeeds
+        // Keep iframe visible - it will now show disconnect button
         if (this.iframe) {
-          this.iframe.style.display = "none"
+          this.iframe.style.display = "block"
         }
         if (this.onAuthChange) {
           this.onAuthChange(true)
@@ -253,6 +253,22 @@ export class SwarmIdClient {
         )
         if (this.readyReject) {
           this.readyReject(new Error(message.error))
+        }
+        break
+
+      case "disconnectResponse":
+        // Handle disconnect response
+        if (this.onAuthChange) {
+          this.onAuthChange(false)
+        }
+        // Handle as response if there's a matching request
+        if ("requestId" in message) {
+          const pending = this.pendingRequests.get(message.requestId)
+          if (pending) {
+            clearTimeout(pending.timeoutId)
+            this.pendingRequests.delete(message.requestId)
+            pending.resolve(message)
+          }
         }
         break
 
@@ -388,6 +404,32 @@ export class SwarmIdClient {
   async isAuthenticated(): Promise<boolean> {
     const status = await this.checkAuthStatus()
     return status.authenticated
+  }
+
+  /**
+   * Disconnect and clear authentication data
+   */
+  async disconnect(): Promise<void> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "disconnectResponse"
+      requestId: string
+      success: boolean
+    }>({
+      type: "disconnect",
+      requestId,
+    })
+
+    if (!response.success) {
+      throw new Error("Failed to disconnect")
+    }
+
+    // Notify via auth change callback
+    if (this.onAuthChange) {
+      this.onAuthChange(false)
+    }
   }
 
   // ============================================================================

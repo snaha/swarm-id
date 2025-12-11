@@ -128,6 +128,11 @@ export const CheckAuthMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const DisconnectMessageSchema = z.object({
+  type: z.literal("disconnect"),
+  requestId: z.string(),
+})
+
 export const RequestAuthMessageSchema = z.object({
   type: z.literal("requestAuth"),
   styles: ButtonStylesSchema,
@@ -181,6 +186,7 @@ export const DownloadChunkMessageSchema = z.object({
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
+  DisconnectMessageSchema,
   RequestAuthMessageSchema,
   UploadDataMessageSchema,
   DownloadDataMessageSchema,
@@ -192,6 +198,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
 export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>
+export type DisconnectMessage = z.infer<typeof DisconnectMessageSchema>
 export type RequestAuthMessage = z.infer<typeof RequestAuthMessageSchema>
 export type UploadDataMessage = z.infer<typeof UploadDataMessageSchema>
 export type DownloadDataMessage = z.infer<typeof DownloadDataMessageSchema>
@@ -221,6 +228,12 @@ export const AuthStatusResponseMessageSchema = z.object({
   requestId: z.string(),
   authenticated: z.boolean(),
   origin: z.string().optional(),
+})
+
+export const DisconnectResponseMessageSchema = z.object({
+  type: z.literal("disconnectResponse"),
+  requestId: z.string(),
+  success: z.boolean(),
 })
 
 export const AuthSuccessMessageSchema = z.object({
@@ -284,6 +297,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
   AuthStatusResponseMessageSchema,
+  DisconnectResponseMessageSchema,
   AuthSuccessMessageSchema,
   UploadDataResponseMessageSchema,
   DownloadDataResponseMessageSchema,
@@ -299,6 +313,9 @@ export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
 export type InitErrorMessage = z.infer<typeof InitErrorMessageSchema>
 export type AuthStatusResponseMessage = z.infer<
   typeof AuthStatusResponseMessageSchema
+>
+export type DisconnectResponseMessage = z.infer<
+  typeof DisconnectResponseMessageSchema
 >
 export type AuthSuccessMessage = z.infer<typeof AuthSuccessMessageSchema>
 export type UploadDataResponseMessage = z.infer<
