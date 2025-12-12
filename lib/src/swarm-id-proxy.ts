@@ -37,6 +37,7 @@ export class SwarmIdProxy {
   private parentOrigin: string | undefined
   private parentIdentified: boolean = false
   private authenticated: boolean = false
+  private authLoading: boolean = true // Start in loading state
   private appSecret: string | undefined
   private postageBatchId: string | undefined
   private signerKey: string | undefined
@@ -350,6 +351,10 @@ export class SwarmIdProxy {
         this.handleCheckAuth(message, event)
         break
 
+      case "disconnect":
+        this.handleDisconnect(message, event)
+        break
+
       case "requestAuth":
         this.handleRequestAuth(message, event)
         break
@@ -405,6 +410,7 @@ export class SwarmIdProxy {
   private loadAuthData(): void {
     if (!this.parentOrigin) {
       console.log("[Proxy] No parent origin, cannot load auth data")
+      this.authLoading = false
       return
     }
 
@@ -422,7 +428,8 @@ export class SwarmIdProxy {
         this.postageBatchId = data.postageBatchId
         this.signerKey = data.signerKey
         this.authenticated = true
-        this.hideAuthButton()
+        this.authLoading = false
+        this.showAuthButton() // Show disconnect button
 
         // Initialize stamper if we have signer key and batch ID
         // (both are required for client-side signing)
@@ -431,24 +438,24 @@ export class SwarmIdProxy {
         }
       } catch (error) {
         console.error("[Proxy] Failed to parse auth data:", error)
+        this.authLoading = false
         this.showAuthButton()
       }
     } else {
       console.log("[Proxy] No auth data found for:", this.parentOrigin)
+      this.authLoading = false
       this.showAuthButton()
     }
   }
 
   /**
-   * Update authentication status and show/hide button accordingly
+   * Update authentication status and update button accordingly
    */
   private updateAuthStatus(authenticated: boolean): void {
     this.authenticated = authenticated
-    if (authenticated) {
-      this.hideAuthButton()
-    } else {
-      this.showAuthButton()
-    }
+    this.authLoading = false
+    // Always show button - it will display as login or disconnect based on auth status
+    this.showAuthButton()
   }
 
   /**
@@ -461,6 +468,38 @@ export class SwarmIdProxy {
     const storageKey = `swarm-secret-${origin}`
     localStorage.setItem(storageKey, JSON.stringify(data))
     console.log("[Proxy] Auth data saved to localStorage for:", origin)
+  }
+
+  /**
+   * Clear auth data from localStorage
+   */
+  private clearAuthData(): void {
+    if (!this.parentOrigin) {
+      console.log("[Proxy] No parent origin, cannot clear auth data")
+      return
+    }
+
+    const storageKey = `swarm-secret-${this.parentOrigin}`
+    localStorage.removeItem(storageKey)
+    console.log(
+      "[Proxy] Auth data cleared from localStorage for:",
+      this.parentOrigin,
+    )
+
+    // Also clear stamper state
+    const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
+    localStorage.removeItem(stamperKey)
+
+    // Reset auth state
+    this.authenticated = false
+    this.authLoading = false
+    this.appSecret = undefined
+    this.postageBatchId = undefined
+    this.signerKey = undefined
+    this.stamper = undefined
+
+    // Show login button
+    this.showAuthButton()
   }
 
   /**
@@ -520,6 +559,30 @@ export class SwarmIdProxy {
     console.log("[Proxy] Authentication status:", this.authenticated)
   }
 
+  private handleDisconnect(
+    message: { type: "disconnect"; requestId: string },
+    event: MessageEvent,
+  ): void {
+    console.log("[Proxy] Disconnect requested...")
+
+    // Clear auth data
+    this.clearAuthData()
+
+    // Send response
+    if (event.source) {
+      ;(event.source as WindowProxy).postMessage(
+        {
+          type: "disconnectResponse",
+          requestId: message.requestId,
+          success: true,
+        } satisfies IframeToParentMessage,
+        { targetOrigin: event.origin },
+      )
+    }
+
+    console.log("[Proxy] Disconnected successfully")
+  }
+
   private handleRequestAuth(
     message: RequestAuthMessage,
     _event: MessageEvent,
@@ -550,83 +613,141 @@ export class SwarmIdProxy {
     // Clear existing content
     this.authButtonContainer.innerHTML = ""
 
-    // Create button
+    // Create button based on authentication status
     const button = document.createElement("button")
-    button.textContent = "🔐 Login with Swarm ID"
+    const isAuthenticated = this.authenticated
+    const isLoading = this.authLoading
+
+    if (isLoading) {
+      button.textContent = "⏳ Loading..."
+      button.disabled = true
+    } else if (isAuthenticated) {
+      button.textContent = "🔓 Disconnect from Swarm ID"
+    } else {
+      button.textContent = "🔐 Login with Swarm ID"
+    }
 
     // Apply styles
     const styles = this.currentStyles || {}
-    button.style.backgroundColor = styles.backgroundColor || "#dd7200"
+    if (isLoading) {
+      button.style.backgroundColor = "#999"
+      button.style.cursor = "default"
+    } else if (isAuthenticated) {
+      // Different color for disconnect button
+      button.style.backgroundColor = styles.backgroundColor || "#666"
+      button.style.cursor = styles.cursor || "pointer"
+    } else {
+      button.style.backgroundColor = styles.backgroundColor || "#dd7200"
+      button.style.cursor = styles.cursor || "pointer"
+    }
     button.style.color = styles.color || "white"
     button.style.border = styles.border || "none"
     button.style.borderRadius = styles.borderRadius || "6px"
     button.style.padding = styles.padding || "12px 24px"
     button.style.fontSize = styles.fontSize || "14px"
     button.style.fontWeight = styles.fontWeight || "600"
-    button.style.cursor = styles.cursor || "pointer"
     button.style.transition = "all 0.2s"
-    button.style.boxShadow = "0 2px 8px rgba(221, 114, 0, 0.3)"
 
-    // Hover effect
-    button.addEventListener("mouseenter", () => {
-      button.style.transform = "translateY(-1px)"
-      button.style.boxShadow = "0 4px 12px rgba(221, 114, 0, 0.5)"
-    })
-    button.addEventListener("mouseleave", () => {
-      button.style.transform = "translateY(0)"
+    if (isLoading) {
+      button.style.boxShadow = "0 2px 8px rgba(153, 153, 153, 0.3)"
+    } else if (isAuthenticated) {
+      button.style.boxShadow = "0 2px 8px rgba(102, 102, 102, 0.3)"
+    } else {
       button.style.boxShadow = "0 2px 8px rgba(221, 114, 0, 0.3)"
-    })
+    }
 
-    // Click handler - open auth popup or window
+    // Hover effect (only when not loading)
+    if (!isLoading) {
+      button.addEventListener("mouseenter", () => {
+        button.style.transform = "translateY(-1px)"
+        if (isAuthenticated) {
+          button.style.boxShadow = "0 4px 12px rgba(102, 102, 102, 0.5)"
+        } else {
+          button.style.boxShadow = "0 4px 12px rgba(221, 114, 0, 0.5)"
+        }
+      })
+      button.addEventListener("mouseleave", () => {
+        button.style.transform = "translateY(0)"
+        if (isAuthenticated) {
+          button.style.boxShadow = "0 2px 8px rgba(102, 102, 102, 0.3)"
+        } else {
+          button.style.boxShadow = "0 2px 8px rgba(221, 114, 0, 0.3)"
+        }
+      })
+    }
+
+    // Click handler
     button.addEventListener("click", () => {
-      if (!this.parentOrigin) {
-        console.error("[Proxy] Cannot open auth window - parent origin not set")
-        return
-      }
-      console.log(
-        "[Proxy] Opening authentication window for parent:",
-        this.parentOrigin,
-      )
-
-      // Disable button and show spinner
-      button.disabled = true
-      button.innerHTML =
-        '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s linear infinite;"></span>'
-
-      // Add spinner animation
-      if (!document.getElementById("swarm-id-spinner-style")) {
-        const style = document.createElement("style")
-        style.id = "swarm-id-spinner-style"
-        style.textContent =
-          "@keyframes spin { to { transform: rotate(360deg); } }"
-        document.head.appendChild(style)
-      }
-
-      const authUrl = `${window.location.origin}/connect?origin=${encodeURIComponent(this.parentOrigin)}`
-
-      // Open as popup or full window based on popupMode
-      if (this.popupMode === "popup") {
-        window.open(authUrl, "_blank", "width=500,height=600")
+      if (isAuthenticated) {
+        // Handle disconnect
+        this.handleDisconnectClick()
       } else {
-        window.open(authUrl, "_blank")
+        // Handle login
+        this.handleLoginClick(button)
       }
     })
 
     this.authButtonContainer.appendChild(button)
-    console.log("[Proxy] Auth button shown")
+    console.log(
+      "[Proxy] Auth button shown (authenticated:",
+      isAuthenticated,
+      ")",
+    )
   }
 
   /**
-   * Hide authentication button
+   * Handle login button click
    */
-  private hideAuthButton(): void {
-    if (!this.authButtonContainer) {
+  private handleLoginClick(button: HTMLButtonElement): void {
+    if (!this.parentOrigin) {
+      console.error("[Proxy] Cannot open auth window - parent origin not set")
       return
     }
+    console.log(
+      "[Proxy] Opening authentication window for parent:",
+      this.parentOrigin,
+    )
 
-    // Clear the button
-    this.authButtonContainer.innerHTML = ""
-    console.log("[Proxy] Auth button hidden")
+    // Disable button and show spinner
+    button.disabled = true
+    button.innerHTML =
+      '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s linear infinite;"></span>'
+
+    // Add spinner animation
+    if (!document.getElementById("swarm-id-spinner-style")) {
+      const style = document.createElement("style")
+      style.id = "swarm-id-spinner-style"
+      style.textContent =
+        "@keyframes spin { to { transform: rotate(360deg); } }"
+      document.head.appendChild(style)
+    }
+
+    const authUrl = `${window.location.origin}/connect?origin=${encodeURIComponent(this.parentOrigin)}`
+
+    // Open as popup or full window based on popupMode
+    if (this.popupMode === "popup") {
+      window.open(authUrl, "_blank", "width=500,height=600")
+    } else {
+      window.open(authUrl, "_blank")
+    }
+  }
+
+  /**
+   * Handle disconnect button click
+   */
+  private handleDisconnectClick(): void {
+    console.log("[Proxy] Disconnecting for parent:", this.parentOrigin)
+
+    // Clear auth data
+    this.clearAuthData()
+
+    // Notify parent about auth status change
+    this.sendToParent({
+      type: "authStatusResponse",
+      requestId: "disconnect",
+      authenticated: false,
+      origin: undefined,
+    })
   }
 
   /**
@@ -635,7 +756,9 @@ export class SwarmIdProxy {
   setAuthButtonContainer(container: HTMLElement): void {
     this.authButtonContainer = container
     console.log("[Proxy] Auth button container set")
-    // Don't show button here - let loadAuthData() handle it after checking auth status
+    // Show button now that container is available
+    // (loadAuthData may have already run and set authenticated status)
+    this.showAuthButton()
   }
 
   private async handleSetSecret(
