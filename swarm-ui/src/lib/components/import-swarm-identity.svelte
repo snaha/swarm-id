@@ -6,39 +6,20 @@
 	import Upload from 'carbon-icons-svelte/lib/Upload.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 
-	interface Props {
-		onclick?: () => void
-	}
-
-	let { onclick }: Props = $props()
-	let isHovered = $state(false)
-	let isFocused = $state(false)
 	let showTooltip = $state(false)
 </script>
 
-<div
-	class="import-row"
-	role="button"
-	tabindex="0"
-	onmouseenter={() => (isHovered = true)}
-	onmouseleave={() => (isHovered = false)}
-	onfocus={() => (isFocused = true)}
-	onblur={() => (isFocused = false)}
-	{onclick}
-	onkeydown={(e) => {
-		if (e.key === 'Enter' || e.key === ' ') {
-			e.preventDefault()
-			onclick?.()
-		}
-	}}
->
+<div class="import-row" role="button" tabindex="-1">
 	<Horizontal --horizontal-justify-content="space-between">
-		<div class="info-text">
-			<Typography variant="small">Use an existing Swarm ID account</Typography>
-			<Tooltip show={showTooltip} position="top" variant="compact" color="dark" maxWidth="360px">
+		<Horizontal --horizontal-justify-content="start" --horizontal-gap="var(--half-padding)">
+			<Button variant="ghost" dimension="small">
+				<Upload size={16} />
+				Import account
+			</Button>
+			<Tooltip show={showTooltip} position="top" variant="small" color="dark" maxWidth="360px">
 				<Button
 					variant="ghost"
-					dimension="compact"
+					dimension="small"
 					onmouseenter={() => (showTooltip = true)}
 					onmouseleave={() => (showTooltip = false)}
 					onclick={(e: MouseEvent) => {
@@ -46,7 +27,7 @@
 						showTooltip = !showTooltip
 					}}
 				>
-					<Information size={20} />
+					<Information size={16} />
 				</Button>
 				{#snippet helperText()}
 					Import an existing Swarm ID account that was previously exported as a <span
@@ -54,31 +35,19 @@
 					> file
 				{/snippet}
 			</Tooltip>
+		</Horizontal>
+		<div class="info-text">
+			<Typography variant="small"
+				>Visit <a href={window.location.origin}>{window.location.host}</a> for info about Swarm ID</Typography
+			>
 		</div>
-		<Button variant="ghost" dimension="compact" hover={isHovered || isFocused}>
-			<Upload size={20} />
-			Import from file
-		</Button>
 	</Horizontal>
 </div>
 
 <style>
 	.import-row {
-		border: 1px solid var(--colors-low);
-		border-top: none;
 		padding: var(--padding);
-		background: var(--colors-card-bg);
 		cursor: pointer;
-	}
-
-	.import-row:hover,
-	.import-row:focus {
-		background: var(--colors-base);
-	}
-
-	.import-row:focus {
-		outline: var(--focus-outline);
-		outline-offset: var(--focus-outline-offset);
 	}
 
 	.info-text {

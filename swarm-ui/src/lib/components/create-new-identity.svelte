@@ -30,7 +30,7 @@
 	}
 </script>
 
-<Vertical --vertical-gap="0" class="content-box">
+<Vertical --vertical-gap="var(--padding)" class="content-box">
 	<Horizontal --horizontal-gap="0">
 		<div class="card-wrapper card-left">
 			<AuthCard

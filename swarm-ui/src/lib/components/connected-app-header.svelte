@@ -81,7 +81,7 @@
 	{/if}
 	<div class="header-text">
 		<Typography variant="h4">Connect to {appName}</Typography>
-		<Typography variant="small">{appUrl}</Typography>
+		<Typography>{appUrl}</Typography>
 	</div>
 </div>
 
