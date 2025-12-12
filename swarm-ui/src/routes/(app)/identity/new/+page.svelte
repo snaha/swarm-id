@@ -89,10 +89,14 @@
 			return
 		}
 
-		// Create the account (encrypted for ethereum, no masterKey for passkey)
-		const account = accountsStore.addAccount(sessionAccount)
-
-		console.log('✅ Account created:', account.id)
+		// Add account only if it doesn't exist yet (for new accounts)
+		let account = accountsStore.getAccount(sessionAccount.id)
+		if (!account) {
+			account = accountsStore.addAccount(sessionAccount)
+			console.log('✅ Account created:', account.id)
+		} else {
+			console.log('✅ Using existing account:', account.id)
+		}
 
 		// Create the identity
 		const identity = identitiesStore.addIdentity({
@@ -109,10 +113,8 @@
 		if (appOrigin) {
 			goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
 		} else {
-			// Clear both account AND temporary masterKey
-			sessionStore.clearAccount()
+			// Clear temporary masterKey for security
 			sessionStore.clearTemporaryMasterKey()
-			console.log('🧹 Cleared session data (account + masterKey)')
 
 			goto(routes.HOME)
 		}

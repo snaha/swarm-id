@@ -4,7 +4,7 @@
 	import { goto } from '$app/navigation'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import { getOrCreatePasskeyAccount } from '$lib/passkey'
+	import { createPasskeyAccount } from '$lib/passkey'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Button from '$lib/components/ui/button.svelte'
@@ -50,15 +50,17 @@
 			const userIdIndex = accountsStore.accounts.filter(
 				(account) => account.type === 'passkey',
 			).length
-			console.debug({ userIdIndex })
 			const userId = `Swarm ID User / ${userIdIndex}`
-			const account = await getOrCreatePasskeyAccount({
+			const account = await createPasskeyAccount({
 				rpName: 'Swarm ID',
 				rpId: swarmIdDomain,
 				challenge,
 				userId,
 				userName: accountName.trim(),
 				userDisplayName: accountName.trim(),
+				excludeCredentials: accountsStore.accounts
+					.filter((acc) => acc.type === 'passkey')
+					.map((acc) => ({ id: acc.credentialId, type: 'public-key' as const })),
 			})
 			console.log('✅ Passkey created successfully')
 
@@ -68,6 +70,7 @@
 				createdAt: Date.now(),
 				name: accountName.trim(),
 				type: 'passkey',
+				credentialId: account.credentialId,
 			})
 
 			// Keep masterKey in session ONLY (not in account)

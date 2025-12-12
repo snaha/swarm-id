@@ -1,8 +1,9 @@
 <script lang="ts">
 	import type { HTMLInputAttributes } from 'svelte/elements'
+	import type { CarbonIconProps } from 'carbon-icons-svelte'
 	import CaretDown from 'carbon-icons-svelte/lib/CaretDown.svelte'
 	import CaretUp from 'carbon-icons-svelte/lib/CaretUp.svelte'
-	import { type Snippet } from 'svelte'
+	import { type Snippet, type Component } from 'svelte'
 	import { withSelectStore } from './select-store.svelte'
 	import Option from './option.svelte'
 
@@ -12,7 +13,9 @@
 	type Item = {
 		value: string
 		label: string
+		icon?: Component<{ width?: number; height?: number }>
 	}
+	export type { Item as SelectItem }
 	interface Props extends HTMLInputAttributes {
 		helperText?: Snippet
 		label?: string
@@ -25,6 +28,9 @@
 		focus?: boolean
 		variant?: Variant
 		items: Item[]
+		actionLabel?: string
+		actionIcon?: Component<CarbonIconProps>
+		onaction?: () => void
 	}
 	let {
 		helperText,
@@ -41,6 +47,9 @@
 		variant = 'outline',
 		onchange = $bindable(),
 		items,
+		actionLabel,
+		actionIcon,
+		onaction,
 		...restProps
 	}: Props = $props()
 
@@ -51,6 +60,9 @@
 	// Dimension changes are handled reactively via $effect below
 	// svelte-ignore state_referenced_locally
 	const store = withSelectStore(dimension, value ?? (placeholder ? '' : undefined))
+
+	// Get the selected item to access its icon
+	const selectedItem = $derived(items.find((item) => item.value === store.value))
 
 	// Focused input when user clicks on caret,Unfocused input when user clicks outside input or caret
 	// Close the select when user clicks outside, when user clicks on the tab button
@@ -138,69 +150,77 @@
 		</label>
 	{/if}
 	<div class="select-container">
-		<input
-			bind:this={input}
-			value={store.value ? (store.labels[store.value] ?? store.value) : value}
-			class="select {variant}"
-			class:hover
-			class:active
-			class:focus
-			class:focused
-			class:open={store.open}
-			onclick={() => {
-				if (!store.open)
-					setTimeout(() => {
-						store.open = true
-					})
-			}}
-			onkeydown={(e) => {
-				switch (e.key) {
-					case 'ArrowDown': {
-						e.preventDefault()
-						if (!store.open) {
+		<div class="input-wrapper">
+			<input
+				bind:this={input}
+				value={store.value ? (store.labels[store.value] ?? store.value) : value}
+				class="select {variant}"
+				class:hover
+				class:active
+				class:focus
+				class:focused
+				class:open={store.open}
+				class:has-icon={selectedItem?.icon}
+				onclick={() => {
+					if (!store.open)
+						setTimeout(() => {
 							store.open = true
-						} else {
-							const values = Object.keys(store.labels)
-							const index = store.marked ? values.indexOf(store.marked) : -1
-							store.marked = values[(index + 1) % values.length]
-						}
-						break
-					}
-					case 'ArrowUp': {
-						e.preventDefault()
-						if (!store.open) {
-							store.open = true
-						} else {
-							const values = Object.keys(store.labels)
-							const index = store.marked ? values.indexOf(store.marked) : 0
-							if (index - 1 >= 0) store.marked = values[index - 1]
-							else store.marked = values[values.length - 1]
-						}
-						break
-					}
-					case 'Enter': {
-						e.preventDefault()
-						if (!store.open) {
-							store.open = true
-						} else {
-							store.value = store.marked
-							store.open = false
-						}
-						break
-					}
-					case 'Escape': {
-						if (store.open) {
+						})
+				}}
+				onkeydown={(e) => {
+					switch (e.key) {
+						case 'ArrowDown': {
 							e.preventDefault()
-							store.open = false
+							if (!store.open) {
+								store.open = true
+							} else {
+								const values = Object.keys(store.labels)
+								const index = store.marked ? values.indexOf(store.marked) : -1
+								store.marked = values[(index + 1) % values.length]
+							}
+							break
+						}
+						case 'ArrowUp': {
+							e.preventDefault()
+							if (!store.open) {
+								store.open = true
+							} else {
+								const values = Object.keys(store.labels)
+								const index = store.marked ? values.indexOf(store.marked) : 0
+								if (index - 1 >= 0) store.marked = values[index - 1]
+								else store.marked = values[values.length - 1]
+							}
+							break
+						}
+						case 'Enter': {
+							e.preventDefault()
+							if (!store.open) {
+								store.open = true
+							} else {
+								store.value = store.marked
+								store.open = false
+							}
+							break
+						}
+						case 'Escape': {
+							if (store.open) {
+								e.preventDefault()
+								store.open = false
+							}
 						}
 					}
-				}
-			}}
-			id={labelFor}
-			{placeholder}
-			readonly
-			{...restProps}
-		/>
+				}}
+				id={labelFor}
+				{placeholder}
+				readonly
+				{...restProps}
+			/>
+			{#if selectedItem?.icon}
+				<div class="selected-icon">
+					<selectedItem.icon width={16} height={16} />
+				</div>
+			{/if}
+		</div>
 		<div class="wrapper">
 			<button
 				class="icon"
@@ -223,8 +243,34 @@
 						<Option class="placeholder" value="" {store}>{placeholder}</Option>
 					{/if}
 					{#each items as item (item.value)}
-						<Option value={item.value} {store}>{item.label}</Option>
+						<Option value={item.value} {store}>
+							<span class="option-content">
+								{#if item.icon}
+									<span class="option-icon"><item.icon width={16} height={16} /></span>
+								{/if}
+								{item.label}
+							</span>
+						</Option>
 					{/each}
+					{#if actionLabel && onaction}
+						<Option
+							value=""
+							{store}
+							onclick={(e) => {
+								e.preventDefault()
+								e.stopPropagation()
+								store.open = false
+								onaction()
+							}}
+						>
+							<span class="option-content">
+								{#if actionIcon}
+									<span class="option-icon"><svelte:component this={actionIcon} size={16} /></span>
+								{/if}
+								{actionLabel}
+							</span>
+						</Option>
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -281,6 +327,7 @@
 		color: var(--colors-ultra-high);
 		caret-color: transparent;
 		font-family: inherit;
+		text-align: left;
 		&.outline {
 			border: 1px solid var(--colors-ultra-high);
 			background: transparent;
@@ -441,6 +488,33 @@
 		font-size: var(--font-size-small);
 		line-height: var(--line-height-small);
 		letter-spacing: var(--letter-spacing-small);
+	}
+	.input-wrapper {
+		position: relative;
+		display: flex;
+		flex-grow: 1;
+		align-items: stretch;
+	}
+	.selected-icon {
+		position: absolute;
+		left: var(--half-padding);
+		top: 50%;
+		transform: translateY(-50%);
+		display: flex;
+		align-items: center;
+		pointer-events: none;
+	}
+	.select.has-icon {
+		padding-left: calc(var(--half-padding) + 20px);
+	}
+	.option-content {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.option-icon {
+		display: inline-flex;
+		align-items: center;
 	}
 	.wrapper {
 		position: relative;

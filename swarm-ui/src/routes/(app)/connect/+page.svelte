@@ -1,6 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
 	import { page } from '$app/stores'
+	import { goto } from '$app/navigation'
+	import routes from '$lib/routes'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
 	import IdentityGroups from '$lib/components/identity-groups.svelte'
@@ -8,6 +10,7 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
+	import Select from '$lib/components/ui/select/select.svelte'
 	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -19,6 +22,9 @@
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 	import Hashicon from '$lib/components/hashicon.svelte'
+	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
+	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
+	import Add from 'carbon-icons-svelte/lib/Add.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 
@@ -30,8 +36,45 @@
 	let error = $state<string | undefined>(undefined)
 	let showCreateMode = $state(false)
 	let authenticated = $state(false)
+	let selectedAccountId = $state<string | undefined>(undefined)
 
-	const identities = $derived(identitiesStore.identities)
+	const accounts = $derived(accountsStore.accounts)
+	const accountItems = $derived(
+		accounts.map((account) => ({
+			value: account.id,
+			label: account.name,
+			icon: account.type === 'passkey' ? PasskeyLogo : EthereumLogo,
+		})),
+	)
+
+	// Initialize from session store or default to first account
+	$effect(() => {
+		if (!selectedAccountId) {
+			if (sessionStore.data.account?.id) {
+				selectedAccountId = sessionStore.data.account.id
+			} else if (accounts.length > 0) {
+				selectedAccountId = accounts[0].id
+				sessionStore.setAccount(accounts[0])
+			}
+		}
+	})
+
+	// Sync selection changes to session store
+	$effect(() => {
+		if (selectedAccountId && selectedAccountId !== sessionStore.data.account?.id) {
+			const account = accountsStore.getAccount(selectedAccountId)
+			if (account) {
+				sessionStore.setAccount(account)
+			}
+		}
+	})
+
+	const allIdentities = $derived(identitiesStore.identities)
+	const identities = $derived(
+		selectedAccountId
+			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
+			: allIdentities,
+	)
 	const hasIdentities = $derived(identities.length > 0)
 	const origin = window.location.origin
 
@@ -99,6 +142,24 @@
 
 	function handleCreateNew() {
 		showCreateMode = true
+	}
+
+	async function handleCreateNewIdentity() {
+		if (!selectedAccountId) return
+		const account = accountsStore.getAccount(selectedAccountId)
+		if (!account) return
+
+		try {
+			const masterKey = await getMasterKeyFromAccount(account)
+			sessionStore.setAccount(account)
+			sessionStore.setTemporaryMasterKey(masterKey)
+			const url = appOrigin
+				? `${routes.IDENTITY_NEW}?origin=${encodeURIComponent(appOrigin)}`
+				: routes.IDENTITY_NEW
+			goto(url)
+		} catch (err) {
+			console.error('Failed to authenticate:', err)
+		}
 	}
 
 	// FIXME: Temporary function to generate random postage batch ID for testing
@@ -251,15 +312,27 @@
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
+			<Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
+				<Typography>Account</Typography>
+				<Select
+					items={accountItems}
+					bind:value={selectedAccountId}
+					dimension="compact"
+					variant="solid"
+					actionLabel="Add account..."
+					actionIcon={Add}
+					onaction={handleCreateNew}
+				/>
+			</Horizontal>
 			<IdentityGroups
 				{identities}
 				appUrl={appOrigin}
 				onIdentityClick={selectIdentityForConnection}
 			/>
 			<Horizontal --horizontal-justify-content="flex-start">
-				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
-					>Connect another account</Button
-				>
+				<Button variant="ghost" dimension="compact" onclick={handleCreateNewIdentity}>
+					<Add size={20} />Create new identity
+				</Button>
 			</Horizontal>
 		</Vertical>
 	{:else}
