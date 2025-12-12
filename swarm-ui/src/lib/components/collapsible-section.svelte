@@ -19,6 +19,8 @@
 
 	let { title, subtitle, count, expanded = true, onToggle, children }: Props = $props()
 
+	// expanded prop is static in practice, internal state handles toggling
+	// svelte-ignore state_referenced_locally
 	let isExpanded = $state(expanded)
 
 	function handleToggle() {

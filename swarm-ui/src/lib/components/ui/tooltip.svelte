@@ -27,6 +27,8 @@
 	}: Props = $props()
 	let tooltip: HTMLDivElement | undefined = $state(undefined)
 	let element: HTMLDivElement | undefined = $state(undefined)
+	// position prop is static in practice, updatePosition() handles dynamic adjustment
+	// svelte-ignore state_referenced_locally
 	let adjustedPosition = $state(position)
 
 	function updatePosition() {
