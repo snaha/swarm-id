@@ -292,7 +292,7 @@ Both servers:
 ## Documentation
 
 - **[The Book of Swarm](./The-Book-of-Swarm.pdf)**: Comprehensive Swarm documentation
-- **[Swarm Identity Management Proposal](./Swarm%20Identity%20Management%20Proposal.rtf)**: Identity system proposal
+- **[Swarm Identity Management Proposal](./docs/Swarm-Identity-Management-Proposal.md)**: Identity system proposal
 - **[Library Documentation](./lib/README.md)**: API reference and usage examples
 
 ## Development Workflow
