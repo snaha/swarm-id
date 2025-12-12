@@ -10,7 +10,7 @@
 		appDescription?: string
 	}
 
-	let { appName, appUrl, appIcon, appDescription }: Props = $props()
+	let { appName, appUrl, appIcon }: Props = $props()
 
 	let faviconUrl = $state<string | undefined>(undefined)
 	let isLoading = $state(true)
