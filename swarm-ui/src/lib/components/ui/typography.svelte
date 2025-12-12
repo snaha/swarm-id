@@ -38,7 +38,7 @@
 
 	let {
 		variant = 'default',
-		element = getDefaultElement(variant),
+		element,
 		font = 'sans',
 		bold = false,
 		italic = false,
@@ -50,10 +50,13 @@
 		children,
 		...restProps
 	}: Props = $props()
+
+	// Compute element reactively - use const for $derived
+	const computedElement = $derived(element ?? getDefaultElement(variant))
 </script>
 
 <svelte:element
-	this={element}
+	this={computedElement}
 	class:bold
 	class:italic
 	class:nowrap

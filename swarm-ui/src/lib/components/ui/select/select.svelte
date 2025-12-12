@@ -47,6 +47,9 @@
 	let input: HTMLInputElement | undefined = $state(undefined)
 	let focused = $state(false)
 
+	// Store is initialized once to preserve internal state (open, marked, etc.)
+	// Dimension changes are handled reactively via $effect below
+	// svelte-ignore state_referenced_locally
 	const store = withSelectStore(dimension, value ?? (placeholder ? '' : undefined))
 
 	// Focused input when user clicks on caret,Unfocused input when user clicks outside input or caret

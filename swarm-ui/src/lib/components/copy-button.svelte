@@ -14,7 +14,7 @@
 
 	let copied = $state(false)
 	let timeoutId = $state<ReturnType<typeof setTimeout> | undefined>(undefined)
-	let previousText = $state(text)
+	let previousText = $state('')
 
 	function handleCopy(event: MouseEvent) {
 		event.stopPropagation()
@@ -33,7 +33,7 @@
 		}, 5000)
 	}
 
-	// Reset copied state when text changes
+	// Sync previousText with text prop and reset copied state when text changes
 	$effect(() => {
 		if (previousText !== text) {
 			copied = false
@@ -41,8 +41,8 @@
 				clearTimeout(timeoutId)
 				timeoutId = undefined
 			}
-			previousText = text
 		}
+		previousText = text
 	})
 </script>
 
