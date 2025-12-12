@@ -30,9 +30,7 @@
 					<Information size={16} />
 				</Button>
 				{#snippet helperText()}
-					Import an existing Swarm ID account that was previously exported as a <span
-						style="color: var(--colors-high)">.swarmid</span
-					> file
+					Import an existing Swarm ID account from a .swarmid file
 				{/snippet}
 			</Tooltip>
 		</Horizontal>
