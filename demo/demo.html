@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Swarm ID Demo dApp</title>
+    <title>Swarm ID Demo</title>
     <style>
       * {
         margin: 0;
@@ -163,7 +163,7 @@
   </head>
   <body>
     <div class="container">
-      <h1>🐝 Swarm ID Demo dApp</h1>
+      <h1>🐝 Swarm ID Demo</h1>
       <p class="subtitle">
         This demo application shows how to use the Swarm ID library for
         authentication and Bee API operations.
@@ -254,6 +254,9 @@ Hello, Swarm!</textarea
       log(`PROXY_PATH: ${PROXY_PATH}`, "info");
       log(`Full Proxy URL: ${PROXY_ORIGIN}${PROXY_PATH}`, "info");
 
+      // Simple bee SVG icon with white background
+      const beeIcon = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
+
       const client = new SwarmIdClient({
         iframeOrigin: PROXY_ORIGIN,
         iframePath: PROXY_PATH,
@@ -262,6 +265,11 @@ Hello, Swarm!</textarea
         onAuthChange: (authenticated) => {
           log(`Auth status changed: ${authenticated}`, "info");
           updateAuthStatus(authenticated);
+        },
+        metadata: {
+          name: "Swarm ID Demo",
+          description: "Demo application showcasing Swarm ID authentication and Bee API operations",
+          icon: beeIcon,
         },
       });
 

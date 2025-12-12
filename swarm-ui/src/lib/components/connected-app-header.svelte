@@ -6,9 +6,11 @@
 	interface Props {
 		appName: string
 		appUrl: string
+		appIcon?: string
+		appDescription?: string
 	}
 
-	let { appName, appUrl }: Props = $props()
+	let { appName, appUrl, appIcon }: Props = $props()
 
 	let faviconUrl = $state<string | undefined>(undefined)
 	let isLoading = $state(true)
@@ -67,14 +69,19 @@
 </script>
 
 <div class="header">
-	{#if !isLoading && faviconUrl}
+	{#if appIcon}
+		<!-- Use provided app icon -->
+		<img src={appIcon} alt="icon" class="favicon" />
+	{:else if !isLoading && faviconUrl}
+		<!-- Fallback to detected favicon -->
 		<img src={faviconUrl} alt="{appName} favicon" class="favicon" />
 	{:else}
+		<!-- Fallback to default logo -->
 		<AppLogo width={40} height={40} />
 	{/if}
 	<div class="header-text">
 		<Typography variant="h4">Connect to {appName}</Typography>
-		<Typography variant="small">{appUrl}</Typography>
+		<Typography>{appUrl}</Typography>
 	</div>
 </div>
 
@@ -92,9 +99,8 @@
 	}
 
 	.favicon {
-		width: 40px;
-		height: 40px;
-		border-radius: 8px;
+		width: 56px;
+		height: 56px;
 		object-fit: contain;
 	}
 </style>

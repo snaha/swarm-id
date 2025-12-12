@@ -44,10 +44,10 @@
 				--horizontal-align-items="center"
 				--horizontal-justify-content="space-between"
 			>
-				{#if app.favicon}
-					<img src={app.favicon} alt={app.appName} class="app-favicon" />
+				{#if app.appIcon}
+					<img src={app.appIcon} alt={app.appName} class="app-icon" />
 				{:else}
-					<div class="app-favicon-placeholder">{app.appName.charAt(0).toUpperCase()}</div>
+					<div class="app-icon-placeholder">{app.appName.charAt(0).toUpperCase()}</div>
 				{/if}
 				<Vertical --vertical-gap="var(--quarter-padding)" style="flex: 1;">
 					<Typography>
@@ -91,16 +91,16 @@
 		border-bottom: none;
 	}
 
-	.app-favicon {
-		width: 40px;
-		height: 40px;
+	.app-icon {
+		width: 56px;
+		height: 56px;
 		border-radius: 8px;
-		object-fit: cover;
+		object-fit: contain;
 	}
 
-	.app-favicon-placeholder {
-		width: 40px;
-		height: 40px;
+	.app-icon-placeholder {
+		width: 56px;
+		height: 56px;
 		border-radius: 8px;
 		background: var(--colors-low);
 		display: flex;

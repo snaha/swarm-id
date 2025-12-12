@@ -30,13 +30,13 @@
 	}
 </script>
 
-<Vertical --vertical-gap="0" class="content-box">
+<Vertical --vertical-gap="var(--padding)" class="content-box">
 	<Horizontal --horizontal-gap="0">
 		<div class="card-wrapper card-left">
 			<AuthCard
-				title="Use Ethereum"
-				description="Connect an Ethereum wallet to create a new Swarm ID account"
-				buttonText="Connect wallet"
+				title="Use Ethereum wallet"
+				description="Create a Swarm ID account using your Ethereum wallet"
+				buttonText="Sign up with Ethereum"
 				onclick={handleEthClick}
 			>
 				{#snippet icon()}
@@ -50,8 +50,8 @@
 		<div class="card-wrapper card-right">
 			<AuthCard
 				title="Use Passkey"
-				description="Use Passkey on this device to create a new Swarm ID account"
-				buttonText="Use Passkey"
+				description="Create a Swarm ID account on this device using a passkey"
+				buttonText="Sign up with Passkey"
 				onclick={handlePasskeyClick}
 			>
 				{#snippet icon()}

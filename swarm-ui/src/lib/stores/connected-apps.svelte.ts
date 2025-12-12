@@ -25,7 +25,10 @@ export const connectedAppsStore = {
 
 	// Add or update a connected app (updates lastConnectedAt if app already exists with same identity)
 	addOrUpdateApp(
-		appData: Omit<ConnectedApp, 'lastConnectedAt'> & { favicon?: string },
+		appData: Omit<ConnectedApp, 'lastConnectedAt'> & {
+			appIcon?: string
+			appDescription?: string
+		},
 	): ConnectedApp {
 		const existingApp = connectedApps.find(
 			(app) => app.appUrl === appData.appUrl && app.identityId === appData.identityId,
@@ -36,7 +39,8 @@ export const connectedAppsStore = {
 			const updatedApp: ConnectedApp = {
 				...existingApp,
 				appName: appData.appName,
-				favicon: appData.favicon ?? existingApp.favicon,
+				appIcon: appData.appIcon ?? existingApp.appIcon,
+				appDescription: appData.appDescription ?? existingApp.appDescription,
 				lastConnectedAt: Date.now(),
 			}
 			connectedApps = connectedApps.map((app) =>
@@ -52,7 +56,8 @@ export const connectedAppsStore = {
 				appUrl: appData.appUrl,
 				appName: appData.appName,
 				identityId: appData.identityId,
-				favicon: appData.favicon,
+				appIcon: appData.appIcon,
+				appDescription: appData.appDescription,
 				lastConnectedAt: Date.now(),
 			}
 			connectedApps = [...connectedApps, newApp]
