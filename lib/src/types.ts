@@ -114,6 +114,35 @@ export const ButtonStylesSchema = z
 export type ButtonStyles = z.infer<typeof ButtonStylesSchema>
 
 // ============================================================================
+// App Metadata
+// ============================================================================
+
+export const AppMetadataSchema = z.object({
+  name: z.string().min(1).max(100),
+  description: z.string().max(500).optional(),
+  icon: z
+    .string()
+    .optional()
+    .refine(
+      (val) => {
+        if (!val) return true
+        if (!val.startsWith("data:image/")) return false
+        const mimeMatch = val.match(/^data:image\/(svg\+xml|png);/)
+        if (!mimeMatch) return false
+        const base64Match = val.match(/base64,(.+)$/)
+        if (base64Match) {
+          const approximateSize = (base64Match[1].length * 3) / 4
+          if (approximateSize > 4096) return false
+        }
+        return true
+      },
+      { message: "Icon must be a data URL with SVG or PNG mime type, max 4KB" },
+    ),
+})
+
+export type AppMetadata = z.infer<typeof AppMetadataSchema>
+
+// ============================================================================
 // Message Types: Parent → Iframe
 // ============================================================================
 
@@ -121,6 +150,7 @@ export const ParentIdentifyMessageSchema = z.object({
   type: z.literal("parentIdentify"),
   beeApiUrl: z.string().url().optional(),
   popupMode: z.enum(["popup", "window"]).optional(),
+  metadata: AppMetadataSchema,
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -391,6 +421,7 @@ export interface ClientOptions {
   timeout?: number
   onAuthChange?: (authenticated: boolean) => void
   popupMode?: "popup" | "window" // Default: 'window'
+  metadata: AppMetadata
 }
 
 export interface ProxyOptions {

@@ -12,6 +12,7 @@ import type {
   DownloadFileMessage,
   UploadChunkMessage,
   DownloadChunkMessage,
+  AppMetadata,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
@@ -48,6 +49,7 @@ export class SwarmIdProxy {
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
   private popupMode: "popup" | "window" = "window"
+  private appMetadata: AppMetadata | undefined
   private bee: Bee
 
   constructor(options: ProxyOptions) {
@@ -296,6 +298,7 @@ export class SwarmIdProxy {
     const message = event.data
     const parentBeeApiUrl = message.beeApiUrl
     const parentPopupMode = message.popupMode
+    const parentMetadata = message.metadata
 
     // Trust event.origin - this is browser-enforced and cannot be spoofed
     this.parentOrigin = event.origin
@@ -317,6 +320,15 @@ export class SwarmIdProxy {
     if (parentPopupMode) {
       this.popupMode = parentPopupMode
       console.log("[Proxy] Using popup mode from parent:", this.popupMode)
+    }
+
+    // Store metadata from parent
+    if (parentMetadata) {
+      this.appMetadata = parentMetadata
+      console.log(
+        "[Proxy] Received app metadata from parent:",
+        parentMetadata.name,
+      )
     }
 
     // Load existing secret if available
@@ -722,7 +734,21 @@ export class SwarmIdProxy {
       document.head.appendChild(style)
     }
 
-    const authUrl = `${window.location.origin}/connect?origin=${encodeURIComponent(this.parentOrigin)}`
+    // Build URL with metadata parameters
+    const params = new URLSearchParams()
+    params.set("origin", this.parentOrigin)
+
+    if (this.appMetadata) {
+      params.set("appName", this.appMetadata.name)
+      if (this.appMetadata.description) {
+        params.set("appDescription", this.appMetadata.description)
+      }
+      if (this.appMetadata.icon) {
+        params.set("appIcon", this.appMetadata.icon)
+      }
+    }
+
+    const authUrl = `${window.location.origin}/connect?${params.toString()}`
 
     // Open as popup or full window based on popupMode
     if (this.popupMode === "popup") {

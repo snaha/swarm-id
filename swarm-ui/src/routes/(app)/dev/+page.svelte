@@ -91,21 +91,18 @@
 			appUrl: 'https://swarm-app.local:8080',
 			appName: 'Swarm App',
 			identityId: identity1.id,
-			favicon: 'https://www.ethswarm.org/favicon.ico',
 		})
 
 		connectedAppsStore.addOrUpdateApp({
 			appUrl: 'https://example.com',
 			appName: 'Example App',
 			identityId: identity1.id,
-			favicon: 'https://example.com/favicon.ico',
 		})
 
 		connectedAppsStore.addOrUpdateApp({
 			appUrl: 'https://github.com',
 			appName: 'GitHub',
 			identityId: identity1.id,
-			favicon: 'https://github.com/favicon.ico',
 		})
 
 		// Bob has connected to swarm-app
@@ -113,7 +110,6 @@
 			appUrl: 'https://swarm-app.local:8080',
 			appName: 'Swarm App',
 			identityId: identity2.id,
-			favicon: 'https://www.ethswarm.org/favicon.ico',
 		})
 
 		// Charlie has connected to localhost

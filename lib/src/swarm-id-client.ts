@@ -9,10 +9,12 @@ import type {
   Reference,
   ParentToIframeMessage,
   IframeToParentMessage,
+  AppMetadata,
 } from "./types"
 import {
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
+  AppMetadataSchema,
 } from "./types"
 
 /**
@@ -26,6 +28,7 @@ export class SwarmIdClient {
   private timeout: number
   private onAuthChange?: (authenticated: boolean) => void
   private popupMode: "popup" | "window"
+  private metadata: AppMetadata
   private ready: boolean = false
   private readyPromise: Promise<void>
   private readyResolve?: () => void
@@ -52,6 +55,14 @@ export class SwarmIdClient {
     this.timeout = options.timeout || 30000 // 30 seconds default
     this.onAuthChange = options.onAuthChange
     this.popupMode = options.popupMode || "window"
+    this.metadata = options.metadata
+
+    // Validate metadata
+    try {
+      AppMetadataSchema.parse(this.metadata)
+    } catch (error) {
+      throw new Error(`Invalid app metadata: ${error}`)
+    }
 
     // Create promise that resolves when iframe is ready
     this.readyPromise = new Promise<void>((resolve, reject) => {
@@ -139,6 +150,7 @@ export class SwarmIdClient {
       type: "parentIdentify",
       beeApiUrl: this.beeApiUrl,
       popupMode: this.popupMode,
+      metadata: this.metadata,
     })
     console.log("[SwarmIdClient] parentIdentify sent")
 

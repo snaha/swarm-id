@@ -33,7 +33,8 @@ export type ConnectedApp = {
 	appName: string
 	lastConnectedAt: number
 	identityId: string
-	favicon?: string
+	appIcon?: string
+	appDescription?: string
 }
 
 export type PostageStamp = {

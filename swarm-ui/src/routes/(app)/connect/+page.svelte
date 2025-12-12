@@ -24,6 +24,8 @@
 
 	let appOrigin = $state('')
 	let appName = $state('')
+	let appDescription = $state<string | undefined>(undefined)
+	let appIcon = $state<string | undefined>(undefined)
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let showCreateMode = $state(false)
@@ -52,7 +54,7 @@
 			return
 		}
 
-		// Get app origin from URL parameter
+		// Get parameters from URL
 		const origin = $page.url.searchParams.get('origin')
 		if (!origin) {
 			error = 'No origin parameter found in URL'
@@ -61,12 +63,24 @@
 
 		appOrigin = origin
 
-		// Extract app name from origin (simple extraction from domain)
-		try {
-			const url = new URL(origin)
-			appName = url.hostname.split('.')[0] || url.hostname
-		} catch {
-			appName = origin
+		// Get app metadata from URL parameters (if provided)
+		const urlAppName = $page.url.searchParams.get('appName')
+		const urlAppDescription = $page.url.searchParams.get('appDescription')
+		const urlAppIcon = $page.url.searchParams.get('appIcon')
+
+		// Use metadata from URL if available, otherwise derive from origin
+		if (urlAppName) {
+			appName = urlAppName
+			appDescription = urlAppDescription ?? undefined
+			appIcon = urlAppIcon ?? undefined
+		} else {
+			// Fallback: Extract app name from origin
+			try {
+				const url = new URL(origin)
+				appName = url.hostname.split('.')[0] || url.hostname
+			} catch {
+				appName = origin
+			}
 		}
 
 		// If there is a new identity set it up
@@ -161,6 +175,8 @@
 			appUrl: appOrigin,
 			appName: appName,
 			identityId: selectedIdentity.id,
+			appIcon: appIcon,
+			appDescription: appDescription,
 		})
 	}
 
@@ -230,7 +246,7 @@
 		{/if}
 	</Vertical>
 {:else}
-	<ConnectedAppHeader {appName} appUrl={appOrigin} />
+	<ConnectedAppHeader {appName} appUrl={appOrigin} {appIcon} {appDescription} />
 
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
