@@ -6,13 +6,17 @@
 	import Upload from 'carbon-icons-svelte/lib/Upload.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 
+	type Props = {
+		onclick: () => void
+	}
+	let { onclick }: Props = $props()
 	let showTooltip = $state(false)
 </script>
 
 <div class="import-row" role="button" tabindex="-1">
 	<Horizontal --horizontal-justify-content="space-between">
 		<Horizontal --horizontal-justify-content="start" --horizontal-gap="var(--half-padding)">
-			<Button variant="ghost" dimension="small">
+			<Button variant="ghost" dimension="small" {onclick}>
 				<Upload size={16} />
 				Import account
 			</Button>
