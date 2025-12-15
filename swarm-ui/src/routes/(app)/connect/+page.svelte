@@ -1,33 +1,24 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
 	import { page } from '$app/stores'
-	import { goto } from '$app/navigation'
-	import routes from '$lib/routes'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
+	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import IdentityGroups from '$lib/components/identity-groups.svelte'
+	import AccountSelector from '$lib/components/account-selector.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import Select from '$lib/components/ui/select/select.svelte'
 	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import { authenticateWithPasskey } from '$lib/passkey'
-	import { keccak256 } from 'ethers'
-	import { hexToUint8Array } from '$lib/utils/key-derivation'
-	import type { Identity, Account } from '$lib/types'
-	import { connectAndSign } from '$lib/ethereum'
-	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
+	import type { Identity } from '$lib/types'
 	import Hashicon from '$lib/components/hashicon.svelte'
-	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
-	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
-	import Add from 'carbon-icons-svelte/lib/Add.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
-	import { notImplemented } from '$lib/utils/not-implemented'
+	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 
 	let appOrigin = $state('')
 	let appName = $state('')
@@ -38,37 +29,6 @@
 	let showCreateMode = $state(false)
 	let authenticated = $state(false)
 	let selectedAccountId = $state<string | undefined>(undefined)
-
-	const accounts = $derived(accountsStore.accounts)
-	const accountItems = $derived(
-		accounts.map((account) => ({
-			value: account.id,
-			label: account.name,
-			icon: account.type === 'passkey' ? PasskeyLogo : EthereumLogo,
-		})),
-	)
-
-	// Initialize from session store or default to first account
-	$effect(() => {
-		if (!selectedAccountId) {
-			if (sessionStore.data.account?.id) {
-				selectedAccountId = sessionStore.data.account.id
-			} else if (accounts.length > 0) {
-				selectedAccountId = accounts[0].id
-				sessionStore.setAccount(accounts[0])
-			}
-		}
-	})
-
-	// Sync selection changes to session store
-	$effect(() => {
-		if (selectedAccountId && selectedAccountId !== sessionStore.data.account?.id) {
-			const account = accountsStore.getAccount(selectedAccountId)
-			if (account) {
-				sessionStore.setAccount(account)
-			}
-		}
-	})
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived(
@@ -145,28 +105,6 @@
 		showCreateMode = true
 	}
 
-	async function handleCreateNewIdentity() {
-		if (!selectedAccountId) return
-		const account = accountsStore.getAccount(selectedAccountId)
-		if (!account) return
-		if (account.type === 'ethereum') {
-			notImplemented()
-			return
-		}
-
-		try {
-			const masterKey = await getMasterKeyFromAccount(account)
-			sessionStore.setAccount(account)
-			sessionStore.setTemporaryMasterKey(masterKey)
-			const url = appOrigin
-				? `${routes.IDENTITY_NEW}?origin=${encodeURIComponent(appOrigin)}`
-				: routes.IDENTITY_NEW
-			goto(url)
-		} catch (err) {
-			console.error('Failed to authenticate:', err)
-		}
-	}
-
 	// FIXME: Temporary function to generate random postage batch ID for testing
 	// In production, this should come from the identity's actual postage stamps
 	function generateRandomPostageBatchId(): string {
@@ -175,40 +113,6 @@
 		return Array.from(bytes)
 			.map((b) => b.toString(16).padStart(2, '0'))
 			.join('')
-	}
-
-	/**
-	 * Retrieve masterKey from account based on account type
-	 */
-	async function getMasterKeyFromAccount(account: Account): Promise<string> {
-		if (account.type === 'passkey') {
-			// For passkey accounts: Re-authenticate to get masterKey
-			console.log('🔐 Re-authenticating with passkey...')
-			const swarmIdDomain = window.location.hostname
-			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
-
-			// Use allowCredentials to guide WebAuthn to the correct passkey
-			const passkeyAccount = await authenticateWithPasskey({
-				rpId: swarmIdDomain,
-				challenge,
-				allowCredentials: [{ id: account.credentialId, type: 'public-key' }],
-			})
-
-			console.log('✅ Passkey authentication successful')
-			return passkeyAccount.masterKey
-		} else {
-			// Connect wallet and sign SIWE message
-			const signed = await connectAndSign()
-
-			// Derive encryption key from public key + salt
-			const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
-			console.log('🔑 Encryption key derived')
-
-			const masterKey = await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
-			console.log('✅ Ethereum authentication successful')
-
-			return masterKey
-		}
 	}
 
 	function updateSelectedIdentity(appSecret: string) {
@@ -319,27 +223,14 @@
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
-			<Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
-				<Typography>Account</Typography>
-				<Select
-					items={accountItems}
-					bind:value={selectedAccountId}
-					dimension="compact"
-					variant="solid"
-					actionLabel="Add account..."
-					actionIcon={Add}
-					onaction={handleCreateNew}
-				/>
-			</Horizontal>
+			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
 			<IdentityGroups
 				{identities}
 				appUrl={appOrigin}
 				onIdentityClick={selectIdentityForConnection}
 			/>
 			<Horizontal --horizontal-justify-content="flex-start">
-				<Button variant="ghost" dimension="compact" onclick={handleCreateNewIdentity}>
-					<Add size={20} />Create new identity
-				</Button>
+				<CreateIdentityButton accountId={selectedAccountId} redirectOrigin={appOrigin} />
 			</Horizontal>
 		</Vertical>
 	{:else}
