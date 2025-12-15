@@ -38,6 +38,11 @@ export const accountsStore = {
 		return accounts.find((a) => a.id === id)
 	},
 
+	setAccountName(id: string, name: string) {
+		accounts = accounts.map((account) => (account.id === id ? { ...account, name } : account))
+		saveAccounts(accounts)
+	},
+
 	clear() {
 		accounts = []
 		saveAccounts(accounts)
