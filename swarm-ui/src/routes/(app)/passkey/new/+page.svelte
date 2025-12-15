@@ -17,7 +17,6 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { keccak256 } from 'ethers'
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
-	import { accountsStore } from '$lib/stores/accounts.svelte'
 
 	let accountName = $state('Passkey')
 	let appOrigin = $state<string | undefined>(undefined)
@@ -43,24 +42,19 @@
 			error = undefined
 			console.log('🔐 Creating passkey account...')
 
-			// Create a new passkey - this will derive the Ethereum address from the credential
-			console.log('📝 Creating new passkey for:', accountName)
+			// Create a new passkey account using account name as userId
+			// Different names create different credentials on the same authenticator
+			console.log('📝 Creating new passkey account for:', accountName)
 			const swarmIdDomain = window.location.hostname
 			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
-			const userIdIndex = accountsStore.accounts.filter(
-				(account) => account.type === 'passkey',
-			).length
-			const userId = `Swarm ID User / ${userIdIndex}`
+
 			const account = await createPasskeyAccount({
 				rpName: 'Swarm ID',
 				rpId: swarmIdDomain,
 				challenge,
-				userId,
+				userId: accountName.trim(),
 				userName: accountName.trim(),
 				userDisplayName: accountName.trim(),
-				excludeCredentials: accountsStore.accounts
-					.filter((acc) => acc.type === 'passkey')
-					.map((acc) => ({ id: acc.credentialId, type: 'public-key' as const })),
 			})
 			console.log('✅ Passkey created successfully')
 

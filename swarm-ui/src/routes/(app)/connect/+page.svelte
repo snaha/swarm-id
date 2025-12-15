@@ -182,9 +182,11 @@
 			const swarmIdDomain = window.location.hostname
 			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
 
+			// Use allowCredentials to guide WebAuthn to the correct passkey
 			const passkeyAccount = await authenticateWithPasskey({
 				rpId: swarmIdDomain,
 				challenge,
+				allowCredentials: [{ id: account.credentialId, type: 'public-key' }],
 			})
 
 			console.log('✅ Passkey authentication successful')
