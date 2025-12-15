@@ -1,10 +1,9 @@
 <script lang="ts">
 	import type { HTMLInputAttributes } from 'svelte/elements'
-	import type { CarbonIconProps } from 'carbon-icons-svelte'
 	import CaretDown from 'carbon-icons-svelte/lib/CaretDown.svelte'
 	import CaretUp from 'carbon-icons-svelte/lib/CaretUp.svelte'
 	import { type Snippet, type Component } from 'svelte'
-	import { withSelectStore } from './select-store.svelte'
+	import { withSelectStore, type SelectStore } from './select-store.svelte'
 	import Option from './option.svelte'
 
 	type Layout = 'vertical' | 'horizontal'
@@ -28,9 +27,8 @@
 		focus?: boolean
 		variant?: Variant
 		items: Item[]
-		actionLabel?: string
-		actionIcon?: Component<CarbonIconProps>
-		onaction?: () => void
+		/** Optional snippet to render at the end of the dropdown list */
+		dropdownFooter?: Snippet<[{ close: () => void; store: SelectStore }]>
 	}
 	let {
 		helperText,
@@ -47,11 +45,13 @@
 		variant = 'outline',
 		onchange = $bindable(),
 		items,
-		actionLabel,
-		actionIcon,
-		onaction,
+		dropdownFooter,
 		...restProps
 	}: Props = $props()
+
+	function closeDropdown() {
+		store.open = false
+	}
 
 	let input: HTMLInputElement | undefined = $state(undefined)
 	let focused = $state(false)
@@ -252,24 +252,8 @@
 							</span>
 						</Option>
 					{/each}
-					{#if actionLabel && onaction}
-						<Option
-							value=""
-							{store}
-							onclick={(e) => {
-								e.preventDefault()
-								e.stopPropagation()
-								store.open = false
-								onaction()
-							}}
-						>
-							<span class="option-content">
-								{#if actionIcon}
-									<span class="option-icon"><svelte:component this={actionIcon} size={16} /></span>
-								{/if}
-								{actionLabel}
-							</span>
-						</Option>
+					{#if dropdownFooter}
+						{@render dropdownFooter({ close: closeDropdown, store })}
 					{/if}
 				</div>
 			</div>

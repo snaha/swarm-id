@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
+	import Option from '$lib/components/ui/select/option.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
@@ -49,13 +50,33 @@
 
 <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
 	<Typography>Account</Typography>
-	<Select
-		items={accountItems}
-		bind:value={selectedAccountId}
-		dimension="compact"
-		variant="solid"
-		actionLabel="Add account..."
-		actionIcon={Add}
-		onaction={onCreateAccount}
-	/>
+	<Select items={accountItems} bind:value={selectedAccountId} dimension="compact" variant="solid">
+		{#snippet dropdownFooter({ close, store })}
+			{#if onCreateAccount}
+				<Option
+					value=""
+					{store}
+					onclick={(e: MouseEvent) => {
+						e.preventDefault()
+						e.stopPropagation()
+						close()
+						onCreateAccount()
+					}}
+				>
+					<span class="option-content">
+						<Add size={16} />
+						Add account...
+					</span>
+				</Option>
+			{/if}
+		{/snippet}
+	</Select>
 </Horizontal>
+
+<style>
+	.option-content {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+</style>
