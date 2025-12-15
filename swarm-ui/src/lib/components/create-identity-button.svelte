@@ -6,7 +6,6 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import routes from '$lib/routes'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
-	import { notImplemented } from '$lib/utils/not-implemented'
 	import type { Account } from '$lib/types'
 
 	interface Props {
@@ -28,10 +27,6 @@
 
 	async function handleClick() {
 		if (!resolvedAccount) return
-		if (resolvedAccount.type === 'ethereum') {
-			notImplemented()
-			return
-		}
 
 		try {
 			const masterKey = await getMasterKeyFromAccount(resolvedAccount)

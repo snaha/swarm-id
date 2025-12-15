@@ -125,7 +125,5 @@ export async function decryptMasterKey(
 		ciphertext,
 	)
 
-	// Convert back to hex string with '0x' prefix
-	const decryptedHex = uint8ArrayToHex(new Uint8Array(decryptedData))
-	return '0x' + decryptedHex
+	return uint8ArrayToHex(new Uint8Array(decryptedData))
 }

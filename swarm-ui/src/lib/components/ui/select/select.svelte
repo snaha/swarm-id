@@ -192,12 +192,14 @@
 							}
 							break
 						}
+						case ' ':
 						case 'Enter': {
 							e.preventDefault()
 							if (!store.open) {
 								store.open = true
 							} else {
 								store.value = store.marked
+								store.changed = true
 								store.open = false
 							}
 							break
@@ -293,8 +295,41 @@
 					border: 1px solid var(--colors-top);
 					background: var(--colors-low);
 					color: var(--colors-top);
-					& + .wrapper > button {
-						color: var(--colors-top);
+				}
+				.wrapper > button {
+					color: var(--colors-top);
+				}
+			}
+			&:has(.select:hover:not(:disabled)),
+			&:has(.select.hover:not(:disabled)) {
+				.wrapper > button {
+					color: var(--colors-top);
+				}
+			}
+			&:has(.select:active:not(:disabled)),
+			&:has(.select.active:not(:disabled)),
+			&:has(.select.open:not(:disabled):not(.focused)) {
+				.wrapper > button {
+					color: var(--colors-high);
+				}
+			}
+			&:has(.select.focus:not(:disabled)),
+			&:has(.select.focused:not(:disabled)) {
+				.wrapper > button {
+					color: var(--colors-top);
+				}
+			}
+			&:has(.select.focused.open:not(:disabled)) {
+				.wrapper > button {
+					color: var(--colors-base);
+				}
+			}
+			&:has(.select:disabled) {
+				.wrapper > button {
+					pointer-events: none;
+					div {
+						opacity: 0.25;
+						cursor: not-allowed;
 					}
 				}
 			}
@@ -325,14 +360,10 @@
 			color: var(--colors-ultra-high);
 		}
 		&:hover:not(:disabled),
-		&:hover:not(:disabled),
 		&.hover:not(:disabled) {
 			border: 1px solid var(--colors-top);
 			background: var(--colors-low);
 			color: var(--colors-top);
-			& + .wrapper > button {
-				color: var(--colors-top);
-			}
 		}
 		&:active:not(:disabled),
 		&.active:not(:disabled),
@@ -341,9 +372,6 @@
 			border: 1px solid var(--colors-high);
 			background: var(--colors-low);
 			color: var(--colors-high);
-			& + .wrapper > button {
-				color: var(--colors-high);
-			}
 		}
 		&:focus {
 			outline: none;
@@ -354,17 +382,11 @@
 			outline-offset: var(--focus-outline-offset);
 			background: var(--colors-base);
 			color: var(--colors-top);
-			& + .wrapper > button {
-				color: var(--colors-top);
-			}
 		}
 		&.focused.open:not(:disabled) {
 			border: 1px var(--colors-top);
 			background: var(--colors-top);
 			color: var(--colors-base);
-			& + .wrapper > button {
-				color: var(--colors-base);
-			}
 			&::placeholder {
 				color: var(--colors-base);
 			}
@@ -373,13 +395,6 @@
 			opacity: 1;
 			border: 1px solid var(--colors-low);
 			cursor: not-allowed;
-			& + .wrapper > button {
-				pointer-events: none;
-				div {
-					opacity: 0.25;
-					cursor: not-allowed;
-				}
-			}
 		}
 	}
 	.label {

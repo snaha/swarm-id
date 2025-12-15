@@ -165,43 +165,6 @@ export async function createPasskeyAccount(
 }
 
 /**
- * Get or create a passkey account
- * If a credential already exists for this authenticator, authenticates with it instead of failing.
- * This allows multiple deterministic accounts from the same authenticator using HD derivation.
- */
-export async function getOrCreatePasskeyAccount(
-	options: PasskeyRegistrationOptions,
-): Promise<PasskeyAccount> {
-	try {
-		// Try to register a new credential
-		return await createPasskeyAccount(options)
-	} catch (error) {
-		// Check if the error is because the authenticator is already registered
-		const errorMessage = error instanceof Error ? error.message : String(error)
-		const isAlreadyRegistered =
-			errorMessage.includes('previously registered') ||
-			errorMessage.includes('already registered') ||
-			errorMessage.includes('excludeCredentials')
-
-		if (
-			isAlreadyRegistered &&
-			options.excludeCredentials &&
-			options.excludeCredentials.length > 0
-		) {
-			// Authenticator already has a credential - authenticate with it instead
-			console.log('🔄 Authenticator already registered, authenticating with existing credential...')
-			return await authenticateWithPasskey({
-				rpId: options.rpId,
-				allowCredentials: options.excludeCredentials,
-			})
-		}
-
-		// Re-throw if it's a different error
-		throw error
-	}
-}
-
-/**
  * Authenticate with passkey and derive Ethereum address from PRF output
  */
 export async function authenticateWithPasskey(

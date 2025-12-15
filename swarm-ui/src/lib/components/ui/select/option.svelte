@@ -7,26 +7,32 @@
 		value: string
 		store: SelectStore
 	}
-	let { value, store, children, class: className = '', ...restProps }: Props = $props()
+	let { value, store, children, class: className = '', onclick, ...restProps }: Props = $props()
+
+	// If onclick is provided, this is an action button (won't be registered for selection)
+	const isAction = $derived(onclick !== undefined)
 
 	let button = $state<HTMLButtonElement | undefined>()
 
 	$effect(() => {
-		store.registerValue(value, button?.innerText)
+		if (!isAction) {
+			store.registerValue(value, button?.innerText)
+		}
 	})
 	let marked = $derived(store.marked === value)
-	let selected = $derived(store.value === value)
+	let selected = $derived(!isAction && store.value === value)
 </script>
 
 <button
 	class="ghost {store.size} {className}"
 	bind:this={button}
-	onclick={() => {
-		if (!store.open) return
-		store.marked = value
-		store.value = value
-		store.changed = true
-	}}
+	onclick={onclick ??
+		(() => {
+			if (!store.open) return
+			store.marked = value
+			store.value = value
+			store.changed = true
+		})}
 	onmouseenter={() => {
 		store.marked = value
 	}}
