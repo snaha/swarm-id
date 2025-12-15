@@ -18,6 +18,7 @@
 	import GenerateSeedModal from '$lib/components/generate-seed-modal.svelte'
 	import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import {
 		generateEncryptionSalt,
 		deriveEncryptionKey,
@@ -90,7 +91,7 @@
 			console.log('✅ MasterKey encrypted')
 
 			// Store account with encrypted masterKey
-			sessionStore.setAccount({
+			const newAccount = accountsStore.addAccount({
 				id: masterAddress,
 				createdAt: Date.now(),
 				name: accountName.trim(),
@@ -99,6 +100,7 @@
 				encryptedMasterKey: encryptedMasterKey,
 				encryptionSalt: encryptionSalt,
 			})
+			sessionStore.setAccount(newAccount)
 
 			// Keep unencrypted masterKey in session temporarily for identity creation
 			sessionStore.setTemporaryMasterKey(masterKey)

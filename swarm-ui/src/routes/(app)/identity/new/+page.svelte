@@ -49,7 +49,6 @@
 			appOrigin = origin
 		}
 
-		// Retrieve account creation data from session store
 		const account = sessionStore.data.account
 		if (account) {
 			accountName = account.name
@@ -57,6 +56,10 @@
 
 		idName = derivedIdentity?.name ?? ''
 	})
+
+	const hasSessionData = $derived(
+		sessionStore.data.account !== undefined && sessionStore.data.temporaryMasterKey !== undefined,
+	)
 
 	function deriveIdentityFromAccount(account: Account, masterKey: string, index: number) {
 		console.debug({ account })
@@ -89,13 +92,10 @@
 			return
 		}
 
-		// Add account only if it doesn't exist yet (for new accounts)
-		let account = accountsStore.getAccount(sessionAccount.id)
+		const account = accountsStore.getAccount(sessionAccount.id)
 		if (!account) {
-			account = accountsStore.addAccount(sessionAccount)
-			console.log('✅ Account created:', account.id)
-		} else {
-			console.log('✅ Using existing account:', account.id)
+			console.error('❌ Account not found in store')
+			return
 		}
 
 		// Create the identity
@@ -123,66 +123,72 @@
 
 <CreationLayout title="Create identity" onClose={() => goto(routes.HOME)}>
 	{#snippet content()}
-		<Vertical --vertical-gap="var(--padding)">
-			<ResponsiveLayout
-				--responsive-align-items="start"
-				--responsive-justify-content="stretch"
-				--responsive-gap="var(--quarter-padding)"
-			>
-				<Horizontal
-					class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-					--horizontal-gap="var(--half-padding)"
-					><FolderShared size={20} /><Typography>Account</Typography></Horizontal
+		{#if !hasSessionData}
+			<Typography>No account data found. Please start from the home page.</Typography>
+		{:else}
+			<Vertical --vertical-gap="var(--padding)">
+				<ResponsiveLayout
+					--responsive-align-items="start"
+					--responsive-justify-content="stretch"
+					--responsive-gap="var(--quarter-padding)"
 				>
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="account"
-					value={accountName}
-					disabled
-					class="flex50"
-				/>
-			</ResponsiveLayout>
+					<Horizontal
+						class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
+						--horizontal-gap="var(--half-padding)"
+						><FolderShared size={20} /><Typography>Account</Typography></Horizontal
+					>
+					<Input
+						variant="outline"
+						dimension="compact"
+						name="account"
+						value={accountName}
+						disabled
+						class="flex50"
+					/>
+				</ResponsiveLayout>
 
-			<ResponsiveLayout
-				--responsive-align-items="start"
-				--responsive-justify-content="stretch"
-				--responsive-gap="var(--quarter-padding)"
-			>
-				<!-- Row 2 -->
-				<Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-					>Identity display name</Typography
+				<ResponsiveLayout
+					--responsive-align-items="start"
+					--responsive-justify-content="stretch"
+					--responsive-gap="var(--quarter-padding)"
 				>
-				<Vertical
-					class={!layoutStore.mobile ? 'flex50' : ''}
-					--vertical-gap="var(--quarter-gap)"
-					--vertical-align-items={layoutStore.mobile ? 'stretch' : 'start'}
-				>
-					<Horizontal --horizontal-gap="var(--half-padding)">
-						<Input
-							variant="outline"
-							dimension="compact"
-							name="id-name"
-							bind:value={idName}
-							class="grower"
-						/>
-						{#if derivedIdentity}
-							<Hashicon value={derivedIdentity.id} size={40} />
-						{/if}
-					</Horizontal>
-					<Typography variant="small">
-						This is how your identity will appear in your Swarm ID account and apps you connect to
-					</Typography>
-				</Vertical>
-			</ResponsiveLayout>
-		</Vertical>
-		<Divider --margin="0" />
+					<!-- Row 2 -->
+					<Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
+						>Identity display name</Typography
+					>
+					<Vertical
+						class={!layoutStore.mobile ? 'flex50' : ''}
+						--vertical-gap="var(--quarter-gap)"
+						--vertical-align-items={layoutStore.mobile ? 'stretch' : 'start'}
+					>
+						<Horizontal --horizontal-gap="var(--half-padding)">
+							<Input
+								variant="outline"
+								dimension="compact"
+								name="id-name"
+								bind:value={idName}
+								class="grower"
+							/>
+							{#if derivedIdentity}
+								<Hashicon value={derivedIdentity.id} size={40} />
+							{/if}
+						</Horizontal>
+						<Typography variant="small">
+							This is how your identity will appear in your Swarm ID account and apps you connect to
+						</Typography>
+					</Vertical>
+				</ResponsiveLayout>
+			</Vertical>
+			<Divider --margin="0" />
+		{/if}
 	{/snippet}
 
 	{#snippet buttonContent()}
-		<Button dimension="compact" onclick={handleCreateIdentity} disabled={!derivedIdentity}>
-			<Checkmark />Create and connect</Button
-		>
+		{#if hasSessionData}
+			<Button dimension="compact" onclick={handleCreateIdentity} disabled={!derivedIdentity}>
+				<Checkmark />Create and connect</Button
+			>
+		{/if}
 	{/snippet}
 </CreationLayout>
 

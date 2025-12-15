@@ -97,21 +97,22 @@ export async function createPasskeyAccount(
 		},
 		extensions: {
 			prf: {
-				eval: {
-					first: prfSalt, // Request PRF evaluation during registration
-				},
+				// Request PRF evaluation during registration to get the key in one step
+				// (avoids requiring a second authentication after account creation)
+				eval: { first: prfSalt },
 			},
 		} as AuthenticationExtensionsClientInputs,
 		timeout: 60000,
 		attestation: 'none',
 	}
 
-	// Format excludeCredentials with transports
+	// Exclude already-registered credentials to prevent duplicate registrations
+	// transports hint helps the browser check all possible authenticator connections
 	if (options.excludeCredentials && options.excludeCredentials.length > 0) {
 		registrationOptions.excludeCredentials = options.excludeCredentials.map((cred) => ({
 			id: cred.id,
 			type: cred.type,
-			transports: ['internal', 'hybrid'],
+			transports: ['internal', 'hybrid', 'usb'],
 		}))
 	}
 

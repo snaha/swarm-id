@@ -7,11 +7,15 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { goto } from '$app/navigation'
 	import type { Identity } from '$lib/types'
 	import routes from '$lib/routes'
 
 	let selectedAccountId = $state<string | undefined>(undefined)
+	const selectedAccount = $derived(
+		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
+	)
 
 	// Get identities from store, filtered by selected account
 	const allIdentities = $derived(identitiesStore.identities)
@@ -20,7 +24,7 @@
 			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
 			: allIdentities,
 	)
-	const hasIdentities = $derived(identities.length > 0)
+	const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
 	let showCreateMode = $state(false)
 
@@ -36,13 +40,17 @@
 <Vertical>
 	<Typography variant="h4">Welcome to Swarm ID</Typography>
 
-	{#if hasIdentities && !showCreateMode}
-		<Typography variant="small">Choose an identity to continue</Typography>
+	{#if hasAccounts && !showCreateMode}
+		<Typography variant="small"
+			>{identities.length > 0
+				? 'Choose an identity to continue'
+				: 'Create an identity to continue'}</Typography
+		>
 		<Vertical --vertical-gap="var(--double-padding)">
 			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
 			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
 			<Horizontal --horizontal-justify-content="flex-start">
-				<CreateIdentityButton accountId={selectedAccountId} />
+				<CreateIdentityButton account={selectedAccount} />
 			</Horizontal>
 		</Vertical>
 	{:else}

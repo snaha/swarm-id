@@ -15,6 +15,7 @@
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Grid from '$lib/components/ui/grid.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { keccak256 } from 'ethers'
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
 
@@ -59,13 +60,14 @@
 			console.log('✅ Passkey created successfully')
 
 			// Store account WITHOUT masterKey (passkey accounts never persist masterKey)
-			sessionStore.setAccount({
+			const newAccount = accountsStore.addAccount({
 				id: account.ethereumAddress,
 				createdAt: Date.now(),
 				name: accountName.trim(),
 				type: 'passkey',
 				credentialId: account.credentialId,
 			})
+			sessionStore.setAccount(newAccount)
 
 			// Keep masterKey in session ONLY (not in account)
 			sessionStore.setTemporaryMasterKey(account.masterKey)

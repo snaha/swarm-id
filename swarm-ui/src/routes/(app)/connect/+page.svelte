@@ -29,6 +29,9 @@
 	let showCreateMode = $state(false)
 	let authenticated = $state(false)
 	let selectedAccountId = $state<string | undefined>(undefined)
+	const selectedAccount = $derived(
+		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
+	)
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived(
@@ -230,7 +233,7 @@
 				onIdentityClick={selectIdentityForConnection}
 			/>
 			<Horizontal --horizontal-justify-content="flex-start">
-				<CreateIdentityButton accountId={selectedAccountId} redirectOrigin={appOrigin} />
+				<CreateIdentityButton account={selectedAccount} redirectOrigin={appOrigin} />
 			</Horizontal>
 		</Vertical>
 	{:else}
