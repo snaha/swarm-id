@@ -1,5 +1,7 @@
-export function notImplemented(e: Event) {
-	e.preventDefault()
-	e.stopPropagation()
+export function notImplemented(e?: Event) {
+	if (e) {
+		e.preventDefault()
+		e.stopPropagation()
+	}
 	alert('Not implemented!')
 }

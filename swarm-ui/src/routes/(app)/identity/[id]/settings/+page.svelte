@@ -21,6 +21,7 @@
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 	import type { Account } from '$lib/types'
+	import { notImplemented } from '$lib/utils/not-implemented'
 
 	const identityId = $derived(page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -62,6 +63,10 @@
 
 	async function handleCreateNewIdentity() {
 		if (!account) return
+		if (account.type === 'ethereum') {
+			notImplemented()
+			return
+		}
 		try {
 			const masterKey = await getMasterKeyFromAccount(account)
 			sessionStore.setAccount(account)

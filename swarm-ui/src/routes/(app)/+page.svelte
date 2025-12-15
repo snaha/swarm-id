@@ -20,6 +20,7 @@
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 	import { keccak256 } from 'ethers'
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
+	import { notImplemented } from '$lib/utils/not-implemented'
 
 	let selectedAccountId = $state<string | undefined>(undefined)
 
@@ -95,6 +96,10 @@
 		if (!selectedAccountId) return
 		const account = accountsStore.getAccount(selectedAccountId)
 		if (!account) return
+		if (account.type === 'ethereum') {
+			notImplemented()
+			return
+		}
 
 		try {
 			const masterKey = await getMasterKeyFromAccount(account)

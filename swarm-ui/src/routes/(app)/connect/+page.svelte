@@ -27,6 +27,7 @@
 	import Add from 'carbon-icons-svelte/lib/Add.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { notImplemented } from '$lib/utils/not-implemented'
 
 	let appOrigin = $state('')
 	let appName = $state('')
@@ -148,6 +149,10 @@
 		if (!selectedAccountId) return
 		const account = accountsStore.getAccount(selectedAccountId)
 		if (!account) return
+		if (account.type === 'ethereum') {
+			notImplemented()
+			return
+		}
 
 		try {
 			const masterKey = await getMasterKeyFromAccount(account)
