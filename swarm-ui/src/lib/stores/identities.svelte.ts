@@ -54,6 +54,11 @@ export const identitiesStore = {
 		saveIdentities(identities)
 	},
 
+	updateIdentity(identityId: string, update: Partial<Identity>) {
+		identities = identities.map((i) => (i.id === identityId ? { ...i, ...update } : i))
+		saveIdentities(identities)
+	},
+
 	clear() {
 		identities = []
 		saveIdentities(identities)

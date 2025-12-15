@@ -13,7 +13,7 @@
 			? [
 					{ label: 'Apps', href: routes.IDENTITY_APPS(identityId) },
 					{ label: 'Stamps', href: routes.IDENTITY_STAMPS(identityId) },
-					{ label: 'Settings', href: routes.IDENTITY_SETTINGS(identityId) },
+					{ label: 'Identity', href: routes.IDENTITY_SETTINGS(identityId) },
 				]
 			: [],
 	)
