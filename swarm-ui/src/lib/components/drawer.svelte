@@ -65,7 +65,7 @@
 	function selectAccount(acc: Account) {
 		const firstAccountIdentity = identities.find((identity) => identity.accountId === acc.id)
 		if (firstAccountIdentity) {
-			goto(routes.IDENTITY_SETTINGS(firstAccountIdentity.id))
+			handleIdentityClick(firstAccountIdentity)
 		}
 	}
 
