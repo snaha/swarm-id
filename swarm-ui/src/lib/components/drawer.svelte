@@ -39,6 +39,7 @@
 	let { drawerOpen = $bindable(), identities, account, identityId }: Props = $props()
 
 	let screen = $state<'main' | 'all-accounts' | 'account-details'>('main')
+	// eslint-disable-next-line svelte/prefer-writable-derived
 	let accountName = $state('')
 	let showUpgradeTooltip = $state(false)
 
@@ -66,6 +67,10 @@
 		if (firstAccountIdentity) {
 			goto(routes.IDENTITY_SETTINGS(firstAccountIdentity.id))
 		}
+	}
+
+	function onAccountNameChange() {
+		accountsStore.setAccountName(account.id, accountName)
 	}
 </script>
 
@@ -157,7 +162,7 @@
 				>
 			</Horizontal>
 			<Vertical --vertical-gap="0" style="padding: var(--padding)">
-				{#each accountsStore.accounts as acc}
+				{#each accountsStore.accounts as acc (acc.id)}
 					<Button variant="ghost" dimension="compact" onclick={() => selectAccount(acc)}>
 						<Horizontal
 							--horizontal-gap="var(--half-padding)"
@@ -220,6 +225,7 @@
 						bind:value={accountName}
 						class="grower"
 						label="Account name"
+						oninput={onAccountNameChange}
 					/>
 					<Horizontal --horizontal-gap="var(--quarter-padding)">
 						{#if account.type === 'ethereum'}
