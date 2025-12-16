@@ -2,8 +2,8 @@
 	import type { HTMLInputAttributes } from 'svelte/elements'
 	import CaretDown from 'carbon-icons-svelte/lib/CaretDown.svelte'
 	import CaretUp from 'carbon-icons-svelte/lib/CaretUp.svelte'
-	import { type Snippet } from 'svelte'
-	import { withSelectStore } from './select-store.svelte'
+	import { type Snippet, type Component } from 'svelte'
+	import { withSelectStore, type SelectStore } from './select-store.svelte'
 	import Option from './option.svelte'
 
 	type Layout = 'vertical' | 'horizontal'
@@ -12,7 +12,9 @@
 	type Item = {
 		value: string
 		label: string
+		icon?: Component<{ width?: number; height?: number }>
 	}
+	export type { Item as SelectItem }
 	interface Props extends HTMLInputAttributes {
 		helperText?: Snippet
 		label?: string
@@ -25,6 +27,8 @@
 		focus?: boolean
 		variant?: Variant
 		items: Item[]
+		/** Optional snippet to render at the end of the dropdown list */
+		dropdownFooter?: Snippet<[{ close: () => void; store: SelectStore }]>
 	}
 	let {
 		helperText,
@@ -41,8 +45,13 @@
 		variant = 'outline',
 		onchange = $bindable(),
 		items,
+		dropdownFooter,
 		...restProps
 	}: Props = $props()
+
+	function closeDropdown() {
+		store.open = false
+	}
 
 	let input: HTMLInputElement | undefined = $state(undefined)
 	let focused = $state(false)
@@ -51,6 +60,9 @@
 	// Dimension changes are handled reactively via $effect below
 	// svelte-ignore state_referenced_locally
 	const store = withSelectStore(dimension, value ?? (placeholder ? '' : undefined))
+
+	// Get the selected item to access its icon
+	const selectedItem = $derived(items.find((item) => item.value === store.value))
 
 	// Focused input when user clicks on caret,Unfocused input when user clicks outside input or caret
 	// Close the select when user clicks outside, when user clicks on the tab button
@@ -138,69 +150,79 @@
 		</label>
 	{/if}
 	<div class="select-container">
-		<input
-			bind:this={input}
-			value={store.value ? (store.labels[store.value] ?? store.value) : value}
-			class="select {variant}"
-			class:hover
-			class:active
-			class:focus
-			class:focused
-			class:open={store.open}
-			onclick={() => {
-				if (!store.open)
-					setTimeout(() => {
-						store.open = true
-					})
-			}}
-			onkeydown={(e) => {
-				switch (e.key) {
-					case 'ArrowDown': {
-						e.preventDefault()
-						if (!store.open) {
+		<div class="input-wrapper">
+			<input
+				bind:this={input}
+				value={store.value ? (store.labels[store.value] ?? store.value) : value}
+				class="select {variant}"
+				class:hover
+				class:active
+				class:focus
+				class:focused
+				class:open={store.open}
+				class:has-icon={selectedItem?.icon}
+				onclick={() => {
+					if (!store.open)
+						setTimeout(() => {
 							store.open = true
-						} else {
-							const values = Object.keys(store.labels)
-							const index = store.marked ? values.indexOf(store.marked) : -1
-							store.marked = values[(index + 1) % values.length]
-						}
-						break
-					}
-					case 'ArrowUp': {
-						e.preventDefault()
-						if (!store.open) {
-							store.open = true
-						} else {
-							const values = Object.keys(store.labels)
-							const index = store.marked ? values.indexOf(store.marked) : 0
-							if (index - 1 >= 0) store.marked = values[index - 1]
-							else store.marked = values[values.length - 1]
-						}
-						break
-					}
-					case 'Enter': {
-						e.preventDefault()
-						if (!store.open) {
-							store.open = true
-						} else {
-							store.value = store.marked
-							store.open = false
-						}
-						break
-					}
-					case 'Escape': {
-						if (store.open) {
+						})
+				}}
+				onkeydown={(e) => {
+					switch (e.key) {
+						case 'ArrowDown': {
 							e.preventDefault()
-							store.open = false
+							if (!store.open) {
+								store.open = true
+							} else {
+								const values = Object.keys(store.labels)
+								const index = store.marked ? values.indexOf(store.marked) : -1
+								store.marked = values[(index + 1) % values.length]
+							}
+							break
+						}
+						case 'ArrowUp': {
+							e.preventDefault()
+							if (!store.open) {
+								store.open = true
+							} else {
+								const values = Object.keys(store.labels)
+								const index = store.marked ? values.indexOf(store.marked) : 0
+								if (index - 1 >= 0) store.marked = values[index - 1]
+								else store.marked = values[values.length - 1]
+							}
+							break
+						}
+						case ' ':
+						case 'Enter': {
+							e.preventDefault()
+							if (!store.open) {
+								store.open = true
+							} else {
+								store.value = store.marked
+								store.changed = true
+								store.open = false
+							}
+							break
+						}
+						case 'Escape': {
+							if (store.open) {
+								e.preventDefault()
+								store.open = false
+							}
 						}
 					}
-				}
-			}}
-			id={labelFor}
-			{placeholder}
-			readonly
-			{...restProps}
-		/>
+				}}
+				id={labelFor}
+				{placeholder}
+				readonly
+				{...restProps}
+			/>
+			{#if selectedItem?.icon}
+				<div class="selected-icon">
+					<selectedItem.icon width={16} height={16} />
+				</div>
+			{/if}
+		</div>
 		<div class="wrapper">
 			<button
 				class="icon"
@@ -223,8 +245,18 @@
 						<Option class="placeholder" value="" {store}>{placeholder}</Option>
 					{/if}
 					{#each items as item (item.value)}
-						<Option value={item.value} {store}>{item.label}</Option>
+						<Option value={item.value} {store}>
+							<span class="option-content">
+								{#if item.icon}
+									<span class="option-icon"><item.icon width={16} height={16} /></span>
+								{/if}
+								{item.label}
+							</span>
+						</Option>
 					{/each}
+					{#if dropdownFooter}
+						{@render dropdownFooter({ close: closeDropdown, store })}
+					{/if}
 				</div>
 			</div>
 		</div>
@@ -263,8 +295,41 @@
 					border: 1px solid var(--colors-top);
 					background: var(--colors-low);
 					color: var(--colors-top);
-					& + .wrapper > button {
-						color: var(--colors-top);
+				}
+				.wrapper > button {
+					color: var(--colors-top);
+				}
+			}
+			&:has(.select:hover:not(:disabled)),
+			&:has(.select.hover:not(:disabled)) {
+				.wrapper > button {
+					color: var(--colors-top);
+				}
+			}
+			&:has(.select:active:not(:disabled)),
+			&:has(.select.active:not(:disabled)),
+			&:has(.select.open:not(:disabled):not(.focused)) {
+				.wrapper > button {
+					color: var(--colors-high);
+				}
+			}
+			&:has(.select.focus:not(:disabled)),
+			&:has(.select.focused:not(:disabled)) {
+				.wrapper > button {
+					color: var(--colors-top);
+				}
+			}
+			&:has(.select.focused.open:not(:disabled)) {
+				.wrapper > button {
+					color: var(--colors-base);
+				}
+			}
+			&:has(.select:disabled) {
+				.wrapper > button {
+					pointer-events: none;
+					div {
+						opacity: 0.25;
+						cursor: not-allowed;
 					}
 				}
 			}
@@ -281,6 +346,7 @@
 		color: var(--colors-ultra-high);
 		caret-color: transparent;
 		font-family: inherit;
+		text-align: left;
 		&.outline {
 			border: 1px solid var(--colors-ultra-high);
 			background: transparent;
@@ -294,14 +360,10 @@
 			color: var(--colors-ultra-high);
 		}
 		&:hover:not(:disabled),
-		&:hover:not(:disabled),
 		&.hover:not(:disabled) {
 			border: 1px solid var(--colors-top);
 			background: var(--colors-low);
 			color: var(--colors-top);
-			& + .wrapper > button {
-				color: var(--colors-top);
-			}
 		}
 		&:active:not(:disabled),
 		&.active:not(:disabled),
@@ -310,9 +372,6 @@
 			border: 1px solid var(--colors-high);
 			background: var(--colors-low);
 			color: var(--colors-high);
-			& + .wrapper > button {
-				color: var(--colors-high);
-			}
 		}
 		&:focus {
 			outline: none;
@@ -323,17 +382,11 @@
 			outline-offset: var(--focus-outline-offset);
 			background: var(--colors-base);
 			color: var(--colors-top);
-			& + .wrapper > button {
-				color: var(--colors-top);
-			}
 		}
 		&.focused.open:not(:disabled) {
 			border: 1px var(--colors-top);
 			background: var(--colors-top);
 			color: var(--colors-base);
-			& + .wrapper > button {
-				color: var(--colors-base);
-			}
 			&::placeholder {
 				color: var(--colors-base);
 			}
@@ -342,13 +395,6 @@
 			opacity: 1;
 			border: 1px solid var(--colors-low);
 			cursor: not-allowed;
-			& + .wrapper > button {
-				pointer-events: none;
-				div {
-					opacity: 0.25;
-					cursor: not-allowed;
-				}
-			}
 		}
 	}
 	.label {
@@ -441,6 +487,33 @@
 		font-size: var(--font-size-small);
 		line-height: var(--line-height-small);
 		letter-spacing: var(--letter-spacing-small);
+	}
+	.input-wrapper {
+		position: relative;
+		display: flex;
+		flex-grow: 1;
+		align-items: stretch;
+	}
+	.selected-icon {
+		position: absolute;
+		left: var(--half-padding);
+		top: 50%;
+		transform: translateY(-50%);
+		display: flex;
+		align-items: center;
+		pointer-events: none;
+	}
+	.select.has-icon {
+		padding-left: calc(var(--half-padding) + 20px);
+	}
+	.option-content {
+		display: inline-flex;
+		align-items: center;
+		gap: 0.5rem;
+	}
+	.option-icon {
+		display: inline-flex;
+		align-items: center;
 	}
 	.wrapper {
 		position: relative;

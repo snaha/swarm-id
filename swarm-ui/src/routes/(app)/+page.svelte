@@ -1,18 +1,30 @@
 <script lang="ts">
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
+	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import IdentityList from '$lib/components/identity-list.svelte'
+	import AccountSelector from '$lib/components/account-selector.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import Button from '$lib/components/ui/button.svelte'
-	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
+	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { goto } from '$app/navigation'
 	import type { Identity } from '$lib/types'
 	import routes from '$lib/routes'
 
-	// Get identities from store
-	const identities = $derived(identitiesStore.identities)
-	const hasIdentities = $derived(identities.length > 0)
+	let selectedAccountId = $state<string | undefined>(undefined)
+	const selectedAccount = $derived(
+		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
+	)
+
+	// Get identities from store, filtered by selected account
+	const allIdentities = $derived(identitiesStore.identities)
+	const identities = $derived(
+		selectedAccountId
+			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
+			: allIdentities,
+	)
+	const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
 	let showCreateMode = $state(false)
 
@@ -28,14 +40,17 @@
 <Vertical>
 	<Typography variant="h4">Welcome to Swarm ID</Typography>
 
-	{#if hasIdentities && !showCreateMode}
-		<Typography variant="small">Choose an identity to continue</Typography>
+	{#if hasAccounts && !showCreateMode}
+		<Typography variant="small"
+			>{identities.length > 0
+				? 'Choose an identity to continue'
+				: 'Create an identity to continue'}</Typography
+		>
 		<Vertical --vertical-gap="var(--double-padding)">
+			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
 			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
-			<Horizontal --justify-content="flex-start">
-				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
-					>Connect another account</Button
-				>
+			<Horizontal --horizontal-justify-content="flex-start">
+				<CreateIdentityButton account={selectedAccount} />
 			</Horizontal>
 		</Vertical>
 	{:else}

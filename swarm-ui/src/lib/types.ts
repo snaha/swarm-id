@@ -16,6 +16,7 @@ type AccountBase = {
 
 export type PasskeyAccount = AccountBase & {
 	type: 'passkey'
+	credentialId: string // WebAuthn credential ID
 	// No masterKey stored - retrieved via passkey re-authentication
 }
 

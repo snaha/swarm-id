@@ -3,7 +3,9 @@
 	import { page } from '$app/stores'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
+	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import IdentityGroups from '$lib/components/identity-groups.svelte'
+	import AccountSelector from '$lib/components/account-selector.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
@@ -12,15 +14,11 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import { authenticateWithPasskey } from '$lib/passkey'
-	import { keccak256 } from 'ethers'
-	import { hexToUint8Array } from '$lib/utils/key-derivation'
-	import type { Identity, Account } from '$lib/types'
-	import { connectAndSign } from '$lib/ethereum'
-	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
+	import type { Identity } from '$lib/types'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 
 	let appOrigin = $state('')
 	let appName = $state('')
@@ -30,8 +28,17 @@
 	let error = $state<string | undefined>(undefined)
 	let showCreateMode = $state(false)
 	let authenticated = $state(false)
+	let selectedAccountId = $state<string | undefined>(undefined)
+	const selectedAccount = $derived(
+		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
+	)
 
-	const identities = $derived(identitiesStore.identities)
+	const allIdentities = $derived(identitiesStore.identities)
+	const identities = $derived(
+		selectedAccountId
+			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
+			: allIdentities,
+	)
 	const hasIdentities = $derived(identities.length > 0)
 	const origin = window.location.origin
 
@@ -109,38 +116,6 @@
 		return Array.from(bytes)
 			.map((b) => b.toString(16).padStart(2, '0'))
 			.join('')
-	}
-
-	/**
-	 * Retrieve masterKey from account based on account type
-	 */
-	async function getMasterKeyFromAccount(account: Account): Promise<string> {
-		if (account.type === 'passkey') {
-			// For passkey accounts: Re-authenticate to get masterKey
-			console.log('🔐 Re-authenticating with passkey...')
-			const swarmIdDomain = window.location.hostname
-			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
-
-			const passkeyAccount = await authenticateWithPasskey({
-				rpId: swarmIdDomain,
-				challenge,
-			})
-
-			console.log('✅ Passkey authentication successful')
-			return passkeyAccount.masterKey
-		} else {
-			// Connect wallet and sign SIWE message
-			const signed = await connectAndSign()
-
-			// Derive encryption key from public key + salt
-			const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
-			console.log('🔑 Encryption key derived')
-
-			const masterKey = await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
-			console.log('✅ Ethereum authentication successful')
-
-			return masterKey
-		}
 	}
 
 	function updateSelectedIdentity(appSecret: string) {
@@ -251,15 +226,14 @@
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
+			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
 			<IdentityGroups
 				{identities}
 				appUrl={appOrigin}
 				onIdentityClick={selectIdentityForConnection}
 			/>
 			<Horizontal --horizontal-justify-content="flex-start">
-				<Button variant="ghost" dimension="compact" onclick={handleCreateNew}
-					>Connect another account</Button
-				>
+				<CreateIdentityButton account={selectedAccount} redirectOrigin={appOrigin} />
 			</Horizontal>
 		</Vertical>
 	{:else}

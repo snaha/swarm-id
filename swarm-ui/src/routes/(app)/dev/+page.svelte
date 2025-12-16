@@ -40,6 +40,7 @@
 			type: 'passkey',
 			id: ethereumWallet1.address,
 			createdAt: Date.now(),
+			credentialId: 'test-credential-1',
 		})
 
 		const wallet2 = HDNodeWallet.fromSeed(ethereumWallet2.masterKey)

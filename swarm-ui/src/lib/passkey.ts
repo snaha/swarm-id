@@ -38,6 +38,7 @@ export interface PasskeyRegistrationOptions {
 	userName: string
 	userDisplayName?: string
 	challenge?: Uint8Array
+	excludeCredentials?: Array<{ id: string; type: 'public-key' }>
 }
 
 export interface PasskeyAuthenticationOptions {
@@ -66,34 +67,13 @@ function bufferToBase64url(buffer: Uint8Array): string {
 }
 
 /**
- * Get existing passkey account or create new one if none exists
- * This is the main entry point for passkey-based authentication
- */
-export async function getOrCreatePasskeyAccount(
-	options: PasskeyRegistrationOptions,
-): Promise<PasskeyAccount> {
-	try {
-		console.log('🔍 Checking for existing passkey credential...')
-		// Try to authenticate with existing credential (usernameless)
-		const account = await authenticateWithPasskey({
-			rpId: options.rpId,
-		})
-		console.log('✅ Found existing credential')
-		return account
-	} catch {
-		console.log('📝 No existing credential found, creating new one...')
-		// No credential exists, create new one
-		return await createPasskeyAccount(options)
-	}
-}
-
-/**
  * Create a new passkey credential with platform authenticator (Touch ID/Face ID)
  */
 export async function createPasskeyAccount(
 	options: PasskeyRegistrationOptions,
 ): Promise<PasskeyAccount> {
 	const challenge = options.challenge || generateChallenge()
+	const prfSalt = await generatePRFSalt()
 
 	const registrationOptions: PublicKeyCredentialCreationOptionsJSON = {
 		challenge: bufferToBase64url(challenge),
@@ -111,16 +91,29 @@ export async function createPasskeyAccount(
 			{ alg: -257, type: 'public-key' }, // RS256 (RSA with SHA-256)
 		],
 		authenticatorSelection: {
-			authenticatorAttachment: 'cross-platform', // Touch ID/Face ID/Windows Hello
 			requireResidentKey: true,
 			residentKey: 'required',
 			userVerification: 'preferred',
 		},
 		extensions: {
-			prf: {}, // Enable PRF extension for deterministic key derivation
+			prf: {
+				// Request PRF evaluation during registration to get the key in one step
+				// (avoids requiring a second authentication after account creation)
+				eval: { first: prfSalt },
+			},
 		} as AuthenticationExtensionsClientInputs,
 		timeout: 60000,
 		attestation: 'none',
+	}
+
+	// Exclude already-registered credentials to prevent duplicate registrations
+	// transports hint helps the browser check all possible authenticator connections
+	if (options.excludeCredentials && options.excludeCredentials.length > 0) {
+		registrationOptions.excludeCredentials = options.excludeCredentials.map((cred) => ({
+			id: cred.id,
+			type: cred.type,
+			transports: ['internal', 'hybrid', 'usb'],
+		}))
 	}
 
 	const registrationResponse = await startRegistration({ optionsJSON: registrationOptions })
@@ -139,12 +132,33 @@ export async function createPasskeyAccount(
 	console.log('📝 Registration: Credential created successfully')
 	console.log('🔑 Credential ID:', credentialId)
 
-	// Immediately authenticate to derive Ethereum address from PRF output
-	console.log('🔐 Authenticating to derive Ethereum address... (biometric verification)')
-	const account = await authenticateWithPasskey({
-		rpId: options.rpId,
-		allowCredentials: [{ id: credentialId, type: 'public-key' }],
-	})
+	// Check if we got PRF results during registration
+	const prfResults = (
+		registrationResponse.clientExtensionResults as {
+			prf?: { results?: { first?: ArrayBuffer } }
+		}
+	)?.prf?.results?.first
+
+	let account: PasskeyAccount
+
+	if (prfResults) {
+		// Use PRF output from registration
+		console.log('✅ Got PRF output during registration (single biometric prompt)')
+		const prfBytes = new Uint8Array(prfResults)
+		const wallet = await deriveWalletFromPRF(prfBytes)
+		account = {
+			credentialId,
+			ethereumAddress: wallet.address,
+			masterKey: wallet.masterKey,
+		}
+	} else {
+		// Fallback: authenticate separately to get PRF output
+		console.log('🔐 Authenticating to get PRF output (second biometric prompt)')
+		account = await authenticateWithPasskey({
+			rpId: options.rpId,
+			allowCredentials: [{ id: credentialId, type: 'public-key' }],
+		})
+	}
 
 	console.log('✅ Passkey account created with address:', account.ethereumAddress)
 

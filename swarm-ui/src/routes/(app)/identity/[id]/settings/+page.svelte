@@ -11,8 +11,7 @@
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import CopyButton from '$lib/components/copy-button.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
-	import Button from '$lib/components/ui/button.svelte'
-	import { notImplemented } from '$lib/utils/not-implemented'
+	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 
 	const identityId = $derived(page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -124,8 +123,7 @@
 		--responsive-justify-content="stretch"
 		--responsive-gap="var(--quarter-padding)"
 	>
-		<Button variant="ghost" dimension="compact" onclick={notImplemented}>Create new identity</Button
-		>
+		<CreateIdentityButton {account} showIcon={false} />
 	</ResponsiveLayout>
 </Vertical>
 
