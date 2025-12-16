@@ -7,6 +7,7 @@
 	import routes from '$lib/routes'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import IdentityList from '$lib/components/identity-list.svelte'
+	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import { notImplemented } from '$lib/utils/not-implemented'
 	import {
 		Add,
@@ -72,6 +73,10 @@
 	function onAccountNameChange() {
 		accountsStore.setAccountName(account.id, accountName)
 	}
+
+	function handleAddAccount() {
+		goto(routes.HOME)
+	}
 </script>
 
 <div class="drawer">
@@ -103,17 +108,7 @@
 			</div>
 
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
-				<Button variant="ghost" dimension="compact">
-					<Horizontal
-						--horizontal-gap="var(--half-padding)"
-						--horizontal-align-items="center"
-						--horizontal-justify-content="stretch"
-						style="flex: 1"
-						onclick={notImplemented}
-					>
-						Create new identity
-					</Horizontal></Button
-				>
+				<CreateIdentityButton {account} />
 				<Button variant="ghost" dimension="compact">
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
@@ -186,13 +181,12 @@
 			</Vertical>
 			<Divider --margin="0" />
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
-				<Button variant="ghost" dimension="compact">
+				<Button variant="ghost" dimension="compact" onclick={handleAddAccount}>
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
 						--horizontal-align-items="center"
 						--horizontal-justify-content="stretch"
 						style="flex: 1"
-						onclick={notImplemented}
 					>
 						<Add size={20} />
 						Add account
