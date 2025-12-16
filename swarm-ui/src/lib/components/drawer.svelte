@@ -73,10 +73,6 @@
 	function onAccountNameChange() {
 		accountsStore.setAccountName(account.id, accountName)
 	}
-
-	function handleAddAccount() {
-		goto(routes.HOME)
-	}
 </script>
 
 <div class="drawer">
@@ -108,7 +104,7 @@
 			</div>
 
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
-				<CreateIdentityButton {account} />
+				<CreateIdentityButton {account} showIcon={false} />
 				<Button variant="ghost" dimension="compact">
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
@@ -181,7 +177,7 @@
 			</Vertical>
 			<Divider --margin="0" />
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
-				<Button variant="ghost" dimension="compact" onclick={handleAddAccount}>
+				<Button variant="ghost" dimension="compact" onclick={notImplemented}>
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
 						--horizontal-align-items="center"

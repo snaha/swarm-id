@@ -34,6 +34,6 @@
 	}
 </script>
 
-<Button variant="ghost" dimension="compact" onclick={handleClick}>
+<Button variant="ghost" dimension="compact" leftAlign onclick={handleClick}>
 	{#if showIcon}<Add size={20} />{/if}Create new identity
 </Button>
