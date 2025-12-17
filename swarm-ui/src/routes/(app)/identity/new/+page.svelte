@@ -54,8 +54,6 @@
 	)
 
 	function deriveIdentityFromAccount(account: Account, masterKey: string, index: number) {
-		console.debug({ account })
-
 		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
 		const id = identityWallet.address
 		const name = generateDockerName()

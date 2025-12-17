@@ -18,6 +18,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { keccak256 } from 'ethers'
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
+	import Confirmation from '$lib/components/confirmation.svelte'
 
 	let accountName = $state('Passkey')
 	let error = $state<string | undefined>(undefined)
@@ -74,58 +75,59 @@
 	}
 </script>
 
-<CreationLayout
-	title="Create account with Passkey"
-	description="Create a new Swarm ID account using Passkey"
-	onClose={() =>
-		sessionStore.data.appOrigin
-			? goto(routes.CONNECT)
-			: goto(routes.HOME)}
->
-	{#snippet content()}
-		<Vertical --vertical-gap="var(--padding)">
-			{#if error}
-				<Vertical
-					--vertical-gap="var(--half-padding)"
-					style="background: #fee; padding: var(--padding); border-radius: 4px; border: 1px solid #fcc;"
+{#if isProcessing}
+	<Confirmation authenticationType="passkey" />
+{:else}
+	<CreationLayout
+		title="Create account with Passkey"
+		description="Create a new Swarm ID account using Passkey"
+		onClose={() => (sessionStore.data.appOrigin ? goto(routes.CONNECT) : goto(routes.HOME))}
+	>
+		{#snippet content()}
+			<Vertical --vertical-gap="var(--padding)">
+				{#if error}
+					<Vertical
+						--vertical-gap="var(--half-padding)"
+						style="background: #fee; padding: var(--padding); border-radius: 4px; border: 1px solid #fcc;"
+					>
+						<Typography variant="small" style="color: #c00;">Error</Typography>
+						<Typography variant="small">{error}</Typography>
+					</Vertical>
+				{/if}
+
+				<Grid>
+					<!-- Row 1 -->
+					<Horizontal --horizontal-gap="var(--half-padding)"
+						><FolderShared size={20} /><Typography>Account name</Typography></Horizontal
+					>
+					<Input
+						variant="outline"
+						dimension="compact"
+						name="account-name"
+						bind:value={accountName}
+						placeholder="Enter account name"
+						disabled={isProcessing}
+					/>
+
+					<!-- Row 2 -->
+					<Typography>Authentication</Typography>
+					<Horizontal --horizontal-gap="var(--half-padding)"
+						><PasskeyLogo size={20} /><Typography>Passkey</Typography></Horizontal
+					>
+				</Grid>
+
+				<Typography variant="small"
+					>Your passkey will be used to derive a deterministic master key for your Swarm ID. Works
+					with your device's biometric authentication or hardware security keys.</Typography
 				>
-					<Typography variant="small" style="color: #c00;">Error</Typography>
-					<Typography variant="small">{error}</Typography>
-				</Vertical>
-			{/if}
+			</Vertical>
+		{/snippet}
 
-			<Grid>
-				<!-- Row 1 -->
-				<Horizontal --horizontal-gap="var(--half-padding)"
-					><FolderShared size={20} /><Typography>Account name</Typography></Horizontal
-				>
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="account-name"
-					bind:value={accountName}
-					placeholder="Enter account name"
-					disabled={isProcessing}
-				/>
-
-				<!-- Row 2 -->
-				<Typography>Authentication</Typography>
-				<Horizontal --horizontal-gap="var(--half-padding)"
-					><PasskeyLogo size={20} /><Typography>Passkey</Typography></Horizontal
-				>
-			</Grid>
-
-			<Typography variant="small"
-				>Your passkey will be used to derive a deterministic master key for your Swarm ID. Works
-				with your device's biometric authentication or hardware security keys.</Typography
-			>
-		</Vertical>
-	{/snippet}
-
-	{#snippet buttonContent()}
-		<Button dimension="compact" onclick={handleCreatePasskey} disabled={isProcessing}>
-			{isProcessing ? 'Creating...' : 'Confirm with Passkey'}
-			{#if !isProcessing}<ArrowRight />{/if}
-		</Button>
-	{/snippet}
-</CreationLayout>
+		{#snippet buttonContent()}
+			<Button dimension="compact" onclick={handleCreatePasskey} disabled={isProcessing}>
+				{isProcessing ? 'Creating...' : 'Confirm with Passkey'}
+				{#if !isProcessing}<ArrowRight />{/if}
+			</Button>
+		{/snippet}
+	</CreationLayout>
+{/if}

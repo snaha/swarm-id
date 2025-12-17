@@ -14,11 +14,13 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import type { Identity } from '$lib/types'
+	import type { Account, Identity } from '$lib/types'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
+	import Confirmation from '$lib/components/confirmation.svelte'
+	import { is } from 'zod/locales'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
@@ -28,6 +30,7 @@
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
+	let isAuthenticating = $state(false)
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived(
@@ -59,13 +62,13 @@
 
 		if (!sessionStore.data.appOrigin) {
 			// Get parameters from URL
-			const origin = $page.url.searchParams.get('origin')
-			if (!origin) {
+			const appOrigin = $page.url.searchParams.get('origin')
+			if (!appOrigin) {
 				error = 'No origin parameter found in URL'
 				return
 			}
 
-			sessionStore.setAppOrigin(origin)
+			sessionStore.setAppOrigin(appOrigin)
 			if (!sessionStore.data.appOrigin) {
 				return
 			}
@@ -113,7 +116,7 @@
 		await handleAuthenticate()
 
 		// If this was an existing identity then close the window automatically
-		if (!sessionStore.data.currentIdentityId) {
+		if (!error && !sessionStore.data.currentIdentityId) {
 			closeWindowWithSessionCleanup()
 		}
 	}
@@ -177,6 +180,21 @@
 		})
 	}
 
+	async function tryGetMasterKeyFromAccount(account: Account) {
+		if (sessionStore.data.temporaryMasterKey) {
+			const masterKey = sessionStore.data.temporaryMasterKey
+			sessionStore.clearTemporaryMasterKey()
+			return masterKey
+		}
+
+		try {
+			isAuthenticating = true
+			return await getMasterKeyFromAccount(account)
+		} finally {
+			isAuthenticating = false
+		}
+	}
+
 	async function handleAuthenticate() {
 		if (!selectedIdentity) {
 			error = 'No identity selected. Please select an identity first.'
@@ -196,13 +214,9 @@
 
 		try {
 			// Retrieve masterKey based on account type
-			const masterKey =
-				sessionStore.data.temporaryMasterKey ?? (await getMasterKeyFromAccount(account))
-
-			sessionStore.clearTemporaryMasterKey()
+			const masterKey = await tryGetMasterKeyFromAccount(account)
 
 			authenticated = true
-
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
 			const identityMasterKey = await deriveIdentityKey(masterKey, selectedIdentity.id)
@@ -227,13 +241,15 @@
 		<Typography variant="h3">Error</Typography>
 		<Typography>{error}</Typography>
 	</Vertical>
+{:else if isAuthenticating && selectedAccount}
+	<Confirmation authenticationType={selectedAccount.type} />
 {:else if selectedIdentity}
-	<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
-		<Vertical --vertical-gap="var(--half-padding)">
-			<Hashicon value={selectedIdentity.id} size={80} />
-			<Typography>{selectedIdentity.name}</Typography>
-		</Vertical>
-		{#if authenticated}
+	{#if authenticated}
+		<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
+			<Vertical --vertical-gap="var(--half-padding)">
+				<Hashicon value={selectedIdentity.id} size={80} />
+				<Typography>{selectedIdentity.name}</Typography>
+			</Vertical>
 			<Vertical --vertical-gap="var(--half-padding)">
 				<Typography variant="large">✅ All set!</Typography>
 				<Typography>Your identity is ready to use.</Typography>
@@ -245,10 +261,15 @@
 				>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
 				></Typography
 			>
-		{/if}
-	</Vertical>
+		</Vertical>
+	{/if}
 {:else if sessionStore.data.appOrigin && sessionStore.data.appData}
-	<ConnectedAppHeader appName={sessionStore.data.appData.appName} appUrl={sessionStore.data.appOrigin} appIcon={sessionStore.data.appData.appIcon} appDescription={sessionStore.data.appData.appDescription} />
+	<ConnectedAppHeader
+		appName={sessionStore.data.appData.appName}
+		appUrl={sessionStore.data.appOrigin}
+		appIcon={sessionStore.data.appData.appIcon}
+		appDescription={sessionStore.data.appData.appDescription}
+	/>
 
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
@@ -260,10 +281,7 @@
 				onIdentityClick={selectIdentityForConnection}
 			/>
 			<Horizontal --horizontal-justify-content="flex-start">
-				<CreateIdentityButton
-					account={selectedAccount}
-					redirectOrigin={sessionStore.data.appOrigin}
-				/>
+				<CreateIdentityButton account={selectedAccount} bind:isAuthenticating />
 			</Horizontal>
 		</Vertical>
 	{:else}
