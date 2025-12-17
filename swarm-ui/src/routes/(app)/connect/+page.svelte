@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
-	import { page } from '$app/stores'
+	import { page } from '$app/state'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
-	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
+	import CreateNewAccount from '$lib/components/create-new-account.svelte'
 	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import IdentityGroups from '$lib/components/identity-groups.svelte'
 	import AccountSelector from '$lib/components/account-selector.svelte'
@@ -20,7 +20,6 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
-	import { is } from 'zod/locales'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
@@ -62,7 +61,7 @@
 
 		if (!sessionStore.data.appOrigin) {
 			// Get parameters from URL
-			const appOrigin = $page.url.searchParams.get('origin')
+			const appOrigin = page.url.searchParams.get('origin')
 			if (!appOrigin) {
 				error = 'No origin parameter found in URL'
 				return
@@ -76,9 +75,9 @@
 
 		if (!sessionStore.data.appData) {
 			// Get app metadata from URL parameters (if provided)
-			const urlAppName = $page.url.searchParams.get('appName')
-			const urlAppDescription = $page.url.searchParams.get('appDescription')
-			const urlAppIcon = $page.url.searchParams.get('appIcon')
+			const urlAppName = page.url.searchParams.get('appName')
+			const urlAppDescription = page.url.searchParams.get('appDescription')
+			const urlAppIcon = page.url.searchParams.get('appIcon')
 
 			sessionStore.setAppData({
 				appUrl: sessionStore.data.appOrigin,
@@ -216,7 +215,6 @@
 			// Retrieve masterKey based on account type
 			const masterKey = await tryGetMasterKeyFromAccount(account)
 
-			authenticated = true
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
 			const identityMasterKey = await deriveIdentityKey(masterKey, selectedIdentity.id)
@@ -225,6 +223,8 @@
 			const appSecret = await deriveSecret(identityMasterKey, sessionStore.data.appOrigin)
 
 			updateSelectedIdentity(appSecret)
+
+			authenticated = true
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Authentication failed'
 		}
@@ -243,26 +243,24 @@
 	</Vertical>
 {:else if isAuthenticating && selectedAccount}
 	<Confirmation authenticationType={selectedAccount.type} />
-{:else if selectedIdentity}
-	{#if authenticated}
-		<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Hashicon value={selectedIdentity.id} size={80} />
-				<Typography>{selectedIdentity.name}</Typography>
-			</Vertical>
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Typography variant="large">✅ All set!</Typography>
-				<Typography>Your identity is ready to use.</Typography>
-			</Vertical>
-			<Button variant="strong" dimension="compact" onclick={closeWindowWithSessionCleanup}
-				>Continue to app<ArrowRight size={20} /></Button
-			>
-			<Typography variant="small"
-				>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
-				></Typography
-			>
+{:else if selectedIdentity && authenticated}
+	<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Hashicon value={selectedIdentity.id} size={80} />
+			<Typography>{selectedIdentity.name}</Typography>
 		</Vertical>
-	{/if}
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Typography variant="large">✅ All set!</Typography>
+			<Typography>Your identity is ready to use.</Typography>
+		</Vertical>
+		<Button variant="strong" dimension="compact" onclick={closeWindowWithSessionCleanup}
+			>Continue to app<ArrowRight size={20} /></Button
+		>
+		<Typography variant="small"
+			>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
+			></Typography
+		>
+	</Vertical>
 {:else if sessionStore.data.appOrigin && sessionStore.data.appData}
 	<ConnectedAppHeader
 		appName={sessionStore.data.appData.appName}
@@ -286,6 +284,6 @@
 		</Vertical>
 	{:else}
 		<!-- No identities, show create form -->
-		<CreateNewIdentity />
+		<CreateNewAccount />
 	{/if}
 {/if}

@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte'
-	import { page } from '$app/stores'
 	import { goto } from '$app/navigation'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'

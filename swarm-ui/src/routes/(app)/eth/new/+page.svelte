@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte'
-	import { page } from '$app/stores'
 	import { goto } from '$app/navigation'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
