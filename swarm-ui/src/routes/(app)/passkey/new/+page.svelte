@@ -20,17 +20,8 @@
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
 
 	let accountName = $state('Passkey')
-	let appOrigin = $state<string | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
-
-	onMount(() => {
-		// Check if we have an origin parameter (coming from /connect)
-		const origin = $page.url.searchParams.get('origin')
-		if (origin) {
-			appOrigin = origin
-		}
-	})
 
 	async function handleCreatePasskey() {
 		if (!accountName.trim()) {
@@ -74,11 +65,7 @@
 			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
-			if (appOrigin) {
-				goto(`${routes.IDENTITY_NEW}?origin=${encodeURIComponent(appOrigin)}`)
-			} else {
-				goto(routes.IDENTITY_NEW)
-			}
+			goto(routes.IDENTITY_NEW)
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to create passkey identity'
 			console.error('❌ Passkey creation failed:', err)
@@ -91,8 +78,8 @@
 	title="Create account with Passkey"
 	description="Create a new Swarm ID account using Passkey"
 	onClose={() =>
-		appOrigin
-			? goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
+		sessionStore.data.appOrigin
+			? goto(routes.CONNECT)
 			: goto(routes.HOME)}
 >
 	{#snippet content()}

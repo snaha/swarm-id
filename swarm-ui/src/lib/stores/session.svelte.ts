@@ -1,6 +1,6 @@
 // Session store for tracking current account/identity creation flow
 
-import type { Account } from '$lib/types'
+import type { Account, AppData } from '$lib/types'
 
 export type SessionData = {
 	// Account during creation flow (ready to be persisted)
@@ -13,6 +13,10 @@ export type SessionData = {
 	// Active account and identity
 	currentAccountId?: string
 	currentIdentityId?: string
+
+	// App data
+	appData?: AppData
+	appOrigin?: string
 }
 
 // Reactive state using Svelte 5 runes
@@ -48,6 +52,22 @@ export const sessionStore = {
 
 	clearTemporaryMasterKey() {
 		session = { ...session, temporaryMasterKey: undefined }
+	},
+
+	setAppOrigin(appOrigin: string) {
+		session = { ...session, appOrigin }
+	},
+
+	clearAppOrigin() {
+		session = { ...session, appOrigin: undefined }
+	},
+
+	setAppData(appData: AppData) {
+		session = { ...session, appData }
+	},
+
+	clearAppData() {
+		session = { ...session, appData: undefined }
 	},
 
 	clear() {
