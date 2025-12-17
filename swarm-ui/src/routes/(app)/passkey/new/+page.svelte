@@ -17,10 +17,20 @@
 	import { keccak256 } from 'ethers'
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
 	import Confirmation from '$lib/components/confirmation.svelte'
+	import { onMount } from 'svelte'
 
 	let accountName = $state('Passkey')
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
+
+	onMount(() => {
+		const accountNameIsTaken = accountsStore.accounts.some(
+			(account) => account.name === accountName,
+		)
+		if (accountNameIsTaken) {
+			accountName = `${accountName} ${accountsStore.accounts.filter((account) => account.type === 'passkey').length + 1}`
+		}
+	})
 
 	async function handleCreatePasskey() {
 		if (!accountName.trim()) {

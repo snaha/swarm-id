@@ -26,6 +26,7 @@
 	import { validateSecretSeed } from '$lib/utils/secret-seed'
 	import { WarningAlt } from 'carbon-icons-svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
+	import { onMount } from 'svelte'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
@@ -33,6 +34,15 @@
 	let secretSeed = $state('')
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
+
+	onMount(() => {
+		const accountNameIsTaken = accountsStore.accounts.some(
+			(account) => account.name === accountName,
+		)
+		if (accountNameIsTaken) {
+			accountName = `${accountName} ${accountsStore.accounts.filter((account) => account.type === 'ethereum').length + 1}`
+		}
+	})
 
 	let secretSeedError = $derived.by(() => {
 		if (!secretSeed) return undefined
