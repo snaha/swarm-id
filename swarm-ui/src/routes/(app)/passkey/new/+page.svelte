@@ -18,6 +18,7 @@
 	import { hexToUint8Array } from '$lib/utils/key-derivation'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
+	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 
 	let accountName = $state('Passkey')
 	let error = $state<string | undefined>(undefined)
@@ -93,41 +94,21 @@
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">
+				<Input
+					variant="outline"
+					dimension="compact"
+					name="account-name"
+					bind:value={accountName}
+					placeholder="Enter account name"
+					disabled={isProcessing}
+					label="Account name"
+				/>
+
 				{#if error}
-					<Vertical
-						--vertical-gap="var(--half-padding)"
-						style="background: #fee; padding: var(--padding); border-radius: 4px; border: 1px solid #fcc;"
-					>
-						<Typography variant="small" style="color: #c00;">Error</Typography>
-						<Typography variant="small">{error}</Typography>
-					</Vertical>
+					<ErrorMessage>
+						{error}
+					</ErrorMessage>
 				{/if}
-
-				<Grid>
-					<!-- Row 1 -->
-					<Horizontal --horizontal-gap="var(--half-padding)"
-						><FolderShared size={20} /><Typography>Account name</Typography></Horizontal
-					>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="account-name"
-						bind:value={accountName}
-						placeholder="Enter account name"
-						disabled={isProcessing}
-					/>
-
-					<!-- Row 2 -->
-					<Typography>Authentication</Typography>
-					<Horizontal --horizontal-gap="var(--half-padding)"
-						><PasskeyLogo size={20} /><Typography>Passkey</Typography></Horizontal
-					>
-				</Grid>
-
-				<Typography variant="small"
-					>Your passkey will be used to derive a deterministic master key for your Swarm ID. Works
-					with your device's biometric authentication or hardware security keys.</Typography
-				>
 			</Vertical>
 		{/snippet}
 

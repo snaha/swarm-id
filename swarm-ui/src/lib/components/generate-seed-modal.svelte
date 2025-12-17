@@ -8,6 +8,7 @@
 	import CopyButton from '$lib/components/copy-button.svelte'
 	import Renew from 'carbon-icons-svelte/lib/Renew.svelte'
 	import { generateSecretSeed } from '$lib/utils/secret-seed'
+	import { CloseLarge } from 'carbon-icons-svelte'
 
 	interface Props {
 		open?: boolean
@@ -36,7 +37,12 @@
 
 <Modal bind:open>
 	<Vertical --vertical-gap="var(--padding)" style="padding: var(--padding)">
-		<Typography variant="h5">Generate secret seed</Typography>
+		<Horizontal --horizontal-justify-content="space-between">
+			<Typography variant="h5">Generate secret seed</Typography>
+			<Button variant="ghost" dimension="compact" onclick={() => (open = false)}
+				><CloseLarge size={20} /></Button
+			>
+		</Horizontal>
 		<Input variant="outline" dimension="compact" value={generatedSeed} label="Secret Seed" readonly>
 			{#snippet buttons()}
 				<CopyButton text={generatedSeed} />
@@ -59,7 +65,6 @@
 		>
 		<Horizontal --horizontal-gap="var(--half-padding)">
 			<Button dimension="compact" onclick={handleUseSeed}>Use this</Button>
-			<Button dimension="compact" variant="ghost" onclick={() => (open = false)}>Cancel</Button>
 		</Horizontal>
 	</Vertical>
 </Modal>
