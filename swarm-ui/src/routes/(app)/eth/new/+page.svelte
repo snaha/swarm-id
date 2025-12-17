@@ -4,7 +4,6 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import FolderShared from 'carbon-icons-svelte/lib/FolderShared.svelte'
 	import WorkflowAutomation from 'carbon-icons-svelte/lib/WorkflowAutomation.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import routes from '$lib/routes'
