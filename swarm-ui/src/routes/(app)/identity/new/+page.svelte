@@ -66,7 +66,7 @@
 
 		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
 		const id = identityWallet.address
-		const name = generateDockerName()
+		const name = generateDockerName(id)
 		const accountId = account.id
 		const createdAt = Date.now()
 		const identity: Identity = {
