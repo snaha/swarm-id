@@ -11,10 +11,10 @@
 		account?: Account
 		/** Whether to show the Add icon. Default: true */
 		showIcon?: boolean
-		isAuthenticating: boolean
+		isAuthenticating?: boolean
 	}
 
-	let { account, showIcon = true, isAuthenticating = $bindable() }: Props = $props()
+	let { account, showIcon = true, isAuthenticating = $bindable(false) }: Props = $props()
 
 	async function handleClick() {
 		if (!account) return

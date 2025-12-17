@@ -11,11 +11,13 @@
 	import { goto } from '$app/navigation'
 	import type { Identity } from '$lib/types'
 	import routes from '$lib/routes'
+	import Confirmation from '$lib/components/confirmation.svelte'
 
 	let selectedAccountId = $state<string | undefined>(undefined)
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
+	let isAuthenticating = $state(false)
 
 	// Get identities from store, filtered by selected account
 	const allIdentities = $derived(identitiesStore.identities)
@@ -37,24 +39,28 @@
 	}
 </script>
 
-<Vertical>
-	<Typography variant="h4">Welcome to Swarm ID</Typography>
+{#if isAuthenticating && selectedAccount}
+	<Confirmation authenticationType={selectedAccount?.type} />
+{:else}
+	<Vertical>
+		<Typography variant="h4">Welcome to Swarm ID</Typography>
 
-	{#if hasAccounts && !showCreateMode}
-		<Typography variant="small"
-			>{identities.length > 0
-				? 'Choose an identity to continue'
-				: 'Create an identity to continue'}</Typography
-		>
-		<Vertical --vertical-gap="var(--double-padding)">
-			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
-			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
-			<Horizontal --horizontal-justify-content="flex-start">
-				<CreateIdentityButton account={selectedAccount} />
-			</Horizontal>
-		</Vertical>
-	{:else}
-		<Typography variant="small">Create or import an account to continue</Typography>
-		<CreateNewIdentity />
-	{/if}
-</Vertical>
+		{#if hasAccounts && !showCreateMode}
+			<Typography variant="small"
+				>{identities.length > 0
+					? 'Choose an identity to continue'
+					: 'Create an identity to continue'}</Typography
+			>
+			<Vertical --vertical-gap="var(--double-padding)">
+				<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
+				<IdentityList {identities} onIdentityClick={handleIdentityClick} />
+				<Horizontal --horizontal-justify-content="flex-start">
+					<CreateIdentityButton account={selectedAccount} {isAuthenticating} />
+				</Horizontal>
+			</Vertical>
+		{:else}
+			<Typography variant="small">Create or import an account to continue</Typography>
+			<CreateNewIdentity />
+		{/if}
+	</Vertical>
+{/if}
