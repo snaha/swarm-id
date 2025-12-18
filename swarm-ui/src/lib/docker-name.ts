@@ -353,10 +353,53 @@ function capitalize(s: string) {
 	return s.slice(0, 1).toUpperCase() + s.slice(1)
 }
 
-export function generateDockerName() {
+function validateEthereumAddress(address: string): string {
+	// Remove '0x' prefix if present
+	const cleanAddress = address.toLowerCase().replace(/^0x/, '')
+
+	// Validate: must be exactly 40 hexadecimal characters
+	if (!/^[0-9a-f]{40}$/.test(cleanAddress)) {
+		throw new Error(
+			`Invalid Ethereum address format: ${address}. Expected 40 hex characters with optional 0x prefix.`,
+		)
+	}
+
+	return cleanAddress
+}
+
+function addressToRandomNumbers(address: string): [number, number] {
+	// Validate and clean the address
+	const cleanAddress = validateEthereumAddress(address)
+
+	// Take 13 hex chars (52 bits) for each number - safely within JavaScript's 53-bit integer range
+	// 13 hex chars = 52 bits < 53 bits (safe integer range)
+	const firstSegment = cleanAddress.slice(0, 13)
+	const secondSegment = cleanAddress.slice(13, 26)
+
+	// Maximum value for 13 hex digits (all F's)
+	const maxValue = 0xfffffffffffff // 2^52 - 1
+
+	// Convert hex to decimal and normalize to [0, 1) range
+	const num1 = parseInt(firstSegment, 16) / maxValue
+	const num2 = parseInt(secondSegment, 16) / maxValue
+
+	return [num1, num2]
+}
+
+export function generateDockerName(ethereumAddress?: string) {
+	let random1: number
+	let random2: number
+
+	if (ethereumAddress) {
+		;[random1, random2] = addressToRandomNumbers(ethereumAddress)
+	} else {
+		random1 = Math.random()
+		random2 = Math.random()
+	}
+
 	return (
-		capitalize(adjective[Math.floor(Math.random() * adjective.length)]) +
+		capitalize(adjective[Math.floor(random1 * adjective.length)]) +
 		' ' +
-		capitalize(surname[Math.floor(Math.random() * surname.length)])
+		capitalize(surname[Math.floor(random2 * surname.length)])
 	)
 }
