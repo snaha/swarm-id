@@ -15,7 +15,7 @@ export const TimestampSchema = z.number().int().nonnegative()
 /**
  * Batch ID (64 hex characters)
  */
-export const BatchIdSchema = z.string().length(64, {
+export const BatchIdSchema = z.string().regex(/^[a-fA-F0-9]{64}$/, {
 	message: 'BatchID must be exactly 64 hex characters',
 })
 
@@ -36,6 +36,6 @@ export const UrlSchema = z.string().url()
  * Used to check if data is in versioned format
  */
 export const VersionedStorageSchema = z.object({
-	version: z.number(),
+	version: z.number().int().nonnegative(),
 	data: z.unknown(),
 })

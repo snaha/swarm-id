@@ -15,6 +15,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import type { Account, Identity } from '$lib/types'
+	import { AppDataSchema } from '$lib/types'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
@@ -79,12 +80,21 @@
 			const urlAppDescription = page.url.searchParams.get('appDescription')
 			const urlAppIcon = page.url.searchParams.get('appIcon')
 
-			sessionStore.setAppData({
+			const appData = {
 				appUrl: sessionStore.data.appOrigin,
 				appName: tryGetAppName(urlAppName),
 				appDescription: urlAppDescription ?? undefined,
 				appIcon: urlAppIcon ?? undefined,
-			})
+			}
+
+			// Validate app data from URL parameters
+			const validationResult = AppDataSchema.safeParse(appData)
+			if (!validationResult.success) {
+				error = `Invalid app data: ${validationResult.error.issues.map((i) => i.message).join(', ')}`
+				return
+			}
+
+			sessionStore.setAppData(validationResult.data)
 		}
 
 		// If there is a new identity set it up
