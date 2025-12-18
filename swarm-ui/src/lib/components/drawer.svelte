@@ -219,11 +219,10 @@
 					/>
 					<Horizontal --horizontal-gap="var(--quarter-padding)">
 						{#if account.type === 'ethereum'}
-							<EthereumLogo size={20} />
+							<EthereumLogo size={20} />Ethereum
 						{:else}
-							<PasskeyLogo size={20} />
+							<PasskeyLogo size={20} />Passkey
 						{/if}
-						{account.name}
 					</Horizontal>
 				</Vertical>
 				<Vertical --vertical-gap="var(--quarter-padding)">
