@@ -67,6 +67,43 @@ function bufferToBase64url(buffer: Uint8Array): string {
 }
 
 /**
+ * Get existing passkey account or create new one if none exists
+ * This is the main entry point for passkey-based authentication
+ *
+ * Flow:
+ * 1. If credentialId is provided, try to authenticate with that specific credential
+ * 2. If not provided, try to discover any existing credential (browser shows picker)
+ * 3. If discovery fails (user cancels or no credentials), create new credential
+ *
+ * This ensures deterministic address derivation when re-creating an account with the same passkey.
+ */
+export async function getOrCreatePasskeyAccount(
+	options: PasskeyRegistrationOptions & { credentialId?: string },
+): Promise<PasskeyAccount> {
+	// Step 1: If credentialId is provided, try that specific credential
+	if (options.credentialId) {
+		try {
+			return await authenticateWithPasskey({
+				rpId: options.rpId,
+				allowCredentials: [{ id: options.credentialId, type: 'public-key' }],
+			})
+		} catch {
+			// Failed, try discovery next
+		}
+	}
+
+	// Step 2: Try to discover any existing credential (browser shows credential picker)
+	try {
+		return await authenticateWithPasskey({ rpId: options.rpId })
+	} catch {
+		// No credential found or user cancelled, create new one
+	}
+
+	// Step 3: Create new credential
+	return await createPasskeyAccount(options)
+}
+
+/**
  * Create a new passkey credential with platform authenticator (Touch ID/Face ID)
  */
 export async function createPasskeyAccount(
@@ -120,8 +157,6 @@ export async function createPasskeyAccount(
 
 	// Check if PRF extension is available
 	const prfEnabled = registrationResponse.clientExtensionResults?.prf?.enabled ?? false
-	console.log('📝 PRF extension:', prfEnabled ? 'enabled ✅' : 'not available ❌')
-
 	if (!prfEnabled) {
 		throw new Error(
 			'PRF extension not available on this device. Please use a device with Touch ID, Face ID, or Windows Hello.',
@@ -129,8 +164,6 @@ export async function createPasskeyAccount(
 	}
 
 	const credentialId = registrationResponse.id
-	console.log('📝 Registration: Credential created successfully')
-	console.log('🔑 Credential ID:', credentialId)
 
 	// Check if we got PRF results during registration
 	const prfResults = (
@@ -139,30 +172,22 @@ export async function createPasskeyAccount(
 		}
 	)?.prf?.results?.first
 
-	let account: PasskeyAccount
-
 	if (prfResults) {
 		// Use PRF output from registration
-		console.log('✅ Got PRF output during registration (single biometric prompt)')
 		const prfBytes = new Uint8Array(prfResults)
 		const wallet = await deriveWalletFromPRF(prfBytes)
-		account = {
+		return {
 			credentialId,
 			ethereumAddress: wallet.address,
 			masterKey: wallet.masterKey,
 		}
-	} else {
-		// Fallback: authenticate separately to get PRF output
-		console.log('🔐 Authenticating to get PRF output (second biometric prompt)')
-		account = await authenticateWithPasskey({
-			rpId: options.rpId,
-			allowCredentials: [{ id: credentialId, type: 'public-key' }],
-		})
 	}
 
-	console.log('✅ Passkey account created with address:', account.ethereumAddress)
-
-	return account
+	// Fallback: authenticate separately to get PRF output
+	return await authenticateWithPasskey({
+		rpId: options.rpId,
+		allowCredentials: [{ id: credentialId, type: 'public-key' }],
+	})
 }
 
 /**
@@ -222,7 +247,6 @@ async function processAuthenticationResponse(
 	}
 
 	const prfBytes = new Uint8Array(prfOutput)
-	console.log('🔑 PRF output received:', prfBytes.length, 'bytes')
 
 	// Derive Ethereum wallet from PRF output
 	const wallet = await deriveWalletFromPRF(prfBytes)
