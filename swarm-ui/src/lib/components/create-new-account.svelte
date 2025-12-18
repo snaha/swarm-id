@@ -1,5 +1,4 @@
 <script lang="ts">
-	import { page } from '$app/stores'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import AuthCard from '$lib/components/auth-card.svelte'
@@ -10,19 +9,12 @@
 	import { goto } from '$app/navigation'
 	import routes from '$lib/routes'
 
-	// Get the origin parameter from the URL if it exists (we're in /connect route)
-	const origin = $page.url.searchParams.get('origin')
-
 	function handlePasskeyClick() {
-		const url = origin
-			? `${routes.PASSKEY_NEW}?origin=${encodeURIComponent(origin)}`
-			: routes.PASSKEY_NEW
-		goto(url)
+		goto(routes.PASSKEY_NEW)
 	}
 
 	function handleEthClick() {
-		const url = origin ? `${routes.ETH_NEW}?origin=${encodeURIComponent(origin)}` : routes.ETH_NEW
-		goto(url)
+		goto(routes.ETH_NEW)
 	}
 
 	function handleImportClick() {

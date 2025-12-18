@@ -29,13 +29,16 @@ export type EthereumAccount = AccountBase & {
 
 export type Account = PasskeyAccount | EthereumAccount
 
-export type ConnectedApp = {
+export type AppData = {
 	appUrl: string
 	appName: string
-	lastConnectedAt: number
-	identityId: string
 	appIcon?: string
 	appDescription?: string
+}
+
+export type ConnectedApp = AppData & {
+	lastConnectedAt: number
+	identityId: string
 }
 
 export type PostageStamp = {

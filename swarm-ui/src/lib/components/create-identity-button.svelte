@@ -9,27 +9,25 @@
 
 	interface Props {
 		account?: Account
-		/** Optional origin to include in redirect URL (for connect flow) */
-		redirectOrigin?: string
 		/** Whether to show the Add icon. Default: true */
 		showIcon?: boolean
+		isAuthenticating?: boolean
 	}
 
-	let { account, redirectOrigin, showIcon = true }: Props = $props()
+	let { account, showIcon = true, isAuthenticating = $bindable(false) }: Props = $props()
 
 	async function handleClick() {
 		if (!account) return
 
 		try {
+			isAuthenticating = true
 			const masterKey = await getMasterKeyFromAccount(account)
 			sessionStore.setAccount(account)
 			sessionStore.setTemporaryMasterKey(masterKey)
-			const url = redirectOrigin
-				? `${routes.IDENTITY_NEW}?origin=${encodeURIComponent(redirectOrigin)}`
-				: routes.IDENTITY_NEW
-			goto(url)
+			goto(routes.IDENTITY_NEW)
 		} catch (err) {
 			console.error('Failed to authenticate:', err)
+			isAuthenticating = false
 		}
 	}
 </script>

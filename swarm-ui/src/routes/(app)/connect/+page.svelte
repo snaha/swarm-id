@@ -1,8 +1,8 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
-	import { page } from '$app/stores'
+	import { page } from '$app/state'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
-	import CreateNewIdentity from '$lib/components/create-new-identity.svelte'
+	import CreateNewAccount from '$lib/components/create-new-account.svelte'
 	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import IdentityGroups from '$lib/components/identity-groups.svelte'
 	import AccountSelector from '$lib/components/account-selector.svelte'
@@ -14,16 +14,13 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import type { Identity } from '$lib/types'
+	import type { Account, Identity } from '$lib/types'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
+	import Confirmation from '$lib/components/confirmation.svelte'
 
-	let appOrigin = $state('')
-	let appName = $state('')
-	let appDescription = $state<string | undefined>(undefined)
-	let appIcon = $state<string | undefined>(undefined)
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let showCreateMode = $state(false)
@@ -32,6 +29,7 @@
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
+	let isAuthenticating = $state(false)
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived(
@@ -61,33 +59,32 @@
 			return
 		}
 
-		// Get parameters from URL
-		const origin = $page.url.searchParams.get('origin')
-		if (!origin) {
-			error = 'No origin parameter found in URL'
-			return
+		if (!sessionStore.data.appOrigin) {
+			// Get parameters from URL
+			const appOrigin = page.url.searchParams.get('origin')
+			if (!appOrigin) {
+				error = 'No origin parameter found in URL'
+				return
+			}
+
+			sessionStore.setAppOrigin(appOrigin)
+			if (!sessionStore.data.appOrigin) {
+				return
+			}
 		}
 
-		appOrigin = origin
+		if (!sessionStore.data.appData) {
+			// Get app metadata from URL parameters (if provided)
+			const urlAppName = page.url.searchParams.get('appName')
+			const urlAppDescription = page.url.searchParams.get('appDescription')
+			const urlAppIcon = page.url.searchParams.get('appIcon')
 
-		// Get app metadata from URL parameters (if provided)
-		const urlAppName = $page.url.searchParams.get('appName')
-		const urlAppDescription = $page.url.searchParams.get('appDescription')
-		const urlAppIcon = $page.url.searchParams.get('appIcon')
-
-		// Use metadata from URL if available, otherwise derive from origin
-		if (urlAppName) {
-			appName = urlAppName
-			appDescription = urlAppDescription ?? undefined
-			appIcon = urlAppIcon ?? undefined
-		} else {
-			// Fallback: Extract app name from origin
-			try {
-				const url = new URL(origin)
-				appName = url.hostname.split('.')[0] || url.hostname
-			} catch {
-				appName = origin
-			}
+			sessionStore.setAppData({
+				appUrl: sessionStore.data.appOrigin,
+				appName: tryGetAppName(urlAppName),
+				appDescription: urlAppDescription ?? undefined,
+				appIcon: urlAppIcon ?? undefined,
+			})
 		}
 
 		// If there is a new identity set it up
@@ -99,9 +96,28 @@
 		}
 	})
 
-	function selectIdentityForConnection(identity: Identity) {
+	function tryGetAppName(urlAppName: string | null) {
+		if (urlAppName) {
+			return urlAppName
+		}
+
+		// Fallback: Extract app name from origin
+		try {
+			const url = new URL(origin)
+			return url.hostname.split('.')[0] || url.hostname
+		} catch {
+			return origin
+		}
+	}
+
+	async function selectIdentityForConnection(identity: Identity) {
 		selectedIdentity = identity
-		handleAuthenticate()
+		await handleAuthenticate()
+
+		// If this was an existing identity then close the window automatically
+		if (!error && !sessionStore.data.currentIdentityId) {
+			closeWindowWithSessionCleanup()
+		}
 	}
 
 	function handleCreateNew() {
@@ -123,6 +139,14 @@
 			return
 		}
 
+		if (!sessionStore.data.appOrigin) {
+			return
+		}
+
+		if (!sessionStore.data.appData) {
+			return
+		}
+
 		// FIXME: Generate random postage batch ID for testing
 		// In production, use the identity's default postage stamp or let user choose
 		const postageBatchId = generateRandomPostageBatchId()
@@ -136,7 +160,7 @@
 		;(window.opener as Window).postMessage(
 			{
 				type: 'setSecret',
-				appOrigin: appOrigin,
+				appOrigin: sessionStore.data.appOrigin,
 				data: {
 					secret: appSecret,
 					postageBatchId, // FIXME: Should come from identity's actual stamps
@@ -147,12 +171,27 @@
 
 		// Track this app connection
 		connectedAppsStore.addOrUpdateApp({
-			appUrl: appOrigin,
-			appName: appName,
+			appUrl: sessionStore.data.appOrigin,
+			appName: sessionStore.data.appData.appName,
 			identityId: selectedIdentity.id,
-			appIcon: appIcon,
-			appDescription: appDescription,
+			appIcon: sessionStore.data.appData.appIcon,
+			appDescription: sessionStore.data.appData.appDescription,
 		})
+	}
+
+	async function tryGetMasterKeyFromAccount(account: Account) {
+		if (sessionStore.data.temporaryMasterKey) {
+			const masterKey = sessionStore.data.temporaryMasterKey
+			sessionStore.clearTemporaryMasterKey()
+			return masterKey
+		}
+
+		try {
+			isAuthenticating = true
+			return await getMasterKeyFromAccount(account)
+		} finally {
+			isAuthenticating = false
+		}
 	}
 
 	async function handleAuthenticate() {
@@ -167,31 +206,33 @@
 			return
 		}
 
-		if (!appOrigin) {
+		if (!sessionStore.data.appOrigin) {
 			error = 'Unknown app origin. Cannot authenticate.'
 			return
 		}
 
 		try {
 			// Retrieve masterKey based on account type
-			const masterKey =
-				sessionStore.data.temporaryMasterKey ?? (await getMasterKeyFromAccount(account))
-
-			sessionStore.clearTemporaryMasterKey()
-
-			authenticated = true
+			const masterKey = await tryGetMasterKeyFromAccount(account)
 
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
 			const identityMasterKey = await deriveIdentityKey(masterKey, selectedIdentity.id)
 
 			// Step 2: Derive app-specific secret from identity master key
-			const appSecret = await deriveSecret(identityMasterKey, appOrigin)
+			const appSecret = await deriveSecret(identityMasterKey, sessionStore.data.appOrigin)
 
 			updateSelectedIdentity(appSecret)
+
+			authenticated = true
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Authentication failed'
 		}
+	}
+
+	function closeWindowWithSessionCleanup() {
+		sessionStore.clear()
+		window.close()
 	}
 </script>
 
@@ -200,28 +241,33 @@
 		<Typography variant="h3">Error</Typography>
 		<Typography>{error}</Typography>
 	</Vertical>
-{:else if selectedIdentity}
+{:else if isAuthenticating && selectedAccount}
+	<Confirmation authenticationType={selectedAccount.type} />
+{:else if selectedIdentity && authenticated}
 	<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
 		<Vertical --vertical-gap="var(--half-padding)">
 			<Hashicon value={selectedIdentity.id} size={80} />
 			<Typography>{selectedIdentity.name}</Typography>
 		</Vertical>
-		{#if authenticated}
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Typography variant="large">✅ All set!</Typography>
-				<Typography>Your identity is ready to use.</Typography>
-			</Vertical>
-			<Button variant="strong" dimension="compact" onclick={() => window.close()}
-				>Continue to app<ArrowRight size={20} /></Button
-			>
-			<Typography variant="small"
-				>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
-				></Typography
-			>
-		{/if}
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Typography variant="large">✅ All set!</Typography>
+			<Typography>Your identity is ready to use.</Typography>
+		</Vertical>
+		<Button variant="strong" dimension="compact" onclick={closeWindowWithSessionCleanup}
+			>Continue to app<ArrowRight size={20} /></Button
+		>
+		<Typography variant="small"
+			>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
+			></Typography
+		>
 	</Vertical>
-{:else}
-	<ConnectedAppHeader {appName} appUrl={appOrigin} {appIcon} {appDescription} />
+{:else if sessionStore.data.appOrigin && sessionStore.data.appData}
+	<ConnectedAppHeader
+		appName={sessionStore.data.appData.appName}
+		appUrl={sessionStore.data.appOrigin}
+		appIcon={sessionStore.data.appData.appIcon}
+		appDescription={sessionStore.data.appData.appDescription}
+	/>
 
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
@@ -229,15 +275,15 @@
 			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
 			<IdentityGroups
 				{identities}
-				appUrl={appOrigin}
+				appUrl={sessionStore.data.appOrigin}
 				onIdentityClick={selectIdentityForConnection}
 			/>
 			<Horizontal --horizontal-justify-content="flex-start">
-				<CreateIdentityButton account={selectedAccount} redirectOrigin={appOrigin} />
+				<CreateIdentityButton account={selectedAccount} bind:isAuthenticating />
 			</Horizontal>
 		</Vertical>
 	{:else}
 		<!-- No identities, show create form -->
-		<CreateNewIdentity />
+		<CreateNewAccount />
 	{/if}
 {/if}

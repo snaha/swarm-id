@@ -1,6 +1,4 @@
 <script lang="ts">
-	import { onMount } from 'svelte'
-	import { page } from '$app/stores'
 	import { goto } from '$app/navigation'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
@@ -27,22 +25,14 @@
 	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
 	import { validateSecretSeed } from '$lib/utils/secret-seed'
 	import { WarningAlt } from 'carbon-icons-svelte'
+	import Confirmation from '$lib/components/confirmation.svelte'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
 	let accountName = $state('Ethereum')
 	let secretSeed = $state('')
-	let appOrigin = $state<string | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
-
-	onMount(() => {
-		// Check if we have an origin parameter (coming from /connect)
-		const origin = $page.url.searchParams.get('origin')
-		if (origin) {
-			appOrigin = origin
-		}
-	})
 
 	let secretSeedError = $derived.by(() => {
 		if (!secretSeed) return undefined
@@ -107,11 +97,7 @@
 			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
-			if (appOrigin) {
-				goto(`${routes.IDENTITY_NEW}?origin=${encodeURIComponent(appOrigin)}`)
-			} else {
-				goto(routes.IDENTITY_NEW)
-			}
+			goto(routes.IDENTITY_NEW)
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to connect wallet'
 			console.error('❌ Wallet connection failed:', err)
@@ -121,123 +107,124 @@
 	}
 </script>
 
-<CreationLayout
-	title="Create account with Ethereum"
-	description="Create a new Swarm ID account using an Ethereum wallet"
-	onClose={() =>
-		appOrigin
-			? goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
-			: goto(routes.HOME)}
->
-	{#snippet content()}
-		<Vertical --vertical-gap="var(--padding)">
-			<!-- Row 1 -->
-			<Vertical --vertical-gap="var(--quarter-padding)">
-				<Horizontal --horizontal-gap="var(--half-padding)">
-					<FolderShared size={20} /><Typography>Account name</Typography>
-				</Horizontal>
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="account-name"
-					bind:value={accountName}
-					disabled={isProcessing}
-				/>
-			</Vertical>
-
-			<!-- Row 2 -->
-			<Vertical --vertical-gap="var(--quarter-padding)">
-				<Typography>Secret seed</Typography>
-				<Horizontal --horizontal-gap="var(--half-padding)">
-					<div style="flex: 1" class="secret-seed-input">
-						<Input
-							variant="outline"
-							dimension="compact"
-							name="secret-seed"
-							bind:value={secretSeed}
-							error={secretSeedError}
-							disabled={isProcessing}
-						/>
-					</div>
-					<Button
-						dimension="compact"
-						variant="ghost"
-						onclick={() => (showSeedModal = true)}
-						disabled={isProcessing}
-					>
-						<WorkflowAutomation size={20} />
-					</Button>
-				</Horizontal>
-				{#if secretSeedError}
-					<ErrorMessage message={secretSeedError} />
-				{:else}
-					<Typography variant="small" class="accent"
-						>Generate one with the button above on the right or use your own. <Tooltip
-							show={showTooltip}
-							position="top"
-							variant="compact"
-							color="dark"
-							maxWidth="287px"
-						>
-							<!-- svelte-ignore a11y_invalid_attribute -->
-							<a
-								href="#"
-								onmouseenter={() => (showTooltip = true)}
-								onmouseleave={() => (showTooltip = false)}
-								onclick={(e: MouseEvent) => {
-									e.stopPropagation()
-									showTooltip = !showTooltip
-								}}>Learn more</a
-							>
-							{#snippet helperText()}
-								The secret seed works with your ETH wallet to restore your Swarm ID account. <strong
-									>Store it in a password manager or write it down and keep it in a secure location.
-									Never share it with anyone.</strong
-								>
-							{/snippet}
-						</Tooltip></Typography
-					>
-				{/if}
-				{#if secretSeed && !secretSeedError}
-					<Typography variant="small" style="color: var(--colors-red)"
-						><strong>Warning:</strong> If you lose this seed, you won't be able to recover your account.</Typography
-					>
-				{/if}
-			</Vertical>
-
-			<!-- Row 3 -->
-			<Vertical --vertical-gap="var(--quarter-padding)">
-				<Horizontal
-					--horizontal-gap="var(--half-padding)"
-					--horizontal-justify-content="space-between"
-				>
-					<Typography>Authentication</Typography>
+{#if isProcessing}
+	<Confirmation authenticationType="ethereum" />
+{:else}
+	<CreationLayout
+		title="Create account with Ethereum"
+		description="Create a new Swarm ID account using an Ethereum wallet"
+		onClose={() => (sessionStore.data.appOrigin ? goto(routes.CONNECT) : goto(routes.HOME))}
+	>
+		{#snippet content()}
+			<Vertical --vertical-gap="var(--padding)">
+				<!-- Row 1 -->
+				<Vertical --vertical-gap="var(--quarter-padding)">
 					<Horizontal --horizontal-gap="var(--half-padding)">
-						<EthereumLogo size={16} />
-						<Typography>Ethereum wallet</Typography>
+						<FolderShared size={20} /><Typography>Account name</Typography>
 					</Horizontal>
-				</Horizontal>
+					<Input
+						variant="outline"
+						dimension="compact"
+						name="account-name"
+						bind:value={accountName}
+						disabled={isProcessing}
+					/>
+				</Vertical>
+
+				<!-- Row 2 -->
+				<Vertical --vertical-gap="var(--quarter-padding)">
+					<Typography>Secret seed</Typography>
+					<Horizontal --horizontal-gap="var(--half-padding)">
+						<div style="flex: 1" class="secret-seed-input">
+							<Input
+								variant="outline"
+								dimension="compact"
+								name="secret-seed"
+								bind:value={secretSeed}
+								error={secretSeedError}
+								disabled={isProcessing}
+							/>
+						</div>
+						<Button
+							dimension="compact"
+							variant="ghost"
+							onclick={() => (showSeedModal = true)}
+							disabled={isProcessing}
+						>
+							<WorkflowAutomation size={20} />
+						</Button>
+					</Horizontal>
+					{#if secretSeedError}
+						<ErrorMessage message={secretSeedError} />
+					{:else}
+						<Typography variant="small" class="accent"
+							>Generate one with the button above on the right or use your own. <Tooltip
+								show={showTooltip}
+								position="top"
+								variant="compact"
+								color="dark"
+								maxWidth="287px"
+							>
+								<!-- svelte-ignore a11y_invalid_attribute -->
+								<a
+									href="#"
+									onmouseenter={() => (showTooltip = true)}
+									onmouseleave={() => (showTooltip = false)}
+									onclick={(e: MouseEvent) => {
+										e.stopPropagation()
+										showTooltip = !showTooltip
+									}}>Learn more</a
+								>
+								{#snippet helperText()}
+									The secret seed works with your ETH wallet to restore your Swarm ID account. <strong
+										>Store it in a password manager or write it down and keep it in a secure
+										location. Never share it with anyone.</strong
+									>
+								{/snippet}
+							</Tooltip></Typography
+						>
+					{/if}
+					{#if secretSeed && !secretSeedError}
+						<Typography variant="small" style="color: var(--colors-red)"
+							><strong>Warning:</strong> If you lose this seed, you won't be able to recover your account.</Typography
+						>
+					{/if}
+				</Vertical>
+
+				<!-- Row 3 -->
+				<Vertical --vertical-gap="var(--quarter-padding)">
+					<Horizontal
+						--horizontal-gap="var(--half-padding)"
+						--horizontal-justify-content="space-between"
+					>
+						<Typography>Authentication</Typography>
+						<Horizontal --horizontal-gap="var(--half-padding)">
+							<EthereumLogo size={16} />
+							<Typography>Ethereum wallet</Typography>
+						</Horizontal>
+					</Horizontal>
+				</Vertical>
+
+				{#if error}
+					<Horizontal
+						--horizontal-gap="var(--quarter-padding)"
+						style="background: var(--colors-red); padding: var(--half-padding); color: var(--colors-ultra-low)"
+					>
+						<WarningAlt size={20} />
+						<Typography --typography-color="var(--colors-ultra-low)">{error}</Typography>
+					</Horizontal>
+				{/if}
 			</Vertical>
+		{/snippet}
 
-			{#if error}
-				<Horizontal
-					--horizontal-gap="var(--quarter-padding)"
-					style="background: var(--colors-red); padding: var(--half-padding); color: var(--colors-ultra-low)"
-				>
-					<WarningAlt size={20} />
-					<Typography --typography-color="var(--colors-ultra-low)">{error}</Typography>
-				</Horizontal>
-			{/if}
-		</Vertical>
-	{/snippet}
-
-	{#snippet buttonContent()}
-		<Button dimension="compact" onclick={handleConfirm} disabled={isFormDisabled}
-			>{isProcessing ? 'Processing...' : 'Confirm with wallet'}
-			{#if !isProcessing}<ArrowRight />{/if}</Button
-		>
-	{/snippet}
-</CreationLayout>
+		{#snippet buttonContent()}
+			<Button dimension="compact" onclick={handleConfirm} disabled={isFormDisabled}
+				>{isProcessing ? 'Processing...' : 'Confirm with wallet'}
+				{#if !isProcessing}<ArrowRight />{/if}</Button
+			>
+		{/snippet}
+	</CreationLayout>
+{/if}
 
 <GenerateSeedModal bind:open={showSeedModal} onUseSeed={(seed) => (secretSeed = seed)} />
 

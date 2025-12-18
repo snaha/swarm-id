@@ -10,7 +10,6 @@
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import { goto } from '$app/navigation'
 	import { onMount } from 'svelte'
-	import { page } from '$app/stores'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
@@ -23,7 +22,6 @@
 	import { layoutStore } from '$lib/stores/layout.svelte'
 
 	let idName = $state('')
-	let appOrigin = $state<string | undefined>(undefined)
 	let accountName = $state('')
 
 	// Derive identity using temporary masterKey from session
@@ -43,12 +41,6 @@
 	})
 
 	onMount(() => {
-		// Get origin parameter if coming from /connect
-		const origin = $page.url.searchParams.get('origin')
-		if (origin) {
-			appOrigin = origin
-		}
-
 		const account = sessionStore.data.account
 		if (account) {
 			accountName = account.name
@@ -62,8 +54,6 @@
 	)
 
 	function deriveIdentityFromAccount(account: Account, masterKey: string, index: number) {
-		console.debug({ account })
-
 		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
 		const id = identityWallet.address
 		const name = generateDockerName()
@@ -110,8 +100,8 @@
 		sessionStore.setCurrentIdentity(identity.id)
 
 		// Navigate back to /connect or home
-		if (appOrigin) {
-			goto(`${routes.CONNECT}?origin=${encodeURIComponent(appOrigin)}`)
+		if (sessionStore.data.appOrigin) {
+			goto(routes.CONNECT)
 		} else {
 			// Clear temporary masterKey for security
 			sessionStore.clearTemporaryMasterKey()
