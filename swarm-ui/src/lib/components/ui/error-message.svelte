@@ -1,16 +1,17 @@
 <script lang="ts">
 	import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
+	import type { Snippet } from 'svelte'
 
 	interface Props {
-		message: string
+		children: Snippet
 	}
 
-	let { message }: Props = $props()
+	let { children }: Props = $props()
 </script>
 
 <div class="error-message">
 	<WarningAltFilled width={20} height={20} />
-	<span>{message}</span>
+	<span>{@render children()}</span>
 </div>
 
 <style>

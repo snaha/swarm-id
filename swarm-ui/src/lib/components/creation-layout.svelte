@@ -5,14 +5,15 @@
 	import ArrowLeft from 'carbon-icons-svelte/lib/ArrowLeft.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import { CloseLarge } from 'carbon-icons-svelte'
+	import type { Snippet } from 'svelte'
 
 	interface Props {
 		title: string
 		description?: string
 		onBack?: () => void
 		onClose?: () => void
-		content: import('svelte').Snippet
-		buttonContent: import('svelte').Snippet
+		content: Snippet
+		buttonContent: Snippet
 	}
 
 	let { title, description, onBack, onClose, content, buttonContent }: Props = $props()

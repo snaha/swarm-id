@@ -101,7 +101,7 @@
 			</div>
 			{#if batchIDError}
 				<div class="error-full-width">
-					<ErrorMessage message={batchIDError} />
+					<ErrorMessage>{batchIDError}</ErrorMessage>
 				</div>
 			{/if}
 
@@ -119,7 +119,7 @@
 			</div>
 			{#if depthError}
 				<div class="error-full-width">
-					<ErrorMessage message={depthError} />
+					<ErrorMessage>{depthError}</ErrorMessage>
 				</div>
 			{/if}
 
@@ -136,7 +136,7 @@
 			</div>
 			{#if signerKeyError}
 				<div class="error-full-width">
-					<ErrorMessage message={signerKeyError} />
+					<ErrorMessage>{signerKeyError}</ErrorMessage>
 				</div>
 			{/if}
 		</Grid>

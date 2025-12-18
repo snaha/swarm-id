@@ -4,13 +4,11 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import FolderShared from 'carbon-icons-svelte/lib/FolderShared.svelte'
 	import WorkflowAutomation from 'carbon-icons-svelte/lib/WorkflowAutomation.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import routes from '$lib/routes'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
-	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import GenerateSeedModal from '$lib/components/generate-seed-modal.svelte'
@@ -130,7 +128,7 @@
 				<!-- Row 1 -->
 				<Vertical --vertical-gap="var(--quarter-padding)">
 					<Horizontal --horizontal-gap="var(--half-padding)">
-						<FolderShared size={20} /><Typography>Account name</Typography>
+						<Typography>Account name</Typography>
 					</Horizontal>
 					<Input
 						variant="outline"
@@ -165,13 +163,13 @@
 						</Button>
 					</Horizontal>
 					{#if secretSeedError}
-						<ErrorMessage message={secretSeedError} />
+						<ErrorMessage>{secretSeedError}</ErrorMessage>
 					{:else}
 						<Typography variant="small" class="accent"
 							>Generate one with the button above on the right or use your own. <Tooltip
 								show={showTooltip}
 								position="top"
-								variant="compact"
+								variant="small"
 								color="dark"
 								maxWidth="287px"
 							>
@@ -199,20 +197,6 @@
 							><strong>Warning:</strong> If you lose this seed, you won't be able to recover your account.</Typography
 						>
 					{/if}
-				</Vertical>
-
-				<!-- Row 3 -->
-				<Vertical --vertical-gap="var(--quarter-padding)">
-					<Horizontal
-						--horizontal-gap="var(--half-padding)"
-						--horizontal-justify-content="space-between"
-					>
-						<Typography>Authentication</Typography>
-						<Horizontal --horizontal-gap="var(--half-padding)">
-							<EthereumLogo size={16} />
-							<Typography>Ethereum wallet</Typography>
-						</Horizontal>
-					</Horizontal>
 				</Vertical>
 
 				{#if error}
