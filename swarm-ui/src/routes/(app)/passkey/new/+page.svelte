@@ -1,6 +1,6 @@
 <script lang="ts">
 	import { goto } from '$app/navigation'
-	import { createPasskeyAccount } from '$lib/passkey'
+	import { getOrCreatePasskeyAccount } from '$lib/passkey'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
@@ -9,8 +9,6 @@
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
-	import { keccak256 } from 'ethers'
-	import { hexToUint8Array } from '$lib/utils/key-derivation'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
@@ -37,43 +35,39 @@
 		try {
 			isProcessing = true
 			error = undefined
-			console.log('🔐 Creating passkey account...')
 
-			// Create a new passkey account using account name as userId
-			// Different names create different credentials on the same authenticator
-			console.log('📝 Creating new passkey account for:', accountName)
 			const swarmIdDomain = window.location.hostname
-			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
 
-			const account = await createPasskeyAccount({
+			const passkeyAccount = await getOrCreatePasskeyAccount({
 				rpName: 'Swarm ID',
 				rpId: swarmIdDomain,
-				challenge,
 				userId: accountName.trim(),
 				userName: accountName.trim(),
 				userDisplayName: accountName.trim(),
 			})
-			console.log('✅ Passkey created successfully')
 
-			// Store account WITHOUT masterKey (passkey accounts never persist masterKey)
-			const newAccount = accountsStore.addAccount({
-				id: account.ethereumAddress,
-				createdAt: Date.now(),
-				name: accountName.trim(),
-				type: 'passkey',
-				credentialId: account.credentialId,
-			})
-			sessionStore.setAccount(newAccount)
+			// Check if account with this credential already exists (to avoid duplicates)
+			const existingAccount = accountsStore.accounts.find(
+				(acc): acc is import('$lib/types').PasskeyAccount =>
+					acc.type === 'passkey' && acc.credentialId === passkeyAccount.credentialId,
+			)
 
-			// Keep masterKey in session ONLY (not in account)
-			sessionStore.setTemporaryMasterKey(account.masterKey)
-			console.log('🔑 MasterKey stored in session (temporary)')
+			const account =
+				existingAccount ??
+				accountsStore.addAccount({
+					id: passkeyAccount.ethereumAddress,
+					createdAt: Date.now(),
+					name: accountName.trim(),
+					type: 'passkey',
+					credentialId: passkeyAccount.credentialId,
+				})
 
-			// Navigate to identity creation page
+			sessionStore.setAccount(account)
+			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
+
 			goto(routes.IDENTITY_NEW)
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to create passkey identity'
-			console.error('❌ Passkey creation failed:', err)
 			isProcessing = false
 		}
 	}
