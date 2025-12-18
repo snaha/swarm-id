@@ -1,21 +1,77 @@
-import type { Identity } from '$lib/types'
+import { z } from 'zod'
+import { browser } from '$app/environment'
+import {
+	EthAddressSchema,
+	TimestampSchema,
+	BatchIdSchema,
+	VersionedStorageSchema,
+} from '$lib/schemas/base'
+
+// ============================================================================
+// Schema & Types
+// ============================================================================
 
 const STORAGE_KEY = 'swarm-identities'
+const CURRENT_VERSION = 1
 
-// Load identities from localStorage
+const IdentitySchemaV1 = z.object({
+	id: z.string().min(1),
+	accountId: EthAddressSchema,
+	name: z.string().min(1).max(100),
+	defaultPostageStampBatchID: BatchIdSchema.optional(),
+	createdAt: TimestampSchema,
+})
+
+export type Identity = z.infer<typeof IdentitySchemaV1>
+
+// ============================================================================
+// Storage (versioned)
+// ============================================================================
+
 function loadIdentities(): Identity[] {
-	if (typeof window === 'undefined') return []
+	if (!browser) return []
 	const stored = localStorage.getItem(STORAGE_KEY)
-	return stored ? JSON.parse(stored) : []
+	if (!stored) return []
+
+	try {
+		const parsed: unknown = JSON.parse(stored)
+		return parse(parsed)
+	} catch (e) {
+		console.error('[Identities] Load failed:', e)
+		return []
+	}
 }
 
-// Save identities to localStorage
-function saveIdentities(identities: Identity[]) {
-	if (typeof window === 'undefined') return
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(identities))
+function parse(parsed: unknown): Identity[] {
+	const versioned = VersionedStorageSchema.safeParse(parsed)
+	const version = versioned.success ? versioned.data.version : 0
+	const data = versioned.success ? versioned.data.data : parsed
+
+	switch (version) {
+		case 0: // Legacy unversioned data
+		case 1: {
+			const result = z.array(IdentitySchemaV1).safeParse(data)
+			if (!result.success) {
+				console.error('[Identities] Invalid data:', result.error.format())
+				return []
+			}
+			return result.data
+		}
+		default:
+			console.error(`[Identities] Unknown version: ${version}`)
+			return []
+	}
 }
 
-// Reactive state using Svelte 5 runes
+function saveIdentities(data: Identity[]): void {
+	if (!browser) return
+	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data }))
+}
+
+// ============================================================================
+// Reactive Store
+// ============================================================================
+
 let identities = $state<Identity[]>(loadIdentities())
 
 export const identitiesStore = {
@@ -61,6 +117,6 @@ export const identitiesStore = {
 
 	clear() {
 		identities = []
-		saveIdentities(identities)
+		if (browser) localStorage.removeItem(STORAGE_KEY)
 	},
 }
