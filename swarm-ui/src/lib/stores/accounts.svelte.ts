@@ -5,7 +5,7 @@ import {
 	TimestampSchema,
 	HexStringSchema,
 	VersionedStorageSchema,
-} from '$lib/schemas/base'
+} from '$lib/schemas'
 
 // ============================================================================
 // Schema & Types

@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
-import { BatchIdSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas/base'
+import { BatchIdSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas'
 
 // ============================================================================
 // Schema & Types

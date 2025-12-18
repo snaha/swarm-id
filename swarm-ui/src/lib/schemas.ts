@@ -8,11 +8,6 @@ export const EthAddressSchema = z.string().regex(/^(0x)?[a-fA-F0-9]{40}$/, {
 })
 
 /**
- * UUID v4 format
- */
-export const UUIDSchema = z.string().uuid()
-
-/**
  * Unix timestamp in milliseconds
  */
 export const TimestampSchema = z.number().int().nonnegative()
