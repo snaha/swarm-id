@@ -30,7 +30,7 @@ declare module '@simplewebauthn/browser' {
 export interface PasskeyAccount {
 	credentialId: string
 	ethereumAddress: EthAddress
-	masterKey: Bytes // Hex-encoded seed for HD wallet derivation
+	masterKey: Bytes
 }
 
 export interface PasskeyRegistrationOptions {
