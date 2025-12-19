@@ -5,6 +5,8 @@
  * from a master identity key.
  */
 
+import { Bytes } from '@ethersphere/bee-js'
+
 /**
  * Derive an identity-specific master key from account master key and identity ID
  *
@@ -12,20 +14,23 @@
  * This enables hierarchical key derivation: Account → Identity → App.
  * The same account master key + identity ID will always produce the same identity key.
  *
- * @param accountMasterKey - The account's master key (hex string)
+ * @param accountMasterKey - The account's master key (Bytes or hex string)
  * @param identityId - The identity's unique identifier
  * @returns The derived identity master key as a hex string
  */
 export async function deriveIdentityKey(
-	accountMasterKey: string,
+	accountMasterKey: Bytes | string,
 	identityId: string,
 ): Promise<string> {
 	console.log('[KeyDerivation] Deriving identity key for:', identityId)
 
 	const encoder = new TextEncoder()
 
-	// Convert account master key from hex string to Uint8Array
-	const keyData = hexToUint8Array(accountMasterKey)
+	// Convert account master key to Uint8Array
+	const keyData =
+		accountMasterKey instanceof Bytes
+			? accountMasterKey.toUint8Array()
+			: new Bytes(accountMasterKey).toUint8Array()
 	const message = encoder.encode(identityId)
 
 	// Import the account master key for HMAC
@@ -41,7 +46,7 @@ export async function deriveIdentityKey(
 	const signature = await crypto.subtle.sign('HMAC', cryptoKey, message)
 
 	// Convert to hex string
-	const identityKeyHex = uint8ArrayToHex(new Uint8Array(signature))
+	const identityKeyHex = new Bytes(new Uint8Array(signature)).toHex()
 	console.log('[KeyDerivation] Identity key derived:', identityKeyHex.substring(0, 16) + '...')
 
 	return identityKeyHex
@@ -53,17 +58,18 @@ export async function deriveIdentityKey(
  * Uses HMAC-SHA256 to create a deterministic, unique secret for each app.
  * The same master key + app origin will always produce the same secret.
  *
- * @param masterKey - The master identity key (hex string)
+ * @param masterKey - The master identity key (Bytes or hex string)
  * @param appOrigin - The app's origin (e.g., "https://swarm-app.local:8080")
  * @returns The derived secret as a hex string
  */
-export async function deriveSecret(masterKey: string, appOrigin: string): Promise<string> {
+export async function deriveSecret(masterKey: Bytes | string, appOrigin: string): Promise<string> {
 	console.log('[KeyDerivation] Deriving secret for app:', appOrigin)
 
 	const encoder = new TextEncoder()
 
-	// Convert master key from hex string to Uint8Array
-	const keyData = hexToUint8Array(masterKey)
+	// Convert master key to Uint8Array
+	const keyData =
+		masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
 	const message = encoder.encode(appOrigin)
 
 	// Import the master key for HMAC
@@ -79,44 +85,8 @@ export async function deriveSecret(masterKey: string, appOrigin: string): Promis
 	const signature = await crypto.subtle.sign('HMAC', cryptoKey, message)
 
 	// Convert to hex string
-	const secretHex = uint8ArrayToHex(new Uint8Array(signature))
+	const secretHex = new Bytes(new Uint8Array(signature)).toHex()
 	console.log('[KeyDerivation] Secret derived:', secretHex.substring(0, 16) + '...')
 
 	return secretHex
-}
-
-/**
- * Convert a hex string to Uint8Array
- *
- * @param hexString - Hex string (e.g., "deadbeef")
- * @returns Uint8Array
- */
-export function hexToUint8Array(hexString: string): Uint8Array {
-	// Remove any whitespace and ensure even length
-	const hex = hexString.replace(/\s/g, '').replace(/^0x/, '')
-	if (hex.length % 2 !== 0) {
-		throw new Error('Invalid hex string: length must be even')
-	}
-
-	const bytes = new Uint8Array(hex.length / 2)
-	for (let i = 0; i < hex.length; i += 2) {
-		bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
-	}
-
-	return bytes
-}
-
-/**
- * Convert a Uint8Array to hex string
- *
- * @param bytes - Uint8Array to convert
- * @returns Hex string (e.g., "deadbeef")
- */
-export function uint8ArrayToHex(bytes: Uint8Array): string {
-	return (
-		'0x' +
-		Array.from(bytes)
-			.map((b) => b.toString(16).padStart(2, '0'))
-			.join('')
-	)
 }

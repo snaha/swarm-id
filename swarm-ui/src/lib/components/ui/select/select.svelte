@@ -96,7 +96,9 @@
 				value = store.value
 				store.changed = false
 				if (onchange && input) {
-					onchange({ ...new Event('onchange'), currentTarget: input })
+					// Pass actual value, not label (input.value shows label text)
+					const target = { ...input, value: store.value ?? '' } as HTMLInputElement
+					onchange({ ...new Event('onchange'), currentTarget: target })
 				}
 			} else {
 				store.value = value

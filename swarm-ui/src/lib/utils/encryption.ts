@@ -6,16 +6,16 @@
  * - AES-GCM for authenticated encryption
  */
 
-import { hexToUint8Array, uint8ArrayToHex } from './key-derivation'
+import { Bytes } from '@ethersphere/bee-js'
 
 /**
  * Generate a random encryption salt (32 bytes)
  * Used as salt for HKDF key derivation
  */
-export function generateEncryptionSalt(): Uint8Array {
+export function generateEncryptionSalt(): Bytes {
 	const salt = new Uint8Array(32)
 	crypto.getRandomValues(salt)
-	return salt
+	return new Bytes(salt)
 }
 
 /**
@@ -28,12 +28,15 @@ export function generateEncryptionSalt(): Uint8Array {
  * - Output: 256-bit AES-GCM key
  *
  * @param publicKey - Hex string of ECDSA public key (recovered from signature)
- * @param salt - Random salt used as HKDF salt
+ * @param salt - Random salt used as HKDF salt (Bytes or hex string)
  * @returns CryptoKey for AES-GCM encryption/decryption
  */
-export async function deriveEncryptionKey(publicKey: string, salt: string): Promise<CryptoKey> {
-	const publicKeyBytes = hexToUint8Array(publicKey)
-	const saltBytes = hexToUint8Array(salt)
+export async function deriveEncryptionKey(
+	publicKey: string,
+	salt: Bytes | string,
+): Promise<CryptoKey> {
+	const publicKeyBytes = new Bytes(publicKey).toUint8Array()
+	const saltBytes = salt instanceof Bytes ? salt.toUint8Array() : new Bytes(salt).toUint8Array()
 
 	// Step 1: Import public key as raw key material for HKDF
 	const keyMaterial = await crypto.subtle.importKey('raw', publicKeyBytes, 'HKDF', false, [
@@ -63,21 +66,20 @@ export async function deriveEncryptionKey(publicKey: string, salt: string): Prom
 /**
  * Encrypt masterKey using AES-GCM
  *
- * @param masterKey - Hex string of masterKey to encrypt
+ * @param masterKey - MasterKey to encrypt (Bytes or hex string)
  * @param encryptionKey - CryptoKey derived from public key + nonce
- * @returns Hex string of encrypted data (includes IV + ciphertext + auth tag)
+ * @returns Encrypted data (includes IV + ciphertext + auth tag)
  */
 export async function encryptMasterKey(
-	masterKey: string,
+	masterKey: Bytes | string,
 	encryptionKey: CryptoKey,
-): Promise<string> {
+): Promise<Bytes> {
 	// Generate random IV (96 bits = 12 bytes, recommended for AES-GCM)
 	const iv = new Uint8Array(12)
 	crypto.getRandomValues(iv)
 
-	// Remove '0x' prefix if present
-	const cleanMasterKey = masterKey.startsWith('0x') ? masterKey.slice(2) : masterKey
-	const masterKeyBytes = hexToUint8Array(cleanMasterKey)
+	const masterKeyBytes =
+		masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
 
 	// Encrypt using AES-GCM (includes authentication tag automatically)
 	const encryptedData = await crypto.subtle.encrypt(
@@ -95,21 +97,24 @@ export async function encryptMasterKey(
 	combined.set(iv, 0)
 	combined.set(new Uint8Array(encryptedData), iv.length)
 
-	return uint8ArrayToHex(combined)
+	return new Bytes(combined)
 }
 
 /**
  * Decrypt masterKey using AES-GCM
  *
- * @param encryptedMasterKey - Hex string of encrypted data (IV + ciphertext + tag)
+ * @param encryptedMasterKey - Encrypted data (IV + ciphertext + tag) as Bytes or hex string
  * @param encryptionKey - CryptoKey derived from public key + nonce
- * @returns Hex string of decrypted masterKey (with '0x' prefix)
+ * @returns Decrypted masterKey
  */
 export async function decryptMasterKey(
-	encryptedMasterKey: string,
+	encryptedMasterKey: Bytes | string,
 	encryptionKey: CryptoKey,
-): Promise<string> {
-	const encryptedBytes = hexToUint8Array(encryptedMasterKey)
+): Promise<Bytes> {
+	const encryptedBytes =
+		encryptedMasterKey instanceof Bytes
+			? encryptedMasterKey.toUint8Array()
+			: new Bytes(encryptedMasterKey).toUint8Array()
 
 	// Extract IV (first 12 bytes) and ciphertext (remaining bytes)
 	const iv = encryptedBytes.slice(0, 12)
@@ -125,5 +130,5 @@ export async function decryptMasterKey(
 		ciphertext,
 	)
 
-	return uint8ArrayToHex(new Uint8Array(decryptedData))
+	return new Bytes(new Uint8Array(decryptedData))
 }

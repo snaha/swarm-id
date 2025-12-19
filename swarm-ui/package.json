@@ -52,6 +52,7 @@
 		"pnpm": "10.x"
 	},
 	"dependencies": {
+		"@ethersphere/bee-js": "link:../bee-js",
 		"@simplewebauthn/browser": "13.2.2",
 		"@swarm-id/lib": "workspace:*",
 		"@web3-onboard/core": "^2.24.1",

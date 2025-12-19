@@ -10,12 +10,13 @@
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
 	import { goto } from '$app/navigation'
+	import type { BatchId } from '@ethersphere/bee-js'
 
 	const identityId = $derived($page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
 	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
 
-	function makeDefaultStamp(batchID: string) {
+	function makeDefaultStamp(batchID: BatchId) {
 		if (!identityId) return
 		identitiesStore.setDefaultStamp(identityId, batchID)
 	}
@@ -36,14 +37,14 @@
 		return `${formatBytes(usedBytes)} of ${formatBytes(totalBytes)} used`
 	}
 
-	function formatBatchId(batchId: string): string {
-		return batchId.slice(0, 8)
+	function formatBatchId(batchId: BatchId): string {
+		return batchId.toHex().slice(0, 8)
 	}
 
-	function removeStamp(batchID: string) {
+	function removeStamp(batchID: BatchId) {
 		if (!identityId) return
 		// If this is the default stamp, clear the default stamp first
-		if (identity?.defaultPostageStampBatchID === batchID) {
+		if (identity?.defaultPostageStampBatchID?.equals(batchID)) {
 			identitiesStore.setDefaultStamp(identityId, undefined)
 		}
 		postageStampsStore.removeStamp(batchID)
@@ -57,8 +58,8 @@
 		>
 		<Vertical --vertical-gap="0">
 			<Divider />
-			{#each stamps as stamp (stamp.batchID)}
-				{@const isDefault = identity?.defaultPostageStampBatchID === stamp.batchID}
+			{#each stamps as stamp (stamp.batchID.toHex())}
+				{@const isDefault = identity?.defaultPostageStampBatchID?.equals(stamp.batchID) ?? false}
 				<CollapsibleSection
 					title={formatBatchId(stamp.batchID)}
 					count={isDefault ? 'default' : undefined}
@@ -67,7 +68,7 @@
 					<Vertical --vertical-gap="var(--half-padding)">
 						<Horizontal --horizontal-justify-content="space-between">
 							<Typography>Stamp ID</Typography>
-							<Input variant="outline" dimension="compact" value={stamp.batchID} readonly />
+							<Input variant="outline" dimension="compact" value={stamp.batchID.toHex()} readonly />
 						</Horizontal>
 						<Horizontal --horizontal-justify-content="space-between">
 							<Typography>Depth</Typography>

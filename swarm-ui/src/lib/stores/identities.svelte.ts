@@ -1,21 +1,92 @@
-import type { Identity } from '$lib/types'
+import { z } from 'zod'
+import { browser } from '$app/environment'
+import { EthAddress, BatchId } from '@ethersphere/bee-js'
+import {
+	EthAddressSchema,
+	TimestampSchema,
+	BatchIdSchema,
+	VersionedStorageSchema,
+} from '$lib/schemas'
+
+// ============================================================================
+// Schema & Types
+// ============================================================================
 
 const STORAGE_KEY = 'swarm-identities'
+const CURRENT_VERSION = 1
 
-// Load identities from localStorage
+const IdentitySchemaV1 = z.object({
+	id: z.string().min(1),
+	accountId: EthAddressSchema,
+	name: z.string().min(1).max(100),
+	defaultPostageStampBatchID: BatchIdSchema.optional(),
+	createdAt: TimestampSchema,
+})
+
+export type Identity = z.infer<typeof IdentitySchemaV1>
+
+// ============================================================================
+// Storage (versioned)
+// ============================================================================
+
 function loadIdentities(): Identity[] {
-	if (typeof window === 'undefined') return []
+	if (!browser) return []
 	const stored = localStorage.getItem(STORAGE_KEY)
-	return stored ? JSON.parse(stored) : []
+	if (!stored) return []
+
+	try {
+		const parsed: unknown = JSON.parse(stored)
+		return parse(parsed)
+	} catch (e) {
+		console.error('[Identities] Load failed:', e)
+		return []
+	}
 }
 
-// Save identities to localStorage
-function saveIdentities(identities: Identity[]) {
-	if (typeof window === 'undefined') return
-	localStorage.setItem(STORAGE_KEY, JSON.stringify(identities))
+function parse(parsed: unknown): Identity[] {
+	const versioned = VersionedStorageSchema.safeParse(parsed)
+	const version = versioned.success ? versioned.data.version : 0
+	const data = versioned.success ? versioned.data.data : parsed
+
+	switch (version) {
+		case 0: // Legacy unversioned data
+		case 1: {
+			const result = z.array(IdentitySchemaV1).safeParse(data)
+			if (!result.success) {
+				console.error('[Identities] Invalid data:', result.error.format())
+				return []
+			}
+			return result.data
+		}
+		default:
+			console.error(`[Identities] Unknown version: ${version}`)
+			return []
+	}
 }
 
-// Reactive state using Svelte 5 runes
+/**
+ * Serialize identity for storage (convert Bytes instances to hex strings)
+ */
+function serializeIdentity(identity: Identity): Record<string, unknown> {
+	return {
+		id: identity.id,
+		accountId: identity.accountId.toHex(),
+		name: identity.name,
+		defaultPostageStampBatchID: identity.defaultPostageStampBatchID?.toHex(),
+		createdAt: identity.createdAt,
+	}
+}
+
+function saveIdentities(data: Identity[]): void {
+	if (!browser) return
+	const serialized = data.map(serializeIdentity)
+	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
+}
+
+// ============================================================================
+// Reactive Store
+// ============================================================================
+
 let identities = $state<Identity[]>(loadIdentities())
 
 export const identitiesStore = {
@@ -43,13 +114,18 @@ export const identitiesStore = {
 		return identities.find((i) => i.id === id)
 	},
 
-	getIdentitiesByAccount(accountId: string): Identity[] {
-		return identities.filter((i) => i.accountId === accountId)
+	getIdentitiesByAccount(accountId: EthAddress): Identity[] {
+		return identities.filter((i) => i.accountId.equals(accountId))
 	},
 
-	setDefaultStamp(identityId: string, batchID: string | undefined) {
+	setDefaultStamp(identityId: string, batchID: BatchId | undefined) {
 		identities = identities.map((i) =>
-			i.id === identityId ? { ...i, defaultPostageStampBatchID: batchID } : i,
+			i.id === identityId
+				? {
+						...i,
+						defaultPostageStampBatchID: batchID,
+					}
+				: i,
 		)
 		saveIdentities(identities)
 	},
@@ -61,6 +137,6 @@ export const identitiesStore = {
 
 	clear() {
 		identities = []
-		saveIdentities(identities)
+		if (browser) localStorage.removeItem(STORAGE_KEY)
 	},
 }

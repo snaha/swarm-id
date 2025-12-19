@@ -11,33 +11,27 @@
 	import Grid from '$lib/components/ui/grid.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
 	import Toggle from '$lib/components/ui/toggle.svelte'
+	import { BatchId } from '@ethersphere/bee-js'
+	import { toPrefixedHex } from '$lib/utils/hex'
 
 	const identityId = $derived($page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
 	const apps = $derived(identityId ? connectedAppsStore.getAppsByIdentityId(identityId) : [])
 	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
 
-	// eslint-disable-next-line svelte/prefer-writable-derived -- defaultStampBatchID is bound to Select, must be writable
-	let defaultStampBatchID = $state<string | undefined>(undefined)
+	const defaultStampBatchId = $derived(identity?.defaultPostageStampBatchID)
+	const defaultStampBatchIdHex = $derived(
+		defaultStampBatchId ? toPrefixedHex(defaultStampBatchId) : undefined,
+	)
 
-	// Sync local state with store
-	$effect(() => {
-		defaultStampBatchID = identity?.defaultPostageStampBatchID
-	})
-
-	// Update store when local state changes
-	$effect(() => {
-		if (
-			identityId &&
-			defaultStampBatchID &&
-			defaultStampBatchID !== identity?.defaultPostageStampBatchID
-		) {
-			identitiesStore.setDefaultStamp(identityId, defaultStampBatchID)
+	function handleStampChange(hex: string) {
+		if (identityId) {
+			identitiesStore.setDefaultStamp(identityId, new BatchId(hex))
 		}
-	})
+	}
 
-	function formatBatchId(batchId: string): string {
-		return batchId.slice(0, 8)
+	function formatBatchId(batchId: BatchId): string {
+		return batchId.toHex().slice(0, 8)
 	}
 </script>
 
@@ -64,8 +58,12 @@
 			<Typography>Default postage stamp</Typography>
 			<Select
 				dimension="compact"
-				bind:value={defaultStampBatchID}
-				items={stamps.map((s) => ({ value: s.batchID, label: formatBatchId(s.batchID) }))}
+				value={defaultStampBatchIdHex}
+				onchange={(e) => handleStampChange(e.currentTarget.value)}
+				items={stamps.map((s) => ({
+					value: toPrefixedHex(s.batchID),
+					label: formatBatchId(s.batchID),
+				}))}
 				placeholder={stamps.length === 0 ? 'No stamps available' : undefined}
 				disabled={stamps.length === 0}
 			></Select>

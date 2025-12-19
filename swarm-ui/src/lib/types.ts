@@ -1,57 +1,21 @@
 // Type definitions for Swarm Identity
+// Types are derived from Zod schemas (single source of truth)
 
-export type Identity = {
-	id: string
-	accountId: string
-	name: string
-	defaultPostageStampBatchID?: string
-	createdAt: number
-}
+import { z } from 'zod'
+import { UrlSchema } from './schemas'
 
-type AccountBase = {
-	id: string // an ethereum address
-	name: string
-	createdAt: number
-}
+// Re-export all types from stores
+export type { Account } from './stores/accounts.svelte'
+export type { Identity } from './stores/identities.svelte'
+export type { ConnectedApp } from './stores/connected-apps.svelte'
+export type { PostageStamp } from './stores/postage-stamps.svelte'
 
-export type PasskeyAccount = AccountBase & {
-	type: 'passkey'
-	credentialId: string // WebAuthn credential ID
-	// No masterKey stored - retrieved via passkey re-authentication
-}
+// App metadata (used for connection requests before identity is assigned)
+export const AppDataSchema = z.object({
+	appUrl: UrlSchema,
+	appName: z.string().min(1).max(100),
+	appIcon: z.string().max(10000).optional(),
+	appDescription: z.string().max(500).optional(),
+})
 
-export type EthereumAccount = AccountBase & {
-	type: 'ethereum'
-	ethereumAddress: string
-	encryptedMasterKey: string // AES-GCM encrypted masterKey
-	encryptionSalt: string // HKDF salt (hex string)
-}
-
-export type Account = PasskeyAccount | EthereumAccount
-
-export type AppData = {
-	appUrl: string
-	appName: string
-	appIcon?: string
-	appDescription?: string
-}
-
-export type ConnectedApp = AppData & {
-	lastConnectedAt: number
-	identityId: string
-}
-
-export type PostageStamp = {
-	identityId: string
-	batchID: string
-	utilization: number
-	usable: boolean
-	depth: number
-	amount: string
-	bucketDepth: number
-	blockNumber: number
-	immutableFlag: boolean
-	exists: boolean
-	batchTTL?: number
-	createdAt: number
-}
+export type AppData = z.infer<typeof AppDataSchema>

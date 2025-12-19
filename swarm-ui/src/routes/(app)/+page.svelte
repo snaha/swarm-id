@@ -8,12 +8,13 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import { EthAddress } from '@ethersphere/bee-js'
 	import { goto } from '$app/navigation'
 	import type { Identity } from '$lib/types'
 	import routes from '$lib/routes'
 	import Confirmation from '$lib/components/confirmation.svelte'
 
-	let selectedAccountId = $state<string | undefined>(undefined)
+	let selectedAccountId = $state<EthAddress | undefined>(undefined)
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
@@ -21,11 +22,11 @@
 
 	// Get identities from store, filtered by selected account
 	const allIdentities = $derived(identitiesStore.identities)
-	const identities = $derived(
-		selectedAccountId
-			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
-			: allIdentities,
-	)
+	const identities = $derived.by(() => {
+		const accountId = selectedAccountId
+		if (!accountId) return allIdentities
+		return allIdentities.filter((identity) => identity.accountId.equals(accountId))
+	})
 	const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
 	let showCreateMode = $state(false)
@@ -52,7 +53,10 @@
 					: 'Create an identity to continue'}</Typography
 			>
 			<Vertical --vertical-gap="var(--double-padding)">
-				<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
+				<AccountSelector
+					bind:selectedAccount={selectedAccountId}
+					onCreateAccount={handleCreateNew}
+				/>
 				<IdentityList {identities} onIdentityClick={handleIdentityClick} />
 				<Horizontal --horizontal-justify-content="flex-start">
 					<CreateIdentityButton account={selectedAccount} {isAuthenticating} />

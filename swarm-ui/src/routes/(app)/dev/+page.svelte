@@ -14,7 +14,8 @@
 		encryptMasterKey,
 		generateEncryptionSalt,
 	} from '$lib/utils/encryption'
-	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
+	import { BatchId } from '@ethersphere/bee-js'
+	import { toPrefixedHex } from '$lib/utils/hex'
 
 	let message = $state('')
 
@@ -43,9 +44,9 @@
 			credentialId: 'test-credential-1',
 		})
 
-		const wallet2 = HDNodeWallet.fromSeed(ethereumWallet2.masterKey)
+		const wallet2 = HDNodeWallet.fromSeed(toPrefixedHex(ethereumWallet2.masterKey))
 		const publicKey2 = wallet2.publicKey
-		const encryptionSalt2 = uint8ArrayToHex(generateEncryptionSalt())
+		const encryptionSalt2 = generateEncryptionSalt()
 		const encryptionKey2 = await deriveEncryptionKey(publicKey2, encryptionSalt2)
 		const encryptedMasterKey2 = await encryptMasterKey(ethereumWallet2.masterKey, encryptionKey2)
 
@@ -124,7 +125,7 @@
 		// Alice has 3 stamps
 		const aliceStamp1 = postageStampsStore.addStamp({
 			identityId: identity1.id,
-			batchID: 'a41d4c7c89e5f42a3b9d8e7f1c2a4b5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b',
+			batchID: new BatchId('a41d4c7c89e5f42a3b9d8e7f1c2a4b5d6e7f8a9b0c1d2e3f4a5b6c7d8e9f0a1b'),
 			utilization: 0.5, // 50% used
 			usable: true,
 			depth: 17,
@@ -138,7 +139,7 @@
 
 		postageStampsStore.addStamp({
 			identityId: identity1.id,
-			batchID: 'b52e5d8d9af6g53b4c0e9f8g2d3b5c6e7f8g0a1b2c3d4e5f6b7c8d9e0f1a2c',
+			batchID: new BatchId('b52e5d8d9af6053b4c0e9f802d3b5c6e7f8000a1b2c3d4e5f6b7c8d9e0f1a2c0'),
 			utilization: 0.15, // 15% used
 			usable: true,
 			depth: 18,
@@ -152,7 +153,7 @@
 
 		postageStampsStore.addStamp({
 			identityId: identity1.id,
-			batchID: 'c63f6e9eabg7h64c5d1f0g9h3e4c6d7f8g9h1b2c3d4e5f6g7c8d9e0f1b2d3e',
+			batchID: new BatchId('c63f6e9eab07064c5d1f009003e4c6d7f8090102c3d4e5f607c8d9e0f1b2d3e0'),
 			utilization: 0.92, // 92% used - almost full!
 			usable: true,
 			depth: 17,
@@ -167,7 +168,7 @@
 		// Bob has 1 stamp
 		const bobStamp1 = postageStampsStore.addStamp({
 			identityId: identity2.id,
-			batchID: 'd74g7f0fbch8i75d6e2g1h0i4f5d7e8g9h0i2c3d4e5f6g7h8d9e0f1c2e3f4g',
+			batchID: new BatchId('d74070f0bc08075d6e201004f5d7e809002c3d4e5f607089e0f1c2e3f4000000'),
 			utilization: 0.25, // 25% used
 			usable: true,
 			depth: 20,

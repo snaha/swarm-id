@@ -9,6 +9,7 @@ import { BrowserProvider, JsonRpcSigner, hashMessage, SigningKey, BaseWallet } f
 import type { Eip1193Provider } from 'ethers'
 import Onboard from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
+import { EthAddress, Bytes } from '@ethersphere/bee-js'
 
 const injected = injectedModule()
 const wallets = [injected]
@@ -142,18 +143,17 @@ export function deriveMasterKey(
 	secretSeed: string,
 	publicKey: string,
 ): {
-	masterKey: string
-	masterAddress: string
+	masterKey: Bytes
+	masterAddress: EthAddress
 } {
 	const seedHash = hashMessage(secretSeed)
-	const masterKey = hashMessage(`${seedHash} ${publicKey}`)
-	const signingKey = new SigningKey(masterKey)
+	const masterKeyHex = hashMessage(`${seedHash} ${publicKey}`)
+	const signingKey = new SigningKey(masterKeyHex)
 	const baseWallet = new BaseWallet(signingKey)
-	const masterAddress = baseWallet.address
 
 	return {
-		masterKey,
-		masterAddress,
+		masterKey: new Bytes(masterKeyHex),
+		masterAddress: new EthAddress(baseWallet.address),
 	}
 }
 
