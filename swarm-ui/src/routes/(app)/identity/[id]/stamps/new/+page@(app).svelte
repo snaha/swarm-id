@@ -10,12 +10,16 @@
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { BatchId } from '@ethersphere/bee-js'
+	import Vertical from '$lib/components/ui/vertical.svelte'
+	import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
 
 	const identityId = $derived($page.params.id)
 
 	let batchID = $state('')
 	let depth = $state('20')
 	let signerKey = $state('')
+	let amount = $state('')
+	let blockNumber = $state('')
 
 	// Error state for each field
 	let batchIDError = $derived.by(() => {
@@ -88,9 +92,8 @@
 	onClose={() => history.back()}
 >
 	{#snippet content()}
-		<Grid>
+		<Vertical>
 			<!-- Row 1 -->
-			<Typography>Stamp ID</Typography>
 			<div class="input-wrapper">
 				<Input
 					variant="outline"
@@ -98,6 +101,7 @@
 					name="batchID"
 					bind:value={batchID}
 					error={batchIDError}
+					label="Stamp ID"
 				/>
 			</div>
 			{#if batchIDError}
@@ -107,25 +111,45 @@
 			{/if}
 
 			<!-- Row 2 -->
-			<Typography>Depth</Typography>
-			<div class="input-wrapper">
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="depth"
-					type="number"
-					bind:value={depth}
-					error={depthError}
-				/>
-			</div>
-			{#if depthError}
-				<div class="error-full-width">
-					<ErrorMessage>{depthError}</ErrorMessage>
-				</div>
-			{/if}
+			<Vertical>
+				<ResponsiveLayout --responsive-justify-content="stretch">
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="depth"
+							type="number"
+							bind:value={depth}
+							error={depthError}
+							label="Depth"
+							class="stamp-depth"
+						/>
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="amount"
+							type="number"
+							bind:value={amount}
+							error={depthError}
+							label="Amount"
+						/>
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="blockNumber"
+							type="number"
+							bind:value={blockNumber}
+							error={depthError}
+							label="Block number"
+						/>
+				</ResponsiveLayout>
+				{#if depthError}
+					<div class="error-full-width">
+						<ErrorMessage>{depthError}</ErrorMessage>
+					</div>
+				{/if}
+			</Vertical>
 
 			<!-- Row 3 -->
-			<Typography>Signer key (optional)</Typography>
 			<div class="input-wrapper">
 				<Input
 					variant="outline"
@@ -133,6 +157,7 @@
 					name="signerKey"
 					bind:value={signerKey}
 					error={signerKeyError}
+					label="Signer key"
 				/>
 			</div>
 			{#if signerKeyError}
@@ -140,7 +165,7 @@
 					<ErrorMessage>{signerKeyError}</ErrorMessage>
 				</div>
 			{/if}
-		</Grid>
+		</Vertical>
 	{/snippet}
 
 	{#snippet buttonContent()}
@@ -157,5 +182,8 @@
 
 	.error-full-width {
 		grid-column: 1 / -1;
+	}
+	:global(.stamp-depth) {
+		flex: 0.1;
 	}
 </style>
