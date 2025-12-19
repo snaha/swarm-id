@@ -1,11 +1,17 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
 import { UrlSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas'
+import { DAY } from '$lib/time'
 
 // ============================================================================
 // Schema & Types
 // ============================================================================
 
+export const DEFAULT_SESSION_DURATION = 30 * DAY
+
+// ============================================================================
+// Storage (versioned)
+// ============================================================================
 const STORAGE_KEY = 'swarm-connected-apps'
 const CURRENT_VERSION = 1
 
@@ -16,13 +22,10 @@ const ConnectedAppSchemaV1 = z.object({
 	identityId: z.string().min(1),
 	appIcon: z.string().max(10000).optional(),
 	appDescription: z.string().max(500).optional(),
+	connectedUntil: TimestampSchema.optional(),
 })
 
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
-
-// ============================================================================
-// Storage (versioned)
-// ============================================================================
 
 function loadConnectedApps(): ConnectedApp[] {
 	if (!browser) return []
@@ -81,11 +84,13 @@ export const connectedAppsStore = {
 			appIcon?: string
 			appDescription?: string
 		},
+		defaultConnectionTime: number,
 	): ConnectedApp {
 		const existingApp = connectedApps.find(
 			(app) => app.appUrl === appData.appUrl && app.identityId === appData.identityId,
 		)
 
+		const now = Date.now()
 		if (existingApp) {
 			// Update existing app
 			const updatedApp: ConnectedApp = {
@@ -93,7 +98,8 @@ export const connectedAppsStore = {
 				appName: appData.appName,
 				appIcon: appData.appIcon ?? existingApp.appIcon,
 				appDescription: appData.appDescription ?? existingApp.appDescription,
-				lastConnectedAt: Date.now(),
+				lastConnectedAt: now,
+				connectedUntil: now + defaultConnectionTime,
 			}
 			connectedApps = connectedApps.map((app) =>
 				app.appUrl === existingApp.appUrl && app.identityId === existingApp.identityId
@@ -110,7 +116,8 @@ export const connectedAppsStore = {
 				identityId: appData.identityId,
 				appIcon: appData.appIcon,
 				appDescription: appData.appDescription,
-				lastConnectedAt: Date.now(),
+				lastConnectedAt: now,
+				connectedUntil: now + defaultConnectionTime,
 			}
 			connectedApps = [...connectedApps, newApp]
 			saveConnectedApps(connectedApps)
@@ -143,6 +150,19 @@ export const connectedAppsStore = {
 	removeApp(appUrl: string, identityId: string) {
 		connectedApps = connectedApps.filter(
 			(app) => !(app.appUrl === appUrl && app.identityId === identityId),
+		)
+		saveConnectedApps(connectedApps)
+	},
+
+	disconnectApp(appUrl: string, identityId: string) {
+		connectedApps = connectedApps.map((app) =>
+			app.appUrl === appUrl && app.identityId === identityId
+				? {
+						...app,
+						lastConnectedAt: 0,
+						connectedUntil: undefined,
+					}
+				: app,
 		)
 		saveConnectedApps(connectedApps)
 	},

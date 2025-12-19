@@ -60,3 +60,8 @@ export {
   IframeToParentMessageSchema,
   PopupToIframeMessageSchema,
 } from "./types"
+
+// Constant exports
+export { 
+  SWARM_SECRET_PREFIX,
+} from "./types"

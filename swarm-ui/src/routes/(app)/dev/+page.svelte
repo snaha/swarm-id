@@ -5,7 +5,7 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+	import { connectedAppsStore, DEFAULT_SESSION_DURATION } from '$lib/stores/connected-apps.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { createEthereumWalletFromSeed } from '$lib/passkey'
 	import { HDNodeWallet } from 'ethers'
@@ -89,37 +89,52 @@
 
 		// Create connected app records for some identities
 		// Alice has connected to multiple apps
-		connectedAppsStore.addOrUpdateApp({
-			appUrl: 'https://swarm-app.local:8080',
-			appName: 'Swarm App',
-			identityId: identity1.id,
-		})
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: 'https://swarm-app.local:8080',
+				appName: 'Swarm App',
+				identityId: identity1.id,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
 
-		connectedAppsStore.addOrUpdateApp({
-			appUrl: 'https://example.com',
-			appName: 'Example App',
-			identityId: identity1.id,
-		})
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: 'https://example.com',
+				appName: 'Example App',
+				identityId: identity1.id,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
 
-		connectedAppsStore.addOrUpdateApp({
-			appUrl: 'https://github.com',
-			appName: 'GitHub',
-			identityId: identity1.id,
-		})
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: 'https://github.com',
+				appName: 'GitHub',
+				identityId: identity1.id,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
 
 		// Bob has connected to swarm-app
-		connectedAppsStore.addOrUpdateApp({
-			appUrl: 'https://swarm-app.local:8080',
-			appName: 'Swarm App',
-			identityId: identity2.id,
-		})
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: 'https://swarm-app.local:8080',
+				appName: 'Swarm App',
+				identityId: identity2.id,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
 
 		// Charlie has connected to localhost
-		connectedAppsStore.addOrUpdateApp({
-			appUrl: 'http://localhost:5173',
-			appName: 'localhost',
-			identityId: identity3.id,
-		})
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: 'http://localhost:5173',
+				appName: 'localhost',
+				identityId: identity3.id,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
 
 		// Create postage stamps
 		// Alice has 3 stamps
