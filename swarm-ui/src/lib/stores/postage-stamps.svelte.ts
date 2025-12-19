@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
-import { Bytes } from '@ethersphere/bee-js'
+import { BatchId } from '@ethersphere/bee-js'
 import { BatchIdSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas'
 
 // ============================================================================
@@ -103,12 +103,12 @@ export const postageStampsStore = {
 		return newStamp
 	},
 
-	removeStamp(batchID: string | Bytes) {
+	removeStamp(batchID: BatchId) {
 		postageStamps = postageStamps.filter((s) => !s.batchID.equals(batchID))
 		savePostageStamps(postageStamps)
 	},
 
-	getStamp(batchID: string | Bytes): PostageStamp | undefined {
+	getStamp(batchID: BatchId): PostageStamp | undefined {
 		return postageStamps.find((s) => s.batchID.equals(batchID))
 	},
 

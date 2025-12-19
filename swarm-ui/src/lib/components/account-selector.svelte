@@ -8,41 +8,44 @@
 	import Add from 'carbon-icons-svelte/lib/Add.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { EthAddress } from '@ethersphere/bee-js'
+	import { toPrefixedHex } from '$lib/utils/hex'
 
 	interface Props {
-		selectedAccountId: string | undefined
+		selectedAccount: EthAddress | undefined
 		onCreateAccount?: () => void
 	}
 
-	let { selectedAccountId = $bindable(), onCreateAccount }: Props = $props()
+	let { selectedAccount = $bindable(), onCreateAccount }: Props = $props()
 
 	const accounts = $derived(accountsStore.accounts)
+
+	const selectedAccountHex = $derived(selectedAccount ? toPrefixedHex(selectedAccount) : undefined)
+
 	const accountItems = $derived(
 		accounts.map((account) => ({
-			value: account.id.toHex(),
+			value: toPrefixedHex(account.id),
 			label: account.name,
 			icon: account.type === 'passkey' ? PasskeyLogo : EthereumLogo,
 		})),
 	)
 
-	// Initialize from session store or default to first account
-	$effect(() => {
-		if (!selectedAccountId) {
-			if (sessionStore.data.account?.id) {
-				selectedAccountId = sessionStore.data.account.id.toHex()
-			} else if (accounts.length > 0) {
-				selectedAccountId = accounts[0].id.toHex()
-				sessionStore.setAccount(accounts[0])
-			}
+	function handleAccountChange(hex: string) {
+		const account = accountsStore.getAccount(new EthAddress(hex))
+		if (account) {
+			selectedAccount = account.id
+			sessionStore.setAccount(account)
 		}
-	})
+	}
 
-	// Sync selection changes to session store
+	// Initialize selected account from session or first available
 	$effect(() => {
-		if (selectedAccountId && selectedAccountId !== sessionStore.data.account?.id.toHex()) {
-			const account = accountsStore.getAccount(selectedAccountId)
-			if (account) {
-				sessionStore.setAccount(account)
+		if (!selectedAccount) {
+			if (sessionStore.data.account?.id) {
+				selectedAccount = sessionStore.data.account.id
+			} else if (accounts.length > 0) {
+				selectedAccount = accounts[0].id
+				sessionStore.setAccount(accounts[0])
 			}
 		}
 	})
@@ -50,7 +53,13 @@
 
 <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
 	<Typography>Account</Typography>
-	<Select items={accountItems} bind:value={selectedAccountId} dimension="compact" variant="solid">
+	<Select
+		items={accountItems}
+		value={selectedAccountHex}
+		onchange={(e) => handleAccountChange(e.currentTarget.value)}
+		dimension="compact"
+		variant="solid"
+	>
 		{#snippet dropdownFooter({ close, store })}
 			{#if onCreateAccount}
 				<Option

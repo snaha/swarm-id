@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
-import { Bytes, BatchId } from '@ethersphere/bee-js'
+import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import {
 	EthAddressSchema,
 	TimestampSchema,
@@ -114,16 +114,16 @@ export const identitiesStore = {
 		return identities.find((i) => i.id === id)
 	},
 
-	getIdentitiesByAccount(accountId: string | Bytes): Identity[] {
+	getIdentitiesByAccount(accountId: EthAddress): Identity[] {
 		return identities.filter((i) => i.accountId.equals(accountId))
 	},
 
-	setDefaultStamp(identityId: string, batchID: BatchId | string | undefined) {
+	setDefaultStamp(identityId: string, batchID: BatchId | undefined) {
 		identities = identities.map((i) =>
 			i.id === identityId
 				? {
 						...i,
-						defaultPostageStampBatchID: batchID === undefined ? undefined : new BatchId(batchID),
+						defaultPostageStampBatchID: batchID,
 					}
 				: i,
 		)

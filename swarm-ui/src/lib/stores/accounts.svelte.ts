@@ -1,6 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
-import { Bytes } from '@ethersphere/bee-js'
+import { EthAddress } from '@ethersphere/bee-js'
 import {
 	EthAddressSchema,
 	TimestampSchema,
@@ -122,16 +122,16 @@ export const accountsStore = {
 		return account
 	},
 
-	removeAccount(id: string | Bytes) {
+	removeAccount(id: EthAddress) {
 		accounts = accounts.filter((a) => !a.id.equals(id))
 		saveAccounts(accounts)
 	},
 
-	getAccount(id: string | Bytes): Account | undefined {
+	getAccount(id: EthAddress): Account | undefined {
 		return accounts.find((a) => a.id.equals(id))
 	},
 
-	setAccountName(id: string | Bytes, name: string) {
+	setAccountName(id: EthAddress, name: string) {
 		accounts = accounts.map((account) => (account.id.equals(id) ? { ...account, name } : account))
 		saveAccounts(accounts)
 	},

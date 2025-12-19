@@ -13,6 +13,7 @@
 	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import { EthAddress } from '@ethersphere/bee-js'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import type { Account, Identity } from '$lib/types'
 	import { AppDataSchema } from '$lib/types'
@@ -26,7 +27,7 @@
 	let error = $state<string | undefined>(undefined)
 	let showCreateMode = $state(false)
 	let authenticated = $state(false)
-	let selectedAccountId = $state<string | undefined>(undefined)
+	let selectedAccountId = $state<EthAddress | undefined>(undefined)
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
@@ -34,9 +35,9 @@
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived.by(() => {
-		const accountIdFilter = selectedAccountId
-		if (!accountIdFilter) return allIdentities
-		return allIdentities.filter((identity) => identity.accountId.equals(accountIdFilter))
+		const accountId = selectedAccountId
+		if (!accountId) return allIdentities
+		return allIdentities.filter((identity) => identity.accountId.equals(accountId))
 	})
 	const hasIdentities = $derived(identities.length > 0)
 	const origin = window.location.origin
@@ -282,7 +283,7 @@
 	{#if hasIdentities && !showCreateMode}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
-			<AccountSelector bind:selectedAccountId onCreateAccount={handleCreateNew} />
+			<AccountSelector bind:selectedAccount={selectedAccountId} onCreateAccount={handleCreateNew} />
 			<IdentityGroups
 				{identities}
 				appUrl={sessionStore.data.appOrigin}
