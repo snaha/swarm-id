@@ -16,6 +16,7 @@
 	import type { Identity, Account } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
 	import { Bytes } from '@ethersphere/bee-js'
+	import { toPrefixedHex } from '$lib/utils/hex'
 	import { generateDockerName } from '$lib/docker-name'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
@@ -55,7 +56,7 @@
 	)
 
 	function deriveIdentityFromAccount(account: Account, masterKey: Bytes, index: number) {
-		const identityWallet = HDNodeWallet.fromSeed('0x' + masterKey.toHex()).deriveChild(index)
+		const identityWallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey)).deriveChild(index)
 		const id = identityWallet.address
 		const name = generateDockerName(id)
 		const accountId = account.id

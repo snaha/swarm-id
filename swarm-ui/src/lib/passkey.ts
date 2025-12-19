@@ -12,6 +12,7 @@ import {
 } from '@simplewebauthn/browser'
 import { HDNodeWallet } from 'ethers'
 import { EthAddress, Bytes } from '@ethersphere/bee-js'
+import { toPrefixedHex } from './utils/hex'
 
 // Type augmentation for PRF extension (not in standard types)
 declare module '@simplewebauthn/browser' {
@@ -161,7 +162,7 @@ export async function createPasskeyAccount(
 		})
 	}
 
-	console.log('✅ Passkey account created with address:', account.ethereumAddress)
+	console.log('✅ Passkey account created with address:', toPrefixedHex(account.ethereumAddress))
 
 	return account
 }
@@ -279,8 +280,7 @@ export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
 	// Create Bytes from seed
 	const masterKey = new Bytes(seedBytes)
 
-	// Create HD wallet from seed (ethers accepts hex with 0x prefix)
-	const wallet = HDNodeWallet.fromSeed('0x' + masterKey.toHex())
+	const wallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey))
 
 	return {
 		address: new EthAddress(wallet.address),

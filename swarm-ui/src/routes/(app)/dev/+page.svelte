@@ -15,6 +15,7 @@
 		generateEncryptionSalt,
 	} from '$lib/utils/encryption'
 	import { BatchId } from '@ethersphere/bee-js'
+	import { toPrefixedHex } from '$lib/utils/hex'
 
 	let message = $state('')
 
@@ -43,7 +44,7 @@
 			credentialId: 'test-credential-1',
 		})
 
-		const wallet2 = HDNodeWallet.fromSeed('0x' + ethereumWallet2.masterKey.toHex())
+		const wallet2 = HDNodeWallet.fromSeed(toPrefixedHex(ethereumWallet2.masterKey))
 		const publicKey2 = wallet2.publicKey
 		const encryptionSalt2 = generateEncryptionSalt()
 		const encryptionKey2 = await deriveEncryptionKey(publicKey2, encryptionSalt2)
