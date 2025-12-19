@@ -10,7 +10,7 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { keccak256 } from 'ethers'
-	import { Bytes } from '@ethersphere/bee-js'
+	import { hexToUint8Array } from '$lib/utils/key-derivation'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
@@ -43,7 +43,7 @@
 			// Different names create different credentials on the same authenticator
 			console.log('📝 Creating new passkey account for:', accountName)
 			const swarmIdDomain = window.location.hostname
-			const challenge = new Bytes(keccak256(new TextEncoder().encode(swarmIdDomain))).toUint8Array()
+			const challenge = hexToUint8Array(keccak256(new TextEncoder().encode(swarmIdDomain)))
 
 			const account = await createPasskeyAccount({
 				rpName: 'Swarm ID',
