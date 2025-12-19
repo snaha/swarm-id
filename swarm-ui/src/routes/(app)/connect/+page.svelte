@@ -33,11 +33,11 @@
 	let isAuthenticating = $state(false)
 
 	const allIdentities = $derived(identitiesStore.identities)
-	const identities = $derived(
-		selectedAccountId
-			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
-			: allIdentities,
-	)
+	const identities = $derived.by(() => {
+		const accountIdFilter = selectedAccountId
+		if (!accountIdFilter) return allIdentities
+		return allIdentities.filter((identity) => identity.accountId.equals(accountIdFilter))
+	})
 	const hasIdentities = $derived(identities.length > 0)
 	const origin = window.location.origin
 

@@ -21,11 +21,11 @@
 
 	// Get identities from store, filtered by selected account
 	const allIdentities = $derived(identitiesStore.identities)
-	const identities = $derived(
-		selectedAccountId
-			? allIdentities.filter((identity) => identity.accountId === selectedAccountId)
-			: allIdentities,
-	)
+	const identities = $derived.by(() => {
+		const accountIdFilter = selectedAccountId
+		if (!accountIdFilter) return allIdentities
+		return allIdentities.filter((identity) => identity.accountId.equals(accountIdFilter))
+	})
 	const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
 	let showCreateMode = $state(false)

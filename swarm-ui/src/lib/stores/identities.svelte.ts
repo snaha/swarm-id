@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
+import { Bytes, BatchId } from '@ethersphere/bee-js'
 import {
 	EthAddressSchema,
 	TimestampSchema,
@@ -63,9 +64,23 @@ function parse(parsed: unknown): Identity[] {
 	}
 }
 
+/**
+ * Serialize identity for storage (convert Bytes instances to hex strings)
+ */
+function serializeIdentity(identity: Identity): Record<string, unknown> {
+	return {
+		id: identity.id,
+		accountId: identity.accountId.toHex(),
+		name: identity.name,
+		defaultPostageStampBatchID: identity.defaultPostageStampBatchID?.toHex(),
+		createdAt: identity.createdAt,
+	}
+}
+
 function saveIdentities(data: Identity[]): void {
 	if (!browser) return
-	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data }))
+	const serialized = data.map(serializeIdentity)
+	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
 }
 
 // ============================================================================
@@ -99,13 +114,18 @@ export const identitiesStore = {
 		return identities.find((i) => i.id === id)
 	},
 
-	getIdentitiesByAccount(accountId: string): Identity[] {
-		return identities.filter((i) => i.accountId === accountId)
+	getIdentitiesByAccount(accountId: string | Bytes): Identity[] {
+		return identities.filter((i) => i.accountId.equals(accountId))
 	},
 
-	setDefaultStamp(identityId: string, batchID: string | undefined) {
+	setDefaultStamp(identityId: string, batchID: BatchId | string | undefined) {
 		identities = identities.map((i) =>
-			i.id === identityId ? { ...i, defaultPostageStampBatchID: batchID } : i,
+			i.id === identityId
+				? {
+						...i,
+						defaultPostageStampBatchID: batchID === undefined ? undefined : new BatchId(batchID),
+					}
+				: i,
 		)
 		saveIdentities(identities)
 	},

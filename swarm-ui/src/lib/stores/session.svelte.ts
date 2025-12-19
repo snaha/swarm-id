@@ -1,6 +1,7 @@
 // Session store for tracking current account/identity creation flow
 
 import type { Account, AppData } from '$lib/types'
+import { Bytes } from '@ethersphere/bee-js'
 
 export type SessionData = {
 	// Account during creation flow (ready to be persisted)
@@ -8,7 +9,7 @@ export type SessionData = {
 
 	// Temporary masterKey during account/identity creation flow
 	// Cleared immediately after identity is created
-	temporaryMasterKey?: string
+	temporaryMasterKey?: Bytes
 
 	// Active account and identity
 	currentAccountId?: string
@@ -46,8 +47,9 @@ export const sessionStore = {
 		session = { ...session, currentIdentityId: identityId }
 	},
 
-	setTemporaryMasterKey(masterKey: string) {
-		session = { ...session, temporaryMasterKey: masterKey }
+	setTemporaryMasterKey(masterKey: Bytes | string) {
+		const key = masterKey instanceof Bytes ? masterKey : new Bytes(masterKey)
+		session = { ...session, temporaryMasterKey: key }
 	},
 
 	clearTemporaryMasterKey() {

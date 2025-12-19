@@ -8,7 +8,7 @@ const config: KnipConfig = {
 		'$lib/*': ['src/lib/*'],
 	},
 	ignore: ['playwright/index.ts'],
-	ignoreDependencies: ['@swarm-id/lib'],
+	ignoreDependencies: ['@swarm-id/lib', '@ethersphere/bee-js'],
 	ignoreExportsUsedInFile: true,
 	'playwright-ct': false,
 }

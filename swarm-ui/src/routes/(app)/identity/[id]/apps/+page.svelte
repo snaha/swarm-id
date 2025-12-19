@@ -11,6 +11,7 @@
 	import Grid from '$lib/components/ui/grid.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
 	import Toggle from '$lib/components/ui/toggle.svelte'
+	import type { BatchId } from '@ethersphere/bee-js'
 
 	const identityId = $derived($page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -18,26 +19,26 @@
 	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
 
 	// eslint-disable-next-line svelte/prefer-writable-derived -- defaultStampBatchID is bound to Select, must be writable
-	let defaultStampBatchID = $state<string | undefined>(undefined)
+	let defaultStampBatchIDHex = $state<string | undefined>(undefined)
 
-	// Sync local state with store
+	// Sync local state with store (convert BatchId to hex for Select)
 	$effect(() => {
-		defaultStampBatchID = identity?.defaultPostageStampBatchID
+		defaultStampBatchIDHex = identity?.defaultPostageStampBatchID?.toHex()
 	})
 
 	// Update store when local state changes
 	$effect(() => {
 		if (
 			identityId &&
-			defaultStampBatchID &&
-			defaultStampBatchID !== identity?.defaultPostageStampBatchID
+			defaultStampBatchIDHex &&
+			defaultStampBatchIDHex !== identity?.defaultPostageStampBatchID?.toHex()
 		) {
-			identitiesStore.setDefaultStamp(identityId, defaultStampBatchID)
+			identitiesStore.setDefaultStamp(identityId, defaultStampBatchIDHex)
 		}
 	})
 
-	function formatBatchId(batchId: string): string {
-		return batchId.slice(0, 8)
+	function formatBatchId(batchId: BatchId): string {
+		return batchId.toHex().slice(0, 8)
 	}
 </script>
 
@@ -64,8 +65,8 @@
 			<Typography>Default postage stamp</Typography>
 			<Select
 				dimension="compact"
-				bind:value={defaultStampBatchID}
-				items={stamps.map((s) => ({ value: s.batchID, label: formatBatchId(s.batchID) }))}
+				bind:value={defaultStampBatchIDHex}
+				items={stamps.map((s) => ({ value: s.batchID.toHex(), label: formatBatchId(s.batchID) }))}
 				placeholder={stamps.length === 0 ? 'No stamps available' : undefined}
 				disabled={stamps.length === 0}
 			></Select>

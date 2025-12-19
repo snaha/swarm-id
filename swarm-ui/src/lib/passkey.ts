@@ -11,6 +11,7 @@ import {
 	type AuthenticationResponseJSON,
 } from '@simplewebauthn/browser'
 import { HDNodeWallet } from 'ethers'
+import { EthAddress, Bytes } from '@ethersphere/bee-js'
 
 // Type augmentation for PRF extension (not in standard types)
 declare module '@simplewebauthn/browser' {
@@ -27,8 +28,8 @@ declare module '@simplewebauthn/browser' {
 
 export interface PasskeyAccount {
 	credentialId: string
-	ethereumAddress: string
-	masterKey: string // Hex-encoded seed for HD wallet derivation
+	ethereumAddress: EthAddress
+	masterKey: Bytes // Hex-encoded seed for HD wallet derivation
 }
 
 export interface PasskeyRegistrationOptions {
@@ -272,22 +273,18 @@ async function deriveMasterKeyFromPRF(prfOutput: Uint8Array): Promise<Uint8Array
  * Converts seed to HD wallet and returns address + master key
  */
 export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
-	address: string
-	masterKey: string
+	address: EthAddress
+	masterKey: Bytes
 } {
-	// Convert to hex for HDNodeWallet
-	const entropyHex =
-		'0x' +
-		Array.from(seedBytes)
-			.map((b) => b.toString(16).padStart(2, '0'))
-			.join('')
+	// Create Bytes from seed
+	const masterKey = new Bytes(seedBytes)
 
-	// Create HD wallet from seed
-	const wallet = HDNodeWallet.fromSeed(entropyHex)
+	// Create HD wallet from seed (ethers accepts hex with 0x prefix)
+	const wallet = HDNodeWallet.fromSeed('0x' + masterKey.toHex())
 
 	return {
-		address: wallet.address,
-		masterKey: entropyHex,
+		address: new EthAddress(wallet.address),
+		masterKey,
 	}
 }
 
@@ -297,7 +294,7 @@ export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
  */
 async function deriveWalletFromPRF(
 	prfOutput: Uint8Array,
-): Promise<{ address: string; masterKey: string }> {
+): Promise<{ address: EthAddress; masterKey: Bytes }> {
 	// Step 1: Derive master key using importKey + deriveKey
 	const seedBytes = await deriveMasterKeyFromPRF(prfOutput)
 

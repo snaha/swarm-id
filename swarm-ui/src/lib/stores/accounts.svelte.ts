@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
+import { Bytes } from '@ethersphere/bee-js'
 import {
 	EthAddressSchema,
 	TimestampSchema,
@@ -28,8 +29,8 @@ const PasskeyAccountSchema = AccountBaseSchema.extend({
 const EthereumAccountSchema = AccountBaseSchema.extend({
 	type: z.literal('ethereum'),
 	ethereumAddress: EthAddressSchema,
-	encryptedMasterKey: HexStringSchema.min(1),
-	encryptionSalt: HexStringSchema.min(1),
+	encryptedMasterKey: HexStringSchema,
+	encryptionSalt: HexStringSchema,
 })
 
 const AccountSchemaV1 = z.discriminatedUnion('type', [PasskeyAccountSchema, EthereumAccountSchema])
@@ -75,9 +76,33 @@ function parse(parsed: unknown): Account[] {
 	}
 }
 
+/**
+ * Serialize account for storage (convert Bytes instances to hex strings)
+ */
+function serializeAccount(account: Account): Record<string, unknown> {
+	const base = {
+		id: account.id.toHex(),
+		name: account.name,
+		createdAt: account.createdAt,
+		type: account.type,
+	}
+
+	if (account.type === 'passkey') {
+		return { ...base, credentialId: account.credentialId }
+	} else {
+		return {
+			...base,
+			ethereumAddress: account.ethereumAddress.toHex(),
+			encryptedMasterKey: account.encryptedMasterKey.toHex(),
+			encryptionSalt: account.encryptionSalt.toHex(),
+		}
+	}
+}
+
 function saveAccounts(data: Account[]): void {
 	if (!browser) return
-	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data }))
+	const serialized = data.map(serializeAccount)
+	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
 }
 
 // ============================================================================
@@ -97,17 +122,17 @@ export const accountsStore = {
 		return account
 	},
 
-	removeAccount(id: string) {
-		accounts = accounts.filter((a) => a.id !== id)
+	removeAccount(id: string | Bytes) {
+		accounts = accounts.filter((a) => !a.id.equals(id))
 		saveAccounts(accounts)
 	},
 
-	getAccount(id: string): Account | undefined {
-		return accounts.find((a) => a.id === id)
+	getAccount(id: string | Bytes): Account | undefined {
+		return accounts.find((a) => a.id.equals(id))
 	},
 
-	setAccountName(id: string, name: string) {
-		accounts = accounts.map((account) => (account.id === id ? { ...account, name } : account))
+	setAccountName(id: string | Bytes, name: string) {
+		accounts = accounts.map((account) => (account.id.equals(id) ? { ...account, name } : account))
 		saveAccounts(accounts)
 	},
 

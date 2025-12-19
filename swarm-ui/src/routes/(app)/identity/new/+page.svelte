@@ -15,6 +15,7 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import type { Identity, Account } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
+	import { Bytes } from '@ethersphere/bee-js'
 	import { generateDockerName } from '$lib/docker-name'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
@@ -33,8 +34,8 @@
 			return undefined
 		}
 
-		const index = identitiesStore.identities.filter(
-			(identity) => identity.accountId === account.id,
+		const index = identitiesStore.identities.filter((identity) =>
+			identity.accountId.equals(account.id),
 		).length
 
 		return deriveIdentityFromAccount(account, tempMasterKey, index)
@@ -53,8 +54,8 @@
 		sessionStore.data.account !== undefined && sessionStore.data.temporaryMasterKey !== undefined,
 	)
 
-	function deriveIdentityFromAccount(account: Account, masterKey: string, index: number) {
-		const identityWallet = HDNodeWallet.fromSeed(masterKey).deriveChild(index)
+	function deriveIdentityFromAccount(account: Account, masterKey: Bytes, index: number) {
+		const identityWallet = HDNodeWallet.fromSeed('0x' + masterKey.toHex()).deriveChild(index)
 		const id = identityWallet.address
 		const name = generateDockerName(id)
 		const accountId = account.id
@@ -96,7 +97,7 @@
 		console.log('✅ Identity created:', identity.id)
 
 		// Set as current account and identity
-		sessionStore.setCurrentAccount(account.id)
+		sessionStore.setCurrentAccount(account.id.toHex())
 		sessionStore.setCurrentIdentity(identity.id)
 
 		// Navigate back to /connect or home

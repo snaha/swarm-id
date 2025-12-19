@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
+import { Bytes } from '@ethersphere/bee-js'
 import { BatchIdSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas'
 
 // ============================================================================
@@ -65,9 +66,20 @@ function parse(parsed: unknown): PostageStamp[] {
 	}
 }
 
+/**
+ * Serialize postage stamp for storage (convert Bytes instances to hex strings)
+ */
+function serializePostageStamp(stamp: PostageStamp): Record<string, unknown> {
+	return {
+		...stamp,
+		batchID: stamp.batchID.toHex(),
+	}
+}
+
 function savePostageStamps(data: PostageStamp[]): void {
 	if (!browser) return
-	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data }))
+	const serialized = data.map(serializePostageStamp)
+	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
 }
 
 // ============================================================================
@@ -91,13 +103,13 @@ export const postageStampsStore = {
 		return newStamp
 	},
 
-	removeStamp(batchID: string) {
-		postageStamps = postageStamps.filter((s) => s.batchID !== batchID)
+	removeStamp(batchID: string | Bytes) {
+		postageStamps = postageStamps.filter((s) => !s.batchID.equals(batchID))
 		savePostageStamps(postageStamps)
 	},
 
-	getStamp(batchID: string): PostageStamp | undefined {
-		return postageStamps.find((s) => s.batchID === batchID)
+	getStamp(batchID: string | Bytes): PostageStamp | undefined {
+		return postageStamps.find((s) => s.batchID.equals(batchID))
 	},
 
 	getStampsByIdentity(identityId: string): PostageStamp[] {

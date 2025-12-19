@@ -230,13 +230,13 @@
 						<Input
 							variant="outline"
 							dimension="compact"
-							value={account.id}
+							value={account.id.toHex()}
 							class="grower"
 							label="Account address"
 							disabled
 						/>
 						<div style="border: 1px solid transparent">
-							<CopyButton text={account.id} />
+							<CopyButton text={account.id.toHex()} />
 						</div>
 					</Horizontal>
 					<Typography variant="small">Used to buy and own stamps</Typography>

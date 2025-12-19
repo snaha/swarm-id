@@ -19,7 +19,7 @@
 	const accounts = $derived(accountsStore.accounts)
 	const accountItems = $derived(
 		accounts.map((account) => ({
-			value: account.id,
+			value: account.id.toHex(),
 			label: account.name,
 			icon: account.type === 'passkey' ? PasskeyLogo : EthereumLogo,
 		})),
@@ -29,9 +29,9 @@
 	$effect(() => {
 		if (!selectedAccountId) {
 			if (sessionStore.data.account?.id) {
-				selectedAccountId = sessionStore.data.account.id
+				selectedAccountId = sessionStore.data.account.id.toHex()
 			} else if (accounts.length > 0) {
-				selectedAccountId = accounts[0].id
+				selectedAccountId = accounts[0].id.toHex()
 				sessionStore.setAccount(accounts[0])
 			}
 		}
@@ -39,7 +39,7 @@
 
 	// Sync selection changes to session store
 	$effect(() => {
-		if (selectedAccountId && selectedAccountId !== sessionStore.data.account?.id) {
+		if (selectedAccountId && selectedAccountId !== sessionStore.data.account?.id.toHex()) {
 			const account = accountsStore.getAccount(selectedAccountId)
 			if (account) {
 				sessionStore.setAccount(account)

@@ -9,6 +9,7 @@
 	import { page } from '$app/stores'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { BatchId } from '@ethersphere/bee-js'
 
 	const identityId = $derived($page.params.id)
 
@@ -56,7 +57,7 @@
 		// Create the postage stamp with guestimated defaults
 		const stamp = postageStampsStore.addStamp({
 			identityId,
-			batchID,
+			batchID: new BatchId(batchID),
 			utilization: 0,
 			usable: true,
 			depth: depthNum,
@@ -67,7 +68,7 @@
 			exists: true,
 		})
 
-		console.log('✅ Postage stamp added:', stamp.batchID)
+		console.log('✅ Postage stamp added:', stamp.batchID.toHex())
 
 		// If this is the first stamp for this identity, make it default
 		const identity = identitiesStore.getIdentity(identityId)

@@ -20,8 +20,8 @@
 		deriveEncryptionKey,
 		encryptMasterKey,
 	} from '$lib/utils/encryption'
-	import { uint8ArrayToHex } from '$lib/utils/key-derivation'
 	import { validateSecretSeed } from '$lib/utils/secret-seed'
+	import { EthAddress } from '@ethersphere/bee-js'
 	import { WarningAlt } from 'carbon-icons-svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
@@ -77,7 +77,7 @@
 			console.log('🔒 Encrypting masterKey...')
 
 			// Step 2: Generate encryption salt
-			const encryptionSalt = uint8ArrayToHex(generateEncryptionSalt())
+			const encryptionSalt = generateEncryptionSalt()
 			console.log('🎲 Encryption salt generated')
 
 			// Step 3: Derive encryption key from public key + salt
@@ -94,7 +94,7 @@
 				createdAt: Date.now(),
 				name: accountName.trim(),
 				type: 'ethereum',
-				ethereumAddress: signed.address,
+				ethereumAddress: new EthAddress(signed.address),
 				encryptedMasterKey: encryptedMasterKey,
 				encryptionSalt: encryptionSalt,
 			})

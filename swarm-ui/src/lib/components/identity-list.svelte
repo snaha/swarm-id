@@ -29,7 +29,7 @@
 	let hoveredIndex = $state<number | undefined>(undefined)
 	let focusedIndex = $state<number | undefined>(undefined)
 
-	function getAccount(accountId: string) {
+	function getAccount(accountId: Parameters<typeof accountsStore.getAccount>[0]) {
 		return accountsStore.getAccount(accountId)
 	}
 
