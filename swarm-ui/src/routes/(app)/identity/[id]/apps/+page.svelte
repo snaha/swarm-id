@@ -6,9 +6,6 @@
 	import { page } from '$app/state'
 	import Grid from '$lib/components/ui/grid.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
-	import Toggle from '$lib/components/ui/toggle.svelte'
-	import { BatchId } from '@ethersphere/bee-js'
-	import { toPrefixedHex } from '$lib/utils/hex'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { DAY, HOUR } from '$lib/time'
 
