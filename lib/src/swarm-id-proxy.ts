@@ -17,6 +17,7 @@ import type {
 import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
+  SWARM_SECRET_PREFIX,
 } from "./types"
 import { Bee, Stamper, makeContentAddressedChunk } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
@@ -426,7 +427,7 @@ export class SwarmIdProxy {
       return
     }
 
-    const storageKey = `swarm-secret-${this.parentOrigin}`
+    const storageKey = `${SWARM_SECRET_PREFIX}${this.parentOrigin}`
     const storedData = localStorage.getItem(storageKey)
 
     if (storedData) {
@@ -477,7 +478,7 @@ export class SwarmIdProxy {
     origin: string,
     data: { secret: string; postageBatchId?: string; signerKey?: string },
   ): void {
-    const storageKey = `swarm-secret-${origin}`
+    const storageKey = `${SWARM_SECRET_PREFIX}${origin}`
     localStorage.setItem(storageKey, JSON.stringify(data))
     console.log("[Proxy] Auth data saved to localStorage for:", origin)
   }
@@ -491,7 +492,7 @@ export class SwarmIdProxy {
       return
     }
 
-    const storageKey = `swarm-secret-${this.parentOrigin}`
+    const storageKey = `${SWARM_SECRET_PREFIX}${this.parentOrigin}`
     localStorage.removeItem(storageKey)
     console.log(
       "[Proxy] Auth data cleared from localStorage for:",

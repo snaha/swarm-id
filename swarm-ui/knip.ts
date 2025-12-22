@@ -7,7 +7,7 @@ const config: KnipConfig = {
 		'$env/*': ['.svelte-kit/ambient.d.ts'],
 		'$lib/*': ['src/lib/*'],
 	},
-	ignore: ['playwright/index.ts'],
+	ignore: ['playwright/index.ts', 'src/lib/time.ts'],
 	ignoreDependencies: ['@swarm-id/lib', '@ethersphere/bee-js'],
 	ignoreExportsUsedInFile: true,
 	'playwright-ct': false,

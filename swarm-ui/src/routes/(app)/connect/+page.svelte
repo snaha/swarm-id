@@ -14,9 +14,9 @@
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { EthAddress } from '@ethersphere/bee-js'
-	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import type { Account, Identity } from '$lib/types'
 	import { AppDataSchema } from '$lib/types'
+	import type { Account, Identity } from '$lib/types'
+	import { connectedAppsStore, DEFAULT_SESSION_DURATION } from '$lib/stores/connected-apps.svelte'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
@@ -181,13 +181,16 @@
 		)
 
 		// Track this app connection
-		connectedAppsStore.addOrUpdateApp({
-			appUrl: sessionStore.data.appOrigin,
-			appName: sessionStore.data.appData.appName,
-			identityId: selectedIdentity.id,
-			appIcon: sessionStore.data.appData.appIcon,
-			appDescription: sessionStore.data.appData.appDescription,
-		})
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: sessionStore.data.appOrigin,
+				appName: sessionStore.data.appData.appName,
+				identityId: selectedIdentity.id,
+				appIcon: sessionStore.data.appData.appIcon,
+				appDescription: sessionStore.data.appData.appDescription,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
 	}
 
 	async function tryGetMasterKeyFromAccount(account: Account) {
