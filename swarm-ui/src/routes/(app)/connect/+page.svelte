@@ -22,6 +22,8 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
+	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+	import type { SetSecretMessage } from '@swarm-id/lib'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
@@ -135,14 +137,12 @@
 		showCreateMode = true
 	}
 
-	// FIXME: Temporary function to generate random postage batch ID for testing
-	// In production, this should come from the identity's actual postage stamps
-	function generateRandomPostageBatchId(): string {
-		const bytes = new Uint8Array(32) // 32 bytes = 64 hex chars
-		crypto.getRandomValues(bytes)
-		return Array.from(bytes)
-			.map((b) => b.toString(16).padStart(2, '0'))
-			.join('')
+	function getIdentityPostageBatchId(identity: Identity): string | undefined {
+		const postageStamp = postageStampsStore.stamps.find(stamp => stamp.identityId === identity.id)
+		if (!postageStamp) {
+			return
+		}
+		return postageStamp.batchID.toHex()
 	}
 
 	function updateSelectedIdentity(appSecret: string) {
@@ -160,7 +160,7 @@
 
 		// FIXME: Generate random postage batch ID for testing
 		// In production, use the identity's default postage stamp or let user choose
-		const postageBatchId = generateRandomPostageBatchId()
+		const postageBatchId = getIdentityPostageBatchId(selectedIdentity)
 
 		// Send secret to opener (the iframe that opened this popup)
 		if (!window.opener || (window.opener as Window).closed) {
@@ -168,17 +168,16 @@
 			return
 		}
 
-		;(window.opener as Window).postMessage(
-			{
-				type: 'setSecret',
-				appOrigin: sessionStore.data.appOrigin,
-				data: {
-					secret: appSecret,
-					postageBatchId, // FIXME: Should come from identity's actual stamps
-				},
+		const message: SetSecretMessage = {
+			type: 'setSecret',
+			appOrigin: sessionStore.data.appOrigin,
+			data: {
+				secret: appSecret,
+				postageBatchId,
 			},
-			window.location.origin,
-		)
+		}
+
+		;(window.opener as Window).postMessage(message, window.location.origin)
 
 		// Track this app connection
 		connectedAppsStore.addOrUpdateApp(

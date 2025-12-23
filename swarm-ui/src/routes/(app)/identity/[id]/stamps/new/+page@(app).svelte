@@ -88,7 +88,6 @@
 
 <CreationLayout
 	title="Add postage stamp"
-	description="Postage stamps can be bought at https://beeport.eth.limo/"
 	onClose={() => history.back()}
 >
 	{#snippet content()}

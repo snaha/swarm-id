@@ -42,6 +42,8 @@ export type {
   ParentToIframeMessage,
   IframeToParentMessage,
   PopupToIframeMessage,
+  SetSecretMessage,
+  AuthData,
 } from "./types"
 
 // Schema exports (for validation)
@@ -59,6 +61,8 @@ export {
   ParentToIframeMessageSchema,
   IframeToParentMessageSchema,
   PopupToIframeMessageSchema,
+  SetSecretMessageSchema,
+  AuthDataSchema,
 } from "./types"
 
 // Constant exports
