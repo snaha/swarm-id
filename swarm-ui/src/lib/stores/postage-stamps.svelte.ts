@@ -1,31 +1,15 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
 import { BatchId } from '@ethersphere/bee-js'
-import { BatchIdSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas'
+import { VersionedStorageSchema } from '$lib/schemas'
+import { type PostageStamp, PostageStampSchemaV1 } from '$lib/types'
 
 // ============================================================================
-// Schema & Types
+// Storage
 // ============================================================================
 
 const STORAGE_KEY = 'swarm-postage-stamps'
 const CURRENT_VERSION = 1
-
-const PostageStampSchemaV1 = z.object({
-	identityId: z.string().min(1),
-	batchID: BatchIdSchema,
-	utilization: z.number().min(0).max(100),
-	usable: z.boolean(),
-	depth: z.number().int().nonnegative(),
-	amount: z.string(), // BigInt as string
-	bucketDepth: z.number().int().nonnegative(),
-	blockNumber: z.number().int().nonnegative(),
-	immutableFlag: z.boolean(),
-	exists: z.boolean(),
-	batchTTL: z.number().int().nonnegative().optional(),
-	createdAt: TimestampSchema,
-})
-
-export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 
 // ============================================================================
 // Storage (versioned)

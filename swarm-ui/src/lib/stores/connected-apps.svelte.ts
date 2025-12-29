@@ -1,31 +1,18 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
-import { UrlSchema, TimestampSchema, VersionedStorageSchema } from '$lib/schemas'
-import { DAY } from '$lib/time'
+import { VersionedStorageSchema } from '$lib/schemas'
+import {
+	type ConnectedApp,
+	ConnectedAppSchemaV1,
+	DEFAULT_SESSION_DURATION,
+} from '$lib/types'
 
 // ============================================================================
-// Schema & Types
+// Storage
 // ============================================================================
 
-export const DEFAULT_SESSION_DURATION = 30 * DAY
-
-// ============================================================================
-// Storage (versioned)
-// ============================================================================
 const STORAGE_KEY = 'swarm-connected-apps'
 const CURRENT_VERSION = 1
-
-const ConnectedAppSchemaV1 = z.object({
-	appUrl: UrlSchema,
-	appName: z.string().min(1).max(100),
-	lastConnectedAt: TimestampSchema,
-	identityId: z.string().min(1),
-	appIcon: z.string().max(10000).optional(),
-	appDescription: z.string().max(500).optional(),
-	connectedUntil: TimestampSchema.optional(),
-})
-
-export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 
 function loadConnectedApps(): ConnectedApp[] {
 	if (!browser) return []
