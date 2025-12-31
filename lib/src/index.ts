@@ -52,6 +52,29 @@ export {
   DEFAULT_BATCH_DEPTH,
 } from "./utils/batch-utilization"
 
+// Versioned storage utilities
+export {
+  VersionedStorageManager,
+  LocalStorageAdapter,
+  MemoryStorageAdapter,
+  createLocalStorageManager,
+  createMemoryStorageManager,
+  createZodParser,
+  VersionedStorageSchema,
+} from "./utils/versioned-storage"
+
+// Storage managers for entities
+export {
+  createAccountsStorageManager,
+  createIdentitiesStorageManager,
+  createConnectedAppsStorageManager,
+  createPostageStampsStorageManager,
+  serializeAccount,
+  serializeIdentity,
+  serializeConnectedApp,
+  serializePostageStamp,
+} from "./utils/storage-managers"
+
 // Type exports
 export type {
   ClientOptions,
@@ -81,6 +104,15 @@ export type {
   UtilizationUpdate,
 } from "./utils/batch-utilization"
 
+// Versioned storage types
+export type {
+  VersionedStorage,
+  StorageAdapter,
+  VersionParser,
+  Serializer,
+  VersionedStorageOptions,
+} from "./utils/versioned-storage"
+
 // Schema exports (for validation)
 export {
   ReferenceSchema,
@@ -101,6 +133,4 @@ export {
 } from "./types"
 
 // Constant exports
-export { 
-  SWARM_SECRET_PREFIX,
-} from "./types"
+export { SWARM_SECRET_PREFIX } from "./types"
