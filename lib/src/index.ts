@@ -24,6 +24,34 @@ export {
   utils,
 } from "./utils/key-derivation"
 
+// Batch utilization tracking
+export {
+  initializeBatchUtilization,
+  calculateUtilizationUpdate,
+  updateAfterWrite,
+  getOrInitializeState,
+  saveUtilizationState,
+  loadUtilizationState,
+  clearUtilizationState,
+  calculateUtilizationPercentage,
+  toBucket,
+  assignChunksToBuckets,
+  serializeUint32Array,
+  deserializeUint32Array,
+  splitIntoChunks,
+  reconstructFromChunks,
+  calculateMaxSlotsPerBucket,
+  hasBucketCapacity,
+  createStamper,
+  prepareBucketState,
+  NUM_BUCKETS,
+  BUCKET_DEPTH,
+  UTILIZATION_SLOTS_PER_BUCKET,
+  DATA_COUNTER_START,
+  CHUNK_SIZE,
+  DEFAULT_BATCH_DEPTH,
+} from "./utils/batch-utilization"
+
 // Type exports
 export type {
   ClientOptions,
@@ -45,6 +73,13 @@ export type {
   SetSecretMessage,
   AuthData,
 } from "./types"
+
+// Batch utilization types
+export type {
+  BatchUtilizationState,
+  ChunkWithBucket,
+  UtilizationUpdate,
+} from "./utils/batch-utilization"
 
 // Schema exports (for validation)
 export {
