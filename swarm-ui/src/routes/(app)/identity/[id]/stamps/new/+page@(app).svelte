@@ -84,7 +84,10 @@
 	}
 </script>
 
-<CreationLayout title="Add postage stamp" onClose={() => history.back()}>
+<CreationLayout
+	title="Add postage stamp"
+	onClose={() => history.back()}
+>
 	{#snippet content()}
 		<Vertical>
 			<!-- Row 1 -->
@@ -107,6 +110,7 @@
 			<!-- Row 2 -->
 			<Vertical>
 				<ResponsiveLayout --responsive-justify-content="stretch">
+<<<<<<< HEAD
 					<Input
 						variant="outline"
 						dimension="compact"
@@ -137,6 +141,36 @@
 						label="Block number"
 						class="flex-grow"
 					/>
+=======
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="depth"
+							type="number"
+							bind:value={depth}
+							error={depthError}
+							label="Depth"
+							class="stamp-depth"
+						/>
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="amount"
+							type="number"
+							bind:value={amount}
+							error={depthError}
+							label="Amount"
+						/>
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="blockNumber"
+							type="number"
+							bind:value={blockNumber}
+							error={depthError}
+							label="Block number"
+						/>
+>>>>>>> bea3dcd (feat: postage stamps)
 				</ResponsiveLayout>
 				{#if depthError}
 					<div class="error-full-width">
@@ -179,8 +213,13 @@
 	.error-full-width {
 		grid-column: 1 / -1;
 	}
+<<<<<<< HEAD
 	:global(.flex-grow) {
 		flex: 1;
 		min-width: 0;
+=======
+	:global(.stamp-depth) {
+		flex: 0.1;
+>>>>>>> bea3dcd (feat: postage stamps)
 	}
 </style>
