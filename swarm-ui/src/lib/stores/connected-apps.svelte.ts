@@ -1,10 +1,7 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
 import { VersionedStorageSchema } from '$lib/schemas'
-import {
-	type ConnectedApp,
-	ConnectedAppSchemaV1,
-} from '$lib/types'
+import { type ConnectedApp, ConnectedAppSchemaV1 } from '$lib/types'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 

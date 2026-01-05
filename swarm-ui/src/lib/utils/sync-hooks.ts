@@ -1,4 +1,4 @@
-import { syncStore } from "../stores/sync.svelte"
+import { syncStore } from '../stores/sync.svelte'
 
 // Debounce timer per identity
 const syncTimers = new Map<string, ReturnType<typeof setTimeout>>()
@@ -9,17 +9,17 @@ const syncTimers = new Map<string, ReturnType<typeof setTimeout>>()
  * Multiple rapid changes are batched into a single sync
  */
 export function triggerSync(identityId: string): void {
-  // Clear existing timer
-  const existingTimer = syncTimers.get(identityId)
-  if (existingTimer) {
-    clearTimeout(existingTimer)
-  }
+	// Clear existing timer
+	const existingTimer = syncTimers.get(identityId)
+	if (existingTimer) {
+		clearTimeout(existingTimer)
+	}
 
-  // Set new timer (2 second debounce)
-  const timer = setTimeout(() => {
-    syncStore.syncIdentity(identityId)
-    syncTimers.delete(identityId)
-  }, 2000)
+	// Set new timer (2 second debounce)
+	const timer = setTimeout(() => {
+		syncStore.syncIdentity(identityId)
+		syncTimers.delete(identityId)
+	}, 2000)
 
-  syncTimers.set(identityId, timer)
+	syncTimers.set(identityId, timer)
 }
