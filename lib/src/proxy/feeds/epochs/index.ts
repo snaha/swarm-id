@@ -38,7 +38,9 @@ import type {
  *
  * @returns EpochFinder implementation
  */
-export function createSyncEpochFinder(options: EpochFeedOptions): EpochFinder {
+export function createSyncEpochFinder(
+  options: EpochFeedOptions,
+): EpochFinder {
   return new SyncEpochFinder(options.bee, options.topic, options.owner)
 }
 
@@ -47,7 +49,9 @@ export function createSyncEpochFinder(options: EpochFeedOptions): EpochFinder {
  *
  * @returns EpochFinder implementation
  */
-export function createAsyncEpochFinder(options: EpochFeedOptions): EpochFinder {
+export function createAsyncEpochFinder(
+  options: EpochFeedOptions,
+): EpochFinder {
   return new AsyncEpochFinder(options.bee, options.topic, options.owner)
 }
 

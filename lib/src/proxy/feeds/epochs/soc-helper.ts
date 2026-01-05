@@ -19,7 +19,10 @@ import {
 /**
  * Make SOC address from identifier and owner
  */
-function makeSOCAddress(identifier: Identifier, owner: EthAddress): Reference {
+function makeSOCAddress(
+  identifier: Identifier,
+  owner: EthAddress,
+): Reference {
   return new Reference(
     Binary.keccak256(
       Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),

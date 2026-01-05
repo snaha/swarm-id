@@ -3,6 +3,8 @@ import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { VersionedStorageSchema } from '$lib/schemas'
 import { type Identity, IdentitySchemaV1 } from '$lib/types'
+import { triggerSync } from '$lib/utils/sync-hooks'
+import { sessionStore } from './session.svelte'
 
 // ============================================================================
 // Storage
@@ -67,6 +69,12 @@ function saveIdentities(data: Identity[]): void {
 	if (!browser) return
 	const serialized = data.map(serializeIdentity)
 	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
+
+	// Trigger Swarm sync for current identity
+	const currentIdentityId = sessionStore.data.currentIdentityId
+	if (currentIdentityId) {
+		triggerSync(currentIdentityId)
+	}
 }
 
 // ============================================================================

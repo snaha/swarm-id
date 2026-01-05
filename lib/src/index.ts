@@ -90,6 +90,23 @@ export {
   MAX_LEVEL,
 } from "./proxy/feeds/epochs"
 
+// State sync to Swarm
+export {
+  StateSyncManager,
+  deriveIdentityBackupKey,
+  deriveIdentityEncryptionKey,
+  backupKeyToPrivateKey,
+  serializeIdentityState,
+  deserializeIdentityState,
+} from "./sync"
+
+// State sync types
+export type {
+  IdentityStateSnapshot,
+  StateSyncOptions,
+  SyncResult,
+} from "./sync"
+
 // Type exports
 export type {
   ClientOptions,

@@ -3,6 +3,8 @@ import { browser } from '$app/environment'
 import { BatchId } from '@ethersphere/bee-js'
 import { VersionedStorageSchema } from '$lib/schemas'
 import { type PostageStamp, PostageStampSchemaV1 } from '$lib/types'
+import { triggerSync } from '$lib/utils/sync-hooks'
+import { sessionStore } from './session.svelte'
 
 // ============================================================================
 // Storage
@@ -64,6 +66,12 @@ function savePostageStamps(data: PostageStamp[]): void {
 	if (!browser) return
 	const serialized = data.map(serializePostageStamp)
 	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
+
+	// Trigger Swarm sync
+	const currentIdentityId = sessionStore.data.currentIdentityId
+	if (currentIdentityId) {
+		triggerSync(currentIdentityId)
+	}
 }
 
 // ============================================================================

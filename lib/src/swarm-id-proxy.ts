@@ -888,6 +888,7 @@ export class SwarmIdProxy {
           uploadResult = await uploadEncryptedDataWithSigning(
             context,
             data,
+            undefined, // encryption key (auto-generated)
             options,
             onProgress,
           )

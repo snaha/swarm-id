@@ -58,10 +58,17 @@ class EncryptedChunkAdapter {
 /**
  * Upload encrypted data with client-side signing
  * Handles chunking, encryption, merkle tree building, and progress reporting
+ *
+ * @param context - Upload context with bee instance and authentication
+ * @param data - Data to encrypt and upload
+ * @param encryptionKey - Optional 32-byte encryption key (generates random if not provided)
+ * @param options - Upload options
+ * @param onProgress - Progress callback
  */
 export async function uploadEncryptedDataWithSigning(
   context: UploadContext,
   data: Uint8Array,
+  encryptionKey?: Uint8Array,
   options?: UploadOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<{ reference: string; tagUid?: number }> {
@@ -107,7 +114,10 @@ export async function uploadEncryptedDataWithSigning(
 
   for (const payload of chunkPayloads) {
     // Create and encrypt content-addressed chunk
-    const encryptedChunk = makeEncryptedContentAddressedChunk(payload)
+    const encryptedChunk = makeEncryptedContentAddressedChunk(
+      payload,
+      encryptionKey,
+    )
 
     console.log(
       `[UploadEncryptedData] Leaf chunk ${encryptedChunkRefs.length}: address=${encryptedChunk.address.toHex()}, span=${payload.length}, data size=${encryptedChunk.data.length}`,

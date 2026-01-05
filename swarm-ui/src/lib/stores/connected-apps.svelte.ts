@@ -1,7 +1,12 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
 import { VersionedStorageSchema } from '$lib/schemas'
-import { type ConnectedApp, ConnectedAppSchemaV1 } from '$lib/types'
+import {
+	type ConnectedApp,
+	ConnectedAppSchemaV1,
+} from '$lib/types'
+import { triggerSync } from '$lib/utils/sync-hooks'
+import { sessionStore } from './session.svelte'
 
 // ============================================================================
 // Storage
@@ -48,6 +53,12 @@ function parse(parsed: unknown): ConnectedApp[] {
 function saveConnectedApps(data: ConnectedApp[]): void {
 	if (!browser) return
 	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data }))
+
+	// Trigger Swarm sync
+	const currentIdentityId = sessionStore.data.currentIdentityId
+	if (currentIdentityId) {
+		triggerSync(currentIdentityId)
+	}
 }
 
 // ============================================================================

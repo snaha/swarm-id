@@ -23,6 +23,10 @@
     "./auth": {
       "import": "./dist/swarm-id-auth.js",
       "types": "./dist/swarm-id-auth.d.ts"
+    },
+    "./sync": {
+      "import": "./dist/swarm-id-sync.js",
+      "types": "./dist/swarm-id-sync.d.ts"
     }
   },
   "files": [
