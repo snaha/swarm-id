@@ -10,12 +10,6 @@ import { z } from 'zod'
 export type { Account, Identity, ConnectedApp, PostageStamp } from '@swarm-id/lib'
 
 // ============================================================================
-// Re-export constants from lib
-// ============================================================================
-
-export { DEFAULT_SESSION_DURATION, DAY, HOUR, MINUTE, SECOND } from '@swarm-id/lib'
-
-// ============================================================================
 // App Metadata (used for connection requests - local to swarm-ui)
 // ============================================================================
 

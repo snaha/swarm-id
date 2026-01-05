@@ -6,7 +6,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import { DEFAULT_SESSION_DURATION } from '$lib/types'
+	import { DEFAULT_SESSION_DURATION } from '@swarm-id/lib'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { createEthereumWalletFromSeed } from '$lib/passkey'
 	import { HDNodeWallet } from 'ethers'
