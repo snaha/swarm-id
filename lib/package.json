@@ -33,12 +33,16 @@
     "build": "rollup -c",
     "build:watch": "rollup -c -w",
     "clean": "rm -rf dist",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:ui": "vitest --ui",
+    "test:coverage": "vitest run --coverage",
     "lint": "eslint src/**/*.ts",
     "lint:fix": "eslint src/**/*.ts --fix",
     "format": "prettier --write \"src/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "check:all": "pnpm format:check && pnpm lint && pnpm typecheck"
+    "check:all": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
   },
   "keywords": [
     "swarm",
@@ -64,11 +68,13 @@
     "@types/node": "24.10.1",
     "@typescript-eslint/eslint-plugin": "8.48.1",
     "@typescript-eslint/parser": "8.48.1",
+    "@vitest/ui": "^4.0.16",
     "eslint": "9.39.1",
     "prettier": "3.7.3",
     "rollup": "4.53.3",
     "tslib": "2.8.1",
-    "typescript": "5.8.3"
+    "typescript": "5.8.3",
+    "vitest": "4.0.14"
   },
   "engines": {
     "node": ">=22",
