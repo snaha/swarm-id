@@ -127,6 +127,13 @@ export type {
   PopupToIframeMessage,
   SetSecretMessage,
   AuthData,
+  // Entity types
+  Account,
+  PasskeyAccount,
+  EthereumAccount,
+  Identity,
+  ConnectedApp,
+  PostageStamp,
 } from "./types"
 
 // Batch utilization types
@@ -176,3 +183,12 @@ export {
 
 // Constant exports
 export { SWARM_SECRET_PREFIX } from "./types"
+
+// Time and session constants
+export {
+  SECOND,
+  MINUTE,
+  HOUR,
+  DAY,
+  DEFAULT_SESSION_DURATION,
+} from "./utils/constants"

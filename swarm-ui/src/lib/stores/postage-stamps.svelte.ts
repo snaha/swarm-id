@@ -1,71 +1,22 @@
-import { z } from 'zod'
 import { browser } from '$app/environment'
 import { BatchId } from '@ethersphere/bee-js'
-import { VersionedStorageSchema } from '$lib/schemas'
-import { type PostageStamp, PostageStampSchemaV1 } from '$lib/types'
+import { createPostageStampsStorageManager, type PostageStamp } from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 
 // ============================================================================
-// Storage
+// Storage Manager
 // ============================================================================
 
-const STORAGE_KEY = 'swarm-postage-stamps'
-const CURRENT_VERSION = 1
-
-// ============================================================================
-// Storage (versioned)
-// ============================================================================
+const storageManager = createPostageStampsStorageManager()
 
 function loadPostageStamps(): PostageStamp[] {
 	if (!browser) return []
-	const stored = localStorage.getItem(STORAGE_KEY)
-	if (!stored) return []
-
-	try {
-		const parsed: unknown = JSON.parse(stored)
-		return parse(parsed)
-	} catch (e) {
-		console.error('[PostageStamps] Load failed:', e)
-		return []
-	}
-}
-
-function parse(parsed: unknown): PostageStamp[] {
-	const versioned = VersionedStorageSchema.safeParse(parsed)
-	const version = versioned.success ? versioned.data.version : 0
-	const data = versioned.success ? versioned.data.data : parsed
-
-	switch (version) {
-		case 0: // Legacy unversioned data
-		case 1: {
-			const result = z.array(PostageStampSchemaV1).safeParse(data)
-			if (!result.success) {
-				console.error('[PostageStamps] Invalid data:', result.error.format())
-				return []
-			}
-			return result.data
-		}
-		default:
-			console.error(`[PostageStamps] Unknown version: ${version}`)
-			return []
-	}
-}
-
-/**
- * Serialize postage stamp for storage (convert Bytes instances to hex strings)
- */
-function serializePostageStamp(stamp: PostageStamp): Record<string, unknown> {
-	return {
-		...stamp,
-		batchID: stamp.batchID.toHex(),
-	}
+	return storageManager.load()
 }
 
 function savePostageStamps(data: PostageStamp[]): void {
-	if (!browser) return
-	const serialized = data.map(serializePostageStamp)
-	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
+	storageManager.save(data)
 
 	// Trigger Swarm sync
 	const currentIdentityId = sessionStore.data.currentIdentityId
@@ -110,6 +61,6 @@ export const postageStampsStore = {
 
 	clear() {
 		postageStamps = []
-		if (browser) localStorage.removeItem(STORAGE_KEY)
+		storageManager.clear()
 	},
 }

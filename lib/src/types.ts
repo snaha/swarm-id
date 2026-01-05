@@ -467,10 +467,10 @@ export type EthereumAccount = {
   encryptionSalt: Bytes
 }
 
-export type StorageAccount = PasskeyAccount | EthereumAccount
+export type Account = PasskeyAccount | EthereumAccount
 
 // Identity types
-export type StorageIdentity = {
+export type Identity = {
   id: string
   accountId: EthAddress
   name: string
@@ -482,7 +482,7 @@ export type StorageIdentity = {
 }
 
 // Connected App types
-export type StorageConnectedApp = {
+export type ConnectedApp = {
   appUrl: string
   appName: string
   lastConnectedAt: number
@@ -493,7 +493,7 @@ export type StorageConnectedApp = {
 }
 
 // Postage Stamp types
-export type StoragePostageStamp = {
+export type PostageStamp = {
   identityId: string
   batchID: BeeJsBatchId
   utilization: number

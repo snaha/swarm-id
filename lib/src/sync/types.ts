@@ -1,9 +1,5 @@
 import type { Bee, PrivateKey } from "@ethersphere/bee-js"
-import type {
-  StorageIdentity,
-  StorageConnectedApp,
-  StoragePostageStamp,
-} from "../types"
+import type { Identity, ConnectedApp, PostageStamp } from "../types"
 
 /**
  * State snapshot for a single identity
@@ -11,9 +7,9 @@ import type {
 export interface IdentityStateSnapshot {
   version: 1
   timestamp: number // milliseconds
-  identity: StorageIdentity
-  connectedApps: StorageConnectedApp[]
-  postageStamps: StoragePostageStamp[]
+  identity: Identity
+  connectedApps: ConnectedApp[]
+  postageStamps: PostageStamp[]
 }
 
 /**

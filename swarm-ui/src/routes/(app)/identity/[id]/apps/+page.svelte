@@ -2,13 +2,12 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import AppList from '$lib/components/app-list.svelte'
-	import { DEFAULT_SESSION_DURATION } from '$lib/types'
+	import { DEFAULT_SESSION_DURATION, DAY, HOUR } from '$lib/types'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { page } from '$app/state'
 	import Grid from '$lib/components/ui/grid.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { DAY, HOUR } from '$lib/time'
 
 	const identityId = $derived(page.params.id)
 	const apps = $derived(identityId ? connectedAppsStore.getAppsByIdentityId(identityId) : [])

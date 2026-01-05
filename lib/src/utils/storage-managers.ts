@@ -13,10 +13,10 @@ import {
   type VersionParser,
 } from "./versioned-storage"
 import type {
-  StorageAccount,
-  StorageIdentity,
-  StorageConnectedApp,
-  StoragePostageStamp,
+  Account,
+  Identity,
+  ConnectedApp,
+  PostageStamp,
 } from "../types"
 
 // ============================================================================
@@ -109,7 +109,7 @@ const PostageStampSchemaV1 = z.object({
 /**
  * Parse accounts and convert to runtime types
  */
-const parseAccountsV1: VersionParser<StorageAccount> = (data: unknown) => {
+const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
   const result = z.array(AccountSchemaV1).safeParse(data)
 
   if (!result.success) {
@@ -145,7 +145,7 @@ const parseAccountsV1: VersionParser<StorageAccount> = (data: unknown) => {
 /**
  * Parse identities and convert to runtime types
  */
-const parseIdentitiesV1: VersionParser<StorageIdentity> = (data: unknown) => {
+const parseIdentitiesV1: VersionParser<Identity> = (data: unknown) => {
   const result = z.array(IdentitySchemaV1).safeParse(data)
 
   if (!result.success) {
@@ -168,7 +168,7 @@ const parseIdentitiesV1: VersionParser<StorageIdentity> = (data: unknown) => {
 /**
  * Parse connected apps (no conversion needed)
  */
-const parseConnectedAppsV1: VersionParser<StorageConnectedApp> = (
+const parseConnectedAppsV1: VersionParser<ConnectedApp> = (
   data: unknown,
 ) => {
   const result = z.array(ConnectedAppSchemaV1).safeParse(data)
@@ -184,7 +184,7 @@ const parseConnectedAppsV1: VersionParser<StorageConnectedApp> = (
 /**
  * Parse postage stamps and convert to runtime types
  */
-const parsePostageStampsV1: VersionParser<StoragePostageStamp> = (
+const parsePostageStampsV1: VersionParser<PostageStamp> = (
   data: unknown,
 ) => {
   const result = z.array(PostageStampSchemaV1).safeParse(data)
@@ -218,7 +218,7 @@ const parsePostageStampsV1: VersionParser<StoragePostageStamp> = (
  * Serialize Account for storage
  */
 export function serializeAccount(
-  account: StorageAccount,
+  account: Account,
 ): Record<string, unknown> {
   if (account.type === "passkey") {
     return {
@@ -245,7 +245,7 @@ export function serializeAccount(
  * Serialize Identity for storage
  */
 export function serializeIdentity(
-  identity: StorageIdentity,
+  identity: Identity,
 ): Record<string, unknown> {
   return {
     id: identity.id,
@@ -261,7 +261,7 @@ export function serializeIdentity(
  * Serialize ConnectedApp for storage
  */
 export function serializeConnectedApp(
-  app: StorageConnectedApp,
+  app: ConnectedApp,
 ): Record<string, unknown> {
   return {
     appUrl: app.appUrl,
@@ -278,7 +278,7 @@ export function serializeConnectedApp(
  * Serialize PostageStamp for storage
  */
 export function serializePostageStamp(
-  stamp: StoragePostageStamp,
+  stamp: PostageStamp,
 ): Record<string, unknown> {
   return {
     identityId: stamp.identityId,
@@ -303,8 +303,8 @@ export function serializePostageStamp(
 /**
  * Create storage manager for accounts
  */
-export function createAccountsStorageManager(): VersionedStorageManager<StorageAccount> {
-  return createLocalStorageManager<StorageAccount>({
+export function createAccountsStorageManager(): VersionedStorageManager<Account> {
+  return createLocalStorageManager<Account>({
     key: "swarm-id-accounts",
     currentVersion: 1,
     parsers: {
@@ -318,8 +318,8 @@ export function createAccountsStorageManager(): VersionedStorageManager<StorageA
 /**
  * Create storage manager for identities
  */
-export function createIdentitiesStorageManager(): VersionedStorageManager<StorageIdentity> {
-  return createLocalStorageManager<StorageIdentity>({
+export function createIdentitiesStorageManager(): VersionedStorageManager<Identity> {
+  return createLocalStorageManager<Identity>({
     key: "swarm-id-identities",
     currentVersion: 1,
     parsers: {
@@ -333,8 +333,8 @@ export function createIdentitiesStorageManager(): VersionedStorageManager<Storag
 /**
  * Create storage manager for connected apps
  */
-export function createConnectedAppsStorageManager(): VersionedStorageManager<StorageConnectedApp> {
-  return createLocalStorageManager<StorageConnectedApp>({
+export function createConnectedAppsStorageManager(): VersionedStorageManager<ConnectedApp> {
+  return createLocalStorageManager<ConnectedApp>({
     key: "swarm-id-connected-apps",
     currentVersion: 1,
     parsers: {
@@ -348,8 +348,8 @@ export function createConnectedAppsStorageManager(): VersionedStorageManager<Sto
 /**
  * Create storage manager for postage stamps
  */
-export function createPostageStampsStorageManager(): VersionedStorageManager<StoragePostageStamp> {
-  return createLocalStorageManager<StoragePostageStamp>({
+export function createPostageStampsStorageManager(): VersionedStorageManager<PostageStamp> {
+  return createLocalStorageManager<PostageStamp>({
     key: "swarm-id-postage-stamps",
     currentVersion: 1,
     parsers: {

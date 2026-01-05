@@ -1,55 +1,21 @@
-import { z } from 'zod'
 import { browser } from '$app/environment'
-import { VersionedStorageSchema } from '$lib/schemas'
-import { type ConnectedApp, ConnectedAppSchemaV1 } from '$lib/types'
+import { createConnectedAppsStorageManager, type ConnectedApp } from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 
 // ============================================================================
-// Storage
+// Storage Manager
 // ============================================================================
 
-const STORAGE_KEY = 'swarm-connected-apps'
-const CURRENT_VERSION = 1
+const storageManager = createConnectedAppsStorageManager()
 
 function loadConnectedApps(): ConnectedApp[] {
 	if (!browser) return []
-	const stored = localStorage.getItem(STORAGE_KEY)
-	if (!stored) return []
-
-	try {
-		const parsed: unknown = JSON.parse(stored)
-		return parse(parsed)
-	} catch (e) {
-		console.error('[ConnectedApps] Load failed:', e)
-		return []
-	}
-}
-
-function parse(parsed: unknown): ConnectedApp[] {
-	const versioned = VersionedStorageSchema.safeParse(parsed)
-	const version = versioned.success ? versioned.data.version : 0
-	const data = versioned.success ? versioned.data.data : parsed
-
-	switch (version) {
-		case 0: // Legacy unversioned data
-		case 1: {
-			const result = z.array(ConnectedAppSchemaV1).safeParse(data)
-			if (!result.success) {
-				console.error('[ConnectedApps] Invalid data:', result.error.format())
-				return []
-			}
-			return result.data
-		}
-		default:
-			console.error(`[ConnectedApps] Unknown version: ${version}`)
-			return []
-	}
+	return storageManager.load()
 }
 
 function saveConnectedApps(data: ConnectedApp[]): void {
-	if (!browser) return
-	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data }))
+	storageManager.save(data)
 
 	// Trigger Swarm sync
 	const currentIdentityId = sessionStore.data.currentIdentityId
@@ -160,6 +126,6 @@ export const connectedAppsStore = {
 
 	clear() {
 		connectedApps = []
-		if (browser) localStorage.removeItem(STORAGE_KEY)
+		storageManager.clear()
 	},
 }

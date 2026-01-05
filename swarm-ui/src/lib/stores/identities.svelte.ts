@@ -1,74 +1,22 @@
-import { z } from 'zod'
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import { VersionedStorageSchema } from '$lib/schemas'
-import { type Identity, IdentitySchemaV1 } from '$lib/types'
+import { createIdentitiesStorageManager, type Identity } from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 
 // ============================================================================
-// Storage
+// Storage Manager
 // ============================================================================
 
-const STORAGE_KEY = 'swarm-identities'
-const CURRENT_VERSION = 1
-
-// ============================================================================
-// Storage (versioned)
-// ============================================================================
+const storageManager = createIdentitiesStorageManager()
 
 function loadIdentities(): Identity[] {
 	if (!browser) return []
-	const stored = localStorage.getItem(STORAGE_KEY)
-	if (!stored) return []
-
-	try {
-		const parsed: unknown = JSON.parse(stored)
-		return parse(parsed)
-	} catch (e) {
-		console.error('[Identities] Load failed:', e)
-		return []
-	}
-}
-
-function parse(parsed: unknown): Identity[] {
-	const versioned = VersionedStorageSchema.safeParse(parsed)
-	const version = versioned.success ? versioned.data.version : 0
-	const data = versioned.success ? versioned.data.data : parsed
-
-	switch (version) {
-		case 0: // Legacy unversioned data
-		case 1: {
-			const result = z.array(IdentitySchemaV1).safeParse(data)
-			if (!result.success) {
-				console.error('[Identities] Invalid data:', result.error.format())
-				return []
-			}
-			return result.data
-		}
-		default:
-			console.error(`[Identities] Unknown version: ${version}`)
-			return []
-	}
-}
-
-/**
- * Serialize identity for storage (convert Bytes instances to hex strings)
- */
-function serializeIdentity(identity: Identity): Record<string, unknown> {
-	return {
-		id: identity.id,
-		accountId: identity.accountId.toHex(),
-		name: identity.name,
-		defaultPostageStampBatchID: identity.defaultPostageStampBatchID?.toHex(),
-		createdAt: identity.createdAt,
-	}
+	return storageManager.load()
 }
 
 function saveIdentities(data: Identity[]): void {
-	if (!browser) return
-	const serialized = data.map(serializeIdentity)
-	localStorage.setItem(STORAGE_KEY, JSON.stringify({ version: CURRENT_VERSION, data: serialized }))
+	storageManager.save(data)
 
 	// Trigger Swarm sync for current identity
 	const currentIdentityId = sessionStore.data.currentIdentityId
@@ -131,6 +79,6 @@ export const identitiesStore = {
 
 	clear() {
 		identities = []
-		if (browser) localStorage.removeItem(STORAGE_KEY)
+		storageManager.clear()
 	},
 }
