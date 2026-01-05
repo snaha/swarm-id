@@ -12,8 +12,8 @@ import { Bee, PrivateKey } from '@ethersphere/bee-js'
 import { browser } from '$app/environment'
 
 // Reactive state
-let syncEnabled = $state(true) // Auto-enabled for v1
-let lastSyncTimes = $state<Map<string, number>>(new Map())
+const syncEnabled = $state(true) // Auto-enabled for v1
+const lastSyncTimes = $state<Map<string, number>>(new Map())
 
 // Initialize Bee client (browser only)
 const getBeeClient = () => {
