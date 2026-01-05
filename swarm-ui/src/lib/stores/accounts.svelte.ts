@@ -1,41 +1,15 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
 import { EthAddress } from '@ethersphere/bee-js'
-import {
-	EthAddressSchema,
-	TimestampSchema,
-	HexStringSchema,
-	VersionedStorageSchema,
-} from '$lib/schemas'
+import { VersionedStorageSchema } from '$lib/schemas'
+import { type Account, AccountSchemaV1 } from '$lib/types'
 
 // ============================================================================
-// Schema & Types
+// Storage
 // ============================================================================
 
 const STORAGE_KEY = 'swarm-accounts'
 const CURRENT_VERSION = 1
-
-const AccountBaseSchema = z.object({
-	id: EthAddressSchema,
-	name: z.string().min(1).max(100),
-	createdAt: TimestampSchema,
-})
-
-const PasskeyAccountSchema = AccountBaseSchema.extend({
-	type: z.literal('passkey'),
-	credentialId: z.string().min(1),
-})
-
-const EthereumAccountSchema = AccountBaseSchema.extend({
-	type: z.literal('ethereum'),
-	ethereumAddress: EthAddressSchema,
-	encryptedMasterKey: HexStringSchema,
-	encryptionSalt: HexStringSchema,
-})
-
-const AccountSchemaV1 = z.discriminatedUnion('type', [PasskeyAccountSchema, EthereumAccountSchema])
-
-export type Account = z.infer<typeof AccountSchemaV1>
 
 // ============================================================================
 // Storage (versioned)

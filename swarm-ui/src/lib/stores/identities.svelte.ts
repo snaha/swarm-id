@@ -1,34 +1,15 @@
 import { z } from 'zod'
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import {
-	EthAddressSchema,
-	TimestampSchema,
-	BatchIdSchema,
-	VersionedStorageSchema,
-} from '$lib/schemas'
+import { VersionedStorageSchema } from '$lib/schemas'
+import { type Identity, IdentitySchemaV1 } from '$lib/types'
 
 // ============================================================================
-// Schema & Types
+// Storage
 // ============================================================================
 
 const STORAGE_KEY = 'swarm-identities'
 const CURRENT_VERSION = 1
-
-const IdentitySettingsSchemaV1 = z.object({
-	appSessionDuration: z.number().optional(),
-})
-
-const IdentitySchemaV1 = z.object({
-	id: z.string().min(1),
-	accountId: EthAddressSchema,
-	name: z.string().min(1).max(100),
-	defaultPostageStampBatchID: BatchIdSchema.optional(),
-	createdAt: TimestampSchema,
-	settings: IdentitySettingsSchemaV1.optional(),
-})
-
-export type Identity = z.infer<typeof IdentitySchemaV1>
 
 // ============================================================================
 // Storage (versioned)

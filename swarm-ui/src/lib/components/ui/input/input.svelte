@@ -258,6 +258,7 @@
 		}
 		input {
 			flex-grow: 1;
+			min-width: 0;
 			border-radius: var(--border-radius);
 			color: var(--colors-ultra-high);
 			&::placeholder {
