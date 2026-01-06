@@ -48,15 +48,15 @@ export class SwarmIdAuth {
       )
     }
 
-    // Get app origin from URL parameter
-    const urlParams = new URLSearchParams(window.location.search)
-    this.appOrigin = urlParams.get("origin") ?? undefined
+    // Get app origin from URL hash parameter (e.g., #origin=foo&appName=bar)
+    const hashParams = new URLSearchParams(window.location.hash.slice(1))
+    this.appOrigin = hashParams.get("origin") ?? undefined
 
     if (!this.appOrigin) {
       throw new Error("No origin parameter found in URL")
     }
 
-    console.log("[Auth] Got app origin from URL parameter:", this.appOrigin)
+    console.log("[Auth] Got app origin from URL hash:", this.appOrigin)
 
     // Load master key
     this.masterKey = localStorage.getItem(this.masterKeyStorageKey) ?? undefined

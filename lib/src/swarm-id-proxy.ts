@@ -735,7 +735,7 @@ export class SwarmIdProxy {
       document.head.appendChild(style)
     }
 
-    // Build URL with metadata parameters
+    // Build URL with hash parameters (avoids re-renders in SPA)
     const params = new URLSearchParams()
     params.set("origin", this.parentOrigin)
 
@@ -749,7 +749,7 @@ export class SwarmIdProxy {
       }
     }
 
-    const authUrl = `${window.location.origin}/connect?${params.toString()}`
+    const authUrl = `${window.location.origin}/connect#${params.toString()}`
 
     // Open as popup or full window based on popupMode
     if (this.popupMode === "popup") {

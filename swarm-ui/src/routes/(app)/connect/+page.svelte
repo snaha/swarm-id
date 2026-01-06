@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
-	import { page } from '$app/state'
 	import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
 	import CreateNewAccount from '$lib/components/create-new-account.svelte'
 	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
@@ -45,6 +44,12 @@
 	const hasIdentities = $derived(identities.length > 0)
 	const origin = window.location.origin
 
+	// Parse hash params (e.g., #origin=foo&appName=bar)
+	function getHashParams(): URLSearchParams {
+		const hash = window.location.hash.slice(1) // Remove the leading '#'
+		return new URLSearchParams(hash)
+	}
+
 	onMount(() => {
 		// Validate opener window
 		if (!window.opener) {
@@ -65,8 +70,9 @@
 		}
 
 		if (!sessionStore.data.appOrigin) {
-			// Get parameters from URL
-			const appOrigin = page.url.searchParams.get('origin')
+			// Get parameters from URL hash (e.g., #origin=foo&appName=bar)
+			const hashParams = getHashParams()
+			const appOrigin = hashParams.get('origin')
 			if (!appOrigin) {
 				error = 'No origin parameter found in URL'
 				return
@@ -79,10 +85,11 @@
 		}
 
 		if (!sessionStore.data.appData) {
-			// Get app metadata from URL parameters (if provided)
-			const urlAppName = page.url.searchParams.get('appName')
-			const urlAppDescription = page.url.searchParams.get('appDescription')
-			const urlAppIcon = page.url.searchParams.get('appIcon')
+			// Get app metadata from URL hash parameters (if provided)
+			const hashParams = getHashParams()
+			const urlAppName = hashParams.get('appName')
+			const urlAppDescription = hashParams.get('appDescription')
+			const urlAppIcon = hashParams.get('appIcon')
 
 			const appData = {
 				appUrl: sessionStore.data.appOrigin,
