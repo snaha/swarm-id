@@ -105,13 +105,12 @@
 
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
 				<CreateIdentityButton {account} showIcon={false} />
-				<Button variant="ghost" dimension="compact">
+				<Button variant="ghost" dimension="compact" onclick={() => (screen = 'account-details')}>
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
 						--horizontal-align-items="center"
 						--horizontal-justify-content="stretch"
 						style="flex: 1"
-						onclick={() => (screen = 'account-details')}
 					>
 						Account details
 						<FlexItem />
@@ -121,13 +120,12 @@
 			</Vertical>
 			<Divider --margin="0" />
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
-				<Button variant="ghost" dimension="compact">
+				<Button variant="ghost" dimension="compact" onclick={() => (screen = 'all-accounts')}>
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
 						--horizontal-align-items="center"
 						--horizontal-justify-content="stretch"
 						style="flex: 1"
-						onclick={() => (screen = 'all-accounts')}
 					>
 						All accounts
 						<FlexItem />
