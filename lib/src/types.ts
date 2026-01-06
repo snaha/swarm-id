@@ -439,71 +439,14 @@ export interface AuthOptions {
 }
 
 // ============================================================================
-// Entity Types (for storage)
+// Entity Types (derived from Zod schemas for type safety)
 // ============================================================================
 
-import type {
-  EthAddress,
-  BatchId as BeeJsBatchId,
-  Bytes,
-} from "@ethersphere/bee-js"
-
-// Account types
-export type PasskeyAccount = {
-  id: EthAddress
-  name: string
-  createdAt: number
-  type: "passkey"
-  credentialId: string
-}
-
-export type EthereumAccount = {
-  id: EthAddress
-  name: string
-  createdAt: number
-  type: "ethereum"
-  ethereumAddress: EthAddress
-  encryptedMasterKey: Bytes
-  encryptionSalt: Bytes
-}
-
-export type Account = PasskeyAccount | EthereumAccount
-
-// Identity types
-export type Identity = {
-  id: string
-  accountId: EthAddress
-  name: string
-  defaultPostageStampBatchID?: BeeJsBatchId
-  createdAt: number
-  settings?: {
-    appSessionDuration?: number
-  }
-}
-
-// Connected App types
-export type ConnectedApp = {
-  appUrl: string
-  appName: string
-  lastConnectedAt: number
-  identityId: string
-  appIcon?: string
-  appDescription?: string
-  connectedUntil?: number
-}
-
-// Postage Stamp types
-export type PostageStamp = {
-  identityId: string
-  batchID: BeeJsBatchId
-  utilization: number
-  usable: boolean
-  depth: number
-  amount: string
-  bucketDepth: number
-  blockNumber: number
-  immutableFlag: boolean
-  exists: boolean
-  batchTTL?: number
-  createdAt: number
-}
+export type {
+  PasskeyAccount,
+  EthereumAccount,
+  Account,
+  Identity,
+  ConnectedApp,
+  PostageStamp,
+} from "./schemas"

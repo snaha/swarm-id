@@ -6,108 +6,25 @@
  */
 
 import { z } from "zod"
-import { EthAddress, BatchId, Bytes } from "@ethersphere/bee-js"
 import {
   VersionedStorageManager,
   createLocalStorageManager,
   type VersionParser,
 } from "./versioned-storage"
-import type {
-  Account,
-  Identity,
-  ConnectedApp,
-  PostageStamp,
-} from "../types"
+import type { Account, Identity, ConnectedApp, PostageStamp } from "../types"
+import {
+  AccountSchemaV1,
+  IdentitySchemaV1,
+  ConnectedAppSchemaV1,
+  PostageStampSchemaV1,
+} from "../schemas"
 
 // ============================================================================
-// Zod Schemas for Serialized Data (JSON format)
-// ============================================================================
-
-/**
- * Passkey Account Schema (serialized)
- */
-const PasskeyAccountSchemaV1 = z.object({
-  id: z.string(),
-  name: z.string(),
-  createdAt: z.number(),
-  type: z.literal("passkey"),
-  credentialId: z.string(),
-})
-
-/**
- * Ethereum Account Schema (serialized)
- */
-const EthereumAccountSchemaV1 = z.object({
-  id: z.string(),
-  name: z.string(),
-  createdAt: z.number(),
-  type: z.literal("ethereum"),
-  ethereumAddress: z.string(),
-  encryptedMasterKey: z.array(z.number()),
-  encryptionSalt: z.array(z.number()),
-})
-
-/**
- * Account Schema (discriminated union, serialized)
- */
-const AccountSchemaV1 = z.discriminatedUnion("type", [
-  PasskeyAccountSchemaV1,
-  EthereumAccountSchemaV1,
-])
-
-/**
- * Identity Schema (serialized)
- */
-const IdentitySchemaV1 = z.object({
-  id: z.string(),
-  accountId: z.string(),
-  name: z.string(),
-  defaultPostageStampBatchID: z.string().optional(),
-  createdAt: z.number(),
-  settings: z
-    .object({
-      appSessionDuration: z.number().optional(),
-    })
-    .optional(),
-})
-
-/**
- * Connected App Schema (serialized)
- */
-const ConnectedAppSchemaV1 = z.object({
-  appUrl: z.string(),
-  appName: z.string(),
-  lastConnectedAt: z.number(),
-  identityId: z.string(),
-  appIcon: z.string().optional(),
-  appDescription: z.string().optional(),
-  connectedUntil: z.number().optional(),
-})
-
-/**
- * Postage Stamp Schema (serialized)
- */
-const PostageStampSchemaV1 = z.object({
-  identityId: z.string(),
-  batchID: z.string(),
-  utilization: z.number(),
-  usable: z.boolean(),
-  depth: z.number(),
-  amount: z.string(),
-  bucketDepth: z.number(),
-  blockNumber: z.number(),
-  immutableFlag: z.boolean(),
-  exists: z.boolean(),
-  batchTTL: z.number().optional(),
-  createdAt: z.number(),
-})
-
-// ============================================================================
-// Custom Parsers (convert JSON format to runtime types)
+// Parsers (Zod transforms handle primitive → bee-js conversion)
 // ============================================================================
 
 /**
- * Parse accounts and convert to runtime types
+ * Parse accounts - Zod transforms handle type conversion
  */
 const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
   const result = z.array(AccountSchemaV1).safeParse(data)
@@ -117,33 +34,11 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
     return []
   }
 
-  return result.data.map((account) => {
-    if (account.type === "passkey") {
-      return {
-        id: new EthAddress(account.id),
-        name: account.name,
-        createdAt: account.createdAt,
-        type: "passkey" as const,
-        credentialId: account.credentialId,
-      }
-    } else {
-      return {
-        id: new EthAddress(account.id),
-        name: account.name,
-        createdAt: account.createdAt,
-        type: "ethereum" as const,
-        ethereumAddress: new EthAddress(account.ethereumAddress),
-        encryptedMasterKey: new Bytes(
-          new Uint8Array(account.encryptedMasterKey),
-        ),
-        encryptionSalt: new Bytes(new Uint8Array(account.encryptionSalt)),
-      }
-    }
-  })
+  return result.data
 }
 
 /**
- * Parse identities and convert to runtime types
+ * Parse identities - Zod transforms handle type conversion
  */
 const parseIdentitiesV1: VersionParser<Identity> = (data: unknown) => {
   const result = z.array(IdentitySchemaV1).safeParse(data)
@@ -153,24 +48,13 @@ const parseIdentitiesV1: VersionParser<Identity> = (data: unknown) => {
     return []
   }
 
-  return result.data.map((identity) => ({
-    id: identity.id,
-    accountId: new EthAddress(identity.accountId),
-    name: identity.name,
-    defaultPostageStampBatchID: identity.defaultPostageStampBatchID
-      ? new BatchId(identity.defaultPostageStampBatchID)
-      : undefined,
-    createdAt: identity.createdAt,
-    settings: identity.settings,
-  }))
+  return result.data
 }
 
 /**
- * Parse connected apps (no conversion needed)
+ * Parse connected apps
  */
-const parseConnectedAppsV1: VersionParser<ConnectedApp> = (
-  data: unknown,
-) => {
+const parseConnectedAppsV1: VersionParser<ConnectedApp> = (data: unknown) => {
   const result = z.array(ConnectedAppSchemaV1).safeParse(data)
 
   if (!result.success) {
@@ -182,11 +66,9 @@ const parseConnectedAppsV1: VersionParser<ConnectedApp> = (
 }
 
 /**
- * Parse postage stamps and convert to runtime types
+ * Parse postage stamps - Zod transforms handle type conversion
  */
-const parsePostageStampsV1: VersionParser<PostageStamp> = (
-  data: unknown,
-) => {
+const parsePostageStampsV1: VersionParser<PostageStamp> = (data: unknown) => {
   const result = z.array(PostageStampSchemaV1).safeParse(data)
 
   if (!result.success) {
@@ -194,20 +76,7 @@ const parsePostageStampsV1: VersionParser<PostageStamp> = (
     return []
   }
 
-  return result.data.map((stamp) => ({
-    identityId: stamp.identityId,
-    batchID: new BatchId(stamp.batchID),
-    utilization: stamp.utilization,
-    usable: stamp.usable,
-    depth: stamp.depth,
-    amount: stamp.amount,
-    bucketDepth: stamp.bucketDepth,
-    blockNumber: stamp.blockNumber,
-    immutableFlag: stamp.immutableFlag,
-    exists: stamp.exists,
-    batchTTL: stamp.batchTTL,
-    createdAt: stamp.createdAt,
-  }))
+  return result.data
 }
 
 // ============================================================================

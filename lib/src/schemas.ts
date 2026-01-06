@@ -1,0 +1,143 @@
+/**
+ * Entity Schemas with Zod
+ *
+ * Defines Zod schemas for storage entities with transforms to convert
+ * serialized primitives to bee-js runtime types. Types are derived using
+ * z.infer to guarantee schema/type consistency.
+ */
+
+import { z } from "zod"
+import { EthAddress, BatchId, Bytes } from "@ethersphere/bee-js"
+
+// ============================================================================
+// Primitive → bee-js Type Transforms (internal, for entity schemas)
+// ============================================================================
+
+/**
+ * Schema for EthAddress - validates 40-char hex string, transforms to EthAddress
+ */
+const StoredEthAddress = z
+  .string()
+  .length(40)
+  .transform((s) => new EthAddress(s))
+
+/**
+ * Schema for BatchId - validates 64-char hex string, transforms to BatchId
+ */
+const StoredBatchId = z
+  .string()
+  .length(64)
+  .transform((s) => new BatchId(s))
+
+/**
+ * Schema for Bytes - validates number array, transforms to Bytes
+ */
+const StoredBytes = z
+  .array(z.number())
+  .transform((arr) => new Bytes(new Uint8Array(arr)))
+
+// ============================================================================
+// Account Schemas
+// ============================================================================
+
+/**
+ * Passkey Account Schema V1
+ */
+export const PasskeyAccountSchemaV1 = z.object({
+  id: StoredEthAddress,
+  name: z.string(),
+  createdAt: z.number(),
+  type: z.literal("passkey"),
+  credentialId: z.string(),
+})
+
+/**
+ * Ethereum Account Schema V1
+ */
+export const EthereumAccountSchemaV1 = z.object({
+  id: StoredEthAddress,
+  name: z.string(),
+  createdAt: z.number(),
+  type: z.literal("ethereum"),
+  ethereumAddress: StoredEthAddress,
+  encryptedMasterKey: StoredBytes,
+  encryptionSalt: StoredBytes,
+})
+
+/**
+ * Account Schema V1 (discriminated union)
+ */
+export const AccountSchemaV1 = z.discriminatedUnion("type", [
+  PasskeyAccountSchemaV1,
+  EthereumAccountSchemaV1,
+])
+
+// ============================================================================
+// Identity Schema
+// ============================================================================
+
+/**
+ * Identity Schema V1
+ */
+export const IdentitySchemaV1 = z.object({
+  id: z.string(),
+  accountId: StoredEthAddress,
+  name: z.string(),
+  defaultPostageStampBatchID: StoredBatchId.optional(),
+  createdAt: z.number(),
+  settings: z
+    .object({
+      appSessionDuration: z.number().optional(),
+    })
+    .optional(),
+})
+
+// ============================================================================
+// Connected App Schema
+// ============================================================================
+
+/**
+ * Connected App Schema V1 (no transforms needed - all primitives)
+ */
+export const ConnectedAppSchemaV1 = z.object({
+  appUrl: z.string(),
+  appName: z.string(),
+  lastConnectedAt: z.number(),
+  identityId: z.string(),
+  appIcon: z.string().optional(),
+  appDescription: z.string().optional(),
+  connectedUntil: z.number().optional(),
+})
+
+// ============================================================================
+// Postage Stamp Schema
+// ============================================================================
+
+/**
+ * Postage Stamp Schema V1
+ */
+export const PostageStampSchemaV1 = z.object({
+  identityId: z.string(),
+  batchID: StoredBatchId,
+  utilization: z.number(),
+  usable: z.boolean(),
+  depth: z.number(),
+  amount: z.string(),
+  bucketDepth: z.number(),
+  blockNumber: z.number(),
+  immutableFlag: z.boolean(),
+  exists: z.boolean(),
+  batchTTL: z.number().optional(),
+  createdAt: z.number(),
+})
+
+// ============================================================================
+// Derived Types (guaranteed to match current schema version)
+// ============================================================================
+
+export type PasskeyAccount = z.infer<typeof PasskeyAccountSchemaV1>
+export type EthereumAccount = z.infer<typeof EthereumAccountSchemaV1>
+export type Account = z.infer<typeof AccountSchemaV1>
+export type Identity = z.infer<typeof IdentitySchemaV1>
+export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
+export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
