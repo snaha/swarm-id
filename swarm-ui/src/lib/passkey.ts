@@ -3,29 +3,9 @@
  * Derives deterministic Ethereum addresses from platform authenticator PRF output
  */
 
-import {
-	startRegistration,
-	startAuthentication,
-	type PublicKeyCredentialCreationOptionsJSON,
-	type PublicKeyCredentialRequestOptionsJSON,
-	type AuthenticationResponseJSON,
-} from '@simplewebauthn/browser'
 import { HDNodeWallet } from 'ethers'
 import { EthAddress, Bytes } from '@ethersphere/bee-js'
 import { toPrefixedHex } from './utils/hex'
-
-// Type augmentation for PRF extension (not in standard types)
-declare module '@simplewebauthn/browser' {
-	interface AuthenticationExtensionsClientOutputs {
-		prf?: {
-			enabled?: boolean
-			results?: {
-				first?: ArrayBuffer
-				second?: ArrayBuffer
-			}
-		}
-	}
-}
 
 export interface PasskeyAccount {
 	credentialId: string
@@ -40,13 +20,13 @@ export interface PasskeyRegistrationOptions {
 	userName: string
 	userDisplayName?: string
 	challenge?: Uint8Array
-	excludeCredentials?: Array<{ id: string; type: 'public-key' }>
+	excludeCredentialIds?: string[]
 }
 
 export interface PasskeyAuthenticationOptions {
 	rpId?: string
 	challenge?: Uint8Array
-	allowCredentials?: Array<{ id: string; type: 'public-key' }>
+	allowCredentialIds?: string[]
 }
 
 function generateChallenge(): Uint8Array {
@@ -55,17 +35,95 @@ function generateChallenge(): Uint8Array {
 	return challenge
 }
 
-async function generatePRFSalt(): Promise<ArrayBuffer> {
+async function generatePRFSalt(): Promise<Uint8Array> {
 	// Domain-specific salt prevents cross-domain key derivation
 	const saltString = `${window.location.hostname}:ethereum-wallet-v1`
 	const encoder = new TextEncoder()
 	const saltBytes = encoder.encode(saltString)
-	return await crypto.subtle.digest('SHA-256', saltBytes)
+	const digest = await crypto.subtle.digest('SHA-256', saltBytes)
+	return new Uint8Array(digest)
 }
 
-function bufferToBase64url(buffer: Uint8Array): string {
-	const base64 = btoa(String.fromCharCode(...buffer))
+function bufferToBase64url(buffer: ArrayBuffer | Uint8Array): string {
+	const bytes = buffer instanceof ArrayBuffer ? new Uint8Array(buffer) : buffer
+	const base64 = btoa(String.fromCharCode(...bytes))
 	return base64.replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '')
+}
+
+function base64urlToBuffer(base64url: string): Uint8Array {
+	const padding = '='.repeat((4 - (base64url.length % 4)) % 4)
+	const base64 = base64url.replace(/-/g, '+').replace(/_/g, '/') + padding
+	const binary = atob(base64)
+	const bytes = new Uint8Array(binary.length)
+	for (let i = 0; i < binary.length; i++) {
+		bytes[i] = binary.charCodeAt(i)
+	}
+	return bytes
+}
+
+function toUint8Array(buffer: BufferSource): Uint8Array {
+	return buffer instanceof ArrayBuffer
+		? new Uint8Array(buffer)
+		: new Uint8Array(buffer.buffer, buffer.byteOffset, buffer.byteLength)
+}
+
+/**
+ * Wraps WebAuthn errors with user-friendly messages
+ */
+function handleWebAuthnError(error: unknown): never {
+	if (error instanceof DOMException) {
+		switch (error.name) {
+			case 'NotAllowedError':
+				throw new Error('Authentication was cancelled or denied by the user.')
+			case 'InvalidStateError':
+				throw new Error('This credential is already registered on this device.')
+			case 'NotSupportedError':
+				throw new Error('Your device does not support the required authentication features.')
+			case 'SecurityError':
+				throw new Error('Authentication requires HTTPS.')
+			case 'AbortError':
+				throw new Error('Authentication was aborted.')
+			default:
+				throw new Error(`Authentication error: ${error.message}`)
+		}
+	}
+	throw error instanceof Error ? error : new Error('Unknown authentication error.')
+}
+
+/**
+ * Derive master key from PRF output using HKDF
+ * Follows Yubico's best practice guide for PRF key derivation
+ */
+async function deriveMasterKeyFromPRF(prfOutput: Uint8Array): Promise<Uint8Array> {
+	const masterKey = await crypto.subtle.importKey('raw', prfOutput, 'HKDF', false, ['deriveBits'])
+	const derivedBits = await crypto.subtle.deriveBits(
+		{
+			name: 'HKDF',
+			salt: new Uint8Array(), // empty salt (PRF already provides entropy)
+			hash: 'SHA-256',
+			info: new TextEncoder().encode('ethereum-hd-wallet-v1'), // purpose binding
+		},
+		masterKey,
+		256, // 256 bits
+	)
+	return new Uint8Array(derivedBits)
+}
+
+/**
+ * Create Ethereum wallet from seed bytes
+ * Converts seed to HD wallet and returns address + master key
+ */
+export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
+	address: EthAddress
+	masterKey: Bytes
+} {
+	const masterKey = new Bytes(seedBytes)
+	const wallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey))
+
+	return {
+		address: new EthAddress(wallet.address),
+		masterKey,
+	}
 }
 
 /**
@@ -77,14 +135,14 @@ export async function createPasskeyAccount(
 	const challenge = options.challenge || generateChallenge()
 	const prfSalt = await generatePRFSalt()
 
-	const registrationOptions: PublicKeyCredentialCreationOptionsJSON = {
-		challenge: bufferToBase64url(challenge),
+	const publicKeyOptions: PublicKeyCredentialCreationOptions = {
+		challenge,
 		rp: {
 			name: options.rpName,
 			id: options.rpId,
 		},
 		user: {
-			id: bufferToBase64url(new TextEncoder().encode(options.userId)),
+			id: new TextEncoder().encode(options.userId),
 			name: options.userName,
 			displayName: options.userDisplayName || options.userName,
 		},
@@ -103,26 +161,35 @@ export async function createPasskeyAccount(
 				// (avoids requiring a second authentication after account creation)
 				eval: { first: prfSalt },
 			},
-		} as AuthenticationExtensionsClientInputs,
+		},
 		timeout: 60000,
 		attestation: 'none',
 	}
 
 	// Exclude already-registered credentials to prevent duplicate registrations
-	// transports hint helps the browser check all possible authenticator connections
-	if (options.excludeCredentials && options.excludeCredentials.length > 0) {
-		registrationOptions.excludeCredentials = options.excludeCredentials.map((cred) => ({
-			id: cred.id,
-			type: cred.type,
-			transports: ['internal', 'hybrid', 'usb'],
+	if (options.excludeCredentialIds && options.excludeCredentialIds.length > 0) {
+		publicKeyOptions.excludeCredentials = options.excludeCredentialIds.map((id) => ({
+			id: base64urlToBuffer(id),
+			type: 'public-key' as const,
+			transports: ['internal', 'hybrid', 'usb'] as AuthenticatorTransport[],
 		}))
 	}
 
-	const registrationResponse = await startRegistration({ optionsJSON: registrationOptions })
+	let credential: Credential | null
+	try {
+		credential = await navigator.credentials.create({ publicKey: publicKeyOptions })
+	} catch (error) {
+		handleWebAuthnError(error)
+	}
+
+	if (!credential || !(credential instanceof PublicKeyCredential)) {
+		throw new Error('Failed to create credential')
+	}
 
 	// Check if PRF extension is available
-	const prfEnabled = registrationResponse.clientExtensionResults?.prf?.enabled ?? false
-	console.log('📝 PRF extension:', prfEnabled ? 'enabled ✅' : 'not available ❌')
+	const extensionResults = credential.getClientExtensionResults()
+	const prfEnabled = extensionResults.prf?.enabled ?? false
+	console.log('PRF extension:', prfEnabled ? 'enabled' : 'not available')
 
 	if (!prfEnabled) {
 		throw new Error(
@@ -130,24 +197,20 @@ export async function createPasskeyAccount(
 		)
 	}
 
-	const credentialId = registrationResponse.id
-	console.log('📝 Registration: Credential created successfully')
-	console.log('🔑 Credential ID:', credentialId)
+	const credentialId = bufferToBase64url(credential.rawId)
+	console.log('Registration: Credential created successfully')
+	console.log('Credential ID:', credentialId)
 
 	// Check if we got PRF results during registration
-	const prfResults = (
-		registrationResponse.clientExtensionResults as {
-			prf?: { results?: { first?: ArrayBuffer } }
-		}
-	)?.prf?.results?.first
+	const prfResults = extensionResults.prf?.results?.first
 
 	let account: PasskeyAccount
 
 	if (prfResults) {
 		// Use PRF output from registration
-		console.log('✅ Got PRF output during registration (single biometric prompt)')
-		const prfBytes = new Uint8Array(prfResults)
-		const wallet = await deriveWalletFromPRF(prfBytes)
+		console.log('Got PRF output during registration (single biometric prompt)')
+		const seedBytes = await deriveMasterKeyFromPRF(toUint8Array(prfResults))
+		const wallet = createEthereumWalletFromSeed(seedBytes)
 		account = {
 			credentialId,
 			ethereumAddress: wallet.address,
@@ -155,14 +218,14 @@ export async function createPasskeyAccount(
 		}
 	} else {
 		// Fallback: authenticate separately to get PRF output
-		console.log('🔐 Authenticating to get PRF output (second biometric prompt)')
+		console.log('Authenticating to get PRF output (second biometric prompt)')
 		account = await authenticateWithPasskey({
 			rpId: options.rpId,
-			allowCredentials: [{ id: credentialId, type: 'public-key' }],
+			allowCredentialIds: [credentialId],
 		})
 	}
 
-	console.log('✅ Passkey account created with address:', toPrefixedHex(account.ethereumAddress))
+	console.log('Passkey account created with address:', toPrefixedHex(account.ethereumAddress))
 
 	return account
 }
@@ -176,8 +239,8 @@ export async function authenticateWithPasskey(
 	const challenge = options.challenge || generateChallenge()
 	const prfSalt = await generatePRFSalt()
 
-	const authenticationOptions: PublicKeyCredentialRequestOptionsJSON = {
-		challenge: bufferToBase64url(challenge),
+	const publicKeyOptions: PublicKeyCredentialRequestOptions = {
+		challenge,
 		rpId: options.rpId || window.location.hostname,
 		timeout: 60000,
 		userVerification: 'required',
@@ -187,35 +250,32 @@ export async function authenticateWithPasskey(
 					first: prfSalt,
 				},
 			},
-		} as AuthenticationExtensionsClientInputs,
+		},
 	}
 
-	if (options.allowCredentials) {
-		authenticationOptions.allowCredentials = options.allowCredentials.map((cred) => ({
-			id: cred.id,
-			type: cred.type,
-			transports: ['internal', 'hybrid'],
+	if (options.allowCredentialIds) {
+		publicKeyOptions.allowCredentials = options.allowCredentialIds.map((id) => ({
+			id: base64urlToBuffer(id),
+			type: 'public-key' as const,
+			transports: ['internal', 'hybrid'] as AuthenticatorTransport[],
 		}))
 	}
 
-	const authenticationResponse = await startAuthentication({ optionsJSON: authenticationOptions })
+	let credential: Credential | null
+	try {
+		credential = await navigator.credentials.get({ publicKey: publicKeyOptions })
+	} catch (error) {
+		handleWebAuthnError(error)
+	}
 
-	return processAuthenticationResponse(authenticationResponse)
-}
+	if (!credential || !(credential instanceof PublicKeyCredential)) {
+		throw new Error('Authentication failed: no credential returned')
+	}
 
-async function processAuthenticationResponse(
-	response: AuthenticationResponseJSON,
-): Promise<PasskeyAccount> {
-	const credentialId = response.id
-
-	// Extract PRF output
-	const clientExtensionResults = response.clientExtensionResults || {}
-	const prfResult = (
-		clientExtensionResults as {
-			prf?: { results?: { first?: ArrayBuffer } }
-		}
-	)?.prf
-	const prfOutput = prfResult?.results?.first
+	// Extract credential ID and PRF output
+	const credentialId = bufferToBase64url(credential.rawId)
+	const extensionResults = credential.getClientExtensionResults()
+	const prfOutput = extensionResults.prf?.results?.first
 
 	if (!prfOutput) {
 		throw new Error(
@@ -223,81 +283,15 @@ async function processAuthenticationResponse(
 		)
 	}
 
-	const prfBytes = new Uint8Array(prfOutput)
-	console.log('🔑 PRF output received:', prfBytes.length, 'bytes')
+	console.log('PRF output received:', toUint8Array(prfOutput).length, 'bytes')
 
 	// Derive Ethereum wallet from PRF output
-	const wallet = await deriveWalletFromPRF(prfBytes)
+	const seedBytes = await deriveMasterKeyFromPRF(toUint8Array(prfOutput))
+	const wallet = createEthereumWalletFromSeed(seedBytes)
 
 	return {
 		credentialId,
 		ethereumAddress: wallet.address,
 		masterKey: wallet.masterKey,
 	}
-}
-
-/**
- * Derive master key from PRF output using importKey + deriveKey pattern
- * Follows Yubico's best practice guide for PRF key derivation
- */
-async function deriveMasterKeyFromPRF(prfOutput: Uint8Array): Promise<Uint8Array> {
-	// Step 1: Import PRF result as master key
-	const masterKey = await crypto.subtle.importKey(
-		'raw',
-		prfOutput,
-		'HKDF',
-		false, // non-extractable
-		['deriveKey'], // only for key derivation
-	)
-
-	// Step 2: Derive purpose-specific key for Ethereum wallet
-	const derivedKey = await crypto.subtle.deriveKey(
-		{
-			name: 'HKDF',
-			salt: new Uint8Array(), // empty salt (PRF already provides entropy)
-			hash: 'SHA-256',
-			info: new TextEncoder().encode('ethereum-hd-wallet-v1'), // purpose binding
-		},
-		masterKey,
-		{ name: 'HMAC', hash: 'SHA-256', length: 256 }, // output: 256-bit key
-		true, // extractable (need to export for HDNodeWallet)
-		['sign'], // usage
-	)
-
-	// Step 3: Export derived key as raw bytes
-	const exportedKey = await crypto.subtle.exportKey('raw', derivedKey)
-	return new Uint8Array(exportedKey)
-}
-
-/**
- * Create Ethereum wallet from seed bytes
- * Converts seed to HD wallet and returns address + master key
- */
-export function createEthereumWalletFromSeed(seedBytes: Uint8Array): {
-	address: EthAddress
-	masterKey: Bytes
-} {
-	// Create Bytes from seed
-	const masterKey = new Bytes(seedBytes)
-
-	const wallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey))
-
-	return {
-		address: new EthAddress(wallet.address),
-		masterKey,
-	}
-}
-
-/**
- * Derive Ethereum wallet from PRF output
- * Returns both the Ethereum address and master key for HD wallet derivation
- */
-async function deriveWalletFromPRF(
-	prfOutput: Uint8Array,
-): Promise<{ address: EthAddress; masterKey: Bytes }> {
-	// Step 1: Derive master key using importKey + deriveKey
-	const seedBytes = await deriveMasterKeyFromPRF(prfOutput)
-
-	// Step 2: Create Ethereum wallet from seed
-	return createEthereumWalletFromSeed(seedBytes)
 }

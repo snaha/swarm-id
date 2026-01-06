@@ -210,9 +210,6 @@ importers:
       '@ethersphere/bee-js':
         specifier: link:../bee-js
         version: link:../bee-js
-      '@simplewebauthn/browser':
-        specifier: 13.2.2
-        version: 13.2.2
       '@swarm-id/lib':
         specifier: workspace:*
         version: link:../lib
@@ -2011,9 +2008,6 @@ packages:
 
   '@sideway/pinpoint@2.0.0':
     resolution: {integrity: sha512-RNiOoTPkptFtSVzQevY/yWtZwf/RxyVnPy/OcA9HBM3MlGDnBEYL5B41H0MTn0Uec8Hi+2qUtTfG2WWZBmMejQ==}
-
-  '@simplewebauthn/browser@13.2.2':
-    resolution: {integrity: sha512-FNW1oLQpTJyqG5kkDg5ZsotvWgmBaC6jCHR7Ej0qUNep36Wl9tj2eZu7J5rP+uhXgHaLk+QQ3lqcw2vS5MX1IA==}
 
   '@sinclair/typebox@0.27.8':
     resolution: {integrity: sha512-+Fj43pSMwJs4KRrH/938Uf+uAELIgVBmQzg/q1YG10djyfA3TnrU8N8XzqCh/okZdszqBQTZf96idMfE5lnwTA==}
@@ -6992,8 +6986,6 @@ snapshots:
   '@sideway/formula@3.0.1': {}
 
   '@sideway/pinpoint@2.0.0': {}
-
-  '@simplewebauthn/browser@13.2.2': {}
 
   '@sinclair/typebox@0.27.8': {}
 

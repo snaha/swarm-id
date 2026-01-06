@@ -17,7 +17,7 @@ export async function getMasterKeyFromAccount(account: Account): Promise<Bytes> 
 		const passkeyAccount = await authenticateWithPasskey({
 			rpId: swarmIdDomain,
 			challenge,
-			allowCredentials: [{ id: account.credentialId, type: 'public-key' }],
+			allowCredentialIds: [account.credentialId],
 		})
 		return passkeyAccount.masterKey
 	} else {
