@@ -1,6 +1,7 @@
 export default {
 	HOME: `/`,
 	CONNECT: `/connect`,
+	ACCOUNT_NEW: `/account/new`,
 	PASSKEY_NEW: `/passkey/new`,
 	ETH_NEW: `/eth/new`,
 	IDENTITY_NEW: `/identity/new`,

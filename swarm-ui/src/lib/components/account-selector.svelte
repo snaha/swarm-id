@@ -10,13 +10,14 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { EthAddress } from '@ethersphere/bee-js'
 	import { toPrefixedHex } from '$lib/utils/hex'
+	import { goto } from '$app/navigation'
+	import routes from '$lib/routes'
 
 	interface Props {
 		selectedAccount: EthAddress | undefined
-		onCreateAccount?: () => void
 	}
 
-	let { selectedAccount = $bindable(), onCreateAccount }: Props = $props()
+	let { selectedAccount = $bindable() }: Props = $props()
 
 	const accounts = $derived(accountsStore.accounts)
 
@@ -61,23 +62,21 @@
 		variant="solid"
 	>
 		{#snippet dropdownFooter({ close, store })}
-			{#if onCreateAccount}
-				<Option
-					value=""
-					{store}
-					onclick={(e: MouseEvent) => {
-						e.preventDefault()
-						e.stopPropagation()
-						close()
-						onCreateAccount()
-					}}
-				>
-					<span class="option-content">
-						<Add size={16} />
-						Add account...
-					</span>
-				</Option>
-			{/if}
+			<Option
+				value=""
+				{store}
+				onclick={(e: MouseEvent) => {
+					e.preventDefault()
+					e.stopPropagation()
+					close()
+					goto(routes.ACCOUNT_NEW)
+				}}
+			>
+				<span class="option-content">
+					<Add size={16} />
+					Add account...
+				</span>
+			</Option>
 		{/snippet}
 	</Select>
 </Horizontal>

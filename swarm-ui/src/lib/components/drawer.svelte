@@ -177,7 +177,14 @@
 			</Vertical>
 			<Divider --margin="0" />
 			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
-				<Button variant="ghost" dimension="compact" onclick={notImplemented}>
+				<Button
+					variant="ghost"
+					dimension="compact"
+					onclick={() => {
+						drawerOpen = false
+						goto(routes.ACCOUNT_NEW)
+					}}
+				>
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
 						--horizontal-align-items="center"

@@ -1,5 +1,4 @@
 <script lang="ts">
-	import CreateNewAccount from '$lib/components/create-new-account.svelte'
 	import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 	import IdentityList from '$lib/components/identity-list.svelte'
 	import AccountSelector from '$lib/components/account-selector.svelte'
@@ -29,11 +28,12 @@
 	})
 	const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
-	let showCreateMode = $state(false)
-
-	function handleCreateNew() {
-		showCreateMode = true
-	}
+	// Redirect to account creation if no accounts exist
+	$effect(() => {
+		if (!hasAccounts) {
+			goto(routes.ACCOUNT_NEW)
+		}
+	})
 
 	function handleIdentityClick(identity: Identity) {
 		goto(routes.IDENTITY(identity.id))
@@ -42,29 +42,20 @@
 
 {#if isAuthenticating && selectedAccount}
 	<Confirmation authenticationType={selectedAccount?.type} />
-{:else}
+{:else if hasAccounts}
 	<Vertical>
 		<Typography variant="h4">Welcome to Swarm ID</Typography>
-
-		{#if hasAccounts && !showCreateMode}
-			<Typography variant="small"
-				>{identities.length > 0
-					? 'Choose an identity to continue'
-					: 'Create an identity to continue'}</Typography
-			>
-			<Vertical --vertical-gap="var(--double-padding)">
-				<AccountSelector
-					bind:selectedAccount={selectedAccountId}
-					onCreateAccount={handleCreateNew}
-				/>
-				<IdentityList {identities} onIdentityClick={handleIdentityClick} />
-				<Horizontal --horizontal-justify-content="flex-start">
-					<CreateIdentityButton account={selectedAccount} {isAuthenticating} />
-				</Horizontal>
-			</Vertical>
-		{:else}
-			<Typography variant="small">Create or import an account to continue</Typography>
-			<CreateNewAccount />
-		{/if}
+		<Typography variant="small"
+			>{identities.length > 0
+				? 'Choose an identity to continue'
+				: 'Create an identity to continue'}</Typography
+		>
+		<Vertical --vertical-gap="var(--double-padding)">
+			<AccountSelector bind:selectedAccount={selectedAccountId} />
+			<IdentityList {identities} onIdentityClick={handleIdentityClick} />
+			<Horizontal --horizontal-justify-content="flex-start">
+				<CreateIdentityButton account={selectedAccount} {isAuthenticating} />
+			</Horizontal>
+		</Vertical>
 	</Vertical>
 {/if}
