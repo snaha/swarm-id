@@ -47,6 +47,10 @@ jobs:
         working-directory: docs-site
         run: pnpm astro build --base /pr-preview/pr-${{ github.event.number }}/
 
+      - name: Add .nojekyll file
+        if: github.event.action != 'closed'
+        run: touch docs-site/dist/.nojekyll
+
       - name: Deploy PR preview
         uses: rossjrw/pr-preview-action@v1
         with:
