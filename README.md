@@ -7,6 +7,7 @@ This monorepo implements a cross-browser compatible authentication and identity 
 - **[lib/](./lib/README.md)** - The Swarm ID TypeScript library for authentication and Bee API operations
 - **[swarm-ui/](./swarm-ui/)** - SvelteKit-based identity management UI
 - **[demo/](./demo/)** - Demo dApp with library integration examples
+- **[docs-site/](./docs-site/)** - Starlight (Astro) documentation website
 - **[bee-js/](https://github.com/agazso/bee-js/tree/feat/encrypted-chunk-streams)** - A custom fork of the [bee-js](https://github.com/ethersphere/bee-js) library, containing encrypted, streaming chunked upload and download functionality.
 
 ## Architecture
@@ -258,6 +259,9 @@ Both servers:
 │   ├── src/              # SvelteKit source code
 │   │   └── routes/       # SvelteKit routes including /proxy and /connect
 │   └── build/            # SvelteKit production build
+├── docs-site/            # Starlight documentation site
+│   ├── src/content/docs/ # Documentation pages (MDX)
+│   └── dist/             # Built static site
 ├── bee-js/               # bee-js library (linked dependency)
 ├── swarm-id-build/       # Build output (deployed to swarm-id.snaha.net)
 │   ├── [SvelteKit app]   # SvelteKit production files (includes /proxy and /connect routes)
@@ -291,9 +295,23 @@ Both servers:
 
 ## Documentation
 
+- **[Documentation Site](./docs-site/)**: Full documentation website (run `pnpm docs:dev` to preview)
 - **[The Book of Swarm](./The-Book-of-Swarm.pdf)**: Comprehensive Swarm documentation
 - **[Swarm Identity Management Proposal](./docs/Swarm-Identity-Management-Proposal.md)**: Identity system proposal
 - **[Library Documentation](./lib/README.md)**: API reference and usage examples
+
+### Documentation Development
+
+```bash
+# Start docs dev server (http://localhost:4321)
+pnpm docs:dev
+
+# Build docs for production
+pnpm docs:build
+
+# Preview production build
+pnpm docs:preview
+```
 
 ## Development Workflow
 

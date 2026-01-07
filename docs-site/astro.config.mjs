@@ -2,7 +2,11 @@
 import { defineConfig } from 'astro/config'
 import starlight from '@astrojs/starlight'
 
+// Support PR preview base paths via environment variable
+const base = process.env.BASE_URL || '/'
+
 export default defineConfig({
+  base,
   integrations: [
     starlight({
       title: 'Swarm ID',
