@@ -10,19 +10,27 @@ export const SWARM_SECRET_PREFIX = "swarm-secret-"
 // Base Types
 // ============================================================================
 
+// Helper for hex string validation
+const hexString = (length: number) =>
+  z.string().regex(new RegExp(`^[0-9a-fA-F]{${length}}$`), {
+    message: `Must be a ${length}-character hex string`,
+  })
+
 // Support both regular (32-byte = 64 hex chars) and encrypted (64-byte = 128 hex chars) references
 export const ReferenceSchema = z
   .string()
-  .refine((val) => val.length === 64 || val.length === 128, {
+  .regex(/^[0-9a-fA-F]{64}$|^[0-9a-fA-F]{128}$/, {
     message:
-      "Reference must be 64 chars (32 bytes) or 128 chars (64 bytes for encrypted)",
+      "Reference must be 64 hex chars (32 bytes) or 128 hex chars (64 bytes for encrypted)",
   })
-export const BatchIdSchema = z.string().length(64)
-export const AddressSchema = z.string().length(40)
+export const BatchIdSchema = hexString(64) // 32 bytes
+export const AddressSchema = hexString(40) // 20 bytes
+export const PrivateKeySchema = hexString(64) // 32 bytes
 
 export type Reference = z.infer<typeof ReferenceSchema>
 export type BatchId = z.infer<typeof BatchIdSchema>
 export type Address = z.infer<typeof AddressSchema>
+export type PrivateKey = z.infer<typeof PrivateKeySchema>
 
 // ============================================================================
 // Upload/Download Options
@@ -380,26 +388,11 @@ export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 // Message Types: Popup → Iframe
 // ============================================================================
 
-export const AuthDataSchema = z
-  .object({
-    secret: z.string(),
-    postageBatchId: BatchIdSchema.optional(),
-    signerKey: z.string().length(64).optional(),
-  })
-  .refine(
-    (data) => {
-      // Must have at least postageBatchId
-      if (!data.postageBatchId) {
-        return false
-      }
-      // If signerKey is provided, it must be used with postageBatchId
-      return true
-    },
-    {
-      message:
-        "postageBatchId is required. signerKey is optional for client-side signing.",
-    },
-  )
+export const AuthDataSchema = z.object({
+  secret: z.string(),
+  postageBatchId: BatchIdSchema.optional(),
+  signerKey: PrivateKeySchema.optional(),
+})
 
 export type AuthData = z.infer<typeof AuthDataSchema>
 

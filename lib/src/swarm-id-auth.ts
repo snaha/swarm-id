@@ -159,12 +159,6 @@ export class SwarmIdAuth {
       throw new Error("Unknown app origin. Cannot authenticate.")
     }
 
-    if (!this.postageBatchId && !this.signerKey) {
-      throw new Error(
-        "No postage batch ID or signer key provided. Cannot authenticate.",
-      )
-    }
-
     console.log("[Auth] Starting authentication for app:", this.appOrigin)
 
     // Derive app-specific secret
