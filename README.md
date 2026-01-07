@@ -304,13 +304,13 @@ Both servers:
 
 ```bash
 # Start docs dev server (http://localhost:4321)
-pnpm docs:dev
+pnpm dev:docs
 
 # Build docs for production
-pnpm docs:build
+pnpm build:docs
 
 # Preview production build
-pnpm docs:preview
+pnpm preview:docs
 ```
 
 ## Development Workflow

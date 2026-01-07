@@ -43,13 +43,13 @@ Run from the repository root:
 
 ```bash
 # Development server with hot reload
-pnpm docs:dev
+pnpm dev:docs
 
 # Build for production
-pnpm docs:build
+pnpm build:docs
 
 # Preview production build locally
-pnpm docs:preview
+pnpm preview:docs
 ```
 
 Or from within `docs-site/`:

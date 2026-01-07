@@ -113,13 +113,13 @@ docs-site/
 pnpm install
 
 # Start dev server
-pnpm docs:dev
+pnpm dev:docs
 
 # Build for production
-pnpm docs:build
+pnpm build:docs
 
 # Preview production build
-pnpm docs:preview
+pnpm preview:docs
 ```
 
 ## Future Work (separate PRs)
