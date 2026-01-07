@@ -16,7 +16,10 @@
     "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
     "dev:swarm-ui": "pnpm --filter swarm-identity dev",
     "install:all": "pnpm install",
-    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all"
+    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all",
+    "docs:dev": "pnpm --filter @swarm-id/docs dev",
+    "docs:build": "pnpm --filter @swarm-id/docs build",
+    "docs:preview": "pnpm --filter @swarm-id/docs preview"
   },
   "keywords": [
     "swarm",

@@ -1,0 +1,144 @@
+---
+title: Architecture
+description: Understanding how Swarm ID works
+---
+
+Swarm ID uses an OAuth-style popup authentication flow that works across all browsers without requiring the Storage Access API or browser extensions.
+
+## System Overview
+
+The architecture consists of three main components:
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Your dApp (e.g., https://my-dapp.com)                      │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │ SwarmIdClient                                       │     │
+│  │                                                     │     │
+│  │  ┌─────────────────────────────────────────────┐   │     │
+│  │  │ Hidden iframe (https://swarm-id.snaha.net)  │   │     │
+│  │  │                                              │   │     │
+│  │  │ SwarmIdProxy                                 │   │     │
+│  │  │   - Stores app-specific secret              │   │     │
+│  │  │   - Proxies Bee API calls                   │   │     │
+│  │  └─────────────────────────────────────────────┘   │     │
+│  └────────────────────────────────────────────────────┘     │
+│                           │                                  │
+│                           │ Opens popup                      │
+│                           ↓                                  │
+│  ┌────────────────────────────────────────────────────┐     │
+│  │ Auth Popup (https://swarm-id.snaha.net)            │     │
+│  │                                                     │     │
+│  │ SwarmIdAuth                                         │     │
+│  │   - Stores master key (first-party context)        │     │
+│  │   - Derives app-specific secrets                   │     │
+│  │   - Sends secret to iframe via postMessage         │     │
+│  └────────────────────────────────────────────────────┘     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+## Components
+
+### SwarmIdClient
+
+The main library used by parent dApp windows. It:
+
+- Creates and embeds a hidden iframe from the trusted domain
+- Provides authentication UI (login button, status)
+- Exposes methods for Bee operations (upload, download, etc.)
+- Communicates with the iframe via postMessage
+
+### SwarmIdProxy
+
+Runs inside the hidden iframe on the trusted domain. It:
+
+- Receives app-specific secrets from the auth popup
+- Stores secrets in partitioned localStorage
+- Proxies Bee API calls with authentication
+- Validates all incoming messages from the parent
+
+### SwarmIdAuth
+
+Runs in the authentication popup window. It:
+
+- Manages the master key in first-party localStorage
+- Derives app-specific secrets using HMAC-SHA256
+- Sends secrets to the iframe via postMessage
+- Provides the authentication UI
+
+## Key Derivation
+
+App-specific secrets are derived deterministically from the master key:
+
+```typescript
+// Pseudocode for key derivation
+appSecret = HMAC-SHA256(masterKey, appOrigin)
+```
+
+This ensures:
+
+- **Deterministic** - Same master key + app origin always produces the same secret
+- **Unique per app** - Each app gets a different secret
+- **No cross-app leakage** - Knowing one app's secret doesn't reveal others
+- **Master key protection** - The master key never leaves the trusted domain
+
+## Storage Partitioning
+
+Modern browsers partition storage by `(iframe-origin, parent-origin)`. This means:
+
+- An iframe from `swarm-id.snaha.net` embedded in `app-a.com` has different storage than the same iframe embedded in `app-b.com`
+- This provides browser-enforced isolation between apps
+- Even if an app is compromised, it can't access other apps' secrets
+
+## Message Protocol
+
+All cross-origin communication uses postMessage with Zod validation:
+
+### Parent → Iframe Messages
+
+| Message | Purpose |
+|---------|---------|
+| `parentIdentify` | Identify parent to iframe |
+| `checkAuth` | Check authentication status |
+| `requestAuth` | Request authentication (open popup) |
+| `uploadData` | Upload data to Swarm |
+| `downloadData` | Download data from Swarm |
+
+### Iframe → Parent Messages
+
+| Message | Purpose |
+|---------|---------|
+| `proxyReady` | Iframe is initialized |
+| `authStatusResponse` | Authentication status |
+| `authSuccess` | Authentication completed |
+| `uploadDataResponse` | Upload result |
+| `downloadDataResponse` | Download result |
+| `error` | Error occurred |
+
+### Popup → Iframe Messages
+
+| Message | Purpose |
+|---------|---------|
+| `setSecret` | Send derived app-specific secret |
+
+## Security Considerations
+
+### What's Protected
+
+- **Master key** - Only stored in first-party context on trusted domain
+- **App secrets** - Derived per-app, stored in partitioned storage
+- **Cross-app isolation** - Browser-enforced through storage partitioning
+
+### Attack Vectors Mitigated
+
+- **XSS in dApp** - Can't access master key (different origin)
+- **Malicious dApp** - Only gets its own derived secret
+- **Man-in-the-middle** - HTTPS required for all communication
+- **Message spoofing** - All messages validated with Zod schemas
+
+### Recommendations
+
+- Always use HTTPS in production
+- Validate the `iframeOrigin` matches your trusted domain
+- Keep the trusted domain secure and audited
+- Use Content Security Policy to restrict iframe embedding

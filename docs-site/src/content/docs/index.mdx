@@ -1,0 +1,53 @@
+---
+title: Introduction
+description: Cross-browser identity management for Swarm dApps
+---
+
+Swarm ID is a cross-browser compatible authentication and identity management system for Swarm dApps. It provides an OAuth-style popup authentication flow that works across Chrome, Firefox, and Safari without requiring browser extensions or the Storage Access API.
+
+## Key Features
+
+- **Cross-Browser Compatible** - Works in Chrome, Firefox, and Safari without extensions
+- **Secure by Design** - Master key never leaves the trusted domain
+- **App-Specific Secrets** - Each app gets a unique derived secret via HMAC-SHA256
+- **Storage Partitioning** - Browser-enforced isolation between apps
+- **No Extension Required** - Pure web-based implementation
+
+## How It Works
+
+The system uses three main components:
+
+1. **Trusted Domain** - A trusted domain (`swarm-id.snaha.net`) hosts authentication UI and keystore management
+2. **OAuth-style Popup** - dApps trigger authentication popups that derive app-specific secrets from a master key
+3. **Iframe Proxy** - Hidden iframe handles secure communication and proxies Bee API calls with partitioned storage
+
+### Authentication Flow
+
+1. A dApp embeds a hidden iframe from the trusted domain
+2. When authentication is needed, a popup opens on the trusted domain
+3. User authenticates (creates or unlocks their identity)
+4. A unique secret is derived for that specific dApp using HMAC-SHA256
+5. The secret is sent to the iframe via postMessage
+6. The iframe stores the secret in partitioned localStorage
+7. All subsequent Bee API calls use this secret
+
+## Security Model
+
+The architecture provides strong security guarantees:
+
+- **Master key isolation** - The master key is stored only in first-party context (popup window on the trusted domain)
+- **App-specific secrets** - Secrets are derived deterministically using HMAC-SHA256 key derivation
+- **Browser-enforced partitioning** - Storage is partitioned per `(iframe-origin, parent-origin)` pair
+- **Message validation** - All postMessage communication is validated with Zod schemas
+
+## Live Demos
+
+The applications are deployed and available at:
+
+- **Demo App**: [swarm-demo.snaha.net](https://swarm-demo.snaha.net)
+- **Identity UI**: [swarm-id.snaha.net](https://swarm-id.snaha.net)
+
+## Next Steps
+
+- [Quick Start Guide](/getting-started) - Get up and running in minutes
+- [Architecture Overview](/architecture) - Deep dive into the system design

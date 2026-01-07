@@ -3,3 +3,4 @@ packages:
   - 'demo'
   - 'swarm-ui'
   - 'bee-js'
+  - 'docs-site'

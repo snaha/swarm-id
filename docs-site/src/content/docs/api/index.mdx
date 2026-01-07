@@ -1,0 +1,93 @@
+---
+title: API Reference
+description: Complete API documentation for Swarm ID
+---
+
+This section contains the complete API reference for the Swarm ID library.
+
+:::note[Coming Soon]
+Detailed API documentation with JSDoc comments will be added in a future update. For now, refer to the source code and type definitions.
+:::
+
+## Main Classes
+
+### SwarmIdClient
+
+The main client for parent dApp windows. Used to integrate Swarm ID authentication into your application.
+
+```typescript
+import { SwarmIdClient } from '@swarm-id/lib'
+
+const client = new SwarmIdClient(options)
+```
+
+**Key methods:**
+- `initialize()` - Create and embed the hidden iframe
+- `isAuthenticated()` - Check authentication status
+- `uploadData(data, options?)` - Upload data to Swarm
+- `downloadData(reference)` - Download data from Swarm
+- `destroy()` - Clean up resources
+
+### SwarmIdProxy
+
+Runs inside the hidden iframe. Generally not used directly by dApp developers.
+
+```typescript
+import { initProxy } from '@swarm-id/lib'
+
+const proxy = initProxy(options)
+```
+
+### SwarmIdAuth
+
+Runs in the authentication popup. Generally not used directly by dApp developers.
+
+```typescript
+import { initAuth } from '@swarm-id/lib'
+
+const auth = await initAuth(options)
+```
+
+## Utility Functions
+
+### Key Derivation
+
+```typescript
+import { deriveSecret, generateMasterKey } from '@swarm-id/lib'
+
+// Generate a new master key
+const masterKey = await generateMasterKey()
+
+// Derive an app-specific secret
+const appSecret = await deriveSecret(masterKey, 'https://my-app.com')
+```
+
+### Hex Utilities
+
+```typescript
+import { hexToUint8Array, uint8ArrayToHex } from '@swarm-id/lib'
+
+const bytes = hexToUint8Array('deadbeef')
+const hex = uint8ArrayToHex(new Uint8Array([222, 173, 190, 239]))
+```
+
+## Types
+
+The library exports TypeScript types for all public APIs:
+
+```typescript
+import type {
+  ClientOptions,
+  ProxyOptions,
+  AuthOptions,
+  UploadOptions,
+  DownloadOptions,
+  UploadResult,
+  Reference,
+  BatchId,
+} from '@swarm-id/lib'
+```
+
+## Source Code
+
+For the most up-to-date API information, see the [library source code](https://github.com/snaha/swarm-id/tree/main/lib/src) and TypeScript definitions.

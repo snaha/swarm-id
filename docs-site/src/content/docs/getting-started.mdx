@@ -1,0 +1,161 @@
+---
+title: Quick Start
+description: Get Swarm ID integrated into your dApp
+---
+
+Get Swarm ID integrated into your dApp in just a few steps.
+
+## Installation
+
+```bash
+# Using pnpm (recommended)
+pnpm add @swarm-id/lib
+
+# Using npm
+npm install @swarm-id/lib
+
+# Using yarn
+yarn add @swarm-id/lib
+```
+
+## Basic Usage
+
+```typescript
+import { SwarmIdClient } from '@swarm-id/lib'
+
+// 1. Create the client
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.snaha.net',
+  beeApiUrl: 'http://localhost:1633',
+  metadata: {
+    name: 'My dApp',
+    description: 'A demo Swarm application'
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status:', authenticated)
+  }
+})
+
+// 2. Initialize (creates hidden iframe)
+await client.initialize()
+
+// 3. Check if user is authenticated
+const isAuth = await client.isAuthenticated()
+
+// 4. Upload data (after authentication)
+if (isAuth) {
+  const result = await client.uploadData(
+    new TextEncoder().encode('Hello, Swarm!')
+  )
+  console.log('Uploaded:', result.reference)
+}
+
+// 5. Cleanup when done
+client.destroy()
+```
+
+## Configuration Options
+
+The `SwarmIdClient` constructor accepts the following options:
+
+| Option | Type | Required | Description |
+|--------|------|----------|-------------|
+| `iframeOrigin` | `string` | Yes | Origin of the Swarm ID iframe (e.g., `https://swarm-id.snaha.net`) |
+| `beeApiUrl` | `string` | No | Bee node API URL (default: `http://localhost:1633`) |
+| `metadata` | `object` | No | App metadata shown during authentication |
+| `metadata.name` | `string` | No | Your app's name |
+| `metadata.description` | `string` | No | Brief description of your app |
+| `onAuthChange` | `function` | No | Callback when authentication status changes |
+
+## Data Operations
+
+### Upload Data
+
+```typescript
+// Simple upload
+const result = await client.uploadData(data)
+
+// Upload with encryption
+const result = await client.uploadData(data, { encrypt: true })
+
+// Upload with progress tracking
+const result = await client.uploadData(data, {}, (progress) => {
+  console.log(`${progress.percent}% uploaded`)
+})
+```
+
+### Download Data
+
+```typescript
+// Download by reference
+const data = await client.downloadData(reference)
+
+// Download encrypted data (reference will be 128 chars instead of 64)
+const data = await client.downloadData(encryptedReference)
+```
+
+### File Operations
+
+```typescript
+// Upload a file
+const result = await client.uploadFile(file, 'myfile.txt')
+
+// Download a file
+const fileData = await client.downloadFile(reference)
+console.log(fileData.name, fileData.data)
+```
+
+## Local Development
+
+For local development, you'll need to set up HTTPS servers with proper certificates.
+
+### Prerequisites
+
+1. **Install mkcert** for local SSL certificates:
+
+   ```bash
+   # macOS
+   brew install mkcert
+
+   # Linux
+   wget https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64
+   chmod +x mkcert-v1.4.4-linux-amd64
+   sudo mv mkcert-v1.4.4-linux-amd64 /usr/local/bin/mkcert
+   ```
+
+2. **Generate certificates**:
+
+   ```bash
+   mkcert -install
+   mkcert swarm-app.local swarm-id.local
+   ```
+
+3. **Configure `/etc/hosts`**:
+
+   ```
+   127.0.0.1  swarm-app.local
+   127.0.0.1  swarm-id.local
+   ```
+
+### Running Locally
+
+```bash
+# Clone the repository
+git clone https://github.com/snaha/swarm-id
+
+# Install dependencies
+pnpm install
+
+# Build the library
+cd lib && pnpm build && cd ..
+
+# Start the development servers
+./start-servers.sh
+```
+
+Then open [https://swarm-app.local:8080](https://swarm-app.local:8080) in your browser.
+
+## Next Steps
+
+- [Architecture Overview](/architecture) - Understand how Swarm ID works
+- API Reference (coming soon) - Detailed API documentation
