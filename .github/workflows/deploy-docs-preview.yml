@@ -52,3 +52,4 @@ jobs:
         with:
           source-dir: docs-site/dist
           umbrella-dir: pr-preview
+          custom-url: swarm-docs.snaha.net
