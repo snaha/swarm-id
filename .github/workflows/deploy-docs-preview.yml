@@ -44,10 +44,8 @@ jobs:
 
       - name: Build docs with PR base path
         if: github.event.action != 'closed'
-        run: pnpm docs:build
-        env:
-          # Astro uses this to set the base path for PR previews
-          BASE_URL: /pr-preview/pr-${{ github.event.number }}/
+        working-directory: docs-site
+        run: pnpm astro build --base /pr-preview/pr-${{ github.event.number }}/
 
       - name: Deploy PR preview
         uses: rossjrw/pr-preview-action@v1
