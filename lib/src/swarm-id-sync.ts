@@ -8,17 +8,31 @@
 
 export { StateSyncManager } from "./sync/state-sync-manager"
 export {
-  deriveIdentityBackupKey,
-  deriveIdentityEncryptionKey,
+  // Account-level key derivation
+  deriveAccountBackupKey,
+  deriveAccountSwarmEncryptionKey,
   backupKeyToPrivateKey,
 } from "./sync/key-derivation"
 export {
-  serializeIdentityState,
-  deserializeIdentityState,
+  serializeAccountState,
+  deserializeAccountState,
 } from "./sync/serialization"
+export {
+  updateAfterWrite,
+  calculateUtilizationPercentage,
+  initializeBatchUtilization,
+  saveUtilizationState,
+  loadUtilizationState,
+} from "./utils/batch-utilization"
 
 export type {
-  IdentityStateSnapshot,
+  AccountStateSnapshot,
+  AccountMetadata,
   StateSyncOptions,
   SyncResult,
 } from "./sync/types"
+export type {
+  BatchUtilizationState,
+  ChunkWithBucket,
+  UtilizationUpdate,
+} from "./utils/batch-utilization"

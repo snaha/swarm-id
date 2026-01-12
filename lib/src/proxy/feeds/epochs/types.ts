@@ -2,7 +2,13 @@
  * Types for Epoch-Based Feeds
  */
 
-import type { Bee, EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
+import type {
+  Bee,
+  EthAddress,
+  Topic,
+  PrivateKey,
+  Stamper,
+} from "@ethersphere/bee-js"
 import type { EpochIndex } from "./epoch"
 
 /**
@@ -68,13 +74,14 @@ export interface EpochUpdater {
    *
    * @param at - Unix timestamp for this update (seconds)
    * @param reference - 32 or 64-byte Swarm reference to store
-   * @param postageBatchId - Batch ID for stamping
+   * @param stamper - Stamper object for stamping
+   * @returns SOC chunk address for utilization tracking
    */
   update(
     at: bigint,
     reference: Uint8Array,
-    postageBatchId: string,
-  ): Promise<void>
+    stamper: Stamper,
+  ): Promise<Uint8Array>
 
   /**
    * Get the owner address (derived from signer)

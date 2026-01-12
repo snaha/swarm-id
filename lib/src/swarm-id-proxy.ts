@@ -43,7 +43,7 @@ export class SwarmIdProxy {
   private appSecret: string | undefined
   private postageBatchId: string | undefined
   private signerKey: string | undefined
-  private stamper: any | undefined // Stamper from bee-js
+  private stamper: Stamper | undefined
   private stamperDepth: number = 23 // Default depth
   private beeApiUrl: string
   private defaultBeeApiUrl: string
@@ -263,7 +263,7 @@ export class SwarmIdProxy {
             await this.handlePopupMessage(message, event)
             return
           } catch (error) {
-            console.warn("[Proxy] Invalid popup message:", error)
+            console.warn("[Proxy] Invalid popup message:", error, event.data)
           }
         }
 
@@ -794,7 +794,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { appOrigin, data } = message
 
-    console.log("[Proxy] Received auth data for app:", appOrigin)
+    console.log("[Proxy] Received auth data for app:", appOrigin, data)
 
     // Validate that appOrigin matches parent origin
     if (appOrigin !== this.parentOrigin) {
@@ -850,13 +850,19 @@ export class SwarmIdProxy {
       throw new Error("Not authenticated. Please login first.")
     }
 
+    if (!this.signerKey) {
+      throw new Error("Signer key not available. Please login first.")
+    }
+
+    if (!this.stamper) {
+      throw new Error("Stamper not initialized. Please login first.")
+    }
+
     try {
       // Prepare upload context
       const context: UploadContext = {
         bee: this.bee,
         stamper: this.stamper,
-        postageBatchId: this.postageBatchId,
-        signerKey: this.signerKey,
       }
 
       // Progress callback (if enabled)
@@ -876,66 +882,31 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      // Use new module for signing, or fallback to bee.uploadData
+      // Client-side chunking and signing
       let uploadResult
-
-      if (this.signerKey) {
-        // Client-side chunking and signing
-        if (options?.encrypt) {
-          console.log(
-            "[Proxy] Using client-side signing with encryption for uploadData",
-          )
-          uploadResult = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // encryption key (auto-generated)
-            options,
-            onProgress,
-          )
-        } else {
-          console.log("[Proxy] Using client-side signing for uploadData")
-          uploadResult = await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            onProgress,
-          )
-        }
-      } else if (this.postageBatchId) {
-        // Fallback to bee.uploadData (node-side stamping)
-        if (options?.encrypt) {
-          console.log(
-            "[Proxy] Using node-side stamping with encryption for uploadData",
-          )
-          const result = await this.bee.uploadData(
-            this.postageBatchId,
-            data,
-            options,
-          )
-          uploadResult = {
-            reference: result.reference.toHex(),
-            tagUid: result.tagUid,
-          }
-        } else {
-          console.log("[Proxy] Using node-side stamping for uploadData")
-          const result = await this.bee.uploadData(
-            this.postageBatchId,
-            data,
-            options,
-          )
-          uploadResult = {
-            reference: result.reference.toHex(),
-            tagUid: result.tagUid,
-          }
-        }
+      if (options?.encrypt) {
+        console.log(
+          "[Proxy] Using client-side signing with encryption for uploadData",
+        )
+        uploadResult = await uploadEncryptedDataWithSigning(
+          context,
+          data,
+          undefined, // encryption key (auto-generated)
+          options,
+          onProgress,
+        )
       } else {
-        throw new Error("No authentication method available")
+        console.log("[Proxy] Using client-side signing for uploadData")
+        uploadResult = await uploadDataWithSigning(
+          context,
+          data,
+          options,
+          onProgress,
+        )
       }
 
-      // Save stamper state after successful upload (if using client-side signing)
-      if (this.signerKey && this.stamper) {
-        this.saveStamperState()
-      }
+      // Save stamper state after successful upload
+      this.saveStamperState()
 
       // Send final response
       if (event.source) {
@@ -1138,11 +1109,8 @@ export class SwarmIdProxy {
       throw new Error("Not authenticated. Please login first.")
     }
 
-    // Check authentication method (prefer signer over batch ID)
-    if (!this.signerKey && !this.postageBatchId) {
-      throw new Error(
-        "No postage batch ID or signer key available. Please authenticate.",
-      )
+    if (!this.signerKey) {
+      throw new Error("Signer key not available. Please authenticate.")
     }
 
     try {
@@ -1153,65 +1121,47 @@ export class SwarmIdProxy {
         )
       }
 
-      let uploadResult
-
-      // Use signer if available (takes priority)
-      if (this.signerKey) {
-        if (!this.stamper) {
-          this.initializeStamper()
-        }
-
-        if (!this.stamper) {
-          throw new Error("Failed to initialize stamper for signing")
-        }
-
-        console.log("[Proxy] Signing and uploading chunk with signer key")
-
-        // Create content-addressed chunk
-        const chunk = makeContentAddressedChunk(data)
-
-        // Sign the chunk to create envelope
-        const envelope = this.stamper.stamp(chunk)
-
-        // Force deferred mode for faster uploads (pinning incompatible with deferred)
-        const uploadOptions = { ...options, deferred: true, pin: false }
-
-        // Upload with envelope signature
-        uploadResult = await this.bee.uploadChunk(
-          envelope,
-          chunk.data,
-          uploadOptions,
-        )
-      } else if (this.postageBatchId) {
-        // Use batch ID (Bee node will stamp it)
-        console.log(
-          "[Proxy] Uploading chunk to Bee at:",
-          this.beeApiUrl,
-          "with batch:",
-          this.postageBatchId,
-        )
-
-        // Force deferred mode for faster uploads (pinning incompatible with deferred)
-        const uploadOptions = { ...options, deferred: true, pin: false }
-
-        uploadResult = await this.bee.uploadChunk(
-          this.postageBatchId,
-          data,
-          uploadOptions,
-        )
-      } else {
-        throw new Error("No authentication method available")
+      if (!this.stamper) {
+        this.initializeStamper()
       }
+
+      if (!this.stamper) {
+        throw new Error("Failed to initialize stamper for signing")
+      }
+
+      console.log("[Proxy] Signing and uploading chunk with signer key")
+
+      // Create content-addressed chunk
+      const chunk = makeContentAddressedChunk(data)
+
+      // Create adapter for cafe-utility Chunk interface
+      const chunkAdapter = {
+        hash: () => chunk.address.toUint8Array(),
+        build: () => chunk.data,
+        span: 0n, // not used by stamper.stamp
+        writer: undefined as any, // not used by stamper.stamp
+      }
+
+      // Sign the chunk to create envelope
+      const envelope = this.stamper.stamp(chunkAdapter)
+
+      // Use non-deferred mode for faster uploads (returns immediately)
+      const uploadOptions = { ...options, deferred: false, pin: false }
+
+      // Upload with envelope signature
+      const uploadResult = await this.bee.uploadChunk(
+        envelope,
+        chunk.data,
+        uploadOptions,
+      )
 
       console.log(
         "[Proxy] Chunk upload successful, reference:",
         uploadResult.reference.toHex(),
       )
 
-      // Save stamper state after successful upload (if using client-side signing)
-      if (this.signerKey && this.stamper) {
-        this.saveStamperState()
-      }
+      // Save stamper state after successful upload
+      this.saveStamperState()
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(

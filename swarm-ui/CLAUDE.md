@@ -127,6 +127,14 @@ This project uses Svelte 5 with runes for reactive state management:
   - ✅ `import { Server } from '@modelcontextprotocol/sdk/server/index'`
   - ❌ `import { Server } from '@modelcontextprotocol/sdk/server/index.js'`
 
+### Code Style
+
+- **Use constants instead of hardcoded numbers**: Always define magic numbers as named constants at the top of the file or module
+  - ❌ Bad: `setTimeout(() => {...}, 5000)` or `if (value > 100)`
+  - ✅ Good: `const TIMEOUT_MS = 5000; setTimeout(() => {...}, TIMEOUT_MS)` or `const MAX_VALUE = 100; if (value > MAX_VALUE)`
+  - Exceptions: 0, 1, -1, and 2 are generally acceptable without constants when their meaning is obvious (e.g., array indexing, incrementing)
+  - Use SCREAMING_SNAKE_CASE for constant names to clearly distinguish them from variables
+
 ### Component Architecture
 
 - Components in `src/lib/components/` are reusable

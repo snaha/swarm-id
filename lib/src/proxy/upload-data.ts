@@ -60,12 +60,7 @@ export async function uploadDataWithSigning(
   options?: UploadOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<{ reference: string; tagUid?: number }> {
-  const { bee, stamper, postageBatchId } = context
-
-  // Validate authentication method
-  if (!stamper && !postageBatchId) {
-    throw new Error("No authentication method available")
-  }
+  const { bee, stamper } = context
 
   // Create a tag for tracking upload progress (required for fast deferred uploads)
   let tag: number | undefined = options?.tag
@@ -106,13 +101,7 @@ export async function uploadDataWithSigning(
     })
 
     // Upload chunk with signing
-    await uploadSingleChunk(
-      bee,
-      stamper,
-      postageBatchId,
-      chunk,
-      uploadOptionsWithTag,
-    )
+    await uploadSingleChunk(bee, stamper, chunk, uploadOptionsWithTag)
 
     processedChunks++
     reportProgress()
@@ -142,7 +131,6 @@ export async function uploadDataWithSigning(
         await uploadSingleChunk(
           bee,
           stamper,
-          postageBatchId,
           intermediateChunk,
           uploadOptionsWithTag,
         )
@@ -173,13 +161,12 @@ export async function uploadDataWithSigning(
 async function uploadSingleChunk(
   bee: Bee,
   stamper: Stamper | undefined,
-  postageBatchId: string | undefined,
   chunk: BeeChunk,
   options?: UploadOptions,
 ): Promise<void> {
-  // Force deferred mode for faster uploads (don't wait for sync)
+  // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { ...options, deferred: true, pin: false }
+  const uploadOptions = { ...options, deferred: false, pin: false }
   console.log("[UploadData] uploadChunk options:", uploadOptions)
 
   if (stamper) {
@@ -187,9 +174,6 @@ async function uploadSingleChunk(
     const chunkAdapter = new ChunkAdapter(chunk)
     const envelope = stamper.stamp(chunkAdapter)
     await bee.uploadChunk(envelope, chunk.data, uploadOptions)
-  } else if (postageBatchId) {
-    // Node-side stamping
-    await bee.uploadChunk(postageBatchId, chunk.data, uploadOptions)
   } else {
     throw new Error("No stamper or batch ID available")
   }

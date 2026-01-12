@@ -1,12 +1,12 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/button.svelte'
-	import { page } from '$app/stores'
+	import { page } from '$app/state'
 	import routes from '$lib/routes'
 
 	let { children } = $props()
 
-	const identityId = $derived($page.params.id)
-	const currentPath = $derived($page.url.pathname)
+	const identityId = $derived(page.params.id)
+	const currentPath = $derived(page.url.pathname)
 
 	const tabs = $derived(
 		identityId

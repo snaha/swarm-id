@@ -18,10 +18,13 @@ function loadIdentities(): Identity[] {
 function saveIdentities(data: Identity[]): void {
 	storageManager.save(data)
 
-	// Trigger Swarm sync for current identity
+	// Trigger Swarm sync for current identity's account
 	const currentIdentityId = sessionStore.data.currentIdentityId
 	if (currentIdentityId) {
-		triggerSync(currentIdentityId)
+		const identity = data.find((i) => i.id === currentIdentityId)
+		if (identity) {
+			triggerSync(identity.accountId.toHex())
+		}
 	}
 }
 

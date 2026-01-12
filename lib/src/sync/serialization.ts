@@ -3,21 +3,26 @@ import {
   serializeConnectedApp,
   serializePostageStamp,
 } from "../utils/storage-managers"
-import type { IdentityStateSnapshot } from "./types"
+import { AccountStateSnapshotSchemaV1 } from "../schemas"
+import type { AccountStateSnapshot } from "./types"
 
 /**
- * Serialize identity state snapshot to JSON bytes
+ * Serialize account state snapshot to JSON bytes
  *
- * @param state - State snapshot to serialize
+ * @param state - Account state snapshot to serialize
  * @returns JSON encoded as Uint8Array
  */
-export function serializeIdentityState(
-  state: IdentityStateSnapshot,
-): Uint8Array {
+export function serializeAccountState(state: AccountStateSnapshot): Uint8Array {
   const json = JSON.stringify({
     version: state.version,
     timestamp: state.timestamp,
-    identity: serializeIdentity(state.identity),
+    accountId: state.accountId,
+    metadata: {
+      defaultPostageStampBatchID: state.metadata.defaultPostageStampBatchID,
+      createdAt: state.metadata.createdAt,
+      lastModified: state.metadata.lastModified,
+    },
+    identities: state.identities.map(serializeIdentity),
     connectedApps: state.connectedApps.map(serializeConnectedApp),
     postageStamps: state.postageStamps.map(serializePostageStamp),
   })
@@ -26,19 +31,15 @@ export function serializeIdentityState(
 }
 
 /**
- * Deserialize JSON bytes to identity state snapshot (for future loading)
+ * Deserialize JSON bytes to account state snapshot
  *
- * @param _data - JSON bytes to deserialize
- * @returns Identity state snapshot
+ * @param data - JSON bytes to deserialize
+ * @returns Account state snapshot
  */
-export function deserializeIdentityState(
-  _data: Uint8Array,
-): IdentityStateSnapshot {
-  // TODO: Implement deserialization when we add loading from Swarm
-  // Will need to:
-  // 1. Parse JSON
-  // 2. Validate with Zod schemas
-  // 3. Convert serialized types back to runtime types
-  // 4. Return IdentityStateSnapshot
-  throw new Error("Deserialization not yet implemented")
+export function deserializeAccountState(
+  data: Uint8Array,
+): AccountStateSnapshot {
+  const json = new TextDecoder().decode(data)
+  const parsed = JSON.parse(json)
+  return AccountStateSnapshotSchemaV1.parse(parsed)
 }

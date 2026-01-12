@@ -29,10 +29,8 @@ export {
   initializeBatchUtilization,
   calculateUtilizationUpdate,
   updateAfterWrite,
-  getOrInitializeState,
   saveUtilizationState,
   loadUtilizationState,
-  clearUtilizationState,
   calculateUtilizationPercentage,
   toBucket,
   assignChunksToBuckets,
@@ -93,16 +91,18 @@ export {
 // State sync to Swarm
 export {
   StateSyncManager,
-  deriveIdentityBackupKey,
-  deriveIdentityEncryptionKey,
+  // Account-level key derivation
+  deriveAccountBackupKey,
+  deriveAccountSwarmEncryptionKey,
   backupKeyToPrivateKey,
-  serializeIdentityState,
-  deserializeIdentityState,
+  serializeAccountState,
+  deserializeAccountState,
 } from "./sync"
 
 // State sync types
 export type {
-  IdentityStateSnapshot,
+  AccountStateSnapshot,
+  AccountMetadata,
   StateSyncOptions,
   SyncResult,
 } from "./sync"
@@ -127,14 +127,17 @@ export type {
   PopupToIframeMessage,
   SetSecretMessage,
   AuthData,
-  // Entity types
+} from "./types"
+
+// Entity types from schemas
+export type {
   Account,
   PasskeyAccount,
   EthereumAccount,
   Identity,
   ConnectedApp,
   PostageStamp,
-} from "./types"
+} from "./schemas"
 
 // Batch utilization types
 export type {

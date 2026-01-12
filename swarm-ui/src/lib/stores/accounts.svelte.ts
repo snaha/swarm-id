@@ -1,5 +1,5 @@
 import { browser } from '$app/environment'
-import { EthAddress } from '@ethersphere/bee-js'
+import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { createAccountsStorageManager, type Account } from '@swarm-id/lib'
 
 // ============================================================================
@@ -45,6 +45,18 @@ export const accountsStore = {
 
 	setAccountName(id: EthAddress, name: string) {
 		accounts = accounts.map((account) => (account.id.equals(id) ? { ...account, name } : account))
+		saveAccounts(accounts)
+	},
+
+	setDefaultStamp(id: EthAddress, batchID: BatchId | undefined) {
+		accounts = accounts.map((account) =>
+			account.id.equals(id)
+				? {
+						...account,
+						defaultPostageStampBatchID: batchID,
+					}
+				: account,
+		)
 		saveAccounts(accounts)
 	},
 

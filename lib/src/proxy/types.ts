@@ -5,9 +5,7 @@ import type { Bee, Stamper } from "@ethersphere/bee-js"
  */
 export interface UploadContext {
   bee: Bee
-  stamper?: Stamper
-  postageBatchId?: string
-  signerKey?: string
+  stamper: Stamper
 }
 
 /**

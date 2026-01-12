@@ -2,35 +2,33 @@ import { deriveSecret } from "../utils/key-derivation"
 import { PrivateKey } from "@ethersphere/bee-js"
 
 /**
- * Derive identity backup key from account master key
+ * Derive account backup key from account master key
  *
- * Uses existing deriveSecret() with "identity:" prefix
+ * Used for signing account feed updates
  *
  * @param accountMasterKey - Account master key (hex string)
- * @param identityId - Identity UUID
- * @returns 32-byte identity backup key (as hex string)
+ * @param accountId - Account ID (EthAddress hex string)
+ * @returns 32-byte account backup key (as hex string)
  */
-export async function deriveIdentityBackupKey(
+export async function deriveAccountBackupKey(
   accountMasterKey: string,
-  identityId: string,
+  accountId: string,
 ): Promise<string> {
-  return deriveSecret(accountMasterKey, `identity:${identityId}`)
+  return deriveSecret(accountMasterKey, `account:${accountId}`)
 }
 
 /**
- * Derive identity encryption key (for uploading encrypted data)
+ * Derive account Swarm encryption key from account master key
  *
- * Uses existing deriveSecret() with "identity-encryption:" prefix
+ * Used for encrypting account snapshot data before upload to Swarm
  *
  * @param accountMasterKey - Account master key (hex string)
- * @param identityId - Identity UUID
  * @returns 32-byte encryption key (as hex string)
  */
-export async function deriveIdentityEncryptionKey(
+export async function deriveAccountSwarmEncryptionKey(
   accountMasterKey: string,
-  identityId: string,
 ): Promise<string> {
-  return deriveSecret(accountMasterKey, `identity-encryption:${identityId}`)
+  return deriveSecret(accountMasterKey, `swarm-encryption`)
 }
 
 /**

@@ -1,17 +1,19 @@
 // Public API
-export { StateSyncManager } from "./state-sync-manager"
 export {
-  deriveIdentityBackupKey,
-  deriveIdentityEncryptionKey,
+  StateSyncManager,
+  ACCOUNT_SYNC_TOPIC_PREFIX,
+} from "./state-sync-manager"
+export {
+  // Account-level key derivation
+  deriveAccountBackupKey,
+  deriveAccountSwarmEncryptionKey,
   backupKeyToPrivateKey,
 } from "./key-derivation"
-export {
-  serializeIdentityState,
-  deserializeIdentityState,
-} from "./serialization"
+export { serializeAccountState, deserializeAccountState } from "./serialization"
 
 export type {
-  IdentityStateSnapshot,
+  AccountStateSnapshot,
+  AccountMetadata,
   StateSyncOptions,
   SyncResult,
 } from "./types"

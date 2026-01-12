@@ -25,6 +25,7 @@
 	import { WarningAlt } from 'carbon-icons-svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
+	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib/sync'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
@@ -73,6 +74,10 @@
 
 			const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
 
+			// Derive swarmEncryptionKey from master key
+			const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
+			console.log('🔑 SwarmEncryptionKey derived')
+
 			// Encrypt masterKey before storage
 			console.log('🔒 Encrypting masterKey...')
 
@@ -97,6 +102,7 @@
 				ethereumAddress: new EthAddress(signed.address),
 				encryptedMasterKey: encryptedMasterKey,
 				encryptionSalt: encryptionSalt,
+				swarmEncryptionKey: swarmEncryptionKey,
 			})
 			sessionStore.setAccount(newAccount)
 

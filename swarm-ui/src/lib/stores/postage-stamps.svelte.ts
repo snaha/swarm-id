@@ -1,6 +1,8 @@
 import { browser } from '$app/environment'
-import { BatchId } from '@ethersphere/bee-js'
+import { BatchId, Stamper, EthAddress } from '@ethersphere/bee-js'
 import { createPostageStampsStorageManager, type PostageStamp } from '@swarm-id/lib'
+import { UtilizationAwareStamper } from '@swarm-id/lib/utils/batch-utilization'
+import { UtilizationCacheDB } from '@swarm-id/lib/storage/utilization-cache'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 
@@ -10,18 +12,32 @@ import { sessionStore } from './session.svelte'
 
 const storageManager = createPostageStampsStorageManager()
 
+// Lazy utilization cache initialization (browser only)
+let utilizationCache: UtilizationCacheDB | undefined
+
+const getUtilizationCache = () => {
+	if (!browser) {
+		throw new Error('Utilization cache not available (browser only)')
+	}
+
+	if (!utilizationCache) {
+		utilizationCache = new UtilizationCacheDB()
+	}
+
+	return utilizationCache
+}
+
 function loadPostageStamps(): PostageStamp[] {
 	if (!browser) return []
 	return storageManager.load()
 }
 
-function savePostageStamps(data: PostageStamp[]): void {
+function savePostageStamps(data: PostageStamp[], skipSync = false, accountId?: string): void {
 	storageManager.save(data)
 
-	// Trigger Swarm sync
-	const currentIdentityId = sessionStore.data.currentIdentityId
-	if (currentIdentityId) {
-		triggerSync(currentIdentityId)
+	// Trigger Swarm sync (unless explicitly skipped)
+	if (!skipSync && accountId) {
+		triggerSync(accountId)
 	}
 }
 
@@ -42,21 +58,61 @@ export const postageStampsStore = {
 			createdAt: Date.now(),
 		}
 		postageStamps = [...postageStamps, newStamp]
-		savePostageStamps(postageStamps)
+		savePostageStamps(postageStamps, false, stamp.accountId)
 		return newStamp
 	},
 
-	removeStamp(batchID: BatchId) {
+	removeStamp(batchID: BatchId, accountId: string) {
 		postageStamps = postageStamps.filter((s) => !s.batchID.equals(batchID))
-		savePostageStamps(postageStamps)
+		savePostageStamps(postageStamps, false, accountId)
 	},
 
 	getStamp(batchID: BatchId): PostageStamp | undefined {
 		return postageStamps.find((s) => s.batchID.equals(batchID))
 	},
 
-	getStampsByIdentity(identityId: string): PostageStamp[] {
-		return postageStamps.filter((s) => s.identityId === identityId)
+	getStampsByAccount(accountId: string): PostageStamp[] {
+		return postageStamps.filter((s) => s.accountId === accountId)
+	},
+
+	async getStamper(
+		batchID: BatchId,
+		options?: { owner?: EthAddress; encryptionKey?: Uint8Array },
+	): Promise<UtilizationAwareStamper | undefined> {
+		const stamp = this.getStamp(batchID)
+		if (!stamp) {
+			return undefined
+		}
+
+		// Get utilization cache
+		const cache = getUtilizationCache()
+
+		// Create utilization-aware stamper with loaded bucket state
+		const stamper = await UtilizationAwareStamper.create(
+			stamp.signerKey,
+			stamp.batchID,
+			stamp.depth,
+			cache,
+			options,
+		)
+
+		return stamper
+	},
+
+	updateStampUtilization(batchID: BatchId, newUtilization: number) {
+		const stamp = postageStamps.find((s) => s.batchID.equals(batchID))
+		if (!stamp) {
+			console.warn('[PostageStamps] Cannot update utilization: stamp not found')
+			return
+		}
+
+		// Update utilization
+		stamp.utilization = newUtilization
+
+		// Save without triggering sync (to avoid infinite loop)
+		savePostageStamps(postageStamps, true)
+
+		console.log(`[PostageStamps] Updated utilization for ${batchID.toHex()}: ${newUtilization}%`)
 	},
 
 	clear() {

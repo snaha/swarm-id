@@ -27,6 +27,22 @@
     "./sync": {
       "import": "./dist/swarm-id-sync.js",
       "types": "./dist/swarm-id-sync.d.ts"
+    },
+    "./utils/batch-utilization": {
+      "import": "./dist/utils/batch-utilization.js",
+      "types": "./dist/utils/batch-utilization.d.ts"
+    },
+    "./utils/hex": {
+      "import": "./dist/utils/hex.js",
+      "types": "./dist/utils/hex.d.ts"
+    },
+    "./storage/utilization-cache": {
+      "import": "./dist/storage/utilization-cache.js",
+      "types": "./dist/storage/utilization-cache.d.ts"
+    },
+    "./storage/debounced-uploader": {
+      "import": "./dist/storage/debounced-uploader.js",
+      "types": "./dist/storage/debounced-uploader.d.ts"
     }
   },
   "files": [

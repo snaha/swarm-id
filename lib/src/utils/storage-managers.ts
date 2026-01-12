@@ -86,9 +86,7 @@ const parsePostageStampsV1: VersionParser<PostageStamp> = (data: unknown) => {
 /**
  * Serialize Account for storage
  */
-export function serializeAccount(
-  account: Account,
-): Record<string, unknown> {
+export function serializeAccount(account: Account): Record<string, unknown> {
   if (account.type === "passkey") {
     return {
       id: account.id.toString(),
@@ -96,6 +94,9 @@ export function serializeAccount(
       createdAt: account.createdAt,
       type: account.type,
       credentialId: account.credentialId,
+      swarmEncryptionKey: account.swarmEncryptionKey,
+      defaultPostageStampBatchID:
+        account.defaultPostageStampBatchID?.toString(),
     }
   } else {
     return {
@@ -106,6 +107,9 @@ export function serializeAccount(
       ethereumAddress: account.ethereumAddress.toString(),
       encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
       encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
+      swarmEncryptionKey: account.swarmEncryptionKey,
+      defaultPostageStampBatchID:
+        account.defaultPostageStampBatchID?.toString(),
     }
   }
 }
@@ -113,9 +117,7 @@ export function serializeAccount(
 /**
  * Serialize Identity for storage
  */
-export function serializeIdentity(
-  identity: Identity,
-): Record<string, unknown> {
+export function serializeIdentity(identity: Identity): Record<string, unknown> {
   return {
     id: identity.id,
     accountId: identity.accountId.toString(),
@@ -150,8 +152,9 @@ export function serializePostageStamp(
   stamp: PostageStamp,
 ): Record<string, unknown> {
   return {
-    identityId: stamp.identityId,
+    accountId: stamp.accountId,
     batchID: stamp.batchID.toString(),
+    signerKey: stamp.signerKey.toString(),
     utilization: stamp.utilization,
     usable: stamp.usable,
     depth: stamp.depth,

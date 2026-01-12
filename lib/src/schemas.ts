@@ -7,7 +7,7 @@
  */
 
 import { z } from "zod"
-import { EthAddress, BatchId, Bytes } from "@ethersphere/bee-js"
+import { EthAddress, BatchId, Bytes, PrivateKey } from "@ethersphere/bee-js"
 
 // ============================================================================
 // Primitive → bee-js Type Transforms (internal, for entity schemas)
@@ -30,6 +30,14 @@ const StoredBatchId = z
   .transform((s) => new BatchId(s))
 
 /**
+ * Schema for PrivateKey - validates 64-char hex string, transforms to PrivateKey
+ */
+const StoredPrivateKey = z
+  .string()
+  .length(64)
+  .transform((s) => new PrivateKey(s))
+
+/**
  * Schema for Bytes - validates number array, transforms to Bytes
  */
 const StoredBytes = z
@@ -49,6 +57,8 @@ export const PasskeyAccountSchemaV1 = z.object({
   createdAt: z.number(),
   type: z.literal("passkey"),
   credentialId: z.string(),
+  swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
+  defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
 })
 
 /**
@@ -62,6 +72,8 @@ export const EthereumAccountSchemaV1 = z.object({
   ethereumAddress: StoredEthAddress,
   encryptedMasterKey: StoredBytes,
   encryptionSalt: StoredBytes,
+  swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
+  defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
 })
 
 /**
@@ -117,18 +129,46 @@ export const ConnectedAppSchemaV1 = z.object({
  * Postage Stamp Schema V1
  */
 export const PostageStampSchemaV1 = z.object({
-  identityId: z.string(),
+  accountId: z.string().length(40), // CHANGED: was identityId
   batchID: StoredBatchId,
+  signerKey: StoredPrivateKey,
   utilization: z.number(),
   usable: z.boolean(),
   depth: z.number(),
-  amount: z.string(),
+  amount: z.number(),
   bucketDepth: z.number(),
   blockNumber: z.number(),
   immutableFlag: z.boolean(),
   exists: z.boolean(),
   batchTTL: z.number().optional(),
   createdAt: z.number(),
+})
+
+// ============================================================================
+// Sync State Snapshot Schemas
+// ============================================================================
+
+/**
+ * Account Metadata Schema V1
+ */
+export const AccountMetadataSchemaV1 = z.object({
+  defaultPostageStampBatchID: z.string().length(64).optional(), // BatchId hex string
+  createdAt: z.number(),
+  lastModified: z.number(),
+})
+
+/**
+ * Account State Snapshot Schema V1
+ * Replaces identity-level sync with account-level sync
+ */
+export const AccountStateSnapshotSchemaV1 = z.object({
+  version: z.literal(1),
+  timestamp: z.number(),
+  accountId: z.string().length(40), // EthAddress hex string
+  metadata: AccountMetadataSchemaV1,
+  identities: z.array(IdentitySchemaV1),
+  connectedApps: z.array(ConnectedAppSchemaV1),
+  postageStamps: z.array(PostageStampSchemaV1),
 })
 
 // ============================================================================
@@ -141,3 +181,5 @@ export type Account = z.infer<typeof AccountSchemaV1>
 export type Identity = z.infer<typeof IdentitySchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
+export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
+export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>

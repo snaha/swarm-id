@@ -11,10 +11,14 @@
 	import Input from '$lib/components/ui/input/input.svelte'
 	import { goto } from '$app/navigation'
 	import type { BatchId } from '@ethersphere/bee-js'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 
 	const identityId = $derived($page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
-	const stamps = $derived(identityId ? postageStampsStore.getStampsByIdentity(identityId) : [])
+	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+	const stamps = $derived(
+		identity ? postageStampsStore.getStampsByAccount(identity.accountId.toHex()) : [],
+	)
 
 	function makeDefaultStamp(batchID: BatchId) {
 		if (!identityId) return
@@ -42,20 +46,22 @@
 	}
 
 	function removeStamp(batchID: BatchId) {
-		if (!identityId) return
+		if (!identity) return
 		// If this is the default stamp, clear the default stamp first
-		if (identity?.defaultPostageStampBatchID?.equals(batchID)) {
-			identitiesStore.setDefaultStamp(identityId, undefined)
+		if (identity.defaultPostageStampBatchID?.equals(batchID)) {
+			identitiesStore.setDefaultStamp(identity.id, undefined)
 		}
-		postageStampsStore.removeStamp(batchID)
+		postageStampsStore.removeStamp(batchID, identity.accountId.toHex())
 	}
 </script>
 
 <Vertical --vertical-gap="var(--padding)" style="padding-top: var(--double-padding);">
 	{#if stamps.length > 0}
-		<Typography
-			>You have {stamps.length} Swarm postage stamp{stamps.length === 1 ? '' : 's'} in use with this identity</Typography
-		>
+		{#if account?.defaultPostageStampBatchID === identity?.defaultPostageStampBatchID}
+			<Typography>This identity uses your account's postage stamp.</Typography>
+		{:else}
+			<Typography>This identity uses a separate postage stamp for extra privacy.</Typography>
+		{/if}
 		<Vertical --vertical-gap="0">
 			<Divider />
 			{#each stamps as stamp (stamp.batchID.toHex())}
@@ -92,7 +98,6 @@
 								>
 									Make default
 								</Button>
-								<Button dimension="compact" variant="ghost">Top up stamp</Button>
 							</Horizontal>
 							<Button
 								dimension="compact"

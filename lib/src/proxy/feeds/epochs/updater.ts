@@ -6,10 +6,10 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { Bee } from "@ethersphere/bee-js"
+import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, next } from "./epoch"
-import { uploadSOC } from "./soc-helper"
+import { uploadEncryptedSOC } from "../../upload-encrypted-data"
 import type { EpochUpdater } from "./types"
 
 /**
@@ -35,13 +35,14 @@ export class BasicEpochUpdater implements EpochUpdater {
    *
    * @param at - Unix timestamp for this update (seconds)
    * @param reference - 32 or 64-byte Swarm reference to store
-   * @param postageBatchId - Batch ID for stamping
+   * @param stamper - Stamper object for stamping
+   * @returns SOC chunk address for utilization tracking
    */
   async update(
     at: bigint,
     reference: Uint8Array,
-    postageBatchId: string,
-  ): Promise<void> {
+    stamper: Stamper,
+  ): Promise<Uint8Array> {
     if (reference.length !== 32 && reference.length !== 64) {
       throw new Error(
         `Reference must be 32 or 64 bytes, got ${reference.length}`,
@@ -52,11 +53,18 @@ export class BasicEpochUpdater implements EpochUpdater {
     const epoch = next(this.lastEpoch, this.lastUpdate, at)
 
     // Upload the chunk with timestamp + reference
-    await this.uploadEpochChunk(epoch, at, reference, postageBatchId)
+    const socAddress = await this.uploadEpochChunk(
+      epoch,
+      at,
+      reference,
+      stamper,
+    )
 
     // Update state
     this.lastUpdate = at
     this.lastEpoch = epoch
+
+    return socAddress
   }
 
   /**
@@ -72,14 +80,15 @@ export class BasicEpochUpdater implements EpochUpdater {
    * @param epoch - Epoch to upload to
    * @param at - Timestamp of this update
    * @param reference - 32 or 64-byte reference to store
-   * @param postageBatchId - Batch ID for stamping
+   * @param stamper - Stamper object for stamping
+   * @returns SOC chunk address for utilization tracking
    */
   private async uploadEpochChunk(
     epoch: EpochIndex,
     at: bigint,
     reference: Uint8Array,
-    postageBatchId: string,
-  ): Promise<void> {
+    stamper: Stamper,
+  ): Promise<Uint8Array> {
     // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
     const epochHash = await epoch.marshalBinary()
     const identifier = new Identifier(
@@ -95,8 +104,18 @@ export class BasicEpochUpdater implements EpochUpdater {
 
     const payload = Binary.concatBytes(timestamp, reference)
 
-    // Upload as Single Owner Chunk using our SOC helper
-    await uploadSOC(this.bee, this.signer, postageBatchId, identifier, payload)
+    // Upload as encrypted Single Owner Chunk
+    const result = await uploadEncryptedSOC(
+      this.bee,
+      stamper,
+      this.signer,
+      identifier,
+      payload,
+      undefined, // Use random encryption key
+      { deferred: false }, // Fast upload mode
+    )
+
+    return result.socAddress
   }
 
   /**

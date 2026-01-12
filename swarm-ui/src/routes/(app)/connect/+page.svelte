@@ -23,7 +23,7 @@
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-	import type { SetSecretMessage } from '@swarm-id/lib'
+	import type { PostageBatch, PostageStamp, SetSecretMessage } from '@swarm-id/lib'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
@@ -136,16 +136,17 @@
 
 		// If this was an existing identity then close the window automatically
 		if (!error && !sessionStore.data.currentIdentityId) {
-			closeWindowWithSessionCleanup()
+			// closeWindowWithSessionCleanup()
 		}
 	}
 
-	function getIdentityPostageBatchId(identity: Identity): string | undefined {
-		const postageStamp = postageStampsStore.stamps.find((stamp) => stamp.identityId === identity.id)
+	function getIdentityPostageStamp(identity: Identity): PostageStamp | undefined {
+		const accountId = identity.accountId.toHex()
+		const postageStamp = postageStampsStore.stamps.find((stamp) => stamp.accountId === accountId)
 		if (!postageStamp) {
 			return
 		}
-		return postageStamp.batchID.toHex()
+		return postageStamp
 	}
 
 	function updateSelectedIdentity(appSecret: string) {
@@ -163,7 +164,7 @@
 
 		// FIXME: Generate random postage batch ID for testing
 		// In production, use the identity's default postage stamp or let user choose
-		const postageBatchId = getIdentityPostageBatchId(selectedIdentity)
+		const postageStamp = getIdentityPostageStamp(selectedIdentity)
 
 		// Send secret to opener (the iframe that opened this popup)
 		if (!window.opener || (window.opener as Window).closed) {
@@ -176,7 +177,8 @@
 			appOrigin: sessionStore.data.appOrigin,
 			data: {
 				secret: appSecret,
-				postageBatchId,
+				postageBatchId: postageStamp?.batchID.toHex(),
+				signerKey: postageStamp?.signerKey.toHex(),
 			},
 		}
 

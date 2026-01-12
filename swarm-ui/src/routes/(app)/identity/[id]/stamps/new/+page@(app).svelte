@@ -7,17 +7,18 @@
 	import { page } from '$app/stores'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { BatchId } from '@ethersphere/bee-js'
+	import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
+	import FormattedNumberInput from '$lib/components/ui/input/formatted-number/input.svelte'
 
 	const identityId = $derived($page.params.id)
 
 	let batchID = $state('')
-	let depth = $state('20')
+	let depth = $state(20)
 	let signerKey = $state('')
-	let amount = $state('')
-	let blockNumber = $state('')
+	let amount = $state(0)
+	let blockNumber = $state(0)
 
 	// Error state for each field
 	let batchIDError = $derived.by(() => {
@@ -27,11 +28,16 @@
 		return undefined
 	})
 
-	let depthError = $derived.by(() => {
-		if (!depth) return undefined
-		const depthNum = parseInt(depth)
-		if (isNaN(depthNum)) return 'Depth must be a number'
-		if (depthNum < 0 || depthNum > 255) return 'Depth must be between 0 and 255'
+	let numberError = $derived.by(() => {
+		if (isNaN(depth)) return 'Depth must be a number'
+		if (depth < 17 || depth > 40) return 'Depth must be between 17 and 40'
+
+		if (isNaN(amount)) return 'Amount must be a number'
+		if (amount < 0) return 'Amount must be greater than 0'
+
+		if (isNaN(blockNumber)) return 'Block number must be a number'
+		if (blockNumber < 0) return 'Block number must be greater than 0'
+
 		return undefined
 	})
 
@@ -43,39 +49,42 @@
 	})
 
 	let isFormDisabled = $derived(
-		!batchID || !depth || !!batchIDError || !!depthError || !!signerKeyError,
+		!batchID || !depth || !!batchIDError || !!numberError || !!signerKeyError,
 	)
 
 	function handleAddStamp() {
 		// Double-check validation
-		if (!batchID || batchIDError || depthError || signerKeyError) {
+		if (!batchID || batchIDError || numberError || signerKeyError) {
 			return
 		}
 
-		const depthNum = parseInt(depth)
-
 		if (!identityId) return
 
-		// Create the postage stamp with guestimated defaults
+		const identity = identitiesStore.getIdentity(identityId)
+		if (!identity) return
+
+		const accountId = identity.accountId.toHex()
+
+		// Create the postage stamp with defaults
 		const stamp = postageStampsStore.addStamp({
-			identityId,
+			accountId,
 			batchID: new BatchId(batchID),
+			signerKey: new PrivateKey(signerKey),
 			utilization: 0,
 			usable: true,
-			depth: depthNum,
-			amount: '10000000',
+			depth,
+			amount,
 			bucketDepth: 16,
 			blockNumber: 0,
 			immutableFlag: false,
 			exists: true,
 		})
 
-		console.log('✅ Postage stamp added:', stamp.batchID.toHex())
+		console.log('✅ Postage stamp added:', stamp.batchID.toHex(), stamp)
 
-		// If this is the first stamp for this identity, make it default
-		const identity = identitiesStore.getIdentity(identityId)
-		const stamps = postageStampsStore.getStampsByIdentity(identityId)
-		if (stamps.length === 1 && !identity?.defaultPostageStampBatchID) {
+		// If this is the first stamp for this account, make it default for this identity
+		const stamps = postageStampsStore.getStampsByAccount(accountId)
+		if (stamps.length === 1 && !identity.defaultPostageStampBatchID) {
 			identitiesStore.setDefaultStamp(identityId, stamp.batchID)
 		}
 
@@ -107,40 +116,44 @@
 			<!-- Row 2 -->
 			<Vertical>
 				<ResponsiveLayout --responsive-justify-content="stretch">
-					<Input
+					<FormattedNumberInput
 						variant="outline"
 						dimension="compact"
 						name="depth"
-						type="number"
+						locale={undefined}
 						bind:value={depth}
-						error={depthError}
 						label="Depth"
 						class="flex-grow"
+						min={0}
+						max={255}
+						step={1}
 					/>
-					<Input
+					<FormattedNumberInput
 						variant="outline"
 						dimension="compact"
 						name="amount"
-						type="number"
+						locale={undefined}
 						bind:value={amount}
-						error={depthError}
 						label="Amount"
 						class="flex-grow"
+						min={0}
+						step={1}
 					/>
-					<Input
+					<FormattedNumberInput
 						variant="outline"
 						dimension="compact"
 						name="blockNumber"
-						type="number"
+						locale={undefined}
 						bind:value={blockNumber}
-						error={depthError}
 						label="Block number"
 						class="flex-grow"
+						min={0}
+						step={1}
 					/>
 				</ResponsiveLayout>
-				{#if depthError}
+				{#if numberError}
 					<div class="error-full-width">
-						<ErrorMessage>{depthError}</ErrorMessage>
+						<ErrorMessage>{numberError}</ErrorMessage>
 					</div>
 				{/if}
 			</Vertical>

@@ -70,7 +70,7 @@
 		return identity
 	}
 
-	function handleCreateIdentity() {
+	async function handleCreateIdentity() {
 		const sessionAccount = sessionStore.data.account
 		const tempMasterKey = sessionStore.data.temporaryMasterKey
 

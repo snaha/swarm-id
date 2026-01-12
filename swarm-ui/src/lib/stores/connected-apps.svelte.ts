@@ -2,6 +2,7 @@ import { browser } from '$app/environment'
 import { createConnectedAppsStorageManager, type ConnectedApp } from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
+import { identitiesStore } from './identities.svelte'
 
 // ============================================================================
 // Storage Manager
@@ -17,10 +18,13 @@ function loadConnectedApps(): ConnectedApp[] {
 function saveConnectedApps(data: ConnectedApp[]): void {
 	storageManager.save(data)
 
-	// Trigger Swarm sync
+	// Trigger Swarm sync for current identity's account
 	const currentIdentityId = sessionStore.data.currentIdentityId
 	if (currentIdentityId) {
-		triggerSync(currentIdentityId)
+		const identity = identitiesStore.getIdentity(currentIdentityId)
+		if (identity) {
+			triggerSync(identity.accountId.toHex())
+		}
 	}
 }
 
