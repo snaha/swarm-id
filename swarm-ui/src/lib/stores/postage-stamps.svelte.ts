@@ -89,7 +89,7 @@ export const postageStampsStore = {
 
 		// Create utilization-aware stamper with loaded bucket state
 		const stamper = await UtilizationAwareStamper.create(
-			stamp.signerKey,
+			stamp.signerKey.toUint8Array(),
 			stamp.batchID,
 			stamp.depth,
 			cache,
