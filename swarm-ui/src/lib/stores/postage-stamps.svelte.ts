@@ -1,10 +1,9 @@
 import { browser } from '$app/environment'
-import { BatchId, Stamper, EthAddress } from '@ethersphere/bee-js'
+import { BatchId, EthAddress } from '@ethersphere/bee-js'
 import { createPostageStampsStorageManager, type PostageStamp } from '@swarm-id/lib'
 import { UtilizationAwareStamper } from '@swarm-id/lib/utils/batch-utilization'
 import { UtilizationCacheDB } from '@swarm-id/lib/storage/utilization-cache'
 import { triggerSync } from '$lib/utils/sync-hooks'
-import { sessionStore } from './session.svelte'
 
 // ============================================================================
 // Storage Manager

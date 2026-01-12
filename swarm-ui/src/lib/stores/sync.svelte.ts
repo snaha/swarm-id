@@ -1,25 +1,20 @@
-import {
-	StateSyncManager,
-	deriveAccountBackupKey,
-	type AccountStateSnapshot,
-} from '@swarm-id/lib/sync'
+import { StateSyncManager, type AccountStateSnapshot } from '@swarm-id/lib/sync'
 import { deriveSecret } from '@swarm-id/lib'
 import { identitiesStore } from './identities.svelte'
 import { connectedAppsStore } from './connected-apps.svelte'
 import { postageStampsStore } from './postage-stamps.svelte'
 import { accountsStore } from './accounts.svelte'
-import { sessionStore } from './session.svelte'
-import { Bee, PrivateKey, BatchId, EthAddress, Stamper, type Chunk } from '@ethersphere/bee-js'
+import { Bee, PrivateKey, BatchId, EthAddress, type Chunk } from '@ethersphere/bee-js'
 import { browser } from '$app/environment'
 import {
 	updateAfterWrite,
 	saveUtilizationState,
 	calculateUtilizationPercentage,
-	type BatchUtilizationState,
 } from '@swarm-id/lib/utils/batch-utilization'
 import { UtilizationCacheDB } from '@swarm-id/lib/storage/utilization-cache'
 import { DebouncedUtilizationUploader } from '@swarm-id/lib/storage/debounced-uploader'
 import { hexToUint8Array } from '@swarm-id/lib/utils/hex'
+import { SvelteDate } from 'svelte/reactivity'
 
 // Reactive state
 const syncEnabled = $state(true) // Auto-enabled for v1
@@ -283,7 +278,9 @@ export const syncStore = {
 	 */
 	async syncAccount(accountId: string): Promise<void> {
 		const startTime = performance.now()
-		console.log(`[StateSync ${new Date().toISOString()}] Starting sync for account ${accountId}`)
+		console.log(
+			`[StateSync ${new SvelteDate().toISOString()}] Starting sync for account ${accountId}`,
+		)
 
 		if (!syncEnabled) return
 
@@ -300,7 +297,7 @@ export const syncStore = {
 			return
 		}
 		console.log(
-			`[StateSync ${new Date().toISOString()}] Account retrieved (+${(performance.now() - startTime).toFixed(2)}ms)`,
+			`[StateSync ${new SvelteDate().toISOString()}] Account retrieved (+${(performance.now() - startTime).toFixed(2)}ms)`,
 		)
 
 		// Resolve default stamp (account or first identity)
@@ -323,7 +320,7 @@ export const syncStore = {
 		// Field is required in schema, so it will always be present for valid accounts
 		const encryptionKey = account.swarmEncryptionKey
 		console.log(
-			`[StateSync ${new Date().toISOString()}] Encryption key retrieved (+${(performance.now() - startTime).toFixed(2)}ms)`,
+			`[StateSync ${new SvelteDate().toISOString()}] Encryption key retrieved (+${(performance.now() - startTime).toFixed(2)}ms)`,
 		)
 
 		// Collect account state
@@ -333,17 +330,17 @@ export const syncStore = {
 		)
 		const stamps = postageStampsStore.getStampsByAccount(accountId)
 		console.log(
-			`[StateSync ${new Date().toISOString()}] State collected: ${identities.length} identities, ${apps.length} apps, ${stamps.length} stamps (+${(performance.now() - startTime).toFixed(2)}ms)`,
+			`[StateSync ${new SvelteDate().toISOString()}] State collected: ${identities.length} identities, ${apps.length} apps, ${stamps.length} stamps (+${(performance.now() - startTime).toFixed(2)}ms)`,
 		)
 
 		const state: AccountStateSnapshot = {
 			version: 1,
-			timestamp: Date.now(),
+			timestamp: SvelteDate.now(),
 			accountId,
 			metadata: {
 				defaultPostageStampBatchID: defaultStampBatchID.toHex(),
 				createdAt: account.createdAt,
-				lastModified: Date.now(),
+				lastModified: SvelteDate.now(),
 			},
 			identities,
 			connectedApps: apps,
@@ -353,27 +350,29 @@ export const syncStore = {
 		// Get sync manager (lazy init)
 		const manager = getSyncManager()
 		console.log(
-			`[StateSync ${new Date().toISOString()}] Sync manager ready (+${(performance.now() - startTime).toFixed(2)}ms)`,
+			`[StateSync ${new SvelteDate().toISOString()}] Sync manager ready (+${(performance.now() - startTime).toFixed(2)}ms)`,
 		)
 
 		// Sync to Swarm with encryption
 		console.log(
-			`[StateSync ${new Date().toISOString()}] Starting upload to Swarm... (+${(performance.now() - startTime).toFixed(2)}ms)`,
+			`[StateSync ${new SvelteDate().toISOString()}] Starting upload to Swarm... (+${(performance.now() - startTime).toFixed(2)}ms)`,
 		)
 		const result = await manager.syncAccount(accountId, state, defaultStamp, encryptionKey)
 		console.log(
-			`[StateSync ${new Date().toISOString()}] Upload completed (+${(performance.now() - startTime).toFixed(2)}ms)`,
+			`[StateSync ${new SvelteDate().toISOString()}] Upload completed (+${(performance.now() - startTime).toFixed(2)}ms)`,
 		)
 
 		if (result.status === 'success') {
-			console.log(`[StateSync ${new Date().toISOString()}] ✅ Sync completed: ${result.reference}`)
 			console.log(
-				`[StateSync ${new Date().toISOString()}] ✅ TOTAL SYNC TIME: ${(performance.now() - startTime).toFixed(2)}ms`,
+				`[StateSync ${new SvelteDate().toISOString()}] ✅ Sync completed: ${result.reference}`,
 			)
-			lastSyncTimes.set(accountId, Date.now())
+			console.log(
+				`[StateSync ${new SvelteDate().toISOString()}] ✅ TOTAL SYNC TIME: ${(performance.now() - startTime).toFixed(2)}ms`,
+			)
+			lastSyncTimes.set(accountId, SvelteDate.now())
 		} else {
 			console.error(
-				`[StateSync ${new Date().toISOString()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
+				`[StateSync ${new SvelteDate().toISOString()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
 				result.error,
 			)
 		}

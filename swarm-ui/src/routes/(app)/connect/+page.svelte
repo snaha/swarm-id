@@ -23,7 +23,7 @@
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-	import type { PostageBatch, PostageStamp, SetSecretMessage } from '@swarm-id/lib'
+	import type { PostageStamp, SetSecretMessage } from '@swarm-id/lib'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
