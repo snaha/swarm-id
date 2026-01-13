@@ -19,11 +19,13 @@ import {
   PopupToIframeMessageSchema,
   SWARM_SECRET_PREFIX,
 } from "./types"
-import { Bee, Stamper, makeContentAddressedChunk } from "@ethersphere/bee-js"
+import { Bee, makeContentAddressedChunk, BatchId } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
+import { UtilizationAwareStamper } from "./utils/batch-utilization"
+import { UtilizationCacheDB } from "./storage/utilization-cache"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -43,8 +45,9 @@ export class SwarmIdProxy {
   private appSecret: string | undefined
   private postageBatchId: string | undefined
   private signerKey: string | undefined
-  private stamper: Stamper | undefined
+  private stamper: UtilizationAwareStamper | undefined
   private stamperDepth: number = 23 // Default depth
+  private utilizationCache: UtilizationCacheDB | undefined
   private beeApiUrl: string
   private defaultBeeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
@@ -98,8 +101,9 @@ export class SwarmIdProxy {
 
   /**
    * Initialize the Stamper for client-side signing
+   * Uses UtilizationAwareStamper to track bucket usage
    */
-  private initializeStamper(): void {
+  private async initializeStamper(): Promise<void> {
     if (!this.signerKey || !this.postageBatchId) {
       console.warn(
         "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
@@ -108,30 +112,26 @@ export class SwarmIdProxy {
     }
 
     try {
-      // Try to load existing bucket state from localStorage
-      const bucketState = this.loadStamperState()
-
-      if (bucketState) {
-        // Restore from saved state
-        this.stamper = Stamper.fromState(
-          this.signerKey,
-          this.postageBatchId,
-          bucketState,
-          this.stamperDepth,
-        )
-        console.log("[Proxy] Stamper restored from saved state")
-      } else {
-        // Create new blank stamper
-        this.stamper = Stamper.fromBlank(
-          this.signerKey,
-          this.postageBatchId,
-          this.stamperDepth,
-        )
-        console.log(
-          "[Proxy] Stamper initialized fresh with depth:",
-          this.stamperDepth,
-        )
+      // Initialize utilization cache if not already done
+      if (!this.utilizationCache) {
+        this.utilizationCache = new UtilizationCacheDB()
       }
+
+      // Create utilization-aware stamper
+      // Note: owner and encryptionKey are optional - not provided here since
+      // the proxy doesn't have access to them. The stamper will still track
+      // bucket usage locally in IndexedDB.
+      this.stamper = await UtilizationAwareStamper.create(
+        this.signerKey,
+        new BatchId(this.postageBatchId),
+        this.stamperDepth,
+        this.utilizationCache,
+      )
+
+      console.log(
+        "[Proxy] Utilization-aware stamper initialized with depth:",
+        this.stamperDepth,
+      )
     } catch (error) {
       console.error("[Proxy] Failed to initialize stamper:", error)
       this.stamper = undefined
@@ -139,60 +139,19 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Save stamper bucket state to localStorage (sparse representation)
-   * Only saves non-zero buckets to minimize storage and serialization time
+   * Save stamper bucket state to IndexedDB
+   * Utilization-aware stamper persists bucket state automatically
    */
-  private saveStamperState(): void {
-    if (!this.stamper || !this.parentOrigin || !this.postageBatchId) {
+  private async saveStamperState(): Promise<void> {
+    if (!this.stamper) {
       return
     }
 
     try {
-      const buckets = this.stamper.getState()
-      const storageKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
-
-      // Save only non-zero buckets as sparse array: [[index, value], [index, value], ...]
-      const sparse: Array<[number, number]> = []
-      for (let i = 0; i < buckets.length; i++) {
-        if (buckets[i] !== 0) {
-          sparse.push([i, buckets[i]])
-        }
-      }
-
-      localStorage.setItem(storageKey, JSON.stringify(sparse))
+      await this.stamper.flush()
     } catch (error) {
       console.error("[Proxy] Failed to save stamper state:", error)
     }
-  }
-
-  /**
-   * Load stamper bucket state from localStorage (sparse representation)
-   */
-  private loadStamperState(): Uint32Array | undefined {
-    if (!this.parentOrigin || !this.postageBatchId) {
-      return undefined
-    }
-
-    try {
-      const storageKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
-      const stored = localStorage.getItem(storageKey)
-
-      if (stored) {
-        const sparse: Array<[number, number]> = JSON.parse(stored)
-        const buckets = new Uint32Array(65536)
-
-        // Restore non-zero buckets from sparse representation
-        for (const [index, value] of sparse) {
-          buckets[index] = value
-        }
-
-        return buckets
-      }
-    } catch (error) {
-      console.error("[Proxy] Failed to load stamper state:", error)
-    }
-
-    return undefined
   }
 
   /**
@@ -211,7 +170,7 @@ export class SwarmIdProxy {
 
       // Handle parent identification (must come first)
       if (type === "parentIdentify") {
-        this.handleParentIdentify(event)
+        await this.handleParentIdentify(event)
         return
       }
 
@@ -288,7 +247,7 @@ export class SwarmIdProxy {
   /**
    * Handle parent identification
    */
-  private handleParentIdentify(event: MessageEvent): void {
+  private async handleParentIdentify(event: MessageEvent): Promise<void> {
     // Prevent parent from changing after first identification
     if (this.parentIdentified) {
       console.error("[Proxy] Parent already identified! Ignoring duplicate.")
@@ -333,7 +292,7 @@ export class SwarmIdProxy {
     }
 
     // Load existing secret if available
-    this.loadAuthData()
+    await this.loadAuthData()
 
     // Acknowledge receipt
     if (event.source) {
@@ -420,7 +379,7 @@ export class SwarmIdProxy {
   /**
    * Load secret from localStorage
    */
-  private loadAuthData(): void {
+  private async loadAuthData(): Promise<void> {
     if (!this.parentOrigin) {
       console.log("[Proxy] No parent origin, cannot load auth data")
       this.authLoading = false
@@ -447,7 +406,7 @@ export class SwarmIdProxy {
         // Initialize stamper if we have signer key and batch ID
         // (both are required for client-side signing)
         if (this.signerKey && this.postageBatchId) {
-          this.initializeStamper()
+          await this.initializeStamper()
         }
       } catch (error) {
         console.error("[Proxy] Failed to parse auth data:", error)
@@ -816,7 +775,7 @@ export class SwarmIdProxy {
 
     // Initialize stamper if we have signer key
     if (this.signerKey && this.postageBatchId) {
-      this.initializeStamper()
+      await this.initializeStamper()
     }
 
     // Notify parent dApp
@@ -846,19 +805,19 @@ export class SwarmIdProxy {
     const { requestId, data, options, enableProgress } = message
 
     console.log("[Proxy] Upload data request, size:", data ? data.length : 0)
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
-    if (!this.signerKey) {
-      throw new Error("Signer key not available. Please login first.")
-    }
-
-    if (!this.stamper) {
-      throw new Error("Stamper not initialized. Please login first.")
-    }
 
     try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey || !this.postageBatchId) {
+        throw new Error("Signer key and postage batch ID required. Please login first.")
+      }
+
+      if (!this.stamper) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
       // Prepare upload context
       const context: UploadContext = {
         bee: this.bee,
@@ -906,7 +865,7 @@ export class SwarmIdProxy {
       }
 
       // Save stamper state after successful upload
-      this.saveStamperState()
+      await this.saveStamperState()
 
       // Send final response
       if (event.source) {
@@ -983,27 +942,24 @@ export class SwarmIdProxy {
       "size:",
       data ? data.length : 0,
     )
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
-    // Check if only signer is available (no batch ID)
-    if (this.signerKey && !this.postageBatchId) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        "Signed uploads for files not yet implemented. Please use uploadChunk for signed uploads, or provide a postage batch ID for automatic chunking.",
-      )
-      return
-    }
-
-    if (!this.postageBatchId) {
-      throw new Error(
-        "No postage batch ID available. Please authenticate with a valid batch ID.",
-      )
-    }
 
     try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      // Check if only signer is available (no batch ID)
+      if (this.signerKey && !this.postageBatchId) {
+        throw new Error(
+          "Signed uploads for files not yet implemented. Please use uploadChunk for signed uploads, or provide a postage batch ID for automatic chunking.",
+        )
+      }
+
+      if (!this.postageBatchId) {
+        throw new Error(
+          "No postage batch ID available. Please authenticate with a valid batch ID.",
+        )
+      }
       console.log(
         "[Proxy] Uploading file to Bee at:",
         this.beeApiUrl,
@@ -1105,15 +1061,15 @@ export class SwarmIdProxy {
     const { requestId, data, options } = message
 
     console.log("[Proxy] Upload chunk request, size:", data ? data.length : 0)
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
-    if (!this.signerKey) {
-      throw new Error("Signer key not available. Please authenticate.")
-    }
 
     try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey || !this.postageBatchId) {
+        throw new Error("Signer key and postage batch ID required. Please authenticate.")
+      }
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
         throw new Error(
@@ -1122,7 +1078,7 @@ export class SwarmIdProxy {
       }
 
       if (!this.stamper) {
-        this.initializeStamper()
+        await this.initializeStamper()
       }
 
       if (!this.stamper) {
@@ -1161,7 +1117,7 @@ export class SwarmIdProxy {
       )
 
       // Save stamper state after successful upload
-      this.saveStamperState()
+      await this.saveStamperState()
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
