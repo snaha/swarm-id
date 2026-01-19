@@ -106,6 +106,23 @@ export const AuthStatusSchema = z.object({
 export type AuthStatus = z.infer<typeof AuthStatusSchema>
 
 // ============================================================================
+// Connection Info
+// ============================================================================
+
+export const ConnectionInfoSchema = z.object({
+  canUpload: z.boolean(),
+  identity: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      address: z.string().length(40),
+    })
+    .optional(),
+})
+
+export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
+
+// ============================================================================
 // Button Styles
 // ============================================================================
 
@@ -227,6 +244,11 @@ export const DownloadChunkMessageSchema = z.object({
   options: DownloadOptionsSchema,
 })
 
+export const GetConnectionInfoMessageSchema = z.object({
+  type: z.literal("getConnectionInfo"),
+  requestId: z.string(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -238,6 +260,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DownloadFileMessageSchema,
   UploadChunkMessageSchema,
   DownloadChunkMessageSchema,
+  GetConnectionInfoMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -250,6 +273,9 @@ export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
 export type DownloadFileMessage = z.infer<typeof DownloadFileMessageSchema>
 export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>
 export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>
+export type GetConnectionInfoMessage = z.infer<
+  typeof GetConnectionInfoMessageSchema
+>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -337,6 +363,19 @@ export const ErrorMessageSchema = z.object({
   error: z.string(),
 })
 
+export const ConnectionInfoResponseMessageSchema = z.object({
+  type: z.literal("connectionInfoResponse"),
+  requestId: z.string(),
+  canUpload: z.boolean(),
+  identity: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      address: z.string().length(40),
+    })
+    .optional(),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -351,6 +390,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DownloadChunkResponseMessageSchema,
   UploadProgressMessageSchema,
   ErrorMessageSchema,
+  ConnectionInfoResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -382,6 +422,9 @@ export type DownloadChunkResponseMessage = z.infer<
 >
 export type UploadProgressMessage = z.infer<typeof UploadProgressMessageSchema>
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
+export type ConnectionInfoResponseMessage = z.infer<
+  typeof ConnectionInfoResponseMessageSchema
+>
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
 // ============================================================================

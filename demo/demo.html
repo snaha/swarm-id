@@ -262,9 +262,9 @@ Hello, Swarm!</textarea
         iframePath: PROXY_PATH,
         beeApiUrl: BEE_API_URL,
         timeout: 60000, // 60 seconds to account for Bee sync delays
-        onAuthChange: (authenticated) => {
+        onAuthChange: async (authenticated) => {
           log(`Auth status changed: ${authenticated}`, "info");
-          updateAuthStatus(authenticated);
+          await updateAuthStatus(authenticated);
         },
         metadata: {
           name: "Swarm ID Demo",
@@ -282,13 +282,13 @@ Hello, Swarm!</textarea
         log("Checking auth status...", "info");
         const status = await client.checkAuthStatus();
         log(`Auth status: ${status.authenticated ? "authenticated" : "not authenticated"}`, "info");
-        updateAuthStatus(status.authenticated);
+        await updateAuthStatus(status.authenticated);
       } catch (error) {
         log(`Initialization failed: ${error.message}`, "error");
         alert(`Failed to initialize Swarm ID: ${error.message}\n\nPlease check the console for details.`);
       }
 
-      function updateAuthStatus(authenticated) {
+      async function updateAuthStatus(authenticated) {
         const statusEl = document.getElementById("auth-status");
         const uploadBtn = document.getElementById("upload-button");
         const downloadBtn = document.getElementById("download-button");
@@ -296,8 +296,20 @@ Hello, Swarm!</textarea
         if (authenticated) {
           statusEl.className = "status authenticated";
           statusEl.textContent = "✓ Status: Authenticated";
-          uploadBtn.disabled = false;
           downloadBtn.disabled = false;
+
+          // Check if upload is available (requires postage stamp)
+          try {
+            const connectionInfo = await client.getConnectionInfo();
+            log(`Connection info: canUpload=${connectionInfo.canUpload}, identity=${connectionInfo.identity}`, "info");
+            uploadBtn.disabled = !connectionInfo.canUpload;
+            if (!connectionInfo.canUpload) {
+              log("Upload disabled: no postage stamp available", "warn");
+            }
+          } catch (error) {
+            log(`Failed to get connection info: ${error.message}`, "error");
+            uploadBtn.disabled = true;
+          }
         } else {
           statusEl.className = "status unauthenticated";
           statusEl.textContent = "✗ Status: Not authenticated";

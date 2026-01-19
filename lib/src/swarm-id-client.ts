@@ -1,6 +1,7 @@
 import type {
   ClientOptions,
   AuthStatus,
+  ConnectionInfo,
   ButtonStyles,
   UploadResult,
   FileData,
@@ -441,6 +442,29 @@ export class SwarmIdClient {
     // Notify via auth change callback
     if (this.onAuthChange) {
       this.onAuthChange(false)
+    }
+  }
+
+  /**
+   * Get connection info including upload capability and identity details
+   */
+  async getConnectionInfo(): Promise<ConnectionInfo> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "connectionInfoResponse"
+      requestId: string
+      canUpload: boolean
+      identity?: { id: string; name: string; address: string }
+    }>({
+      type: "getConnectionInfo",
+      requestId,
+    })
+
+    return {
+      canUpload: response.canUpload,
+      identity: response.identity,
     }
   }
 

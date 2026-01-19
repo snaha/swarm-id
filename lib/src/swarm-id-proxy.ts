@@ -12,7 +12,9 @@ import type {
   DownloadFileMessage,
   UploadChunkMessage,
   DownloadChunkMessage,
+  GetConnectionInfoMessage,
   AppMetadata,
+  PostageStamp,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
@@ -26,6 +28,11 @@ import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationCacheDB } from "./storage/utilization-cache"
+import {
+  createConnectedAppsStorageManager,
+  createIdentitiesStorageManager,
+  createPostageStampsStorageManager,
+} from "./utils/storage-managers"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -355,6 +362,10 @@ export class SwarmIdProxy {
         await this.handleDownloadChunk(message, event)
         break
 
+      case "getConnectionInfo":
+        this.handleGetConnectionInfo(message, event)
+        break
+
       default:
         // TypeScript should ensure this is never reached
         const exhaustiveCheck: never = message
@@ -397,16 +408,20 @@ export class SwarmIdProxy {
           this.parentOrigin,
         )
         this.appSecret = data.secret
-        this.postageBatchId = data.postageBatchId
-        this.signerKey = data.signerKey
         this.authenticated = true
         this.authLoading = false
         this.showAuthButton() // Show disconnect button
 
-        // Initialize stamper if we have signer key and batch ID
-        // (both are required for client-side signing)
-        if (this.signerKey && this.postageBatchId) {
+        // Look up postage stamp from shared storage based on connected identity
+        const stamp = this.lookupPostageStampForApp()
+        if (stamp) {
+          this.postageBatchId = stamp.batchID.toHex()
+          this.signerKey = stamp.signerKey.toHex()
           await this.initializeStamper()
+        } else {
+          console.log("[Proxy] No postage stamp found for connected identity")
+          this.postageBatchId = undefined
+          this.signerKey = undefined
         }
       } catch (error) {
         console.error("[Proxy] Failed to parse auth data:", error)
@@ -417,6 +432,67 @@ export class SwarmIdProxy {
       console.log("[Proxy] No auth data found for:", this.parentOrigin)
       this.authLoading = false
       this.showAuthButton()
+    }
+  }
+
+  /**
+   * Look up the postage stamp for the currently connected app's identity
+   * by reading from shared localStorage stores.
+   */
+  private lookupPostageStampForApp(): PostageStamp | undefined {
+    if (!this.parentOrigin) {
+      return undefined
+    }
+
+    try {
+      // Load connected apps to find which identity is connected to this app
+      const connectedAppsManager = createConnectedAppsStorageManager()
+      const connectedApps = connectedAppsManager.load()
+      const connectedApp = connectedApps.find(
+        (app) => app.appUrl === this.parentOrigin
+      )
+
+      if (!connectedApp) {
+        console.log("[Proxy] No connected app found for:", this.parentOrigin)
+        return undefined
+      }
+
+      // Load identities to find the account for this identity
+      const identitiesManager = createIdentitiesStorageManager()
+      const identities = identitiesManager.load()
+      const identity = identities.find((i) => i.id === connectedApp.identityId)
+
+      if (!identity) {
+        console.log("[Proxy] Identity not found:", connectedApp.identityId)
+        return undefined
+      }
+
+      // Load postage stamps and find one for this account
+      const postageStampsManager = createPostageStampsStorageManager()
+      const stamps = postageStampsManager.load()
+
+      // First try identity's default stamp, then fall back to any account stamp
+      let stamp: PostageStamp | undefined
+      if (identity.defaultPostageStampBatchID) {
+        stamp = stamps.find(
+          (s) => s.batchID.equals(identity.defaultPostageStampBatchID!)
+        )
+      }
+
+      if (!stamp) {
+        stamp = stamps.find(
+          (s) => s.accountId === identity.accountId.toHex()
+        )
+      }
+
+      if (stamp) {
+        console.log("[Proxy] Found postage stamp for identity:", stamp.batchID.toHex())
+      }
+
+      return stamp
+    } catch (error) {
+      console.error("[Proxy] Error looking up postage stamp:", error)
+      return undefined
     }
   }
 
@@ -529,6 +605,63 @@ export class SwarmIdProxy {
     }
 
     console.log("[Proxy] Authentication status:", this.authenticated)
+  }
+
+  private handleGetConnectionInfo(
+    message: GetConnectionInfoMessage,
+    event: MessageEvent,
+  ): void {
+    console.log("[Proxy] Getting connection info...")
+
+    let identity:
+      | { id: string; name: string; address: string }
+      | undefined = undefined
+
+    // Look up identity info if authenticated
+    if (this.authenticated && this.parentOrigin) {
+      try {
+        const connectedAppsManager = createConnectedAppsStorageManager()
+        const connectedApps = connectedAppsManager.load()
+        const connectedApp = connectedApps.find(
+          (app) => app.appUrl === this.parentOrigin,
+        )
+
+        if (connectedApp) {
+          const identitiesManager = createIdentitiesStorageManager()
+          const identities = identitiesManager.load()
+          const foundIdentity = identities.find(
+            (i) => i.id === connectedApp.identityId,
+          )
+
+          if (foundIdentity) {
+            identity = {
+              id: foundIdentity.id,
+              name: foundIdentity.name,
+              address: foundIdentity.accountId.toHex(),
+            }
+          }
+        }
+      } catch (error) {
+        console.error("[Proxy] Error looking up identity:", error)
+      }
+    }
+
+    // canUpload is true if we have both a postage batch ID and signer key
+    const canUpload = !!(this.postageBatchId && this.signerKey)
+
+    if (event.source) {
+      ;(event.source as WindowProxy).postMessage(
+        {
+          type: "connectionInfoResponse",
+          requestId: message.requestId,
+          canUpload,
+          identity,
+        } satisfies IframeToParentMessage,
+        { targetOrigin: event.origin },
+      )
+    }
+
+    console.log("[Proxy] Connection info:", { canUpload, identity })
   }
 
   private handleDisconnect(
