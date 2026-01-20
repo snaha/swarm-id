@@ -23,6 +23,7 @@
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 	import type { PostageStamp, SetSecretMessage } from '@swarm-id/lib'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
@@ -202,6 +203,7 @@
 				secret: appSecret,
 				postageBatchId: isDevelopment ? postageStamp?.batchID.toHex() : undefined,
 				signerKey: isDevelopment ? postageStamp?.signerKey.toHex() : undefined,
+				networkSettings: isDevelopment ? { ...networkSettingsStore.settings } : undefined,
 			},
 		}
 

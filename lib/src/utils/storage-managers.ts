@@ -17,6 +17,8 @@ import {
   IdentitySchemaV1,
   ConnectedAppSchemaV1,
   PostageStampSchemaV1,
+  NetworkSettingsSchemaV1,
+  type NetworkSettings,
 } from "../schemas"
 
 // ============================================================================
@@ -231,4 +233,99 @@ export function createPostageStampsStorageManager(): VersionedStorageManager<Pos
     serializer: serializePostageStamp,
     loggerName: "PostageStampsStorage",
   })
+}
+
+// ============================================================================
+// Network Settings Storage (Singleton)
+// ============================================================================
+
+const NETWORK_SETTINGS_STORAGE_KEY = "swarm-id-network-settings"
+
+/**
+ * Parse network settings - Zod validates URL format
+ */
+function parseNetworkSettingsV1(data: unknown): NetworkSettings | undefined {
+  const result = NetworkSettingsSchemaV1.safeParse(data)
+
+  if (!result.success) {
+    console.error(
+      "[NetworkSettingsStorage] Parse failed:",
+      result.error.format(),
+    )
+    return undefined
+  }
+
+  return result.data
+}
+
+/**
+ * Serialize NetworkSettings for storage
+ */
+export function serializeNetworkSettings(
+  settings: NetworkSettings,
+): Record<string, unknown> {
+  return {
+    beeNodeUrl: settings.beeNodeUrl,
+    gnosisRpcUrl: settings.gnosisRpcUrl,
+  }
+}
+
+/**
+ * Singleton storage manager interface for network settings
+ */
+export interface NetworkSettingsStorageManager {
+  load(): NetworkSettings | undefined
+  save(settings: NetworkSettings): void
+  clear(): void
+}
+
+/**
+ * Create storage manager for network settings (singleton)
+ * Unlike other storage managers, this stores a single object, not an array
+ */
+export function createNetworkSettingsStorageManager(): NetworkSettingsStorageManager {
+  return {
+    load(): NetworkSettings | undefined {
+      if (typeof localStorage === "undefined") {
+        return undefined
+      }
+
+      const raw = localStorage.getItem(NETWORK_SETTINGS_STORAGE_KEY)
+      if (!raw) {
+        return undefined
+      }
+
+      try {
+        const parsed = JSON.parse(raw)
+        return parseNetworkSettingsV1(parsed)
+      } catch (e) {
+        console.error(
+          "[NetworkSettingsStorage] Failed to parse stored data:",
+          e,
+        )
+        return undefined
+      }
+    },
+
+    save(settings: NetworkSettings): void {
+      if (typeof localStorage === "undefined") {
+        console.warn("[NetworkSettingsStorage] localStorage not available")
+        return
+      }
+
+      const serialized = serializeNetworkSettings(settings)
+      localStorage.setItem(
+        NETWORK_SETTINGS_STORAGE_KEY,
+        JSON.stringify(serialized),
+      )
+    },
+
+    clear(): void {
+      if (typeof localStorage === "undefined") {
+        return
+      }
+
+      localStorage.removeItem(NETWORK_SETTINGS_STORAGE_KEY)
+    },
+  }
 }

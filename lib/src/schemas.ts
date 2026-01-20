@@ -10,6 +10,13 @@ import { z } from "zod"
 import { EthAddress, BatchId, Bytes, PrivateKey } from "@ethersphere/bee-js"
 
 // ============================================================================
+// Network Settings Constants
+// ============================================================================
+
+export const DEFAULT_BEE_NODE_URL = "https://api.gateway.ethswarm.org/"
+export const DEFAULT_GNOSIS_RPC_URL = "https://xdai.fairdatasociety.org/"
+
+// ============================================================================
 // Primitive → bee-js Type Transforms (internal, for entity schemas)
 // ============================================================================
 
@@ -184,3 +191,18 @@ export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
+
+// ============================================================================
+// Network Settings Schema
+// ============================================================================
+
+/**
+ * Network Settings Schema V1
+ * Stores user-configurable network endpoints (Bee node and Gnosis RPC)
+ */
+export const NetworkSettingsSchemaV1 = z.object({
+  beeNodeUrl: z.string().url(),
+  gnosisRpcUrl: z.string().url(),
+})
+
+export type NetworkSettings = z.infer<typeof NetworkSettingsSchemaV1>

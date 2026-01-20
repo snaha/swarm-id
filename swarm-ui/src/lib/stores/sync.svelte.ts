@@ -4,6 +4,7 @@ import { identitiesStore } from './identities.svelte'
 import { connectedAppsStore } from './connected-apps.svelte'
 import { postageStampsStore } from './postage-stamps.svelte'
 import { accountsStore } from './accounts.svelte'
+import { networkSettingsStore } from './network-settings.svelte'
 import { Bee, PrivateKey, BatchId, EthAddress, type Chunk } from '@ethersphere/bee-js'
 import { browser } from '$app/environment'
 import {
@@ -23,7 +24,7 @@ const lastSyncTimes = $state<Map<string, number>>(new Map())
 // Initialize Bee client (browser only)
 const getBeeClient = () => {
 	if (!browser) return undefined
-	const beeApiUrl = window.__BEE_API_URL__ || 'http://localhost:1633'
+	const beeApiUrl = networkSettingsStore.beeNodeUrl
 	console.log(`[StateSync] Creating Bee client with URL: ${beeApiUrl}`)
 	return new Bee(beeApiUrl)
 }

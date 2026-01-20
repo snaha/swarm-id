@@ -246,8 +246,6 @@ Hello, Swarm!</textarea
       // Use /proxy - this is a SvelteKit route that works in both dev and production
       const PROXY_PATH = '/proxy'
 
-      const BEE_API_URL = "http://localhost:1633";
-
       // Initialize the Swarm ID client
       log("Initializing Swarm ID client...", "info");
       log(`PROXY_ORIGIN: ${PROXY_ORIGIN}`, "info");
@@ -260,7 +258,6 @@ Hello, Swarm!</textarea
       const client = new SwarmIdClient({
         iframeOrigin: PROXY_ORIGIN,
         iframePath: PROXY_PATH,
-        beeApiUrl: BEE_API_URL,
         timeout: 60000, // 60 seconds to account for Bee sync delays
         onAuthChange: async (authenticated) => {
           log(`Auth status changed: ${authenticated}`, "info");

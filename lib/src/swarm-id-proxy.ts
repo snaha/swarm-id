@@ -1,5 +1,4 @@
 import type {
-  ProxyOptions,
   ParentToIframeMessage,
   IframeToParentMessage,
   PopupToIframeMessage,
@@ -32,7 +31,9 @@ import {
   createConnectedAppsStorageManager,
   createIdentitiesStorageManager,
   createPostageStampsStorageManager,
+  createNetworkSettingsStorageManager,
 } from "./utils/storage-managers"
+import { DEFAULT_BEE_NODE_URL } from "./schemas"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -56,21 +57,21 @@ export class SwarmIdProxy {
   private stamperDepth: number = 23 // Default depth
   private utilizationCache: UtilizationCacheDB | undefined
   private beeApiUrl: string
-  private defaultBeeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
   private bee: Bee
 
-  constructor(options: ProxyOptions) {
-    this.defaultBeeApiUrl = options.beeApiUrl
-    this.beeApiUrl = options.beeApiUrl
+  constructor() {
+    // Load Bee API URL from network settings, falling back to default
+    const networkSettings = createNetworkSettingsStorageManager().load()
+    this.beeApiUrl = networkSettings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     console.log(
-      "[Proxy] Proxy initialized with default Bee API:",
-      this.defaultBeeApiUrl,
+      "[Proxy] Proxy initialized with Bee API from network settings:",
+      this.beeApiUrl,
     )
 
     // Announce readiness to parent window immediately
@@ -263,7 +264,6 @@ export class SwarmIdProxy {
 
     // Parse the message to get optional parameters
     const message = event.data
-    const parentBeeApiUrl = message.beeApiUrl
     const parentPopupMode = message.popupMode
     const parentMetadata = message.metadata
 
@@ -273,15 +273,10 @@ export class SwarmIdProxy {
 
     console.log("[Proxy] Parent identified via postMessage:", this.parentOrigin)
     console.log("[Proxy] Parent locked in - cannot be changed")
-
-    // Use parent's Bee API URL if provided, otherwise use default
-    if (parentBeeApiUrl) {
-      this.beeApiUrl = parentBeeApiUrl
-      this.bee = new Bee(this.beeApiUrl)
-      console.log("[Proxy] Using Bee API URL from parent:", this.beeApiUrl)
-    } else {
-      console.log("[Proxy] Using default Bee API URL:", this.beeApiUrl)
-    }
+    console.log(
+      "[Proxy] Using Bee API URL from network settings:",
+      this.beeApiUrl,
+    )
 
     // Use parent's popup mode if provided
     if (parentPopupMode) {
@@ -975,11 +970,18 @@ export class SwarmIdProxy {
     const isDevelopment = this.isDevelopmentEnvironment()
 
     if (isDevelopment) {
-      // In development, localStorage is partitioned so we receive stamps in the message
+      // In development, localStorage is partitioned so we receive stamps and settings in the message
       console.log("[Proxy] Using auth data from message (development mode)")
       this.appSecret = data.secret
       this.postageBatchId = data.postageBatchId
       this.signerKey = data.signerKey
+
+      // Use network settings from message if provided
+      if (data.networkSettings) {
+        this.beeApiUrl = data.networkSettings.beeNodeUrl
+        this.bee = new Bee(this.beeApiUrl)
+        console.log("[Proxy] Using Bee API URL from message:", this.beeApiUrl)
+      }
     } else {
       // In production, secret is already in shared storage (set by auth popup)
       // Just update local state
@@ -1413,6 +1415,6 @@ export class SwarmIdProxy {
 /**
  * Initialize the proxy (called from HTML page)
  */
-export function initProxy(options: ProxyOptions): SwarmIdProxy {
-  return new SwarmIdProxy(options)
+export function initProxy(): SwarmIdProxy {
+  return new SwarmIdProxy()
 }

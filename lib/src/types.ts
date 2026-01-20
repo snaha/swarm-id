@@ -1,4 +1,5 @@
 import { z } from "zod"
+import { NetworkSettingsSchemaV1 } from "./schemas"
 
 // ============================================================================
 // Constants
@@ -435,6 +436,7 @@ export const AuthDataSchema = z.object({
   secret: z.string(),
   postageBatchId: BatchIdSchema.optional(),
   signerKey: PrivateKeySchema.optional(),
+  networkSettings: NetworkSettingsSchemaV1.optional(),
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>
@@ -459,15 +461,10 @@ export type PopupToIframeMessage = z.infer<typeof PopupToIframeMessageSchema>
 export interface ClientOptions {
   iframeOrigin: string
   iframePath?: string
-  beeApiUrl?: string
   timeout?: number
   onAuthChange?: (authenticated: boolean) => void
   popupMode?: "popup" | "window" // Default: 'window'
   metadata: AppMetadata
-}
-
-export interface ProxyOptions {
-  beeApiUrl: string
 }
 
 export interface AuthOptions {

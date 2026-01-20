@@ -17,8 +17,10 @@
 		CloseLarge,
 		Information,
 		Rocket,
+		Settings,
 		TrashCan,
 	} from 'carbon-icons-svelte'
+	import NetworkSettingsModal from './network-settings-modal.svelte'
 	import FlexItem from '$lib/components/ui/flex-item.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Badge from '$lib/components/ui/badge.svelte'
@@ -43,6 +45,7 @@
 	// eslint-disable-next-line svelte/prefer-writable-derived
 	let accountName = $state('')
 	let showUpgradeTooltip = $state(false)
+	let networkSettingsModalOpen = $state(false)
 
 	$effect(() => {
 		accountName = account.name
@@ -130,6 +133,23 @@
 						All accounts
 						<FlexItem />
 						<ChevronRight size={20} />
+					</Horizontal></Button
+				>
+			</Vertical>
+			<Divider --margin="0" />
+			<Vertical --vertical-gap="0" --vertical-align-items="stretch" style="padding: var(--padding)">
+				<Button
+					variant="ghost"
+					dimension="compact"
+					onclick={() => (networkSettingsModalOpen = true)}
+				>
+					<Horizontal
+						--horizontal-gap="var(--half-padding)"
+						--horizontal-align-items="center"
+						--horizontal-justify-content="stretch"
+						style="flex: 1"
+					>
+						Network settings
 					</Horizontal></Button
 				>
 			</Vertical>
@@ -307,6 +327,8 @@
 		{/if}
 	</Vertical>
 </div>
+
+<NetworkSettingsModal bind:open={networkSettingsModalOpen} />
 
 <style>
 	.drawer {

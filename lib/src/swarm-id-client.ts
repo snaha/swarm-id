@@ -25,7 +25,6 @@ export class SwarmIdClient {
   private iframe: HTMLIFrameElement | undefined
   private iframeOrigin: string
   private iframePath: string
-  private beeApiUrl: string
   private timeout: number
   private onAuthChange?: (authenticated: boolean) => void
   private popupMode: "popup" | "window"
@@ -52,7 +51,6 @@ export class SwarmIdClient {
   constructor(options: ClientOptions) {
     this.iframeOrigin = options.iframeOrigin
     this.iframePath = options.iframePath || "/proxy"
-    this.beeApiUrl = options.beeApiUrl || "http://localhost:1633"
     this.timeout = options.timeout || 30000 // 30 seconds default
     this.onAuthChange = options.onAuthChange
     this.popupMode = options.popupMode || "window"
@@ -149,7 +147,6 @@ export class SwarmIdClient {
     )
     this.sendMessage({
       type: "parentIdentify",
-      beeApiUrl: this.beeApiUrl,
       popupMode: this.popupMode,
       metadata: this.metadata,
     })

@@ -67,11 +67,16 @@ export {
   createIdentitiesStorageManager,
   createConnectedAppsStorageManager,
   createPostageStampsStorageManager,
+  createNetworkSettingsStorageManager,
   serializeAccount,
   serializeIdentity,
   serializeConnectedApp,
   serializePostageStamp,
+  serializeNetworkSettings,
 } from "./utils/storage-managers"
+
+// Storage manager types
+export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
 // Epoch-based feeds - implementations
 export {
@@ -110,7 +115,6 @@ export type {
 // Type exports
 export type {
   ClientOptions,
-  ProxyOptions,
   AuthOptions,
   AuthStatus,
   ButtonStyles,
@@ -137,6 +141,14 @@ export type {
   Identity,
   ConnectedApp,
   PostageStamp,
+  NetworkSettings,
+} from "./schemas"
+
+// Network settings constants and schema
+export {
+  DEFAULT_BEE_NODE_URL,
+  DEFAULT_GNOSIS_RPC_URL,
+  NetworkSettingsSchemaV1,
 } from "./schemas"
 
 // Batch utilization types

@@ -11,7 +11,6 @@ declare global {
 
 	interface Window {
 		__APP_DOMAIN__?: string
-		__BEE_API_URL__?: string
 	}
 }
 
