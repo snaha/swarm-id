@@ -93,6 +93,14 @@ export const connectedAppsStore = {
 		return connectedApps.find((app) => app.appUrl === appUrl)
 	},
 
+	// Get a connected app for a specific appUrl and identityId if the connection is still valid
+	getValidConnection(appUrl: string, identityId: string): ConnectedApp | undefined {
+		const app = connectedApps.find((a) => a.appUrl === appUrl && a.identityId === identityId)
+		if (!app?.connectedUntil || !app.appSecret) return undefined
+		if (app.connectedUntil <= Date.now()) return undefined
+		return app
+	},
+
 	// Get identity IDs that have connected to a specific app URL
 	getConnectedIdentityIds(appUrl: string): string[] {
 		return [

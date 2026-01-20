@@ -132,6 +132,21 @@
 
 	async function selectIdentityForConnection(identity: Identity) {
 		selectedIdentity = identity
+
+		// Check if there's a valid existing connection
+		if (sessionStore.data.appOrigin) {
+			const validConnection = connectedAppsStore.getValidConnection(
+				sessionStore.data.appOrigin,
+				identity.id,
+			)
+			if (validConnection?.appSecret) {
+				// Reuse the existing connection
+				updateSelectedIdentity(validConnection.appSecret)
+				authenticated = true
+				return
+			}
+		}
+
 		await handleAuthenticate()
 
 		// If this was an existing identity then close the window automatically
