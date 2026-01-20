@@ -388,6 +388,16 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Check if running in a development environment (localhost)
+   */
+  private isDevelopmentEnvironment(): boolean {
+    return (
+      window.location.hostname === "localhost" ||
+      window.location.hostname === "127.0.0.1"
+    )
+  }
+
+  /**
    * Load secret from localStorage
    */
   private async loadAuthData(): Promise<void> {
@@ -412,16 +422,27 @@ export class SwarmIdProxy {
         this.authLoading = false
         this.showAuthButton() // Show disconnect button
 
-        // Look up postage stamp from shared storage based on connected identity
-        const stamp = this.lookupPostageStampForApp()
-        if (stamp) {
-          this.postageBatchId = stamp.batchID.toHex()
-          this.signerKey = stamp.signerKey.toHex()
+        // In development, use saved values directly since shared stores are partitioned
+        // In production, look up from shared stores for more up-to-date data
+        const isDevelopment = this.isDevelopmentEnvironment()
+
+        if (isDevelopment && data.postageBatchId && data.signerKey) {
+          console.log("[Proxy] Using saved postage stamp values (development mode)")
+          this.postageBatchId = data.postageBatchId
+          this.signerKey = data.signerKey
           await this.initializeStamper()
         } else {
-          console.log("[Proxy] No postage stamp found for connected identity")
-          this.postageBatchId = undefined
-          this.signerKey = undefined
+          // Look up postage stamp from shared storage based on connected identity
+          const stamp = this.lookupPostageStampForApp()
+          if (stamp) {
+            this.postageBatchId = stamp.batchID.toHex()
+            this.signerKey = stamp.signerKey.toHex()
+            await this.initializeStamper()
+          } else {
+            console.log("[Proxy] No postage stamp found for connected identity")
+            this.postageBatchId = undefined
+            this.signerKey = undefined
+          }
         }
       } catch (error) {
         console.error("[Proxy] Failed to parse auth data:", error)
