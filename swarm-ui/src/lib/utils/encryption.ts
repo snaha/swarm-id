@@ -132,3 +132,126 @@ export async function decryptMasterKey(
 
 	return new Bytes(new Uint8Array(decryptedData))
 }
+
+// ============================================================================
+// Secret Seed Encryption (encrypted with key derived from masterKey)
+// ============================================================================
+
+/**
+ * Fixed salt for secret seed encryption key derivation
+ * Used with HKDF to derive a deterministic key from masterKey
+ */
+const SECRET_SEED_ENCRYPTION_SALT = new Uint8Array([
+	0x73, 0x77, 0x61, 0x72, 0x6d, 0x2d, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x2d, 0x73, 0x65, 0x65,
+	0x64, 0x2d, 0x73, 0x61, 0x6c, 0x74, 0x2d, 0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+]) // "swarm-secret-seed-salt-v1" padded to 32 bytes
+
+/**
+ * Derive encryption key from masterKey for encrypting secretSeed
+ *
+ * Uses HKDF with different info string for domain separation from masterKey encryption:
+ * - Input: masterKey (derived from secretSeed + publicKey)
+ * - Salt: Fixed salt for deterministic derivation
+ * - Info: Context string "swarm-id-secretseed-encryption-v1"
+ * - Output: 256-bit AES-GCM key
+ *
+ * @param masterKey - MasterKey (Bytes or hex string)
+ * @returns CryptoKey for AES-GCM encryption/decryption of secretSeed
+ */
+export async function deriveSecretSeedEncryptionKey(masterKey: Bytes | string): Promise<CryptoKey> {
+	const masterKeyBytes =
+		masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
+
+	// Step 1: Import masterKey as raw key material for HKDF
+	const keyMaterial = await crypto.subtle.importKey('raw', masterKeyBytes, 'HKDF', false, [
+		'deriveKey',
+	])
+
+	// Step 2: Derive AES-GCM key using HKDF
+	const encryptionKey = await crypto.subtle.deriveKey(
+		{
+			name: 'HKDF',
+			salt: SECRET_SEED_ENCRYPTION_SALT,
+			hash: 'SHA-256',
+			info: new TextEncoder().encode('swarm-id-secretseed-encryption-v1'),
+		},
+		keyMaterial,
+		{
+			name: 'AES-GCM',
+			length: 256, // 256-bit key
+		},
+		false, // non-extractable
+		['encrypt', 'decrypt'],
+	)
+
+	return encryptionKey
+}
+
+/**
+ * Encrypt secretSeed using AES-GCM with key derived from masterKey
+ *
+ * @param secretSeed - Secret seed string to encrypt
+ * @param encryptionKey - CryptoKey derived from masterKey
+ * @returns Encrypted data (includes IV + ciphertext + auth tag)
+ */
+export async function encryptSecretSeed(
+	secretSeed: string,
+	encryptionKey: CryptoKey,
+): Promise<Bytes> {
+	// Generate random IV (96 bits = 12 bytes, recommended for AES-GCM)
+	const iv = new Uint8Array(12)
+	crypto.getRandomValues(iv)
+
+	const secretSeedBytes = new TextEncoder().encode(secretSeed)
+
+	// Encrypt using AES-GCM (includes authentication tag automatically)
+	const encryptedData = await crypto.subtle.encrypt(
+		{
+			name: 'AES-GCM',
+			iv: iv,
+		},
+		encryptionKey,
+		secretSeedBytes,
+	)
+
+	// Combine IV + encrypted data for storage
+	// Format: [IV (12 bytes)][Ciphertext + Auth Tag]
+	const combined = new Uint8Array(iv.length + encryptedData.byteLength)
+	combined.set(iv, 0)
+	combined.set(new Uint8Array(encryptedData), iv.length)
+
+	return new Bytes(combined)
+}
+
+/**
+ * Decrypt secretSeed using AES-GCM with key derived from masterKey
+ *
+ * @param encryptedSecretSeed - Encrypted data (IV + ciphertext + tag) as Bytes or hex string
+ * @param encryptionKey - CryptoKey derived from masterKey
+ * @returns Decrypted secretSeed string
+ */
+export async function decryptSecretSeed(
+	encryptedSecretSeed: Bytes | string,
+	encryptionKey: CryptoKey,
+): Promise<string> {
+	const encryptedBytes =
+		encryptedSecretSeed instanceof Bytes
+			? encryptedSecretSeed.toUint8Array()
+			: new Bytes(encryptedSecretSeed).toUint8Array()
+
+	// Extract IV (first 12 bytes) and ciphertext (remaining bytes)
+	const iv = encryptedBytes.slice(0, 12)
+	const ciphertext = encryptedBytes.slice(12)
+
+	// Decrypt using AES-GCM (verifies authentication tag automatically)
+	const decryptedData = await crypto.subtle.decrypt(
+		{
+			name: 'AES-GCM',
+			iv: iv,
+		},
+		encryptionKey,
+		ciphertext,
+	)
+
+	return new TextDecoder().decode(decryptedData)
+}

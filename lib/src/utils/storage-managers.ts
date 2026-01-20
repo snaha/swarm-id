@@ -109,6 +109,9 @@ export function serializeAccount(account: Account): Record<string, unknown> {
       ethereumAddress: account.ethereumAddress.toString(),
       encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
       encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
+      encryptedSecretSeed: Array.from(
+        account.encryptedSecretSeed.toUint8Array(),
+      ),
       swarmEncryptionKey: account.swarmEncryptionKey,
       defaultPostageStampBatchID:
         account.defaultPostageStampBatchID?.toString(),

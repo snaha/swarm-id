@@ -19,6 +19,8 @@
 		generateEncryptionSalt,
 		deriveEncryptionKey,
 		encryptMasterKey,
+		deriveSecretSeedEncryptionKey,
+		encryptSecretSeed,
 	} from '$lib/utils/encryption'
 	import { validateSecretSeed } from '$lib/utils/secret-seed'
 	import { EthAddress } from '@ethersphere/bee-js'
@@ -93,7 +95,12 @@
 			const encryptedMasterKey = await encryptMasterKey(masterKey, encryptionKey)
 			console.log('✅ MasterKey encrypted')
 
-			// Store account with encrypted masterKey
+			// Step 5: Encrypt secretSeed with masterKey as encryption key
+			const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(masterKey)
+			const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
+			console.log('✅ Secret seed encrypted with masterKey')
+
+			// Store account with encrypted masterKey and encrypted secret seed
 			const newAccount = accountsStore.addAccount({
 				id: masterAddress,
 				createdAt: Date.now(),
@@ -102,6 +109,7 @@
 				ethereumAddress: new EthAddress(signed.address),
 				encryptedMasterKey: encryptedMasterKey,
 				encryptionSalt: encryptionSalt,
+				encryptedSecretSeed: encryptedSecretSeed,
 				swarmEncryptionKey: swarmEncryptionKey,
 			})
 			sessionStore.setAccount(newAccount)

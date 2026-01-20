@@ -70,7 +70,7 @@
 			{@render children()}
 		</Vertical>
 
-		{#if identity && account && drawerOpen}
+		{#if identity && account}
 			<Drawer bind:drawerOpen {account} {identities} {identityId} />
 		{/if}
 	</div>

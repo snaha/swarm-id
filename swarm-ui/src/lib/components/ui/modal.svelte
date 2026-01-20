@@ -7,6 +7,7 @@
 		oncancel?: () => void
 		onshow?: () => void
 		open?: boolean
+		hidden?: boolean
 	}
 </script>
 

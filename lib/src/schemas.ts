@@ -79,6 +79,7 @@ export const EthereumAccountSchemaV1 = z.object({
   ethereumAddress: StoredEthAddress,
   encryptedMasterKey: StoredBytes,
   encryptionSalt: StoredBytes,
+  encryptedSecretSeed: StoredBytes, // Encrypted secret seed for later retrieval
   swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
   defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
 })
