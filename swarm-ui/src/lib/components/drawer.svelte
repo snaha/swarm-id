@@ -17,7 +17,6 @@
 		CloseLarge,
 		Information,
 		Rocket,
-		Settings,
 		TrashCan,
 	} from 'carbon-icons-svelte'
 	import NetworkSettingsModal from './network-settings-modal.svelte'
