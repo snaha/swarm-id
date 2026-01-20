@@ -427,7 +427,9 @@ export class SwarmIdProxy {
         const isDevelopment = this.isDevelopmentEnvironment()
 
         if (isDevelopment && data.postageBatchId && data.signerKey) {
-          console.log("[Proxy] Using saved postage stamp values (development mode)")
+          console.log(
+            "[Proxy] Using saved postage stamp values (development mode)",
+          )
           this.postageBatchId = data.postageBatchId
           this.signerKey = data.signerKey
           await this.initializeStamper()
@@ -470,7 +472,7 @@ export class SwarmIdProxy {
       const connectedAppsManager = createConnectedAppsStorageManager()
       const connectedApps = connectedAppsManager.load()
       const connectedApp = connectedApps.find(
-        (app) => app.appUrl === this.parentOrigin
+        (app) => app.appUrl === this.parentOrigin,
       )
 
       if (!connectedApp) {
@@ -495,19 +497,20 @@ export class SwarmIdProxy {
       // First try identity's default stamp, then fall back to any account stamp
       let stamp: PostageStamp | undefined
       if (identity.defaultPostageStampBatchID) {
-        stamp = stamps.find(
-          (s) => s.batchID.equals(identity.defaultPostageStampBatchID!)
+        stamp = stamps.find((s) =>
+          s.batchID.equals(identity.defaultPostageStampBatchID!),
         )
       }
 
       if (!stamp) {
-        stamp = stamps.find(
-          (s) => s.accountId === identity.accountId.toHex()
-        )
+        stamp = stamps.find((s) => s.accountId === identity.accountId.toHex())
       }
 
       if (stamp) {
-        console.log("[Proxy] Found postage stamp for identity:", stamp.batchID.toHex())
+        console.log(
+          "[Proxy] Found postage stamp for identity:",
+          stamp.batchID.toHex(),
+        )
       }
 
       return stamp
@@ -634,9 +637,8 @@ export class SwarmIdProxy {
   ): void {
     console.log("[Proxy] Getting connection info...")
 
-    let identity:
-      | { id: string; name: string; address: string }
-      | undefined = undefined
+    let identity: { id: string; name: string; address: string } | undefined =
+      undefined
 
     // Look up identity info if authenticated
     if (this.authenticated && this.parentOrigin) {
@@ -966,7 +968,9 @@ export class SwarmIdProxy {
       }
 
       if (!this.signerKey || !this.postageBatchId) {
-        throw new Error("Signer key and postage batch ID required. Please login first.")
+        throw new Error(
+          "Signer key and postage batch ID required. Please login first.",
+        )
       }
 
       if (!this.stamper) {
@@ -1222,7 +1226,9 @@ export class SwarmIdProxy {
       }
 
       if (!this.signerKey || !this.postageBatchId) {
-        throw new Error("Signer key and postage batch ID required. Please authenticate.")
+        throw new Error(
+          "Signer key and postage batch ID required. Please authenticate.",
+        )
       }
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
