@@ -15,6 +15,7 @@
 		ChevronLeft,
 		ChevronRight,
 		CloseLarge,
+		IbmCloudHyperProtectCryptoServices,
 		Information,
 		Rocket,
 		TrashCan,
@@ -293,23 +294,6 @@
 						disabled
 						helperText="Limited to viewing only. Upgrade to synced account to upload content and sync across devices."
 					/>
-
-					{#if account.type === 'ethereum'}
-						<Vertical --vertical-gap="var(--quarter-padding)">
-							<Button
-								variant="ghost"
-								dimension="compact"
-								onclick={() => {
-									showGenerationDetailsModal = true
-									drawerOpen = false
-								}}
-								leftAlign
-							>
-								<Information size={16} style="margin-right: var(--quarter-padding)" />
-								View Generation Details
-							</Button>
-						</Vertical>
-					{/if}
 				</Vertical>
 
 				<Vertical
@@ -318,6 +302,20 @@
 					--vertical-justify-content="stretch"
 					style="padding: var(--padding)"
 				>
+					{#if account.type === 'ethereum'}
+						<Button
+							variant="ghost"
+							dimension="compact"
+							onclick={() => {
+								showGenerationDetailsModal = true
+							}}
+							leftAlign
+						>
+							<IbmCloudHyperProtectCryptoServices size={20} />
+							View Generation Details
+						</Button>
+					{/if}
+
 					<Horizontal
 						--horizontal-gap="var(--half-padding)"
 						--horizontal-align-items="stretch"
@@ -366,6 +364,7 @@
 {#if account.type === 'ethereum'}
 	<ViewGenerationDetailsModal
 		bind:open={showGenerationDetailsModal}
+		bind:drawerOpen
 		{account}
 		onClose={() => (showGenerationDetailsModal = false)}
 	/>

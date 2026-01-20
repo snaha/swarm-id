@@ -14,11 +14,12 @@
 
 	interface Props {
 		open: boolean
+		drawerOpen: boolean
 		account: EthereumAccount
 		onClose: () => void
 	}
 
-	let { open = $bindable(false), account, onClose }: Props = $props()
+	let { open = $bindable(false), drawerOpen = $bindable(false), account, onClose }: Props = $props()
 
 	let isUnmasked = $state(false)
 	let secretSeed = $state('')
@@ -38,6 +39,8 @@
 
 		try {
 			open = false
+			drawerOpen = false
+
 			isAuthenticating = true
 			error = undefined
 
@@ -50,6 +53,7 @@
 		} finally {
 			isAuthenticating = false
 			open = true
+			drawerOpen = true
 		}
 	}
 
@@ -152,7 +156,9 @@
 		</Vertical>
 
 		{#if error}
-			<Typography variant="small" style="color: var(--colors-red)">{error}</Typography>
+			<Typography style="color: var(--colors-red)"
+				>There was an error during authentication</Typography
+			>
 		{/if}
 
 		<Horizontal --horizontal-gap="var(--padding)" --horizontal-justify-content="start">
