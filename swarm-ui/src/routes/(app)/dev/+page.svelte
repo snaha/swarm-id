@@ -20,6 +20,7 @@
 	import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 	import { toPrefixedHex } from '$lib/utils/hex'
 	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import { encryptSecretSeed, deriveSecretSeedEncryptionKey } from '$lib/utils/encryption'
 
 	let message = $state('')
 	let syncMessage = $state('')
@@ -63,6 +64,10 @@
 		const encryptionSalt2 = generateEncryptionSalt()
 		const encryptionKey2 = await deriveEncryptionKey(publicKey2, encryptionSalt2)
 		const encryptedMasterKey2 = await encryptMasterKey(ethereumWallet2.masterKey, encryptionKey2)
+		const encryptedSecretSeed2 = await encryptSecretSeed(
+			'secret-seed',
+			deriveSecretSeedEncryptionKey(ethereumWallet2.masterKey),
+		)
 
 		const account2 = accountsStore.addAccount({
 			name: 'Test Account 2',
@@ -73,6 +78,7 @@
 			encryptedMasterKey: encryptedMasterKey2,
 			encryptionSalt: encryptionSalt2,
 			swarmEncryptionKey: swarmEncryptionKey2,
+			encryptedSecretSeed: encryptedSecretSeed2,
 		})
 
 		// Create identities

@@ -27,13 +27,6 @@
 	let isAuthenticating = $state(false)
 	let decryptedMasterKey: Bytes | undefined
 
-	// Masked version of secret seed (show only first and last 4 characters)
-	const maskedSecretSeed = $derived(
-		secretSeed
-			? `${secretSeed.slice(0, 4)}${'*'.repeat(secretSeed.length - 8)}${secretSeed.slice(-4)}`
-			: '',
-	)
-
 	async function handleAuthenticate() {
 		if (!account) return
 
@@ -63,16 +56,18 @@
 		}
 
 		try {
-			console.log('🔓 Decrypting secret seed...')
+			if (decryptedMasterKey) {
+				console.log('🔓 Decrypting secret seed...')
 
-			// Derive encryption key from master key
-			const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(decryptedMasterKey)
+				// Derive encryption key from master key
+				const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(decryptedMasterKey)
 
-			// Decrypt secret seed
-			secretSeed = await decryptSecretSeed(account.encryptedSecretSeed, secretSeedEncryptionKey)
+				// Decrypt secret seed
+				secretSeed = await decryptSecretSeed(account.encryptedSecretSeed, secretSeedEncryptionKey)
 
-			isUnmasked = true
-			console.log('✅ Secret seed decrypted')
+				isUnmasked = true
+				console.log('✅ Secret seed decrypted')
+			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to decrypt secret seed'
 			console.error('❌ Failed to decrypt secret seed:', err)
