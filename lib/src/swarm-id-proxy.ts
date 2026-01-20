@@ -15,11 +15,11 @@ import type {
   GetConnectionInfoMessage,
   AppMetadata,
   PostageStamp,
+  ConnectedApp,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
-  SWARM_SECRET_PREFIX,
 } from "./types"
 import { Bee, makeContentAddressedChunk, BatchId } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
@@ -398,7 +398,9 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Load secret from localStorage
+   * Load authentication data.
+   * - In production: reads from shared storage (ConnectedApp records)
+   * - In development: uses in-memory values (set by handleSetSecret)
    */
   private async loadAuthData(): Promise<void> {
     if (!this.parentOrigin) {
@@ -407,54 +409,50 @@ export class SwarmIdProxy {
       return
     }
 
-    const storageKey = `${SWARM_SECRET_PREFIX}${this.parentOrigin}`
-    const storedData = localStorage.getItem(storageKey)
+    const isDevelopment = this.isDevelopmentEnvironment()
 
-    if (storedData) {
-      try {
-        const data = JSON.parse(storedData)
+    if (isDevelopment) {
+      // In development, localStorage is partitioned so we can't read shared storage.
+      // User must re-authenticate on each page reload.
+      console.log(
+        "[Proxy] Development mode - shared storage not accessible, requires auth for:",
+        this.parentOrigin,
+      )
+      this.authLoading = false
+      this.showAuthButton()
+    } else {
+      // In production, read from shared storage
+      const sharedData = this.lookupAppSecretFromSharedStorage()
+
+      if (sharedData) {
         console.log(
-          "[Proxy] Auth data loaded from localStorage for:",
+          "[Proxy] Auth data loaded from shared storage for:",
           this.parentOrigin,
         )
-        this.appSecret = data.secret
+        this.appSecret = sharedData.secret
         this.authenticated = true
         this.authLoading = false
-        this.showAuthButton() // Show disconnect button
+        this.showAuthButton()
 
-        // In development, use saved values directly since shared stores are partitioned
-        // In production, look up from shared stores for more up-to-date data
-        const isDevelopment = this.isDevelopmentEnvironment()
-
-        if (isDevelopment && data.postageBatchId && data.signerKey) {
-          console.log(
-            "[Proxy] Using saved postage stamp values (development mode)",
-          )
-          this.postageBatchId = data.postageBatchId
-          this.signerKey = data.signerKey
+        // Look up postage stamp from shared storage based on connected identity
+        const stamp = this.lookupPostageStampForApp()
+        if (stamp) {
+          this.postageBatchId = stamp.batchID.toHex()
+          this.signerKey = stamp.signerKey.toHex()
           await this.initializeStamper()
         } else {
-          // Look up postage stamp from shared storage based on connected identity
-          const stamp = this.lookupPostageStampForApp()
-          if (stamp) {
-            this.postageBatchId = stamp.batchID.toHex()
-            this.signerKey = stamp.signerKey.toHex()
-            await this.initializeStamper()
-          } else {
-            console.log("[Proxy] No postage stamp found for connected identity")
-            this.postageBatchId = undefined
-            this.signerKey = undefined
-          }
+          console.log("[Proxy] No postage stamp found for connected identity")
+          this.postageBatchId = undefined
+          this.signerKey = undefined
         }
-      } catch (error) {
-        console.error("[Proxy] Failed to parse auth data:", error)
+      } else {
+        console.log(
+          "[Proxy] No valid auth data found in shared storage for:",
+          this.parentOrigin,
+        )
         this.authLoading = false
         this.showAuthButton()
       }
-    } else {
-      console.log("[Proxy] No auth data found for:", this.parentOrigin)
-      this.authLoading = false
-      this.showAuthButton()
     }
   }
 
@@ -521,6 +519,76 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Check if a connection is still valid based on connectedUntil timestamp
+   */
+  private isConnectionValid(connectedApp: ConnectedApp): boolean {
+    if (!connectedApp.connectedUntil) return false
+    return connectedApp.connectedUntil > Date.now()
+  }
+
+  /**
+   * Look up the app secret from shared storage for the current parent origin.
+   * Returns the secret and identityId if found and connection is valid.
+   */
+  private lookupAppSecretFromSharedStorage():
+    | { secret: string; identityId: string }
+    | undefined {
+    if (!this.parentOrigin) {
+      return undefined
+    }
+
+    try {
+      const connectedAppsManager = createConnectedAppsStorageManager()
+      const connectedApps = connectedAppsManager.load()
+      const connectedApp = connectedApps.find(
+        (app) => app.appUrl === this.parentOrigin,
+      )
+
+      if (!connectedApp) {
+        console.log(
+          "[Proxy] No connected app found in shared storage for:",
+          this.parentOrigin,
+        )
+        return undefined
+      }
+
+      // Check if connection is still valid
+      if (!this.isConnectionValid(connectedApp)) {
+        console.log(
+          "[Proxy] Connection expired for:",
+          this.parentOrigin,
+          "connectedUntil:",
+          connectedApp.connectedUntil,
+        )
+        return undefined
+      }
+
+      if (!connectedApp.appSecret) {
+        console.log(
+          "[Proxy] No appSecret in connected app record for:",
+          this.parentOrigin,
+        )
+        return undefined
+      }
+
+      console.log(
+        "[Proxy] Found valid app secret in shared storage for:",
+        this.parentOrigin,
+      )
+      return {
+        secret: connectedApp.appSecret,
+        identityId: connectedApp.identityId,
+      }
+    } catch (error) {
+      console.error(
+        "[Proxy] Error looking up app secret from shared storage:",
+        error,
+      )
+      return undefined
+    }
+  }
+
+  /**
    * Update authentication status and update button accordingly
    */
   private updateAuthStatus(authenticated: boolean): void {
@@ -531,19 +599,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Save secret to localStorage
-   */
-  private saveAuthData(
-    origin: string,
-    data: { secret: string; postageBatchId?: string; signerKey?: string },
-  ): void {
-    const storageKey = `${SWARM_SECRET_PREFIX}${origin}`
-    localStorage.setItem(storageKey, JSON.stringify(data))
-    console.log("[Proxy] Auth data saved to localStorage for:", origin)
-  }
-
-  /**
-   * Clear auth data from localStorage
+   * Clear authentication data
    */
   private clearAuthData(): void {
     if (!this.parentOrigin) {
@@ -551,14 +607,9 @@ export class SwarmIdProxy {
       return
     }
 
-    const storageKey = `${SWARM_SECRET_PREFIX}${this.parentOrigin}`
-    localStorage.removeItem(storageKey)
-    console.log(
-      "[Proxy] Auth data cleared from localStorage for:",
-      this.parentOrigin,
-    )
+    console.log("[Proxy] Clearing auth data for:", this.parentOrigin)
 
-    // Also clear stamper state
+    // Clear stamper state from localStorage
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
     localStorage.removeItem(stamperKey)
 
@@ -919,14 +970,32 @@ export class SwarmIdProxy {
         "vs",
         this.parentOrigin,
       )
-      // Still save it, but log warning
     }
 
-    // Save auth data to partitioned localStorage
-    this.saveAuthData(appOrigin, data)
-    this.appSecret = data.secret
-    this.postageBatchId = data.postageBatchId
-    this.signerKey = data.signerKey
+    const isDevelopment = this.isDevelopmentEnvironment()
+
+    if (isDevelopment) {
+      // In development, localStorage is partitioned so we receive stamps in the message
+      console.log("[Proxy] Using auth data from message (development mode)")
+      this.appSecret = data.secret
+      this.postageBatchId = data.postageBatchId
+      this.signerKey = data.signerKey
+    } else {
+      // In production, secret is already in shared storage (set by auth popup)
+      // Just update local state
+      console.log(
+        "[Proxy] Auth data stored in shared storage, updating local state",
+      )
+      this.appSecret = data.secret
+
+      // Look up postage stamp from shared storage
+      const stamp = this.lookupPostageStampForApp()
+      if (stamp) {
+        this.postageBatchId = stamp.batchID.toHex()
+        this.signerKey = stamp.signerKey.toHex()
+      }
+    }
+
     this.updateAuthStatus(true)
 
     // Initialize stamper if we have signer key

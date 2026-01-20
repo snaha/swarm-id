@@ -142,6 +142,7 @@ export function serializeConnectedApp(
     appIcon: app.appIcon,
     appDescription: app.appDescription,
     connectedUntil: app.connectedUntil,
+    appSecret: app.appSecret,
   }
 }
 

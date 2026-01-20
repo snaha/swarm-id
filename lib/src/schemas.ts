@@ -119,6 +119,7 @@ export const ConnectedAppSchemaV1 = z.object({
   appIcon: z.string().optional(),
   appDescription: z.string().optional(),
   connectedUntil: z.number().optional(),
+  appSecret: z.string().optional(),
 })
 
 // ============================================================================

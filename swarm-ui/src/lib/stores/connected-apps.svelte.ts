@@ -44,6 +44,7 @@ export const connectedAppsStore = {
 		appData: Omit<ConnectedApp, 'lastConnectedAt'> & {
 			appIcon?: string
 			appDescription?: string
+			appSecret?: string
 		},
 		defaultConnectionTime: number,
 	): ConnectedApp {
@@ -59,6 +60,7 @@ export const connectedAppsStore = {
 				appName: appData.appName,
 				appIcon: appData.appIcon ?? existingApp.appIcon,
 				appDescription: appData.appDescription ?? existingApp.appDescription,
+				appSecret: appData.appSecret ?? existingApp.appSecret,
 				lastConnectedAt: now,
 				connectedUntil: now + defaultConnectionTime,
 			}
@@ -77,6 +79,7 @@ export const connectedAppsStore = {
 				identityId: appData.identityId,
 				appIcon: appData.appIcon,
 				appDescription: appData.appDescription,
+				appSecret: appData.appSecret,
 				lastConnectedAt: now,
 				connectedUntil: now + defaultConnectionTime,
 			}
