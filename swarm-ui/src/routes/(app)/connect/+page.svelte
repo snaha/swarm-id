@@ -192,6 +192,7 @@
 		// In development mode, include postageBatchId/signerKey in the message
 		// because the proxy's localStorage is partitioned and can't access shared storage.
 		// In production, the proxy looks up stamps from shared storage.
+		// TODO: see https://github.com/snaha/swarm-id/issues/124
 		const isDevelopment = isDevelopmentEnvironment()
 
 		const message: SetSecretMessage = {
