@@ -66,7 +66,7 @@
 		const encryptedMasterKey2 = await encryptMasterKey(ethereumWallet2.masterKey, encryptionKey2)
 		const encryptedSecretSeed2 = await encryptSecretSeed(
 			'secret-seed',
-			deriveSecretSeedEncryptionKey(ethereumWallet2.masterKey),
+			await deriveSecretSeedEncryptionKey(ethereumWallet2.masterKey),
 		)
 
 		const account2 = accountsStore.addAccount({
