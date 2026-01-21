@@ -175,10 +175,7 @@
         <div id="auth-status" class="status unauthenticated">
           Status: Not authenticated
         </div>
-        <p style="font-size: 14px; color: #666; margin-top: 10px">
-          The authentication button will appear in the iframe below when not
-          authenticated.
-        </p>
+        <div id="swarm-id-button" style="width: 200px; height: 40px; margin-top: 15px;"></div>
       </div>
 
       <!-- Upload Section -->
@@ -268,6 +265,15 @@ Hello, Swarm!</textarea
           description: "Demo application showcasing Swarm ID authentication and Bee API operations",
           icon: beeIcon,
         },
+        buttonConfig: {
+          connectText: "Connect to Swarm",
+          disconnectText: "Disconnect",
+          loadingText: "Loading...",
+          backgroundColor: "#667eea",
+          color: "white",
+          borderRadius: "6px",
+        },
+        containerId: "swarm-id-button",
       });
 
       try {

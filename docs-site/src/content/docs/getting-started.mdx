@@ -40,10 +40,10 @@ const client = new SwarmIdClient({
 await client.initialize()
 
 // 3. Check if user is authenticated
-const isAuth = await client.isAuthenticated()
+const status = await client.checkAuthStatus()
 
 // 4. Upload data (after authentication)
-if (isAuth) {
+if (status.authenticated) {
   const result = await client.uploadData(
     new TextEncoder().encode('Hello, Swarm!')
   )

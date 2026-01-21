@@ -1,93 +1,544 @@
 ---
-title: API Reference
-description: Complete API documentation for Swarm ID
+title: SwarmIdClient API Reference
+description: Complete API documentation for the SwarmIdClient class
 ---
 
-This section contains the complete API reference for the Swarm ID library.
+The `SwarmIdClient` is the main class for integrating Swarm ID authentication and storage capabilities into web applications. It enables parent windows to interact with a Swarm ID iframe proxy, providing secure authentication, identity management, and data upload/download functionality to the Swarm decentralized storage network.
 
-:::note[Coming Soon]
-Detailed API documentation with JSDoc comments will be added in a future update. For now, refer to the source code and type definitions.
-:::
+## Installation
 
-## Main Classes
+```bash
+pnpm add @swarm-id/lib
+```
 
-### SwarmIdClient
-
-The main client for parent dApp windows. Used to integrate Swarm ID authentication into your application.
+## Quick Start
 
 ```typescript
 import { SwarmIdClient } from '@swarm-id/lib'
 
-const client = new SwarmIdClient(options)
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.example.com',
+  metadata: {
+    name: 'My App',
+    description: 'A decentralized application'
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status changed:', authenticated)
+  }
+})
+
+await client.initialize()
+
+const status = await client.checkAuthStatus()
+if (status.authenticated) {
+  const result = await client.uploadData(new Uint8Array([1, 2, 3]))
+  console.log('Uploaded with reference:', result.reference)
+}
 ```
 
-**Key methods:**
-- `initialize()` - Create and embed the hidden iframe
-- `isAuthenticated()` - Check authentication status
-- `uploadData(data, options?)` - Upload data to Swarm
-- `downloadData(reference)` - Download data from Swarm
-- `destroy()` - Clean up resources
+## Constructor
 
-### SwarmIdProxy
+### `new SwarmIdClient(options)`
 
-Runs inside the hidden iframe. Generally not used directly by dApp developers.
+Creates a new SwarmIdClient instance.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options.iframeOrigin` | `string` | Yes | The origin URL where the Swarm ID proxy iframe is hosted |
+| `options.iframePath` | `string` | No | The path to the proxy iframe (defaults to `"/proxy"`) |
+| `options.timeout` | `number` | No | Request timeout in milliseconds (defaults to `30000`) |
+| `options.onAuthChange` | `(authenticated: boolean) => void` | No | Callback function invoked when authentication status changes |
+| `options.popupMode` | `"popup" \| "window"` | No | How to display the authentication popup (defaults to `"window"`) |
+| `options.metadata` | `AppMetadata` | Yes | Application metadata shown to users during authentication |
+| `options.metadata.name` | `string` | Yes | Application name (1-100 characters) |
+| `options.metadata.description` | `string` | No | Application description (max 500 characters) |
+| `options.metadata.icon` | `string` | No | Application icon as a data URL (SVG or PNG, max 4KB) |
+| `options.buttonConfig` | `ButtonConfig` | No | Button configuration for the authentication UI |
+| `options.containerId` | `string` | No | ID of container element to place iframe in (optional) |
+
+**Throws:** `Error` if the provided app metadata is invalid
+
+**Example:**
 
 ```typescript
-import { initProxy } from '@swarm-id/lib'
-
-const proxy = initProxy(options)
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://id.swarm.example.com',
+  timeout: 60000,
+  metadata: {
+    name: 'My dApp',
+    description: 'A decentralized application built on Swarm',
+    icon: 'data:image/svg+xml;base64,...'
+  },
+  onAuthChange: (authenticated) => {
+    updateUI(authenticated)
+  }
+})
 ```
 
-### SwarmIdAuth
+---
 
-Runs in the authentication popup. Generally not used directly by dApp developers.
+## Lifecycle Methods
+
+### `initialize()`
+
+Initializes the client by creating and embedding the proxy iframe.
+
+This method must be called before using any other client methods. It creates a hidden iframe, waits for the proxy to initialize, identifies the parent application to the proxy, and waits for the proxy to signal readiness.
+
+**Returns:** `Promise<void>` - Resolves when the client is fully initialized
+
+**Throws:**
+- `Error` if the client is already initialized
+- `Error` if the iframe fails to load
+- `Error` if the proxy does not respond within the timeout period (10 seconds)
+- `Error` if origin validation fails on the proxy side
+
+**Example:**
 
 ```typescript
-import { initAuth } from '@swarm-id/lib'
-
-const auth = await initAuth(options)
+const client = new SwarmIdClient({ ... })
+try {
+  await client.initialize()
+  console.log('Client ready')
+} catch (error) {
+  console.error('Failed to initialize:', error)
+}
 ```
 
-## Utility Functions
+---
 
-### Key Derivation
+### `destroy()`
+
+Destroys the client and releases all resources.
+
+This method should be called when the client is no longer needed. It performs the following cleanup:
+- Cancels all pending requests with an error
+- Removes the message event listener
+- Removes the iframe from the DOM
+- Resets the client to an uninitialized state
+
+After calling `destroy()`, the client instance cannot be reused. Create a new instance if you need to reconnect.
+
+**Returns:** `void`
+
+**Example:**
 
 ```typescript
-import { deriveSecret, generateMasterKey } from '@swarm-id/lib'
+// Clean up when component unmounts
+useEffect(() => {
+  const client = new SwarmIdClient({ ... })
+  client.initialize()
 
-// Generate a new master key
-const masterKey = await generateMasterKey()
-
-// Derive an app-specific secret
-const appSecret = await deriveSecret(masterKey, 'https://my-app.com')
+  return () => {
+    client.destroy()
+  }
+}, [])
 ```
 
-### Hex Utilities
+---
+
+## Authentication Methods
+
+### `getAuthIframe()`
+
+Returns the authentication iframe element.
+
+The iframe displays authentication UI based on the current auth status:
+- If not authenticated: shows a "Connect" button
+- If authenticated: shows identity info and a "Disconnect" button
+
+The iframe is positioned fixed in the bottom-right corner of the viewport.
+
+**Returns:** `HTMLIFrameElement` - The iframe element displaying the authentication UI
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the iframe is not available
+
+**Example:**
 
 ```typescript
-import { hexToUint8Array, uint8ArrayToHex } from '@swarm-id/lib'
-
-const bytes = hexToUint8Array('deadbeef')
-const hex = uint8ArrayToHex(new Uint8Array([222, 173, 190, 239]))
+const iframe = client.getAuthIframe()
+// The iframe is already displayed; this returns a reference to it
 ```
+
+---
+
+### Button Configuration
+
+The authentication button in the iframe can be customized using the `buttonConfig` option in the constructor. This configuration allows you to customize the button text, colors, and styling.
+
+**ButtonConfig Interface:**
+
+```typescript
+interface ButtonConfig {
+  connectText?: string
+  disconnectText?: string
+  loadingText?: string
+  backgroundColor?: string
+  color?: string
+  borderRadius?: string
+}
+```
+
+**Example: Customizing Button Configuration**
+
+```typescript
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.example.com',
+  metadata: {
+    name: 'My App',
+    description: 'A decentralized application'
+  },
+  buttonConfig: {
+    connectText: 'Connect with Swarm',
+    disconnectText: 'Disconnect',
+    loadingText: 'Loading...',
+    backgroundColor: '#4CAF50',
+    color: 'white',
+    borderRadius: '8px'
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status changed:', authenticated)
+  }
+})
+
+await client.initialize()
+```
+
+**ButtonConfig Properties:**
+
+| Property | Type | Required | Description | Default Value |
+|----------|------|----------|-------------|---------------|
+| `connectText` | `string` | No | Text for the connect button | "🔐 Login with Swarm ID" |
+| `disconnectText` | `string` | No | Text for the disconnect button | "🔓 Disconnect from Swarm ID" |
+| `loadingText` | `string` | No | Text shown during loading | "⏳ Loading..." |
+| `backgroundColor` | `string` | No | Background color for buttons | `#dd7200` (connect), `#666` (disconnect) |
+| `color` | `string` | No | Text color for buttons | `white` |
+| `borderRadius` | `string` | No | Border radius for buttons and iframe | `0` |
+
+**Notes:**
+- Button configuration is passed directly to the constructor, not via postMessage
+- The `borderRadius` property affects both the buttons and the iframe container
+- Colors should be valid CSS color strings (e.g., `'#FF0000'`, `'rgb(255, 0, 0)'`, `'red'`)
+- Text properties support plain text or emoji combinations
+- The configuration applies to both authentication states (connect/disconnect)
+
+---
+
+### `checkAuthStatus()`
+
+Checks the current authentication status with the Swarm ID proxy.
+
+**Returns:** `Promise<AuthStatus>` - The authentication status object
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `authenticated` | `boolean` | Whether the user is currently authenticated |
+| `origin` | `string \| undefined` | The origin that authenticated (if authenticated) |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const status = await client.checkAuthStatus()
+if (status.authenticated) {
+  console.log('Authenticated from:', status.origin)
+}
+```
+
+---
+
+### `disconnect()`
+
+Disconnects the current session and clears authentication data.
+
+After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The `onAuthChange` callback will be invoked with `false`.
+
+**Returns:** `Promise<void>` - Resolves when disconnection is complete
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the disconnect operation fails
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+await client.disconnect()
+console.log('User logged out')
+```
+
+---
+
+### `getConnectionInfo()`
+
+Retrieves connection information including upload capability and identity details.
+
+Use this method to check if the user can upload data and to get information about the currently connected identity.
+
+**Returns:** `Promise<ConnectionInfo>` - The connection info object
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `canUpload` | `boolean` | Whether the user can upload data (has valid postage stamp) |
+| `identity` | `object \| undefined` | The connected identity details (if authenticated) |
+| `identity.id` | `string` | Unique identifier for the identity |
+| `identity.name` | `string` | Display name of the identity |
+| `identity.address` | `string` | Ethereum address associated with the identity |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const info = await client.getConnectionInfo()
+if (info.canUpload) {
+  console.log('Ready to upload as:', info.identity?.name)
+} else {
+  console.log('No postage stamp available')
+}
+```
+
+---
+
+## Data Methods
+
+### `uploadData(data, options?, onProgress?)`
+
+Uploads raw binary data to the Swarm network.
+
+The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the optional callback.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `data` | `Uint8Array` | Yes | The binary data to upload |
+| `options` | `UploadOptions` | No | Upload configuration |
+| `options.pin` | `boolean` | No | Whether to pin the data locally (defaults to `false`) |
+| `options.encrypt` | `boolean` | No | Whether to encrypt the data (defaults to `false`) |
+| `options.tag` | `number` | No | Tag ID for tracking upload progress |
+| `options.deferred` | `boolean` | No | Whether to use deferred upload (defaults to `false`) |
+| `options.redundancyLevel` | `0-4` | No | Redundancy level for data availability |
+| `onProgress` | `(progress) => void` | No | Callback for tracking upload progress |
+
+**Returns:** `Promise<UploadResult>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `reference` | `string` | The Swarm reference (hash) of the uploaded data |
+| `tagUid` | `number \| undefined` | The tag UID if a tag was created |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated or cannot upload
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const data = new TextEncoder().encode('Hello, Swarm!')
+const result = await client.uploadData(data, { encrypt: true }, (progress) => {
+  console.log(`Progress: ${progress.processed}/${progress.total}`)
+})
+console.log('Reference:', result.reference)
+```
+
+---
+
+### `downloadData(reference, options?)`
+
+Downloads raw binary data from the Swarm network.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reference` | `string` | Yes | The Swarm reference (64 or 128 hex chars) |
+| `options` | `DownloadOptions` | No | Download configuration |
+| `options.redundancyStrategy` | `0-3` | No | Strategy for handling redundancy |
+| `options.fallback` | `boolean` | No | Whether to use fallback retrieval |
+| `options.timeoutMs` | `number` | No | Download timeout in milliseconds |
+| `options.actPublisher` | `Uint8Array \| string` | No | ACT publisher for encrypted content |
+| `options.actHistoryAddress` | `Uint8Array \| string` | No | ACT history address for encrypted content |
+| `options.actTimestamp` | `number \| string` | No | ACT timestamp for encrypted content |
+
+**Returns:** `Promise<Uint8Array>` - The downloaded data
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the reference is not found
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const data = await client.downloadData('a1b2c3...') // 64 char hex reference
+const text = new TextDecoder().decode(data)
+console.log('Downloaded:', text)
+```
+
+---
+
+## File Methods
+
+### `uploadFile(file, name?, options?)`
+
+Uploads a file to the Swarm network.
+
+Accepts either a File object (from file input) or raw Uint8Array data. When using a File object, the filename is automatically extracted unless explicitly overridden.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `file` | `File \| Uint8Array` | Yes | The file to upload |
+| `name` | `string` | No | Filename (extracted from File object if not provided) |
+| `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
+
+**Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated or cannot upload
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+// From file input
+const fileInput = document.querySelector('input[type="file"]')
+const file = fileInput.files[0]
+const result = await client.uploadFile(file)
+
+// From Uint8Array with custom name
+const data = new Uint8Array([...])
+const result = await client.uploadFile(data, 'document.pdf')
+```
+
+---
+
+### `downloadFile(reference, path?, options?)`
+
+Downloads a file from the Swarm network.
+
+Returns both the file data and its original filename (if available). For manifest references, an optional path can be specified to retrieve a specific file from the manifest.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reference` | `string` | Yes | The Swarm reference of the file |
+| `path` | `string` | No | Path within a manifest to retrieve a specific file |
+| `options` | `DownloadOptions` | No | Download configuration (see `downloadData`) |
+
+**Returns:** `Promise<FileData>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `name` | `string` | The filename |
+| `data` | `Uint8Array` | The file contents |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the reference is not found
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const file = await client.downloadFile('a1b2c3...')
+console.log('Filename:', file.name)
+
+// Create download link
+const blob = new Blob([file.data])
+const url = URL.createObjectURL(blob)
+```
+
+---
+
+## Chunk Methods
+
+### `uploadChunk(data, options?)`
+
+Uploads a single chunk to the Swarm network.
+
+Chunks are the fundamental unit of storage in Swarm (4KB each). This method is useful for low-level operations or when implementing custom chunking strategies.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `data` | `Uint8Array` | Yes | The chunk data (should be exactly 4KB for optimal storage) |
+| `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
+
+**Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated or cannot upload
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const chunk = new Uint8Array(4096) // 4KB chunk
+chunk.fill(0x42) // Fill with data
+const result = await client.uploadChunk(chunk)
+console.log('Chunk reference:', result.reference)
+```
+
+---
+
+### `downloadChunk(reference, options?)`
+
+Downloads a single chunk from the Swarm network.
+
+Retrieves a chunk by its reference hash. This method is useful for low-level operations or when implementing custom retrieval strategies.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `reference` | `string` | Yes | The Swarm reference of the chunk |
+| `options` | `DownloadOptions` | No | Download configuration (see `downloadData`) |
+
+**Returns:** `Promise<Uint8Array>` - The chunk data
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the reference is not found
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const chunk = await client.downloadChunk('a1b2c3...')
+console.log('Chunk size:', chunk.length)
+```
+
+---
 
 ## Types
-
-The library exports TypeScript types for all public APIs:
 
 ```typescript
 import type {
   ClientOptions,
-  ProxyOptions,
-  AuthOptions,
+  AuthStatus,
+  ConnectionInfo,
   UploadOptions,
   DownloadOptions,
   UploadResult,
+  FileData,
   Reference,
-  BatchId,
+  AppMetadata,
 } from '@swarm-id/lib'
 ```
-
-## Source Code
-
-For the most up-to-date API information, see the [library source code](https://github.com/snaha/swarm-id/tree/main/lib/src) and TypeScript definitions.

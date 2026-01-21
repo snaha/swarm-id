@@ -103,14 +103,8 @@ const client = new SwarmIdClient({
 // Initialize and wait for ready
 await client.initialize()
 
-// Create auth button
-const container = document.getElementById('auth-container')
-const button = client.createAuthButton(container, {
-  backgroundColor: '#dd7200',
-  color: 'white',
-  padding: '10px 20px',
-  borderRadius: '4px'
-})
+// Get the auth iframe (positioned fixed in bottom-right corner)
+const iframe = client.getAuthIframe()
 
 // Check auth status
 const status = await client.checkAuthStatus()
@@ -204,10 +198,11 @@ Options:
 
 **Authentication**
 - `initialize()` - Initialize the client and embed iframe
-- `createAuthButton(container, styles?)` - Create auth button
-- `requestAuth(styles?)` - Request authentication (opens popup)
+- `getAuthIframe()` - Get the auth iframe element
 - `checkAuthStatus()` - Check authentication status
-- `isAuthenticated()` - Check if user is authenticated
+- `connect()` - Open authentication popup programmatically
+- `disconnect()` - Disconnect and clear authentication data
+- `getConnectionInfo()` - Get connection info including upload capability
 
 **Data Operations**
 - `uploadData(batchId, data, options?)` - Upload raw data

@@ -3,6 +3,7 @@ import type {
   IframeToParentMessage,
   PopupToIframeMessage,
   ButtonStyles,
+  ButtonConfig,
   RequestAuthMessage,
   SetSecretMessage,
   UploadDataMessage,
@@ -59,6 +60,7 @@ export class SwarmIdProxy {
   private beeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
+  private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
   private bee: Bee
@@ -266,6 +268,7 @@ export class SwarmIdProxy {
     const message = event.data
     const parentPopupMode = message.popupMode
     const parentMetadata = message.metadata
+    const parentButtonConfig = message.buttonConfig
 
     // Trust event.origin - this is browser-enforced and cannot be spoofed
     this.parentOrigin = event.origin
@@ -291,6 +294,12 @@ export class SwarmIdProxy {
         "[Proxy] Received app metadata from parent:",
         parentMetadata.name,
       )
+    }
+
+    // Store button config from parent
+    if (parentButtonConfig) {
+      this.buttonConfig = parentButtonConfig
+      console.log("[Proxy] Received button config from parent")
     }
 
     // Load existing secret if available
@@ -792,63 +801,50 @@ export class SwarmIdProxy {
     const isAuthenticated = this.authenticated
     const isLoading = this.authLoading
 
+    // Get text from buttonConfig or use defaults
+    const config = this.buttonConfig || {}
+    const loadingText = config.loadingText || "⏳ Loading..."
+    const disconnectText = config.disconnectText || "🔓 Disconnect from Swarm ID"
+    const connectText = config.connectText || "🔐 Login with Swarm ID"
+
     if (isLoading) {
-      button.textContent = "⏳ Loading..."
+      button.textContent = loadingText
       button.disabled = true
     } else if (isAuthenticated) {
-      button.textContent = "🔓 Disconnect from Swarm ID"
+      button.textContent = disconnectText
     } else {
-      button.textContent = "🔐 Login with Swarm ID"
+      button.textContent = connectText
     }
 
-    // Apply styles
+    // Apply styles from currentStyles (for backward compat) and buttonConfig
     const styles = this.currentStyles || {}
+
+    // Make button fill container
+    button.style.width = "100%"
+    button.style.height = "100%"
+    button.style.display = "flex"
+    button.style.alignItems = "center"
+    button.style.justifyContent = "center"
+
     if (isLoading) {
       button.style.backgroundColor = "#999"
       button.style.cursor = "default"
     } else if (isAuthenticated) {
-      // Different color for disconnect button
-      button.style.backgroundColor = styles.backgroundColor || "#666"
+      // Different color for disconnect button (use default gray unless overridden)
+      button.style.backgroundColor = "#666"
       button.style.cursor = styles.cursor || "pointer"
     } else {
-      button.style.backgroundColor = styles.backgroundColor || "#dd7200"
+      // Use buttonConfig colors, then fall back to currentStyles, then defaults
+      button.style.backgroundColor =
+        config.backgroundColor || styles.backgroundColor || "#dd7200"
       button.style.cursor = styles.cursor || "pointer"
     }
-    button.style.color = styles.color || "white"
+    button.style.color = config.color || styles.color || "white"
     button.style.border = styles.border || "none"
-    button.style.borderRadius = styles.borderRadius || "6px"
-    button.style.padding = styles.padding || "12px 24px"
+    button.style.borderRadius = config.borderRadius || styles.borderRadius || "0"
+    button.style.padding = styles.padding || "0"
     button.style.fontSize = styles.fontSize || "14px"
     button.style.fontWeight = styles.fontWeight || "600"
-    button.style.transition = "all 0.2s"
-
-    if (isLoading) {
-      button.style.boxShadow = "0 2px 8px rgba(153, 153, 153, 0.3)"
-    } else if (isAuthenticated) {
-      button.style.boxShadow = "0 2px 8px rgba(102, 102, 102, 0.3)"
-    } else {
-      button.style.boxShadow = "0 2px 8px rgba(221, 114, 0, 0.3)"
-    }
-
-    // Hover effect (only when not loading)
-    if (!isLoading) {
-      button.addEventListener("mouseenter", () => {
-        button.style.transform = "translateY(-1px)"
-        if (isAuthenticated) {
-          button.style.boxShadow = "0 4px 12px rgba(102, 102, 102, 0.5)"
-        } else {
-          button.style.boxShadow = "0 4px 12px rgba(221, 114, 0, 0.5)"
-        }
-      })
-      button.addEventListener("mouseleave", () => {
-        button.style.transform = "translateY(0)"
-        if (isAuthenticated) {
-          button.style.boxShadow = "0 2px 8px rgba(102, 102, 102, 0.3)"
-        } else {
-          button.style.boxShadow = "0 2px 8px rgba(221, 114, 0, 0.3)"
-        }
-      })
-    }
 
     // Click handler
     button.addEventListener("click", () => {
@@ -870,31 +866,19 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Handle login button click
+   * Open the authentication popup window.
+   * Returns true if popup was opened, false if parent origin is not set.
    */
-  private handleLoginClick(button: HTMLButtonElement): void {
+  private openAuthPopup(): boolean {
     if (!this.parentOrigin) {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
-      return
+      return false
     }
+
     console.log(
       "[Proxy] Opening authentication window for parent:",
       this.parentOrigin,
     )
-
-    // Disable button and show spinner
-    button.disabled = true
-    button.innerHTML =
-      '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s linear infinite;"></span>'
-
-    // Add spinner animation
-    if (!document.getElementById("swarm-id-spinner-style")) {
-      const style = document.createElement("style")
-      style.id = "swarm-id-spinner-style"
-      style.textContent =
-        "@keyframes spin { to { transform: rotate(360deg); } }"
-      document.head.appendChild(style)
-    }
 
     // Build URL with hash parameters (avoids re-renders in SPA)
     const params = new URLSearchParams()
@@ -918,6 +902,29 @@ export class SwarmIdProxy {
     } else {
       window.open(authUrl, "_blank")
     }
+
+    return true
+  }
+
+  /**
+   * Handle login button click
+   */
+  private handleLoginClick(button: HTMLButtonElement): void {
+    // Disable button and show spinner
+    button.disabled = true
+    button.innerHTML =
+      '<span style="display: inline-block; width: 16px; height: 16px; border: 2px solid rgba(255,255,255,.3); border-radius: 50%; border-top-color: white; animation: spin 1s linear infinite;"></span>'
+
+    // Add spinner animation
+    if (!document.getElementById("swarm-id-spinner-style")) {
+      const style = document.createElement("style")
+      style.id = "swarm-id-spinner-style"
+      style.textContent =
+        "@keyframes spin { to { transform: rotate(360deg); } }"
+      document.head.appendChild(style)
+    }
+
+    this.openAuthPopup()
   }
 
   /**

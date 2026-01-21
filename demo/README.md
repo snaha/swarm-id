@@ -113,16 +113,11 @@ if (status.authenticated) {
 }
 ```
 
-### Create Auth Button
+### Get Auth Iframe
 
 ```javascript
-const container = document.getElementById('auth-container')
-const button = client.createAuthButton(container, {
-  backgroundColor: '#dd7200',
-  color: 'white',
-  padding: '12px 24px',
-  borderRadius: '6px'
-})
+// The iframe is automatically positioned in the bottom-right corner
+const iframe = client.getAuthIframe()
 ```
 
 ## Benefits of Using the Library

@@ -175,6 +175,30 @@ export const AppMetadataSchema = z.object({
 export type AppMetadata = z.infer<typeof AppMetadataSchema>
 
 // ============================================================================
+// Button Configuration
+// ============================================================================
+
+export const ButtonConfigSchema = z
+  .object({
+    connectText: z.string().optional(),
+    disconnectText: z.string().optional(),
+    loadingText: z.string().optional(),
+    backgroundColor: z.string().optional(),
+    color: z.string().optional(),
+    borderRadius: z.string().optional(),
+  })
+  .optional()
+
+export interface ButtonConfig {
+  connectText?: string // Default: "🔐 Login with Swarm ID"
+  disconnectText?: string // Default: "🔓 Disconnect from Swarm ID"
+  loadingText?: string // Default: "⏳ Loading..."
+  backgroundColor?: string // Default: "#dd7200" (connect), "#666" (disconnect)
+  color?: string // Default: "white"
+  borderRadius?: string // Default: "0", applied to iframe
+}
+
+// ============================================================================
 // Message Types: Parent → Iframe
 // ============================================================================
 
@@ -183,6 +207,7 @@ export const ParentIdentifyMessageSchema = z.object({
   beeApiUrl: z.string().url().optional(),
   popupMode: z.enum(["popup", "window"]).optional(),
   metadata: AppMetadataSchema,
+  buttonConfig: ButtonConfigSchema,
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -377,6 +402,12 @@ export const ConnectionInfoResponseMessageSchema = z.object({
     .optional(),
 })
 
+export const ConnectResponseMessageSchema = z.object({
+  type: z.literal("connectResponse"),
+  requestId: z.string(),
+  success: z.boolean(),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -392,6 +423,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoResponseMessageSchema,
+  ConnectResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -425,6 +457,9 @@ export type UploadProgressMessage = z.infer<typeof UploadProgressMessageSchema>
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoResponseMessage = z.infer<
   typeof ConnectionInfoResponseMessageSchema
+>
+export type ConnectResponseMessage = z.infer<
+  typeof ConnectResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
@@ -465,6 +500,8 @@ export interface ClientOptions {
   onAuthChange?: (authenticated: boolean) => void
   popupMode?: "popup" | "window" // Default: 'window'
   metadata: AppMetadata
+  buttonConfig?: ButtonConfig
+  containerId?: string // ID of container element to place iframe in (optional)
 }
 
 export interface AuthOptions {
