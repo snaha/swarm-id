@@ -17,6 +17,7 @@ import {
   ParentToIframeMessageSchema,
   AppMetadataSchema,
 } from "./types"
+import { buildAuthUrl } from "./utils/url"
 
 /**
  * Main client library for integrating Swarm ID authentication and storage capabilities
@@ -573,6 +574,50 @@ export class SwarmIdClient {
     if (this.onAuthChange) {
       this.onAuthChange(false)
     }
+  }
+
+  /**
+   * Opens the Swarm ID authentication page in a new window.
+   *
+   * This method creates the same authentication URL as used by the iframe
+   * proxy and opens it in a new browser window. The user can authenticate
+   * with their Swarm ID, and the resulting authentication will be available
+   * to the client when they return.
+   *
+   * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
+   * @returns The URL that was opened (useful for testing or reference)
+   * @throws {Error} If the client is not initialized
+   *
+   * @example
+   * ```typescript
+   * const client = new SwarmIdClient({ ... })
+   * await client.initialize()
+   *
+   * // Open authentication page
+   * const url = client.connect()
+   * console.log('Authentication opened at:', url)
+   *
+   * // Open as popup window
+   * client.connect("popup")
+   * ```
+   */
+  connect(popupMode: "window" | "popup" = "window"): string {
+    this.ensureReady()
+
+    const authUrl = buildAuthUrl(
+      this.iframeOrigin,
+      window.location.origin,
+      this.metadata,
+    )
+
+    // Open as popup or full window based on popupMode
+    if (popupMode === "popup") {
+      window.open(authUrl, "_blank", "width=500,height=600")
+    } else {
+      window.open(authUrl, "_blank")
+    }
+
+    return authUrl
   }
 
   /**

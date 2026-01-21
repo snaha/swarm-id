@@ -35,6 +35,7 @@ import {
   createNetworkSettingsStorageManager,
 } from "./utils/storage-managers"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
+import { buildAuthUrl } from "./utils/url"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -232,7 +233,10 @@ export class SwarmIdProxy {
             await this.handlePopupMessage(message, event)
             return
           } catch (error) {
-            console.warn("[Proxy] Invalid popup message:", error, event.data)
+            // Avoid excessive logging with Metamask
+            if (event.data.target !== "metamask-inpage") {
+              console.warn("[Proxy] Invalid popup message:", error, event.data)
+            }
           }
         }
 
@@ -804,7 +808,8 @@ export class SwarmIdProxy {
     // Get text from buttonConfig or use defaults
     const config = this.buttonConfig || {}
     const loadingText = config.loadingText || "⏳ Loading..."
-    const disconnectText = config.disconnectText || "🔓 Disconnect from Swarm ID"
+    const disconnectText =
+      config.disconnectText || "🔓 Disconnect from Swarm ID"
     const connectText = config.connectText || "🔐 Login with Swarm ID"
 
     if (isLoading) {
@@ -841,7 +846,8 @@ export class SwarmIdProxy {
     }
     button.style.color = config.color || styles.color || "white"
     button.style.border = styles.border || "none"
-    button.style.borderRadius = config.borderRadius || styles.borderRadius || "0"
+    button.style.borderRadius =
+      config.borderRadius || styles.borderRadius || "0"
     button.style.padding = styles.padding || "0"
     button.style.fontSize = styles.fontSize || "14px"
     button.style.fontWeight = styles.fontWeight || "600"
@@ -880,21 +886,12 @@ export class SwarmIdProxy {
       this.parentOrigin,
     )
 
-    // Build URL with hash parameters (avoids re-renders in SPA)
-    const params = new URLSearchParams()
-    params.set("origin", this.parentOrigin)
-
-    if (this.appMetadata) {
-      params.set("appName", this.appMetadata.name)
-      if (this.appMetadata.description) {
-        params.set("appDescription", this.appMetadata.description)
-      }
-      if (this.appMetadata.icon) {
-        params.set("appIcon", this.appMetadata.icon)
-      }
-    }
-
-    const authUrl = `${window.location.origin}/connect#${params.toString()}`
+    // Build authentication URL using shared utility
+    const authUrl = buildAuthUrl(
+      window.location.origin,
+      this.parentOrigin,
+      this.appMetadata,
+    )
 
     // Open as popup or full window based on popupMode
     if (this.popupMode === "popup") {

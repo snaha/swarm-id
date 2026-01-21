@@ -39,10 +39,18 @@ const client = new SwarmIdClient({
 // 2. Initialize (creates hidden iframe)
 await client.initialize()
 
-// 3. Check if user is authenticated
+// 3a. Option A: Use iframe authentication button
+// The iframe will show a connect/disconnect button automatically
+
+// 3b. Option B: Manual authentication with connect()
+// Open authentication page in new window (useful for custom UI)
+const authUrl = client.connect("popup") // or "window" for full window
+console.log('Authentication opened at:', authUrl)
+
+// 4. Check if user is authenticated
 const status = await client.checkAuthStatus()
 
-// 4. Upload data (after authentication)
+// 5. Upload data (after authentication)
 if (status.authenticated) {
   const result = await client.uploadData(
     new TextEncoder().encode('Hello, Swarm!')
@@ -50,7 +58,7 @@ if (status.authenticated) {
   console.log('Uploaded:', result.reference)
 }
 
-// 5. Cleanup when done
+// 6. Cleanup when done
 client.destroy()
 ```
 
@@ -68,6 +76,8 @@ The `SwarmIdClient` constructor accepts the following options:
 | `onAuthChange` | `function` | No | Callback when authentication status changes |
 
 ## Data Operations
+
+> **Note:** Data operations require the user to be authenticated first. Use `client.connect()` or the iframe button to authenticate.
 
 ### Upload Data
 

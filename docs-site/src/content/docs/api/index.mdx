@@ -29,6 +29,11 @@ const client = new SwarmIdClient({
 
 await client.initialize()
 
+// Option 1: Open authentication page manually
+const authUrl = client.connect()
+console.log('Authentication opened at:', authUrl)
+
+// Option 2: Check authentication status and upload if authenticated
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
   const result = await client.uploadData(new Uint8Array([1, 2, 3]))
@@ -228,6 +233,32 @@ await client.initialize()
 
 ---
 
+### Manual Authentication
+
+In addition to the iframe-based authentication (via `getAuthIframe()`), you can manually trigger the authentication flow by calling `connect()`. This opens the same authentication URL in a new window:
+
+```typescript
+// Open authentication manually (opens in new window)
+const url = client.connect("popup")
+
+// Or open as full window
+const url = client.connect("window")
+```
+
+**When to use `connect()`:**
+- When you want to trigger authentication from a custom UI element
+- When you prefer the authentication to open in a new window instead of an iframe
+- When you need the authentication URL for testing or debugging
+
+**Authentication Flow:**
+1. User calls `client.connect()` or clicks the iframe button
+2. Authentication page opens with the app metadata
+3. User authenticates with their Swarm ID
+4. Authentication state is shared with the iframe proxy
+5. `onAuthChange` callback is invoked with `true`
+
+---
+
 ### `checkAuthStatus()`
 
 Checks the current authentication status with the Swarm ID proxy.
@@ -250,6 +281,39 @@ const status = await client.checkAuthStatus()
 if (status.authenticated) {
   console.log('Authenticated from:', status.origin)
 }
+```
+
+---
+
+### `connect(popupMode?)`
+
+Opens Swarm ID authentication page in a new window.
+
+This method creates the same authentication URL as used by the iframe proxy and opens it in a new browser window. The user can authenticate with their Swarm ID, and the resulting authentication will be available to the client when they return.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `popupMode` | `"window" \| "popup"` | No | Whether to open as a popup window ("popup") or full window ("window", default) |
+
+**Returns:** `string` - The URL that was opened (useful for testing or reference)
+
+**Throws:**
+- `Error` if the client is not initialized
+
+**Example:**
+
+```typescript
+const client = new SwarmIdClient({ ... })
+await client.initialize()
+
+// Open authentication page
+const url = client.connect()
+console.log('Authentication opened at:', url)
+
+// Open as popup window
+client.connect("popup")
 ```
 
 ---

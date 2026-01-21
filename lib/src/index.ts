@@ -131,6 +131,9 @@ export type {
   PopupToIframeMessage,
   SetSecretMessage,
   AuthData,
+  AppMetadata,
+  ButtonConfig,
+  ConnectionInfo,
 } from "./types"
 
 // Entity types from schemas
@@ -198,6 +201,9 @@ export {
 
 // Constant exports
 export { SWARM_SECRET_PREFIX } from "./types"
+
+// URL building utilities
+export { buildAuthUrl } from "./utils/url"
 
 // Time and session constants
 export {
