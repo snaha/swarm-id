@@ -87,7 +87,67 @@ See [lib/README.md](./lib/README.md) for detailed library documentation.
 
 ## Local Development Setup
 
-### Prerequisites
+### Option 1: Docker (Recommended - One Command Setup)
+
+The easiest way to get started with local development is using Docker. This automatically handles HTTPS certificates, dependencies, and runs all services with hot reload enabled.
+
+**Prerequisites:**
+- [Docker](https://docs.docker.com/get-docker/) and [Docker Compose](https://docs.docker.com/compose/install/) installed
+
+**Quick Start:**
+
+```bash
+# 1. Add domains to /etc/hosts on your HOST machine
+sudo bash -c 'echo "" >> /etc/hosts && echo "# Swarm local development domains" >> /etc/hosts && echo "127.0.0.1  swarm-app.local" >> /etc/hosts && echo "127.0.0.1  swarm-id.local" >> /etc/hosts'
+
+# 2. Start everything with one command
+docker compose up
+
+# That's it! 🎉
+```
+
+**What this does:**
+- ✅ Builds and starts all services in a single container
+- ✅ Automatically generates SSL certificates with mkcert
+- ✅ Runs SvelteKit in watch mode with hot reload
+- ✅ Serves demo app on `https://swarm-app.local:8080`
+- ✅ Serves identity UI on `https://swarm-id.local:8081`
+- ✅ All source code changes are automatically reflected (no rebuild needed)
+
+**Access the application:**
+- Demo App: https://swarm-app.local:8080/
+- Identity UI: https://swarm-id.local:8081/
+
+⚠️ **Important:** You'll see browser security warnings due to self-signed certificates. Click "Advanced" → "Accept Risk and Continue" for both domains. This is safe for local development.
+
+**Stopping the services:**
+```bash
+# Press Ctrl+C to stop all services
+# Or in another terminal:
+docker compose down
+```
+
+**Viewing logs:**
+```bash
+# Follow logs from all services
+docker compose logs -f
+
+# View logs from a specific service
+docker compose logs -f swarm-dev
+```
+
+**Rebuilding after dependency changes:**
+```bash
+# If you modify package.json files, rebuild the image
+docker compose build
+docker compose up
+```
+
+### Option 2: Manual Setup (Advanced)
+
+For more control or if you prefer not to use Docker, you can set up the development environment manually.
+
+#### Prerequisites
 
 1. **Install mkcert** (for local HTTPS certificates)
 
@@ -130,7 +190,7 @@ See [lib/README.md](./lib/README.md) for detailed library documentation.
    sudo bash -c 'echo "" >> /etc/hosts && echo "# Swarm local development domains" >> /etc/hosts && echo "127.0.0.1  swarm-app.local" >> /etc/hosts && echo "127.0.0.1  swarm-id.local" >> /etc/hosts'
    ```
 
-### Starting the Development Servers
+#### Starting the Development Servers (Manual Setup)
 
 The project includes two Node.js HTTPS servers that serve content on different domains to simulate production cross-origin behavior.
 
@@ -311,6 +371,10 @@ Both servers:
 ├── server-id.js          # Local HTTPS server for swarm-id.local:8081
 ├── start-servers.sh      # Start both servers (production mode)
 ├── start-servers-dev.sh  # Start both servers (dev mode with proxy)
+├── Dockerfile            # Docker image for development environment
+├── docker-compose.yml    # Docker Compose configuration
+├── docker-entrypoint.sh  # Docker container startup script
+├── .dockerignore         # Docker build exclusions
 └── swarm-app.local+1*.pem  # SSL certificates (mkcert)
 ```
 
@@ -356,7 +420,21 @@ pnpm preview:docs
 
 ## Development Workflow
 
-### Quick Start
+### Quick Start (Docker - Recommended)
+
+```bash
+# 1. One-time setup - add domains to /etc/hosts
+sudo bash -c 'echo "127.0.0.1 swarm-app.local swarm-id.local" >> /etc/hosts'
+
+# 2. Start everything
+docker compose up
+
+# 3. Open browser
+# Visit: https://swarm-app.local:8080/
+# Accept security warnings for both domains
+```
+
+### Quick Start (Manual Setup)
 
 ```bash
 # 1. One-time setup
@@ -377,7 +455,7 @@ cd ..
 # Accept security warnings for both domains
 ```
 
-**With SvelteKit development:**
+**With SvelteKit development (Manual):**
 ```bash
 # Terminal 1: SvelteKit dev server with hot reload
 cd swarm-ui && pnpm dev
@@ -418,25 +496,55 @@ cd swarm-ui && pnpm dev
 
 ## Troubleshooting
 
-### Servers won't start
+### Docker-specific issues
+
+#### Container won't start or exits immediately
+- Check logs: `docker compose logs`
+- Verify Docker and Docker Compose are installed correctly
+- Ensure ports 8080, 8081, and 5174 are not already in use on your host
+
+#### Cannot access swarm-app.local with Docker
+- Verify `/etc/hosts` on your **host machine** (not in container): `grep swarm /etc/hosts`
+- Make sure you added the entries to your host machine's /etc/hosts, not inside the container
+- Restart browser after adding /etc/hosts entries
+- Try ping: `ping swarm-app.local`
+
+#### Hot reload not working in Docker
+- Check that volume mounts are correct: `docker compose config`
+- On Windows/Mac, ensure Docker Desktop has file sharing enabled for the project directory
+- Restart container: `docker compose restart`
+
+#### SSL certificate issues with Docker
+- Certificates are generated automatically on first run
+- To regenerate: `docker compose down`, delete `swarm-app.local+1*.pem` files, then `docker compose up`
+- Accept browser warnings for both domains
+
+#### Performance issues on Mac/Windows
+- Docker on Mac/Windows uses a VM which can be slower
+- Consider using manual setup for better performance
+- Ensure Docker Desktop has sufficient resources allocated (Settings → Resources)
+
+### General issues (Manual Setup)
+
+#### Servers won't start
 - Check if ports 8080 and 8081 are already in use: `lsof -i :8080 -i :8081`
 - Ensure certificate files exist and are readable
 
-### Cannot access swarm-app.local
+#### Cannot access swarm-app.local
 - Verify `/etc/hosts` configuration: `grep swarm /etc/hosts`
 - Clear browser DNS cache or restart browser
 - Try ping: `ping swarm-app.local`
 
-### Browser rejects certificates
+#### Browser rejects certificates
 - Reinstall mkcert CA: `mkcert -install`
 - Regenerate certificates: `mkcert swarm-app.local swarm-id.local`
 - Check certificate files exist in project root
 
-### Authentication popup blocked
+#### Authentication popup blocked
 - Allow popups for `swarm-app.local` in browser settings
 - Ensure popup is triggered by user action (not programmatically)
 
-### Dev mode shows "502 Bad Gateway"
+#### Dev mode shows "502 Bad Gateway"
 - Make sure `pnpm dev` is running in `swarm-ui/`
 - Verify the dev server is running on the correct port (default: 5173)
 - Check `PROXY_TARGET` environment variable if using custom port

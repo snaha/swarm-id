@@ -1,0 +1,48 @@
+# Node modules (will be installed in container)
+node_modules
+lib/node_modules
+swarm-ui/node_modules
+demo/node_modules
+docs-site/node_modules
+
+# Build outputs
+lib/dist
+swarm-ui/build
+demo/build
+swarm-id-build
+docs-site/dist
+
+# Git
+.git
+.github
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+npm-debug.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Test coverage
+coverage
+
+# Temporary files
+tmp
+temp
+*.tmp
+
+# Documentation build
+The-Book-of-Swarm.pdf

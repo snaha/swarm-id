@@ -1,0 +1,46 @@
+version: '3.8'
+
+services:
+  swarm-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: swarm-id-dev
+    ports:
+      - "8080:8080"   # Demo app HTTPS
+      - "8081:8081"   # Identity UI HTTPS
+      - "5174:5174"   # Vite dev server (optional direct access)
+    volumes:
+      # Mount source code for hot reload
+      - ./lib/src:/app/lib/src
+      - ./swarm-ui/src:/app/swarm-ui/src
+      - ./swarm-ui/static:/app/swarm-ui/static
+      - ./demo:/app/demo
+      - ./server-app.js:/app/server-app.js
+      - ./server-id.js:/app/server-id.js
+      # Persist SSL certificates
+      - ssl-certs:/root/.local/share/mkcert
+      - ./swarm-app.local+1.pem:/app/swarm-app.local+1.pem
+      - ./swarm-app.local+1-key.pem:/app/swarm-app.local+1-key.pem
+      # Exclude node_modules from being overwritten
+      - /app/node_modules
+      - /app/lib/node_modules
+      - /app/swarm-ui/node_modules
+      - /app/demo/node_modules
+    environment:
+      - NODE_ENV=development
+      - PROXY_TARGET=http://localhost:5174
+    extra_hosts:
+      - "swarm-app.local:127.0.0.1"
+      - "swarm-id.local:127.0.0.1"
+    networks:
+      - swarm-network
+    stdin_open: true
+    tty: true
+
+volumes:
+  ssl-certs:
+
+networks:
+  swarm-network:
+    driver: bridge
