@@ -28,17 +28,6 @@ echo ""
 
 cd /app
 
-# Function to start a service with logging
-start_service() {
-    local name=$1
-    local cmd=$2
-    echo "🚀 Starting $name..."
-    $cmd &
-    local pid=$!
-    echo "  Started $name (PID: $pid)"
-    return $pid
-}
-
 echo "========================================================================"
 echo "Starting Services"
 echo "========================================================================"
@@ -88,7 +77,16 @@ echo "========================================================================"
 echo ""
 
 # Trap SIGTERM and SIGINT to gracefully shutdown
-trap "echo ''; echo 'Stopping services...'; kill $VITE_PID $APP_PID $ID_PID 2>/dev/null; exit" SIGTERM SIGINT
+shutdown() {
+    echo ''
+    echo 'Stopping services...'
+    [ -n "$VITE_PID" ] && kill "$VITE_PID" 2>/dev/null || true
+    [ -n "$APP_PID" ] && kill "$APP_PID" 2>/dev/null || true
+    [ -n "$ID_PID" ] && kill "$ID_PID" 2>/dev/null || true
+    exit 0
+}
+
+trap shutdown SIGTERM SIGINT
 
 # Wait for all background processes
 wait $VITE_PID $APP_PID $ID_PID

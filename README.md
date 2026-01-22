@@ -98,7 +98,7 @@ The easiest way to get started with local development is using Docker. This auto
 
 ```bash
 # 1. Add domains to /etc/hosts on your HOST machine
-sudo bash -c 'echo "" >> /etc/hosts && echo "# Swarm local development domains" >> /etc/hosts && echo "127.0.0.1  swarm-app.local" >> /etc/hosts && echo "127.0.0.1  swarm-id.local" >> /etc/hosts'
+sudo bash -c 'echo "127.0.0.1 swarm-app.local swarm-id.local" >> /etc/hosts'
 
 # 2. Start everything with one command
 docker compose up
@@ -187,7 +187,7 @@ For more control or if you prefer not to use Docker, you can set up the developm
 
    Quick command (Linux/macOS):
    ```bash
-   sudo bash -c 'echo "" >> /etc/hosts && echo "# Swarm local development domains" >> /etc/hosts && echo "127.0.0.1  swarm-app.local" >> /etc/hosts && echo "127.0.0.1  swarm-id.local" >> /etc/hosts'
+   sudo bash -c 'echo "127.0.0.1 swarm-app.local swarm-id.local" >> /etc/hosts'
    ```
 
 #### Starting the Development Servers (Manual Setup)

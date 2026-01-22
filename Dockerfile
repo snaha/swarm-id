@@ -1,10 +1,14 @@
 # Development Dockerfile with hot reload support
 FROM node:20-slim
 
-# Install mkcert for SSL certificate generation
+# Install mkcert for SSL certificate generation with checksum verification
 RUN apt-get update && \
-    apt-get install -y wget curl libnss3-tools && \
-    wget https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64 -O /usr/local/bin/mkcert && \
+    apt-get install -y wget curl libnss3-tools ca-certificates && \
+    MKCERT_VERSION=v1.4.4 && \
+    MKCERT_CHECKSUM="6d31c65b03972c6dc4a14ab429f2928300518b26503f58723e532d1b0a3bbb52" && \
+    wget https://github.com/FiloSottile/mkcert/releases/download/${MKCERT_VERSION}/mkcert-${MKCERT_VERSION}-linux-amd64 -O /tmp/mkcert && \
+    echo "${MKCERT_CHECKSUM}  /tmp/mkcert" | sha256sum -c - && \
+    mv /tmp/mkcert /usr/local/bin/mkcert && \
     chmod +x /usr/local/bin/mkcert && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
@@ -25,9 +29,6 @@ RUN pnpm install --frozen-lockfile
 
 # Copy the rest of the application
 COPY . .
-
-# Generate SSL certificates (will be run in entrypoint)
-# The certificates will be generated when the container starts
 
 # Expose ports for both servers
 EXPOSE 8080 8081 5174
