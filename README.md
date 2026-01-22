@@ -184,6 +184,42 @@ The dev mode setup:
 PROXY_TARGET=http://localhost:3000 ./start-servers-dev.sh
 ```
 
+#### Testing with Real Domains (SSH Tunnel)
+
+To test storage partitioning behavior with real TLS certificates (as in production), you can use SSH tunnels to a VPS with nginx.
+
+**Architecture:**
+```
+Your VPS (nginx + HTTPS)              Your Local Machine
+┌─────────────────────────┐           ┌─────────────────────┐
+│ demo.yourdomain.com     │◄──────────│ SSH -R tunnels      │
+│   → 127.0.0.1:18080     │           │   18080 → demo      │
+│ id.yourdomain.com       │           │   8081 → identity   │
+│   → 127.0.0.1:8081      │           └─────────────────────┘
+└─────────────────────────┘
+```
+
+**VPS Setup (one-time):**
+1. Add nginx server blocks pointing to `127.0.0.1:18080` and `127.0.0.1:8081`
+2. Get SSL certificates with certbot
+3. Add DNS A records for both subdomains
+
+**Local usage:**
+```bash
+# Terminal 1: Start local servers
+./start-servers.sh
+
+# Terminal 2: Open SSH tunnel
+ssh -R 18080:localhost:18080 -R 8081:localhost:8081 user@your-vps
+```
+
+**Access the demo:**
+```
+https://demo.yourdomain.com/?idDomain=https://id.yourdomain.com
+```
+
+The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies.
+
 **Important:**
 - Demo HTML files import from `/lib/` which automatically maps to `lib/dist/`
 - If you change library code, rebuild it: `cd lib && pnpm build`

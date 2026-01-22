@@ -1,11 +1,14 @@
 #!/usr/bin/env node
 
 /**
- * Simple HTTPS server for swarm-app.local
- * Serves demo-iframe-storage.html on port 8080
+ * Simple HTTPS/HTTP server for swarm-app.local
+ * Serves demo files on:
+ *   - HTTPS port 8080 (for local .local domain testing)
+ *   - HTTP port 18080 (for SSH tunnel / nginx proxy)
  */
 
 import https from 'https'
+import http from 'http'
 import fs from 'fs'
 import path from 'path'
 import { fileURLToPath } from 'url'
@@ -14,7 +17,8 @@ import { dirname } from 'path'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const PORT = 8080
+const PORT_HTTPS = 8080
+const PORT_HTTP = 18080
 const HOST = 'swarm-app.local'
 
 // SSL certificate options
@@ -35,11 +39,16 @@ const mimeTypes = {
   '.ico': 'image/x-icon'
 }
 
-const server = https.createServer(sslOptions, (req, res) => {
+// Shared request handler
+function requestHandler(req, res) {
   console.log(`[${new Date().toISOString()}] ${req.method} ${req.url}`)
 
+  // Parse URL to get pathname (strip query string)
+  const url = new URL(req.url, `http://${req.headers.host}`)
+  const pathname = url.pathname
+
   // Default to demo.html
-  let filePath = req.url === '/' ? '/demo/demo.html' : req.url
+  let filePath = pathname === '/' ? '/demo/demo.html' : pathname
 
   // Map /lib/* to lib/dist/* for local development
   // This allows HTML files to use production-style imports without building
@@ -88,12 +97,22 @@ const server = https.createServer(sslOptions, (req, res) => {
       res.end(content)
     })
   })
+}
+
+// HTTPS server for local .local domain testing
+const httpsServer = https.createServer(sslOptions, requestHandler)
+httpsServer.listen(PORT_HTTPS, '127.0.0.1', () => {
+  console.log(`HTTPS Server running at https://${HOST}:${PORT_HTTPS}/`)
 })
 
-server.listen(PORT, '127.0.0.1', () => {
-  console.log('='.repeat(70))
-  console.log(`HTTPS Server running at https://${HOST}:${PORT}/`)
-  console.log(`Serving: demo/ and root files`)
-  console.log('='.repeat(70))
-  console.log(`\nAccess the app at: https://${HOST}:${PORT}/\n`)
+// HTTP server for SSH tunnel (nginx proxies to this)
+const httpServer = http.createServer(requestHandler)
+httpServer.listen(PORT_HTTP, '127.0.0.1', () => {
+  console.log(`HTTP Server running at http://127.0.0.1:${PORT_HTTP}/`)
 })
+
+console.log('='.repeat(70))
+console.log('Serving: demo/ and root files')
+console.log('='.repeat(70))
+console.log(`\nLocal access:  https://${HOST}:${PORT_HTTPS}/`)
+console.log(`SSH tunnel:    http://127.0.0.1:${PORT_HTTP}/\n`)
