@@ -7,11 +7,15 @@ echo "========================================================================"
 echo ""
 
 # Generate SSL certificates if they don't exist
-if [ ! -f "swarm-app.local+1.pem" ] || [ ! -f "swarm-app.local+1-key.pem" ]; then
+if [ ! -f "/app/swarm-app.local+1.pem" ] || [ ! -f "/app/swarm-app.local+1-key.pem" ]; then
     echo "📜 Generating SSL certificates with mkcert..."
     mkcert -install
+    cd /app
     mkcert swarm-app.local swarm-id.local
     echo "✓ SSL certificates generated"
+    echo ""
+else
+    echo "✓ SSL certificates already exist"
     echo ""
 fi
 

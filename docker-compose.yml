@@ -18,10 +18,8 @@ services:
       - ./demo:/app/demo
       - ./server-app.js:/app/server-app.js
       - ./server-id.js:/app/server-id.js
-      # Persist SSL certificates
+      # Persist SSL certificates (will be generated in entrypoint)
       - ssl-certs:/root/.local/share/mkcert
-      - ./swarm-app.local+1.pem:/app/swarm-app.local+1.pem
-      - ./swarm-app.local+1-key.pem:/app/swarm-app.local+1-key.pem
       # Exclude node_modules from being overwritten
       - /app/node_modules
       - /app/lib/node_modules
