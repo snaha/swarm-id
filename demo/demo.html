@@ -254,7 +254,7 @@ Hello, Swarm!</textarea
       const urlParams = new URLSearchParams(window.location.search);
       const PROXY_ORIGIN = urlParams.get('idDomain') || window.__ID_DOMAIN__ || (
         window.location.hostname.includes('local')
-          ? 'https://swarm-id.local:8081'
+          ? 'http://localhost:5174'
           : 'https://swarm-id.snaha.net'
       );
 
