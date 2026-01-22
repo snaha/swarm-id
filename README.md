@@ -194,31 +194,36 @@ Your VPS (nginx + HTTPS)              Your Local Machine
 ┌─────────────────────────┐           ┌─────────────────────┐
 │ demo.yourdomain.com     │◄──────────│ SSH -R tunnels      │
 │   → 127.0.0.1:18080     │           │   18080 → demo      │
-│ id.yourdomain.com       │           │   8081 → identity   │
-│   → 127.0.0.1:8081      │           └─────────────────────┘
-└─────────────────────────┘
+│ id.yourdomain.com       │           │   5174 → identity   │
+│   → 127.0.0.1:5174      │           │   (Vite dev server) │
+└─────────────────────────┘           └─────────────────────┘
 ```
 
 **VPS Setup (one-time):**
-1. Add nginx server blocks pointing to `127.0.0.1:18080` and `127.0.0.1:8081`
+1. Add nginx server blocks pointing to `127.0.0.1:18080` (demo) and `127.0.0.1:5174` (identity)
 2. Get SSL certificates with certbot
 3. Add DNS A records for both subdomains
 
 **Local usage:**
 ```bash
-# Terminal 1: Start local servers
-./start-servers.sh
+# Terminal 1: Start demo server (HTTP on port 18080)
+node server-app.js
 
-# Terminal 2: Open SSH tunnel
-ssh -R 18080:localhost:18080 -R 8081:localhost:8081 user@your-vps
+# Terminal 2: Start SvelteKit dev server with allowed hosts
+VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=id.yourdomain.com pnpm --filter swarm-ui dev
+
+# Terminal 3: Open SSH tunnel
+ssh -R 18080:localhost:18080 -R 5174:localhost:5174 user@your-vps
 ```
+
+**Note:** The `VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable is required when accessing the Vite dev server through a foreign hostname. Without it, Vite will reject requests from the tunneled domain.
 
 **Access the demo:**
 ```
 https://demo.yourdomain.com/?idDomain=https://id.yourdomain.com
 ```
 
-The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies.
+The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies while still having hot reload for the identity UI.
 
 **Important:**
 - Demo HTML files import from `/lib/` which automatically maps to `lib/dist/`
