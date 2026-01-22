@@ -43,8 +43,8 @@ await client.initialize()
 // The iframe will show a connect/disconnect button automatically
 
 // 3b. Option B: Manual authentication with connect()
-// Open authentication page in new window (useful for custom UI)
-const authUrl = client.connect("popup") // or "window" for full window
+// Open authentication page in new window/browser tab (useful for custom UI)
+const authUrl = client.connect("window") // or "popup" for a popup
 console.log('Authentication opened at:', authUrl)
 
 // 4. Check if user is authenticated

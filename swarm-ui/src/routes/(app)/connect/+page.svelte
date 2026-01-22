@@ -30,6 +30,7 @@
 	let error = $state<string | undefined>(undefined)
 	let authenticated = $state(false)
 	let selectedAccountId = $state<EthAddress | undefined>(undefined)
+	let proxyMode = $state(false)
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
@@ -51,27 +52,34 @@
 	}
 
 	onMount(() => {
-		// Validate opener window
-		if (!window.opener) {
-			error = 'No opener window found. This page must be opened by Swarm ID iframe.'
-			return
-		}
+		// Get parameters from URL hash (e.g., #origin=foo&appName=bar&proxyMode=true)
+		const hashParams = getHashParams()
 
-		// Check opener origin
-		try {
-			const openerOrigin = (window.opener as Window).location.origin
-			if (openerOrigin !== window.location.origin) {
-				error = `Opener origin (${openerOrigin}) does not match expected origin`
+		// Check if we're in proxy mode (opened from the proxy iframe)
+		proxyMode = hashParams.get('proxyMode') === 'true'
+
+		if (proxyMode) {
+			// PROXY MODE: Require same-origin opener for postMessage communication
+			if (!window.opener) {
+				error = 'No opener window found. This page must be opened by Swarm ID iframe.'
 				return
 			}
-		} catch {
-			error = 'Cannot verify opener origin - cross-origin access denied'
-			return
+
+			// Check opener origin - must be same-origin for proxy mode
+			try {
+				const openerOrigin = (window.opener as Window).location.origin
+				if (openerOrigin !== window.location.origin) {
+					error = `Opener origin (${openerOrigin}) does not match expected origin`
+					return
+				}
+			} catch {
+				error = 'Cannot verify opener origin - cross-origin access denied'
+				return
+			}
 		}
+		// DIRECT MODE: No opener validation needed - relies on storage events
 
 		if (!sessionStore.data.appOrigin) {
-			// Get parameters from URL hash (e.g., #origin=foo&appName=bar)
-			const hashParams = getHashParams()
 			const appOrigin = hashParams.get('origin')
 			if (!appOrigin) {
 				error = 'No origin parameter found in URL'
@@ -182,34 +190,39 @@
 			return
 		}
 
-		const postageStamp = getIdentityPostageStamp(selectedIdentity)
+		if (proxyMode) {
+			// PROXY MODE: Send setSecret via postMessage to the opener (the proxy iframe)
+			if (!window.opener || (window.opener as Window).closed) {
+				error = 'Opener window not available'
+				return
+			}
 
-		// Send secret to opener (the iframe that opened this popup)
-		if (!window.opener || (window.opener as Window).closed) {
-			error = 'Opener window not available'
-			return
+			const postageStamp = getIdentityPostageStamp(selectedIdentity)
+
+			// In development mode, include postageBatchId/signerKey in the message
+			// because the proxy's localStorage is partitioned and can't access shared storage.
+			// In production, the proxy looks up stamps from shared storage.
+			// TODO: see https://github.com/snaha/swarm-id/issues/124
+			const isDevelopment = isDevelopmentEnvironment()
+
+			const message: SetSecretMessage = {
+				type: 'setSecret',
+				appOrigin: sessionStore.data.appOrigin,
+				data: {
+					secret: appSecret,
+					postageBatchId: isDevelopment ? postageStamp?.batchID.toHex() : undefined,
+					signerKey: isDevelopment ? postageStamp?.signerKey.toHex() : undefined,
+					networkSettings: isDevelopment ? { ...networkSettingsStore.settings } : undefined,
+				},
+			}
+
+			;(window.opener as Window).postMessage(message, window.location.origin)
 		}
-
-		// In development mode, include postageBatchId/signerKey in the message
-		// because the proxy's localStorage is partitioned and can't access shared storage.
-		// In production, the proxy looks up stamps from shared storage.
-		// TODO: see https://github.com/snaha/swarm-id/issues/124
-		const isDevelopment = isDevelopmentEnvironment()
-
-		const message: SetSecretMessage = {
-			type: 'setSecret',
-			appOrigin: sessionStore.data.appOrigin,
-			data: {
-				secret: appSecret,
-				postageBatchId: isDevelopment ? postageStamp?.batchID.toHex() : undefined,
-				signerKey: isDevelopment ? postageStamp?.signerKey.toHex() : undefined,
-				networkSettings: isDevelopment ? { ...networkSettingsStore.settings } : undefined,
-			},
-		}
-
-		;(window.opener as Window).postMessage(message, window.location.origin)
+		// DIRECT MODE: No postMessage needed - the localStorage write below
+		// triggers a storage event that the proxy detects
 
 		// Track this app connection with appSecret in shared storage
+		// This happens in BOTH modes - in direct mode, this triggers the storage event
 		connectedAppsStore.addOrUpdateApp(
 			{
 				appUrl: sessionStore.data.appOrigin,

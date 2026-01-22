@@ -65,6 +65,7 @@ export class SwarmIdProxy {
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
   private bee: Bee
+  private unsubscribeConnectedApps: (() => void) | undefined
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -72,6 +73,7 @@ export class SwarmIdProxy {
     this.beeApiUrl = networkSettings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
+    this.setupConnectedAppsListener()
     console.log(
       "[Proxy] Proxy initialized with Bee API from network settings:",
       this.beeApiUrl,
@@ -80,6 +82,125 @@ export class SwarmIdProxy {
     // Announce readiness to parent window immediately
     // This signals that our message listener is ready to receive parentIdentify
     this.announceReady()
+  }
+
+  /**
+   * Subscribe to connected apps storage changes for direct mode authentication.
+   * When a user completes authentication in the /connect popup (direct mode),
+   * the popup writes to localStorage. This storage event notifies the proxy
+   * to check for a new valid connection and send authSuccess to the parent.
+   * Also handles disconnection when the connection is removed or invalidated.
+   */
+  private setupConnectedAppsListener(): void {
+    // Only set up in production - in development, storage is partitioned
+    if (this.isDevelopmentEnvironment()) {
+      console.log(
+        "[Proxy] Development mode - skipping connected apps storage listener",
+      )
+      return
+    }
+
+    const connectedAppsManager = createConnectedAppsStorageManager()
+    this.unsubscribeConnectedApps = connectedAppsManager.subscribe(
+      (connectedApps) => {
+        this.handleConnectedAppsChange(connectedApps)
+      },
+    )
+    console.log("[Proxy] Subscribed to connected apps storage changes")
+  }
+
+  /**
+   * Handle changes to connected apps storage (triggered by storage events from other windows)
+   * Handles both new connections and disconnections.
+   */
+  private async handleConnectedAppsChange(
+    connectedApps: ConnectedApp[],
+  ): Promise<void> {
+    // Skip if parent not identified yet
+    if (!this.parentOrigin) {
+      return
+    }
+
+    console.log(
+      "[Proxy] Connected apps storage changed, checking connection for:",
+      this.parentOrigin,
+    )
+
+    // Look for a valid connection for this parent origin
+    const connectedApp = connectedApps.find(
+      (app) => app.appUrl === this.parentOrigin,
+    )
+
+    const hasValidConnection =
+      connectedApp && this.isConnectionValid(connectedApp)
+
+    if (hasValidConnection && !this.authenticated) {
+      // New connection detected
+      console.log(
+        "[Proxy] Found new valid connection via storage event for:",
+        this.parentOrigin,
+      )
+
+      // Set auth data
+      this.appSecret = connectedApp.appSecret
+      this.authenticated = true
+      this.authLoading = false
+
+      // Look up postage stamp from shared storage
+      const stamp = this.lookupPostageStampForApp()
+      if (stamp) {
+        this.postageBatchId = stamp.batchID.toHex()
+        this.signerKey = stamp.signerKey.toHex()
+        await this.initializeStamper()
+      } else {
+        console.log("[Proxy] No postage stamp found for connected identity")
+        this.postageBatchId = undefined
+        this.signerKey = undefined
+      }
+
+      // Update button
+      this.showAuthButton()
+
+      // Notify parent dApp
+      this.sendToParent({
+        type: "authSuccess",
+        origin: this.parentOrigin,
+      })
+
+      console.log(
+        "[Proxy] Notified parent of successful authentication (via storage event)",
+      )
+    } else if (!hasValidConnection && this.authenticated) {
+      // Connection removed or invalidated - disconnect
+      console.log(
+        "[Proxy] Connection removed or expired via storage event for:",
+        this.parentOrigin,
+      )
+
+      // Clear auth data
+      this.clearAuthData()
+
+      // Notify parent about disconnection
+      this.sendToParent({
+        type: "disconnectResponse",
+        requestId: "storage-event",
+        success: true,
+      })
+
+      console.log("[Proxy] Notified parent of disconnection (via storage event)")
+    }
+  }
+
+  /**
+   * Clean up resources when the proxy is destroyed.
+   * Call this method when the proxy iframe is being unloaded.
+   */
+  destroy(): void {
+    if (this.unsubscribeConnectedApps) {
+      this.unsubscribeConnectedApps()
+      this.unsubscribeConnectedApps = undefined
+      console.log("[Proxy] Unsubscribed from connected apps storage changes")
+    }
   }
 
   /**
@@ -887,10 +1008,13 @@ export class SwarmIdProxy {
     )
 
     // Build authentication URL using shared utility
+    // proxyMode=true: popup was opened from proxy iframe, so we validate
+    // same-origin opener and send setSecret via postMessage
     const authUrl = buildAuthUrl(
       window.location.origin,
       this.parentOrigin,
       this.appMetadata,
+      true, // proxyMode - enables same-origin validation and setSecret message
     )
 
     // Open as popup or full window based on popupMode

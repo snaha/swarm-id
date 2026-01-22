@@ -42,6 +42,11 @@ export type VersionParser<T> = (data: unknown, version: number) => T[]
 export type Serializer<T> = (data: T) => Record<string, unknown>
 
 /**
+ * Listener function for storage change events
+ */
+export type StorageChangeListener<T> = (data: T[]) => void
+
+/**
  * Options for versioned storage
  */
 export interface VersionedStorageOptions<T> {
@@ -126,9 +131,94 @@ export class MemoryStorageAdapter implements StorageAdapter {
  */
 export class VersionedStorageManager<T> {
   private options: VersionedStorageOptions<T>
+  private listeners: Set<StorageChangeListener<T>> = new Set()
+  private boundStorageHandler: ((event: StorageEvent) => void) | undefined
 
   constructor(options: VersionedStorageOptions<T>) {
     this.options = options
+  }
+
+  /**
+   * Subscribe to storage change events from other windows/tabs
+   * The browser's storage event fires when localStorage changes in OTHER windows,
+   * making this useful for cross-window synchronization.
+   *
+   * @param listener - Callback function that receives the updated data
+   * @returns Unsubscribe function to remove the listener
+   */
+  subscribe(listener: StorageChangeListener<T>): () => void {
+    this.listeners.add(listener)
+
+    // Set up storage event listener on first subscription
+    if (!this.boundStorageHandler) {
+      this.setupStorageEventListener()
+    }
+
+    // Return unsubscribe function
+    return () => {
+      this.listeners.delete(listener)
+      if (this.listeners.size === 0) {
+        this.cleanupStorageEventListener()
+      }
+    }
+  }
+
+  /**
+   * Set up the browser storage event listener
+   * Only listens for changes to this manager's specific key
+   */
+  private setupStorageEventListener(): void {
+    if (typeof window === "undefined") return
+
+    this.boundStorageHandler = (event: StorageEvent) => {
+      // Only handle events for our specific key
+      if (event.key !== this.options.key) return
+
+      console.log(
+        `[${this.options.loggerName ?? "Storage"}] Storage event detected for key:`,
+        this.options.key,
+      )
+
+      // Reload data and notify listeners
+      const data = this.load()
+      this.notifyListeners(data)
+    }
+
+    window.addEventListener("storage", this.boundStorageHandler)
+    console.log(
+      `[${this.options.loggerName ?? "Storage"}] Storage event listener set up for key:`,
+      this.options.key,
+    )
+  }
+
+  /**
+   * Clean up the storage event listener when no more subscribers
+   */
+  private cleanupStorageEventListener(): void {
+    if (this.boundStorageHandler && typeof window !== "undefined") {
+      window.removeEventListener("storage", this.boundStorageHandler)
+      this.boundStorageHandler = undefined
+      console.log(
+        `[${this.options.loggerName ?? "Storage"}] Storage event listener removed for key:`,
+        this.options.key,
+      )
+    }
+  }
+
+  /**
+   * Notify all listeners of data changes
+   */
+  private notifyListeners(data: T[]): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(data)
+      } catch (e) {
+        console.error(
+          `[${this.options.loggerName ?? "Storage"}] Listener error:`,
+          e,
+        )
+      }
+    }
   }
 
   /**

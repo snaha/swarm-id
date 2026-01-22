@@ -13,23 +13,23 @@ The architecture consists of three main components:
 ┌─────────────────────────────────────────────────────────────┐
 │  Your dApp (e.g., https://my-dapp.com)                      │
 │  ┌────────────────────────────────────────────────────┐     │
-│  │ SwarmIdClient                                       │     │
-│  │                                                     │     │
+│  │ SwarmIdClient                                      │     │
+│  │                                                    │     │
 │  │  ┌─────────────────────────────────────────────┐   │     │
 │  │  │ Hidden iframe (https://swarm-id.snaha.net)  │   │     │
-│  │  │                                              │   │     │
-│  │  │ SwarmIdProxy                                 │   │     │
+│  │  │                                             │   │     │
+│  │  │ SwarmIdProxy                                │   │     │
 │  │  │   - Stores app-specific secret              │   │     │
 │  │  │   - Proxies Bee API calls                   │   │     │
 │  │  └─────────────────────────────────────────────┘   │     │
 │  └────────────────────────────────────────────────────┘     │
-│                           │                                  │
-│                           │ Opens popup                      │
-│                           ↓                                  │
+│                           │                                 │
+│                           │ Opens popup                     │
+│                           ↓                                 │
 │  ┌────────────────────────────────────────────────────┐     │
 │  │ Auth Popup (https://swarm-id.snaha.net)            │     │
-│  │                                                     │     │
-│  │ SwarmIdAuth                                         │     │
+│  │                                                    │     │
+│  │ SwarmIdAuth                                        │     │
 │  │   - Stores master key (first-party context)        │     │
 │  │   - Derives app-specific secrets                   │     │
 │  │   - Sends secret to iframe via postMessage         │     │

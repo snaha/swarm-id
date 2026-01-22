@@ -9,6 +9,8 @@ import type { AppMetadata } from "../types"
  * @param baseUrl - The base URL where the authentication page is hosted
  * @param origin - The origin of the parent application requesting authentication
  * @param metadata - Optional application metadata to display during authentication
+ * @param proxyMode - When true, enables proxy mode which validates same-origin opener
+ *                    and sends setSecret via postMessage (used for local development)
  * @returns The complete authentication URL with hash parameters
  *
  * @example
@@ -25,10 +27,15 @@ export function buildAuthUrl(
   baseUrl: string,
   origin: string,
   metadata?: AppMetadata,
+  proxyMode?: boolean,
 ): string {
   // Build URL with hash parameters (avoids re-renders in SPA)
   const params = new URLSearchParams()
   params.set("origin", origin)
+
+  if (proxyMode) {
+    params.set("proxyMode", "true")
+  }
 
   if (metadata) {
     params.set("appName", metadata.name)

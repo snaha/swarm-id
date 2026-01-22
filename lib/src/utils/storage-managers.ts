@@ -13,6 +13,13 @@ import {
 } from "./versioned-storage"
 import type { Account, Identity, ConnectedApp, PostageStamp } from "../types"
 import {
+  STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_IDENTITIES,
+  STORAGE_KEY_CONNECTED_APPS,
+  STORAGE_KEY_POSTAGE_STAMPS,
+  STORAGE_KEY_NETWORK_SETTINGS,
+} from "../types"
+import {
   AccountSchemaV1,
   IdentitySchemaV1,
   ConnectedAppSchemaV1,
@@ -183,7 +190,7 @@ export function serializePostageStamp(
  */
 export function createAccountsStorageManager(): VersionedStorageManager<Account> {
   return createLocalStorageManager<Account>({
-    key: "swarm-id-accounts",
+    key: STORAGE_KEY_ACCOUNTS,
     currentVersion: 1,
     parsers: {
       1: parseAccountsV1,
@@ -198,7 +205,7 @@ export function createAccountsStorageManager(): VersionedStorageManager<Account>
  */
 export function createIdentitiesStorageManager(): VersionedStorageManager<Identity> {
   return createLocalStorageManager<Identity>({
-    key: "swarm-id-identities",
+    key: STORAGE_KEY_IDENTITIES,
     currentVersion: 1,
     parsers: {
       1: parseIdentitiesV1,
@@ -213,7 +220,7 @@ export function createIdentitiesStorageManager(): VersionedStorageManager<Identi
  */
 export function createConnectedAppsStorageManager(): VersionedStorageManager<ConnectedApp> {
   return createLocalStorageManager<ConnectedApp>({
-    key: "swarm-id-connected-apps",
+    key: STORAGE_KEY_CONNECTED_APPS,
     currentVersion: 1,
     parsers: {
       1: parseConnectedAppsV1,
@@ -228,7 +235,7 @@ export function createConnectedAppsStorageManager(): VersionedStorageManager<Con
  */
 export function createPostageStampsStorageManager(): VersionedStorageManager<PostageStamp> {
   return createLocalStorageManager<PostageStamp>({
-    key: "swarm-id-postage-stamps",
+    key: STORAGE_KEY_POSTAGE_STAMPS,
     currentVersion: 1,
     parsers: {
       1: parsePostageStampsV1,
@@ -241,8 +248,6 @@ export function createPostageStampsStorageManager(): VersionedStorageManager<Pos
 // ============================================================================
 // Network Settings Storage (Singleton)
 // ============================================================================
-
-const NETWORK_SETTINGS_STORAGE_KEY = "swarm-id-network-settings"
 
 /**
  * Parse network settings - Zod validates URL format
@@ -293,7 +298,7 @@ export function createNetworkSettingsStorageManager(): NetworkSettingsStorageMan
         return undefined
       }
 
-      const raw = localStorage.getItem(NETWORK_SETTINGS_STORAGE_KEY)
+      const raw = localStorage.getItem(STORAGE_KEY_NETWORK_SETTINGS)
       if (!raw) {
         return undefined
       }
@@ -318,7 +323,7 @@ export function createNetworkSettingsStorageManager(): NetworkSettingsStorageMan
 
       const serialized = serializeNetworkSettings(settings)
       localStorage.setItem(
-        NETWORK_SETTINGS_STORAGE_KEY,
+        STORAGE_KEY_NETWORK_SETTINGS,
         JSON.stringify(serialized),
       )
     },
@@ -328,7 +333,7 @@ export function createNetworkSettingsStorageManager(): NetworkSettingsStorageMan
         return
       }
 
-      localStorage.removeItem(NETWORK_SETTINGS_STORAGE_KEY)
+      localStorage.removeItem(STORAGE_KEY_NETWORK_SETTINGS)
     },
   }
 }

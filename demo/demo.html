@@ -46,6 +46,7 @@
         padding: 20px;
         background: #f8f9fa;
         border-radius: 8px;
+        gap: 8px;
       }
 
       .section h2 {
@@ -70,6 +71,13 @@
         background: #f8d7da;
         border: 1px solid #f5c6cb;
         color: #721c24;
+      }
+
+      .button-container {
+        display: flex;
+        flex-direction: row;
+        align-items: center;
+        gap: 8px;
       }
 
       button {
@@ -175,7 +183,15 @@
         <div id="auth-status" class="status unauthenticated">
           Status: Not authenticated
         </div>
-        <div id="swarm-id-button" style="width: 200px; height: 40px; margin-top: 15px;"></div>
+
+        <div class="button-container">
+          Custom button:
+          <button id="connect-button" style="width: 200px; height: 40px; margin-top: 15px;">Connect</button>
+        </div>
+        <div class="button-container">
+          Iframe button:
+<div id="swarm-id-button" style="width: 200px; height: 40px; margin-top: 15px;"></div>
+        </div>
       </div>
 
       <!-- Upload Section -->
@@ -295,11 +311,13 @@ Hello, Swarm!</textarea
         const statusEl = document.getElementById("auth-status");
         const uploadBtn = document.getElementById("upload-button");
         const downloadBtn = document.getElementById("download-button");
+        const connectBtn = document.getElementById("connect-button");
 
         if (authenticated) {
           statusEl.className = "status authenticated";
           statusEl.textContent = "✓ Status: Authenticated";
           downloadBtn.disabled = false;
+          connectBtn.textContent = "Disconnect";
 
           // Check if upload is available (requires postage stamp)
           try {
@@ -318,6 +336,7 @@ Hello, Swarm!</textarea
           statusEl.textContent = "✗ Status: Not authenticated";
           uploadBtn.disabled = true;
           downloadBtn.disabled = true;
+          connectBtn.textContent = "Connect";
         }
       }
 
@@ -384,6 +403,18 @@ Hello, Swarm!</textarea
             resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
           }
         });
+
+      document
+        .getElementById('connect-button')
+        .addEventListener("click", async () => {
+          const status = await client.checkAuthStatus();
+          if (status.authenticated) {
+            await client.disconnect();
+          } else {
+            client.connect();
+          }
+        })
+
 
       log("Demo application ready", "info");
 
