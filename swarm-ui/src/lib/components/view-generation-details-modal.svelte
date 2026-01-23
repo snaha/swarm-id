@@ -115,7 +115,7 @@
 					dimension="compact"
 					value={isUnmasked ? secretSeed : '***********************'}
 					class="grower"
-					label="Initial wallet address"
+					label="Secret seed"
 					disabled
 					type={isUnmasked ? 'text' : 'password'}
 				/>
