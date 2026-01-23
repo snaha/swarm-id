@@ -181,7 +181,7 @@ pnpm dev
 Access at http://localhost:3000
 
 - Demo app: http://localhost:3000
-- Identity UI: http://localhost:5173
+- Identity UI: http://localhost:5174
 
 No HTTPS, certificates, or custom domains required - `localhost` is a secure context.
 

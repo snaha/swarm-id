@@ -10,27 +10,13 @@ This demo shows how to integrate the Swarm ID library into a dApp for authentica
 
 - **index.html** - Demo dApp that uses `SwarmIdClient` from the library
 - **build.js** - Build script that bundles the demo with the library
-- **lib/** - Symlink to `../lib/dist` for local development
-
-## Local Development
-
-From the project root:
-
-```bash
-pnpm install
-pnpm dev
-```
-
-Then open http://localhost:3000
-
-No HTTPS or certificates required - `localhost` is a secure context.
 
 ## Using the Library
 
-The demo imports from the library:
+The demo imports from the built library:
 
 ```javascript
-import { SwarmIdClient } from '/lib/swarm-id-client.js'
+import { SwarmIdClient } from '../lib/dist/swarm-id-client.js'
 ```
 
 The library handles all the complex authentication, message passing, validation, and type safety internally. The demo HTML only needs to:
@@ -39,7 +25,7 @@ The library handles all the complex authentication, message passing, validation,
 2. Initialize the client with configuration
 3. Handle UI interactions
 
-## Building for Production
+## Building the Demo
 
 From the project root:
 
@@ -55,7 +41,22 @@ This will:
 
 ## Deployment
 
-The demo is deployed to **swarm-demo.snaha.net** using DigitalOcean App Platform.
+The demo is deployed to **swarm-demo.snaha.net** using DigitalOcean App Platform. The deployment configuration is in `.do/swarm-demo-app.yaml`.
+
+## Local Development
+
+From the project root:
+
+```bash
+pnpm install
+pnpm dev
+```
+
+Then open http://localhost:3000
+
+No HTTPS or certificates required - `localhost` is a secure context.
+
+**Note:** Safari is not supported for local development.
 
 ## How It Works
 
@@ -63,16 +64,12 @@ The demo creates a `SwarmIdClient` instance:
 
 ```javascript
 const client = new SwarmIdClient({
-  iframeOrigin: 'http://localhost:5174',  // or production URL
-  iframePath: '/proxy',
-  timeout: 60000,
+  iframeOrigin: window.__ID_DOMAIN__ || 'https://swarm-id.snaha.net',
+  beeApiUrl: 'http://localhost:1633',
+  timeout: 30000,
   onAuthChange: (authenticated) => {
     // Handle auth status changes
-  },
-  metadata: {
-    name: 'My App',
-    description: 'App description',
-  },
+  }
 })
 
 await client.initialize()
@@ -84,13 +81,19 @@ The client automatically:
 - Validates all messages with Zod schemas
 - Provides a type-safe API for authentication and Bee operations
 
+The identity management (authentication, key derivation, storage) is handled by the Swarm ID UI at `swarm-id.snaha.net` (see `../swarm-ui/`)
+
 ## API Examples
 
 ### Upload Data
 
 ```javascript
 const data = new TextEncoder().encode('Hello, Swarm!')
-const result = await client.uploadData(data, { pin: true, encrypt: true })
+const result = await client.uploadData(
+  'your-postage-batch-id',
+  data,
+  { pin: true }
+)
 console.log('Reference:', result.reference)
 ```
 
@@ -111,14 +114,11 @@ if (status.authenticated) {
 }
 ```
 
-### Connect/Disconnect
+### Get Auth Iframe
 
 ```javascript
-// Open auth popup
-client.connect()
-
-// Disconnect
-await client.disconnect()
+// The iframe is automatically positioned in the bottom-right corner
+const iframe = client.getAuthIframe()
 ```
 
 ## Benefits of Using the Library
