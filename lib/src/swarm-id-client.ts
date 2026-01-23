@@ -130,7 +130,7 @@ export class SwarmIdClient {
             "Proxy initialization timeout - proxy did not respond within 10 seconds",
           ),
         )
-      }, 10000)
+      }, 30000)
     })
 
     // Create promise for proxyInitialized message
@@ -147,7 +147,7 @@ export class SwarmIdClient {
             ),
           )
         }
-      }, 10000)
+      }, 30000)
     })
 
     this.setupMessageListener()

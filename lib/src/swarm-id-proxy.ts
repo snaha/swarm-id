@@ -66,6 +66,7 @@ export class SwarmIdProxy {
   private appMetadata: AppMetadata | undefined
   private bee: Bee
   private unsubscribeConnectedApps: (() => void) | undefined
+  private isConnecting: boolean = false
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -723,6 +724,7 @@ export class SwarmIdProxy {
   private updateAuthStatus(authenticated: boolean): void {
     this.authenticated = authenticated
     this.authLoading = false
+    this.isConnecting = false
     // Always show button - it will display as login or disconnect based on auth status
     this.showAuthButton()
   }
@@ -918,6 +920,11 @@ export class SwarmIdProxy {
       return
     }
 
+    if (this.isConnecting) {
+      console.log("[Proxy] Skipping button render - auth popup is open")
+      return
+    }
+
     // Clear existing content
     this.authButtonContainer.innerHTML = ""
 
@@ -1031,6 +1038,7 @@ export class SwarmIdProxy {
    * Handle login button click
    */
   private handleLoginClick(button: HTMLButtonElement): void {
+    this.isConnecting = true
     // Disable button and show spinner
     button.disabled = true
     button.innerHTML =
