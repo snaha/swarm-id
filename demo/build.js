@@ -35,9 +35,9 @@ mkdirSync(buildLibDir, { recursive: true })
 cpSync(libDistDir, buildLibDir, { recursive: true })
 console.log('✓ Library files copied')
 
-// Process demo.html and rename to index.html
-console.log('Processing demo.html...')
-let demoHtml = readFileSync(join(__dirname, 'demo.html'), 'utf-8')
+// Process index.html
+console.log('Processing index.html...')
+let demoHtml = readFileSync(join(__dirname, 'index.html'), 'utf-8')
 
 // Inject environment config in head
 const configScript = `

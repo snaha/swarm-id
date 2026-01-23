@@ -12,7 +12,7 @@ export default defineConfig({
 		timeout: 5000,
 	},
 	use: {
-		baseURL: 'http://localhost:5173',
+		baseURL: 'http://localhost:5174',
 		trace: 'on-first-retry',
 		actionTimeout: 5000,
 		navigationTimeout: 10000,
@@ -39,7 +39,7 @@ export default defineConfig({
 
 	webServer: {
 		command: 'pnpm dev',
-		port: 5173,
+		port: 5174,
 		reuseExistingServer: !process.env.CI,
 		timeout: 30000,
 		stdout: 'pipe',

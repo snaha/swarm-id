@@ -5,6 +5,11 @@
   "description": "Swarm Identity Management - Monorepo",
   "type": "module",
   "scripts": {
+    "dev": "concurrently -n ui,demo -c blue,green \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
+    "dev:demo": "npx serve demo -l 3000",
+    "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
+    "dev:swarm-ui": "pnpm --filter swarm-identity dev",
+    "dev:docs": "pnpm --filter @swarm-id/docs dev",
     "build": "pnpm -r --workspace-concurrency=1 build",
     "build:bee-js": "pnpm --filter @ethersphere/bee-js build",
     "build:lib": "pnpm build:bee-js && pnpm --filter @swarm-id/lib build",
@@ -12,14 +17,14 @@
     "build:swarm-ui": "pnpm --filter swarm-identity build",
     "build:swarm-demo": "pnpm build:lib && pnpm build:demo",
     "build:swarm-id": "pnpm build:lib && pnpm build:swarm-ui && rm -rf swarm-id-build && cp -r swarm-ui/build swarm-id-build && cp -r lib/dist swarm-id-build/lib",
-    "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
-    "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
-    "dev:swarm-ui": "pnpm --filter swarm-identity dev",
-    "install:all": "pnpm install",
-    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all",
-    "dev:docs": "pnpm --filter @swarm-id/docs dev",
     "build:docs": "pnpm --filter @swarm-id/docs build",
-    "preview:docs": "pnpm --filter @swarm-id/docs preview"
+    "preview:docs": "pnpm --filter @swarm-id/docs preview",
+    "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
+    "install:all": "pnpm install",
+    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
   },
   "keywords": [
     "swarm",

@@ -173,10 +173,6 @@
 		return postageStamp
 	}
 
-	function isDevelopmentEnvironment(): boolean {
-		return window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-	}
-
 	function updateSelectedIdentity(appSecret: string) {
 		if (!selectedIdentity) {
 			return
@@ -199,20 +195,18 @@
 
 			const postageStamp = getIdentityPostageStamp(selectedIdentity)
 
-			// In development mode, include postageBatchId/signerKey in the message
-			// because the proxy's localStorage is partitioned and can't access shared storage.
-			// In production, the proxy looks up stamps from shared storage.
-			// TODO: see https://github.com/snaha/swarm-id/issues/124
-			const isDevelopment = isDevelopmentEnvironment()
-
+			// Always include postageBatchId/signerKey/networkSettings in the message.
+			// The proxy iframe decides whether to use this data or read from shared storage:
+			// - If Storage Access API is granted: reads from shared storage
+			// - If storage is partitioned: uses this message data as fallback
 			const message: SetSecretMessage = {
 				type: 'setSecret',
 				appOrigin: sessionStore.data.appOrigin,
 				data: {
 					secret: appSecret,
-					postageBatchId: isDevelopment ? postageStamp?.batchID.toHex() : undefined,
-					signerKey: isDevelopment ? postageStamp?.signerKey.toHex() : undefined,
-					networkSettings: isDevelopment ? { ...networkSettingsStore.settings } : undefined,
+					postageBatchId: postageStamp?.batchID.toHex(),
+					signerKey: postageStamp?.signerKey.toHex(),
+					networkSettings: { ...networkSettingsStore.settings },
 				},
 			}
 
@@ -220,6 +214,7 @@
 		}
 		// DIRECT MODE: No postMessage needed - the localStorage write below
 		// triggers a storage event that the proxy detects
+		// Note: This doesn't work in Safari due to storage partitioning - use the iframe button instead
 
 		// Track this app connection with appSecret in shared storage
 		// This happens in BOTH modes - in direct mode, this triggers the storage event

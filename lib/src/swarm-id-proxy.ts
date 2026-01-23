@@ -67,6 +67,7 @@ export class SwarmIdProxy {
   private bee: Bee
   private unsubscribeConnectedApps: (() => void) | undefined
   private isConnecting: boolean = false
+  private hasStorageAccess: boolean = false
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -91,13 +92,16 @@ export class SwarmIdProxy {
    * the popup writes to localStorage. This storage event notifies the proxy
    * to check for a new valid connection and send authSuccess to the parent.
    * Also handles disconnection when the connection is removed or invalidated.
+   *
+   * Note: We always set up this listener, even when storage might be partitioned.
+   * In some browsers/configurations (like localhost development), storage events
+   * work between same-origin windows even in iframes. If storage IS partitioned,
+   * the listener simply won't fire, and we fall back to postMessage from the popup.
    */
   private setupConnectedAppsListener(): void {
-    // Only set up in production - in development, storage is partitioned
-    if (this.isDevelopmentEnvironment()) {
-      console.log(
-        "[Proxy] Development mode - skipping connected apps storage listener",
-      )
+    // Avoid duplicate subscriptions
+    if (this.unsubscribeConnectedApps) {
+      console.log("[Proxy] Already subscribed to connected apps storage")
       return
     }
 
@@ -518,19 +522,73 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Check if running in a development environment (localhost)
+   * Check if Storage Access API is available
    */
-  private isDevelopmentEnvironment(): boolean {
+  private hasStorageAccessAPI(): boolean {
     return (
-      window.location.hostname === "localhost" ||
-      window.location.hostname === "127.0.0.1"
+      typeof document.hasStorageAccess === "function" &&
+      typeof document.requestStorageAccess === "function"
     )
   }
 
   /**
+   * Request unpartitioned storage access using the Storage Access API.
+   * This allows the iframe to access the same localStorage as the top-level context.
+   * Must be called from a user gesture (click handler).
+   * @returns true if access was granted, false otherwise
+   */
+  private async requestStorageAccess(): Promise<boolean> {
+    if (!this.hasStorageAccessAPI()) {
+      console.log("[Proxy] Storage Access API not available")
+      return false
+    }
+
+    try {
+      // Check if we already have access
+      const hasAccess = await document.hasStorageAccess()
+      if (hasAccess) {
+        console.log("[Proxy] Already have storage access")
+        this.hasStorageAccess = true
+        return true
+      }
+
+      // Request access - must be called from user gesture
+      console.log("[Proxy] Requesting storage access...")
+      await document.requestStorageAccess()
+      console.log("[Proxy] Storage access granted!")
+      this.hasStorageAccess = true
+
+      return true
+    } catch (error) {
+      console.log("[Proxy] Storage access denied or failed:", error)
+      this.hasStorageAccess = false
+      return false
+    }
+  }
+
+  /**
+   * Check if we should use shared storage (either not in iframe, have storage access, or dev mode)
+   */
+  private canUseSharedStorage(): boolean {
+    return this.hasStorageAccess || !this.isInIframe()
+  }
+
+  /**
+   * Check if running inside an iframe
+   */
+  private isInIframe(): boolean {
+    try {
+      return window.self !== window.top
+    } catch {
+      // Cross-origin iframes throw an error
+      return true
+    }
+  }
+
+  /**
    * Load authentication data.
-   * - In production: reads from shared storage (ConnectedApp records)
-   * - In development: uses in-memory values (set by handleSetSecret)
+   * - If shared storage is accessible: reads from shared storage (ConnectedApp records)
+   * - If partitioned (iframe without Storage Access): uses in-memory values (set by handleSetSecret)
    */
   private async loadAuthData(): Promise<void> {
     if (!this.parentOrigin) {
@@ -539,19 +597,33 @@ export class SwarmIdProxy {
       return
     }
 
-    const isDevelopment = this.isDevelopmentEnvironment()
+    // Try to restore Storage Access permission if in iframe
+    // This allows auth to persist across page reloads
+    if (this.isInIframe() && this.hasStorageAccessAPI()) {
+      try {
+        const hasAccess = await document.hasStorageAccess()
+        if (hasAccess) {
+          this.hasStorageAccess = true
+          console.log("[Proxy] Storage access restored from previous grant")
+        }
+      } catch {
+        // Ignore - will fall back to showing login button
+      }
+    }
 
-    if (isDevelopment) {
-      // In development, localStorage is partitioned so we can't read shared storage.
-      // User must re-authenticate on each page reload.
+    if (!this.canUseSharedStorage()) {
+      // Storage is partitioned - we can't read shared storage.
+      // User must authenticate, which will either:
+      // 1. Request Storage Access API and then read shared storage, or
+      // 2. Receive auth data via postMessage from the popup
       console.log(
-        "[Proxy] Development mode - shared storage not accessible, requires auth for:",
+        "[Proxy] Storage partitioned - shared storage not accessible, requires auth for:",
         this.parentOrigin,
       )
       this.authLoading = false
       this.showAuthButton()
     } else {
-      // In production, read from shared storage
+      // We have access to shared storage (not in iframe, or Storage Access granted)
       const sharedData = this.lookupAppSecretFromSharedStorage()
 
       if (sharedData) {
@@ -1037,7 +1109,7 @@ export class SwarmIdProxy {
   /**
    * Handle login button click
    */
-  private handleLoginClick(button: HTMLButtonElement): void {
+  private async handleLoginClick(button: HTMLButtonElement): Promise<void> {
     this.isConnecting = true
     // Disable button and show spinner
     button.disabled = true
@@ -1051,6 +1123,12 @@ export class SwarmIdProxy {
       style.textContent =
         "@keyframes spin { to { transform: rotate(360deg); } }"
       document.head.appendChild(style)
+    }
+
+    // Request storage access (must be done during user gesture)
+    // This allows the iframe to access unpartitioned localStorage
+    if (!this.hasStorageAccess && this.isInIframe()) {
+      await this.requestStorageAccess()
     }
 
     this.openAuthPopup()
@@ -1103,11 +1181,9 @@ export class SwarmIdProxy {
       )
     }
 
-    const isDevelopment = this.isDevelopmentEnvironment()
-
-    if (isDevelopment) {
-      // In development, localStorage is partitioned so we receive stamps and settings in the message
-      console.log("[Proxy] Using auth data from message (development mode)")
+    if (!this.canUseSharedStorage()) {
+      // Storage is partitioned - we receive stamps and settings in the message
+      console.log("[Proxy] Using auth data from message (partitioned storage)")
       this.appSecret = data.secret
       this.postageBatchId = data.postageBatchId
       this.signerKey = data.signerKey
@@ -1119,7 +1195,7 @@ export class SwarmIdProxy {
         console.log("[Proxy] Using Bee API URL from message:", this.beeApiUrl)
       }
     } else {
-      // In production, secret is already in shared storage (set by auth popup)
+      // We have access to shared storage - data is already there (set by auth popup)
       // Just update local state
       console.log(
         "[Proxy] Auth data stored in shared storage, updating local state",

@@ -29,7 +29,7 @@ swarm-id-explorations/
 **Output:** `demo/build/`
 
 **Files:**
-- `/index.html` - Demo app (renamed from demo.html during build)
+- `/index.html` - Demo app
 
 **CORS:** Allows requests from `https://swarm-id.snaha.net`
 
@@ -173,32 +173,17 @@ Both apps use these environment variables (injected at build time):
 
 ## Local Development
 
-### Setup
-
-1. Install mkcert: `brew install mkcert` (macOS)
-2. Generate certificates:
-   ```bash
-   mkcert swarm-app.local swarm-id.local
-   ```
-3. Configure `/etc/hosts`:
-   ```
-   127.0.0.1  swarm-app.local
-   127.0.0.1  swarm-id.local
-   ```
-
-### Run Servers
-
 ```bash
-# Start both HTTPS servers (uses local domains)
-./start-servers.sh
-
-# Development mode with hot reload
-./start-servers-dev.sh
+pnpm install
+pnpm dev
 ```
 
-Access demos:
-- Demo app: `https://swarm-app.local:8080/` (serves demo/demo.html)
-- Identity UI: `https://swarm-id.local:8081/`
+Access at http://localhost:3000
+
+- Demo app: http://localhost:3000
+- Identity UI: http://localhost:5173
+
+No HTTPS, certificates, or custom domains required - `localhost` is a secure context.
 
 ## Troubleshooting
 

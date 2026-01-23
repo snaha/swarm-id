@@ -255,7 +255,7 @@ Hello, Swarm!</textarea
       // Support ?idDomain= parameter for ngrok testing
       const urlParams = new URLSearchParams(window.location.search);
       const PROXY_ORIGIN = urlParams.get('idDomain') || window.__ID_DOMAIN__ || (
-        window.location.hostname.includes('local')
+        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
           ? 'http://localhost:5174'
           : 'https://swarm-id.snaha.net'
       );
