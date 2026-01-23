@@ -285,7 +285,10 @@ export class SwarmIdClient {
 
       // Validate origin
       if (event.origin !== this.iframeOrigin) {
-        // Silently ignore messages from other origins (browser extensions, etc.)
+        console.warn(
+          "[SwarmIdClient] Rejected message from unauthorized origin:",
+          event.origin,
+        )
         return
       }
 
