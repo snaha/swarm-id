@@ -283,8 +283,9 @@ export class SwarmIdClient {
         return
       }
 
-      // Validate origin
-      if (event.origin !== this.iframeOrigin) {
+      // Validate origin (extract just origin part, ignoring any path in iframeOrigin)
+      const expectedOrigin = new URL(this.iframeOrigin).origin
+      if (event.origin !== expectedOrigin) {
         console.warn(
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
@@ -711,7 +712,7 @@ export class SwarmIdClient {
     let progressListener: ((event: MessageEvent) => void) | undefined
     if (onProgress) {
       progressListener = (event: MessageEvent) => {
-        if (event.origin !== this.iframeOrigin) return
+        if (event.origin !== new URL(this.iframeOrigin).origin) return
 
         try {
           const message = IframeToParentMessageSchema.parse(event.data)
