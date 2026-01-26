@@ -7,14 +7,15 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 
 	function handlePasskeyClick() {
-		goto(routes.PASSKEY_NEW)
+		goto(resolve(routes.PASSKEY_NEW))
 	}
 
 	function handleEthClick() {
-		goto(routes.ETH_NEW)
+		goto(resolve(routes.ETH_NEW))
 	}
 
 	function handleImportClick() {

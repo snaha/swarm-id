@@ -27,9 +27,7 @@ export default typescriptEslint.config(
 				extraFileExtensions: ['.svelte'],
 			},
 		},
-		rules: {
-			'svelte/no-navigation-without-resolve': 'off',
-		},
+		rules: {},
 	},
 	{
 		files: ['**/*.svelte.ts'],

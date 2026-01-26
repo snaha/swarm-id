@@ -1,6 +1,7 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/button.svelte'
 	import { page } from '$app/state'
+	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 
 	let { children } = $props()
@@ -11,9 +12,9 @@
 	const tabs = $derived(
 		identityId
 			? [
-					{ label: 'Apps', href: routes.IDENTITY_APPS(identityId) },
-					{ label: 'Stamps', href: routes.IDENTITY_STAMPS(identityId) },
-					{ label: 'Identity', href: routes.IDENTITY_SETTINGS(identityId) },
+					{ label: 'Apps', href: resolve(routes.IDENTITY_APPS, { id: identityId }) },
+					{ label: 'Stamps', href: resolve(routes.IDENTITY_STAMPS, { id: identityId }) },
+					{ label: 'Identity', href: resolve(routes.IDENTITY_SETTINGS, { id: identityId }) },
 				]
 			: [],
 	)

@@ -1,4 +1,5 @@
 <script lang="ts">
+	import { resolve } from '$app/paths'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
@@ -342,10 +343,12 @@ Check console logs for details:
 	<Vertical --vertical-gap="var(--padding)">
 		<Typography variant="h3">Test URLs</Typography>
 		<Vertical --vertical-gap="var(--half-padding)">
-			<a href="/connect?origin=https://swarm-app.local:8080">
+			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- template literal with resolve() -->
+			<a href={`${resolve('/(app)/connect')}?origin=https://swarm-app.local:8080`}>
 				<Button variant="ghost" dimension="compact">Test: swarm-app.local:8080</Button>
 			</a>
-			<a href="/connect?origin=http://localhost:5173">
+			<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- template literal with resolve() -->
+			<a href={`${resolve('/(app)/connect')}?origin=http://localhost:5173`}>
 				<Button variant="ghost" dimension="compact">Test: localhost:5173</Button>
 			</a>
 		</Vertical>

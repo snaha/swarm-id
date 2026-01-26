@@ -4,6 +4,7 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import { page } from '$app/state'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import IdentityList from '$lib/components/identity-list.svelte'
@@ -58,13 +59,13 @@
 
 		// Determine which page we're on and navigate to the same page type with the new identity
 		if (currentPath.includes('/apps')) {
-			goto(routes.IDENTITY_APPS(clickedIdentity.id))
+			goto(resolve(routes.IDENTITY_APPS, { id: clickedIdentity.id }))
 		} else if (currentPath.includes('/stamps')) {
-			goto(routes.IDENTITY_STAMPS(clickedIdentity.id))
+			goto(resolve(routes.IDENTITY_STAMPS, { id: clickedIdentity.id }))
 		} else if (currentPath.includes('/settings')) {
-			goto(routes.IDENTITY_SETTINGS(clickedIdentity.id))
+			goto(resolve(routes.IDENTITY_SETTINGS, { id: clickedIdentity.id }))
 		} else {
-			goto(routes.IDENTITY_APPS(clickedIdentity.id))
+			goto(resolve(routes.IDENTITY_APPS, { id: clickedIdentity.id }))
 		}
 	}
 
@@ -219,7 +220,7 @@
 						dimension="compact"
 						onclick={() => {
 							drawerOpen = false
-							goto(routes.ACCOUNT_NEW)
+							goto(resolve(routes.ACCOUNT_NEW))
 						}}
 					>
 						<Horizontal

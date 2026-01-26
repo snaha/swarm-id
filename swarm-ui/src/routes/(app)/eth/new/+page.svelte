@@ -7,6 +7,7 @@
 	import WorkflowAutomation from 'carbon-icons-svelte/lib/WorkflowAutomation.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import routes from '$lib/routes'
+	import { resolve } from '$app/paths'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
@@ -119,7 +120,7 @@
 			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
-			goto(routes.IDENTITY_NEW)
+			goto(resolve(routes.IDENTITY_NEW))
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to connect wallet'
 			console.error('❌ Wallet connection failed:', err)
@@ -135,7 +136,8 @@
 	<CreationLayout
 		title="Create account with Ethereum"
 		description="Create a new Swarm ID account using an Ethereum wallet"
-		onClose={() => (sessionStore.data.appOrigin ? goto(routes.CONNECT) : goto(routes.HOME))}
+		onClose={() =>
+			sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">

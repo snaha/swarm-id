@@ -1,12 +1,15 @@
-export default {
-	HOME: `/`,
-	CONNECT: `/connect`,
-	ACCOUNT_NEW: `/account/new`,
-	PASSKEY_NEW: `/passkey/new`,
-	ETH_NEW: `/eth/new`,
-	IDENTITY_NEW: `/identity/new`,
-	IDENTITY: (id: string) => `/identity/${id}`,
-	IDENTITY_APPS: (id: string) => `/identity/${id}/apps`,
-	IDENTITY_STAMPS: (id: string) => `/identity/${id}/stamps`,
-	IDENTITY_SETTINGS: (id: string) => `/identity/${id}/settings`,
-} as const
+const routes = {
+	HOME: '/' as const,
+	CONNECT: '/(app)/connect' as const,
+	ACCOUNT_NEW: '/(app)/account/new' as const,
+	PASSKEY_NEW: '/(app)/passkey/new' as const,
+	ETH_NEW: '/(app)/eth/new' as const,
+	IDENTITY_NEW: '/(app)/identity/new' as const,
+	IDENTITY: '/(app)/identity/[id]' as const,
+	IDENTITY_APPS: '/(app)/identity/[id]/apps' as const,
+	IDENTITY_STAMPS: '/(app)/identity/[id]/stamps' as const,
+	IDENTITY_STAMPS_NEW: '/(app)/identity/[id]/stamps/new' as const,
+	IDENTITY_SETTINGS: '/(app)/identity/[id]/settings' as const,
+}
+
+export default routes

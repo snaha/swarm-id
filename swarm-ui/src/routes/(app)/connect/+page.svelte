@@ -308,10 +308,12 @@
 		<Button variant="strong" dimension="compact" onclick={closeWindowWithSessionCleanup}
 			>Continue to app<ArrowRight size={20} /></Button
 		>
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- full URL, not a route -->
 		<Typography variant="small"
 			>Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
 			></Typography
 		>
+		<!-- eslint-enable svelte/no-navigation-without-resolve -->
 	</Vertical>
 {:else if sessionStore.data.appOrigin && sessionStore.data.appData}
 	<ConnectedAppHeader

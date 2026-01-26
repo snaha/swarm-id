@@ -9,6 +9,7 @@
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import { onMount } from 'svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -103,17 +104,17 @@
 
 		// Navigate back to /connect or home
 		if (sessionStore.data.appOrigin) {
-			goto(routes.CONNECT)
+			goto(resolve(routes.CONNECT))
 		} else {
 			// Clear temporary masterKey for security
 			sessionStore.clearTemporaryMasterKey()
 
-			goto(routes.HOME)
+			goto(resolve(routes.HOME))
 		}
 	}
 </script>
 
-<CreationLayout title="Create identity" onClose={() => goto(routes.HOME)}>
+<CreationLayout title="Create identity" onClose={() => goto(resolve(routes.HOME))}>
 	{#snippet content()}
 		{#if !hasSessionData}
 			<Typography>No account data found. Please start from the home page.</Typography>

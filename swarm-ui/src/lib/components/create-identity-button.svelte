@@ -2,6 +2,7 @@
 	import Button from '$lib/components/ui/button.svelte'
 	import Add from 'carbon-icons-svelte/lib/Add.svelte'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import routes from '$lib/routes'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
@@ -24,7 +25,7 @@
 			const masterKey = await getMasterKeyFromAccount(account)
 			sessionStore.setAccount(account)
 			sessionStore.setTemporaryMasterKey(masterKey)
-			goto(routes.IDENTITY_NEW)
+			goto(resolve(routes.IDENTITY_NEW))
 		} catch (err) {
 			console.error('Failed to authenticate:', err)
 			isAuthenticating = false

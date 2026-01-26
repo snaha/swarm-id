@@ -4,7 +4,9 @@
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import { page } from '$app/stores'
+	import routes from '$lib/routes'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { BatchId, PrivateKey } from '@ethersphere/bee-js'
@@ -89,7 +91,7 @@
 		}
 
 		// Navigate back to stamps page
-		goto(`/identity/${identityId}/stamps`)
+		goto(resolve(routes.IDENTITY_STAMPS, { id: identityId }))
 	}
 </script>
 

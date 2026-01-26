@@ -6,6 +6,7 @@
 	import Input from '$lib/components/ui/input/input.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import routes from '$lib/routes'
+	import { resolve } from '$app/paths'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -76,7 +77,7 @@
 			console.log('🔑 MasterKey stored in session (temporary)')
 
 			// Navigate to identity creation page
-			goto(routes.IDENTITY_NEW)
+			goto(resolve(routes.IDENTITY_NEW))
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Failed to create passkey identity'
 			console.error('❌ Passkey creation failed:', err)
@@ -91,7 +92,8 @@
 	<CreationLayout
 		title="Create account with Passkey"
 		description="Create a new Swarm ID account using Passkey"
-		onClose={() => (sessionStore.data.appOrigin ? goto(routes.CONNECT) : goto(routes.HOME))}
+		onClose={() =>
+			sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">

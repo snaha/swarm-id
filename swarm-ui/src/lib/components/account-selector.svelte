@@ -11,6 +11,7 @@
 	import { EthAddress } from '@ethersphere/bee-js'
 	import { toPrefixedHex } from '$lib/utils/hex'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 
 	interface Props {
@@ -69,7 +70,7 @@
 					e.preventDefault()
 					e.stopPropagation()
 					close()
-					goto(routes.ACCOUNT_NEW)
+					goto(resolve(routes.ACCOUNT_NEW))
 				}}
 			>
 				<span class="option-content">

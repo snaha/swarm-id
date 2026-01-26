@@ -39,9 +39,11 @@
 			</Tooltip>
 		</Horizontal>
 		<div class="info-text">
+			<!-- eslint-disable svelte/no-navigation-without-resolve -- full URL, not a route -->
 			<Typography variant="small"
 				>Visit <a href={window.location.origin}>{window.location.host}</a> for info about Swarm ID</Typography
 			>
+			<!-- eslint-enable svelte/no-navigation-without-resolve -->
 		</div>
 	</Horizontal>
 </div>

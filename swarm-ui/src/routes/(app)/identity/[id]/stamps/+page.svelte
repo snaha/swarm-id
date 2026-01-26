@@ -10,6 +10,8 @@
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
+	import routes from '$lib/routes'
 	import type { BatchId } from '@ethersphere/bee-js'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 
@@ -120,7 +122,7 @@
 		<Button
 			dimension="compact"
 			variant="ghost"
-			onclick={() => goto(`/identity/${identityId}/stamps/new`)}
+			onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
 		>
 			Add postage stamp
 		</Button>

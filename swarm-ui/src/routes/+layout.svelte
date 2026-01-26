@@ -6,6 +6,7 @@
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import SwarmLogo from '$lib/components/swarm-logo.svelte'
 	import { page } from '$app/state'
+	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -46,7 +47,7 @@
 				style="width: 100%;"
 			>
 				<div class="logo">
-					<a href={routes.HOME}>
+					<a href={resolve(routes.HOME)}>
 						<SwarmLogo fill="#242424" height={30} />
 					</a>
 				</div>

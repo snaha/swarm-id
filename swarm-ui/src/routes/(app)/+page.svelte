@@ -9,6 +9,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { EthAddress } from '@ethersphere/bee-js'
 	import { goto } from '$app/navigation'
+	import { resolve } from '$app/paths'
 	import type { Identity } from '$lib/types'
 	import routes from '$lib/routes'
 	import Confirmation from '$lib/components/confirmation.svelte'
@@ -31,12 +32,12 @@
 	// Redirect to account creation if no accounts exist
 	$effect(() => {
 		if (!hasAccounts) {
-			goto(routes.ACCOUNT_NEW)
+			goto(resolve(routes.ACCOUNT_NEW))
 		}
 	})
 
 	function handleIdentityClick(identity: Identity) {
-		goto(routes.IDENTITY(identity.id))
+		goto(resolve(routes.IDENTITY, { id: identity.id }))
 	}
 </script>
 
