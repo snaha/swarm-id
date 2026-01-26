@@ -16,6 +16,7 @@ import { Binary } from "cafe-utility"
 import { splitDataIntoChunks } from "./chunking"
 import { buildEncryptedMerkleTree } from "./chunking-encrypted"
 import type { UploadContext, UploadProgress } from "./types"
+import { type ChunkUploader, createHttpChunkUploader } from "./chunk-uploader"
 
 /**
  * Result of uploading encrypted data
@@ -75,15 +76,17 @@ class EncryptedChunkAdapter {
  * @param context - Upload context with bee instance and authentication
  * @param data - Data to encrypt and upload
  * @param encryptionKey - Optional 32-byte encryption key (generates random if not provided)
- * @param options - Upload options
+ * @param chunkUploader - Optional custom chunk uploader (defaults to HTTP)
  * @param onProgress - Progress callback
+ * @param options - Upload options
  */
 export async function uploadEncryptedDataWithSigning(
   context: UploadContext,
   data: Uint8Array,
   encryptionKey?: Uint8Array,
-  options?: UploadOptions,
+  chunkUploader?: ChunkUploader,
   onProgress?: (progress: UploadProgress) => void,
+  options?: UploadOptions,
 ): Promise<UploadEncryptedDataResult> {
   const { bee, stamper } = context
 
@@ -91,6 +94,9 @@ export async function uploadEncryptedDataWithSigning(
   if (!stamper) {
     throw new Error("No authentication method available")
   }
+
+  // Use provided uploader or default to HTTP
+  const uploader = chunkUploader ?? createHttpChunkUploader(bee)
 
   // Create a tag for tracking upload progress (required for fast deferred uploads)
   let tag: number | undefined = options?.tag
@@ -148,9 +154,9 @@ export async function uploadEncryptedDataWithSigning(
 
     // Upload chunk with signing
     await uploadSingleEncryptedChunk(
-      bee,
       stamper,
       encryptedChunk,
+      uploader,
       uploadOptionsWithTag,
     )
 
@@ -189,20 +195,11 @@ export async function uploadEncryptedDataWithSigning(
         // encryptedChunkData = encryptedSpan (8 bytes) + encryptedPayload (4096 bytes) = 4104 bytes
         // We need to upload this without any modification
 
-        console.log(
-          `[UploadCallback] Received encrypted chunk data, size: ${encryptedChunkData.length} bytes`,
-        )
-
         // Calculate address for this intermediate chunk (needed for both stamper and utilization tracking)
         const address = calculateChunkAddress(encryptedChunkData)
 
         // Track this intermediate chunk address for utilization
         uploadedChunkAddresses.push(address.toUint8Array())
-
-        // For client-side signing, use the calculated address
-        console.log(
-          `[UploadCallback] Calculated address for upload: ${address.toHex()}`,
-        )
 
         const envelope = stamper.stamp({
           hash: () => address.toUint8Array(),
@@ -211,17 +208,7 @@ export async function uploadEncryptedDataWithSigning(
           writer: undefined as any, // not used by stamper.stamp
         })
 
-        console.log(
-          `[UploadCallback] Uploading intermediate chunk with client-side signing...`,
-        )
-        await bee.uploadChunk(
-          envelope,
-          encryptedChunkData,
-          uploadOptionsWithTag,
-        )
-        console.log(
-          `[UploadCallback] Upload complete for address: ${address.toHex()}`,
-        )
+        await uploader(envelope, encryptedChunkData, uploadOptionsWithTag)
 
         // Count intermediate chunks in progress
         totalChunks++
@@ -245,52 +232,18 @@ export async function uploadEncryptedDataWithSigning(
 }
 
 /**
- * Upload a single encrypted chunk with optional signing
+ * Upload a single encrypted chunk using the provided uploader
  */
 async function uploadSingleEncryptedChunk(
-  bee: Bee,
   stamper: Stamper,
   encryptedChunk: EncryptedChunk,
+  uploader: ChunkUploader,
   options?: UploadOptions,
 ): Promise<void> {
   // Client-side signing - use adapter for cafe-utility Chunk interface
   const chunkAdapter = new EncryptedChunkAdapter(encryptedChunk)
   const envelope = stamper.stamp(chunkAdapter)
-  await uploadSingleChunkWithEnvelope(
-    bee,
-    envelope,
-    encryptedChunk.data,
-    options,
-  )
-}
-
-/**
- * Upload a single encrypted chunk with optional signing
- */
-async function uploadSingleChunkWithEnvelope(
-  bee: Bee,
-  envelope: EnvelopeWithBatchId,
-  data: Uint8Array,
-  options?: UploadOptions,
-): Promise<void> {
-  const startTime = performance.now()
-  // Use non-deferred mode for faster uploads (returns immediately)
-  // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { ...options, deferred: false, pin: false }
-  console.log(
-    `[uploadSingleChunkWithEnvelope] Options prepared:`,
-    uploadOptions,
-  )
-
-  const beeUploadStart = performance.now()
-  await bee.uploadChunk(envelope, data, uploadOptions)
-  console.log(
-    `[uploadSingleChunkWithEnvelope] bee.uploadChunk (stamper) completed (+${(performance.now() - beeUploadStart).toFixed(2)}ms)`,
-  )
-
-  console.log(
-    `[uploadSingleChunkWithEnvelope] TOTAL: ${(performance.now() - startTime).toFixed(2)}ms`,
-  )
+  await uploader(envelope, encryptedChunk.data, options)
 }
 
 /**
@@ -310,14 +263,9 @@ export async function uploadSingleChunkWithEncryption(
   stamper: Stamper,
   payload: Uint8Array,
   encryptionKey: Uint8Array,
+  chunkUploader?: ChunkUploader,
   options?: UploadOptions,
 ): Promise<void> {
-  const startTime = performance.now()
-  console.log(
-    `[UploadSingleChunk] Starting upload, batch: ${stamper.batchId}, options:`,
-    options,
-  )
-
   // Validate payload size (1-4096 bytes, encryption handles padding)
   if (payload.length < 1 || payload.length > 4096) {
     throw new Error(
@@ -332,22 +280,17 @@ export async function uploadSingleChunkWithEncryption(
     )
   }
 
+  // Use provided uploader or default to HTTP
+  const uploader = chunkUploader ?? createHttpChunkUploader(bee)
+
   // Create encrypted content-addressed chunk
-  const encryptChunkStart = performance.now()
   const encryptedChunk = makeEncryptedContentAddressedChunk(
     payload,
     encryptionKey,
   )
-  console.log(
-    `[UploadSingleChunk] Encryption complete (+${(performance.now() - encryptChunkStart).toFixed(2)}ms)`,
-  )
 
-  // Upload using the existing function that handles both stamper and batch cases
-  const uploadStart = performance.now()
-  await uploadSingleEncryptedChunk(bee, stamper, encryptedChunk, options)
-  console.log(
-    `[UploadSingleChunk] Upload complete (+${(performance.now() - uploadStart).toFixed(2)}ms, TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
+  // Upload using the uploader
+  await uploadSingleEncryptedChunk(stamper, encryptedChunk, uploader, options)
 }
 
 /**

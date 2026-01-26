@@ -112,6 +112,13 @@ export type {
   SyncResult,
 } from "./sync"
 
+// Chunk uploader abstractions (for WebSocket/HTTP uploads)
+export {
+  createHttpChunkUploader,
+  createWsChunkUploader,
+} from "./proxy/chunk-uploader"
+export type { ChunkUploader } from "./proxy/chunk-uploader"
+
 // Type exports
 export type {
   ClientOptions,

@@ -1,6 +1,7 @@
 import type { Bee, PrivateKey, Stamper } from "@ethersphere/bee-js"
 import type { PostageStamp } from "../types"
 import type { AccountStateSnapshot, AccountMetadata } from "../schemas"
+import type { ChunkUploader } from "../proxy/chunk-uploader"
 
 // Re-export snapshot types
 export type { AccountStateSnapshot, AccountMetadata }
@@ -35,6 +36,7 @@ export interface StateSyncOptions {
   bee: Bee
   getAccountKey: (accountId: string) => Promise<PrivateKey> // Required for account sync
   getStamper: (postageStamp: PostageStamp) => Promise<Stamper> // Required stamper factory (for utilization tracking)
+  chunkUploader?: ChunkUploader // Optional custom chunk uploader (defaults to HTTP)
   utilization?: UtilizationCallbacks // Optional utilization tracking (browser-only)
 }
 

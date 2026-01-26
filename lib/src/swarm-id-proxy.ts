@@ -21,9 +21,18 @@ import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
 } from "./types"
-import { Bee, makeContentAddressedChunk, BatchId } from "@ethersphere/bee-js"
+import {
+  Bee,
+  makeContentAddressedChunk,
+  BatchId,
+  ChunkUploadStream,
+} from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
+import {
+  type ChunkUploader,
+  createWsChunkUploader,
+} from "./proxy/chunk-uploader"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
@@ -66,6 +75,10 @@ export class SwarmIdProxy {
   private appMetadata: AppMetadata | undefined
   private bee: Bee
   private unsubscribeConnectedApps: (() => void) | undefined
+  private wsStream: ChunkUploadStream | undefined
+  private wsStreamPromise: Promise<void> | undefined
+
+  private static readonly WS_CONCURRENCY = 64
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -201,6 +214,9 @@ export class SwarmIdProxy {
       this.unsubscribeConnectedApps = undefined
       console.log("[Proxy] Unsubscribed from connected apps storage changes")
     }
+
+    // Close WebSocket stream (fire and forget)
+    this.closeWsStream()
   }
 
   /**
@@ -284,6 +300,68 @@ export class SwarmIdProxy {
     } catch (error) {
       console.error("[Proxy] Failed to save stamper state:", error)
     }
+  }
+
+  /**
+   * Get or create a WebSocket stream for chunk uploads.
+   * Maintains a persistent connection for multiple uploads.
+   */
+  private async getOrCreateWsStream(): Promise<ChunkUploadStream> {
+    // If stream exists, return it
+    if (this.wsStream) {
+      return this.wsStream
+    }
+
+    // If creation is in progress, wait for it
+    if (this.wsStreamPromise) {
+      await this.wsStreamPromise
+      return this.wsStream!
+    }
+
+    if (!this.postageBatchId) {
+      throw new Error("No postage batch ID available for WebSocket stream")
+    }
+
+    console.log("[Proxy] Creating WebSocket chunk stream")
+
+    this.wsStream = new ChunkUploadStream(
+      this.beeApiUrl,
+      new BatchId(this.postageBatchId),
+      { deferred: false },
+      { concurrency: SwarmIdProxy.WS_CONCURRENCY },
+    )
+
+    this.wsStreamPromise = this.wsStream.open()
+    await this.wsStreamPromise
+    this.wsStreamPromise = undefined
+
+    console.log("[Proxy] WebSocket chunk stream connected")
+
+    return this.wsStream
+  }
+
+  /**
+   * Close WebSocket stream if open
+   */
+  private async closeWsStream(): Promise<void> {
+    if (this.wsStream) {
+      try {
+        console.log("[Proxy] Closing WebSocket chunk stream")
+        await this.wsStream.close()
+      } catch (error) {
+        console.error("[Proxy] Error closing WebSocket stream:", error)
+      }
+      this.wsStream = undefined
+      this.wsStreamPromise = undefined
+    }
+  }
+
+  /**
+   * Create a WebSocket-based chunk uploader
+   */
+  private async createWsUploader(): Promise<ChunkUploader> {
+    const stream = await this.getOrCreateWsStream()
+    return createWsChunkUploader(stream)
   }
 
   /**
@@ -730,13 +808,16 @@ export class SwarmIdProxy {
   /**
    * Clear authentication data
    */
-  private clearAuthData(): void {
+  private async clearAuthData(): Promise<void> {
     if (!this.parentOrigin) {
       console.log("[Proxy] No parent origin, cannot clear auth data")
       return
     }
 
     console.log("[Proxy] Clearing auth data for:", this.parentOrigin)
+
+    // Close WebSocket stream
+    await this.closeWsStream()
 
     // Clear stamper state from localStorage
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
@@ -1198,26 +1279,31 @@ export class SwarmIdProxy {
           }
         : undefined
 
+      // Create WebSocket uploader for this upload session
+      const chunkUploader = await this.createWsUploader()
+
       // Client-side chunking and signing
       let uploadResult
       if (options?.encrypt) {
         console.log(
-          "[Proxy] Using client-side signing with encryption for uploadData",
+          "[Proxy] Using client-side signing with encryption for uploadData (WebSocket)",
         )
         uploadResult = await uploadEncryptedDataWithSigning(
           context,
           data,
           undefined, // encryption key (auto-generated)
-          options,
+          chunkUploader,
           onProgress,
+          options,
         )
       } else {
-        console.log("[Proxy] Using client-side signing for uploadData")
+        console.log("[Proxy] Using client-side signing for uploadData (WebSocket)")
         uploadResult = await uploadDataWithSigning(
           context,
           data,
-          options,
+          chunkUploader,
           onProgress,
+          options,
         )
       }
 

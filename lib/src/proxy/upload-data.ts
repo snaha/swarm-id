@@ -1,12 +1,12 @@
 import { makeContentAddressedChunk, Reference } from "@ethersphere/bee-js"
 import type {
-  Bee,
   Stamper,
   Chunk as BeeChunk,
   UploadOptions,
 } from "@ethersphere/bee-js"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
 import type { UploadContext, UploadProgress, ChunkReference } from "./types"
+import { type ChunkUploader, createHttpChunkUploader } from "./chunk-uploader"
 
 /**
  * Simple Uint8ArrayWriter implementation for ChunkAdapter
@@ -53,14 +53,24 @@ class ChunkAdapter {
 /**
  * Upload data with client-side signing
  * Handles chunking, merkle tree building, and progress reporting
+ *
+ * @param context - Upload context with bee instance and stamper
+ * @param data - Data to upload
+ * @param chunkUploader - Optional custom chunk uploader (defaults to HTTP)
+ * @param onProgress - Progress callback
+ * @param options - Upload options
  */
 export async function uploadDataWithSigning(
   context: UploadContext,
   data: Uint8Array,
-  options?: UploadOptions,
+  chunkUploader?: ChunkUploader,
   onProgress?: (progress: UploadProgress) => void,
+  options?: UploadOptions,
 ): Promise<{ reference: string; tagUid?: number }> {
   const { bee, stamper } = context
+
+  // Use provided uploader or default to HTTP
+  const uploader = chunkUploader ?? createHttpChunkUploader(bee)
 
   // Create a tag for tracking upload progress (required for fast deferred uploads)
   let tag: number | undefined = options?.tag
@@ -101,7 +111,7 @@ export async function uploadDataWithSigning(
     })
 
     // Upload chunk with signing
-    await uploadSingleChunk(bee, stamper, chunk, uploadOptionsWithTag)
+    await uploadSingleChunk(stamper, chunk, uploader, uploadOptionsWithTag)
 
     processedChunks++
     reportProgress()
@@ -129,9 +139,9 @@ export async function uploadDataWithSigning(
       chunkRefs,
       async (intermediateChunk) => {
         await uploadSingleChunk(
-          bee,
           stamper,
           intermediateChunk,
+          uploader,
           uploadOptionsWithTag,
         )
 
@@ -156,25 +166,20 @@ export async function uploadDataWithSigning(
 }
 
 /**
- * Upload a single chunk with optional signing
+ * Upload a single chunk using the provided uploader
  */
 async function uploadSingleChunk(
-  bee: Bee,
   stamper: Stamper | undefined,
   chunk: BeeChunk,
+  uploader: ChunkUploader,
   options?: UploadOptions,
 ): Promise<void> {
-  // Use non-deferred mode for faster uploads (returns immediately)
-  // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { ...options, deferred: false, pin: false }
-  console.log("[UploadData] uploadChunk options:", uploadOptions)
-
-  if (stamper) {
-    // Client-side signing - use adapter for cafe-utility Chunk interface
-    const chunkAdapter = new ChunkAdapter(chunk)
-    const envelope = stamper.stamp(chunkAdapter)
-    await bee.uploadChunk(envelope, chunk.data, uploadOptions)
-  } else {
-    throw new Error("No stamper or batch ID available")
+  if (!stamper) {
+    throw new Error("No stamper available")
   }
+
+  // Client-side signing - use adapter for cafe-utility Chunk interface
+  const chunkAdapter = new ChunkAdapter(chunk)
+  const envelope = stamper.stamp(chunkAdapter)
+  await uploader(envelope, chunk.data, options)
 }

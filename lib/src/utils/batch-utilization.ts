@@ -414,6 +414,7 @@ export async function uploadUtilizationChunk(
     stamper,
     data,
     encryptionKey,
+    undefined, // chunkUploader (use default HTTP)
     { deferred: false, tag }, // fast, non-blocking upload
   )
   console.log(

@@ -69,7 +69,7 @@ export class StateSyncManager {
         },
         jsonData,
         hexToUint8Array(encryptionKey), // encryption key
-        undefined, // options
+        this.options.chunkUploader, // use WebSocket if provided
       )
       console.log(
         `[StateSyncManager ${new Date().toISOString()}] Upload completed, ${uploadResult.chunkAddresses.length} chunks (+${(performance.now() - startTime).toFixed(2)}ms)`,
