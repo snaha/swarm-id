@@ -32,7 +32,7 @@
 	})
 </script>
 
-{#if page.url.pathname === '/proxy'}
+{#if page.route.id === '/proxy'}
 	{@render children()}
 {:else}
 	<div class="page-wrapper">
