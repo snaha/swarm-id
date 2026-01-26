@@ -137,11 +137,20 @@ jobs:
           version: 10
           run_install: false
 
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
       - name: Download workspace
         uses: actions/download-artifact@v4
         with:
           name: workspace
           path: .
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Build identity UI
         env:
