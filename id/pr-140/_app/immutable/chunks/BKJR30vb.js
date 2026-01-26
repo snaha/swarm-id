@@ -1,0 +1,1 @@
+const T={HOME:"/",CONNECT:"/connect",ACCOUNT_NEW:"/account/new",PASSKEY_NEW:"/passkey/new",ETH_NEW:"/eth/new",IDENTITY_NEW:"/identity/new",IDENTITY:t=>`/identity/${t}`,IDENTITY_APPS:t=>`/identity/${t}/apps`,IDENTITY_STAMPS:t=>`/identity/${t}/stamps`,IDENTITY_SETTINGS:t=>`/identity/${t}/settings`};export{T as r};

@@ -1,0 +1,1 @@
+import{a5 as t,u,a6 as o,a7 as l,a3 as e}from"./pmhXVU7g.js";function c(n){o===null&&t(),l&&o.l!==null?s(o).m.push(n):u(()=>{const a=e(n);if(typeof a=="function")return a})}function i(n){o===null&&t(),c(()=>()=>e(n))}function s(n){var a=n.l;return a.u??={a:[],b:[],m:[]}}export{i as a,c as o};
