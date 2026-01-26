@@ -49,6 +49,9 @@ const configScript = `
 `
 demoHtml = demoHtml.replace('</head>', configScript + '</head>')
 
+// Convert absolute lib path to relative for subdirectory deployment
+demoHtml = demoHtml.replace('from "/lib/', 'from "./lib/')
+
 writeFileSync(join(buildDir, 'index.html'), demoHtml)
 console.log('✓ index.html processed')
 

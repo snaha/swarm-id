@@ -1,0 +1,280 @@
+name: Deploy PR Preview
+
+on:
+  pull_request:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - closed
+    paths:
+      - 'lib/**'
+      - 'demo/**'
+      - 'swarm-ui/**'
+      - 'docs-site/**'
+      - '.github/workflows/deploy-preview.yml'
+
+concurrency: preview-${{ github.ref }}
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  # Detect which apps have changes
+  detect-changes:
+    runs-on: ubuntu-latest
+    if: github.event.action != 'closed'
+    outputs:
+      demo: ${{ steps.changes.outputs.demo }}
+      id: ${{ steps.changes.outputs.id }}
+      docs: ${{ steps.changes.outputs.docs }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Detect changed paths
+        uses: dorny/paths-filter@v3
+        id: changes
+        with:
+          filters: |
+            demo:
+              - 'demo/**'
+              - 'lib/**'
+            id:
+              - 'swarm-ui/**'
+              - 'lib/**'
+            docs:
+              - 'docs-site/**'
+
+  # Build demo app
+  build-demo:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.demo == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build bee-js
+        run: pnpm build:bee-js
+
+      - name: Build library
+        run: pnpm build:lib
+
+      - name: Build demo
+        env:
+          APP_DOMAIN: https://swarm.snaha.net/demo/pr-${{ github.event.number }}
+          ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
+        run: pnpm build:demo
+
+      - name: Upload demo artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-build
+          path: demo/build
+          retention-days: 1
+
+  # Build identity UI
+  build-id:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.id == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build bee-js
+        run: pnpm build:bee-js
+
+      - name: Build library
+        run: pnpm build:lib
+
+      - name: Build identity UI
+        env:
+          BASE_PATH: /id/pr-${{ github.event.number }}
+          ORIGIN: https://swarm.snaha.net
+          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo/pr-${{ github.event.number }}
+          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
+        run: pnpm --filter swarm-identity build
+
+      - name: Create 404.html for SPA routing
+        run: cp swarm-ui/build/index.html swarm-ui/build/404.html
+
+      - name: Upload identity UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: id-build
+          path: swarm-ui/build
+          retention-days: 1
+
+  # Build docs
+  build-docs:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.docs == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build docs with PR base path
+        working-directory: docs-site
+        run: pnpm astro build --base /docs/pr-${{ github.event.number }}/
+
+      - name: Upload docs artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-build
+          path: docs-site/dist
+          retention-days: 1
+
+  # Deploy all built apps to GitHub Pages
+  deploy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, build-demo, build-id, build-docs]
+    if: |
+      always() &&
+      github.event.action != 'closed' &&
+      (needs.build-demo.result == 'success' || needs.build-demo.result == 'skipped') &&
+      (needs.build-id.result == 'success' || needs.build-id.result == 'skipped') &&
+      (needs.build-docs.result == 'success' || needs.build-docs.result == 'skipped') &&
+      (needs.build-demo.result == 'success' || needs.build-id.result == 'success' || needs.build-docs.result == 'success')
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Create preview directory structure
+        run: mkdir -p preview-build
+
+      - name: Download demo artifact
+        if: needs.build-demo.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-build
+          path: preview-build/demo/pr-${{ github.event.number }}
+
+      - name: Download identity UI artifact
+        if: needs.build-id.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: id-build
+          path: preview-build/id/pr-${{ github.event.number }}
+
+      - name: Download docs artifact
+        if: needs.build-docs.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-build
+          path: preview-build/docs/pr-${{ github.event.number }}
+
+      - name: Deploy to GitHub Pages
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: preview-build
+          cname: swarm.snaha.net
+          keep_files: true
+
+      - name: Build PR comment
+        id: comment
+        run: |
+          COMMENT="## PR Preview\n\n"
+          COMMENT+="| App | Preview URL |\n"
+          COMMENT+="|-----|-------------|\n"
+
+          if [ "${{ needs.build-demo.result }}" == "success" ]; then
+            COMMENT+="| Demo | https://swarm.snaha.net/demo/pr-${{ github.event.number }}/ |\n"
+          fi
+
+          if [ "${{ needs.build-id.result }}" == "success" ]; then
+            COMMENT+="| Identity | https://swarm.snaha.net/id/pr-${{ github.event.number }}/ |\n"
+          fi
+
+          if [ "${{ needs.build-docs.result }}" == "success" ]; then
+            COMMENT+="| Docs | https://swarm.snaha.net/docs/pr-${{ github.event.number }}/ |\n"
+          fi
+
+          COMMENT+="\n*Only apps with changes are deployed*"
+
+          echo "comment<<EOF" >> $GITHUB_OUTPUT
+          echo -e "$COMMENT" >> $GITHUB_OUTPUT
+          echo "EOF" >> $GITHUB_OUTPUT
+
+      - name: Comment on PR
+        uses: marocchino/sticky-comment@v2
+        with:
+          header: pr-preview
+          message: ${{ steps.comment.outputs.comment }}
+
+  # Cleanup preview on PR close
+  cleanup:
+    runs-on: ubuntu-latest
+    if: github.event.action == 'closed'
+    steps:
+      - name: Checkout gh-pages branch
+        uses: actions/checkout@v4
+        with:
+          ref: gh-pages
+
+      - name: Remove preview directories
+        run: |
+          rm -rf demo/pr-${{ github.event.number }} || true
+          rm -rf id/pr-${{ github.event.number }} || true
+          rm -rf docs/pr-${{ github.event.number }} || true
+
+      - name: Commit and push cleanup
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --staged --quiet || git commit -m "Clean up PR #${{ github.event.number }} previews"
+          git push

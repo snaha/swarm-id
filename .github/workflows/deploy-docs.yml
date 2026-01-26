@@ -38,13 +38,19 @@ jobs:
         run: pnpm install --frozen-lockfile
 
       - name: Build docs
-        run: pnpm build:docs
+        working-directory: docs-site
+        run: pnpm astro build --base /docs/
+
+      - name: Create root redirect
+        run: |
+          mkdir -p docs-site/dist-root/docs
+          cp -r docs-site/dist/* docs-site/dist-root/docs/
+          echo '<!DOCTYPE html><html><head><meta http-equiv="refresh" content="0;url=/docs/"></head></html>' > docs-site/dist-root/index.html
 
       - name: Deploy to GitHub Pages
         uses: peaceiris/actions-gh-pages@v4
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          publish_dir: docs-site/dist
-          cname: swarm-docs.snaha.net
-          # Keep PR preview directories when deploying main
+          publish_dir: docs-site/dist-root
+          cname: swarm.snaha.net
           keep_files: true
