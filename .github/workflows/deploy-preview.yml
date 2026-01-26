@@ -227,33 +227,49 @@ jobs:
       - name: Build PR comment
         id: comment
         run: |
-          COMMENT="## PR Preview\n\n"
-          COMMENT+="| App | Preview URL |\n"
-          COMMENT+="|-----|-------------|\n"
+          {
+            echo "## 🚀 PR Preview"
+            echo ""
+            echo "| App | Preview URL |"
+            echo "|-----|-------------|"
 
-          if [ "${{ needs.build-demo.result }}" == "success" ]; then
-            COMMENT+="| Demo | https://swarm.snaha.net/demo/pr-${{ github.event.number }}/ |\n"
-          fi
+            if [ "${{ needs.build-demo.result }}" == "success" ]; then
+              echo "| Demo | https://swarm.snaha.net/demo/pr-${{ github.event.number }}/ |"
+            fi
 
-          if [ "${{ needs.build-id.result }}" == "success" ]; then
-            COMMENT+="| Identity | https://swarm.snaha.net/id/pr-${{ github.event.number }}/ |\n"
-          fi
+            if [ "${{ needs.build-id.result }}" == "success" ]; then
+              echo "| Identity | https://swarm.snaha.net/id/pr-${{ github.event.number }}/ |"
+            fi
 
-          if [ "${{ needs.build-docs.result }}" == "success" ]; then
-            COMMENT+="| Docs | https://swarm.snaha.net/docs/pr-${{ github.event.number }}/ |\n"
-          fi
+            if [ "${{ needs.build-docs.result }}" == "success" ]; then
+              echo "| Docs | https://swarm.snaha.net/docs/pr-${{ github.event.number }}/ |"
+            fi
 
-          COMMENT+="\n*Only apps with changes are deployed*"
+            echo ""
+            echo "*Only apps with changes are deployed*"
+            echo ""
+            echo "<!-- pr-preview-comment -->"
+          } > comment.md
 
-          echo "comment<<EOF" >> $GITHUB_OUTPUT
-          echo -e "$COMMENT" >> $GITHUB_OUTPUT
+          echo "body<<EOF" >> $GITHUB_OUTPUT
+          cat comment.md >> $GITHUB_OUTPUT
           echo "EOF" >> $GITHUB_OUTPUT
 
-      - name: Comment on PR
-        uses: marocchino/sticky-comment@v2
+      - name: Find existing comment
+        uses: peter-evans/find-comment@v3
+        id: find-comment
         with:
-          header: pr-preview
-          message: ${{ steps.comment.outputs.comment }}
+          issue-number: ${{ github.event.number }}
+          comment-author: 'github-actions[bot]'
+          body-includes: '<!-- pr-preview-comment -->'
+
+      - name: Create or update comment
+        uses: peter-evans/create-or-update-comment@v4
+        with:
+          comment-id: ${{ steps.find-comment.outputs.comment-id }}
+          issue-number: ${{ github.event.number }}
+          body: ${{ steps.comment.outputs.body }}
+          edit-mode: replace
 
   # Cleanup preview on PR close
   cleanup:
