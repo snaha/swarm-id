@@ -1089,8 +1089,10 @@ export class SwarmIdProxy {
     // Build authentication URL using shared utility
     // proxyMode=true: popup was opened from proxy iframe, so we validate
     // same-origin opener and send setSecret via postMessage
+    // Get base path from current location (e.g., /id/pr-140/proxy -> /id/pr-140)
+    const basePath = window.location.pathname.replace(/\/proxy$/, "")
     const authUrl = buildAuthUrl(
-      window.location.origin,
+      window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
       true, // proxyMode - enables same-origin validation and setSecret message
