@@ -347,13 +347,25 @@ export class SwarmIdProxy {
       try {
         // Try to parse as parent message first
         if (isParent) {
+          let message: ParentToIframeMessage
           try {
-            const message = ParentToIframeMessageSchema.parse(event.data)
-            await this.handleParentMessage(message, event)
-            return
+            message = ParentToIframeMessageSchema.parse(event.data)
           } catch (error) {
             console.warn("[Proxy] Invalid parent message:", error)
+            return
           }
+
+          try {
+            await this.handleParentMessage(message, event)
+          } catch (error) {
+            console.error("[Proxy] Error handling parent message:", error)
+            this.sendErrorToParent(
+              event,
+              (message as { requestId?: string }).requestId,
+              error instanceof Error ? error.message : "Unknown error",
+            )
+          }
+          return
         }
 
         // Try to parse as popup message
