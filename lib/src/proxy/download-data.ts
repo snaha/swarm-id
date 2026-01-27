@@ -1,5 +1,5 @@
 import { ChunkJoiner, Reference } from "@ethersphere/bee-js"
-import type { Bee, DownloadOptions } from "@ethersphere/bee-js"
+import type { Bee, BeeRequestOptions, DownloadOptions } from "@ethersphere/bee-js"
 import type { UploadProgress } from "./types"
 
 /**
@@ -15,6 +15,7 @@ export async function downloadDataWithChunkAPI(
   reference: string,
   options?: DownloadOptions,
   onProgress?: (progress: UploadProgress) => void,
+  requestOptions?: BeeRequestOptions,
 ): Promise<Uint8Array> {
   console.log(
     `[DownloadData] Downloading from reference: ${reference} (${reference.length} chars)`,
@@ -26,6 +27,7 @@ export async function downloadDataWithChunkAPI(
   // Create ChunkJoiner with progress callback
   const joiner = new ChunkJoiner(bee, ref, {
     downloadOptions: options,
+    requestOptions,
     onDownloadProgress: onProgress
       ? (progress) => {
           onProgress({

@@ -814,6 +814,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
+   * @param requestOptions - Optional request configuration (timeout, headers)
    * @returns A promise resolving to the downloaded data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the reference is not found
@@ -829,6 +830,7 @@ export class SwarmIdClient {
   async downloadData(
     reference: Reference,
     options?: DownloadOptions,
+    requestOptions?: RequestOptions,
   ): Promise<Uint8Array> {
     this.ensureReady()
     const requestId = this.generateRequestId()
@@ -842,6 +844,7 @@ export class SwarmIdClient {
       requestId,
       reference,
       options,
+      requestOptions,
     })
 
     return response.data
@@ -947,6 +950,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
+   * @param requestOptions - Optional request configuration (timeout, headers)
    * @returns A promise resolving to the file data object
    * @returns return.name - The filename
    * @returns return.data - The file contents as a Uint8Array
@@ -968,6 +972,7 @@ export class SwarmIdClient {
     reference: Reference,
     path?: string,
     options?: DownloadOptions,
+    requestOptions?: RequestOptions,
   ): Promise<FileData> {
     this.ensureReady()
     const requestId = this.generateRequestId()
@@ -983,6 +988,7 @@ export class SwarmIdClient {
       reference,
       path,
       options,
+      requestOptions,
     })
 
     return {
@@ -1064,6 +1070,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
+   * @param requestOptions - Optional request configuration (timeout, headers)
    * @returns A promise resolving to the chunk data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the reference is not found
@@ -1078,6 +1085,7 @@ export class SwarmIdClient {
   async downloadChunk(
     reference: Reference,
     options?: DownloadOptions,
+    requestOptions?: RequestOptions,
   ): Promise<Uint8Array> {
     this.ensureReady()
     const requestId = this.generateRequestId()
@@ -1091,6 +1099,7 @@ export class SwarmIdClient {
       requestId,
       reference,
       options,
+      requestOptions,
     })
 
     return new Uint8Array(response.data)

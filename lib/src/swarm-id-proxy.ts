@@ -1400,7 +1400,7 @@ export class SwarmIdProxy {
     message: DownloadDataMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, options } = message
+    const { requestId, reference, options, requestOptions } = message
 
     console.log("[Proxy] Download data request, reference:", reference)
     if (!this.authenticated || !this.appSecret) {
@@ -1411,7 +1411,13 @@ export class SwarmIdProxy {
       console.log("[Proxy] Downloading from Bee at:", this.beeApiUrl)
 
       // Download data using chunk API only (supports both regular and encrypted references)
-      const data = await downloadDataWithChunkAPI(this.bee, reference, options)
+      const data = await downloadDataWithChunkAPI(
+        this.bee,
+        reference,
+        options,
+        undefined,
+        requestOptions,
+      )
 
       console.log("[Proxy] Download successful, data size:", data.length)
 
@@ -1513,7 +1519,7 @@ export class SwarmIdProxy {
     message: DownloadFileMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, path, options } = message
+    const { requestId, reference, path, options, requestOptions } = message
 
     console.log(
       "[Proxy] Download file request, reference:",
@@ -1529,7 +1535,12 @@ export class SwarmIdProxy {
       console.log("[Proxy] Downloading file from Bee at:", this.beeApiUrl)
 
       // Download file using bee-js
-      const fileData = await this.bee.downloadFile(reference, path, options)
+      const fileData = await this.bee.downloadFile(
+        reference,
+        path,
+        options,
+        requestOptions,
+      )
 
       console.log(
         "[Proxy] File download successful, data size:",
@@ -1654,7 +1665,7 @@ export class SwarmIdProxy {
     message: DownloadChunkMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, reference, options } = message
+    const { requestId, reference, options, requestOptions } = message
 
     console.log("[Proxy] Download chunk request, reference:", reference)
     if (!this.authenticated || !this.appSecret) {
@@ -1665,7 +1676,11 @@ export class SwarmIdProxy {
       console.log("[Proxy] Downloading chunk from Bee at:", this.beeApiUrl)
 
       // Download chunk using bee-js (returns Uint8Array directly)
-      const data = await this.bee.downloadChunk(reference, options)
+      const data = await this.bee.downloadChunk(
+        reference,
+        options,
+        requestOptions,
+      )
 
       console.log("[Proxy] Chunk download successful, data size:", data.length)
 

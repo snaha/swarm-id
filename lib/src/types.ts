@@ -268,6 +268,7 @@ export const DownloadDataMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   options: DownloadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
 })
 
 export const UploadFileMessageSchema = z.object({
@@ -285,6 +286,7 @@ export const DownloadFileMessageSchema = z.object({
   reference: ReferenceSchema,
   path: z.string().optional(),
   options: DownloadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
 })
 
 export const UploadChunkMessageSchema = z.object({
@@ -300,6 +302,7 @@ export const DownloadChunkMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   options: DownloadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
 })
 
 export const GetConnectionInfoMessageSchema = z.object({
