@@ -13,7 +13,6 @@ import type {
   UploadChunkMessage,
   DownloadChunkMessage,
   GetConnectionInfoMessage,
-  CheckConnectionMessage,
   IsConnectedMessage,
   GsocMineMessage,
   GsocSendMessage,
@@ -516,10 +515,6 @@ export class SwarmIdProxy {
         this.handleGetConnectionInfo(message, event)
         break
 
-      case "checkConnection":
-        await this.handleCheckConnection(message, event)
-        break
-
       case "isConnected":
         await this.handleIsConnected(message, event)
         break
@@ -971,35 +966,6 @@ export class SwarmIdProxy {
     }
 
     console.log("[Proxy] Connection info:", { canUpload, identity })
-  }
-
-  private async handleCheckConnection(
-    message: CheckConnectionMessage,
-    event: MessageEvent,
-  ): Promise<void> {
-    console.log("[Proxy] Check connection request...")
-
-    try {
-      await this.bee.checkConnection()
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "checkConnectionResponse",
-            requestId: message.requestId,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
-
-      console.log("[Proxy] Bee node connection OK")
-    } catch (error) {
-      this.sendErrorToParent(
-        event,
-        message.requestId,
-        error instanceof Error ? error.message : "Connection check failed",
-      )
-    }
   }
 
   private async handleIsConnected(
