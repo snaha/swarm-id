@@ -15,6 +15,8 @@ import type {
   GetConnectionInfoMessage,
   CheckConnectionMessage,
   IsConnectedMessage,
+  GsocMineMessage,
+  GsocSendMessage,
   AppMetadata,
   PostageStamp,
   ConnectedApp,
@@ -508,6 +510,14 @@ export class SwarmIdProxy {
 
       case "isConnected":
         await this.handleIsConnected(message, event)
+        break
+
+      case "gsocMine":
+        this.handleGsocMine(message, event)
+        break
+
+      case "gsocSend":
+        await this.handleGsocSend(message, event)
         break
 
       default:
@@ -1701,6 +1711,92 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "Download failed",
+      )
+    }
+  }
+
+  private handleGsocMine(
+    message: GsocMineMessage,
+    event: MessageEvent,
+  ): void {
+    const { requestId, targetOverlay, identifier, proximity } = message
+
+    console.log("[Proxy] GSOC mine request, targetOverlay:", targetOverlay)
+
+    try {
+      const signer = this.bee.gsocMine(targetOverlay, identifier, proximity)
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "gsocMineResponse",
+            requestId,
+            signer: signer.toHex(),
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] GSOC mine successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "GSOC mine failed",
+      )
+    }
+  }
+
+  private async handleGsocSend(
+    message: GsocSendMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, signer, identifier, data, options, requestOptions } =
+      message
+
+    console.log("[Proxy] GSOC send request")
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.postageBatchId) {
+        throw new Error(
+          "No postage batch ID available. Please authenticate with a valid batch ID.",
+        )
+      }
+
+      const result = await this.bee.gsocSend(
+        this.postageBatchId,
+        signer,
+        identifier,
+        data,
+        options,
+        requestOptions,
+      )
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "gsocSendResponse",
+            requestId,
+            reference: result.reference.toHex(),
+            tagUid: result.tagUid,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log(
+        "[Proxy] GSOC send successful, reference:",
+        result.reference.toHex(),
+      )
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "GSOC send failed",
       )
     }
   }

@@ -1106,6 +1106,110 @@ export class SwarmIdClient {
   }
 
   // ============================================================================
+  // GSOC Methods
+  // ============================================================================
+
+  /**
+   * Mines a private key whose SOC address is proximate to a target overlay.
+   *
+   * This is a synchronous, pure computation that does not require authentication.
+   * The mined signer can be used with {@link gsocSend} to send GSOC messages
+   * that route to the target overlay node.
+   *
+   * @param targetOverlay - The target overlay address to mine proximity for
+   * @param identifier - The GSOC identifier
+   * @param proximity - Optional proximity depth (defaults to 12 in bee-js)
+   * @returns A promise resolving to the mined signer as a hex string (private key)
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If no valid signer can be mined
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const signer = await client.gsocMine(targetOverlay, identifier)
+   * // Use signer with gsocSend
+   * await client.gsocSend(signer, identifier, data)
+   * ```
+   */
+  async gsocMine(
+    targetOverlay: string,
+    identifier: string,
+    proximity?: number,
+  ): Promise<string> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "gsocMineResponse"
+      requestId: string
+      signer: string
+    }>({
+      type: "gsocMine",
+      requestId,
+      targetOverlay,
+      identifier,
+      proximity,
+    })
+
+    return response.signer
+  }
+
+  /**
+   * Sends a GSOC (Global Single Owner Chunk) message using a mined signer.
+   *
+   * The signer should be obtained from {@link gsocMine}. The message is sent
+   * using the proxy's stored postage batch ID.
+   *
+   * @param signer - The mined signer as a hex string (from gsocMine)
+   * @param identifier - The GSOC identifier
+   * @param data - The message data to send
+   * @param options - Optional upload configuration
+   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @returns A promise resolving to the upload result with reference and optional tagUid
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not authenticated
+   * @throws {Error} If no postage batch ID is available
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const signer = await client.gsocMine(targetOverlay, identifier)
+   * const result = await client.gsocSend(signer, identifier, new TextEncoder().encode('Hello!'))
+   * console.log('GSOC reference:', result.reference)
+   * ```
+   */
+  async gsocSend(
+    signer: string,
+    identifier: string,
+    data: Uint8Array,
+    options?: UploadOptions,
+    requestOptions?: RequestOptions,
+  ): Promise<UploadResult> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "gsocSendResponse"
+      requestId: string
+      reference: Reference
+      tagUid?: number
+    }>({
+      type: "gsocSend",
+      requestId,
+      signer,
+      identifier,
+      data: new Uint8Array(data),
+      options,
+      requestOptions,
+    })
+
+    return {
+      reference: response.reference,
+      tagUid: response.tagUid,
+    }
+  }
+
+  // ============================================================================
   // Cleanup
   // ============================================================================
 

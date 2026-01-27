@@ -320,6 +320,24 @@ export const IsConnectedMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const GsocMineMessageSchema = z.object({
+  type: z.literal("gsocMine"),
+  requestId: z.string(),
+  targetOverlay: z.string(),
+  identifier: z.string(),
+  proximity: z.number().optional(),
+})
+
+export const GsocSendMessageSchema = z.object({
+  type: z.literal("gsocSend"),
+  requestId: z.string(),
+  signer: z.string(),
+  identifier: z.string(),
+  data: z.instanceof(Uint8Array),
+  options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -334,6 +352,8 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   GetConnectionInfoMessageSchema,
   CheckConnectionMessageSchema,
   IsConnectedMessageSchema,
+  GsocMineMessageSchema,
+  GsocSendMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -353,6 +373,8 @@ export type CheckConnectionMessage = z.infer<
   typeof CheckConnectionMessageSchema
 >
 export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>
+export type GsocMineMessage = z.infer<typeof GsocMineMessageSchema>
+export type GsocSendMessage = z.infer<typeof GsocSendMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -470,6 +492,19 @@ export const IsConnectedResponseMessageSchema = z.object({
   connected: z.boolean(),
 })
 
+export const GsocMineResponseMessageSchema = z.object({
+  type: z.literal("gsocMineResponse"),
+  requestId: z.string(),
+  signer: z.string(),
+})
+
+export const GsocSendResponseMessageSchema = z.object({
+  type: z.literal("gsocSendResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  tagUid: z.number().optional(),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -488,6 +523,8 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ConnectResponseMessageSchema,
   CheckConnectionResponseMessageSchema,
   IsConnectedResponseMessageSchema,
+  GsocMineResponseMessageSchema,
+  GsocSendResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -530,6 +567,12 @@ export type CheckConnectionResponseMessage = z.infer<
 >
 export type IsConnectedResponseMessage = z.infer<
   typeof IsConnectedResponseMessageSchema
+>
+export type GsocMineResponseMessage = z.infer<
+  typeof GsocMineResponseMessageSchema
+>
+export type GsocSendResponseMessage = z.infer<
+  typeof GsocSendResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
