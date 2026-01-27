@@ -307,6 +307,16 @@ export const GetConnectionInfoMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const CheckConnectionMessageSchema = z.object({
+  type: z.literal("checkConnection"),
+  requestId: z.string(),
+})
+
+export const IsConnectedMessageSchema = z.object({
+  type: z.literal("isConnected"),
+  requestId: z.string(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -319,6 +329,8 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   UploadChunkMessageSchema,
   DownloadChunkMessageSchema,
   GetConnectionInfoMessageSchema,
+  CheckConnectionMessageSchema,
+  IsConnectedMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -334,6 +346,10 @@ export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>
 export type GetConnectionInfoMessage = z.infer<
   typeof GetConnectionInfoMessageSchema
 >
+export type CheckConnectionMessage = z.infer<
+  typeof CheckConnectionMessageSchema
+>
+export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -440,6 +456,17 @@ export const ConnectResponseMessageSchema = z.object({
   success: z.boolean(),
 })
 
+export const CheckConnectionResponseMessageSchema = z.object({
+  type: z.literal("checkConnectionResponse"),
+  requestId: z.string(),
+})
+
+export const IsConnectedResponseMessageSchema = z.object({
+  type: z.literal("isConnectedResponse"),
+  requestId: z.string(),
+  connected: z.boolean(),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -456,6 +483,8 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ErrorMessageSchema,
   ConnectionInfoResponseMessageSchema,
   ConnectResponseMessageSchema,
+  CheckConnectionResponseMessageSchema,
+  IsConnectedResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -492,6 +521,12 @@ export type ConnectionInfoResponseMessage = z.infer<
 >
 export type ConnectResponseMessage = z.infer<
   typeof ConnectResponseMessageSchema
+>
+export type CheckConnectionResponseMessage = z.infer<
+  typeof CheckConnectionResponseMessageSchema
+>
+export type IsConnectedResponseMessage = z.infer<
+  typeof IsConnectedResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 

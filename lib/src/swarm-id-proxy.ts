@@ -13,6 +13,8 @@ import type {
   UploadChunkMessage,
   DownloadChunkMessage,
   GetConnectionInfoMessage,
+  CheckConnectionMessage,
+  IsConnectedMessage,
   AppMetadata,
   PostageStamp,
   ConnectedApp,
@@ -500,6 +502,14 @@ export class SwarmIdProxy {
         this.handleGetConnectionInfo(message, event)
         break
 
+      case "checkConnection":
+        await this.handleCheckConnection(message, event)
+        break
+
+      case "isConnected":
+        await this.handleIsConnected(message, event)
+        break
+
       default:
         // TypeScript should ensure this is never reached
         const exhaustiveCheck: never = message
@@ -939,6 +949,57 @@ export class SwarmIdProxy {
     }
 
     console.log("[Proxy] Connection info:", { canUpload, identity })
+  }
+
+  private async handleCheckConnection(
+    message: CheckConnectionMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    console.log("[Proxy] Check connection request...")
+
+    try {
+      await this.bee.checkConnection()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "checkConnectionResponse",
+            requestId: message.requestId,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] Bee node connection OK")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        error instanceof Error ? error.message : "Connection check failed",
+      )
+    }
+  }
+
+  private async handleIsConnected(
+    message: IsConnectedMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    console.log("[Proxy] Is connected request...")
+
+    const connected = await this.bee.isConnected()
+
+    if (event.source) {
+      ;(event.source as WindowProxy).postMessage(
+        {
+          type: "isConnectedResponse",
+          requestId: message.requestId,
+          connected,
+        } satisfies IframeToParentMessage,
+        { targetOrigin: event.origin },
+      )
+    }
+
+    console.log("[Proxy] Bee node connected:", connected)
   }
 
   private handleDisconnect(

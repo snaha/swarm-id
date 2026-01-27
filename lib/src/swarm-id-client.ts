@@ -668,6 +668,43 @@ export class SwarmIdClient {
   }
 
   // ============================================================================
+  // Bee Connectivity Methods
+  // ============================================================================
+
+  /**
+   * Checks whether the Bee node is reachable.
+   *
+   * @returns A promise resolving to `true` if the Bee node is reachable, `false` otherwise
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const connected = await client.isBeeConnected()
+   * if (connected) {
+   *   console.log('Bee node is online')
+   * } else {
+   *   console.log('Bee node is offline')
+   * }
+   * ```
+   */
+  async isBeeConnected(): Promise<boolean> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "isConnectedResponse"
+      requestId: string
+      connected: boolean
+    }>({
+      type: "isConnected",
+      requestId,
+    })
+
+    return response.connected
+  }
+
+  // ============================================================================
   // Data Upload/Download Methods
   // ============================================================================
 
