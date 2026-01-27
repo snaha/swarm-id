@@ -6,6 +6,7 @@ import type {
   FileData,
   UploadOptions,
   DownloadOptions,
+  RequestOptions,
   Reference,
   ParentToIframeMessage,
   IframeToParentMessage,
@@ -683,7 +684,8 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
-   * @param onProgress - Optional callback for tracking upload progress
+   * @param options.onProgress - Optional callback for tracking upload progress
+   * @param requestOptions - Optional request configuration (timeout, headers)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded data
    * @returns return.tagUid - The tag UID if a tag was created
@@ -694,8 +696,11 @@ export class SwarmIdClient {
    * @example
    * ```typescript
    * const data = new TextEncoder().encode('Hello, Swarm!')
-   * const result = await client.uploadData(data, { encrypt: true }, (progress) => {
-   *   console.log(`Progress: ${progress.processed}/${progress.total}`)
+   * const result = await client.uploadData(data, {
+   *   encrypt: true,
+   *   onProgress: (progress) => {
+   *     console.log(`Progress: ${progress.processed}/${progress.total}`)
+   *   },
    * })
    * console.log('Reference:', result.reference)
    * ```
@@ -703,10 +708,11 @@ export class SwarmIdClient {
   async uploadData(
     data: Uint8Array,
     options?: UploadOptions,
-    onProgress?: (progress: { total: number; processed: number }) => void,
+    requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
+    const { onProgress, ...serializableOptions } = options ?? {}
 
     // Setup progress listener if callback provided
     let progressListener: ((event: MessageEvent) => void) | undefined
@@ -742,7 +748,8 @@ export class SwarmIdClient {
         type: "uploadData",
         requestId,
         data: new Uint8Array(data),
-        options,
+        options: serializableOptions,
+        requestOptions,
         enableProgress: !!onProgress,
       })
 
@@ -822,6 +829,7 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
+   * @param requestOptions - Optional request configuration (timeout, headers)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded file
    * @returns return.tagUid - The tag UID if a tag was created
@@ -845,9 +853,11 @@ export class SwarmIdClient {
     file: File | Uint8Array,
     name?: string,
     options?: UploadOptions,
+    requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
+    const { onProgress: _onProgress, ...serializableOptions } = options ?? {}
 
     let data: Uint8Array<ArrayBuffer>
     let fileName: string | undefined = name
@@ -874,7 +884,8 @@ export class SwarmIdClient {
       requestId,
       data,
       name: fileName,
-      options,
+      options: serializableOptions,
+      requestOptions,
     })
 
     return {
@@ -961,6 +972,7 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
+   * @param requestOptions - Optional request configuration (timeout, headers)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded chunk
    * @throws {Error} If the client is not initialized
@@ -978,9 +990,11 @@ export class SwarmIdClient {
   async uploadChunk(
     data: Uint8Array,
     options?: UploadOptions,
+    requestOptions?: RequestOptions,
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
+    const { onProgress: _onProgress, ...serializableOptions } = options ?? {}
 
     const response = await this.sendRequest<{
       type: "uploadChunkResponse"
@@ -990,7 +1004,8 @@ export class SwarmIdClient {
       type: "uploadChunk",
       requestId,
       data: data as Uint8Array,
-      options,
+      options: serializableOptions,
+      requestOptions,
     })
 
     return {

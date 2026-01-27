@@ -7,6 +7,7 @@ import {
 } from "@ethersphere/bee-js"
 import type {
   Bee,
+  BeeRequestOptions,
   Stamper,
   EncryptedChunk,
   UploadOptions,
@@ -84,6 +85,7 @@ export async function uploadEncryptedDataWithSigning(
   encryptionKey?: Uint8Array,
   options?: UploadOptions,
   onProgress?: (progress: UploadProgress) => void,
+  requestOptions?: BeeRequestOptions,
 ): Promise<UploadEncryptedDataResult> {
   const { bee, stamper } = context
 
@@ -152,6 +154,7 @@ export async function uploadEncryptedDataWithSigning(
       stamper,
       encryptedChunk,
       uploadOptionsWithTag,
+      requestOptions,
     )
 
     // Track uploaded chunk address for utilization
@@ -218,6 +221,7 @@ export async function uploadEncryptedDataWithSigning(
           envelope,
           encryptedChunkData,
           uploadOptionsWithTag,
+          requestOptions,
         )
         console.log(
           `[UploadCallback] Upload complete for address: ${address.toHex()}`,
@@ -252,6 +256,7 @@ async function uploadSingleEncryptedChunk(
   stamper: Stamper,
   encryptedChunk: EncryptedChunk,
   options?: UploadOptions,
+  requestOptions?: BeeRequestOptions,
 ): Promise<void> {
   // Client-side signing - use adapter for cafe-utility Chunk interface
   const chunkAdapter = new EncryptedChunkAdapter(encryptedChunk)
@@ -261,6 +266,7 @@ async function uploadSingleEncryptedChunk(
     envelope,
     encryptedChunk.data,
     options,
+    requestOptions,
   )
 }
 
@@ -272,6 +278,7 @@ async function uploadSingleChunkWithEnvelope(
   envelope: EnvelopeWithBatchId,
   data: Uint8Array,
   options?: UploadOptions,
+  requestOptions?: BeeRequestOptions,
 ): Promise<void> {
   const startTime = performance.now()
   // Use non-deferred mode for faster uploads (returns immediately)
@@ -283,7 +290,7 @@ async function uploadSingleChunkWithEnvelope(
   )
 
   const beeUploadStart = performance.now()
-  await bee.uploadChunk(envelope, data, uploadOptions)
+  await bee.uploadChunk(envelope, data, uploadOptions, requestOptions)
   console.log(
     `[uploadSingleChunkWithEnvelope] bee.uploadChunk (stamper) completed (+${(performance.now() - beeUploadStart).toFixed(2)}ms)`,
   )

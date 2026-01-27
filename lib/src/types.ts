@@ -54,6 +54,14 @@ export const UploadOptionsSchema = z
   })
   .optional()
 
+export const RequestOptionsSchema = z
+  .object({
+    timeout: z.number().optional(),
+    headers: z.record(z.string(), z.string()).optional(),
+    endlesslyRetry: z.boolean().optional(),
+  })
+  .optional()
+
 export const DownloadOptionsSchema = z
   .object({
     redundancyStrategy: z
@@ -67,7 +75,21 @@ export const DownloadOptionsSchema = z
   })
   .optional()
 
-export type UploadOptions = z.infer<typeof UploadOptionsSchema>
+export interface UploadProgress {
+  total: number
+  processed: number
+}
+
+export interface UploadOptions {
+  pin?: boolean
+  encrypt?: boolean
+  tag?: number
+  deferred?: boolean
+  redundancyLevel?: number
+  onProgress?: (progress: UploadProgress) => void
+}
+
+export type RequestOptions = z.infer<typeof RequestOptionsSchema>
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
 
 // ============================================================================
@@ -237,6 +259,7 @@ export const UploadDataMessageSchema = z.object({
   requestId: z.string(),
   data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
 })
 
@@ -253,6 +276,7 @@ export const UploadFileMessageSchema = z.object({
   data: z.instanceof(Uint8Array),
   name: z.string().optional(),
   options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
 })
 
 export const DownloadFileMessageSchema = z.object({
@@ -268,6 +292,7 @@ export const UploadChunkMessageSchema = z.object({
   requestId: z.string(),
   data: z.instanceof(Uint8Array),
   options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
 })
 
 export const DownloadChunkMessageSchema = z.object({

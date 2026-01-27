@@ -44,9 +44,33 @@ export class MockChunkStore {
 export class MockBee {
   public readonly url = "http://localhost:1633"
   private store: MockChunkStore
+  private tagCounter = 0
 
   constructor(store?: MockChunkStore) {
     this.store = store || new MockChunkStore()
+  }
+
+  async createTag(): Promise<{
+    uid: number
+    split: number
+    seen: number
+    stored: number
+    sent: number
+    synced: number
+    address: string
+    startedAt: string
+  }> {
+    this.tagCounter++
+    return {
+      uid: this.tagCounter,
+      split: 0,
+      seen: 0,
+      stored: 0,
+      sent: 0,
+      synced: 0,
+      address: "",
+      startedAt: new Date().toISOString(),
+    }
   }
 
   async downloadChunk(reference: string): Promise<Uint8Array> {
@@ -114,12 +138,45 @@ export function createTestPayload(at: bigint): Uint8Array {
   return payload
 }
 
+const BATCH_ID_LENGTH = 32
+const INDEX_LENGTH = 8
+const TIMESTAMP_LENGTH = 8
+const SIGNATURE_LENGTH = 65
+const ISSUER_LENGTH = 20
+const SOC_IDENTIFIER_LENGTH = 32
+
 /**
- * Mock fetch for SOC uploads
+ * Create a mock Stamper for testing
  *
- * NOTE: This doesn't actually store data - use a proper mock Bee implementation instead
+ * Returns an object with a stamp() method that produces a valid-looking
+ * EnvelopeWithBatchId without performing real cryptographic operations.
  */
-export function mockFetch(store?: MockChunkStore): void {
+export function createMockStamper() {
+  return {
+    stamp(_chunk: any) {
+      return {
+        batchId: {
+          toUint8Array: () => new Uint8Array(BATCH_ID_LENGTH),
+        },
+        index: new Uint8Array(INDEX_LENGTH),
+        timestamp: new Uint8Array(TIMESTAMP_LENGTH),
+        signature: new Uint8Array(SIGNATURE_LENGTH),
+        issuer: new Uint8Array(ISSUER_LENGTH),
+      }
+    },
+  }
+}
+
+/**
+ * Mock fetch for SOC and chunk uploads
+ *
+ * Intercepts fetch calls to /soc/ and /chunks endpoints, storing data
+ * in the provided MockChunkStore.
+ *
+ * @param store - Mock chunk store for persisting uploaded data
+ * @param owner - Owner address for computing SOC addresses on /chunks uploads
+ */
+export function mockFetch(store?: MockChunkStore, owner?: EthAddress): void {
   const originalFetch = global.fetch
 
   global.fetch = async (url: string | URL | Request, init?: RequestInit) => {
@@ -136,13 +193,13 @@ export function mockFetch(store?: MockChunkStore): void {
 
       // Parse URL: /soc/{owner}/{id}?sig={signature}
       const parts = urlStr.split("/soc/")[1].split("/")
-      const owner = parts[0]
+      const socOwner = parts[0]
       const idAndSig = parts[1].split("?sig=")
       const identifier = idAndSig[0]
 
       // Calculate SOC address: Keccak256(identifier || owner)
       const identifierBytes = Binary.hexToUint8Array(identifier)
-      const ownerBytes = Binary.hexToUint8Array(owner)
+      const ownerBytes = Binary.hexToUint8Array(socOwner)
       const socAddress = Binary.keccak256(
         Binary.concatBytes(identifierBytes, ownerBytes),
       )
@@ -163,6 +220,40 @@ export function mockFetch(store?: MockChunkStore): void {
         await store.put(reference, fullSOCData)
       }
 
+      return new Response(JSON.stringify({ reference }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      })
+    }
+
+    // Check if it's a chunk upload (used by uploadChunkWithFetch)
+    if (urlStr.includes("/chunks") && init?.method === "POST") {
+      const body = init?.body as Uint8Array
+      if (!body) {
+        throw new Error("Missing body in chunk upload")
+      }
+
+      // SOC data starts with identifier (32 bytes)
+      // Compute SOC address: Keccak256(identifier + owner)
+      if (store && owner) {
+        const identifier = body.slice(0, SOC_IDENTIFIER_LENGTH)
+        const socAddress = Binary.keccak256(
+          Binary.concatBytes(identifier, owner.toUint8Array()),
+        )
+        const reference = Binary.uint8ArrayToHex(socAddress)
+        await store.put(reference, body)
+        return new Response(JSON.stringify({ reference }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        })
+      }
+
+      // Fallback: store by content hash
+      const address = Binary.keccak256(body)
+      const reference = Binary.uint8ArrayToHex(address)
+      if (store) {
+        await store.put(reference, body)
+      }
       return new Response(JSON.stringify({ reference }), {
         status: 200,
         headers: { "Content-Type": "application/json" },

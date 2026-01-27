@@ -1243,7 +1243,7 @@ export class SwarmIdProxy {
     message: UploadDataMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, data, options, enableProgress } = message
+    const { requestId, data, options, requestOptions, enableProgress } = message
 
     console.log("[Proxy] Upload data request, size:", data ? data.length : 0)
 
@@ -1296,6 +1296,7 @@ export class SwarmIdProxy {
           undefined, // encryption key (auto-generated)
           options,
           onProgress,
+          requestOptions,
         )
       } else {
         console.log("[Proxy] Using client-side signing for uploadData")
@@ -1304,6 +1305,7 @@ export class SwarmIdProxy {
           data,
           options,
           onProgress,
+          requestOptions,
         )
       }
 
@@ -1377,7 +1379,7 @@ export class SwarmIdProxy {
     message: UploadFileMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, data, name, options } = message
+    const { requestId, data, name, options, requestOptions } = message
 
     console.log(
       "[Proxy] Upload file request, name:",
@@ -1416,6 +1418,7 @@ export class SwarmIdProxy {
         data,
         name,
         options,
+        requestOptions,
       )
 
       console.log(
@@ -1501,7 +1504,7 @@ export class SwarmIdProxy {
     message: UploadChunkMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, data, options } = message
+    const { requestId, data, options, requestOptions } = message
 
     console.log("[Proxy] Upload chunk request, size:", data ? data.length : 0)
 
@@ -1554,6 +1557,7 @@ export class SwarmIdProxy {
         envelope,
         chunk.data,
         uploadOptions,
+        requestOptions,
       )
 
       console.log(

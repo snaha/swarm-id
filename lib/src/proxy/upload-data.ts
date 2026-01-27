@@ -1,6 +1,7 @@
 import { makeContentAddressedChunk, Reference } from "@ethersphere/bee-js"
 import type {
   Bee,
+  BeeRequestOptions,
   Stamper,
   Chunk as BeeChunk,
   UploadOptions,
@@ -59,6 +60,7 @@ export async function uploadDataWithSigning(
   data: Uint8Array,
   options?: UploadOptions,
   onProgress?: (progress: UploadProgress) => void,
+  requestOptions?: BeeRequestOptions,
 ): Promise<{ reference: string; tagUid?: number }> {
   const { bee, stamper } = context
 
@@ -101,7 +103,7 @@ export async function uploadDataWithSigning(
     })
 
     // Upload chunk with signing
-    await uploadSingleChunk(bee, stamper, chunk, uploadOptionsWithTag)
+    await uploadSingleChunk(bee, stamper, chunk, uploadOptionsWithTag, requestOptions)
 
     processedChunks++
     reportProgress()
@@ -133,6 +135,7 @@ export async function uploadDataWithSigning(
           stamper,
           intermediateChunk,
           uploadOptionsWithTag,
+          requestOptions,
         )
 
         // Count intermediate chunks in progress
@@ -163,6 +166,7 @@ async function uploadSingleChunk(
   stamper: Stamper | undefined,
   chunk: BeeChunk,
   options?: UploadOptions,
+  requestOptions?: BeeRequestOptions,
 ): Promise<void> {
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
@@ -173,7 +177,7 @@ async function uploadSingleChunk(
     // Client-side signing - use adapter for cafe-utility Chunk interface
     const chunkAdapter = new ChunkAdapter(chunk)
     const envelope = stamper.stamp(chunkAdapter)
-    await bee.uploadChunk(envelope, chunk.data, uploadOptions)
+    await bee.uploadChunk(envelope, chunk.data, uploadOptions, requestOptions)
   } else {
     throw new Error("No stamper or batch ID available")
   }
