@@ -165,7 +165,7 @@ export class SwarmIdClient {
    * @returns A promise that resolves when the client is fully initialized
    * @throws {Error} If the client is already initialized
    * @throws {Error} If the iframe fails to load
-   * @throws {Error} If the proxy does not respond within the timeout period (10 seconds)
+   * @throws {Error} If the proxy does not respond within the timeout period (30 seconds)
    * @throws {Error} If origin validation fails on the proxy side
    *
    * @example
@@ -722,7 +722,7 @@ export class SwarmIdClient {
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
    * @param options.onProgress - Optional callback for tracking upload progress
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded data
    * @returns return.tagUid - The tag UID if a tag was created
@@ -814,7 +814,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the downloaded data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the reference is not found
@@ -869,7 +869,7 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded file
    * @returns return.tagUid - The tag UID if a tag was created
@@ -950,7 +950,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the file data object
    * @returns return.name - The filename
    * @returns return.data - The file contents as a Uint8Array
@@ -1015,7 +1015,7 @@ export class SwarmIdClient {
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
    * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded chunk
    * @throws {Error} If the client is not initialized
@@ -1070,7 +1070,7 @@ export class SwarmIdClient {
    * @param options.actPublisher - ACT publisher for encrypted content
    * @param options.actHistoryAddress - ACT history address for encrypted content
    * @param options.actTimestamp - ACT timestamp for encrypted content
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the chunk data as a Uint8Array
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the reference is not found
@@ -1164,7 +1164,7 @@ export class SwarmIdClient {
    * @param identifier - The GSOC identifier
    * @param data - The message data to send
    * @param options - Optional upload configuration
-   * @param requestOptions - Optional request configuration (timeout, headers)
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result with reference and optional tagUid
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the user is not authenticated
