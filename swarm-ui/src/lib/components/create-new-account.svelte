@@ -27,24 +27,21 @@
 	<Horizontal --horizontal-gap="0">
 		<div class="card-wrapper card-left">
 			<AuthCard
-				title="Use Ethereum wallet"
+				title="Sign up with Ethereum"
 				description="Create a Swarm ID account using your Ethereum wallet"
-				buttonText="Sign up with Ethereum"
+				buttonText="Create Ethereum account"
 				onclick={handleEthClick}
 			>
 				{#snippet icon()}
 					<EthereumLogo fill="var(--colors-ultra-high)" width={64} height={64} />
 				{/snippet}
-				{#snippet buttonIcon()}
-					<Wallet size={20} />
-				{/snippet}
 			</AuthCard>
 		</div>
 		<div class="card-wrapper card-right">
 			<AuthCard
-				title="Use Passkey"
-				description="Create a Swarm ID account on this device using a passkey"
-				buttonText="Sign up with Passkey"
+				title="Sign up with Passkey"
+				description="Create a Swarm ID account on this device using a Passkey"
+				buttonText="Create Passkey account"
 				onclick={handlePasskeyClick}
 			>
 				{#snippet icon()}

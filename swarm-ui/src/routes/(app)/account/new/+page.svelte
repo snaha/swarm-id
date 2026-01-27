@@ -4,8 +4,10 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 </script>
 
-<Vertical>
-	<Typography variant="h4">Create New Account</Typography>
-	<Typography variant="small">Create or import an account to continue</Typography>
+<Vertical --vertical-gap="16px">
+<Vertical --vertical-gap="0px">
+	<Typography variant="h4">Sign up for Swarm ID</Typography>
+	<Typography>Create your Swarm ID account with Ethereum or Passkey</Typography>
+</Vertical>
 	<CreateNewAccount />
 </Vertical>
