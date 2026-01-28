@@ -592,6 +592,7 @@ export interface ClientOptions {
   iframeOrigin: string
   iframePath?: string
   timeout?: number
+  initializationTimeout?: number
   onAuthChange?: (authenticated: boolean) => void
   popupMode?: "popup" | "window" // Default: 'window'
   metadata: AppMetadata

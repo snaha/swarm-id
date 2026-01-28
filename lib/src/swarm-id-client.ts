@@ -20,6 +20,9 @@ import {
 } from "./types"
 import { buildAuthUrl } from "./utils/url"
 
+const DEFAULT_TIMEOUT_MS = 30000
+const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
+
 /**
  * Main client library for integrating Swarm ID authentication and storage capabilities
  * into web applications.
@@ -55,6 +58,7 @@ export class SwarmIdClient {
   private iframeOrigin: string
   private iframePath: string
   private timeout: number
+  private initializationTimeout: number
   private onAuthChange?: (authenticated: boolean) => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
@@ -105,7 +109,9 @@ export class SwarmIdClient {
   constructor(options: ClientOptions) {
     this.iframeOrigin = options.iframeOrigin
     this.iframePath = options.iframePath || "/proxy"
-    this.timeout = options.timeout || 30000 // 30 seconds default
+    this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
+    this.initializationTimeout =
+      options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
     this.onAuthChange = options.onAuthChange
     this.popupMode = options.popupMode || "window"
     this.metadata = options.metadata
@@ -124,14 +130,14 @@ export class SwarmIdClient {
       this.readyResolve = resolve
       this.readyReject = reject
 
-      // Timeout after 10 seconds if proxy doesn't respond
+      // Timeout if proxy doesn't respond
       setTimeout(() => {
         reject(
           new Error(
-            "Proxy initialization timeout - proxy did not respond within 10 seconds",
+            `Proxy initialization timeout - proxy did not respond within ${this.initializationTimeout}ms`,
           ),
         )
-      }, 30000)
+      }, this.initializationTimeout)
     })
 
     // Create promise for proxyInitialized message
@@ -139,16 +145,16 @@ export class SwarmIdClient {
       this.proxyInitializedResolve = resolve
       this.proxyInitializedReject = reject
 
-      // Timeout if proxy doesn't send proxyInitialized within 10 seconds
+      // Timeout if proxy doesn't send proxyInitialized
       setTimeout(() => {
         if (this.proxyInitializedReject) {
           this.proxyInitializedReject(
             new Error(
-              "Proxy initialization timeout - proxy did not signal readiness",
+              `Proxy initialization timeout - proxy did not signal readiness within ${this.initializationTimeout}ms`,
             ),
           )
         }
-      }, 30000)
+      }, this.initializationTimeout)
     })
 
     this.setupMessageListener()
@@ -674,9 +680,10 @@ export class SwarmIdClient {
   /**
    * Checks whether the Bee node is reachable.
    *
+   * This method never throws an exception. If the client is not initialized,
+   * the request times out, or any other error occurs, it returns `false`.
+   *
    * @returns A promise resolving to `true` if the Bee node is reachable, `false` otherwise
-   * @throws {Error} If the client is not initialized
-   * @throws {Error} If the request times out
    *
    * @example
    * ```typescript
@@ -689,19 +696,23 @@ export class SwarmIdClient {
    * ```
    */
   async isBeeConnected(): Promise<boolean> {
-    this.ensureReady()
-    const requestId = this.generateRequestId()
+    try {
+      this.ensureReady()
+      const requestId = this.generateRequestId()
 
-    const response = await this.sendRequest<{
-      type: "isConnectedResponse"
-      requestId: string
-      connected: boolean
-    }>({
-      type: "isConnected",
-      requestId,
-    })
+      const response = await this.sendRequest<{
+        type: "isConnectedResponse"
+        requestId: string
+        connected: boolean
+      }>({
+        type: "isConnected",
+        requestId,
+      })
 
-    return response.connected
+      return response.connected
+    } catch {
+      return false
+    }
   }
 
   // ============================================================================

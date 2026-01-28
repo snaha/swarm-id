@@ -54,6 +54,7 @@ Creates a new SwarmIdClient instance.
 | `options.iframeOrigin` | `string` | Yes | The origin URL where the Swarm ID proxy iframe is hosted |
 | `options.iframePath` | `string` | No | The path to the proxy iframe (defaults to `"/proxy"`) |
 | `options.timeout` | `number` | No | Request timeout in milliseconds (defaults to `30000`) |
+| `options.initializationTimeout` | `number` | No | Initialization timeout in milliseconds (defaults to `30000`) |
 | `options.onAuthChange` | `(authenticated: boolean) => void` | No | Callback function invoked when authentication status changes |
 | `options.popupMode` | `"popup" \| "window"` | No | How to display the authentication popup (defaults to `"window"`) |
 | `options.metadata` | `AppMetadata` | Yes | Application metadata shown to users during authentication |
@@ -97,7 +98,7 @@ This method must be called before using any other client methods. It creates a h
 **Throws:**
 - `Error` if the client is already initialized
 - `Error` if the iframe fails to load
-- `Error` if the proxy does not respond within the timeout period (30 seconds)
+- `Error` if the proxy does not respond within the initialization timeout period (configurable via `initializationTimeout`, defaults to 30 seconds)
 - `Error` if origin validation fails on the proxy side
 
 **Example:**
@@ -379,11 +380,9 @@ if (info.canUpload) {
 
 Checks whether the Bee node is reachable.
 
-**Returns:** `Promise<boolean>` - `true` if the Bee node is reachable, `false` otherwise
+This method never throws an exception. If the client is not initialized, the request times out, or any other error occurs, it returns `false`.
 
-**Throws:**
-- `Error` if the client is not initialized
-- `Error` if the request times out
+**Returns:** `Promise<boolean>` - `true` if the Bee node is reachable, `false` otherwise
 
 **Example:**
 
