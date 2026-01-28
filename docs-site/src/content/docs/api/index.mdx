@@ -97,7 +97,7 @@ This method must be called before using any other client methods. It creates a h
 **Throws:**
 - `Error` if the client is already initialized
 - `Error` if the iframe fails to load
-- `Error` if the proxy does not respond within the timeout period (10 seconds)
+- `Error` if the proxy does not respond within the timeout period (30 seconds)
 - `Error` if origin validation fails on the proxy side
 
 **Example:**
@@ -373,13 +373,38 @@ if (info.canUpload) {
 
 ---
 
+## Bee Connectivity Methods
+
+### `isBeeConnected()`
+
+Checks whether the Bee node is reachable.
+
+**Returns:** `Promise<boolean>` - `true` if the Bee node is reachable, `false` otherwise
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const connected = await client.isBeeConnected()
+if (connected) {
+  console.log('Bee node is online')
+} else {
+  console.log('Bee node is offline')
+}
+```
+
+---
+
 ## Data Methods
 
-### `uploadData(data, options?, onProgress?)`
+### `uploadData(data, options?, requestOptions?)`
 
 Uploads raw binary data to the Swarm network.
 
-The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the optional callback.
+The data is uploaded using the authenticated user's postage stamp. Progress can be tracked via the `options.onProgress` callback.
 
 **Parameters:**
 
@@ -392,7 +417,11 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 | `options.tag` | `number` | No | Tag ID for tracking upload progress |
 | `options.deferred` | `boolean` | No | Whether to use deferred upload (defaults to `false`) |
 | `options.redundancyLevel` | `0-4` | No | Redundancy level for data availability |
-| `onProgress` | `(progress) => void` | No | Callback for tracking upload progress |
+| `options.onProgress` | `(progress) => void` | No | Callback for tracking upload progress |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
 
 **Returns:** `Promise<UploadResult>`
 
@@ -410,15 +439,18 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 
 ```typescript
 const data = new TextEncoder().encode('Hello, Swarm!')
-const result = await client.uploadData(data, { encrypt: true }, (progress) => {
-  console.log(`Progress: ${progress.processed}/${progress.total}`)
+const result = await client.uploadData(data, {
+  encrypt: true,
+  onProgress: (progress) => {
+    console.log(`Progress: ${progress.processed}/${progress.total}`)
+  }
 })
 console.log('Reference:', result.reference)
 ```
 
 ---
 
-### `downloadData(reference, options?)`
+### `downloadData(reference, options?, requestOptions?)`
 
 Downloads raw binary data from the Swarm network.
 
@@ -434,6 +466,10 @@ Downloads raw binary data from the Swarm network.
 | `options.actPublisher` | `Uint8Array \| string` | No | ACT publisher for encrypted content |
 | `options.actHistoryAddress` | `Uint8Array \| string` | No | ACT history address for encrypted content |
 | `options.actTimestamp` | `number \| string` | No | ACT timestamp for encrypted content |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
 
 **Returns:** `Promise<Uint8Array>` - The downloaded data
 
@@ -454,7 +490,7 @@ console.log('Downloaded:', text)
 
 ## File Methods
 
-### `uploadFile(file, name?, options?)`
+### `uploadFile(file, name?, options?, requestOptions?)`
 
 Uploads a file to the Swarm network.
 
@@ -467,6 +503,10 @@ Accepts either a File object (from file input) or raw Uint8Array data. When usin
 | `file` | `File \| Uint8Array` | Yes | The file to upload |
 | `name` | `string` | No | Filename (extracted from File object if not provided) |
 | `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
 
@@ -490,7 +530,7 @@ const result = await client.uploadFile(data, 'document.pdf')
 
 ---
 
-### `downloadFile(reference, path?, options?)`
+### `downloadFile(reference, path?, options?, requestOptions?)`
 
 Downloads a file from the Swarm network.
 
@@ -503,6 +543,10 @@ Returns both the file data and its original filename (if available). For manifes
 | `reference` | `string` | Yes | The Swarm reference of the file |
 | `path` | `string` | No | Path within a manifest to retrieve a specific file |
 | `options` | `DownloadOptions` | No | Download configuration (see `downloadData`) |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
 
 **Returns:** `Promise<FileData>`
 
@@ -531,7 +575,7 @@ const url = URL.createObjectURL(blob)
 
 ## Chunk Methods
 
-### `uploadChunk(data, options?)`
+### `uploadChunk(data, options?, requestOptions?)`
 
 Uploads a single chunk to the Swarm network.
 
@@ -543,6 +587,10 @@ Chunks are the fundamental unit of storage in Swarm (4KB each). This method is u
 |-----------|------|----------|-------------|
 | `data` | `Uint8Array` | Yes | The chunk data (should be exactly 4KB for optimal storage) |
 | `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
@@ -562,7 +610,7 @@ console.log('Chunk reference:', result.reference)
 
 ---
 
-### `downloadChunk(reference, options?)`
+### `downloadChunk(reference, options?, requestOptions?)`
 
 Downloads a single chunk from the Swarm network.
 
@@ -574,6 +622,10 @@ Retrieves a chunk by its reference hash. This method is useful for low-level ope
 |-----------|------|----------|-------------|
 | `reference` | `string` | Yes | The Swarm reference of the chunk |
 | `options` | `DownloadOptions` | No | Download configuration (see `downloadData`) |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
 
 **Returns:** `Promise<Uint8Array>` - The chunk data
 
@@ -591,6 +643,84 @@ console.log('Chunk size:', chunk.length)
 
 ---
 
+## GSOC Methods
+
+GSOC (Global Single Owner Chunk) methods enable proximity-based message routing on the Swarm network. These methods allow you to mine a private key that produces a SOC address proximate to a target overlay, then send messages using that key.
+
+### `gsocMine(targetOverlay, identifier, proximity?)`
+
+Mines a private key whose SOC (Single Owner Chunk) address is proximate to a target overlay address.
+
+This is useful for sending messages to specific nodes in the Swarm network based on their overlay address.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `targetOverlay` | `string` | Yes | The target overlay address to be proximate to |
+| `identifier` | `string` | Yes | The identifier for the SOC |
+| `proximity` | `number` | No | The required proximity (number of matching prefix bits) |
+
+**Returns:** `Promise<string>` - The mined signer as a hex string (private key)
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if mining fails
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const targetOverlay = 'a1b2c3d4e5f6...'
+const identifier = 'my-channel'
+const signer = await client.gsocMine(targetOverlay, identifier, 8)
+console.log('Mined signer:', signer)
+```
+
+---
+
+### `gsocSend(signer, identifier, data, options?, requestOptions?)`
+
+Sends a GSOC (Global Single Owner Chunk) message using a mined signer.
+
+Use the signer obtained from `gsocMine()` to send messages that will be routed to nodes with the target overlay address.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `signer` | `string` | Yes | The mined signer (private key) from `gsocMine()` |
+| `identifier` | `string` | Yes | The identifier for the SOC (must match the one used in mining) |
+| `data` | `Uint8Array` | Yes | The message data to send |
+| `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+
+**Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated or cannot upload
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+// First, mine a signer for the target overlay
+const targetOverlay = 'a1b2c3d4e5f6...'
+const identifier = 'my-channel'
+const signer = await client.gsocMine(targetOverlay, identifier, 8)
+
+// Then send a message using the mined signer
+const message = new TextEncoder().encode('Hello, Swarm!')
+const result = await client.gsocSend(signer, identifier, message)
+console.log('Message sent with reference:', result.reference)
+```
+
+---
+
 ## Types
 
 ```typescript
@@ -604,5 +734,7 @@ import type {
   FileData,
   Reference,
   AppMetadata,
+  ButtonConfig,
+  RequestOptions,
 } from '@swarm-id/lib'
 ```
