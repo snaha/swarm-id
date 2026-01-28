@@ -21,6 +21,7 @@
 	let signerKey = $state('')
 	let amount = $state(0)
 	let blockNumber = $state(0)
+	let submitError = $state<string | undefined>(undefined)
 
 	// Error state for each field
 	let batchIDError = $derived.by(() => {
@@ -55,6 +56,9 @@
 	)
 
 	function handleAddStamp() {
+		// Clear previous error
+		submitError = undefined
+
 		// Double-check validation
 		if (!batchID || batchIDError || numberError || signerKeyError) {
 			return
@@ -67,31 +71,35 @@
 
 		const accountId = identity.accountId.toHex()
 
-		// Create the postage stamp with defaults
-		const stamp = postageStampsStore.addStamp({
-			accountId,
-			batchID: new BatchId(batchID),
-			signerKey: new PrivateKey(signerKey),
-			utilization: 0,
-			usable: true,
-			depth,
-			amount,
-			bucketDepth: 16,
-			blockNumber: 0,
-			immutableFlag: false,
-			exists: true,
-		})
+		try {
+			// Create the postage stamp with defaults
+			const stamp = postageStampsStore.addStamp({
+				accountId,
+				batchID: new BatchId(batchID),
+				signerKey: new PrivateKey(signerKey),
+				utilization: 0,
+				usable: true,
+				depth,
+				amount,
+				bucketDepth: 16,
+				blockNumber: 0,
+				immutableFlag: false,
+				exists: true,
+			})
 
-		console.log('✅ Postage stamp added:', stamp.batchID.toHex(), stamp)
+			console.log('✅ Postage stamp added:', stamp.batchID.toHex(), stamp)
 
-		// If this is the first stamp for this account, make it default for this identity
-		const stamps = postageStampsStore.getStampsByAccount(accountId)
-		if (stamps.length === 1 && !identity.defaultPostageStampBatchID) {
-			identitiesStore.setDefaultStamp(identityId, stamp.batchID)
+			// If this is the first stamp for this account, make it default for this identity
+			const stamps = postageStampsStore.getStampsByAccount(accountId)
+			if (stamps.length === 1 && !identity.defaultPostageStampBatchID) {
+				identitiesStore.setDefaultStamp(identityId, stamp.batchID)
+			}
+
+			// Navigate back to stamps page
+			goto(resolve(routes.IDENTITY_STAMPS, { id: identityId }))
+		} catch (error) {
+			submitError = error instanceof Error ? error.message : 'Failed to add postage stamp'
 		}
-
-		// Navigate back to stamps page
-		goto(resolve(routes.IDENTITY_STAMPS, { id: identityId }))
 	}
 </script>
 
@@ -174,6 +182,12 @@
 			{#if signerKeyError}
 				<div class="error-full-width">
 					<ErrorMessage>{signerKeyError}</ErrorMessage>
+				</div>
+			{/if}
+
+			{#if submitError}
+				<div class="error-full-width">
+					<ErrorMessage>{submitError}</ErrorMessage>
 				</div>
 			{/if}
 		</Vertical>

@@ -52,6 +52,12 @@ export const postageStampsStore = {
 	},
 
 	addStamp(stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {
+		// Check for duplicate batch ID
+		const existingStamp = postageStamps.find((s) => s.batchID.equals(stamp.batchID))
+		if (existingStamp) {
+			throw new Error(`Postage stamp with batch ID ${stamp.batchID.toHex()} already exists`)
+		}
+
 		const newStamp: PostageStamp = {
 			...stamp,
 			createdAt: Date.now(),
