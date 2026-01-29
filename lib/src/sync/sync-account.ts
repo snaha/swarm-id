@@ -125,9 +125,7 @@ export function createSyncAccount(
     // Get account
     const account = accountsStore.getAccount(new EthAddress(accountId))
     if (!account) {
-      console.warn(
-        "[SyncCoordinator] Account not found for utilization update",
-      )
+      console.warn("[SyncCoordinator] Account not found for utilization update")
       return
     }
 
@@ -182,7 +180,9 @@ export function createSyncAccount(
       utilizationState,
       stamp.depth,
     )
-    console.log(`[SyncCoordinator] New utilization: ${newUtilization.toFixed(2)}%`)
+    console.log(
+      `[SyncCoordinator] New utilization: ${newUtilization.toFixed(2)}%`,
+    )
 
     // Update stamp in store (without triggering sync)
     postageStampsStore.updateStampUtilization(batchID, newUtilization)
@@ -264,9 +264,7 @@ export function createSyncAccount(
    * @param accountId - Account ID (hex address)
    * @returns Snapshot and sync context, or undefined if account/stamp not found
    */
-  function getAccountStateSnapshot(
-    accountId: string,
-  ):
+  function getAccountStateSnapshot(accountId: string):
     | {
         snapshot: AccountStateSnapshot
         encryptionKey: string

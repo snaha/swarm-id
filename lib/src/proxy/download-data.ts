@@ -1,5 +1,9 @@
 import { ChunkJoiner, Reference } from "@ethersphere/bee-js"
-import type { Bee, BeeRequestOptions, DownloadOptions } from "@ethersphere/bee-js"
+import type {
+  Bee,
+  BeeRequestOptions,
+  DownloadOptions,
+} from "@ethersphere/bee-js"
 import type { UploadProgress } from "./types"
 
 /**

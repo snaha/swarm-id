@@ -79,7 +79,7 @@ export const postageStampsStore = {
 
 	async getStamper(
 		batchID: BatchId,
-		options?: { owner?: EthAddress; encryptionKey?: Uint8Array },
+		options: { owner: EthAddress; encryptionKey: Uint8Array },
 	): Promise<UtilizationAwareStamper | undefined> {
 		const stamp = this.getStamp(batchID)
 		if (!stamp) {
@@ -95,7 +95,8 @@ export const postageStampsStore = {
 			stamp.batchID,
 			stamp.depth,
 			cache,
-			options,
+			options.owner,
+			options.encryptionKey,
 		)
 
 		return stamper

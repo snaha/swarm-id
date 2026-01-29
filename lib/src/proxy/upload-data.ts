@@ -103,7 +103,13 @@ export async function uploadDataWithSigning(
     })
 
     // Upload chunk with signing
-    await uploadSingleChunk(bee, stamper, chunk, uploadOptionsWithTag, requestOptions)
+    await uploadSingleChunk(
+      bee,
+      stamper,
+      chunk,
+      uploadOptionsWithTag,
+      requestOptions,
+    )
 
     processedChunks++
     reportProgress()

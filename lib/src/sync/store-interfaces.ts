@@ -13,8 +13,8 @@ import type { Account, Identity, ConnectedApp, PostageStamp } from "../schemas"
  * Options for creating a stamper with utilization tracking
  */
 export interface StamperOptions {
-  owner?: EthAddress
-  encryptionKey?: Uint8Array
+  owner: EthAddress
+  encryptionKey: Uint8Array
 }
 
 /**

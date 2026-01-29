@@ -29,9 +29,8 @@ const ENCRYPTION_KEY_SIZE = 32
  * This mock bypasses encryption so the finder can parse the data directly.
  */
 vi.mock("../../upload-encrypted-data", async (importOriginal) => {
-  const mod = await importOriginal<
-    typeof import("../../upload-encrypted-data")
-  >()
+  const mod =
+    await importOriginal<typeof import("../../upload-encrypted-data")>()
   const { Binary } = await import("cafe-utility")
 
   return {
@@ -50,10 +49,7 @@ vi.mock("../../upload-encrypted-data", async (importOriginal) => {
 
       // Sign: hash(identifier + hash(span + data))
       const contentHash = Binary.keccak256(Binary.concatBytes(span, data))
-      const toSign = Binary.concatBytes(
-        identifier.toUint8Array(),
-        contentHash,
-      )
+      const toSign = Binary.concatBytes(identifier.toUint8Array(), contentHash)
       const signature = signer.sign(toSign)
 
       // Build SOC data: identifier(32) + signature(65) + span(8) + payload
@@ -382,9 +378,9 @@ describe("Epoch Feeds Integration", () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
 
       const wrongRef = new Uint8Array(16) // Wrong size
-      await expect(
-        updater.update(100n, wrongRef, stamper),
-      ).rejects.toThrow("Reference must be 32 or 64 bytes")
+      await expect(updater.update(100n, wrongRef, stamper)).rejects.toThrow(
+        "Reference must be 32 or 64 bytes",
+      )
     })
   })
 })

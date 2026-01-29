@@ -1114,7 +1114,7 @@ export function calculateUtilizationPercentage(
  */
 export class UtilizationAwareStamper implements Stamper {
   private stamper: Stamper
-  private utilizationState: BatchUtilizationState | undefined
+  private utilizationState: BatchUtilizationState
   private cache: UtilizationStoreDB
   private dirty: boolean = false
   private dirtyBuckets: Set<number> = new Set()
@@ -1138,7 +1138,7 @@ export class UtilizationAwareStamper implements Stamper {
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
-    utilizationState?: BatchUtilizationState,
+    utilizationState: BatchUtilizationState,
   ) {
     this.stamper = stamper
     this.batchId = batchId
@@ -1154,7 +1154,8 @@ export class UtilizationAwareStamper implements Stamper {
    * @param batchId - Postage batch ID
    * @param depth - Batch depth
    * @param cache - Utilization cache database
-   * @param options - Optional owner and encryption key for loading state
+   * @param _owner - Owner address (required for validation, reserved for future Swarm upload)
+   * @param _encryptionKey - Encryption key (required for validation, reserved for future Swarm upload)
    * @returns New UtilizationAwareStamper instance
    */
   static async create(
@@ -1162,43 +1163,42 @@ export class UtilizationAwareStamper implements Stamper {
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
-    options?: { owner?: EthAddress; encryptionKey?: Uint8Array },
+    _owner: EthAddress,
+    _encryptionKey: Uint8Array,
   ): Promise<UtilizationAwareStamper> {
-    let utilizationState: BatchUtilizationState | undefined
+    // Initialize utilization state (always, since owner is now required)
+    const utilizationState = initializeBatchUtilization(batchId)
     let bucketState: Uint32Array
 
     // Try to load utilization state from cache
-    if (options?.owner && options?.encryptionKey) {
-      try {
-        // We need a Bee instance to load from Swarm, but for now just try cache
-        // Create a minimal options object with just cache
-        utilizationState = await loadUtilizationState(batchId, {
-          bee: undefined as any, // Not used when loading from cache only
-          cache,
-          owner: options.owner,
-          encryptionKey: options.encryptionKey,
-        })
-
-        // Convert utilization counters to bucket state
-        bucketState = utilizationToBucketState(utilizationState.dataCounters)
-
+    try {
+      const cachedChunks = await cache.getAllChunks(batchId.toHex())
+      if (cachedChunks.length > 0) {
+        // Merge cached chunks into state
+        for (const cached of cachedChunks) {
+          mergeChunk(
+            utilizationState.dataCounters,
+            cached.chunkIndex,
+            cached.data,
+          )
+        }
         console.log(
-          `[UtilizationAwareStamper] Loaded state from cache for batch ${batchId.toHex()}, max bucket usage: ${Math.max(...Array.from(utilizationState.dataCounters))}`,
+          `[UtilizationAwareStamper] Loaded ${cachedChunks.length} chunks from cache for batch ${batchId.toHex()}, max bucket usage: ${Math.max(...Array.from(utilizationState.dataCounters))}`,
         )
-      } catch (error) {
-        console.warn(
-          `[UtilizationAwareStamper] Failed to load state from cache, starting with blank state:`,
-          error,
+      } else {
+        console.log(
+          `[UtilizationAwareStamper] No cached state, starting fresh for batch ${batchId.toHex()}`,
         )
-        bucketState = new Uint32Array(NUM_BUCKETS)
       }
-    } else {
-      // No options provided, start with blank state
-      console.log(
-        `[UtilizationAwareStamper] No owner/encryptionKey provided, starting with blank state`,
+    } catch (error) {
+      console.warn(
+        `[UtilizationAwareStamper] Failed to load state from cache, starting with fresh state:`,
+        error,
       )
-      bucketState = new Uint32Array(NUM_BUCKETS)
     }
+
+    // Convert utilization counters to bucket state
+    bucketState = utilizationToBucketState(utilizationState.dataCounters)
 
     // Create underlying stamper with bucket state
     const stamper = Stamper.fromState(privateKey, batchId, bucketState, depth)
@@ -1232,6 +1232,9 @@ export class UtilizationAwareStamper implements Stamper {
     )
     const bucket = view.getUint32(0, false) // false = big-endian
 
+    // Update utilization state (increment counter for this bucket)
+    this.utilizationState.dataCounters[bucket]++
+
     // Mark bucket as dirty for eventual flush
     this.dirtyBuckets.add(bucket)
     this.dirty = true
@@ -1253,7 +1256,7 @@ export class UtilizationAwareStamper implements Stamper {
    * Should be called after all stamping operations are complete.
    */
   async flush(): Promise<void> {
-    if (!this.dirty || !this.utilizationState) {
+    if (!this.dirty) {
       console.log(`[UtilizationAwareStamper] Nothing to flush`)
       return
     }
@@ -1321,9 +1324,9 @@ export class UtilizationAwareStamper implements Stamper {
   /**
    * Get current utilization state
    *
-   * @returns Current utilization state or undefined if not loaded
+   * @returns Current utilization state
    */
-  getUtilizationState(): BatchUtilizationState | undefined {
+  getUtilizationState(): BatchUtilizationState {
     return this.utilizationState
   }
 }

@@ -24,7 +24,12 @@ import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
 } from "./types"
-import { Bee, makeContentAddressedChunk, BatchId } from "@ethersphere/bee-js"
+import {
+  Bee,
+  makeContentAddressedChunk,
+  BatchId,
+  EthAddress,
+} from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
@@ -36,7 +41,9 @@ import {
   createIdentitiesStorageManager,
   createPostageStampsStorageManager,
   createNetworkSettingsStorageManager,
+  createAccountsStorageManager,
 } from "./utils/storage-managers"
+import { hexToUint8Array } from "./utils/key-derivation"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 
@@ -195,7 +202,9 @@ export class SwarmIdProxy {
         success: true,
       })
 
-      console.log("[Proxy] Notified parent of disconnection (via storage event)")
+      console.log(
+        "[Proxy] Notified parent of disconnection (via storage event)",
+      )
     }
   }
 
@@ -251,21 +260,28 @@ export class SwarmIdProxy {
       return
     }
 
+    // Look up account info for utilization tracking
+    const accountInfo = this.lookupAccountForApp()
+    if (!accountInfo) {
+      console.warn("[Proxy] Cannot initialize stamper: account not found")
+      return
+    }
+
     try {
       // Initialize utilization cache if not already done
       if (!this.utilizationStore) {
         this.utilizationStore = new UtilizationStoreDB()
       }
 
-      // Create utilization-aware stamper
-      // Note: owner and encryptionKey are optional - not provided here since
-      // the proxy doesn't have access to them. The stamper will still track
-      // bucket usage locally in IndexedDB.
+      // Create utilization-aware stamper with owner and encryption key
+      // This enables proper utilization tracking and persistence
       this.stamper = await UtilizationAwareStamper.create(
         this.signerKey,
         new BatchId(this.postageBatchId),
         this.stamperDepth,
         this.utilizationStore,
+        accountInfo.owner,
+        accountInfo.encryptionKey,
       )
 
       console.log(
@@ -743,6 +759,67 @@ export class SwarmIdProxy {
       return stamp
     } catch (error) {
       console.error("[Proxy] Error looking up postage stamp:", error)
+      return undefined
+    }
+  }
+
+  /**
+   * Look up the account for the currently connected app's identity
+   * by reading from shared localStorage stores.
+   *
+   * @returns Account info with owner address and encryption key, or undefined if not found
+   */
+  private lookupAccountForApp():
+    | { owner: EthAddress; encryptionKey: Uint8Array }
+    | undefined {
+    if (!this.parentOrigin) {
+      return undefined
+    }
+
+    try {
+      // Load connected apps to find which identity is connected to this app
+      const connectedAppsManager = createConnectedAppsStorageManager()
+      const connectedApps = connectedAppsManager.load()
+      const connectedApp = connectedApps.find(
+        (app) => app.appUrl === this.parentOrigin,
+      )
+
+      if (!connectedApp) {
+        console.log("[Proxy] No connected app found for:", this.parentOrigin)
+        return undefined
+      }
+
+      // Load identities to find the account for this identity
+      const identitiesManager = createIdentitiesStorageManager()
+      const identities = identitiesManager.load()
+      const identity = identities.find((i) => i.id === connectedApp.identityId)
+
+      if (!identity) {
+        console.log("[Proxy] Identity not found:", connectedApp.identityId)
+        return undefined
+      }
+
+      // Load accounts and find the one for this identity
+      const accountsManager = createAccountsStorageManager()
+      const accounts = accountsManager.load()
+      const account = accounts.find((a) => a.id.equals(identity.accountId))
+
+      if (!account) {
+        console.log(
+          "[Proxy] Account not found for identity:",
+          identity.accountId.toHex(),
+        )
+        return undefined
+      }
+
+      console.log("[Proxy] Found account for app:", account.id.toHex())
+
+      return {
+        owner: account.id,
+        encryptionKey: hexToUint8Array(account.swarmEncryptionKey),
+      }
+    } catch (error) {
+      console.error("[Proxy] Error looking up account:", error)
       return undefined
     }
   }
@@ -1693,10 +1770,7 @@ export class SwarmIdProxy {
     }
   }
 
-  private handleGsocMine(
-    message: GsocMineMessage,
-    event: MessageEvent,
-  ): void {
+  private handleGsocMine(message: GsocMineMessage, event: MessageEvent): void {
     const { requestId, targetOverlay, identifier, proximity } = message
 
     console.log("[Proxy] GSOC mine request, targetOverlay:", targetOverlay)
