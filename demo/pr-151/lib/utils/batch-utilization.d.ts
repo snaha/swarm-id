@@ -337,13 +337,13 @@ export declare function updateAfterWrite(batchId: BatchId, dataChunks: BeeChunk[
     tracker: DirtyChunkTracker;
 }>;
 /**
- * Calculate current utilization percentage for a batch
+ * Calculate current utilization fraction for a batch
  *
  * @param state - Current utilization state
  * @param batchDepth - Batch depth parameter
- * @returns Utilization percentage (0-100)
+ * @returns Utilization as decimal fraction (0-1)
  */
-export declare function calculateUtilizationPercentage(state: BatchUtilizationState, batchDepth: number): number;
+export declare function calculateUtilization(state: BatchUtilizationState, batchDepth: number): number;
 /**
  * Stamper wrapper that maintains bucket state from utilization data
  *

@@ -7,7 +7,7 @@
 export { SwarmIdClient } from "./swarm-id-client";
 export { SwarmIdProxy, initProxy } from "./swarm-id-proxy";
 export { deriveSecret, generateMasterKey, hexToUint8Array, uint8ArrayToHex, verifySecret, utils, } from "./utils/key-derivation";
-export { initializeBatchUtilization, calculateUtilizationUpdate, updateAfterWrite, saveUtilizationState, loadUtilizationState, calculateUtilizationPercentage, toBucket, assignChunksToBuckets, serializeUint32Array, deserializeUint32Array, splitIntoChunks, reconstructFromChunks, calculateMaxSlotsPerBucket, hasBucketCapacity, createStamper, prepareBucketState, UtilizationAwareStamper, NUM_BUCKETS, BUCKET_DEPTH, UTILIZATION_SLOTS_PER_BUCKET, DATA_COUNTER_START, CHUNK_SIZE, DEFAULT_BATCH_DEPTH, } from "./utils/batch-utilization";
+export { initializeBatchUtilization, calculateUtilizationUpdate, updateAfterWrite, saveUtilizationState, loadUtilizationState, calculateUtilization, toBucket, assignChunksToBuckets, serializeUint32Array, deserializeUint32Array, splitIntoChunks, reconstructFromChunks, calculateMaxSlotsPerBucket, hasBucketCapacity, createStamper, prepareBucketState, UtilizationAwareStamper, NUM_BUCKETS, BUCKET_DEPTH, UTILIZATION_SLOTS_PER_BUCKET, DATA_COUNTER_START, CHUNK_SIZE, DEFAULT_BATCH_DEPTH, } from "./utils/batch-utilization";
 export { UtilizationStoreDB, evictOldEntries, calculateContentHash, } from "./storage/utilization-store";
 export type { ChunkCacheEntry, BatchMetadata, CacheEvictionPolicy, } from "./storage/utilization-store";
 export { DebouncedUtilizationUploader } from "./storage/debounced-uploader";
