@@ -3,46 +3,13 @@
   "version": "1.0.0",
   "type": "module",
   "description": "Swarm ID library for authentication and Bee API operations",
-  "main": "dist/swarm-id.umd.js",
+  "main": "dist/swarm-id.esm.js",
   "module": "dist/swarm-id.esm.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "import": "./dist/swarm-id.esm.js",
-      "require": "./dist/swarm-id.umd.js",
       "types": "./dist/index.d.ts"
-    },
-    "./client": {
-      "import": "./dist/swarm-id-client.js",
-      "types": "./dist/swarm-id-client.d.ts"
-    },
-    "./proxy": {
-      "import": "./dist/swarm-id-proxy.js",
-      "types": "./dist/swarm-id-proxy.d.ts"
-    },
-    "./auth": {
-      "import": "./dist/swarm-id-auth.js",
-      "types": "./dist/swarm-id-auth.d.ts"
-    },
-    "./sync": {
-      "import": "./dist/swarm-id-sync.js",
-      "types": "./dist/swarm-id-sync.d.ts"
-    },
-    "./utils/batch-utilization": {
-      "import": "./dist/utils/batch-utilization.js",
-      "types": "./dist/utils/batch-utilization.d.ts"
-    },
-    "./utils/hex": {
-      "import": "./dist/utils/hex.js",
-      "types": "./dist/utils/hex.d.ts"
-    },
-    "./storage/utilization-cache": {
-      "import": "./dist/storage/utilization-cache.js",
-      "types": "./dist/storage/utilization-cache.d.ts"
-    },
-    "./storage/debounced-uploader": {
-      "import": "./dist/storage/debounced-uploader.js",
-      "types": "./dist/storage/debounced-uploader.d.ts"
     }
   },
   "files": [

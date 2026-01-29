@@ -1,8 +1,11 @@
 import { browser } from '$app/environment'
 import { BatchId, EthAddress } from '@ethersphere/bee-js'
-import { createPostageStampsStorageManager, type PostageStamp } from '@swarm-id/lib'
-import { UtilizationAwareStamper } from '@swarm-id/lib/utils/batch-utilization'
-import { UtilizationCacheDB } from '@swarm-id/lib/storage/utilization-cache'
+import {
+	createPostageStampsStorageManager,
+	type PostageStamp,
+	UtilizationAwareStamper,
+	UtilizationStoreDB,
+} from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
@@ -11,19 +14,19 @@ import { triggerSync } from '$lib/utils/sync-hooks'
 
 const storageManager = createPostageStampsStorageManager()
 
-// Lazy utilization cache initialization (browser only)
-let utilizationCache: UtilizationCacheDB | undefined
+// Lazy utilization store initialization (browser only)
+let utilizationStore: UtilizationStoreDB | undefined
 
-const getUtilizationCache = () => {
+const getUtilizationStore = () => {
 	if (!browser) {
-		throw new Error('Utilization cache not available (browser only)')
+		throw new Error('Utilization store not available (browser only)')
 	}
 
-	if (!utilizationCache) {
-		utilizationCache = new UtilizationCacheDB()
+	if (!utilizationStore) {
+		utilizationStore = new UtilizationStoreDB()
 	}
 
-	return utilizationCache
+	return utilizationStore
 }
 
 function loadPostageStamps(): PostageStamp[] {
@@ -83,8 +86,8 @@ export const postageStampsStore = {
 			return undefined
 		}
 
-		// Get utilization cache
-		const cache = getUtilizationCache()
+		// Get utilization store
+		const cache = getUtilizationStore()
 
 		// Create utilization-aware stamper with loaded bucket state
 		const stamper = await UtilizationAwareStamper.create(

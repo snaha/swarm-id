@@ -23,8 +23,8 @@ import {
 } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "@ethersphere/bee-js"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
-import type { UtilizationCacheDB } from "../storage/utilization-cache"
-import { calculateContentHash } from "../storage/utilization-cache"
+import type { UtilizationStoreDB } from "../storage/utilization-store"
+import { calculateContentHash } from "../storage/utilization-store"
 import { uploadSingleChunkWithEncryption } from "../proxy/upload-encrypted-data"
 
 // ============================================================================
@@ -798,7 +798,7 @@ export async function loadUtilizationState(
     bee: Bee
     owner: EthAddress
     encryptionKey: Uint8Array
-    cache: UtilizationCacheDB
+    cache: UtilizationStoreDB
   },
 ): Promise<BatchUtilizationState> {
   const { cache } = options
@@ -918,7 +918,7 @@ export async function saveUtilizationState(
     bee: Bee
     stamper: Stamper
     encryptionKey: Uint8Array
-    cache: UtilizationCacheDB
+    cache: UtilizationStoreDB
     tracker: DirtyChunkTracker
   },
 ): Promise<void> {
@@ -1029,7 +1029,7 @@ export async function updateAfterWrite(
     bee: Bee
     owner: EthAddress
     encryptionKey: Uint8Array
-    cache: UtilizationCacheDB
+    cache: UtilizationStoreDB
   },
 ): Promise<{
   state: BatchUtilizationState
@@ -1115,7 +1115,7 @@ export function calculateUtilizationPercentage(
 export class UtilizationAwareStamper implements Stamper {
   private stamper: Stamper
   private utilizationState: BatchUtilizationState | undefined
-  private cache: UtilizationCacheDB
+  private cache: UtilizationStoreDB
   private dirty: boolean = false
   private dirtyBuckets: Set<number> = new Set()
 
@@ -1137,7 +1137,7 @@ export class UtilizationAwareStamper implements Stamper {
     stamper: Stamper,
     batchId: BatchId,
     depth: number,
-    cache: UtilizationCacheDB,
+    cache: UtilizationStoreDB,
     utilizationState?: BatchUtilizationState,
   ) {
     this.stamper = stamper
@@ -1161,7 +1161,7 @@ export class UtilizationAwareStamper implements Stamper {
     privateKey: Uint8Array | string,
     batchId: BatchId,
     depth: number,
-    cache: UtilizationCacheDB,
+    cache: UtilizationStoreDB,
     options?: { owner?: EthAddress; encryptionKey?: Uint8Array },
   ): Promise<UtilizationAwareStamper> {
     let utilizationState: BatchUtilizationState | undefined

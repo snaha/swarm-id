@@ -11,9 +11,6 @@ export { SwarmIdClient } from "./swarm-id-client"
 // Proxy for iframe
 export { SwarmIdProxy, initProxy } from "./swarm-id-proxy"
 
-// Auth popup
-export { SwarmIdAuth, initAuth } from "./swarm-id-auth"
-
 // Key derivation utilities
 export {
   deriveSecret,
@@ -42,6 +39,7 @@ export {
   hasBucketCapacity,
   createStamper,
   prepareBucketState,
+  UtilizationAwareStamper,
   NUM_BUCKETS,
   BUCKET_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
@@ -49,6 +47,22 @@ export {
   CHUNK_SIZE,
   DEFAULT_BATCH_DEPTH,
 } from "./utils/batch-utilization"
+
+// Utilization storage (IndexedDB cache)
+export {
+  UtilizationStoreDB,
+  evictOldEntries,
+  calculateContentHash,
+} from "./storage/utilization-store"
+
+export type {
+  ChunkCacheEntry,
+  BatchMetadata,
+  CacheEvictionPolicy,
+} from "./storage/utilization-store"
+
+// Debounced utilization uploader
+export { DebouncedUtilizationUploader } from "./storage/debounced-uploader"
 
 // Versioned storage utilities
 export {
@@ -95,27 +109,37 @@ export {
 
 // State sync to Swarm
 export {
-  StateSyncManager,
   // Account-level key derivation
   deriveAccountBackupKey,
   deriveAccountSwarmEncryptionKey,
   backupKeyToPrivateKey,
   serializeAccountState,
   deserializeAccountState,
+  // Sync account
+  createSyncAccount,
+  ACCOUNT_SYNC_TOPIC_PREFIX,
 } from "./sync"
 
 // State sync types
 export type {
   AccountStateSnapshot,
   AccountMetadata,
-  StateSyncOptions,
   SyncResult,
+  // Sync account types
+  SyncAccountOptions,
+  SyncAccountFunction,
+  // Store interfaces
+  AccountsStoreInterface,
+  IdentitiesStoreInterface,
+  ConnectedAppsStoreInterface,
+  PostageStampsStoreInterface,
+  StamperOptions,
+  FlushableStamper,
 } from "./sync"
 
 // Type exports
 export type {
   ClientOptions,
-  AuthOptions,
   AuthStatus,
   ButtonStyles,
   UploadResult,

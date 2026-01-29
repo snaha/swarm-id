@@ -30,7 +30,7 @@ import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
-import { UtilizationCacheDB } from "./storage/utilization-cache"
+import { UtilizationStoreDB } from "./storage/utilization-store"
 import {
   createConnectedAppsStorageManager,
   createIdentitiesStorageManager,
@@ -60,7 +60,7 @@ export class SwarmIdProxy {
   private signerKey: string | undefined
   private stamper: UtilizationAwareStamper | undefined
   private stamperDepth: number = 23 // Default depth
-  private utilizationCache: UtilizationCacheDB | undefined
+  private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
@@ -253,8 +253,8 @@ export class SwarmIdProxy {
 
     try {
       // Initialize utilization cache if not already done
-      if (!this.utilizationCache) {
-        this.utilizationCache = new UtilizationCacheDB()
+      if (!this.utilizationStore) {
+        this.utilizationStore = new UtilizationStoreDB()
       }
 
       // Create utilization-aware stamper
@@ -265,7 +265,7 @@ export class SwarmIdProxy {
         this.signerKey,
         new BatchId(this.postageBatchId),
         this.stamperDepth,
-        this.utilizationCache,
+        this.utilizationStore,
       )
 
       console.log(

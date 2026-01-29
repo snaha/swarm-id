@@ -48,7 +48,7 @@ export interface BatchMetadata {
 // IndexedDB Cache Manager
 // ============================================================================
 
-const DB_NAME = "swarm-utilization-cache"
+const DB_NAME = "swarm-utilization-store"
 const DB_VERSION = 1
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
@@ -56,7 +56,7 @@ const METADATA_STORE = "metadata"
 /**
  * Manages IndexedDB cache for batch utilization chunks
  */
-export class UtilizationCacheDB {
+export class UtilizationStoreDB {
   private db: IDBDatabase | undefined
 
   /**
@@ -126,7 +126,7 @@ export class UtilizationCacheDB {
         if (entry) {
           // Update lastAccess asynchronously (don't wait)
           this.touchChunk(batchId, chunkIndex).catch((err) => {
-            console.warn("[UtilizationCache] Failed to update lastAccess:", err)
+            console.warn("[UtilizationStore] Failed to update lastAccess:", err)
           })
         }
 
@@ -329,7 +329,7 @@ export interface CacheEvictionPolicy {
  * @param policy - Eviction policy
  */
 export async function evictOldEntries(
-  cache: UtilizationCacheDB,
+  cache: UtilizationStoreDB,
   policy: CacheEvictionPolicy = {},
 ): Promise<void> {
   const maxAge = policy.maxAge ?? 7 * 24 * 60 * 60 * 1000 // 7 days

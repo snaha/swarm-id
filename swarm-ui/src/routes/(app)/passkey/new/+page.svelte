@@ -15,7 +15,7 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
-	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib/sync'
+	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
 
 	let accountName = $state('Passkey')
 	let error = $state<string | undefined>(undefined)

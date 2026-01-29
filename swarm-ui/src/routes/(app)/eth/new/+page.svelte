@@ -28,7 +28,7 @@
 	import { WarningAlt } from 'carbon-icons-svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
-	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib/sync'
+	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
 
 	let showTooltip = $state(false)
 	let showSeedModal = $state(false)
