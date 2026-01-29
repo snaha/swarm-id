@@ -1080,13 +1080,13 @@ export async function updateAfterWrite(
 }
 
 /**
- * Calculate current utilization percentage for a batch
+ * Calculate current utilization fraction for a batch
  *
  * @param state - Current utilization state
  * @param batchDepth - Batch depth parameter
- * @returns Utilization percentage (0-100)
+ * @returns Utilization as decimal fraction (0-1)
  */
-export function calculateUtilizationPercentage(
+export function calculateUtilization(
   state: BatchUtilizationState,
   batchDepth: number,
 ): number {
@@ -1094,7 +1094,7 @@ export function calculateUtilizationPercentage(
   const maxBucketUsage = Math.max(...Array.from(state.dataCounters))
 
   // Utilization is based on the fullest bucket
-  return Math.min(100, (maxBucketUsage / maxSlots) * 100)
+  return Math.min(1, maxBucketUsage / maxSlots)
 }
 
 // ============================================================================

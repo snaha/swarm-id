@@ -28,7 +28,7 @@ export {
   updateAfterWrite,
   saveUtilizationState,
   loadUtilizationState,
-  calculateUtilizationPercentage,
+  calculateUtilization,
   toBucket,
   assignChunksToBuckets,
   serializeUint32Array,

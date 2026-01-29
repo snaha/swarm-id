@@ -19,7 +19,7 @@ import { deriveSecret, hexToUint8Array } from "../utils/key-derivation"
 import {
   updateAfterWrite,
   saveUtilizationState,
-  calculateUtilizationPercentage,
+  calculateUtilization,
 } from "../utils/batch-utilization"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
@@ -175,13 +175,10 @@ export function createSyncAccount(
       },
     )
 
-    // Calculate new utilization percentage
-    const newUtilization = calculateUtilizationPercentage(
-      utilizationState,
-      stamp.depth,
-    )
+    // Calculate new utilization fraction
+    const newUtilization = calculateUtilization(utilizationState, stamp.depth)
     console.log(
-      `[SyncCoordinator] New utilization: ${newUtilization.toFixed(2)}%`,
+      `[SyncCoordinator] New utilization: ${(newUtilization * 100).toFixed(2)}%`,
     )
 
     // Update stamp in store (without triggering sync)
