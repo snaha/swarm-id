@@ -1,0 +1,1 @@
+import{e as i,k as n,d as o,g as s}from"./Bc7s4u5Y.js";function a(){let e=i(n(t()));window.addEventListener("resize",()=>{o(e,t(),!0)});function t(){return window.innerWidth<1024}return{get mobile(){return s(e)},set mobile(r){o(e,r,!0)}}}const l=a();export{l};
