@@ -10,6 +10,7 @@
 	import routes from '$lib/routes'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import { themeStore } from '$lib/stores/theme.svelte'
 	import Drawer from '$lib/components/drawer.svelte'
 
 	let { children } = $props()
@@ -18,6 +19,9 @@
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
 	const identities = $derived(identitiesStore.identities)
 	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+
+	// Ensure theme store is initialized
+	void themeStore.preference
 
 	// Initialize drawer state from localStorage
 	let drawerOpen = $state(
@@ -48,7 +52,7 @@
 			>
 				<div class="logo">
 					<a href={resolve(routes.HOME)}>
-						<SwarmLogo fill="#242424" height={30} />
+						<SwarmLogo fill="var(--colors-ultra-high)" height={30} />
 					</a>
 				</div>
 

@@ -6,7 +6,7 @@
 		size?: number
 	}
 
-	let { fill = '#242424', width = 42, height = 64, size }: Props = $props()
+	let { fill = 'currentColor', width = 42, height = 64, size }: Props = $props()
 </script>
 
 <svg

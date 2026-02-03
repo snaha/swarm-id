@@ -22,6 +22,7 @@
 		TrashCan,
 	} from 'carbon-icons-svelte'
 	import NetworkSettingsModal from './network-settings-modal.svelte'
+	import ThemeToggle from './theme-toggle.svelte'
 	import FlexItem from '$lib/components/ui/flex-item.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Badge from '$lib/components/ui/badge.svelte'
@@ -168,6 +169,15 @@
 							Network settings
 						</Horizontal></Button
 					>
+				</Vertical>
+				<Divider --margin="0" />
+				<Vertical
+					--vertical-gap="var(--half-padding)"
+					--vertical-align-items="stretch"
+					style="padding: var(--padding)"
+				>
+					<Typography variant="small">Appearance</Typography>
+					<ThemeToggle />
 				</Vertical>
 			{:else if screen === 'all-accounts'}
 				<Horizontal
@@ -385,6 +395,6 @@
 		padding: 0;
 		overflow-y: auto;
 		z-index: 50;
-		box-shadow: 0px 4px 12px 4px #00000040;
+		box-shadow: 0px 4px 12px 4px var(--colors-dark-25);
 	}
 </style>

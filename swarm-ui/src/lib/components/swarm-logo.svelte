@@ -5,7 +5,7 @@
 		height?: number
 	}
 
-	let { fill = '#FAFAFA', width = 136, height = 30 }: Props = $props()
+	let { fill = 'currentColor', width = 136, height = 30 }: Props = $props()
 </script>
 
 <svg {width} {height} viewBox="0 0 136 30" fill="none" xmlns="http://www.w3.org/2000/svg">

@@ -22,15 +22,15 @@
 	--colors-light-red: #cc0000;
 
 	/* Default Colors (defaults to light mode) */
-	--colors-top: #000000;
-	--colors-ultra-high: #242424;
-	--colors-high: #dd7200;
-	--colors-low: #e7e7e7;
-	--colors-ultra-low: #fafafa;
-	--colors-base: #ffffff;
+	--colors-top: var(--colors-light-top);
+	--colors-ultra-high: var(--colors-light-ultra-high);
+	--colors-high: var(--colors-light-high);
+	--colors-low: var(--colors-light-low);
+	--colors-ultra-low: var(--colors-light-ultra-low);
+	--colors-base: var(--colors-light-base);
 
-	--colors-green: #008800;
-	--colors-red: #cc0000;
+	--colors-green: var(--colors-light-green);
+	--colors-red: var(--colors-light-red);
 
 	--colors-light: #ffffff;
 	--colors-dark: #000000;
@@ -98,6 +98,18 @@
 	--focus-outline: 4px solid var(--colors-top);
 	--focus-outline-offset: -4px;
 }
+html[data-theme='dark'] {
+	--colors-top: var(--colors-dark-top);
+	--colors-ultra-high: var(--colors-dark-ultra-high);
+	--colors-high: var(--colors-dark-high);
+	--colors-low: var(--colors-dark-low);
+	--colors-ultra-low: var(--colors-dark-ultra-low);
+	--colors-base: var(--colors-dark-base);
+
+	--colors-green: var(--colors-dark-green);
+	--colors-red: var(--colors-dark-red);
+}
+
 *,
 *::before,
 *::after {

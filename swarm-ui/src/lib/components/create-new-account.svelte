@@ -33,7 +33,7 @@
 				onclick={handleEthClick}
 			>
 				{#snippet icon()}
-					<EthereumLogo fill="#242424" width={64} height={64} />
+					<EthereumLogo fill="var(--colors-ultra-high)" width={64} height={64} />
 				{/snippet}
 				{#snippet buttonIcon()}
 					<Wallet size={20} />
@@ -48,10 +48,10 @@
 				onclick={handlePasskeyClick}
 			>
 				{#snippet icon()}
-					<PasskeyLogo fill="#242424" width={64} height={64} />
+					<PasskeyLogo fill="var(--colors-ultra-high)" width={64} height={64} />
 				{/snippet}
 				{#snippet buttonIcon()}
-					<PasskeyLogo fill="#FAFAFA" width={20} height={20} />
+					<PasskeyLogo fill="currentColor" width={20} height={20} />
 				{/snippet}
 			</AuthCard>
 		</div>
