@@ -1,11 +1,18 @@
-import type { Bee, Stamper } from "@ethersphere/bee-js"
+import type { Bee, EnvelopeWithBatchId } from "@ethersphere/bee-js"
+
+/**
+ * Async stamp function that requests a stamp for a chunk hash.
+ * On the leader tab this stamps locally; on a follower tab this
+ * round-trips through the SyncCoordinator BroadcastChannel.
+ */
+export type StampFunction = (chunkHash: Uint8Array) => Promise<EnvelopeWithBatchId>
 
 /**
  * Upload context shared across handlers
  */
 export interface UploadContext {
   bee: Bee
-  stamper: Stamper
+  stamp: StampFunction
 }
 
 /**

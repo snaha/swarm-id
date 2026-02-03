@@ -24,28 +24,20 @@ import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
 } from "./types"
-import {
-  Bee,
-  makeContentAddressedChunk,
-  BatchId,
-  EthAddress,
-} from "@ethersphere/bee-js"
+import { Bee, makeContentAddressedChunk } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
-import { UtilizationAwareStamper } from "./utils/batch-utilization"
-import { UtilizationStoreDB } from "./storage/utilization-store"
 import {
   createConnectedAppsStorageManager,
   createIdentitiesStorageManager,
   createPostageStampsStorageManager,
   createNetworkSettingsStorageManager,
-  createAccountsStorageManager,
 } from "./utils/storage-managers"
-import { hexToUint8Array } from "./utils/key-derivation"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
+import { initSyncCoordinator, requestStamp, flushCoordinatorStamper } from "./sync"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -65,9 +57,7 @@ export class SwarmIdProxy {
   private appSecret: string | undefined
   private postageBatchId: string | undefined
   private signerKey: string | undefined
-  private stamper: UtilizationAwareStamper | undefined
   private stamperDepth: number = 23 // Default depth
-  private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
@@ -86,6 +76,7 @@ export class SwarmIdProxy {
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupConnectedAppsListener()
+    initSyncCoordinator()
     console.log(
       "[Proxy] Proxy initialized with Bee API from network settings:",
       this.beeApiUrl,
@@ -166,7 +157,6 @@ export class SwarmIdProxy {
       if (stamp) {
         this.postageBatchId = stamp.batchID.toHex()
         this.signerKey = stamp.signerKey.toHex()
-        await this.initializeStamper()
       } else {
         console.log("[Proxy] No postage stamp found for connected identity")
         this.postageBatchId = undefined
@@ -248,67 +238,7 @@ export class SwarmIdProxy {
     return this.signerKey
   }
 
-  /**
-   * Initialize the Stamper for client-side signing
-   * Uses UtilizationAwareStamper to track bucket usage
-   */
-  private async initializeStamper(): Promise<void> {
-    if (!this.signerKey || !this.postageBatchId) {
-      console.warn(
-        "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
-      )
-      return
-    }
 
-    // Look up account info for utilization tracking
-    const accountInfo = this.lookupAccountForApp()
-    if (!accountInfo) {
-      console.warn("[Proxy] Cannot initialize stamper: account not found")
-      return
-    }
-
-    try {
-      // Initialize utilization cache if not already done
-      if (!this.utilizationStore) {
-        this.utilizationStore = new UtilizationStoreDB()
-      }
-
-      // Create utilization-aware stamper with owner and encryption key
-      // This enables proper utilization tracking and persistence
-      this.stamper = await UtilizationAwareStamper.create(
-        this.signerKey,
-        new BatchId(this.postageBatchId),
-        this.stamperDepth,
-        this.utilizationStore,
-        accountInfo.owner,
-        accountInfo.encryptionKey,
-      )
-
-      console.log(
-        "[Proxy] Utilization-aware stamper initialized with depth:",
-        this.stamperDepth,
-      )
-    } catch (error) {
-      console.error("[Proxy] Failed to initialize stamper:", error)
-      this.stamper = undefined
-    }
-  }
-
-  /**
-   * Save stamper bucket state to IndexedDB
-   * Utilization-aware stamper persists bucket state automatically
-   */
-  private async saveStamperState(): Promise<void> {
-    if (!this.stamper) {
-      return
-    }
-
-    try {
-      await this.stamper.flush()
-    } catch (error) {
-      console.error("[Proxy] Failed to save stamper state:", error)
-    }
-  }
 
   /**
    * Setup message listener for parent and popup messages
@@ -684,7 +614,6 @@ export class SwarmIdProxy {
         if (stamp) {
           this.postageBatchId = stamp.batchID.toHex()
           this.signerKey = stamp.signerKey.toHex()
-          await this.initializeStamper()
         } else {
           console.log("[Proxy] No postage stamp found for connected identity")
           this.postageBatchId = undefined
@@ -759,67 +688,6 @@ export class SwarmIdProxy {
       return stamp
     } catch (error) {
       console.error("[Proxy] Error looking up postage stamp:", error)
-      return undefined
-    }
-  }
-
-  /**
-   * Look up the account for the currently connected app's identity
-   * by reading from shared localStorage stores.
-   *
-   * @returns Account info with owner address and encryption key, or undefined if not found
-   */
-  private lookupAccountForApp():
-    | { owner: EthAddress; encryptionKey: Uint8Array }
-    | undefined {
-    if (!this.parentOrigin) {
-      return undefined
-    }
-
-    try {
-      // Load connected apps to find which identity is connected to this app
-      const connectedAppsManager = createConnectedAppsStorageManager()
-      const connectedApps = connectedAppsManager.load()
-      const connectedApp = connectedApps.find(
-        (app) => app.appUrl === this.parentOrigin,
-      )
-
-      if (!connectedApp) {
-        console.log("[Proxy] No connected app found for:", this.parentOrigin)
-        return undefined
-      }
-
-      // Load identities to find the account for this identity
-      const identitiesManager = createIdentitiesStorageManager()
-      const identities = identitiesManager.load()
-      const identity = identities.find((i) => i.id === connectedApp.identityId)
-
-      if (!identity) {
-        console.log("[Proxy] Identity not found:", connectedApp.identityId)
-        return undefined
-      }
-
-      // Load accounts and find the one for this identity
-      const accountsManager = createAccountsStorageManager()
-      const accounts = accountsManager.load()
-      const account = accounts.find((a) => a.id.equals(identity.accountId))
-
-      if (!account) {
-        console.log(
-          "[Proxy] Account not found for identity:",
-          identity.accountId.toHex(),
-        )
-        return undefined
-      }
-
-      console.log("[Proxy] Found account for app:", account.id.toHex())
-
-      return {
-        owner: account.id,
-        encryptionKey: hexToUint8Array(account.swarmEncryptionKey),
-      }
-    } catch (error) {
-      console.error("[Proxy] Error looking up account:", error)
       return undefined
     }
   }
@@ -926,7 +794,6 @@ export class SwarmIdProxy {
     this.appSecret = undefined
     this.postageBatchId = undefined
     this.signerKey = undefined
-    this.stamper = undefined
 
     // Show login button
     this.showAuthButton()
@@ -1340,11 +1207,6 @@ export class SwarmIdProxy {
 
     this.updateAuthStatus(true)
 
-    // Initialize stamper if we have signer key
-    if (this.signerKey && this.postageBatchId) {
-      await this.initializeStamper()
-    }
-
     // Notify parent dApp
     this.sendToParent({
       type: "authSuccess",
@@ -1384,13 +1246,19 @@ export class SwarmIdProxy {
         )
       }
 
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-      // Prepare upload context
+      // Prepare upload context with coordinator-backed stamp function
+      const postageBatchId = this.postageBatchId
+      const signerKey = this.signerKey
+      const stamperDepth = this.stamperDepth
+
       const context: UploadContext = {
         bee: this.bee,
-        stamper: this.stamper,
+        stamp: (chunkHash) => requestStamp({
+          chunkHash,
+          batchId: postageBatchId,
+          signerKey,
+          depth: stamperDepth,
+        }),
       }
 
       // Progress callback (if enabled)
@@ -1435,8 +1303,8 @@ export class SwarmIdProxy {
         )
       }
 
-      // Save stamper state after successful upload
-      await this.saveStamperState()
+      // Flush stamper state via coordinator after successful upload
+      await flushCoordinatorStamper(postageBatchId)
 
       // Send final response
       if (event.source) {
@@ -1662,29 +1530,18 @@ export class SwarmIdProxy {
         )
       }
 
-      if (!this.stamper) {
-        await this.initializeStamper()
-      }
-
-      if (!this.stamper) {
-        throw new Error("Failed to initialize stamper for signing")
-      }
-
       console.log("[Proxy] Signing and uploading chunk with signer key")
 
       // Create content-addressed chunk
       const chunk = makeContentAddressedChunk(data)
 
-      // Create adapter for cafe-utility Chunk interface
-      const chunkAdapter = {
-        hash: () => chunk.address.toUint8Array(),
-        build: () => chunk.data,
-        span: 0n, // not used by stamper.stamp
-        writer: undefined as any, // not used by stamper.stamp
-      }
-
-      // Sign the chunk to create envelope
-      const envelope = this.stamper.stamp(chunkAdapter)
+      // Request stamp from coordinator (leader stamps locally, follower round-trips)
+      const envelope = await requestStamp({
+        chunkHash: chunk.address.toUint8Array(),
+        batchId: this.postageBatchId,
+        signerKey: this.signerKey,
+        depth: this.stamperDepth,
+      })
 
       // Use non-deferred mode for faster uploads (returns immediately)
       const uploadOptions = { ...options, deferred: false, pin: false }
@@ -1702,8 +1559,8 @@ export class SwarmIdProxy {
         uploadResult.reference.toHex(),
       )
 
-      // Save stamper state after successful upload
-      await this.saveStamperState()
+      // Flush stamper state via coordinator after successful upload
+      await flushCoordinatorStamper(this.postageBatchId)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(

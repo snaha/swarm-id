@@ -2,7 +2,6 @@ import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { createIdentitiesStorageManager, type Identity } from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
-import { sessionStore } from './session.svelte'
 
 // ============================================================================
 // Storage Manager
@@ -15,16 +14,11 @@ function loadIdentities(): Identity[] {
 	return storageManager.load()
 }
 
-function saveIdentities(data: Identity[]): void {
+function saveIdentities(data: Identity[], accountId?: string): void {
 	storageManager.save(data)
 
-	// Trigger Swarm sync for current identity's account
-	const currentIdentityId = sessionStore.data.currentIdentityId
-	if (currentIdentityId) {
-		const identity = data.find((i) => i.id === currentIdentityId)
-		if (identity) {
-			triggerSync(identity.accountId.toHex())
-		}
+	if (accountId) {
+		triggerSync(accountId)
 	}
 }
 
@@ -33,6 +27,13 @@ function saveIdentities(data: Identity[]): void {
 // ============================================================================
 
 let identities = $state<Identity[]>(loadIdentities())
+
+// Subscribe to cross-tab storage changes (fires in OTHER tabs when localStorage changes)
+if (browser) {
+	storageManager.subscribe((updatedData) => {
+		identities = updatedData
+	})
+}
 
 export const identitiesStore = {
 	get identities() {
@@ -46,13 +47,14 @@ export const identitiesStore = {
 			createdAt: Date.now(),
 		}
 		identities = [...identities, newIdentity]
-		saveIdentities(identities)
+		saveIdentities(identities, newIdentity.accountId.toHex())
 		return newIdentity
 	},
 
 	removeIdentity(id: string) {
+		const identity = identities.find((i) => i.id === id)
 		identities = identities.filter((i) => i.id !== id)
-		saveIdentities(identities)
+		saveIdentities(identities, identity?.accountId.toHex())
 	},
 
 	getIdentity(id: string): Identity | undefined {
@@ -64,6 +66,7 @@ export const identitiesStore = {
 	},
 
 	setDefaultStamp(identityId: string, batchID: BatchId | undefined) {
+		const identity = identities.find((i) => i.id === identityId)
 		identities = identities.map((i) =>
 			i.id === identityId
 				? {
@@ -72,12 +75,13 @@ export const identitiesStore = {
 					}
 				: i,
 		)
-		saveIdentities(identities)
+		saveIdentities(identities, identity?.accountId.toHex())
 	},
 
 	updateIdentity(identityId: string, update: Partial<Identity>) {
+		const identity = identities.find((i) => i.id === identityId)
 		identities = identities.map((i) => (i.id === identityId ? { ...i, ...update } : i))
-		saveIdentities(identities)
+		saveIdentities(identities, identity?.accountId.toHex())
 	},
 
 	clear() {

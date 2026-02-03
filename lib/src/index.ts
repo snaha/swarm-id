@@ -118,6 +118,14 @@ export {
   // Sync account
   createSyncAccount,
   ACCOUNT_SYNC_TOPIC_PREFIX,
+  // Cross-tab sync coordination
+  initSyncCoordinator,
+  triggerSync,
+  requestSync,
+  destroySyncCoordinator,
+  // Leader-based stamp coordination
+  requestStamp,
+  flushCoordinatorStamper,
 } from "./sync"
 
 // State sync types

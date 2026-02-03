@@ -1,6 +1,7 @@
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { createAccountsStorageManager, type Account } from '@swarm-id/lib'
+import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
 // Storage Manager
@@ -13,8 +14,12 @@ function loadAccounts(): Account[] {
 	return storageManager.load()
 }
 
-function saveAccounts(data: Account[]): void {
+function saveAccounts(data: Account[], accountId?: string): void {
 	storageManager.save(data)
+
+	if (accountId) {
+		triggerSync(accountId)
+	}
 }
 
 // ============================================================================
@@ -23,6 +28,13 @@ function saveAccounts(data: Account[]): void {
 
 let accounts = $state<Account[]>(loadAccounts())
 
+// Subscribe to cross-tab storage changes (fires in OTHER tabs when localStorage changes)
+if (browser) {
+	storageManager.subscribe((updatedData) => {
+		accounts = updatedData
+	})
+}
+
 export const accountsStore = {
 	get accounts() {
 		return accounts
@@ -30,7 +42,7 @@ export const accountsStore = {
 
 	addAccount(account: Account): Account {
 		accounts = [...accounts, account]
-		saveAccounts(accounts)
+		saveAccounts(accounts, account.id.toHex())
 		return account
 	},
 
@@ -45,7 +57,7 @@ export const accountsStore = {
 
 	setAccountName(id: EthAddress, name: string) {
 		accounts = accounts.map((account) => (account.id.equals(id) ? { ...account, name } : account))
-		saveAccounts(accounts)
+		saveAccounts(accounts, id.toHex())
 	},
 
 	setDefaultStamp(id: EthAddress, batchID: BatchId | undefined) {
@@ -57,7 +69,7 @@ export const accountsStore = {
 					}
 				: account,
 		)
-		saveAccounts(accounts)
+		saveAccounts(accounts, id.toHex())
 	},
 
 	clear() {

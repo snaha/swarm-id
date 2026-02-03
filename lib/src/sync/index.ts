@@ -22,3 +22,21 @@ export type {
 } from "./store-interfaces"
 
 export type { AccountStateSnapshot, AccountMetadata, SyncResult } from "./types"
+
+// Cross-tab sync coordination (module-level singleton)
+export {
+  initSyncCoordinator,
+  triggerSync,
+  requestSync,
+  destroySyncCoordinator,
+  requestStamp,
+  flushCoordinatorStamper,
+} from "./sync-coordinator"
+
+// Storage-backed store factories
+export {
+  createStorageBackedAccountsStore,
+  createStorageBackedIdentitiesStore,
+  createStorageBackedConnectedAppsStore,
+  createStorageBackedPostageStampsStore,
+} from "./storage-backed-stores"

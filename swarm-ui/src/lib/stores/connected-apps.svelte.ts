@@ -1,7 +1,6 @@
 import { browser } from '$app/environment'
 import { createConnectedAppsStorageManager, type ConnectedApp } from '@swarm-id/lib'
 import { triggerSync } from '$lib/utils/sync-hooks'
-import { sessionStore } from './session.svelte'
 import { identitiesStore } from './identities.svelte'
 
 // ============================================================================
@@ -15,13 +14,11 @@ function loadConnectedApps(): ConnectedApp[] {
 	return storageManager.load()
 }
 
-function saveConnectedApps(data: ConnectedApp[]): void {
+function saveConnectedApps(data: ConnectedApp[], identityId?: string): void {
 	storageManager.save(data)
 
-	// Trigger Swarm sync for current identity's account
-	const currentIdentityId = sessionStore.data.currentIdentityId
-	if (currentIdentityId) {
-		const identity = identitiesStore.getIdentity(currentIdentityId)
+	if (identityId) {
+		const identity = identitiesStore.getIdentity(identityId)
 		if (identity) {
 			triggerSync(identity.accountId.toHex())
 		}
@@ -33,6 +30,13 @@ function saveConnectedApps(data: ConnectedApp[]): void {
 // ============================================================================
 
 let connectedApps = $state<ConnectedApp[]>(loadConnectedApps())
+
+// Subscribe to cross-tab storage changes (fires in OTHER tabs when localStorage changes)
+if (browser) {
+	storageManager.subscribe((updatedData) => {
+		connectedApps = updatedData
+	})
+}
 
 export const connectedAppsStore = {
 	get apps() {
@@ -69,7 +73,7 @@ export const connectedAppsStore = {
 					? updatedApp
 					: app,
 			)
-			saveConnectedApps(connectedApps)
+			saveConnectedApps(connectedApps, appData.identityId)
 			return updatedApp
 		} else {
 			// Add new app
@@ -84,7 +88,7 @@ export const connectedAppsStore = {
 				connectedUntil: now + defaultConnectionTime,
 			}
 			connectedApps = [...connectedApps, newApp]
-			saveConnectedApps(connectedApps)
+			saveConnectedApps(connectedApps, appData.identityId)
 			return newApp
 		}
 	},
@@ -123,7 +127,7 @@ export const connectedAppsStore = {
 		connectedApps = connectedApps.filter(
 			(app) => !(app.appUrl === appUrl && app.identityId === identityId),
 		)
-		saveConnectedApps(connectedApps)
+		saveConnectedApps(connectedApps, identityId)
 	},
 
 	disconnectApp(appUrl: string, identityId: string) {
@@ -136,7 +140,7 @@ export const connectedAppsStore = {
 					}
 				: app,
 		)
-		saveConnectedApps(connectedApps)
+		saveConnectedApps(connectedApps, identityId)
 	},
 
 	clear() {

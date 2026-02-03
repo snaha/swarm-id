@@ -1163,8 +1163,8 @@ export class UtilizationAwareStamper implements Stamper {
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
-    _owner: EthAddress,
-    _encryptionKey: Uint8Array,
+    _owner?: EthAddress,
+    _encryptionKey?: Uint8Array,
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId)

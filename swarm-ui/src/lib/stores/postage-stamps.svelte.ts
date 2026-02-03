@@ -49,6 +49,13 @@ function savePostageStamps(data: PostageStamp[], skipSync = false, accountId?: s
 
 let postageStamps = $state<PostageStamp[]>(loadPostageStamps())
 
+// Subscribe to cross-tab storage changes (fires in OTHER tabs when localStorage changes)
+if (browser) {
+	storageManager.subscribe((updatedData) => {
+		postageStamps = updatedData
+	})
+}
+
 export const postageStampsStore = {
 	get stamps() {
 		return postageStamps

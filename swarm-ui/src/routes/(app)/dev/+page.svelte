@@ -282,7 +282,7 @@ or
 
 		for (const account of accountsToSync) {
 			try {
-				await syncStore.syncAccount(account.id.toHex())
+				await syncStore.requestSync(account.id.toHex())
 
 				// Get default stamp to show utilization
 				const defaultStamp =
