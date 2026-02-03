@@ -1,29 +1,30 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/button.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import Light from 'carbon-icons-svelte/lib/Light.svelte'
-	import Screen from 'carbon-icons-svelte/lib/Screen.svelte'
-	import Asleep from 'carbon-icons-svelte/lib/Asleep.svelte'
 	import { themeStore } from '$lib/stores/theme.svelte'
+	import { Automatic, Light, Asleep } from 'carbon-icons-svelte'
 </script>
 
-<Horizontal --horizontal-gap="0">
+<Horizontal --horizontal-gap="0" style="border: 1px solid var(--colors-low)">
 	<Button
-		variant={themeStore.preference === 'light' ? 'secondary' : 'ghost'}
+		variant="ghost"
+		active={themeStore.preference === 'auto'}
+		dimension="compact"
+		onclick={() => (themeStore.preference = 'auto')}
+	>
+		<Automatic size={20} />
+	</Button>
+	<Button
+		variant="ghost"
+		active={themeStore.preference === 'light'}
 		dimension="compact"
 		onclick={() => (themeStore.preference = 'light')}
 	>
 		<Light size={20} />
 	</Button>
 	<Button
-		variant={themeStore.preference === 'auto' ? 'secondary' : 'ghost'}
-		dimension="compact"
-		onclick={() => (themeStore.preference = 'auto')}
-	>
-		<Screen size={20} />
-	</Button>
-	<Button
-		variant={themeStore.preference === 'dark' ? 'secondary' : 'ghost'}
+		variant="ghost"
+		active={themeStore.preference === 'dark'}
 		dimension="compact"
 		onclick={() => (themeStore.preference = 'dark')}
 	>

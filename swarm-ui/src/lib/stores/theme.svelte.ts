@@ -20,13 +20,6 @@ function withThemeStore(): ThemeStore {
 		})
 	}
 
-	$effect(() => {
-		if (browser) {
-			localStorage.setItem(STORAGE_KEY, preference)
-			applyTheme(preference)
-		}
-	})
-
 	function readPreference(): ThemePreference {
 		if (!browser) return 'auto'
 		const stored = localStorage.getItem(STORAGE_KEY)
@@ -48,6 +41,8 @@ function withThemeStore(): ThemeStore {
 		},
 		set preference(value: ThemePreference) {
 			preference = value
+			applyTheme(preference)
+			localStorage.setItem(STORAGE_KEY, preference)
 		},
 	}
 }

@@ -172,12 +172,20 @@
 				</Vertical>
 				<Divider --margin="0" />
 				<Vertical
-					--vertical-gap="var(--half-padding)"
+					--vertical-gap="0"
 					--vertical-align-items="stretch"
 					style="padding: var(--padding)"
 				>
-					<Typography variant="small">Appearance</Typography>
-					<ThemeToggle />
+					<Horizontal
+						--horizontal-gap="var(--half-padding)"
+						--horizontal-align-items="center"
+						--horizontal-justify-content="stretch"
+						style="flex: 1;"
+					>
+						<Typography style="padding: var(--half-padding)">Appearance</Typography>
+						<FlexItem />
+						<ThemeToggle />
+					</Horizontal>
 				</Vertical>
 			{:else if screen === 'all-accounts'}
 				<Horizontal
