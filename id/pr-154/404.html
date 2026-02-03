@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta name="description" content="Swarm Identity Management" />
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+		<meta name="apple-mobile-web-app-title" content="Swarm Identity" />
+		<link rel="manifest" href="/id/pr-154/manifest.json" />
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover"
+		/>
+		<script>
+			;(function () {
+				var pref = localStorage.getItem('swarm-id-theme') || 'auto'
+				var dark =
+					pref === 'dark' || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches)
+				document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+				document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+			})()
+		</script>
+		
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/entry/start.13nXGjAt.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/BQP-TM6A.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/CaeqAMj1.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/6DkgZWdH.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/BUApaBEI.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/Cn8_zviN.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/C4kXW7eY.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/entry/app.BSYvm458.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/PPVm8Dsz.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/kTeBN3Ya.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/DvzSU3ph.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/B3XUY7G1.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/BwVH4K-7.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/B7LByAA5.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/eZnGk-lW.js">
+		<link rel="modulepreload" href="/id/pr-154/_app/immutable/chunks/DV6NlMjS.js">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_3l26ql = {
+						base: "/id/pr-154",
+						assets: "/id/pr-154"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("/id/pr-154/_app/immutable/entry/start.13nXGjAt.js"),
+						import("/id/pr-154/_app/immutable/entry/app.BSYvm458.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>
