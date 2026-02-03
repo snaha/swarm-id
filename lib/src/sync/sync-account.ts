@@ -379,12 +379,18 @@ export function createSyncAccount(
       const uploadResult = await uploadEncryptedDataWithSigning(
         {
           bee,
-          stamp: async (chunkHash) => stamper.stamp({
-            hash: () => chunkHash,
-            build: () => new Uint8Array(0),
-            span: 0n,
-            writer: { cursor: 0, buffer: new Uint8Array(0), write: () => 0, max: () => 0 },
-          }),
+          stamp: async (chunkHash) =>
+            stamper.stamp({
+              hash: () => chunkHash,
+              build: () => new Uint8Array(0),
+              span: 0n,
+              writer: {
+                cursor: 0,
+                buffer: new Uint8Array(0),
+                write: () => 0,
+                max: () => 0,
+              },
+            }),
         },
         jsonData,
         hexToUint8Array(encryptionKey),

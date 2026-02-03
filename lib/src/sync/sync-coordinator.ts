@@ -105,18 +105,27 @@ class SyncCoordinator {
 
   // Stamper management (leader only)
   private stampers = new Map<string, UtilizationAwareStamper>()
-  private stamperCreationPromises = new Map<string, Promise<UtilizationAwareStamper>>()
+  private stamperCreationPromises = new Map<
+    string,
+    Promise<UtilizationAwareStamper>
+  >()
   private stamperUtilizationStore: UtilizationStoreDB | undefined
 
   // Pending stamp/flush requests (follower only)
-  private pendingStampRequests = new Map<string, {
-    resolve: (envelope: EnvelopeWithBatchId) => void
-    reject: (error: Error) => void
-  }>()
-  private pendingFlushRequests = new Map<string, {
-    resolve: () => void
-    reject: (error: Error) => void
-  }>()
+  private pendingStampRequests = new Map<
+    string,
+    {
+      resolve: (envelope: EnvelopeWithBatchId) => void
+      reject: (error: Error) => void
+    }
+  >()
+  private pendingFlushRequests = new Map<
+    string,
+    {
+      resolve: () => void
+      reject: (error: Error) => void
+    }
+  >()
 
   constructor() {
     this.channel = new BroadcastChannel<ChannelMessage>(CHANNEL_NAME)
@@ -153,7 +162,8 @@ class SyncCoordinator {
       accountsStore: createStorageBackedAccountsStore(),
       identitiesStore: createStorageBackedIdentitiesStore(),
       connectedAppsStore: createStorageBackedConnectedAppsStore(),
-      postageStampsStore: createStorageBackedPostageStampsStore(utilizationStore),
+      postageStampsStore:
+        createStorageBackedPostageStampsStore(utilizationStore),
       utilizationStore,
       utilizationUploader,
     })
@@ -275,7 +285,12 @@ class SyncCoordinator {
       hash: () => chunkHash,
       build: () => new Uint8Array(0),
       span: 0n,
-      writer: { cursor: 0, buffer: new Uint8Array(0), write: () => 0, max: () => 0 },
+      writer: {
+        cursor: 0,
+        buffer: new Uint8Array(0),
+        write: () => 0,
+        max: () => 0,
+      },
     }
 
     return stamper.stamp(adapter)

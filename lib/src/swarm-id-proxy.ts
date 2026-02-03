@@ -37,7 +37,11 @@ import {
 } from "./utils/storage-managers"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
-import { initSyncCoordinator, requestStamp, flushCoordinatorStamper } from "./sync"
+import {
+  initSyncCoordinator,
+  requestStamp,
+  flushCoordinatorStamper,
+} from "./sync"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -238,8 +242,6 @@ export class SwarmIdProxy {
     return this.signerKey
   }
 
-
-
   /**
    * Setup message listener for parent and popup messages
    */
@@ -282,10 +284,7 @@ export class SwarmIdProxy {
       }
 
       if (!isPopup && !isParent) {
-        console.warn(
-          "[Proxy] Rejected message from unauthorized origin:",
-          event.origin,
-        )
+        // Rejected message from unauthorized origin
         return
       }
 
@@ -327,13 +326,8 @@ export class SwarmIdProxy {
           }
         }
 
-        // Unknown message type
-        console.warn("[Proxy] Unknown message type:", type)
-        this.sendErrorToParent(
-          event,
-          event.data.requestId,
-          `Unknown message type: ${type}`,
-        )
+        // Unknown message type, ignore it
+        return
       } catch (error) {
         console.error("[Proxy] Error handling message:", error)
         this.sendErrorToParent(
@@ -1253,12 +1247,13 @@ export class SwarmIdProxy {
 
       const context: UploadContext = {
         bee: this.bee,
-        stamp: (chunkHash) => requestStamp({
-          chunkHash,
-          batchId: postageBatchId,
-          signerKey,
-          depth: stamperDepth,
-        }),
+        stamp: (chunkHash) =>
+          requestStamp({
+            chunkHash,
+            batchId: postageBatchId,
+            signerKey,
+            depth: stamperDepth,
+          }),
       }
 
       // Progress callback (if enabled)

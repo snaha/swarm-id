@@ -293,10 +293,7 @@ export class SwarmIdClient {
       // Validate origin (extract just origin part, ignoring any path in iframeOrigin)
       const expectedOrigin = new URL(this.iframeOrigin).origin
       if (event.origin !== expectedOrigin) {
-        console.warn(
-          "[SwarmIdClient] Rejected message from unauthorized origin:",
-          event.origin,
-        )
+        // Rejected message from unauthorized origin
         return
       }
 

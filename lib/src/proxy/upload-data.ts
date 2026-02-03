@@ -6,7 +6,12 @@ import type {
   UploadOptions,
 } from "@ethersphere/bee-js"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
-import type { UploadContext, UploadProgress, ChunkReference, StampFunction } from "./types"
+import type {
+  UploadContext,
+  UploadProgress,
+  ChunkReference,
+  StampFunction,
+} from "./types"
 
 /**
  * Upload data with client-side signing

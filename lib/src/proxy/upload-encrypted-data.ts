@@ -302,7 +302,12 @@ export async function uploadSingleChunkWithEncryption(
       hash: () => chunkHash,
       build: () => encryptedChunk.data,
       span: 0n,
-      writer: { cursor: 0, buffer: new Uint8Array(0), write: () => 0, max: () => 0 },
+      writer: {
+        cursor: 0,
+        buffer: new Uint8Array(0),
+        write: () => 0,
+        max: () => 0,
+      },
     })
   }
 
@@ -504,7 +509,12 @@ export async function uploadEncryptedSOC(
     hash: () => socAddress.toUint8Array(),
     build: () => socData,
     span: 0n, // not used by stamper.stamp
-    writer: { cursor: 0, buffer: new Uint8Array(0), write: () => 0, max: () => 0 },
+    writer: {
+      cursor: 0,
+      buffer: new Uint8Array(0),
+      write: () => 0,
+      max: () => 0,
+    },
   })
 
   console.log(

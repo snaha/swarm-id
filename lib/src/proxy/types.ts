@@ -5,7 +5,9 @@ import type { Bee, EnvelopeWithBatchId } from "@ethersphere/bee-js"
  * On the leader tab this stamps locally; on a follower tab this
  * round-trips through the SyncCoordinator BroadcastChannel.
  */
-export type StampFunction = (chunkHash: Uint8Array) => Promise<EnvelopeWithBatchId>
+export type StampFunction = (
+  chunkHash: Uint8Array,
+) => Promise<EnvelopeWithBatchId>
 
 /**
  * Upload context shared across handlers
