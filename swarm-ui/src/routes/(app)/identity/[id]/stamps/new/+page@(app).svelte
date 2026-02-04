@@ -13,8 +13,11 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
 	import FormattedNumberInput from '$lib/components/ui/input/formatted-number/input.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 
 	const identityId = $derived($page.params.id)
+	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
+	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
 
 	let batchID = $state('')
 	let depth = $state(20)
@@ -64,17 +67,13 @@
 			return
 		}
 
-		if (!identityId) return
-
-		const identity = identitiesStore.getIdentity(identityId)
 		if (!identity) return
-
-		const accountId = identity.accountId.toHex()
+		if (!account) return
 
 		try {
 			// Create the postage stamp with defaults
 			const stamp = postageStampsStore.addStamp({
-				accountId,
+				accountId: account.id.toHex(),
 				batchID: new BatchId(batchID),
 				signerKey: new PrivateKey(signerKey),
 				utilization: 0,
@@ -90,9 +89,10 @@
 			console.log('✅ Postage stamp added:', stamp.batchID.toHex(), stamp)
 
 			// If this is the first stamp for this account, make it default for this identity
-			const stamps = postageStampsStore.getStampsByAccount(accountId)
-			if (stamps.length === 1 && !identity.defaultPostageStampBatchID) {
-				identitiesStore.setDefaultStamp(identityId, stamp.batchID)
+			if (account.defaultPostageStampBatchID) {
+				identitiesStore.setDefaultStamp(identity.id, stamp.batchID)
+			} else {
+				accountsStore.setDefaultStamp(account.id, stamp.batchID)
 			}
 
 			// Navigate back to stamps page

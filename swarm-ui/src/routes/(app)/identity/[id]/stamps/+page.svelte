@@ -3,10 +3,10 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import CollapsibleSection from '$lib/components/collapsible-section.svelte'
+	import Badge from '$lib/components/ui/badge.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { page } from '$app/stores'
+	import { page } from '$app/state'
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
 	import { goto } from '$app/navigation'
@@ -14,117 +14,236 @@
 	import routes from '$lib/routes'
 	import type { BatchId } from '@ethersphere/bee-js'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import CopyButton from '$lib/components/copy-button.svelte'
+	import type { PostageStamp } from '$lib/types'
+	import { onMount } from 'svelte'
+	import { WarningAltFilled } from 'carbon-icons-svelte'
 
-	const identityId = $derived($page.params.id)
+	const BATCH_ID_PREVIEW_LENGTH = 8
+	const CHUNK_SIZE_BYTES = 4096
+	const BYTES_PER_KB = 1024
+	const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
+	const BYTES_PER_GB = BYTES_PER_MB * BYTES_PER_KB
+	const MS_PER_SECOND = 1000
+	const MAX_UTILIZATION_PERCENT = 100
+	const SWARMSCAN_STATS_URL = 'https://api.swarmscan.io/v1/postage-stamps/stats'
+	const CHUNKS_PER_GB = 262144
+	const SECONDS_PER_MONTH = 2592000
+	const PLUR_PER_BZZ = 1e16
+	const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
+
+	const identityId = $derived(page.params.id)
 	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
 	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
-	const stamps = $derived(
-		identity ? postageStampsStore.getStampsByAccount(identity.accountId.toHex()) : [],
+	const accountStamp = $derived(
+		account?.defaultPostageStampBatchID
+			? postageStampsStore.getStamp(account.defaultPostageStampBatchID)
+			: undefined,
+	)
+	const identityStamp = $derived(
+		identity?.defaultPostageStampBatchID
+			? postageStampsStore.getStamp(identity.defaultPostageStampBatchID)
+			: undefined,
 	)
 
-	function makeDefaultStamp(batchID: BatchId) {
-		if (!identityId) return
-		identitiesStore.setDefaultStamp(identityId, batchID)
+	$inspect(identity, account)
+
+	const isUsingAccountStamp = $derived.by(() => {
+		if (!identity?.defaultPostageStampBatchID) return true
+		if (!account?.defaultPostageStampBatchID) return false
+		return account.defaultPostageStampBatchID.equals(identity.defaultPostageStampBatchID)
+	})
+
+	const activeStamp = $derived.by(() => {
+		if (!identity) return undefined
+		if (identity.defaultPostageStampBatchID) {
+			return postageStampsStore.getStamp(identity.defaultPostageStampBatchID)
+		}
+		if (account?.defaultPostageStampBatchID) {
+			return postageStampsStore.getStamp(account.defaultPostageStampBatchID)
+		}
+		return undefined
+	})
+
+	let pricePerGBPerMonth = $state<number | undefined>(undefined)
+
+	onMount(() => {
+		fetch(SWARMSCAN_STATS_URL)
+			.then((res) => res.json())
+			.then((data: { pricePerGBPerMonth: number }) => {
+				pricePerGBPerMonth = data.pricePerGBPerMonth
+			})
+			.catch(() => {
+				// Silently fail — expiry date just won't render
+			})
+	})
+
+	function formatBytes(bytes: number): string {
+		if (bytes < BYTES_PER_KB) return `${bytes} B`
+		if (bytes < BYTES_PER_MB) return `${(bytes / BYTES_PER_KB).toFixed(1)} KB`
+		if (bytes < BYTES_PER_GB) return `${(bytes / BYTES_PER_MB).toFixed(1)} MB`
+		return `${(bytes / BYTES_PER_GB).toFixed(1)} GB`
 	}
 
 	function formatCapacity(utilization: number, depth: number): string {
 		const totalChunks = Math.pow(2, depth)
-		const chunkSize = 4096 // 4KB per chunk
-		const totalBytes = totalChunks * chunkSize
+		const totalBytes = totalChunks * CHUNK_SIZE_BYTES
 		const usedBytes = totalBytes * utilization
-
-		const formatBytes = (bytes: number): string => {
-			if (bytes < 1024) return `${bytes} B`
-			if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-			if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
-			return `${(bytes / (1024 * 1024 * 1024)).toFixed(1)} GB`
-		}
 
 		return `${formatBytes(usedBytes)} of ${formatBytes(totalBytes)} used`
 	}
 
 	function formatBatchId(batchId: BatchId): string {
-		return batchId.toHex().slice(0, 8)
+		return batchId.toHex().slice(0, BATCH_ID_PREVIEW_LENGTH)
 	}
 
-	function removeStamp(batchID: BatchId) {
-		if (!identity) return
-		// If this is the default stamp, clear the default stamp first
-		if (identity.defaultPostageStampBatchID?.equals(batchID)) {
-			identitiesStore.setDefaultStamp(identity.id, undefined)
-		}
-		postageStampsStore.removeStamp(batchID, identity.accountId.toHex())
+	function formatExpiryDate(stamp: PostageStamp, price: number): string {
+		const perChunkPerMonthCost = (price * PLUR_PER_BZZ) / CHUNKS_PER_GB
+		const durationMonths = stamp.amount / perChunkPerMonthCost
+		const durationMs = durationMonths * SECONDS_PER_MONTH * MS_PER_SECOND
+		return new Date(stamp.createdAt + durationMs).toLocaleDateString()
+	}
+
+	function isExpiringSoon(stamp: PostageStamp, price: number): boolean {
+		const perChunkPerMonthCost = (price * PLUR_PER_BZZ) / CHUNKS_PER_GB
+		const durationMonths = stamp.amount / perChunkPerMonthCost
+		const totalLifetimeMs = durationMonths * SECONDS_PER_MONTH * MS_PER_SECOND
+		const expiryTimestamp = stamp.createdAt + totalLifetimeMs
+		const remainingMs = expiryTimestamp - Date.now()
+		const oneMonthMs = SECONDS_PER_MONTH * MS_PER_SECOND
+
+		return (
+			remainingMs > 0 &&
+			(remainingMs < oneMonthMs || remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION)
+		)
 	}
 </script>
 
-<Vertical --vertical-gap="var(--padding)" style="padding-top: var(--double-padding);">
-	{#if stamps.length > 0}
-		{#if account?.defaultPostageStampBatchID === identity?.defaultPostageStampBatchID}
-			<Typography>This identity uses your account's postage stamp.</Typography>
-		{:else}
-			<Typography>This identity uses a separate postage stamp for extra privacy.</Typography>
+{#snippet stampDetails(stamp: PostageStamp, isAccountStamp: boolean)}
+	<Vertical --vertical-gap="var(--padding)">
+		<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+			<Typography bold>{formatBatchId(stamp.batchID)}</Typography>
+			{#if isAccountStamp}
+				<Badge dimension="small">Account stamp</Badge>
+			{:else}
+				<Badge dimension="small">Identity stamp</Badge>
+			{/if}
+		</Horizontal>
+
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Input
+				label="Stamp ID"
+				variant="outline"
+				dimension="compact"
+				value={stamp.batchID.toHex()}
+				readonly
+			>
+				{#snippet buttons()}
+					<CopyButton text={stamp.batchID.toHex()} />
+				{/snippet}
+			</Input>
+
+			<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+				<div class="capacity-label">
+					<Typography>{formatCapacity(stamp.utilization, stamp.depth)}</Typography>
+				</div>
+				<div class="progress-bar">
+					<div
+						class="progress-bar-fill"
+						style="width: {Math.min(
+							stamp.utilization * MAX_UTILIZATION_PERCENT,
+							MAX_UTILIZATION_PERCENT,
+						)}%"
+					></div>
+				</div>
+			</Horizontal>
+
+			{#if pricePerGBPerMonth}
+				{@const expiringSoon = isExpiringSoon(stamp, pricePerGBPerMonth)}
+				<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+					<Typography>Expiry date</Typography>
+					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+						<Typography --typography-color={expiringSoon ? 'var(--colors-red)' : undefined}>
+							{formatExpiryDate(stamp, pricePerGBPerMonth)}
+						</Typography>
+						{#if expiringSoon}
+							<Badge variant="error" dimension="small"
+								><WarningAltFilled size={16} />Expires soon</Badge
+							>
+						{/if}
+					</Horizontal>
+				</Horizontal>
+			{/if}
+		</Vertical>
+	</Vertical>
+{/snippet}
+
+<Vertical --vertical-gap="var(--double-padding)" style="padding-top: var(--double-padding);">
+	{#if identityStamp}
+		<Typography>This identity uses a separate postage stamp for extra privacy.</Typography>
+
+		{@render stampDetails(identityStamp, false)}
+
+		<Divider --margin="0" />
+
+		{#if accountStamp}
+			{@render stampDetails(accountStamp, true)}
 		{/if}
-		<Vertical --vertical-gap="0">
-			<Divider />
-			{#each stamps as stamp (stamp.batchID.toHex())}
-				{@const isDefault = identity?.defaultPostageStampBatchID?.equals(stamp.batchID) ?? false}
-				<CollapsibleSection
-					title={formatBatchId(stamp.batchID)}
-					count={isDefault ? 'default' : undefined}
-					expanded={false}
-				>
-					<Vertical --vertical-gap="var(--half-padding)">
-						<Horizontal --horizontal-justify-content="space-between">
-							<Typography>Stamp ID</Typography>
-							<Input variant="outline" dimension="compact" value={stamp.batchID.toHex()} readonly />
-						</Horizontal>
-						<Horizontal --horizontal-justify-content="space-between">
-							<Typography>Depth</Typography>
-							<Typography>{stamp.depth}</Typography>
-						</Horizontal>
-						<Horizontal --horizontal-justify-content="space-between">
-							<Typography>Capacity</Typography>
-							<Typography
-								>{formatCapacity(stamp.utilization, stamp.depth)}({(
-									stamp.utilization * 100
-								).toFixed(1)}%)</Typography
-							>
-						</Horizontal>
-						<Horizontal --horizontal-justify-content="space-between">
-							<Horizontal --horizontal-justify-content="flex-start">
-								<Button
-									dimension="compact"
-									variant="ghost"
-									onclick={() => makeDefaultStamp(stamp.batchID)}
-									disabled={isDefault}
-								>
-									Make default
-								</Button>
-							</Horizontal>
-							<Button
-								dimension="compact"
-								variant="ghost"
-								onclick={() => removeStamp(stamp.batchID)}
-							>
-								Remove stamp
-							</Button>
-						</Horizontal>
-					</Vertical>
-				</CollapsibleSection>
-				<Divider />
-			{/each}
+	{:else if accountStamp}
+		<Typography>This identity uses your account's postage stamp.</Typography>
+		{@render stampDetails(accountStamp, true)}
+
+		<Divider --margin="0" />
+		<Vertical --vertical-gap="var(--half-padding)" --vertical-align-items="start">
+			<Button
+				variant="ghost"
+				dimension="compact"
+				onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
+			>
+				Use separate stamp
+			</Button>
+			<Typography variant="small">
+				Use a separate stamp to keep this identity's activity private from your other identities.
+			</Typography>
 		</Vertical>
 	{:else}
-		<Typography variant="small" style="opacity: 0.5;">No postage stamps yet.</Typography>
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Typography bold center>No stamps yet.</Typography>
+			<Typography center>
+				Your account is local and stored only on this device. To upload data and sync across
+				devices, upgrade to a synced account by purchasing a Swarm postage stamp.
+			</Typography>
+		</Vertical>
+		<Horizontal --horizontal-justify-content="center">
+			<Button
+				variant="strong"
+				dimension="compact"
+				onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
+			>
+				Add postage stamp
+			</Button>
+		</Horizontal>
 	{/if}
-
-	<Horizontal>
-		<Button
-			dimension="compact"
-			variant="ghost"
-			onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
-		>
-			Add postage stamp
-		</Button>
-	</Horizontal>
 </Vertical>
+
+<style>
+	.capacity-label {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.progress-bar {
+		flex: 1;
+		min-width: 0;
+		height: 4px;
+		background: var(--colors-low);
+		border-radius: 2px;
+		overflow: hidden;
+	}
+
+	.progress-bar-fill {
+		height: 100%;
+		background: var(--colors-high);
+		border-radius: 2px;
+	}
+</style>
