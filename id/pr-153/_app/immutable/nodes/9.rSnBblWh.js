@@ -1,1 +1,0 @@
-import{R as o}from"../chunks/BUApaBEI.js";import{r as t}from"../chunks/BG0-oVD7.js";import{r as i}from"../chunks/DZ3Qu7e5.js";function n(r,e){throw new o(r,e.toString())}const a=({params:r})=>{n(302,t(i.IDENTITY_APPS,{id:r.id}))},d=Object.freeze(Object.defineProperty({__proto__:null,load:a},Symbol.toStringTag,{value:"Module"}));export{d as universal};
