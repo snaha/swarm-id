@@ -46,25 +46,6 @@
 			: undefined,
 	)
 
-	$inspect(identity, account)
-
-	const isUsingAccountStamp = $derived.by(() => {
-		if (!identity?.defaultPostageStampBatchID) return true
-		if (!account?.defaultPostageStampBatchID) return false
-		return account.defaultPostageStampBatchID.equals(identity.defaultPostageStampBatchID)
-	})
-
-	const activeStamp = $derived.by(() => {
-		if (!identity) return undefined
-		if (identity.defaultPostageStampBatchID) {
-			return postageStampsStore.getStamp(identity.defaultPostageStampBatchID)
-		}
-		if (account?.defaultPostageStampBatchID) {
-			return postageStampsStore.getStamp(account.defaultPostageStampBatchID)
-		}
-		return undefined
-	})
-
 	let pricePerGBPerMonth = $state<number | undefined>(undefined)
 
 	onMount(() => {
