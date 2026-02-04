@@ -96,7 +96,7 @@
 			}
 
 			// Navigate back to stamps page
-			goto(resolve(routes.IDENTITY_STAMPS, { id: identityId }))
+			goto(resolve(routes.IDENTITY_STAMPS, { id: identity.id }))
 		} catch (error) {
 			submitError = error instanceof Error ? error.message : 'Failed to add postage stamp'
 		}
