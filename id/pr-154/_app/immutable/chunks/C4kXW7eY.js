@@ -1,1 +1,0 @@
-import{u as c,ap as t,af as l,a2 as o}from"./CaeqAMj1.js";function a(e){throw new Error("https://svelte.dev/e/lifecycle_outside_component")}function u(e){t===null&&a(),l&&t.l!==null?f(t).m.push(e):c(()=>{const n=o(e);if(typeof n=="function")return n})}function s(e){t===null&&a(),u(()=>()=>o(e))}function f(e){var n=e.l;return n.u??={a:[],b:[],m:[]}}export{s as a,u as o};
