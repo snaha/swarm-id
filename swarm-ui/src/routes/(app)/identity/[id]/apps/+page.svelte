@@ -66,24 +66,29 @@
 </script>
 
 <Vertical --vertical-gap="var(--padding)" style="padding-top: var(--double-padding);">
-	<Grid>
-		<!-- Row 1-->
-		<Typography>Keep apps connected for</Typography>
-		<Select
-			dimension="compact"
-			bind:value={sessionDurationValue}
-			items={[
-				{ value: 'session', label: 'Current session' },
-				{ value: '24h', label: '24 hours' },
-				{ value: '7d', label: '7 days' },
-				{ value: '30d', label: '30 days' },
-			]}
-			onchange={onSessionDurationChange}
-		></Select>
-	</Grid>
 	{#if apps.length > 0 && identity}
+		<Grid>
+			<!-- Row 1-->
+			<Typography>Keep apps connected for</Typography>
+			<Select
+				dimension="compact"
+				bind:value={sessionDurationValue}
+				items={[
+					{ value: 'session', label: 'Current session' },
+					{ value: '24h', label: '24 hours' },
+					{ value: '7d', label: '7 days' },
+					{ value: '30d', label: '30 days' },
+				]}
+				onchange={onSessionDurationChange}
+			></Select>
+		</Grid>
 		<AppList {apps} {identity} />
 	{:else}
-		<Typography variant="small" style="opacity: 0.5;">No connected apps yet.</Typography>
+		<Vertical --vertical-gap="var(--half-padding)">
+			<Typography bold center>No connected apps yet.</Typography>
+			<Typography center>
+				Visit any app that supports Swarm ID and select "Connect with Swarm ID" to get started.
+			</Typography>
+		</Vertical>
 	{/if}
 </Vertical>
