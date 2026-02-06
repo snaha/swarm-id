@@ -16,6 +16,11 @@ import type {
   IsConnectedMessage,
   GsocMineMessage,
   GsocSendMessage,
+  ActUploadDataMessage,
+  ActDownloadDataMessage,
+  ActAddGranteesMessage,
+  ActRevokeGranteesMessage,
+  ActGetGranteesMessage,
   AppMetadata,
   PostageStamp,
   ConnectedApp,
@@ -46,6 +51,14 @@ import {
 import { hexToUint8Array } from "./utils/key-derivation"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
+import {
+  createActForContent,
+  decryptActReference,
+  addGranteesToAct,
+  revokeGranteesFromAct,
+  getGranteesFromAct,
+  parseCompressedPublicKey,
+} from "./proxy/act"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -541,6 +554,26 @@ export class SwarmIdProxy {
 
       case "gsocSend":
         await this.handleGsocSend(message, event)
+        break
+
+      case "actUploadData":
+        await this.handleActUploadData(message, event)
+        break
+
+      case "actDownloadData":
+        await this.handleActDownloadData(message, event)
+        break
+
+      case "actAddGrantees":
+        await this.handleActAddGrantees(message, event)
+        break
+
+      case "actRevokeGrantees":
+        await this.handleActRevokeGrantees(message, event)
+        break
+
+      case "actGetGrantees":
+        await this.handleActGetGrantees(message, event)
         break
 
       default:
@@ -1849,6 +1882,431 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "GSOC send failed",
+      )
+    }
+  }
+
+  // ============================================================================
+  // ACT (Access Control Tries) Handlers
+  // ============================================================================
+
+  private async handleActUploadData(
+    message: ActUploadDataMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const {
+      requestId,
+      data,
+      grantees,
+      options,
+      requestOptions,
+      enableProgress,
+    } = message
+
+    console.log(
+      "[Proxy] ACT upload data request, size:",
+      data ? data.length : 0,
+      "grantees:",
+      grantees.length,
+    )
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey || !this.postageBatchId) {
+        throw new Error(
+          "Signer key and postage batch ID required. Please login first.",
+        )
+      }
+
+      if (!this.stamper) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
+
+      // Prepare upload context
+      const context: UploadContext = {
+        bee: this.bee,
+        stamper: this.stamper,
+      }
+
+      // Parse grantee public keys from compressed hex
+      const granteePublicKeys = grantees.map((hex) =>
+        parseCompressedPublicKey(hex),
+      )
+
+      // Progress callback (if enabled)
+      const onProgress = enableProgress
+        ? (progress: UploadProgress) => {
+            if (event.source) {
+              ;(event.source as WindowProxy).postMessage(
+                {
+                  type: "uploadProgress",
+                  requestId,
+                  total: progress.total,
+                  processed: progress.processed,
+                } satisfies IframeToParentMessage,
+                { targetOrigin: event.origin },
+              )
+            }
+          }
+        : undefined
+
+      // Convert signer key to Uint8Array
+      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+
+      // First upload the content data (encrypted)
+      const uploadResult = await uploadEncryptedDataWithSigning(
+        context,
+        data,
+        undefined, // encryption key (auto-generated)
+        options,
+        onProgress,
+        requestOptions,
+      )
+
+      // Convert content reference to bytes (encrypted reference is 128 hex chars = 64 bytes)
+      const contentReferenceBytes = hexToUint8Array(uploadResult.reference)
+
+      // Create ACT for the content
+      const actResult = await createActForContent(
+        context,
+        contentReferenceBytes,
+        publisherPrivateKey,
+        granteePublicKeys,
+        options,
+        requestOptions,
+      )
+
+      // Save stamper state after successful upload
+      await this.saveStamperState()
+
+      // Send final response
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "actUploadDataResponse",
+            requestId,
+            encryptedReference: actResult.encryptedReference,
+            historyReference: actResult.historyReference,
+            granteeListReference: actResult.granteeListReference,
+            publisherPubKey: actResult.publisherPubKey,
+            actReference: actResult.actReference,
+            tagUid: uploadResult.tagUid,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log(
+        "[Proxy] ACT upload complete, historyReference:",
+        actResult.historyReference,
+      )
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "ACT upload failed",
+      )
+    }
+  }
+
+  private async handleActDownloadData(
+    message: ActDownloadDataMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const {
+      requestId,
+      encryptedReference,
+      historyReference,
+      publisherPubKey,
+      timestamp,
+      requestOptions,
+    } = message
+
+    console.log(
+      "[Proxy] ACT download data request, historyReference:",
+      historyReference,
+    )
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey) {
+        throw new Error(
+          "Signer key required for ACT decryption. Please login first.",
+        )
+      }
+
+      // Convert signer key to Uint8Array
+      const readerPrivateKey = hexToUint8Array(this.signerKey)
+
+      // Decrypt the ACT reference to get the content reference
+      const contentReference = await decryptActReference(
+        this.bee,
+        encryptedReference,
+        historyReference,
+        publisherPubKey,
+        readerPrivateKey,
+        timestamp,
+        requestOptions,
+      )
+
+      console.log("[Proxy] ACT decrypted, content reference:", contentReference)
+
+      // Download the decrypted content
+      const data = await downloadDataWithChunkAPI(
+        this.bee,
+        contentReference,
+        undefined,
+        undefined,
+        requestOptions,
+      )
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "actDownloadDataResponse",
+            requestId,
+            data: data as Uint8Array,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] ACT download complete, data size:", data.length)
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "ACT download failed",
+      )
+    }
+  }
+
+  private async handleActAddGrantees(
+    message: ActAddGranteesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, historyReference, grantees, requestOptions } = message
+
+    console.log(
+      "[Proxy] ACT add grantees request, historyReference:",
+      historyReference,
+      "new grantees:",
+      grantees.length,
+    )
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey || !this.postageBatchId) {
+        throw new Error(
+          "Signer key and postage batch ID required. Please login first.",
+        )
+      }
+
+      if (!this.stamper) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
+
+      // Prepare upload context
+      const context: UploadContext = {
+        bee: this.bee,
+        stamper: this.stamper,
+      }
+
+      // Convert signer key to Uint8Array
+      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+
+      // Parse grantee public keys from compressed hex
+      const newGranteePublicKeys = grantees.map((hex) =>
+        parseCompressedPublicKey(hex),
+      )
+
+      // Add grantees to ACT
+      const result = await addGranteesToAct(
+        context,
+        historyReference,
+        publisherPrivateKey,
+        newGranteePublicKeys,
+        undefined,
+        requestOptions,
+      )
+
+      // Save stamper state after successful upload
+      await this.saveStamperState()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "actAddGranteesResponse",
+            requestId,
+            historyReference: result.historyReference,
+            granteeListReference: result.granteeListReference,
+            actReference: result.actReference,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log(
+        "[Proxy] ACT grantees added, new historyReference:",
+        result.historyReference,
+      )
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "ACT add grantees failed",
+      )
+    }
+  }
+
+  private async handleActRevokeGrantees(
+    message: ActRevokeGranteesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const {
+      requestId,
+      historyReference,
+      encryptedReference,
+      revokeGrantees,
+      requestOptions,
+    } = message
+
+    console.log(
+      "[Proxy] ACT revoke grantees request, historyReference:",
+      historyReference,
+      "revoke grantees:",
+      revokeGrantees.length,
+    )
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey || !this.postageBatchId) {
+        throw new Error(
+          "Signer key and postage batch ID required. Please login first.",
+        )
+      }
+
+      if (!this.stamper) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
+
+      // Prepare upload context
+      const context: UploadContext = {
+        bee: this.bee,
+        stamper: this.stamper,
+      }
+
+      // Convert signer key to Uint8Array
+      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+
+      // Parse grantee public keys from compressed hex
+      const revokePublicKeys = revokeGrantees.map((hex) =>
+        parseCompressedPublicKey(hex),
+      )
+
+      // Revoke grantees from ACT (performs key rotation)
+      const result = await revokeGranteesFromAct(
+        context,
+        historyReference,
+        encryptedReference,
+        publisherPrivateKey,
+        revokePublicKeys,
+        undefined,
+        requestOptions,
+      )
+
+      // Save stamper state after successful upload
+      await this.saveStamperState()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "actRevokeGranteesResponse",
+            requestId,
+            encryptedReference: result.encryptedReference,
+            historyReference: result.historyReference,
+            granteeListReference: result.granteeListReference,
+            actReference: result.actReference,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log(
+        "[Proxy] ACT grantees revoked, new historyReference:",
+        result.historyReference,
+      )
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "ACT revoke grantees failed",
+      )
+    }
+  }
+
+  private async handleActGetGrantees(
+    message: ActGetGranteesMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, historyReference, requestOptions } = message
+
+    console.log(
+      "[Proxy] ACT get grantees request, historyReference:",
+      historyReference,
+    )
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.signerKey) {
+        throw new Error(
+          "Signer key required to view grantees. Please login first.",
+        )
+      }
+
+      // Convert signer key to Uint8Array
+      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+
+      // Get grantees from ACT
+      const grantees = await getGranteesFromAct(
+        this.bee,
+        historyReference,
+        publisherPrivateKey,
+        requestOptions,
+      )
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "actGetGranteesResponse",
+            requestId,
+            grantees,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] ACT grantees retrieved:", grantees.length)
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "ACT get grantees failed",
       )
     }
   }

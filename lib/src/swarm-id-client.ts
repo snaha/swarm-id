@@ -1221,6 +1221,355 @@ export class SwarmIdClient {
   }
 
   // ============================================================================
+  // ACT (Access Control Tries) Methods
+  // ============================================================================
+
+  /**
+   * Uploads data with ACT (Access Control Tries) protection.
+   *
+   * This method encrypts the data and creates an ACT that controls who can decrypt it.
+   * Only the specified grantees (and the publisher) can decrypt and access the data.
+   *
+   * @param data - The binary data to upload as a Uint8Array
+   * @param grantees - Array of grantee public keys as compressed hex strings (33 bytes = 66 hex chars)
+   * @param options - Optional upload configuration
+   * @param options.pin - Whether to pin the data locally (defaults to false)
+   * @param options.tag - Tag ID for tracking upload progress
+   * @param options.deferred - Whether to use deferred upload (defaults to false)
+   * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
+   * @param options.onProgress - Optional callback for tracking upload progress
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns A promise resolving to the ACT upload result
+   * @returns return.encryptedReference - The encrypted reference that must be stored with the ACT
+   * @returns return.actReference - The Swarm reference (hash) of the ACT manifest
+   * @returns return.historyReference - The Swarm reference of the history manifest (use for future operations)
+   * @returns return.granteeListReference - The Swarm reference of the encrypted grantee list
+   * @returns return.publisherPubKey - The publisher's compressed public key (share with grantees)
+   * @returns return.tagUid - The tag UID if a tag was created
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not authenticated or cannot upload
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const data = new TextEncoder().encode('Secret message')
+   * const grantees = ['03a1b2c3...'] // Compressed public keys of allowed readers
+   * const result = await client.actUploadData(data, grantees, {
+   *   onProgress: (progress) => {
+   *     console.log(`Progress: ${progress.processed}/${progress.total}`)
+   *   },
+   * })
+   * console.log('History Reference:', result.historyReference)
+   * console.log('Encrypted Reference:', result.encryptedReference)
+   * console.log('Publisher Public Key:', result.publisherPubKey)
+   * ```
+   */
+  async actUploadData(
+    data: Uint8Array,
+    grantees: string[],
+    options?: UploadOptions,
+    requestOptions?: RequestOptions,
+  ): Promise<{
+    encryptedReference: string
+    historyReference: string
+    granteeListReference: string
+    publisherPubKey: string
+    actReference: string
+    tagUid?: number
+  }> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+    const { onProgress, ...serializableOptions } = options ?? {}
+
+    // Setup progress listener if callback provided
+    let progressListener: ((event: MessageEvent) => void) | undefined
+    if (onProgress) {
+      progressListener = (event: MessageEvent) => {
+        if (event.origin !== new URL(this.iframeOrigin).origin) return
+
+        try {
+          const message = IframeToParentMessageSchema.parse(event.data)
+          if (
+            message.type === "uploadProgress" &&
+            message.requestId === requestId
+          ) {
+            onProgress({
+              total: message.total,
+              processed: message.processed,
+            })
+          }
+        } catch {
+          // Ignore invalid messages
+        }
+      }
+      window.addEventListener("message", progressListener)
+    }
+
+    try {
+      const response = await this.sendRequest<{
+        type: "actUploadDataResponse"
+        requestId: string
+        encryptedReference: string
+        historyReference: string
+        granteeListReference: string
+        publisherPubKey: string
+        actReference: string
+        tagUid?: number
+      }>({
+        type: "actUploadData",
+        requestId,
+        data: new Uint8Array(data),
+        grantees,
+        options: serializableOptions,
+        requestOptions,
+        enableProgress: !!onProgress,
+      })
+
+      return {
+        encryptedReference: response.encryptedReference,
+        historyReference: response.historyReference,
+        granteeListReference: response.granteeListReference,
+        publisherPubKey: response.publisherPubKey,
+        actReference: response.actReference,
+        tagUid: response.tagUid,
+      }
+    } finally {
+      // Clean up progress listener
+      if (progressListener) {
+        window.removeEventListener("message", progressListener)
+      }
+    }
+  }
+
+  /**
+   * Downloads ACT-protected data from the Swarm network.
+   *
+   * This method decrypts the ACT to recover the content reference,
+   * then downloads and returns the decrypted data. Only authorized
+   * grantees (including the publisher) can successfully decrypt.
+   *
+   * @param encryptedReference - The encrypted reference from actUploadData
+   * @param historyReference - The history reference from actUploadData
+   * @param publisherPubKey - The publisher's compressed public key from actUploadData
+   * @param timestamp - Optional timestamp to look up a specific ACT version
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns A promise resolving to the decrypted data as a Uint8Array
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not authorized to decrypt the ACT
+   * @throws {Error} If the references are not found
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * // Using the references from actUploadData
+   * const data = await client.actDownloadData(
+   *   encryptedReference,
+   *   historyReference,
+   *   publisherPubKey
+   * )
+   * const text = new TextDecoder().decode(data)
+   * console.log('Decrypted:', text)
+   * ```
+   */
+  async actDownloadData(
+    encryptedReference: string,
+    historyReference: string,
+    publisherPubKey: string,
+    timestamp?: number,
+    requestOptions?: RequestOptions,
+  ): Promise<Uint8Array> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "actDownloadDataResponse"
+      requestId: string
+      data: Uint8Array
+    }>({
+      type: "actDownloadData",
+      requestId,
+      encryptedReference,
+      historyReference,
+      publisherPubKey,
+      timestamp,
+      requestOptions,
+    })
+
+    return response.data
+  }
+
+  /**
+   * Adds new grantees to an existing ACT.
+   *
+   * This method adds new public keys to the ACT's access list.
+   * Only the publisher (original uploader) can add grantees.
+   * Returns new references since Swarm content is immutable.
+   *
+   * @param historyReference - The current history reference
+   * @param grantees - Array of new grantee public keys as compressed hex strings
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns A promise resolving to the new references
+   * @returns return.historyReference - The new history reference after adding grantees
+   * @returns return.granteeListReference - The new grantee list reference
+   * @returns return.actReference - The new ACT reference
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not the publisher
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const newGrantees = ['03d4e5f6...'] // New public keys to grant access
+   * const result = await client.actAddGrantees(historyReference, newGrantees)
+   * console.log('New History Reference:', result.historyReference)
+   * // The encrypted reference remains the same
+   * ```
+   */
+  async actAddGrantees(
+    historyReference: string,
+    grantees: string[],
+    requestOptions?: RequestOptions,
+  ): Promise<{
+    historyReference: string
+    granteeListReference: string
+    actReference: string
+  }> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "actAddGranteesResponse"
+      requestId: string
+      historyReference: string
+      granteeListReference: string
+      actReference: string
+    }>({
+      type: "actAddGrantees",
+      requestId,
+      historyReference,
+      grantees,
+      requestOptions,
+    })
+
+    return {
+      historyReference: response.historyReference,
+      granteeListReference: response.granteeListReference,
+      actReference: response.actReference,
+    }
+  }
+
+  /**
+   * Revokes grantees from an existing ACT.
+   *
+   * This method removes public keys from the ACT's access list and performs
+   * key rotation to ensure revoked grantees cannot decrypt new versions.
+   * Returns new references including a new encrypted reference.
+   *
+   * IMPORTANT: The original encrypted reference can still be decrypted by
+   * revoked grantees if they have cached it. Key rotation only protects
+   * access through the new references.
+   *
+   * @param historyReference - The current history reference
+   * @param encryptedReference - The current encrypted reference (needed for key rotation)
+   * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns A promise resolving to the new references after revocation
+   * @returns return.encryptedReference - The new encrypted reference (key rotated)
+   * @returns return.historyReference - The new history reference after revocation
+   * @returns return.granteeListReference - The new grantee list reference
+   * @returns return.actReference - The new ACT reference after revocation
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not the publisher
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const revokeKeys = ['03a1b2c3...'] // Public keys to revoke
+   * const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
+   * console.log('New History Reference:', result.historyReference)
+   * console.log('New Encrypted Reference:', result.encryptedReference)
+   * // All references are new due to key rotation
+   * ```
+   */
+  async actRevokeGrantees(
+    historyReference: string,
+    encryptedReference: string,
+    revokeGrantees: string[],
+    requestOptions?: RequestOptions,
+  ): Promise<{
+    encryptedReference: string
+    historyReference: string
+    granteeListReference: string
+    actReference: string
+  }> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "actRevokeGranteesResponse"
+      requestId: string
+      encryptedReference: string
+      historyReference: string
+      granteeListReference: string
+      actReference: string
+    }>({
+      type: "actRevokeGrantees",
+      requestId,
+      historyReference,
+      encryptedReference,
+      revokeGrantees,
+      requestOptions,
+    })
+
+    return {
+      encryptedReference: response.encryptedReference,
+      historyReference: response.historyReference,
+      granteeListReference: response.granteeListReference,
+      actReference: response.actReference,
+    }
+  }
+
+  /**
+   * Retrieves the list of grantees from an ACT.
+   *
+   * Only the publisher (original uploader) can view the grantee list,
+   * as it is encrypted with the publisher's key.
+   *
+   * @param historyReference - The history reference
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns A promise resolving to an array of grantee public keys as compressed hex strings
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the user is not the publisher
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const grantees = await client.actGetGrantees(historyReference)
+   * console.log('Current grantees:', grantees.length)
+   * grantees.forEach(pubKey => console.log('  -', pubKey))
+   * ```
+   */
+  async actGetGrantees(
+    historyReference: string,
+    requestOptions?: RequestOptions,
+  ): Promise<string[]> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "actGetGranteesResponse"
+      requestId: string
+      grantees: string[]
+    }>({
+      type: "actGetGrantees",
+      requestId,
+      historyReference,
+      requestOptions,
+    })
+
+    return response.grantees
+  }
+
+  // ============================================================================
   // Cleanup
   // ============================================================================
 
