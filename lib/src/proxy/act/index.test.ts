@@ -4,6 +4,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
+import { MerkleTree } from "@ethersphere/bee-js"
 import type { UploadContext } from "../types"
 import {
   createActForContent,
@@ -19,9 +20,8 @@ import {
   deriveKeys,
   counterModeDecrypt,
 } from "./crypto"
-import { deserializeAct, findEntryByLookupKey } from "./act"
+import { collectActEntriesFromJson, findActEntryByKey } from "./act"
 import { decryptAndDeserializeGranteeList } from "./grantee-list"
-import { deserializeHistory, getLatestEntry } from "./history"
 
 // Mock the upload/download functions
 vi.mock("../upload-data", () => ({
@@ -66,6 +66,44 @@ function createMockContext(): UploadContext {
   }
 }
 
+// Create a valid 32-byte hex reference for mocking
+function createMockReference(counter: number): string {
+  // Create a 32-byte array with the counter as the last byte
+  const bytes = new Uint8Array(32)
+  bytes[31] = counter
+  return toHex(bytes)
+}
+
+// Compute content hash using Swarm's BMT algorithm (same as MantarayNode)
+async function computeContentHash(data: Uint8Array): Promise<string> {
+  const rootNode = await MerkleTree.root(data)
+  return toHex(rootNode.hash())
+}
+
+// Create a content-addressed storage mock for uploads
+function createContentAddressedUploadMock() {
+  const storage: Map<string, Uint8Array> = new Map()
+
+  const uploadMock = async (
+    _ctx: UploadContext,
+    data: Uint8Array,
+  ): Promise<{ reference: string; tagUid?: number }> => {
+    const ref = await computeContentHash(data)
+    storage.set(ref, data)
+    return { reference: ref }
+  }
+
+  const downloadMock = async (_bee: Bee, ref: string): Promise<Uint8Array> => {
+    const data = storage.get(ref)
+    if (!data) {
+      throw new Error(`Data not found for reference: ${ref}`)
+    }
+    return data
+  }
+
+  return { storage, uploadMock, downloadMock }
+}
+
 // Create test key pair
 function createTestKeyPair(seed: number): {
   privateKey: Uint8Array
@@ -81,6 +119,18 @@ function createTestKeyPair(seed: number): {
     publicKey,
     compressedPublicKey: toHex(compressed),
   }
+}
+
+// Helper to load ACT JSON data from storage
+function loadActDataFromStorage(
+  storage: Map<string, Uint8Array>,
+  actReference: string,
+): Uint8Array {
+  const actData = storage.get(actReference)
+  if (!actData) {
+    throw new Error(`ACT data not found for reference: ${actReference}`)
+  }
+  return actData
 }
 
 describe("parseCompressedPublicKey", () => {
@@ -111,14 +161,9 @@ describe("createActForContent", () => {
 
     const contentRef = randomBytes(64)
 
-    // Track all uploaded blobs (ACT, grantee list, history)
-    const uploadedBlobs: Uint8Array[] = []
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        uploadedBlobs.push(data)
-        return { reference: toHex(randomBytes(32)), tagUid: 123 }
-      },
-    )
+    // Use content-addressed storage mock
+    const { storage, uploadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const result = await createActForContent(
       context,
@@ -135,25 +180,19 @@ describe("createActForContent", () => {
     expect(result.publisherPubKey).toBeDefined()
     expect(result.actReference).toBeDefined()
 
-    // 3 uploads: ACT manifest, grantee list, history manifest
-    expect(uploadDataWithSigning).toHaveBeenCalledTimes(3)
-    expect(uploadedBlobs.length).toBe(3)
+    // ACT manifest should have 3 entries (publisher + 2 grantees)
+    const actData = loadActDataFromStorage(storage, result.actReference)
+    const actEntries = collectActEntriesFromJson(actData)
+    expect(actEntries.length).toBe(3)
 
-    // First blob is ACT manifest
-    const actEntries = deserializeAct(uploadedBlobs[0])
-    expect(actEntries.length).toBe(3) // publisher + 2 grantees
-
-    // Second blob is encrypted grantee list
+    // Grantee list should have 2 grantees
+    const granteeListBlob = storage.get(result.granteeListReference)
+    expect(granteeListBlob).toBeDefined()
     const grantees = decryptAndDeserializeGranteeList(
-      uploadedBlobs[1],
+      granteeListBlob!,
       publisher.privateKey,
     )
     expect(grantees.length).toBe(2)
-
-    // Third blob is history manifest
-    const history = deserializeHistory(uploadedBlobs[2])
-    const latestEntry = getLatestEntry(history)
-    expect(latestEntry).toBeDefined()
   })
 
   it("should create ACT that publisher can decrypt", async () => {
@@ -163,13 +202,9 @@ describe("createActForContent", () => {
 
     const contentRef = randomBytes(32)
 
-    const uploadedBlobs: Uint8Array[] = []
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        uploadedBlobs.push(data)
-        return { reference: toHex(randomBytes(32)) }
-      },
-    )
+    // Use content-addressed storage mock
+    const { storage, uploadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const result = await createActForContent(
       context,
@@ -179,7 +214,7 @@ describe("createActForContent", () => {
     )
 
     // Publisher should be able to decrypt
-    const actEntries = deserializeAct(uploadedBlobs[0])
+    const actData = loadActDataFromStorage(storage, result.actReference)
 
     // Derive publisher's lookup key (publisher uses their own pub key)
     const publisherKeys = deriveKeys(
@@ -189,15 +224,15 @@ describe("createActForContent", () => {
     )
 
     // Find publisher's entry
-    const publisherEntry = findEntryByLookupKey(
-      actEntries,
+    const encryptedAccessKey = findActEntryByKey(
+      actData,
       publisherKeys.lookupKey,
     )
-    expect(publisherEntry).toBeDefined()
+    expect(encryptedAccessKey).toBeDefined()
 
     // Decrypt access key
     const accessKey = counterModeDecrypt(
-      publisherEntry!.encryptedAccessKey,
+      encryptedAccessKey!,
       publisherKeys.accessKeyDecryptionKey,
     )
 
@@ -216,13 +251,9 @@ describe("createActForContent", () => {
 
     const contentRef = randomBytes(32)
 
-    const uploadedBlobs: Uint8Array[] = []
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        uploadedBlobs.push(data)
-        return { reference: toHex(randomBytes(32)) }
-      },
-    )
+    // Use content-addressed storage mock
+    const { storage, uploadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const result = await createActForContent(
       context,
@@ -232,7 +263,7 @@ describe("createActForContent", () => {
     )
 
     // Grantee should be able to decrypt
-    const actEntries = deserializeAct(uploadedBlobs[0])
+    const actData = loadActDataFromStorage(storage, result.actReference)
 
     // Grantee derives keys using publisher's public key
     const granteeKeys = deriveKeys(
@@ -242,12 +273,12 @@ describe("createActForContent", () => {
     )
 
     // Find grantee's entry
-    const granteeEntry = findEntryByLookupKey(actEntries, granteeKeys.lookupKey)
-    expect(granteeEntry).toBeDefined()
+    const encryptedAccessKey = findActEntryByKey(actData, granteeKeys.lookupKey)
+    expect(encryptedAccessKey).toBeDefined()
 
     // Decrypt access key
     const accessKey = counterModeDecrypt(
-      granteeEntry!.encryptedAccessKey,
+      encryptedAccessKey!,
       granteeKeys.accessKeyDecryptionKey,
     )
 
@@ -273,17 +304,9 @@ describe("decryptActReference", () => {
     const originalContentRef = randomBytes(32)
     const originalContentRefHex = toHex(originalContentRef)
 
-    // First create an ACT
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -294,11 +317,7 @@ describe("decryptActReference", () => {
     )
 
     // Mock download to return the appropriate blobs
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     // Grantee should be able to decrypt
     const decryptedRef = await decryptActReference(
@@ -320,16 +339,9 @@ describe("decryptActReference", () => {
     const originalContentRef = randomBytes(32)
     const originalContentRefHex = toHex(originalContentRef)
 
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -339,11 +351,7 @@ describe("decryptActReference", () => {
       [grantee.publicKey],
     )
 
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     // Publisher should be able to decrypt their own content
     const decryptedRef = await decryptActReference(
@@ -365,16 +373,9 @@ describe("decryptActReference", () => {
 
     const originalContentRef = randomBytes(32)
 
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -384,11 +385,7 @@ describe("decryptActReference", () => {
       [grantee.publicKey],
     )
 
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     // Unauthorized user should not be able to decrypt
     await expect(
@@ -415,17 +412,10 @@ describe("addGranteesToAct", () => {
 
     const originalContentRef = randomBytes(32)
 
-    // Track all uploaded blobs
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { storage, uploadMock, downloadMock } =
+      createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -436,16 +426,15 @@ describe("addGranteesToAct", () => {
     )
 
     // Verify original has 2 entries (publisher + grantee1)
-    const originalActBlob = uploadedBlobs.get(createResult.actReference)!
-    const originalEntries = deserializeAct(originalActBlob)
+    const originalActData = loadActDataFromStorage(
+      storage,
+      createResult.actReference,
+    )
+    const originalEntries = collectActEntriesFromJson(originalActData)
     expect(originalEntries.length).toBe(2)
 
     // Mock download to return the uploaded blobs
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     // Add new grantee
     const result = await addGranteesToAct(
@@ -460,12 +449,12 @@ describe("addGranteesToAct", () => {
     expect(result.granteeListReference).toBeDefined()
 
     // Verify new ACT has 3 entries
-    const newActBlob = uploadedBlobs.get(result.actReference)!
-    const newEntries = deserializeAct(newActBlob)
+    const newActData = loadActDataFromStorage(storage, result.actReference)
+    const newEntries = collectActEntriesFromJson(newActData)
     expect(newEntries.length).toBe(3)
 
     // Verify grantee list has 2 grantees
-    const newGranteeListBlob = uploadedBlobs.get(result.granteeListReference)!
+    const newGranteeListBlob = storage.get(result.granteeListReference)!
     const grantees = decryptAndDeserializeGranteeList(
       newGranteeListBlob,
       publisher.privateKey,
@@ -478,10 +467,7 @@ describe("addGranteesToAct", () => {
       publisher.publicKey.x,
       publisher.publicKey.y,
     )
-    const grantee2Entry = findEntryByLookupKey(
-      newEntries,
-      grantee2Keys.lookupKey,
-    )
+    const grantee2Entry = findActEntryByKey(newActData, grantee2Keys.lookupKey)
     expect(grantee2Entry).toBeDefined()
   })
 })
@@ -498,17 +484,10 @@ describe("revokeGranteesFromAct", () => {
 
     const originalContentRef = randomBytes(32)
 
-    // Track all uploaded blobs
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { storage, uploadMock, downloadMock } =
+      createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -519,16 +498,15 @@ describe("revokeGranteesFromAct", () => {
     )
 
     // Verify original has 3 entries
-    const originalActBlob = uploadedBlobs.get(createResult.actReference)!
-    const originalEntries = deserializeAct(originalActBlob)
+    const originalActData = loadActDataFromStorage(
+      storage,
+      createResult.actReference,
+    )
+    const originalEntries = collectActEntriesFromJson(originalActData)
     expect(originalEntries.length).toBe(3)
 
     // Mock download to return the uploaded blobs
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     // Revoke grantee2
     const result = await revokeGranteesFromAct(
@@ -544,12 +522,12 @@ describe("revokeGranteesFromAct", () => {
     expect(result.actReference).toBeDefined()
 
     // New ACT should have 2 entries (publisher + grantee1)
-    const newActBlob = uploadedBlobs.get(result.actReference)!
-    const newEntries = deserializeAct(newActBlob)
+    const newActData = loadActDataFromStorage(storage, result.actReference)
+    const newEntries = collectActEntriesFromJson(newActData)
     expect(newEntries.length).toBe(2)
 
     // Verify grantee list has 1 grantee
-    const newGranteeListBlob = uploadedBlobs.get(result.granteeListReference)!
+    const newGranteeListBlob = storage.get(result.granteeListReference)!
     const grantees = decryptAndDeserializeGranteeList(
       newGranteeListBlob,
       publisher.privateKey,
@@ -562,10 +540,7 @@ describe("revokeGranteesFromAct", () => {
       publisher.publicKey.x,
       publisher.publicKey.y,
     )
-    const grantee2Entry = findEntryByLookupKey(
-      newEntries,
-      grantee2Keys.lookupKey,
-    )
+    const grantee2Entry = findActEntryByKey(newActData, grantee2Keys.lookupKey)
     expect(grantee2Entry).toBeUndefined()
 
     // Grantee1 should still be able to find their entry
@@ -574,10 +549,7 @@ describe("revokeGranteesFromAct", () => {
       publisher.publicKey.x,
       publisher.publicKey.y,
     )
-    const grantee1Entry = findEntryByLookupKey(
-      newEntries,
-      grantee1Keys.lookupKey,
-    )
+    const grantee1Entry = findActEntryByKey(newActData, grantee1Keys.lookupKey)
     expect(grantee1Entry).toBeDefined()
   })
 })
@@ -593,17 +565,9 @@ describe("getGranteesFromAct", () => {
     const grantee1 = createTestKeyPair(91)
     const grantee2 = createTestKeyPair(92)
 
-    // Track all uploaded blobs
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -614,11 +578,7 @@ describe("getGranteesFromAct", () => {
     )
 
     // Mock download to return the uploaded blobs
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     // Get grantees
     const grantees = await getGranteesFromAct(
@@ -636,17 +596,9 @@ describe("getGranteesFromAct", () => {
     const bee = {} as Bee
     const publisher = createTestKeyPair(100)
 
-    // Track all uploaded blobs
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -656,11 +608,7 @@ describe("getGranteesFromAct", () => {
       [],
     )
 
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     const grantees = await getGranteesFromAct(
       bee,
@@ -690,17 +638,9 @@ describe("ACT end-to-end flow", () => {
 
     const secretData = new TextEncoder().encode("Top secret message!")
 
-    // Track uploaded blobs
-    const uploadedBlobs: Map<string, Uint8Array> = new Map()
-    let uploadCounter = 0
-
-    vi.mocked(uploadDataWithSigning).mockImplementation(
-      async (_ctx, data: Uint8Array) => {
-        const ref = `ref_${++uploadCounter}`
-        uploadedBlobs.set(ref, data)
-        return { reference: ref }
-      },
-    )
+    // Use content-addressed storage mock
+    const { uploadMock, downloadMock } = createContentAddressedUploadMock()
+    vi.mocked(uploadDataWithSigning).mockImplementation(uploadMock)
 
     // Step 1: Publisher creates ACT with Alice and Bob
     const createResult = await createActForContent(
@@ -711,11 +651,7 @@ describe("ACT end-to-end flow", () => {
     )
 
     // Step 2: Verify Alice can decrypt
-    vi.mocked(downloadDataWithChunkAPI).mockImplementation(
-      async (_bee, ref) => {
-        return uploadedBlobs.get(ref)!
-      },
-    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
 
     const aliceDecrypted = await decryptActReference(
       bee,

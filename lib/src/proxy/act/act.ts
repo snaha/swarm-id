@@ -1,11 +1,24 @@
 /**
  * ACT (Access Control Tries) Data Structure
  *
- * Bee-compatible JSON manifest format for storing ACT entries.
- * The ACT only stores lookup key -> encrypted access key mappings.
+ * Bee-compatible Simple Manifest (JSON) format for storing ACT entries.
+ * The ACT stores lookup key -> encrypted access key mappings.
+ *
+ * Bee's ACT format is a Simple Manifest with structure:
+ * {
+ *   "entries": {
+ *     "<lookupKeyHex>": {
+ *       "reference": "<encryptedAccessKeyHex>",
+ *       "metadata": {}
+ *     }
+ *   }
+ * }
+ *
  * All other data (publisher public key, encrypted reference, grantee list)
  * is stored separately and passed out-of-band.
  */
+
+import { hexToUint8Array, uint8ArrayToHex } from "../../utils/hex"
 
 /**
  * Single ACT entry: lookup key + encrypted access key
@@ -16,83 +29,73 @@ export interface ActEntry {
 }
 
 /**
- * Bee-compatible ACT manifest (JSON format)
+ * Bee's Simple Manifest entry format
+ */
+interface SimpleManifestEntry {
+  reference: string
+  metadata?: Record<string, string>
+}
+
+/**
+ * Bee's Simple Manifest format for ACT
+ */
+interface SimpleManifest {
+  entries: Record<string, SimpleManifestEntry>
+}
+
+/**
+ * Serialize ACT entries to JSON bytes (Bee-compatible Simple Manifest format)
  *
- * This matches Bee's ACT format:
- * ```json
- * {
- *   "entries": {
- *     "<lookupKeyHex>": {
- *       "reference": "<encryptedAccessKeyHex>",
- *       "metadata": {}
- *     }
- *   }
- * }
- * ```
- */
-export interface BeeActManifest {
-  entries: Record<
-    string,
-    { reference: string; metadata: Record<string, string> }
-  >
-}
-
-/**
- * Convert Uint8Array to hex string
- */
-function uint8ArrayToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-}
-
-/**
- * Convert hex string to Uint8Array
- */
-function hexToUint8Array(hex: string): Uint8Array {
-  const bytes = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.slice(i, i + 2), 16)
-  }
-  return bytes
-}
-
-/**
- * Serialize ACT entries to Bee-compatible JSON manifest format
- *
- * This is the format used by Bee for ACT storage. The manifest only contains
- * the lookup key -> encrypted access key mappings.
+ * @param entries - Array of ACT entries
+ * @returns JSON-encoded bytes
  */
 export function serializeAct(entries: ActEntry[]): Uint8Array {
-  const manifest: BeeActManifest = { entries: {} }
+  const manifest: SimpleManifest = {
+    entries: {},
+  }
 
   for (const entry of entries) {
-    const lookupKeyHex = uint8ArrayToHex(entry.lookupKey)
-    const encAccessKeyHex = uint8ArrayToHex(entry.encryptedAccessKey)
-    manifest.entries[lookupKeyHex] = {
-      reference: encAccessKeyHex,
+    // Path is the hex-encoded lookup key (64 chars)
+    const path = uint8ArrayToHex(entry.lookupKey)
+    // Reference is the hex-encoded encrypted access key (64 chars)
+    manifest.entries[path] = {
+      reference: uint8ArrayToHex(entry.encryptedAccessKey),
       metadata: {},
     }
   }
 
-  return new TextEncoder().encode(JSON.stringify(manifest))
+  const json = JSON.stringify(manifest)
+  return new TextEncoder().encode(json)
 }
 
 /**
- * Deserialize ACT entries from Bee-compatible JSON manifest format
+ * Deserialize ACT entries from JSON bytes (Bee-compatible Simple Manifest format)
+ *
+ * @param data - JSON-encoded bytes
+ * @returns Array of ACT entries
  */
 export function deserializeAct(data: Uint8Array): ActEntry[] {
   const json = new TextDecoder().decode(data)
-  const manifest: BeeActManifest = JSON.parse(json)
+  const manifest: SimpleManifest = JSON.parse(json)
 
-  return Object.entries(manifest.entries).map(([lookupKeyHex, entry]) => ({
-    lookupKey: hexToUint8Array(lookupKeyHex),
-    encryptedAccessKey: hexToUint8Array(entry.reference),
-  }))
+  const entries: ActEntry[] = []
+
+  for (const [path, entry] of Object.entries(manifest.entries)) {
+    entries.push({
+      lookupKey: hexToUint8Array(path),
+      encryptedAccessKey: hexToUint8Array(entry.reference),
+    })
+  }
+
+  return entries
 }
 
 /**
  * Find an ACT entry by lookup key
+ *
+ * @param entries - Array of ACT entries
+ * @param lookupKey - 32-byte lookup key
+ * @returns The entry if found, undefined otherwise
  */
 export function findEntryByLookupKey(
   entries: ActEntry[],
@@ -122,4 +125,34 @@ export function publicKeysEqual(
     if (a.y[i] !== b.y[i]) return false
   }
   return true
+}
+
+/**
+ * Helper to collect all ACT entries from JSON-encoded ACT data
+ *
+ * This is a convenience function for working with JSON ACT data directly from storage.
+ *
+ * @param actData - JSON-encoded ACT data from storage
+ * @returns Array of ACT entries
+ */
+export function collectActEntriesFromJson(actData: Uint8Array): ActEntry[] {
+  return deserializeAct(actData)
+}
+
+/**
+ * Helper to find an ACT entry by lookup key from JSON-encoded ACT data
+ *
+ * This is a convenience function for working with JSON ACT data directly from storage.
+ *
+ * @param actData - JSON-encoded ACT data from storage
+ * @param lookupKey - 32-byte lookup key to search for
+ * @returns The encrypted access key if found, undefined otherwise
+ */
+export function findActEntryByKey(
+  actData: Uint8Array,
+  lookupKey: Uint8Array,
+): Uint8Array | undefined {
+  const entries = deserializeAct(actData)
+  const entry = findEntryByLookupKey(entries, lookupKey)
+  return entry?.encryptedAccessKey
 }

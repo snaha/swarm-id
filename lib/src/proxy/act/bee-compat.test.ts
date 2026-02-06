@@ -20,12 +20,7 @@ import {
   counterModeDecrypt,
   generateRandomKey,
 } from "./crypto"
-import {
-  serializeAct,
-  deserializeAct,
-  findEntryByLookupKey,
-  type ActEntry,
-} from "./act"
+import { findEntryByLookupKey, type ActEntry } from "./act"
 
 // =============================================================================
 // Test Vectors from Bee
@@ -429,28 +424,23 @@ describe("Bee Compatibility Tests", () => {
         },
       ]
 
-      // Step 4: Serialize and deserialize ACT (simulates storage)
-      const serializedAct = serializeAct(actEntries)
-      const deserializedEntries = deserializeAct(serializedAct)
-      expect(deserializedEntries.length).toBe(1)
-
-      // Step 5: Publisher looks up their entry in ACT
+      // Step 4: Publisher looks up their entry in ACT (using array directly)
       const {
         lookupKey: derivedLookupKey,
         accessKeyDecryptionKey: derivedAkdKey,
       } = deriveKeys(publisherPrivKey, publisherPubKey.x, publisherPubKey.y)
 
-      const entry = findEntryByLookupKey(deserializedEntries, derivedLookupKey)
+      const entry = findEntryByLookupKey(actEntries, derivedLookupKey)
       expect(entry).toBeDefined()
 
-      // Step 6: Publisher decrypts the access key
+      // Step 5: Publisher decrypts the access key
       const decryptedAccessKey = counterModeDecrypt(
         entry!.encryptedAccessKey,
         derivedAkdKey,
       )
       expect(bytesToHex(decryptedAccessKey)).toBe(bytesToHex(accessKey))
 
-      // Step 7: Publisher decrypts the reference
+      // Step 6: Publisher decrypts the reference
       const decryptedReference = counterModeDecrypt(
         encryptedReference,
         decryptedAccessKey,
@@ -459,8 +449,6 @@ describe("Bee Compatibility Tests", () => {
     })
 
     it("should produce consistent encryption across multiple operations", () => {
-      const publisherPrivKey = hexToBytes(BEE_PRIVATE_KEYS.KEY_1)
-      const publisherPubKey = publicKeyFromPrivate(publisherPrivKey)
       const testReference = hexToBytes(BEE_TEST_REFERENCE)
 
       // Use a fixed access key for deterministic testing
@@ -545,12 +533,7 @@ describe("Bee Compatibility Tests", () => {
         },
       ]
 
-      // Step 4: Serialize and deserialize ACT (simulates storage)
-      const serializedAct = serializeAct(actEntries)
-      const deserializedEntries = deserializeAct(serializedAct)
-      expect(deserializedEntries.length).toBe(2)
-
-      // Step 5: Grantee derives keys using their private key + publisher's public key
+      // Step 4: Grantee derives keys using their private key + publisher's public key
       const granteeDerivation = deriveKeys(
         granteePrivKey,
         publisherPubKey.x,
@@ -562,21 +545,21 @@ describe("Bee Compatibility Tests", () => {
         BEE_EXPECTED_LOOKUP_KEYS.KEY1_WITH_KEY2_PUB,
       )
 
-      // Step 6: Grantee looks up their entry in ACT
+      // Step 5: Grantee looks up their entry in ACT
       const granteeEntry = findEntryByLookupKey(
-        deserializedEntries,
+        actEntries,
         granteeDerivation.lookupKey,
       )
       expect(granteeEntry).toBeDefined()
 
-      // Step 7: Grantee decrypts the access key
+      // Step 6: Grantee decrypts the access key
       const decryptedAccessKey = counterModeDecrypt(
         granteeEntry!.encryptedAccessKey,
         granteeDerivation.accessKeyDecryptionKey,
       )
       expect(bytesToHex(decryptedAccessKey)).toBe(bytesToHex(accessKey))
 
-      // Step 8: Grantee decrypts the reference
+      // Step 7: Grantee decrypts the reference
       const decryptedReference = counterModeDecrypt(
         encryptedReference,
         decryptedAccessKey,
@@ -599,7 +582,6 @@ describe("Bee Compatibility Tests", () => {
 
       // Publisher creates ACT only for themselves and Key 2 (not Key 0)
       const accessKey = generateRandomKey()
-      const encryptedReference = counterModeEncrypt(testReference, accessKey)
 
       // Create entries for publisher and grantee only
       const publisherKeys = deriveKeys(
@@ -630,9 +612,6 @@ describe("Bee Compatibility Tests", () => {
         },
       ]
 
-      const serializedAct = serializeAct(actEntries)
-      const deserializedEntries = deserializeAct(serializedAct)
-
       // Non-grantee (Key 0) tries to derive keys with publisher's public key
       const nonGranteeDerivation = deriveKeys(
         nonGranteePrivKey,
@@ -642,7 +621,7 @@ describe("Bee Compatibility Tests", () => {
 
       // Non-grantee's lookup key should NOT match any entry in the ACT
       const nonGranteeEntry = findEntryByLookupKey(
-        deserializedEntries,
+        actEntries,
         nonGranteeDerivation.lookupKey,
       )
 
@@ -721,9 +700,7 @@ describe("Bee Compatibility Tests", () => {
         },
       ]
 
-      const serializedAct = serializeAct(actEntries)
-      const deserializedEntries = deserializeAct(serializedAct)
-      expect(deserializedEntries.length).toBe(3)
+      expect(actEntries.length).toBe(3)
 
       // Grantee 0 decrypts
       const grantee0Derivation = deriveKeys(
@@ -732,7 +709,7 @@ describe("Bee Compatibility Tests", () => {
         publisherPubKey.y,
       )
       const grantee0Entry = findEntryByLookupKey(
-        deserializedEntries,
+        actEntries,
         grantee0Derivation.lookupKey,
       )
       expect(grantee0Entry).toBeDefined()
@@ -754,7 +731,7 @@ describe("Bee Compatibility Tests", () => {
         publisherPubKey.y,
       )
       const grantee2Entry = findEntryByLookupKey(
-        deserializedEntries,
+        actEntries,
         grantee2Derivation.lookupKey,
       )
       expect(grantee2Entry).toBeDefined()
@@ -808,22 +785,19 @@ describe("Bee Compatibility Tests", () => {
       const ENCRYPTED_ACCESS_KEY_LENGTH = 32
       expect(encryptedAccessKey.length).toBe(ENCRYPTED_ACCESS_KEY_LENGTH)
 
-      // Verify the ACT entry can be created and serialized
+      // Verify the ACT entry can be created
       const actEntry: ActEntry = {
         lookupKey,
         encryptedAccessKey,
       }
 
-      const serialized = serializeAct([actEntry])
-      const deserialized = deserializeAct(serialized)
-
-      expect(deserialized.length).toBe(1)
-      expect(bytesToHex(deserialized[0].lookupKey)).toBe(
+      // Verify entry can be found by lookup key
+      const found = findEntryByLookupKey([actEntry], lookupKey)
+      expect(found).toBeDefined()
+      expect(bytesToHex(found!.lookupKey)).toBe(
         BEE_EXPECTED_LOOKUP_KEYS.KEY1_WITH_KEY0_PUB,
       )
-      expect(deserialized[0].encryptedAccessKey.length).toBe(
-        ENCRYPTED_ACCESS_KEY_LENGTH,
-      )
+      expect(found!.encryptedAccessKey.length).toBe(ENCRYPTED_ACCESS_KEY_LENGTH)
     })
   })
 
@@ -915,16 +889,10 @@ describe("Bee Compatibility Tests", () => {
       )
       expect(lookupKeySet.size).toBe(3)
 
-      // Verify serialization/deserialization roundtrip
-      const serialized = serializeAct(actEntries)
-      const deserialized = deserializeAct(serialized)
-
-      expect(deserialized.length).toBe(3)
-
-      // Verify each lookup key can be found in deserialized entries
-      const entry0 = findEntryByLookupKey(deserialized, keys0.lookupKey)
-      const entry1 = findEntryByLookupKey(deserialized, keys1.lookupKey)
-      const entry2 = findEntryByLookupKey(deserialized, keys2.lookupKey)
+      // Verify each lookup key can be found in entries
+      const entry0 = findEntryByLookupKey(actEntries, keys0.lookupKey)
+      const entry1 = findEntryByLookupKey(actEntries, keys1.lookupKey)
+      const entry2 = findEntryByLookupKey(actEntries, keys2.lookupKey)
 
       expect(entry0).toBeDefined()
       expect(entry1).toBeDefined()

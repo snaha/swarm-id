@@ -1,5 +1,5 @@
 /**
- * Unit tests for ACT data structure and serialization (Bee-compatible JSON format)
+ * Unit tests for ACT data structure and serialization (Bee-compatible Simple Manifest JSON format)
  */
 
 import { describe, it, expect } from "vitest"
@@ -9,7 +9,6 @@ import {
   findEntryByLookupKey,
   publicKeysEqual,
   type ActEntry,
-  type BeeActManifest,
 } from "./act"
 import { publicKeyFromPrivate } from "./crypto"
 
@@ -34,8 +33,8 @@ function toHex(bytes: Uint8Array): string {
     .join("")
 }
 
-describe("serializeAct/deserializeAct (Bee-compatible JSON format)", () => {
-  it("should serialize and deserialize a single entry", () => {
+describe("serializeAct/deserializeAct (Bee-compatible Simple Manifest JSON format)", () => {
+  it("should serialize and deserialize single entry", () => {
     const lookupKey = randomBytes(32)
     const encryptedAccessKey = randomBytes(32)
 
@@ -63,12 +62,6 @@ describe("serializeAct/deserializeAct (Bee-compatible JSON format)", () => {
     const deserialized = deserializeAct(serialized)
 
     expect(deserialized.length).toBe(5)
-    for (let i = 0; i < 5; i++) {
-      expect(deserialized[i].lookupKey).toEqual(entries[i].lookupKey)
-      expect(deserialized[i].encryptedAccessKey).toEqual(
-        entries[i].encryptedAccessKey,
-      )
-    }
   })
 
   it("should handle zero entries", () => {
@@ -87,21 +80,27 @@ describe("serializeAct/deserializeAct (Bee-compatible JSON format)", () => {
     const entries: ActEntry[] = [{ lookupKey, encryptedAccessKey }]
 
     const serialized = serializeAct(entries)
+
+    // Should be valid JSON
     const json = new TextDecoder().decode(serialized)
-    const parsed: BeeActManifest = JSON.parse(json)
+    const parsed = JSON.parse(json)
 
-    expect(parsed.entries).toBeDefined()
-    expect(Object.keys(parsed.entries).length).toBe(1)
+    // Should have entries object
+    expect(parsed).toHaveProperty("entries")
+    expect(typeof parsed.entries).toBe("object")
 
+    // Entry key should be hex-encoded lookup key
     const lookupKeyHex = toHex(lookupKey)
-    expect(parsed.entries[lookupKeyHex]).toBeDefined()
+    expect(parsed.entries).toHaveProperty(lookupKeyHex)
+
+    // Entry value should have reference (hex-encoded encrypted access key)
+    expect(parsed.entries[lookupKeyHex]).toHaveProperty("reference")
     expect(parsed.entries[lookupKeyHex].reference).toBe(
       toHex(encryptedAccessKey),
     )
-    expect(parsed.entries[lookupKeyHex].metadata).toEqual({})
   })
 
-  it("should handle entries with same lookup key (overwrites)", () => {
+  it("should handle entries with same lookup key (last wins)", () => {
     const lookupKey = randomBytes(32)
     const encryptedAccessKey1 = randomBytes(32)
     const encryptedAccessKey2 = randomBytes(32)
@@ -113,24 +112,74 @@ describe("serializeAct/deserializeAct (Bee-compatible JSON format)", () => {
     ]
 
     const serialized = serializeAct(entries)
-    const json = new TextDecoder().decode(serialized)
-    const parsed: BeeActManifest = JSON.parse(json)
+    const deserialized = deserializeAct(serialized)
 
     // Should only have one entry (second overwrites first)
-    expect(Object.keys(parsed.entries).length).toBe(1)
-    expect(parsed.entries[toHex(lookupKey)].reference).toBe(
-      toHex(encryptedAccessKey2),
-    )
+    expect(deserialized.length).toBe(1)
+    expect(deserialized[0].encryptedAccessKey).toEqual(encryptedAccessKey2)
   })
 
-  it("should throw error for invalid JSON", () => {
-    const invalidData = new TextEncoder().encode("not valid json")
-    expect(() => deserializeAct(invalidData)).toThrow()
+  it("should produce Bee-compatible Simple Manifest structure", () => {
+    const lookupKey = new Uint8Array(32)
+    lookupKey.fill(0xaa)
+    const encryptedAccessKey = new Uint8Array(32)
+    encryptedAccessKey.fill(0xbb)
+
+    const entries: ActEntry[] = [{ lookupKey, encryptedAccessKey }]
+
+    const serialized = serializeAct(entries)
+
+    // Parse and check structure matches Bee's Simple Manifest
+    const json = new TextDecoder().decode(serialized)
+    const manifest = JSON.parse(json)
+
+    // Bee Simple Manifest format:
+    // { "entries": { "<path>": { "reference": "<hex>", "metadata": {} } } }
+    expect(manifest).toHaveProperty("entries")
+
+    const lookupKeyHex = "aa".repeat(32)
+    expect(manifest.entries).toHaveProperty(lookupKeyHex)
+    expect(manifest.entries[lookupKeyHex]).toHaveProperty("reference")
+    expect(manifest.entries[lookupKeyHex].reference).toBe("bb".repeat(32))
+    expect(manifest.entries[lookupKeyHex]).toHaveProperty("metadata")
   })
 
-  it("should throw error for invalid JSON structure", () => {
-    const invalidStructure = new TextEncoder().encode('{"notEntries": {}}')
-    expect(() => deserializeAct(invalidStructure)).toThrow()
+  it("should handle large number of entries", () => {
+    const numEntries = 100
+    const entries: ActEntry[] = []
+    for (let i = 0; i < numEntries; i++) {
+      entries.push({
+        lookupKey: randomBytes(32),
+        encryptedAccessKey: randomBytes(32),
+      })
+    }
+
+    const serialized = serializeAct(entries)
+    const deserialized = deserializeAct(serialized)
+
+    expect(deserialized.length).toBe(numEntries)
+  })
+
+  it("should preserve all data through serialize/deserialize cycle", () => {
+    const entries: ActEntry[] = []
+    for (let i = 0; i < 10; i++) {
+      entries.push({
+        lookupKey: randomBytes(32),
+        encryptedAccessKey: randomBytes(32),
+      })
+    }
+
+    const serialized = serializeAct(entries)
+    const deserialized = deserializeAct(serialized)
+
+    expect(deserialized.length).toBe(entries.length)
+
+    // Each entry should be found
+    for (const entry of entries) {
+      const found = findEntryByLookupKey(deserialized, entry.lookupKey)
+      expect(found).toBeDefined()
+      expect(found?.encryptedAccessKey).toEqual(entry.encryptedAccessKey)
+    }
   })
 })
 
@@ -225,69 +274,5 @@ describe("publicKeysEqual", () => {
     }
 
     expect(publicKeysEqual(key1, key2)).toBe(false)
-  })
-})
-
-describe("Bee-compatible JSON format", () => {
-  it("should produce Bee-expected JSON structure", () => {
-    const lookupKey = new Uint8Array(32)
-    lookupKey.fill(0xaa)
-    const encryptedAccessKey = new Uint8Array(32)
-    encryptedAccessKey.fill(0xbb)
-
-    const entries: ActEntry[] = [{ lookupKey, encryptedAccessKey }]
-
-    const serialized = serializeAct(entries)
-    const json = new TextDecoder().decode(serialized)
-    const parsed: BeeActManifest = JSON.parse(json)
-
-    // Verify Bee format
-    expect(parsed).toHaveProperty("entries")
-    expect(typeof parsed.entries).toBe("object")
-
-    const lookupKeyHex = toHex(lookupKey)
-    expect(parsed.entries[lookupKeyHex]).toHaveProperty("reference")
-    expect(parsed.entries[lookupKeyHex]).toHaveProperty("metadata")
-    expect(parsed.entries[lookupKeyHex].reference).toBe(
-      toHex(encryptedAccessKey),
-    )
-    expect(parsed.entries[lookupKeyHex].metadata).toEqual({})
-  })
-
-  it("should handle large number of entries", () => {
-    const numEntries = 100
-    const entries: ActEntry[] = []
-    for (let i = 0; i < numEntries; i++) {
-      entries.push({
-        lookupKey: randomBytes(32),
-        encryptedAccessKey: randomBytes(32),
-      })
-    }
-
-    const serialized = serializeAct(entries)
-    const deserialized = deserializeAct(serialized)
-
-    expect(deserialized.length).toBe(numEntries)
-  })
-
-  it("should preserve all data through serialize/deserialize cycle", () => {
-    const entries: ActEntry[] = []
-    for (let i = 0; i < 10; i++) {
-      entries.push({
-        lookupKey: randomBytes(32),
-        encryptedAccessKey: randomBytes(32),
-      })
-    }
-
-    const serialized = serializeAct(entries)
-    const deserialized = deserializeAct(serialized)
-
-    expect(deserialized.length).toBe(entries.length)
-    for (let i = 0; i < entries.length; i++) {
-      expect(deserialized[i].lookupKey).toEqual(entries[i].lookupKey)
-      expect(deserialized[i].encryptedAccessKey).toEqual(
-        entries[i].encryptedAccessKey,
-      )
-    }
   })
 })

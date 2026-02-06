@@ -34,11 +34,14 @@ import {
   makeContentAddressedChunk,
   BatchId,
   EthAddress,
+  MantarayNode,
+  NULL_ADDRESS,
 } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
+import { saveMantarayTreeRecursively } from "./proxy/mantaray"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import {
@@ -48,7 +51,7 @@ import {
   createNetworkSettingsStorageManager,
   createAccountsStorageManager,
 } from "./utils/storage-managers"
-import { hexToUint8Array } from "./utils/key-derivation"
+import { hexToUint8Array, uint8ArrayToHex } from "./utils/key-derivation"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
@@ -59,6 +62,9 @@ import {
   getGranteesFromAct,
   parseCompressedPublicKey,
 } from "./proxy/act"
+
+const DEFAULT_ACT_FILENAME = "index.bin"
+const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -1953,30 +1959,72 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      // Convert signer key to Uint8Array
-      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+      // Use appSecret as publisher private key (user's identity key for this app)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret)
 
-      // First upload the content data (encrypted)
-      const uploadResult = await uploadEncryptedDataWithSigning(
+      // Step 1: Upload raw content data
+      const contentUpload = await uploadDataWithSigning(
         context,
         data,
-        undefined, // encryption key (auto-generated)
         options,
         onProgress,
         requestOptions,
       )
+      console.log(
+        `[ACT DEBUG] Raw content reference: ${contentUpload.reference}`,
+      )
 
-      // Convert content reference to bytes (encrypted reference is 128 hex chars = 64 bytes)
-      const contentReferenceBytes = hexToUint8Array(uploadResult.reference)
+      // Step 2: Create Mantaray manifest wrapping the content
+      // This is needed because Bee's /bzz/ endpoint expects a default (Mantaray) manifest
+      const manifest = new MantarayNode()
+      const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
+      manifest.addFork(DEFAULT_ACT_FILENAME, contentReferenceBytes, {
+        "Content-Type": DEFAULT_ACT_CONTENT_TYPE,
+        Filename: DEFAULT_ACT_FILENAME,
+      })
+      manifest.addFork("/", NULL_ADDRESS, {
+        "website-index-document": DEFAULT_ACT_FILENAME,
+      })
 
-      // Create ACT for the content
+      // Step 3: Upload the Mantaray manifest
+      const manifestResult = await saveMantarayTreeRecursively(
+        manifest,
+        async (data, isRoot) => {
+          const result = await uploadDataWithSigning(
+            context,
+            data,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
+          return result
+        },
+      )
+
+      console.log(
+        `[ACT DEBUG] Manifest reference: ${manifestResult.rootReference}`,
+      )
+
+      // Step 4: Use manifest reference for ACT encryption (not raw content ref)
+      const manifestReferenceBytes = hexToUint8Array(
+        manifestResult.rootReference,
+      )
+      console.log(
+        `[ACT DEBUG] Manifest reference bytes (hex): ${uint8ArrayToHex(manifestReferenceBytes)}`,
+      )
+
+      // Create ACT for the manifest (which points to the content)
       const actResult = await createActForContent(
         context,
-        contentReferenceBytes,
+        manifestReferenceBytes,
         publisherPrivateKey,
         granteePublicKeys,
         options,
         requestOptions,
+      )
+
+      console.log(
+        `[ACT DEBUG] Encrypted reference: ${actResult.encryptedReference}`,
       )
 
       // Save stamper state after successful upload
@@ -1993,7 +2041,7 @@ export class SwarmIdProxy {
             granteeListReference: actResult.granteeListReference,
             publisherPubKey: actResult.publisherPubKey,
             actReference: actResult.actReference,
-            tagUid: uploadResult.tagUid,
+            tagUid: contentUpload.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
@@ -2035,14 +2083,9 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
-      if (!this.signerKey) {
-        throw new Error(
-          "Signer key required for ACT decryption. Please login first.",
-        )
-      }
-
-      // Convert signer key to Uint8Array
-      const readerPrivateKey = hexToUint8Array(this.signerKey)
+      // appSecret is already checked by authenticated check above
+      // Use appSecret as reader private key (user's identity key for this app)
+      const readerPrivateKey = hexToUint8Array(this.appSecret)
 
       // Decrypt the ACT reference to get the content reference
       const contentReference = await decryptActReference(
@@ -2121,8 +2164,8 @@ export class SwarmIdProxy {
         stamper: this.stamper,
       }
 
-      // Convert signer key to Uint8Array
-      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+      // Use appSecret as publisher private key (user's identity key for this app)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret)
 
       // Parse grantee public keys from compressed hex
       const newGranteePublicKeys = grantees.map((hex) =>
@@ -2208,8 +2251,8 @@ export class SwarmIdProxy {
         stamper: this.stamper,
       }
 
-      // Convert signer key to Uint8Array
-      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+      // Use appSecret as publisher private key (user's identity key for this app)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret)
 
       // Parse grantee public keys from compressed hex
       const revokePublicKeys = revokeGrantees.map((hex) =>
@@ -2273,14 +2316,9 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
-      if (!this.signerKey) {
-        throw new Error(
-          "Signer key required to view grantees. Please login first.",
-        )
-      }
-
-      // Convert signer key to Uint8Array
-      const publisherPrivateKey = hexToUint8Array(this.signerKey)
+      // appSecret is already checked by authenticated check above
+      // Use appSecret as publisher private key (user's identity key for this app)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret)
 
       // Get grantees from ACT
       const grantees = await getGranteesFromAct(

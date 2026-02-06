@@ -236,7 +236,8 @@ export function deriveKeys(
 
 /**
  * Counter-mode encryption/decryption
- * For each 32-byte block i: data[i] XOR keccak256(key || uint32BE(i))
+ * Matches Bee's Go implementation (bee/pkg/encryption/encryption.go:134-168)
+ * For each 32-byte block i: data[i] XOR keccak256(keccak256(key || uint32LE(i)))
  */
 export function counterModeEncrypt(
   data: Uint8Array,
@@ -250,15 +251,21 @@ export function counterModeEncrypt(
   const numBlocks = Math.ceil(data.length / KEY_SIZE)
 
   for (let i = 0; i < numBlocks; i++) {
-    // Create counter input: key || uint32BE(i)
+    // Create counter input: key || uint32LE(i)
+    // Must match Bee's Go implementation which uses binary.LittleEndian.PutUint32
     const counterInput = new Uint8Array(key.length + COUNTER_SIZE)
     counterInput.set(key)
-    counterInput[key.length] = (i >> 24) & 0xff
-    counterInput[key.length + 1] = (i >> 16) & 0xff
-    counterInput[key.length + 2] = (i >> 8) & 0xff
-    counterInput[key.length + 3] = i & 0xff
+    // LITTLE ENDIAN counter (matches Bee's binary.LittleEndian.PutUint32)
+    counterInput[key.length] = i & 0xff
+    counterInput[key.length + 1] = (i >> 8) & 0xff
+    counterInput[key.length + 2] = (i >> 16) & 0xff
+    counterInput[key.length + 3] = (i >> 24) & 0xff
 
-    const keyStream = Binary.keccak256(counterInput)
+    // First hash: keccak256(key || counter)
+    const ctrHash = Binary.keccak256(counterInput)
+
+    // Second hash for "selective disclosure" (matches Bee's implementation)
+    const keyStream = Binary.keccak256(ctrHash)
 
     // XOR data block with keystream
     const blockStart = i * KEY_SIZE

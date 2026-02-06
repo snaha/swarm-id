@@ -5,6 +5,7 @@ import type {
   Stamper,
   Chunk as BeeChunk,
   UploadOptions,
+  UploadResult,
 } from "@ethersphere/bee-js"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
 import type { UploadContext, UploadProgress, ChunkReference } from "./types"
@@ -166,6 +167,7 @@ export async function uploadDataWithSigning(
 
 /**
  * Upload a single chunk with optional signing
+ * Returns UploadResult with Bee's actual stored reference for verification
  */
 async function uploadSingleChunk(
   bee: Bee,
@@ -173,7 +175,7 @@ async function uploadSingleChunk(
   chunk: BeeChunk,
   options?: UploadOptions,
   requestOptions?: BeeRequestOptions,
-): Promise<void> {
+): Promise<UploadResult> {
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
   const uploadOptions = { ...options, deferred: false, pin: false }
@@ -183,7 +185,23 @@ async function uploadSingleChunk(
     // Client-side signing - use adapter for cafe-utility Chunk interface
     const chunkAdapter = new ChunkAdapter(chunk)
     const envelope = stamper.stamp(chunkAdapter)
-    await bee.uploadChunk(envelope, chunk.data, uploadOptions, requestOptions)
+    const result = await bee.uploadChunk(
+      envelope,
+      chunk.data,
+      uploadOptions,
+      requestOptions,
+    )
+
+    // Verify address match between locally computed and Bee's response
+    const localAddress = chunk.address.toHex()
+    const beeAddress = result.reference.toHex()
+    if (localAddress !== beeAddress) {
+      console.error(
+        `[ADDRESS MISMATCH] local=${localAddress} bee=${beeAddress}`,
+      )
+    }
+
+    return result
   } else {
     throw new Error("No stamper or batch ID available")
   }
