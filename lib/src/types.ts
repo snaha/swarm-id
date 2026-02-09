@@ -315,6 +315,11 @@ export const IsConnectedMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const GetNodeInfoMessageSchema = z.object({
+  type: z.literal("getNodeInfo"),
+  requestId: z.string(),
+})
+
 export const GsocMineMessageSchema = z.object({
   type: z.literal("gsocMine"),
   requestId: z.string(),
@@ -391,6 +396,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DownloadChunkMessageSchema,
   GetConnectionInfoMessageSchema,
   IsConnectedMessageSchema,
+  GetNodeInfoMessageSchema,
   GsocMineMessageSchema,
   GsocSendMessageSchema,
   ActUploadDataMessageSchema,
@@ -414,6 +420,7 @@ export type GetConnectionInfoMessage = z.infer<
   typeof GetConnectionInfoMessageSchema
 >
 export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>
+export type GetNodeInfoMessage = z.infer<typeof GetNodeInfoMessageSchema>
 export type GsocMineMessage = z.infer<typeof GsocMineMessageSchema>
 export type GsocSendMessage = z.infer<typeof GsocSendMessageSchema>
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>
@@ -537,6 +544,14 @@ export const IsConnectedResponseMessageSchema = z.object({
   connected: z.boolean(),
 })
 
+export const GetNodeInfoResponseMessageSchema = z.object({
+  type: z.literal("getNodeInfoResponse"),
+  requestId: z.string(),
+  beeMode: z.string(),
+  chequebookEnabled: z.boolean(),
+  swapEnabled: z.boolean(),
+})
+
 export const GsocMineResponseMessageSchema = z.object({
   type: z.literal("gsocMineResponse"),
   requestId: z.string(),
@@ -608,6 +623,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ConnectionInfoResponseMessageSchema,
   ConnectResponseMessageSchema,
   IsConnectedResponseMessageSchema,
+  GetNodeInfoResponseMessageSchema,
   GsocMineResponseMessageSchema,
   GsocSendResponseMessageSchema,
   ActUploadDataResponseMessageSchema,
@@ -654,6 +670,9 @@ export type ConnectResponseMessage = z.infer<
 >
 export type IsConnectedResponseMessage = z.infer<
   typeof IsConnectedResponseMessageSchema
+>
+export type GetNodeInfoResponseMessage = z.infer<
+  typeof GetNodeInfoResponseMessageSchema
 >
 export type GsocMineResponseMessage = z.infer<
   typeof GsocMineResponseMessageSchema

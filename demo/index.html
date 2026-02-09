@@ -215,7 +215,7 @@ Hello, Swarm!</textarea
         </div>
         <div style="margin-bottom: 15px">
           <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
-            <input type="checkbox" id="deferred-checkbox" checked style="width: auto; cursor: pointer" />
+            <input type="checkbox" id="deferred-checkbox" style="width: auto; cursor: pointer" />
             <span style="font-size: 14px; color: #333">
               Deferred upload mode
             </span>
@@ -371,10 +371,30 @@ Hello, Swarm!</textarea
         containerId: "swarm-id-button",
       });
 
+      // Initialize deferred checkbox based on Bee node mode
+      async function initializeDeferredDefault() {
+        try {
+          const nodeInfo = await client.getNodeInfo()
+          const deferredCheckbox = document.getElementById('deferred-checkbox')
+
+          // Dev mode requires deferred=true, production can use direct uploads
+          const isDevMode = nodeInfo.beeMode === 'dev'
+          deferredCheckbox.checked = isDevMode
+
+          log(`Bee mode: ${nodeInfo.beeMode}, deferred default: ${isDevMode}`, "info")
+        } catch (error) {
+          log(`Could not determine beeMode, keeping default: ${error.message}`, "warn")
+          // Keep current default (checked)
+        }
+      }
+
       try {
         log("Starting client initialization...", "info");
         await client.initialize();
         log("Client initialized successfully", "info");
+
+        // Set deferred checkbox default based on Bee node mode
+        await initializeDeferredDefault();
 
         // Check initial auth status
         log("Checking auth status...", "info");

@@ -14,6 +14,7 @@ import type {
   DownloadChunkMessage,
   GetConnectionInfoMessage,
   IsConnectedMessage,
+  GetNodeInfoMessage,
   GsocMineMessage,
   GsocSendMessage,
   ActUploadDataMessage,
@@ -553,6 +554,10 @@ export class SwarmIdProxy {
 
       case "isConnected":
         await this.handleIsConnected(message, event)
+        break
+
+      case "getNodeInfo":
+        await this.handleGetNodeInfo(message, event)
         break
 
       case "gsocMine":
@@ -1106,6 +1111,38 @@ export class SwarmIdProxy {
     }
 
     console.log("[Proxy] Bee node connected:", connected)
+  }
+
+  private async handleGetNodeInfo(
+    message: GetNodeInfoMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    console.log("[Proxy] Getting node info...")
+
+    try {
+      const nodeInfo = await this.bee.getNodeInfo()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "getNodeInfoResponse",
+            requestId: message.requestId,
+            beeMode: nodeInfo.beeMode,
+            chequebookEnabled: nodeInfo.chequebookEnabled,
+            swapEnabled: nodeInfo.swapEnabled,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] Node info:", nodeInfo.beeMode)
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        error instanceof Error ? error.message : "Failed to get node info",
+      )
+    }
   }
 
   private handleDisconnect(
