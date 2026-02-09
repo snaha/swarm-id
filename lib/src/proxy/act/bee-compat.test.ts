@@ -61,6 +61,16 @@ const BEE_ECDH_TEST = {
 const BEE_TEST_REFERENCE =
   "39a5ea87b141fe44aa609c3327ecd896c0e2122897f5f4bbacf74db1033c5559"
 
+// Values from actual Bee debug logs for CTR verification
+const BEE_CTR_DEBUG = {
+  ENCRYPTED_REF:
+    "daae5cf4b3978362e7975548de9139ee6cfd5b4422179b23a55eded1b975ea52",
+  ACCESS_KEY:
+    "f264f1e4a6c0104a295bc650b80dc38635eb56ba047b6c9b41bd7241cf4bbf99",
+  DECRYPTED_REF:
+    "ffe4a41dcc711ab78148a37c92599c116a75e2ee02a16cd651eee9a077e7af5b",
+}
+
 // =============================================================================
 // Helper Functions
 // =============================================================================
@@ -915,6 +925,24 @@ describe("Bee Compatibility Tests", () => {
       expect(bytesToHex(decrypted0)).toBe(bytesToHex(accessKey))
       expect(bytesToHex(decrypted1)).toBe(bytesToHex(accessKey))
       expect(bytesToHex(decrypted2)).toBe(bytesToHex(accessKey))
+    })
+  })
+
+  describe("CTR Mode Verification with Bee Debug Logs", () => {
+    it("should decrypt to same value as Bee", () => {
+      const ourDecrypted = counterModeEncrypt(
+        hexToBytes(BEE_CTR_DEBUG.ENCRYPTED_REF),
+        hexToBytes(BEE_CTR_DEBUG.ACCESS_KEY),
+      )
+      expect(bytesToHex(ourDecrypted)).toBe(BEE_CTR_DEBUG.DECRYPTED_REF)
+    })
+
+    it("should encrypt original to same value Bee received", () => {
+      const ourEncrypted = counterModeEncrypt(
+        hexToBytes(BEE_CTR_DEBUG.DECRYPTED_REF),
+        hexToBytes(BEE_CTR_DEBUG.ACCESS_KEY),
+      )
+      expect(bytesToHex(ourEncrypted)).toBe(BEE_CTR_DEBUG.ENCRYPTED_REF)
     })
   })
 })
