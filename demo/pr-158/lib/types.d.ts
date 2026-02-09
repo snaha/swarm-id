@@ -282,6 +282,10 @@ export declare const IsConnectedMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"isConnected">;
     requestId: z.ZodString;
 }, z.core.$strip>;
+export declare const GetNodeInfoMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfo">;
+    requestId: z.ZodString;
+}, z.core.$strip>;
 export declare const GsocMineMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"gsocMine">;
     requestId: z.ZodString;
@@ -523,6 +527,9 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     type: z.ZodLiteral<"isConnected">;
     requestId: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfo">;
+    requestId: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"gsocMine">;
     requestId: z.ZodString;
     targetOverlay: z.ZodString;
@@ -619,6 +626,7 @@ export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>;
 export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>;
 export type GetConnectionInfoMessage = z.infer<typeof GetConnectionInfoMessageSchema>;
 export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>;
+export type GetNodeInfoMessage = z.infer<typeof GetNodeInfoMessageSchema>;
 export type GsocMineMessage = z.infer<typeof GsocMineMessageSchema>;
 export type GsocSendMessage = z.infer<typeof GsocSendMessageSchema>;
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>;
@@ -714,6 +722,13 @@ export declare const IsConnectedResponseMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"isConnectedResponse">;
     requestId: z.ZodString;
     connected: z.ZodBoolean;
+}, z.core.$strip>;
+export declare const GetNodeInfoResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfoResponse">;
+    requestId: z.ZodString;
+    beeMode: z.ZodString;
+    chequebookEnabled: z.ZodBoolean;
+    swapEnabled: z.ZodBoolean;
 }, z.core.$strip>;
 export declare const GsocMineResponseMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"gsocMineResponse">;
@@ -834,6 +849,12 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     requestId: z.ZodString;
     connected: z.ZodBoolean;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfoResponse">;
+    requestId: z.ZodString;
+    beeMode: z.ZodString;
+    chequebookEnabled: z.ZodBoolean;
+    swapEnabled: z.ZodBoolean;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"gsocMineResponse">;
     requestId: z.ZodString;
     signer: z.ZodString;
@@ -889,6 +910,7 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 export type ConnectionInfoResponseMessage = z.infer<typeof ConnectionInfoResponseMessageSchema>;
 export type ConnectResponseMessage = z.infer<typeof ConnectResponseMessageSchema>;
 export type IsConnectedResponseMessage = z.infer<typeof IsConnectedResponseMessageSchema>;
+export type GetNodeInfoResponseMessage = z.infer<typeof GetNodeInfoResponseMessageSchema>;
 export type GsocMineResponseMessage = z.infer<typeof GsocMineResponseMessageSchema>;
 export type GsocSendResponseMessage = z.infer<typeof GsocSendResponseMessageSchema>;
 export type ActUploadDataResponseMessage = z.infer<typeof ActUploadDataResponseMessageSchema>;

@@ -253,6 +253,38 @@ export declare class SwarmIdClient {
      */
     isBeeConnected(): Promise<boolean>;
     /**
+     * Gets information about the Bee node configuration.
+     *
+     * This method retrieves the current Bee node's operating mode and feature flags.
+     * Use this to determine if deferred uploads are required (dev mode) or if direct
+     * uploads are available (production modes).
+     *
+     * @returns A promise resolving to the node info object
+     * @returns return.beeMode - The Bee node operating mode ("dev", "light", "full", "ultra-light")
+     * @returns return.chequebookEnabled - Whether the chequebook is enabled
+     * @returns return.swapEnabled - Whether SWAP is enabled
+     * @throws {Error} If the client is not initialized
+     * @throws {Error} If the Bee node is not reachable
+     * @throws {Error} If the request times out
+     *
+     * @example
+     * ```typescript
+     * const nodeInfo = await client.getNodeInfo()
+     * if (nodeInfo.beeMode === 'dev') {
+     *   // Dev mode requires deferred uploads
+     *   await client.uploadData(data, { deferred: true })
+     * } else {
+     *   // Production modes can use direct uploads
+     *   await client.uploadData(data, { deferred: false })
+     * }
+     * ```
+     */
+    getNodeInfo(): Promise<{
+        beeMode: string;
+        chequebookEnabled: boolean;
+        swapEnabled: boolean;
+    }>;
+    /**
      * Uploads raw binary data to the Swarm network.
      *
      * The data is uploaded using the authenticated user's postage stamp.

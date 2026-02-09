@@ -219,6 +219,17 @@ Hello, Swarm!</textarea
             When enabled, data is encrypted with unique keys. Reference will be 128 chars (64 bytes).
           </p>
         </div>
+        <div style="margin-bottom: 15px">
+          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+            <input type="checkbox" id="deferred-checkbox" style="width: auto; cursor: pointer" />
+            <span style="font-size: 14px; color: #333">
+              Deferred upload mode
+            </span>
+          </label>
+          <p style="font-size: 12px; color: #666; margin-top: 5px; margin-left: 24px">
+            Required for dev mode. Uncheck for direct uploads in production.
+          </p>
+        </div>
         <button id="upload-button" disabled>Upload Data</button>
         <div id="upload-result"></div>
       </div>
@@ -366,10 +377,30 @@ Hello, Swarm!</textarea
         containerId: "swarm-id-button",
       });
 
+      // Initialize deferred checkbox based on Bee node mode
+      async function initializeDeferredDefault() {
+        try {
+          const nodeInfo = await client.getNodeInfo()
+          const deferredCheckbox = document.getElementById('deferred-checkbox')
+
+          // Dev mode requires deferred=true, production can use direct uploads
+          const isDevMode = nodeInfo.beeMode === 'dev'
+          deferredCheckbox.checked = isDevMode
+
+          log(`Bee mode: ${nodeInfo.beeMode}, deferred default: ${isDevMode}`, "info")
+        } catch (error) {
+          log(`Could not determine beeMode, keeping default: ${error.message}`, "warn")
+          // Keep current default (checked)
+        }
+      }
+
       try {
         log("Starting client initialization...", "info");
         await client.initialize();
         log("Client initialized successfully", "info");
+
+        // Set deferred checkbox default based on Bee node mode
+        await initializeDeferredDefault();
 
         // Check initial auth status
         log("Checking auth status...", "info");
@@ -447,9 +478,11 @@ Hello, Swarm!</textarea
             const uint8Data = encoder.encode(data);
 
             // Proxy will use stored batch ID from authentication
+            const deferred = document.getElementById("deferred-checkbox").checked
             const result = await client.uploadData(uint8Data, {
               pin: true,
               encrypt: encrypt,
+              deferred: deferred,
             });
             log(`Upload successful! Reference: ${result.reference} (${result.reference.length} chars)`, "info");
             resultEl.innerHTML = `<div class="result"><strong>Reference ${encrypt ? "(Encrypted)" : ""}:</strong><br/>${result.reference}<br/><small style="color: #666;">${result.reference.length} hex chars (${result.reference.length / 2} bytes)</small></div>`;
@@ -534,7 +567,10 @@ Hello, Swarm!</textarea
             const encoder = new TextEncoder();
             const uint8Data = encoder.encode(data);
 
-            const result = await client.actUploadData(uint8Data, grantees);
+            const deferred = document.getElementById("deferred-checkbox").checked
+            const result = await client.actUploadData(uint8Data, grantees, {
+              deferred: deferred,
+            });
 
             log(`ACT Upload successful!`, "info");
             log(`Encrypted Reference: ${result.encryptedReference}`, "info");

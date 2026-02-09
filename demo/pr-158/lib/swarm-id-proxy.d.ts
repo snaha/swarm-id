@@ -157,6 +157,7 @@ export declare class SwarmIdProxy {
     private handleCheckAuth;
     private handleGetConnectionInfo;
     private handleIsConnected;
+    private handleGetNodeInfo;
     private handleDisconnect;
     private handleRequestAuth;
     /**
