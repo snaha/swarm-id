@@ -1,8 +1,8 @@
 <script lang="ts">
 	import Button from '$lib/components/ui/button.svelte'
+	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import type { Snippet } from 'svelte'
-	import Vertical from './ui/vertical.svelte'
 
 	interface Props {
 		icon: Snippet
@@ -31,21 +31,25 @@
 		}
 	}}
 >
-	<div class="icon">
-		{@render icon()}
+	<div class="card-header">
+		<div class="icon">
+			{@render icon()}
+		</div>
+		<Vertical --vertical-gap="var(--quarter-padding)" class="card-text">
+			<Typography variant="h5">{title}</Typography>
+			<Typography variant="small">
+				{description}
+			</Typography>
+		</Vertical>
 	</div>
-	<Vertical --vertical-gap="var(--quarter-padding)" --vertical-align-items="center">
-		<Typography variant="h5">{title}</Typography>
-		<Typography variant="small" center>
-			{description}
-		</Typography>
-	</Vertical>
-	<Button variant="strong" dimension="compact" hover={isHovered}>
-		{#if buttonIcon}
-			{@render buttonIcon()}
-		{/if}
-		{buttonText}
-	</Button>
+	<div class="card-action">
+		<Button variant="strong" dimension="compact" hover={isHovered}>
+			{#if buttonIcon}
+				{@render buttonIcon()}
+			{/if}
+			{buttonText}
+		</Button>
+	</div>
 </div>
 
 <style>
@@ -55,7 +59,6 @@
 		flex-direction: column;
 		align-items: center;
 		padding: var(--padding);
-		background: var(--colors-card-bg);
 		gap: var(--padding);
 		cursor: pointer;
 	}
@@ -65,11 +68,51 @@
 		background: var(--colors-base);
 	}
 
+	.card-header {
+		display: flex;
+		flex-direction: column;
+		align-items: center;
+		gap: var(--padding);
+	}
+
+	:global(.card-text) {
+		align-items: center;
+		text-align: center;
+	}
+
 	.icon {
 		display: flex;
 		justify-content: center;
 		align-items: center;
-		width: 64px;
-		height: 64px;
+	}
+
+	.card-action {
+		display: flex;
+	}
+
+	@media screen and (max-width: 640px) {
+		.card {
+			align-items: stretch;
+		}
+
+		.card-header {
+			flex-direction: row;
+			align-items: center;
+			width: 100%;
+		}
+
+		:global(.card-text) {
+			align-items: flex-start;
+			text-align: left;
+			flex: 1;
+		}
+
+		.card-action {
+			width: 100%;
+		}
+
+		.card-action :global(.root) {
+			flex-grow: 1;
+		}
 	}
 </style>

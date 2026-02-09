@@ -1,5 +1,7 @@
 import { browser } from '$app/environment'
 
+export const MOBILE_BREAKPOINT = 640
+
 export interface LayoutStore {
 	mobile: boolean
 }
@@ -14,7 +16,7 @@ function withLayoutStore(): LayoutStore {
 	}
 
 	function checkMobile() {
-		return browser && window.innerWidth < 1024
+		return browser && window.innerWidth <= MOBILE_BREAKPOINT
 	}
 
 	return {

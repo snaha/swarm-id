@@ -316,14 +316,17 @@
 		<!-- eslint-enable svelte/no-navigation-without-resolve -->
 	</Vertical>
 {:else if sessionStore.data.appOrigin && sessionStore.data.appData}
-	<ConnectedAppHeader
-		appName={sessionStore.data.appData.appName}
-		appUrl={sessionStore.data.appOrigin}
-		appIcon={sessionStore.data.appData.appIcon}
-		appDescription={sessionStore.data.appData.appDescription}
-	/>
+	{#snippet connectedAppHeader()}
+		<ConnectedAppHeader
+			appName={sessionStore.data.appData?.appName ?? ''}
+			appUrl={sessionStore.data.appOrigin ?? ''}
+			appIcon={sessionStore.data.appData?.appIcon}
+			appDescription={sessionStore.data.appData?.appDescription}
+		/>
+	{/snippet}
 
 	{#if hasAccounts}
+		{@render connectedAppHeader()}
 		<!-- Show identity list -->
 		<Vertical --vertical-gap="var(--double-padding)">
 			<AccountSelector bind:selectedAccount={selectedAccountId} />
@@ -338,6 +341,6 @@
 		</Vertical>
 	{:else}
 		<!-- No accounts, show create form -->
-		<CreateNewAccount />
+		<CreateNewAccount header={connectedAppHeader} />
 	{/if}
 {/if}

@@ -2,13 +2,22 @@
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import AuthCard from '$lib/components/auth-card.svelte'
-	import ImportSwarmIdentity from '$lib/components/import-swarm-identity.svelte'
-	import Wallet from 'carbon-icons-svelte/lib/Wallet.svelte'
+	import SignInCard from '$lib/components/sign-in-card.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
+	import Typography from '$lib/components/ui/typography.svelte'
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
+	import { layoutStore } from '$lib/stores/layout.svelte'
+	import { notImplemented } from '$lib/utils/not-implemented'
+	import type { Snippet } from 'svelte'
+
+	interface Props {
+		header?: Snippet
+	}
+
+	let { header }: Props = $props()
 
 	function handlePasskeyClick() {
 		goto(resolve(routes.PASSKEY_NEW))
@@ -18,51 +27,136 @@
 		goto(resolve(routes.ETH_NEW))
 	}
 
-	function handleImportClick() {
-		console.log('Import from file')
+	function handleSignInClick(e: Event) {
+		notImplemented(e)
 	}
 </script>
 
-<Vertical --vertical-gap="var(--padding)" class="content-box">
-	<Horizontal --horizontal-gap="0">
-		<div class="card-wrapper card-left">
-			<AuthCard
-				title="Sign up with Ethereum"
-				description="Create a Swarm ID account using your Ethereum wallet"
-				buttonText="Create Ethereum account"
-				onclick={handleEthClick}
-			>
-				{#snippet icon()}
-					<EthereumLogo fill="var(--colors-ultra-high)" width={64} height={64} />
-				{/snippet}
-			</AuthCard>
+<Vertical --vertical-gap="0" class="wrapper">
+	<Vertical --vertical-gap="0" --vertical-justify-content="center" class="center-area">
+		{#if header}
+			{@render header()}
+		{/if}
+		<div class="container">
+			{#if layoutStore.mobile}
+				<AuthCard
+					title="Use Ethereum wallet"
+					description="Create a Swarm ID account using your Ethereum wallet"
+					buttonText="Sign up with Ethereum"
+					onclick={handleEthClick}
+				>
+					{#snippet icon()}
+						<EthereumLogo fill="var(--colors-ultra-high)" width={48} height={48} />
+					{/snippet}
+				</AuthCard>
+				<AuthCard
+					title="Use Passkey"
+					description="Create a Swarm ID account on this device using a passkey"
+					buttonText="Sign up with Passkey"
+					onclick={handlePasskeyClick}
+				>
+					{#snippet icon()}
+						<PasskeyLogo fill="var(--colors-ultra-high)" width={48} height={48} />
+					{/snippet}
+				</AuthCard>
+				<SignInCard
+					text="Already have a Swarm ID account?"
+					buttonText="Sign in"
+					onclick={handleSignInClick}
+				/>
+			{:else}
+				<Horizontal --horizontal-gap="0">
+					<div class="card-wrapper">
+						<AuthCard
+							title="Sign up with Ethereum"
+							description="Create a Swarm ID account using your Ethereum wallet"
+							buttonText="Create Ethereum account"
+							onclick={handleEthClick}
+						>
+							{#snippet icon()}
+								<EthereumLogo fill="var(--colors-ultra-high)" width={64} height={64} />
+							{/snippet}
+						</AuthCard>
+					</div>
+					<div class="card-wrapper">
+						<AuthCard
+							title="Sign up with Passkey"
+							description="Create a Swarm ID account on this device using a Passkey"
+							buttonText="Create Passkey account"
+							onclick={handlePasskeyClick}
+						>
+							{#snippet icon()}
+								<PasskeyLogo fill="var(--colors-ultra-high)" width={64} height={64} />
+							{/snippet}
+						</AuthCard>
+					</div>
+				</Horizontal>
+				<SignInCard
+					text="Already have a Swarm ID account?"
+					buttonText="Sign in"
+					onclick={handleSignInClick}
+				/>
+			{/if}
 		</div>
-		<div class="card-wrapper card-right">
-			<AuthCard
-				title="Sign up with Passkey"
-				description="Create a Swarm ID account on this device using a Passkey"
-				buttonText="Create Passkey account"
-				onclick={handlePasskeyClick}
-			>
-				{#snippet icon()}
-					<PasskeyLogo fill="var(--colors-ultra-high)" width={64} height={64} />
-				{/snippet}
-				{#snippet buttonIcon()}
-					<PasskeyLogo fill="currentColor" width={20} height={20} />
-				{/snippet}
-			</AuthCard>
-		</div>
-	</Horizontal>
-	<ImportSwarmIdentity onclick={handleImportClick} />
+	</Vertical>
+	<div class="footer-text">
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- full URL, not a route -->
+		<Typography variant="small"
+			>Visit <a href={window.location.origin}>{window.location.host}</a> for info about Swarm ID</Typography
+		>
+		<!-- eslint-enable svelte/no-navigation-without-resolve -->
+	</div>
 </Vertical>
 
 <style>
-	.card-wrapper {
-		flex: 1;
+	.container {
 		border: 1px solid var(--colors-low);
 	}
 
-	.card-right {
-		border-left: none;
+	.card-wrapper {
+		flex: 1;
+	}
+
+	.card-wrapper + .card-wrapper {
+		border-left: 1px solid var(--colors-low);
+	}
+
+	.footer-text {
+		padding-top: var(--padding);
+	}
+
+	.footer-text :global(a) {
+		color: var(--colors-high);
+	}
+
+	@media screen and (max-width: 640px) {
+		:global(.wrapper) {
+			flex: 1;
+		}
+
+		:global(.center-area) {
+			flex: 1;
+		}
+
+		.container {
+			border: none;
+			display: flex;
+			flex-direction: column;
+			margin-left: calc(-1 * var(--padding));
+			margin-right: calc(-1 * var(--padding));
+		}
+
+		.container > :global(*) {
+			border-top: 1px solid var(--colors-low);
+		}
+
+		.container > :global(*:last-child) {
+			border-bottom: 1px solid var(--colors-low);
+		}
+
+		.footer-text {
+			text-align: center;
+			padding: var(--padding);
+		}
 	}
 </style>

@@ -26,4 +26,10 @@
 		justify-content: center;
 		width: 100%;
 	}
+
+	@media screen and (max-width: 640px) {
+		.content-area {
+			flex: 1;
+		}
+	}
 </style>

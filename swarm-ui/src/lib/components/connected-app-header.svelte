@@ -1,7 +1,10 @@
 <script lang="ts">
 	import { onMount } from 'svelte'
 	import AppLogo from '$lib/components/app-logo.svelte'
+	import Horizontal from '$lib/components/ui/horizontal.svelte'
+	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
+	import { layoutStore } from '$lib/stores/layout.svelte'
 
 	interface Props {
 		appName: string
@@ -68,34 +71,37 @@
 	}
 </script>
 
-<div class="header">
+{#snippet appIconSnippet()}
 	{#if appIcon}
-		<!-- Use provided app icon -->
 		<img src={appIcon} alt="icon" class="favicon" />
 	{:else if !isLoading && faviconUrl}
-		<!-- Fallback to detected favicon -->
 		<img src={faviconUrl} alt="{appName} favicon" class="favicon" />
 	{:else}
-		<!-- Fallback to default logo -->
-		<AppLogo width={40} height={40} />
+		<AppLogo width={56} height={56} />
 	{/if}
-	<div class="header-text">
-		<Typography variant="h4">Connect to {appName}</Typography>
-		<Typography>{appUrl}</Typography>
-	</div>
-</div>
+{/snippet}
+
+{#if layoutStore.mobile}
+	<Vertical --vertical-align-items="center" --vertical-gap="var(--half-padding)" class="header">
+		{@render appIconSnippet()}
+		<Vertical --vertical-gap="0" --vertical-align-items="center">
+			<Typography variant="h4">Connect to {appName}</Typography>
+			<Typography>{appUrl}</Typography>
+		</Vertical>
+	</Vertical>
+{:else}
+	<Horizontal --horizontal-align-items="center" --horizontal-gap="16px" class="header">
+		{@render appIconSnippet()}
+		<Vertical --vertical-gap="0">
+			<Typography variant="h4">Connect to {appName}</Typography>
+			<Typography>{appUrl}</Typography>
+		</Vertical>
+	</Horizontal>
+{/if}
 
 <style>
-	.header {
-		display: flex;
-		align-items: center;
-		gap: 16px;
+	:global(.header) {
 		margin-bottom: var(--double-padding);
-	}
-
-	.header-text {
-		display: flex;
-		flex-direction: column;
 	}
 
 	.favicon {

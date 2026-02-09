@@ -43,7 +43,8 @@
 		<Vertical
 			--vertical-justify-content="flex-start"
 			--vertical-gap="var(--double-padding)"
-			style="flex: 1; padding: var(--double-padding);"
+			class="main-layout"
+			style="flex: 1;"
 		>
 			<Horizontal
 				--horizontal-justify-content="space-between"
@@ -93,5 +94,15 @@
 	}
 	:global(.clickable) {
 		cursor: pointer;
+	}
+
+	:global(.main-layout) {
+		padding: var(--double-padding);
+	}
+
+	@media screen and (max-width: 640px) {
+		:global(.main-layout) {
+			padding: var(--padding);
+		}
 	}
 </style>
