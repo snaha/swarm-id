@@ -2101,12 +2101,46 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      console.log("[Proxy] ACT decrypted, content reference:", contentReference)
+      console.log("[Proxy] ACT decrypted, manifest reference:", contentReference)
 
-      // Download the decrypted content
-      const data = await downloadDataWithChunkAPI(
+      // Step 1: Download and unmarshal the Mantaray manifest
+      const manifest = await MantarayNode.unmarshal(
         this.bee,
         contentReference,
+        undefined,
+        requestOptions,
+      )
+
+      // Step 2: Load the manifest tree to access all paths
+      await manifest.loadRecursively(this.bee, undefined, requestOptions)
+
+      // Step 3: Get the index document path from manifest metadata
+      const { indexDocument } = manifest.getDocsMetadata()
+      if (!indexDocument) {
+        throw new Error(
+          "Manifest does not contain an index document reference",
+        )
+      }
+
+      // Step 4: Find the node at the index document path
+      const contentNode = manifest.find(indexDocument)
+      if (!contentNode) {
+        throw new Error(`Content node "${indexDocument}" not found in manifest`)
+      }
+
+      if (!contentNode.targetAddress) {
+        throw new Error(
+          `Content node "${indexDocument}" does not have a target address`,
+        )
+      }
+
+      const actualContentRef = uint8ArrayToHex(contentNode.targetAddress)
+      console.log("[Proxy] Resolved actual content reference:", actualContentRef)
+
+      // Step 5: Download the actual content
+      const data = await downloadDataWithChunkAPI(
+        this.bee,
+        actualContentRef,
         undefined,
         undefined,
         requestOptions,
