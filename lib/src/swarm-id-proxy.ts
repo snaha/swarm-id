@@ -185,6 +185,7 @@ export class SwarmIdProxy {
       if (stamp) {
         this.postageBatchId = stamp.batchID.toHex()
         this.signerKey = stamp.signerKey.toHex()
+        this.stamperDepth = stamp.depth
         await this.initializeStamper()
       } else {
         console.log("[Proxy] No postage stamp found for connected identity")
@@ -723,6 +724,7 @@ export class SwarmIdProxy {
         if (stamp) {
           this.postageBatchId = stamp.batchID.toHex()
           this.signerKey = stamp.signerKey.toHex()
+          this.stamperDepth = stamp.depth
           await this.initializeStamper()
         } else {
           console.log("[Proxy] No postage stamp found for connected identity")
@@ -1374,6 +1376,7 @@ export class SwarmIdProxy {
       if (stamp) {
         this.postageBatchId = stamp.batchID.toHex()
         this.signerKey = stamp.signerKey.toHex()
+        this.stamperDepth = stamp.depth
       }
     }
 
