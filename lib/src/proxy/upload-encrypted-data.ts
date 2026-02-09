@@ -95,10 +95,16 @@ export async function uploadEncryptedDataWithSigning(
   }
 
   // Create a tag for tracking upload progress (required for fast deferred uploads)
+  // IMPORTANT: Tag is REQUIRED in dev mode - Bee's /chunks endpoint uses tag presence
+  // to determine deferred mode (deferred = tag != 0), and dev mode blocks non-deferred uploads
   let tag: number | undefined = options?.tag
   if (!tag) {
+    console.log(`[UploadEncryptedData] Creating tag (required for dev mode)...`)
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
+    console.log(`[UploadEncryptedData] Tag created successfully: ${tag}`)
+  } else {
+    console.log(`[UploadEncryptedData] Using existing tag from options: ${tag}`)
   }
 
   // Step 1: Split data into chunks
@@ -283,7 +289,7 @@ async function uploadSingleChunkWithEnvelope(
   const startTime = performance.now()
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { ...options, deferred: false, pin: false }
+  const uploadOptions = { deferred: false, pin: false, ...options }
   console.log(
     `[uploadSingleChunkWithEnvelope] Options prepared:`,
     uploadOptions,
@@ -414,6 +420,8 @@ async function uploadChunkWithFetch(
   console.log(
     `[uploadChunkWithFetch] Uploading ${chunkData.length} bytes to ${bee.url}/chunks`,
   )
+  console.log(`[uploadChunkWithFetch] Tag in options: ${options?.tag}`)
+  console.log(`[uploadChunkWithFetch] Headers being sent:`, headers)
 
   // Make direct fetch call to /chunks endpoint
   const response = await fetch(`${bee.url}/chunks`, {
@@ -537,10 +545,16 @@ export async function uploadEncryptedSOC(
   )
 
   // Step 3: Create tag for tracking (if not provided in options)
+  // IMPORTANT: Tag is REQUIRED in dev mode - Bee's /chunks endpoint uses tag presence
+  // to determine deferred mode (deferred = tag != 0), and dev mode blocks non-deferred uploads
   let tag: number | undefined = options?.tag
   if (!tag) {
+    console.log(`[UploadEncryptedSOC] Creating tag (required for dev mode)...`)
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
+    console.log(`[UploadEncryptedSOC] Tag created successfully: ${tag}`)
+  } else {
+    console.log(`[UploadEncryptedSOC] Using existing tag from options: ${tag}`)
   }
 
   // Step 4: Create envelope with stamper
@@ -556,7 +570,7 @@ export async function uploadEncryptedSOC(
   )
 
   // Step 5: Upload using direct fetch (bypasses bee.uploadChunk size check)
-  const uploadOptionsWithTag = { ...options, tag, deferred: false, pin: false }
+  const uploadOptionsWithTag = { tag, deferred: false, pin: false, ...options }
   await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
 
   console.log(

@@ -1728,8 +1728,15 @@ export class SwarmIdProxy {
       // Sign the chunk to create envelope
       const envelope = this.stamper.stamp(chunkAdapter)
 
+      // Create a tag if not provided (required for dev mode)
+      let tag = options?.tag
+      if (!tag) {
+        const tagResponse = await this.bee.createTag()
+        tag = tagResponse.uid
+      }
+
       // Use non-deferred mode for faster uploads (returns immediately)
-      const uploadOptions = { ...options, deferred: false, pin: false }
+      const uploadOptions = { ...options, tag, deferred: false, pin: false }
 
       // Upload with envelope signature
       const uploadResult = await this.bee.uploadChunk(
@@ -1965,22 +1972,24 @@ export class SwarmIdProxy {
       // Use appSecret as publisher private key (user's identity key for this app)
       const publisherPrivateKey = hexToUint8Array(this.appSecret)
 
-      // Step 1: Upload raw content data
-      const contentUpload = await uploadDataWithSigning(
+      // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
+      const contentUpload = await uploadEncryptedDataWithSigning(
         context,
         data,
+        undefined, // generate random encryption key
         options,
         onProgress,
         requestOptions,
       )
       console.log(
-        `[ACT DEBUG] Raw content reference: ${contentUpload.reference}`,
+        `[ACT DEBUG] Encrypted content reference (${contentUpload.reference.length} hex chars): ${contentUpload.reference}`,
       )
 
       // Step 2: Create Mantaray manifest wrapping the content
+      // Content reference is now 64 bytes (encrypted reference: address + encryption key)
       // This is needed because Bee's /bzz/ endpoint expects a default (Mantaray) manifest
       const manifest = new MantarayNode()
-      const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
+      const contentReferenceBytes = hexToUint8Array(contentUpload.reference) // 64 bytes
       manifest.addFork(DEFAULT_ACT_FILENAME, contentReferenceBytes, {
         "Content-Type": DEFAULT_ACT_CONTENT_TYPE,
         Filename: DEFAULT_ACT_FILENAME,
@@ -1989,31 +1998,55 @@ export class SwarmIdProxy {
         "website-index-document": DEFAULT_ACT_FILENAME,
       })
 
-      // Step 3: Upload the Mantaray manifest
+      // Create a tag for the manifest uploads (required for dev mode)
+      let manifestTag = options?.tag
+      if (!manifestTag) {
+        const tagResponse = await context.bee.createTag()
+        manifestTag = tagResponse.uid
+      }
+
+      // Step 3: Upload the Mantaray manifest - UNENCRYPTED (32-byte reference)
+      // This makes the manifest compatible with Bee's /bzz/ endpoint
+      // Content inside the manifest is still encrypted (64-byte ref)
       const manifestResult = await saveMantarayTreeRecursively(
         manifest,
         async (data, isRoot) => {
-          const result = await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            isRoot ? onProgress : undefined,
+          // Create content-addressed chunk from manifest data
+          const chunk = makeContentAddressedChunk(data)
+
+          // Stamp and upload the manifest chunk
+          // Note: chunk.data includes span prefix, which is required for valid stamps
+          const envelope = context.stamper.stamp({
+            hash: () => chunk.address.toUint8Array(),
+            build: () => chunk.data,
+            span: 0n,
+            writer: undefined as any,
+          })
+          await context.bee.uploadChunk(
+            envelope,
+            chunk.data,
+            { ...options, tag: manifestTag, deferred: false },
             requestOptions,
           )
-          return result
+
+          // Return the actual chunk address (32-byte hex)
+          return {
+            reference: chunk.address.toHex(),
+            tagUid: isRoot ? manifestTag : undefined,
+          }
         },
       )
 
       console.log(
-        `[ACT DEBUG] Manifest reference: ${manifestResult.rootReference}`,
+        `[ACT DEBUG] Unencrypted manifest reference (${manifestResult.rootReference.length} hex chars): ${manifestResult.rootReference}`,
       )
 
-      // Step 4: Use manifest reference for ACT encryption (not raw content ref)
+      // Step 4: Use manifest reference for ACT encryption (32 bytes - unencrypted manifest)
       const manifestReferenceBytes = hexToUint8Array(
         manifestResult.rootReference,
-      )
+      ) // 32 bytes
       console.log(
-        `[ACT DEBUG] Manifest reference bytes (hex): ${uint8ArrayToHex(manifestReferenceBytes)}`,
+        `[ACT DEBUG] Manifest reference bytes (${manifestReferenceBytes.length} bytes): ${uint8ArrayToHex(manifestReferenceBytes)}`,
       )
 
       // Create ACT for the manifest (which points to the content)

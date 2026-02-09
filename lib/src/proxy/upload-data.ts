@@ -178,7 +178,7 @@ async function uploadSingleChunk(
 ): Promise<UploadResult> {
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { ...options, deferred: false, pin: false }
+  const uploadOptions = { deferred: false, pin: false, ...options }
   console.log("[UploadData] uploadChunk options:", uploadOptions)
 
   if (stamper) {
