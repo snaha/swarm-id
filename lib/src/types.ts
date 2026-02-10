@@ -44,15 +44,19 @@ export type PrivateKey = z.infer<typeof PrivateKeySchema>
 // Upload/Download Options
 // ============================================================================
 
-export const UploadOptionsSchema = z
-  .object({
-    pin: z.boolean().optional(),
-    encrypt: z.boolean().optional(),
-    tag: z.number().optional(),
-    deferred: z.boolean().optional(),
-    redundancyLevel: z.number().min(0).max(4).optional(),
-  })
-  .optional()
+const UploadOptionsObjectSchema = z.object({
+  pin: z.boolean().optional(),
+  encrypt: z.boolean().optional(),
+  tag: z.number().optional(),
+  deferred: z.boolean().optional(),
+  redundancyLevel: z.number().min(0).max(4).optional(),
+})
+
+export const UploadOptionsSchema = UploadOptionsObjectSchema.optional()
+
+export const ActUploadOptionsSchema = UploadOptionsObjectSchema.extend({
+  beeCompatible: z.boolean().optional(),
+}).optional()
 
 export const RequestOptionsSchema = z
   .object({
@@ -91,6 +95,9 @@ export interface UploadOptions {
 
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>
+export interface ActUploadOptions extends UploadOptions {
+  beeCompatible?: boolean
+}
 
 // ============================================================================
 // Upload/Download Results
@@ -344,7 +351,7 @@ export const ActUploadDataMessageSchema = z.object({
   requestId: z.string(),
   data: z.instanceof(Uint8Array),
   grantees: z.array(z.string()), // Compressed public keys (33 bytes = 66 hex chars)
-  options: UploadOptionsSchema,
+  options: ActUploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
 })

@@ -29,6 +29,10 @@ const ENCODER = new TextEncoder()
 // Bee uses "encryptedglref" as the metadata key for encrypted grantee list reference
 const ENCRYPTED_GRANTEE_LIST_METADATA_KEY = "encryptedglref"
 
+// Ensure monotonic seconds so multiple ACT updates within the same second
+// don't collide on the same history key (mantaray requires unique paths).
+let lastTimestamp = 0
+
 /**
  * Single history entry metadata
  */
@@ -399,5 +403,11 @@ export async function loadHistoryEntries(
  * Get current Unix timestamp in seconds
  */
 export function getCurrentTimestamp(): number {
-  return Math.floor(Date.now() / 1000)
+  const now = Math.floor(Date.now() / 1000)
+  if (now <= lastTimestamp) {
+    lastTimestamp += 1
+    return lastTimestamp
+  }
+  lastTimestamp = now
+  return now
 }

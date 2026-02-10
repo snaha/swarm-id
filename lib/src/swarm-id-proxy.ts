@@ -42,7 +42,11 @@ import { uploadDataWithSigning } from "./proxy/upload-data"
 import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
 import { downloadDataWithChunkAPI } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
-import { saveMantarayTreeRecursively } from "./proxy/mantaray"
+import {
+  loadMantarayTreeWithChunkAPI,
+  saveMantarayTreeRecursively,
+} from "./proxy/mantaray"
+import { saveMantarayTreeRecursivelyEncrypted } from "./proxy/mantaray-encrypted"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import {
@@ -2042,46 +2046,58 @@ export class SwarmIdProxy {
         manifestTag = tagResponse.uid
       }
 
-      // Step 3: Upload the Mantaray manifest - UNENCRYPTED (32-byte reference)
-      // This makes the manifest compatible with Bee's /bzz/ endpoint
-      // Content inside the manifest is still encrypted (64-byte ref)
-      const manifestResult = await saveMantarayTreeRecursively(
-        manifest,
-        async (data, isRoot) => {
-          // Create content-addressed chunk from manifest data
-          const chunk = makeContentAddressedChunk(data)
+      const beeCompatible = options?.beeCompatible === true
 
-          // Stamp and upload the manifest chunk
-          // Note: chunk.data includes span prefix, which is required for valid stamps
-          const envelope = context.stamper.stamp({
-            hash: () => chunk.address.toUint8Array(),
-            build: () => chunk.data,
-            span: 0n,
-            writer: undefined as any,
+      // Step 3: Upload the Mantaray manifest
+      const manifestResult = beeCompatible
+        ? await saveMantarayTreeRecursively(manifest, async (data, isRoot) => {
+            const chunk = makeContentAddressedChunk(data)
+            const envelope = context.stamper.stamp({
+              hash: () => chunk.address.toUint8Array(),
+              build: () => chunk.data,
+              span: 0n,
+              writer: undefined as any,
+            })
+            await context.bee.uploadChunk(
+              envelope,
+              chunk.data,
+              { ...options, tag: manifestTag, deferred: false },
+              requestOptions,
+            )
+            return {
+              reference: chunk.address.toHex(),
+              tagUid: isRoot ? manifestTag : undefined,
+            }
           })
-          await context.bee.uploadChunk(
-            envelope,
-            chunk.data,
-            { ...options, tag: manifestTag, deferred: false },
-            requestOptions,
+        : await saveMantarayTreeRecursivelyEncrypted(
+            manifest,
+            async (encryptedData, address, isRoot) => {
+              const envelope = context.stamper.stamp({
+                hash: () => address,
+                build: () => encryptedData,
+                span: 0n,
+                writer: undefined as any,
+              })
+              await context.bee.uploadChunk(
+                envelope,
+                encryptedData,
+                { ...options, tag: manifestTag, deferred: false },
+                requestOptions,
+              )
+              return {
+                tagUid: isRoot ? manifestTag : undefined,
+              }
+            },
           )
 
-          // Return the actual chunk address (32-byte hex)
-          return {
-            reference: chunk.address.toHex(),
-            tagUid: isRoot ? manifestTag : undefined,
-          }
-        },
-      )
-
       console.log(
-        `[ACT DEBUG] Unencrypted manifest reference (${manifestResult.rootReference.length} hex chars): ${manifestResult.rootReference}`,
+        `[ACT DEBUG] ${beeCompatible ? "Bee-compatible" : "Encrypted"} manifest reference (${manifestResult.rootReference.length} hex chars): ${manifestResult.rootReference}`,
       )
 
-      // Step 4: Use manifest reference for ACT encryption (32 bytes - unencrypted manifest)
+      // Step 4: Use manifest reference for ACT encryption
       const manifestReferenceBytes = hexToUint8Array(
         manifestResult.rootReference,
-      ) // 32 bytes
+      )
       console.log(
         `[ACT DEBUG] Manifest reference bytes (${manifestReferenceBytes.length} bytes): ${uint8ArrayToHex(manifestReferenceBytes)}`,
       )
@@ -2171,28 +2187,25 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      console.log("[Proxy] ACT decrypted, manifest reference:", contentReference)
+      console.log(
+        "[Proxy] ACT decrypted, manifest reference:",
+        contentReference,
+      )
 
-      // Step 1: Download and unmarshal the Mantaray manifest
-      const manifest = await MantarayNode.unmarshal(
+      // Step 1: Download and unmarshal the Mantaray manifest (chunk API only)
+      const manifest = await loadMantarayTreeWithChunkAPI(
         this.bee,
         contentReference,
-        undefined,
         requestOptions,
       )
 
-      // Step 2: Load the manifest tree to access all paths
-      await manifest.loadRecursively(this.bee, undefined, requestOptions)
-
-      // Step 3: Get the index document path from manifest metadata
+      // Step 2: Get the index document path from manifest metadata
       const { indexDocument } = manifest.getDocsMetadata()
       if (!indexDocument) {
-        throw new Error(
-          "Manifest does not contain an index document reference",
-        )
+        throw new Error("Manifest does not contain an index document reference")
       }
 
-      // Step 4: Find the node at the index document path
+      // Step 3: Find the node at the index document path
       const contentNode = manifest.find(indexDocument)
       if (!contentNode) {
         throw new Error(`Content node "${indexDocument}" not found in manifest`)
@@ -2205,9 +2218,12 @@ export class SwarmIdProxy {
       }
 
       const actualContentRef = uint8ArrayToHex(contentNode.targetAddress)
-      console.log("[Proxy] Resolved actual content reference:", actualContentRef)
+      console.log(
+        "[Proxy] Resolved actual content reference:",
+        actualContentRef,
+      )
 
-      // Step 5: Download the actual content
+      // Step 4: Download the actual content
       const data = await downloadDataWithChunkAPI(
         this.bee,
         actualContentRef,

@@ -1,5 +1,7 @@
-import type { MantarayNode } from "@ethersphere/bee-js"
-import { hexToUint8Array } from "../utils/hex"
+import { MantarayNode } from "@ethersphere/bee-js"
+import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
+import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
+import { downloadDataWithChunkAPI } from "./download-data"
 
 /**
  * Upload callback type for saveMantarayTreeRecursively
@@ -40,4 +42,63 @@ export async function saveMantarayTreeRecursively(
     rootReference: result.reference,
     tagUid: result.tagUid,
   }
+}
+
+/**
+ * Load a Mantaray tree using only the chunk API.
+ *
+ * This avoids /bytes and supports encrypted references.
+ */
+export async function loadMantarayTreeWithChunkAPI(
+  bee: Bee,
+  rootReference: string,
+  requestOptions?: BeeRequestOptions,
+): Promise<MantarayNode> {
+  const rootData = await downloadDataWithChunkAPI(
+    bee,
+    rootReference,
+    undefined,
+    undefined,
+    requestOptions,
+  )
+  const root = MantarayNode.unmarshalFromData(
+    rootData,
+    hexToUint8Array(rootReference),
+  )
+
+  async function loadRecursively(node: MantarayNode): Promise<void> {
+    for (const fork of node.forks.values()) {
+      if (!fork.node.selfAddress) {
+        throw new Error("Fork node selfAddress is not set")
+      }
+
+      const childRef = uint8ArrayToHex(fork.node.selfAddress)
+      const childData = await downloadDataWithChunkAPI(
+        bee,
+        childRef,
+        undefined,
+        undefined,
+        requestOptions,
+      )
+      const childNode = MantarayNode.unmarshalFromData(
+        childData,
+        fork.node.selfAddress,
+      )
+
+      fork.node.targetAddress = childNode.targetAddress
+      fork.node.forks = childNode.forks
+      fork.node.obfuscationKey = childNode.obfuscationKey
+      fork.node.path = fork.prefix
+      fork.node.parent = node
+
+      for (const nestedFork of fork.node.forks.values()) {
+        nestedFork.node.parent = fork.node
+      }
+
+      await loadRecursively(fork.node)
+    }
+  }
+
+  await loadRecursively(root)
+  return root
 }

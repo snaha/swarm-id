@@ -5,6 +5,7 @@ import type {
   UploadResult,
   FileData,
   UploadOptions,
+  ActUploadOptions,
   DownloadOptions,
   RequestOptions,
   Reference,
@@ -1320,7 +1321,7 @@ export class SwarmIdClient {
   async actUploadData(
     data: Uint8Array,
     grantees: string[],
-    options?: UploadOptions,
+    options?: ActUploadOptions,
     requestOptions?: RequestOptions,
   ): Promise<{
     encryptedReference: string

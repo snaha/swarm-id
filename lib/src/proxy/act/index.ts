@@ -10,6 +10,7 @@
 
 import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
 import type { UploadContext, UploadProgress } from "../types"
+import { uploadEncryptedDataWithSigning } from "../upload-encrypted-data"
 import { uploadDataWithSigning } from "../upload-data"
 import { downloadDataWithChunkAPI } from "../download-data"
 import { hexToUint8Array, uint8ArrayToHex } from "../../utils/hex"
@@ -22,6 +23,8 @@ import {
   publicKeyFromCompressed,
   compressPublicKey,
 } from "./crypto"
+
+type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
 import {
   serializeAct,
   deserializeAct,
@@ -117,7 +120,7 @@ export async function createActForContent(
   contentReference: Uint8Array,
   publisherPrivateKey: Uint8Array,
   granteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
-  options?: UploadOptions,
+  options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActUploadResult> {
@@ -175,13 +178,24 @@ export async function createActForContent(
   const actJson = serializeAct(entries)
   console.log(`[ACT] Created ACT manifest: ${entries.length} entries`)
 
-  const actResult = await uploadDataWithSigning(
-    context,
-    actJson,
-    options,
-    undefined,
-    requestOptions,
-  )
+  const beeCompatible = options?.beeCompatible === true
+
+  const actResult = beeCompatible
+    ? await uploadDataWithSigning(
+        context,
+        actJson,
+        options,
+        undefined,
+        requestOptions,
+      )
+    : await uploadEncryptedDataWithSigning(
+        context,
+        actJson,
+        undefined,
+        options,
+        undefined,
+        requestOptions,
+      )
 
   console.log(`[ACT] ACT manifest saved, root: ${actResult.reference}`)
 
@@ -194,9 +208,10 @@ export async function createActForContent(
     `[ACT] Created encrypted grantee list: ${encryptedGranteeList.length} bytes`,
   )
 
-  const granteeListResult = await uploadDataWithSigning(
+  const granteeListResult = await uploadEncryptedDataWithSigning(
     context,
     encryptedGranteeList,
+    undefined,
     options,
     undefined,
     requestOptions,
@@ -219,13 +234,22 @@ export async function createActForContent(
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = await uploadDataWithSigning(
-        context,
-        data,
-        options,
-        isRoot ? onProgress : undefined,
-        requestOptions,
-      )
+      const result = beeCompatible
+        ? await uploadDataWithSigning(
+            context,
+            data,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
+        : await uploadEncryptedDataWithSigning(
+            context,
+            data,
+            undefined,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
       return result
     },
   )
@@ -378,11 +402,12 @@ export async function addGranteesToAct(
   historyReference: string,
   publisherPrivateKey: Uint8Array,
   newGranteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
-  options?: UploadOptions,
+  options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActGranteeModifyResult> {
   const { bee } = context
+  const beeCompatible = historyReference.length === 64
 
   // Download history manifest
   const historyData = await downloadDataWithChunkAPI(
@@ -478,22 +503,32 @@ export async function addGranteesToAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const actResult = await uploadDataWithSigning(
-    context,
-    newActJson,
-    options,
-    undefined,
-    requestOptions,
-  )
+  const actResult = beeCompatible
+    ? await uploadDataWithSigning(
+        context,
+        newActJson,
+        options,
+        undefined,
+        requestOptions,
+      )
+    : await uploadEncryptedDataWithSigning(
+        context,
+        newActJson,
+        undefined,
+        options,
+        undefined,
+        requestOptions,
+      )
 
   // Upload updated grantee list
   const encryptedGranteeList = serializeAndEncryptGranteeList(
     updatedGrantees,
     publisherPrivateKey,
   )
-  const granteeListResult = await uploadDataWithSigning(
+  const granteeListResult = await uploadEncryptedDataWithSigning(
     context,
     encryptedGranteeList,
+    undefined,
     options,
     undefined,
     requestOptions,
@@ -512,13 +547,22 @@ export async function addGranteesToAct(
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = await uploadDataWithSigning(
-        context,
-        data,
-        options,
-        isRoot ? onProgress : undefined,
-        requestOptions,
-      )
+      const result = beeCompatible
+        ? await uploadDataWithSigning(
+            context,
+            data,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
+        : await uploadEncryptedDataWithSigning(
+            context,
+            data,
+            undefined,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
       return result
     },
   )
@@ -547,11 +591,12 @@ export async function revokeGranteesFromAct(
   encryptedReference: string,
   publisherPrivateKey: Uint8Array,
   revokePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
-  options?: UploadOptions,
+  options?: ActUploadOptions,
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActRevocationResult> {
   const { bee } = context
+  const beeCompatible = historyReference.length === 64
 
   // Download history manifest
   const historyData = await downloadDataWithChunkAPI(
@@ -673,22 +718,32 @@ export async function revokeGranteesFromAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const actResult = await uploadDataWithSigning(
-    context,
-    newActJson,
-    options,
-    undefined,
-    requestOptions,
-  )
+  const actResult = beeCompatible
+    ? await uploadDataWithSigning(
+        context,
+        newActJson,
+        options,
+        undefined,
+        requestOptions,
+      )
+    : await uploadEncryptedDataWithSigning(
+        context,
+        newActJson,
+        undefined,
+        options,
+        undefined,
+        requestOptions,
+      )
 
   // Upload updated grantee list
   const encryptedGranteeList = serializeAndEncryptGranteeList(
     remainingGrantees,
     publisherPrivateKey,
   )
-  const granteeListResult = await uploadDataWithSigning(
+  const granteeListResult = await uploadEncryptedDataWithSigning(
     context,
     encryptedGranteeList,
+    undefined,
     options,
     undefined,
     requestOptions,
@@ -707,13 +762,22 @@ export async function revokeGranteesFromAct(
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = await uploadDataWithSigning(
-        context,
-        data,
-        options,
-        isRoot ? onProgress : undefined,
-        requestOptions,
-      )
+      const result = beeCompatible
+        ? await uploadDataWithSigning(
+            context,
+            data,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
+        : await uploadEncryptedDataWithSigning(
+            context,
+            data,
+            undefined,
+            options,
+            isRoot ? onProgress : undefined,
+            requestOptions,
+          )
       return result
     },
   )
