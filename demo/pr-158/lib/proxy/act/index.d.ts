@@ -9,6 +9,9 @@
  */
 import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js";
 import type { UploadContext, UploadProgress } from "../types";
+type ActUploadOptions = UploadOptions & {
+    beeCompatible?: boolean;
+};
 /**
  * Result of ACT upload operation
  */
@@ -55,7 +58,7 @@ export interface ActRevocationResult extends ActGranteeModifyResult {
 export declare function createActForContent(context: UploadContext, contentReference: Uint8Array, publisherPrivateKey: Uint8Array, granteePublicKeys: Array<{
     x: Uint8Array;
     y: Uint8Array;
-}>, options?: UploadOptions, requestOptions?: BeeRequestOptions, onProgress?: (progress: UploadProgress) => void): Promise<ActUploadResult>;
+}>, options?: ActUploadOptions, requestOptions?: BeeRequestOptions, onProgress?: (progress: UploadProgress) => void): Promise<ActUploadResult>;
 /**
  * Decrypt an ACT-protected reference
  *
@@ -75,14 +78,14 @@ export declare function decryptActReference(bee: Bee, encryptedReference: string
 export declare function addGranteesToAct(context: UploadContext, historyReference: string, publisherPrivateKey: Uint8Array, newGranteePublicKeys: Array<{
     x: Uint8Array;
     y: Uint8Array;
-}>, options?: UploadOptions, requestOptions?: BeeRequestOptions, onProgress?: (progress: UploadProgress) => void): Promise<ActGranteeModifyResult>;
+}>, options?: ActUploadOptions, requestOptions?: BeeRequestOptions, onProgress?: (progress: UploadProgress) => void): Promise<ActGranteeModifyResult>;
 /**
  * Revoke grantees from an ACT (performs key rotation)
  */
 export declare function revokeGranteesFromAct(context: UploadContext, historyReference: string, encryptedReference: string, publisherPrivateKey: Uint8Array, revokePublicKeys: Array<{
     x: Uint8Array;
     y: Uint8Array;
-}>, options?: UploadOptions, requestOptions?: BeeRequestOptions, onProgress?: (progress: UploadProgress) => void): Promise<ActRevocationResult>;
+}>, options?: ActUploadOptions, requestOptions?: BeeRequestOptions, onProgress?: (progress: UploadProgress) => void): Promise<ActRevocationResult>;
 /**
  * Get grantees from an ACT
  */

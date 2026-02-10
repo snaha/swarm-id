@@ -261,6 +261,13 @@ Hello, Swarm!</textarea
         <p style="font-size: 12px; color: #888; margin-bottom: 10px;">
           💡 Get Bee node's public key: <code>curl -s http://localhost:1633/addresses | jq -r '.publicKey'</code>
         </p>
+        <div style="margin-bottom: 15px">
+          <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; margin: 6px 0 8px;">
+            <input type="checkbox" id="act-bee-compatible" checked style="width: auto; cursor: pointer;"/>
+            <span>Bee-compatible ACT (enable Bee node /bzz download with ACT headers)</span>
+            
+          </label>
+        </div>
         <button id="act-upload-button" disabled>Upload with ACT</button>
         <div id="act-upload-result"></div>
       </div>
@@ -568,8 +575,10 @@ Hello, Swarm!</textarea
             const uint8Data = encoder.encode(data);
 
             const deferred = document.getElementById("deferred-checkbox").checked
+            const beeCompatible = document.getElementById("act-bee-compatible").checked
             const result = await client.actUploadData(uint8Data, grantees, {
               deferred: deferred,
+              beeCompatible: beeCompatible,
             });
 
             log(`ACT Upload successful!`, "info");
@@ -584,6 +593,14 @@ Hello, Swarm!</textarea
             document.getElementById("act-download-publisher").value = result.publisherPubKey;
             document.getElementById("act-add-history-ref").value = result.historyReference;
 
+            const beeDownloadNote = beeCompatible
+              ? `<strong style="color: #28a745;">To download with Bee node (curl):</strong><br/>
+                <pre style="background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">curl "http://localhost:1633/bzz/${result.encryptedReference}/" \\
+  -H "Swarm-Act: true" \\
+  -H "Swarm-Act-Publisher: ${result.publisherPubKey}" \\
+  -H "Swarm-Act-History-Address: ${result.historyReference}"</pre>`
+              : `<strong style="color: #b58100;">Bee node download disabled:</strong> use the ACT Download section (client-side decrypt).`
+
             resultEl.innerHTML = `
               <div class="result">
                 <strong>ACT Upload Result:</strong><br/>
@@ -593,11 +610,7 @@ Hello, Swarm!</textarea
                 <strong>ACT Ref:</strong> ${result.actReference}<br/>
                 <strong>Grantee List Ref:</strong> ${result.granteeListReference}<br/>
                 <br/>
-                <strong style="color: #28a745;">To download with Bee node (curl):</strong><br/>
-                <pre style="background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">curl "http://localhost:1633/bzz/${result.encryptedReference}/" \\
-  -H "Swarm-Act: true" \\
-  -H "Swarm-Act-Publisher: ${result.publisherPubKey}" \\
-  -H "Swarm-Act-History-Address: ${result.historyReference}"</pre>
+                ${beeDownloadNote}
               </div>
             `;
           } catch (error) {
@@ -626,10 +639,14 @@ Hello, Swarm!</textarea
             return;
           }
 
-          if (!historyRef || historyRef.length !== REFERENCE_LENGTH) {
+          if (
+            !historyRef ||
+            (historyRef.length !== REFERENCE_LENGTH &&
+              historyRef.length !== ENCRYPTED_REFERENCE_LENGTH)
+          ) {
             log("Invalid history reference", "error");
             resultEl.innerHTML =
-              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} hex chars)</div>`;
+              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`;
             return;
           }
 
@@ -670,12 +687,17 @@ Hello, Swarm!</textarea
           const resultEl = document.getElementById("act-add-grantees-result");
 
           const REFERENCE_LENGTH = 64;
+          const ENCRYPTED_REFERENCE_LENGTH = 128;
           const COMPRESSED_PUBKEY_LENGTH = 66;
 
-          if (!historyRef || historyRef.length !== REFERENCE_LENGTH) {
+          if (
+            !historyRef ||
+            (historyRef.length !== REFERENCE_LENGTH &&
+              historyRef.length !== ENCRYPTED_REFERENCE_LENGTH)
+          ) {
             log("Invalid history reference", "error");
             resultEl.innerHTML =
-              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} hex chars)</div>`;
+              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`;
             return;
           }
 

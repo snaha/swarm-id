@@ -20,6 +20,14 @@ export declare const UploadOptionsSchema: z.ZodOptional<z.ZodObject<{
     deferred: z.ZodOptional<z.ZodBoolean>;
     redundancyLevel: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>>;
+export declare const ActUploadOptionsSchema: z.ZodOptional<z.ZodObject<{
+    pin: z.ZodOptional<z.ZodBoolean>;
+    encrypt: z.ZodOptional<z.ZodBoolean>;
+    tag: z.ZodOptional<z.ZodNumber>;
+    deferred: z.ZodOptional<z.ZodBoolean>;
+    redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    beeCompatible: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>>;
 export declare const RequestOptionsSchema: z.ZodOptional<z.ZodObject<{
     timeout: z.ZodOptional<z.ZodNumber>;
     headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
@@ -47,6 +55,9 @@ export interface UploadOptions {
 }
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>;
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>;
+export interface ActUploadOptions extends UploadOptions {
+    beeCompatible?: boolean;
+}
 export declare const UploadResultSchema: z.ZodObject<{
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
@@ -323,6 +334,7 @@ export declare const ActUploadDataMessageSchema: z.ZodObject<{
         tag: z.ZodOptional<z.ZodNumber>;
         deferred: z.ZodOptional<z.ZodBoolean>;
         redundancyLevel: z.ZodOptional<z.ZodNumber>;
+        beeCompatible: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
     requestOptions: z.ZodOptional<z.ZodObject<{
         timeout: z.ZodOptional<z.ZodNumber>;
@@ -564,6 +576,7 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
         tag: z.ZodOptional<z.ZodNumber>;
         deferred: z.ZodOptional<z.ZodBoolean>;
         redundancyLevel: z.ZodOptional<z.ZodNumber>;
+        beeCompatible: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
     requestOptions: z.ZodOptional<z.ZodObject<{
         timeout: z.ZodOptional<z.ZodNumber>;

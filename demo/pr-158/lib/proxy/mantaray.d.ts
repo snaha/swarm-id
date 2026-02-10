@@ -1,4 +1,5 @@
-import type { MantarayNode } from "@ethersphere/bee-js";
+import { MantarayNode } from "@ethersphere/bee-js";
+import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js";
 /**
  * Upload callback type for saveMantarayTreeRecursively
  */
@@ -16,4 +17,10 @@ export declare function saveMantarayTreeRecursively(node: MantarayNode, uploadFn
     rootReference: string;
     tagUid?: number;
 }>;
+/**
+ * Load a Mantaray tree using only the chunk API.
+ *
+ * This avoids /bytes and supports encrypted references.
+ */
+export declare function loadMantarayTreeWithChunkAPI(bee: Bee, rootReference: string, requestOptions?: BeeRequestOptions): Promise<MantarayNode>;
 //# sourceMappingURL=mantaray.d.ts.map

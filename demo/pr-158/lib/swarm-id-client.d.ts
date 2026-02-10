@@ -1,4 +1,4 @@
-import type { ClientOptions, AuthStatus, ConnectionInfo, UploadResult, FileData, UploadOptions, DownloadOptions, RequestOptions, Reference } from "./types";
+import type { ClientOptions, AuthStatus, ConnectionInfo, UploadResult, FileData, UploadOptions, ActUploadOptions, DownloadOptions, RequestOptions, Reference } from "./types";
 /**
  * Main client library for integrating Swarm ID authentication and storage capabilities
  * into web applications.
@@ -561,7 +561,7 @@ export declare class SwarmIdClient {
      * console.log('Publisher Public Key:', result.publisherPubKey)
      * ```
      */
-    actUploadData(data: Uint8Array, grantees: string[], options?: UploadOptions, requestOptions?: RequestOptions): Promise<{
+    actUploadData(data: Uint8Array, grantees: string[], options?: ActUploadOptions, requestOptions?: RequestOptions): Promise<{
         encryptedReference: string;
         historyReference: string;
         granteeListReference: string;
