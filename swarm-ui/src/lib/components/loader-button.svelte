@@ -18,7 +18,7 @@
 		...restProps
 	}: LoaderButtonProps = $props()
 
-	const loaderColor = variant === 'strong' || variant === 'darkoverlay' ? 'high' : 'low'
+	const loaderColor = $derived(variant === 'strong' || variant === 'darkoverlay' ? 'high' : 'low')
 
 	function asyncTimeout(ms: number) {
 		return new Promise((resolve) => {

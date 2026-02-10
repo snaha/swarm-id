@@ -211,7 +211,7 @@ export async function uploadEncryptedDataWithSigning(
           hash: () => address.toUint8Array(),
           build: () => encryptedChunkData,
           span: 0n, // not used by stamper.stamp
-          writer: undefined as any, // not used by stamper.stamp
+          writer: new SimpleUint8ArrayWriter(new Uint8Array(0)), // not used by stamper.stamp
         })
 
         console.log(
@@ -548,7 +548,7 @@ export async function uploadEncryptedSOC(
     hash: () => socAddress.toUint8Array(),
     build: () => socData,
     span: 0n, // not used by stamper.stamp
-    writer: undefined as any, // not used by stamper.stamp
+    writer: new SimpleUint8ArrayWriter(new Uint8Array(0)), // not used by stamper.stamp
   })
 
   console.log(

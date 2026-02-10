@@ -7,33 +7,12 @@
 		color?: Color
 	}
 	let { dimension = 'default', color = 'low' }: Props & HTMLAttributes<HTMLDivElement> = $props()
-
-	let size = dimensionToSize(dimension)
-
-	function dimensionToSize(dimension: Dimension): number {
-		switch (dimension) {
-			case 'large':
-				return 32
-			case 'default':
-				return 24
-			case 'compact':
-				return 24
-			case 'small':
-				return 16
-		}
-	}
 </script>
 
-<div
-	class="loader"
-	style="width: {size}px"
-	class:high={color === 'high'}
-	class:low={color === 'low'}
-></div>
+<div class="loader {dimension}" class:high={color === 'high'} class:low={color === 'low'}></div>
 
 <style lang="postcss">
 	.loader {
-		width: 50px;
 		padding: 2px;
 		aspect-ratio: 1;
 		border-radius: 50%;
@@ -44,12 +23,26 @@
 		mask-composite: subtract;
 		animation: l3 1s infinite linear;
 	}
+
 	@keyframes l3 {
 		to {
 			transform: rotate(1turn);
 		}
 	}
 
+	/* Dimension sizes */
+	.large {
+		width: 32px;
+	}
+	.default,
+	.compact {
+		width: 24px;
+	}
+	.small {
+		width: 16px;
+	}
+
+	/* Colors */
 	.high {
 		background: var(--colors-base);
 	}
