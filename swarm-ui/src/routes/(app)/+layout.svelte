@@ -1,18 +1,103 @@
 <script lang="ts">
+	import Vertical from '$lib/components/ui/vertical.svelte'
+	import Horizontal from '$lib/components/ui/horizontal.svelte'
+	import Typography from '$lib/components/ui/typography.svelte'
+	import Hashicon from '$lib/components/hashicon.svelte'
+	import SwarmLogo from '$lib/components/swarm-logo.svelte'
+	import { page } from '$app/state'
+	import { resolve } from '$app/paths'
+	import routes from '$lib/routes'
+	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import Drawer from '$lib/components/drawer.svelte'
+
 	let { children } = $props()
+
+	const identityId = $derived(page.params.id)
+	const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
+	const identities = $derived(identitiesStore.identities)
+	const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+
+	// Initialize drawer state from localStorage
+	let drawerOpen = $state(
+		typeof window !== 'undefined' ? localStorage.getItem('drawerOpen') === 'true' : false,
+	)
+
+	// Persist drawer state to localStorage whenever it changes
+	$effect(() => {
+		if (typeof window !== 'undefined') {
+			localStorage.setItem('drawerOpen', String(drawerOpen))
+		}
+	})
 </script>
 
-<div class="page-content">
-	<div class="content-area">
-		{@render children()}
-	</div>
+<div class="app-layout">
+	<Vertical
+		--vertical-justify-content="flex-start"
+		--vertical-gap="var(--double-padding)"
+		class="main-layout"
+		style="flex: 1;"
+	>
+		<Horizontal
+			--horizontal-justify-content="space-between"
+			--horizontal-align-items="center"
+			style="width: 100%;"
+		>
+			<div class="logo">
+				<a href={resolve(routes.HOME)}>
+					<SwarmLogo fill="var(--colors-ultra-high)" height={30} />
+				</a>
+			</div>
+
+			{#if identity && account}
+				<Horizontal
+					--horizontal-gap="var(--half-padding)"
+					--horizontal-align-items="center"
+					onclick={() => (drawerOpen = true)}
+					class="clickable"
+				>
+					<Hashicon value={identity.id} size={32} />
+					<Vertical --vertical-gap="0">
+						<Typography variant="small">{account.name}</Typography>
+						<Typography>{identity.name}</Typography>
+					</Vertical>
+				</Horizontal>
+			{/if}
+		</Horizontal>
+
+		<div class="page-content">
+			<div class="content-area">
+				{@render children()}
+			</div>
+		</div>
+	</Vertical>
+
+	{#if identity && account}
+		<Drawer bind:drawerOpen {account} {identities} {identityId} />
+	{/if}
 </div>
 
 <style>
+	.app-layout {
+		display: flex;
+		flex-direction: row;
+		flex: 1;
+		align-items: stretch;
+		justify-content: space-around;
+		position: relative;
+	}
+
+	:global(.clickable) {
+		cursor: pointer;
+	}
+
+	:global(.main-layout) {
+		padding: var(--double-padding);
+	}
+
 	.page-content {
 		flex: 1;
 		display: flex;
-		justify-content: center;
 		flex-direction: column;
 		justify-content: center;
 		align-items: center;
@@ -28,6 +113,10 @@
 	}
 
 	@media screen and (max-width: 640px) {
+		:global(.main-layout) {
+			padding: var(--padding);
+		}
+
 		.content-area {
 			flex: 1;
 		}

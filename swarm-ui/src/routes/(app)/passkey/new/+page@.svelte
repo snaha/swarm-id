@@ -4,7 +4,11 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
+	import Select from '$lib/components/ui/select/select.svelte'
+	import Tooltip from '$lib/components/ui/tooltip.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
+	import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
+	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import routes from '$lib/routes'
 	import { resolve } from '$app/paths'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
@@ -18,8 +22,15 @@
 	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
 
 	let accountName = $state('Passkey')
+	let accountType = $state('local')
+	let showTooltip = $state(false)
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
+
+	const accountTypeItems = [
+		{ value: 'local', label: 'Local' },
+		{ value: 'synced', label: 'Synced' },
+	]
 
 	onMount(() => {
 		const accountNameIsTaken = accountsStore.accounts.some(
@@ -90,22 +101,66 @@
 	<Confirmation authenticationType="passkey" />
 {:else}
 	<CreationLayout
-		title="Create account with Passkey"
-		description="Create a new Swarm ID account using Passkey"
+		title="Sign up with Passkey"
+		description="Create a Swarm ID account on this device using a passkey"
 		onClose={() =>
 			sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">
-				<Input
-					variant="outline"
-					dimension="compact"
-					name="account-name"
-					bind:value={accountName}
-					placeholder="Enter account name"
-					disabled={isProcessing}
-					label="Account name"
-				/>
+				<div class="form-row">
+					<div class="form-field">
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="account-name"
+							bind:value={accountName}
+							placeholder="Enter account name"
+							disabled={isProcessing}
+							label="Account name"
+						/>
+					</div>
+					<div class="type-row">
+						<div class="form-field">
+							<Select
+								variant="outline"
+								dimension="compact"
+								label="Account type"
+								bind:value={accountType}
+								items={accountTypeItems}
+							/>
+						</div>
+						<div class="info-button">
+							<Tooltip
+								show={showTooltip}
+								position="bottom"
+								variant="small"
+								color="dark"
+								maxWidth="279px"
+							>
+								<Button
+									dimension="compact"
+									variant="ghost"
+									onmouseenter={() => (showTooltip = true)}
+									onmouseleave={() => (showTooltip = false)}
+									onclick={(e: MouseEvent) => {
+										e.stopPropagation()
+										showTooltip = !showTooltip
+									}}
+								>
+									<Information size={20} />
+								</Button>
+								{#snippet helperText()}
+									Local accounts are free and faster to set up but are limited to viewing content on
+									this device. Synced accounts enable uploading data and syncing across devices but
+									require purchasing a Swarm postage stamp. <strong
+										>Not sure yet? You can always upgrade from Local to Synced later.</strong
+									>
+								{/snippet}
+							</Tooltip>
+						</div>
+					</div>
+				</div>
 
 				{#if error}
 					<ErrorMessage>
@@ -116,10 +171,70 @@
 		{/snippet}
 
 		{#snippet buttonContent()}
-			<Button dimension="compact" onclick={handleCreatePasskey} disabled={isProcessing}>
+			<Button
+				dimension="compact"
+				onclick={handleCreatePasskey}
+				disabled={isProcessing}
+				class="mobile-full-width"
+			>
+				<span class="desktop-only"><Checkmark size={20} /></span>
 				{isProcessing ? 'Creating...' : 'Confirm with Passkey'}
-				{#if !isProcessing}<ArrowRight />{/if}
+				<span class="mobile-only"
+					>{#if !isProcessing}<ArrowRight size={20} />{/if}</span
+				>
 			</Button>
 		{/snippet}
 	</CreationLayout>
 {/if}
+
+<style>
+	.form-row {
+		display: flex;
+		gap: var(--half-padding);
+		align-items: flex-end;
+	}
+
+	.form-field {
+		flex: 1;
+	}
+
+	.type-row {
+		display: flex;
+		gap: var(--half-padding);
+		align-items: flex-end;
+		flex: 1;
+	}
+
+	.info-button {
+		display: flex;
+		align-items: flex-end;
+	}
+
+	.desktop-only {
+		display: inline-flex;
+	}
+
+	.mobile-only {
+		display: none;
+	}
+
+	@media screen and (max-width: 640px) {
+		.form-row {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.desktop-only {
+			display: none;
+		}
+
+		.mobile-only {
+			display: inline-flex;
+		}
+
+		:global(.mobile-full-width) {
+			width: 100%;
+			justify-content: center;
+		}
+	}
+</style>
