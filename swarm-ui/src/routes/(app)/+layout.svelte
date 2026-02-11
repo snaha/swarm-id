@@ -31,7 +31,7 @@
 	})
 </script>
 
-<div class="app-layout">
+<div class="page-wrapper">
 	<Vertical
 		--vertical-justify-content="flex-start"
 		--vertical-gap="var(--double-padding)"
@@ -78,13 +78,14 @@
 </div>
 
 <style>
-	.app-layout {
+	.page-wrapper {
 		display: flex;
 		flex-direction: row;
-		flex: 1;
+		min-height: 100vh;
+		background: var(--colors-ultra-low);
+		position: relative;
 		align-items: stretch;
 		justify-content: space-around;
-		position: relative;
 	}
 
 	:global(.clickable) {
@@ -93,6 +94,12 @@
 
 	:global(.main-layout) {
 		padding: var(--double-padding);
+	}
+
+	@media screen and (max-width: 640px) {
+		:global(.main-layout) {
+			padding: var(--padding);
+		}
 	}
 
 	.page-content {
@@ -113,10 +120,6 @@
 	}
 
 	@media screen and (max-width: 640px) {
-		:global(.main-layout) {
-			padding: var(--padding);
-		}
-
 		.content-area {
 			flex: 1;
 		}

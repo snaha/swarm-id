@@ -3,29 +3,46 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
-	import FolderShared from 'carbon-icons-svelte/lib/FolderShared.svelte'
 	import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
+	import Information from 'carbon-icons-svelte/lib/Information.svelte'
+	import ChevronDown from 'carbon-icons-svelte/lib/ChevronDown.svelte'
 	import routes from '$lib/routes'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
+	import Tooltip from '$lib/components/ui/tooltip.svelte'
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import { onMount } from 'svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import type { Identity, Account } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
-	import { Bytes } from '@ethersphere/bee-js'
+	import { Bytes, BatchId } from '@ethersphere/bee-js'
 	import { toPrefixedHex } from '$lib/utils/hex'
 	import { generateDockerName } from '$lib/docker-name'
 	import Vertical from '$lib/components/ui/vertical.svelte'
-	import Divider from '$lib/components/ui/divider.svelte'
-	import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
-	import { layoutStore } from '$lib/stores/layout.svelte'
+
+	type StampOption = 'account' | 'separate'
 
 	let idName = $state('')
-	let accountName = $state('')
+	let selectedStampOption = $state<StampOption>('account')
+	let showStampTooltip = $state(false)
+
+	// Check if account is synced (has postage stamp)
+	const isSyncedAccount = $derived.by(() => {
+		const account = sessionStore.data.account
+		if (!account) return false
+		return account.defaultPostageStampBatchID !== undefined
+	})
+
+	// Get account's postage stamps
+	const accountStamps = $derived.by(() => {
+		const account = sessionStore.data.account
+		if (!account) return []
+		return postageStampsStore.getStampsByAccount(account.id.toHex())
+	})
 
 	// Derive identity using temporary masterKey from session
 	const derivedIdentity = $derived.by(() => {
@@ -44,17 +61,14 @@
 	})
 
 	onMount(() => {
-		const account = sessionStore.data.account
-		if (account) {
-			accountName = account.name
-		}
-
 		idName = derivedIdentity?.name ?? ''
 	})
 
 	const hasSessionData = $derived(
 		sessionStore.data.account !== undefined && sessionStore.data.temporaryMasterKey !== undefined,
 	)
+
+	const accountName = $derived(sessionStore.data.account?.name ?? '')
 
 	function deriveIdentityFromAccount(account: Account, masterKey: Bytes, index: number) {
 		const identityWallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey)).deriveChild(index)
@@ -91,9 +105,19 @@
 			return
 		}
 
-		// Create the identity
+		// Determine postage stamp based on selection
+		let defaultPostageStampBatchID: BatchId | undefined
+		if (isSyncedAccount && selectedStampOption === 'separate' && accountStamps.length > 0) {
+			// For separate stamp, use the first account stamp as identity-specific
+			defaultPostageStampBatchID = accountStamps[0].batchID
+		}
+		// If 'account' is selected or not synced, don't set identity-specific stamp (uses account stamp)
+
+		// Create the identity with custom name
 		const identity = identitiesStore.addIdentity({
 			...derivedIdentity,
+			name: idName || derivedIdentity.name,
+			defaultPostageStampBatchID,
 		})
 
 		console.log('✅ Identity created:', identity.id)
@@ -114,83 +138,170 @@
 	}
 </script>
 
-<CreationLayout title="Create identity" onClose={() => goto(resolve(routes.HOME))}>
-	{#snippet content()}
-		{#if !hasSessionData}
-			<Typography>No account data found. Please start from the home page.</Typography>
-		{:else}
-			<Vertical --vertical-gap="var(--padding)">
-				<ResponsiveLayout
-					--responsive-align-items="start"
-					--responsive-justify-content="stretch"
-					--responsive-gap="var(--quarter-padding)"
-				>
-					<Horizontal
-						class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-						--horizontal-gap="var(--half-padding)"
-						><FolderShared size={20} /><Typography>Account</Typography></Horizontal
-					>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="account"
-						value={accountName}
-						disabled
-						class="flex50"
-					/>
-				</ResponsiveLayout>
-
-				<ResponsiveLayout
-					--responsive-align-items="start"
-					--responsive-justify-content="stretch"
-					--responsive-gap="var(--quarter-padding)"
-				>
-					<!-- Row 2 -->
-					<Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-						>Identity display name</Typography
-					>
-					<Vertical
-						class={!layoutStore.mobile ? 'flex50' : ''}
-						--vertical-gap="var(--quarter-gap)"
-						--vertical-align-items={layoutStore.mobile ? 'stretch' : 'start'}
-					>
-						<Horizontal --horizontal-gap="var(--half-padding)">
-							<Input
-								variant="outline"
-								dimension="compact"
-								name="id-name"
-								bind:value={idName}
-								class="grower"
-							/>
-							{#if derivedIdentity}
-								<Hashicon value={derivedIdentity.id} size={40} />
-							{/if}
-						</Horizontal>
-						<Typography variant="small">
-							This is how your identity will appear in your Swarm ID account and apps you connect to
-						</Typography>
-					</Vertical>
-				</ResponsiveLayout>
-			</Vertical>
-			<Divider --margin="0" />
-		{/if}
-	{/snippet}
-
-	{#snippet buttonContent()}
-		{#if hasSessionData}
-			<Button dimension="compact" onclick={handleCreateIdentity} disabled={!derivedIdentity}>
-				<Checkmark />Create and connect</Button
+<div class="page-wrapper">
+	<div class="page-content">
+		<div class="content-area">
+			<CreationLayout
+				title="Create identity"
+				description={accountName ? `in ${accountName} account` : undefined}
+				onClose={() => goto(resolve(routes.HOME))}
 			>
-		{/if}
-	{/snippet}
-</CreationLayout>
+				{#snippet content()}
+					{#if !hasSessionData}
+						<Typography>No account data found. Please start from the home page.</Typography>
+					{:else}
+						<Vertical --vertical-gap="var(--padding)">
+							<!-- Identity name input -->
+							<Vertical --vertical-gap="var(--quarter-padding)">
+								<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
+									<div class="input-grow">
+										<Input
+											variant="outline"
+											dimension="compact"
+											label="Identity name"
+											bind:value={idName}
+										/>
+									</div>
+									{#if derivedIdentity}
+										<Hashicon value={derivedIdentity.id} size={40} />
+									{/if}
+								</Horizontal>
+								<Typography variant="small">Displayed in your account and apps</Typography>
+							</Vertical>
+
+							<!-- Postage stamp selector (only for synced accounts) -->
+							{#if isSyncedAccount}
+								<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
+									<div class="input-grow">
+										<Vertical --vertical-gap="var(--quarter-padding)">
+											<Typography>Postage stamp</Typography>
+											<div class="select-wrapper">
+												<select class="stamp-select" bind:value={selectedStampOption}>
+													<option value="account">Use account stamp</option>
+													<option value="separate">Use separate stamp (advanced)</option>
+												</select>
+												<ChevronDown size={20} class="select-icon" />
+											</div>
+										</Vertical>
+									</div>
+									<Tooltip
+										helperText="Use your account stamp for simplicity, or assign a separate stamp to keep this identity's activity separate from your other identities. You can change this later."
+										position="left"
+										variant="small"
+										maxWidth="280px"
+										show={showStampTooltip}
+									>
+										<Button
+											variant="ghost"
+											dimension="compact"
+											onclick={() => (showStampTooltip = !showStampTooltip)}
+										>
+											<Information size={20} />
+										</Button>
+									</Tooltip>
+								</Horizontal>
+							{/if}
+						</Vertical>
+					{/if}
+				{/snippet}
+
+				{#snippet buttonContent()}
+					{#if hasSessionData}
+						<Button
+							variant="strong"
+							dimension="compact"
+							onclick={handleCreateIdentity}
+							disabled={!derivedIdentity}
+						>
+							<Checkmark size={20} />Confirm
+						</Button>
+					{/if}
+				{/snippet}
+			</CreationLayout>
+		</div>
+	</div>
+</div>
 
 <style>
-	:global(.flex50) {
-		flex: 0.5;
+	.page-wrapper {
+		display: flex;
+		flex-direction: row;
+		min-height: 100vh;
+		background: var(--colors-ultra-low);
+		position: relative;
+		align-items: stretch;
+		justify-content: space-around;
 	}
-	:global(.input-layout) {
-		padding: var(--half-padding) 0 !important;
-		border: 1px solid transparent;
+
+	.page-content {
+		flex: 1;
+		display: flex;
+		justify-content: center;
+		flex-direction: column;
+		align-items: center;
+		padding: var(--double-padding);
+	}
+
+	.content-area {
+		max-width: 560px;
+		display: flex;
+		flex-direction: column;
+		justify-content: center;
+		width: 100%;
+	}
+
+	@media screen and (max-width: 640px) {
+		.page-content {
+			padding: var(--padding);
+		}
+
+		.content-area {
+			flex: 1;
+		}
+	}
+
+	.input-grow {
+		flex: 1;
+		min-width: 0;
+	}
+
+	/* Select wrapper for custom styled select */
+	.select-wrapper {
+		position: relative;
+		width: 100%;
+	}
+
+	.stamp-select {
+		width: 100%;
+		padding: var(--half-padding);
+		padding-right: calc(var(--half-padding) + 24px);
+		border: 1px solid var(--colors-ultra-high);
+		background: transparent;
+		font-family: var(--font-family-sans-serif);
+		font-size: var(--font-size);
+		line-height: var(--line-height);
+		color: var(--colors-ultra-high);
+		cursor: pointer;
+		appearance: none;
+		-webkit-appearance: none;
+		-moz-appearance: none;
+	}
+
+	.stamp-select:focus {
+		outline: var(--focus-outline);
+		outline-offset: var(--focus-outline-offset);
+	}
+
+	.stamp-select:hover {
+		border-color: var(--colors-top);
+	}
+
+	.select-wrapper :global(.select-icon) {
+		position: absolute;
+		right: var(--half-padding);
+		top: 50%;
+		transform: translateY(-50%);
+		pointer-events: none;
+		color: var(--colors-ultra-high);
 	}
 </style>

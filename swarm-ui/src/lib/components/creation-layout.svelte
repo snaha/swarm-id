@@ -18,9 +18,13 @@
 	let { title, description, onBack, onClose, content, buttonContent }: Props = $props()
 </script>
 
-<div class="layout">
-	<div class="header">
-		<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+<div class="creation-layout">
+	<!-- Header -->
+	<div class="creation-header">
+		<Horizontal
+			--horizontal-justify-content="space-between"
+			--horizontal-align-items="center"
+		>
 			{#if onBack}
 				<Horizontal --horizontal-gap="var(--half-padding)">
 					<Button dimension="compact" variant="ghost" onclick={onBack}><ArrowLeft /></Button>
@@ -36,62 +40,52 @@
 			{/if}
 		</Horizontal>
 		{#if description}
-			<Typography>{description}</Typography>
+			<Typography class="description">{description}</Typography>
 		{/if}
 	</div>
-	<div class="content">
+
+	<!-- Content (grows and centers on mobile) -->
+	<div class="creation-content">
 		{@render content()}
 	</div>
-	<div class="footer">
+
+	<!-- Button -->
+	<div class="creation-button">
 		{@render buttonContent()}
 	</div>
 </div>
 
 <style>
-	.layout {
+	.creation-layout {
 		display: flex;
 		flex-direction: column;
 		gap: var(--double-padding);
-		max-width: 560px;
-		width: 100%;
-		margin: auto;
-		padding: var(--double-padding);
+		height: 100%;
 	}
 
-	.header {
+	.creation-header :global(.description) {
+		color: var(--colors-ultra-high-50);
+	}
+
+	.creation-content {
 		display: flex;
 		flex-direction: column;
-		gap: var(--three-quarters-padding);
 	}
 
-	.footer {
+	.creation-button {
 		display: flex;
+		flex-direction: column;
+		align-items: flex-start;
 	}
 
 	@media screen and (max-width: 640px) {
-		.layout {
+		.creation-content {
 			flex: 1;
-			gap: 0;
-			max-width: none;
-			margin: 0;
-			padding: 0;
-		}
-
-		.header {
-			padding: var(--padding);
-			gap: var(--half-padding);
-		}
-
-		.content {
-			flex: 1;
-			display: flex;
-			flex-direction: column;
 			justify-content: center;
-			padding: 0 var(--padding);
 		}
 
-		.footer {
-			padding: var(--padding);
+		.creation-button {
+			align-items: stretch;
 		}
 	}
 </style>

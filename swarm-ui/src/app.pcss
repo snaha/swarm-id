@@ -9,6 +9,7 @@
 
 	--colors-dark-green: #36c450;
 	--colors-dark-red: #ff6e4e;
+	--colors-dark-ultra-high-50: rgba(232, 232, 232, 0.5);
 
 	/* Light Mode Colors (explicit) */
 	--colors-light-top: #000000;
@@ -20,10 +21,12 @@
 
 	--colors-light-green: #008800;
 	--colors-light-red: #cc0000;
+	--colors-light-ultra-high-50: rgba(36, 36, 36, 0.5);
 
 	/* Default Colors (defaults to light mode) */
 	--colors-top: var(--colors-light-top);
 	--colors-ultra-high: var(--colors-light-ultra-high);
+	--colors-ultra-high-50: var(--colors-light-ultra-high-50);
 	--colors-high: var(--colors-light-high);
 	--colors-low: var(--colors-light-low);
 	--colors-ultra-low: var(--colors-light-ultra-low);
@@ -101,6 +104,7 @@
 html[data-theme='dark'] {
 	--colors-top: var(--colors-dark-top);
 	--colors-ultra-high: var(--colors-dark-ultra-high);
+	--colors-ultra-high-50: var(--colors-dark-ultra-high-50);
 	--colors-high: var(--colors-dark-high);
 	--colors-low: var(--colors-dark-low);
 	--colors-ultra-low: var(--colors-dark-ultra-low);
