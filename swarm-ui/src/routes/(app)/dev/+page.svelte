@@ -1,6 +1,5 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
-	import { goto } from '$app/navigation'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
