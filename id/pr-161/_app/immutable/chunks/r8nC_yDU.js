@@ -1,0 +1,1 @@
+import{j as o,h as i,i as c,E as d,q as E,H as T,v as b,l as p,w as _}from"./DjggraVM.js";import{B as v}from"./DwiB1Y6r.js";function m(t,f,h=!1){i&&c();var e=new v(t),l=h?d:0;function n(a,r){if(i){const u=E(t)===T;if(a===u){var s=b();p(s),e.anchor=s,_(!1),e.ensure(a,r),_(!0);return}}e.ensure(a,r)}o(()=>{var a=!1;f((r,s=!0)=>{a=!0,n(s,r)}),a||n(!1,null)},l)}export{m as i};
