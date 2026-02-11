@@ -2,6 +2,32 @@ import { makeEncryptedContentAddressedChunk } from "@ethersphere/bee-js"
 import type { MantarayNode, EncryptedChunk } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "../utils/hex"
 
+function isZeroAddress32(value: Uint8Array): boolean {
+  if (value.length !== 32) return false
+  for (let i = 0; i < value.length; i++) {
+    if (value[i] !== 0) return false
+  }
+  return true
+}
+
+export function normalizeEncryptedMantarayRefSize(node: MantarayNode): void {
+  const stack: MantarayNode[] = [node]
+  while (stack.length > 0) {
+    const current = stack.pop()!
+
+    if (
+      current.targetAddress.length === 0 ||
+      isZeroAddress32(current.targetAddress)
+    ) {
+      current.targetAddress = new Uint8Array(64)
+    }
+
+    for (const fork of current.forks.values()) {
+      stack.push(fork.node)
+    }
+  }
+}
+
 /**
  * Upload callback type for saveMantarayTreeRecursivelyEncrypted
  *
@@ -30,6 +56,8 @@ export async function saveMantarayTreeRecursivelyEncrypted(
   node: MantarayNode,
   uploadFn: EncryptedUploadCallback,
 ): Promise<{ rootReference: string; tagUid?: number }> {
+  normalizeEncryptedMantarayRefSize(node)
+
   async function saveRecursively(
     current: MantarayNode,
     isRoot: boolean,

@@ -588,12 +588,13 @@ Hello, Swarm!</textarea
             document.getElementById("act-add-history-ref").value = result.historyReference;
 
             const beeDownloadNote = beeCompatible
-              ? `<strong style="color: #28a745;">To download with Bee node (curl):</strong><br/>
-                <pre style="background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">curl "http://localhost:1633/bzz/${result.encryptedReference}/" \\
+              ? `<strong style="color: #28a745;">To download with Bee node (curl):</strong><br/>`
+              : `<strong style="color: #b58100;">Encrypted ACT download (requires Bee with encrypted ACT support):</strong><br/>`
+
+            const beeDownloadCurl = `<pre style="background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">curl "http://localhost:1633/bzz/${result.encryptedReference}/" \\
   -H "Swarm-Act: true" \\
   -H "Swarm-Act-Publisher: ${result.publisherPubKey}" \\
   -H "Swarm-Act-History-Address: ${result.historyReference}"</pre>`
-              : `<strong style="color: #b58100;">Bee node download disabled:</strong> use the ACT Download section (client-side decrypt).`
 
             resultEl.innerHTML = `
               <div class="result">
@@ -605,6 +606,7 @@ Hello, Swarm!</textarea
                 <strong>Grantee List Ref:</strong> ${result.granteeListReference}<br/>
                 <br/>
                 ${beeDownloadNote}
+                ${beeDownloadCurl}
               </div>
             `;
           } catch (error) {

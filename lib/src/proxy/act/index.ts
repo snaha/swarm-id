@@ -13,6 +13,7 @@ import type { UploadContext, UploadProgress } from "../types"
 import { uploadEncryptedDataWithSigning } from "../upload-encrypted-data"
 import { uploadDataWithSigning } from "../upload-data"
 import { downloadDataWithChunkAPI } from "../download-data"
+import { normalizeEncryptedMantarayRefSize } from "../mantaray-encrypted"
 import { hexToUint8Array, uint8ArrayToHex } from "../../utils/hex"
 import {
   deriveKeys,
@@ -180,7 +181,7 @@ export async function createActForContent(
 
   const beeCompatible = options?.beeCompatible === true
 
-  const actResult = beeCompatible
+  let actResult = beeCompatible
     ? await uploadDataWithSigning(
         context,
         actJson,
@@ -196,6 +197,19 @@ export async function createActForContent(
         undefined,
         requestOptions,
       )
+
+  if (!beeCompatible && actResult.reference.length === 64) {
+    // Encrypted history requires 64-byte refs everywhere (entries + forks).
+    // Re-upload ACT encrypted if we ended up with a 32-byte reference.
+    actResult = await uploadEncryptedDataWithSigning(
+      context,
+      actJson,
+      undefined,
+      options,
+      undefined,
+      requestOptions,
+    )
+  }
 
   console.log(`[ACT] ACT manifest saved, root: ${actResult.reference}`)
 
@@ -231,10 +245,14 @@ export async function createActForContent(
 
   // Save history tree bottom-up using Bee's actual returned references
   // This ensures parent nodes reference children by their actual storage addresses
+  const encryptHistory = !beeCompatible
+  if (encryptHistory) {
+    normalizeEncryptedMantarayRefSize(historyManifest)
+  }
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = beeCompatible
+      const result = !encryptHistory
         ? await uploadDataWithSigning(
             context,
             data,
@@ -503,7 +521,7 @@ export async function addGranteesToAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const actResult = beeCompatible
+  let actResult = beeCompatible
     ? await uploadDataWithSigning(
         context,
         newActJson,
@@ -519,6 +537,18 @@ export async function addGranteesToAct(
         undefined,
         requestOptions,
       )
+
+  if (!beeCompatible && actResult.reference.length === 64) {
+    // Encrypted history requires 64-byte refs everywhere (entries + forks).
+    actResult = await uploadEncryptedDataWithSigning(
+      context,
+      newActJson,
+      undefined,
+      options,
+      undefined,
+      requestOptions,
+    )
+  }
 
   // Upload updated grantee list
   const encryptedGranteeList = serializeAndEncryptGranteeList(
@@ -544,10 +574,14 @@ export async function addGranteesToAct(
   )
 
   // Save history tree bottom-up using Bee's actual returned references
+  const encryptHistory = !beeCompatible
+  if (encryptHistory) {
+    normalizeEncryptedMantarayRefSize(historyManifest)
+  }
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = beeCompatible
+      const result = !encryptHistory
         ? await uploadDataWithSigning(
             context,
             data,
@@ -718,7 +752,7 @@ export async function revokeGranteesFromAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const actResult = beeCompatible
+  let actResult = beeCompatible
     ? await uploadDataWithSigning(
         context,
         newActJson,
@@ -734,6 +768,18 @@ export async function revokeGranteesFromAct(
         undefined,
         requestOptions,
       )
+
+  if (!beeCompatible && actResult.reference.length === 64) {
+    // Encrypted history requires 64-byte refs everywhere (entries + forks).
+    actResult = await uploadEncryptedDataWithSigning(
+      context,
+      newActJson,
+      undefined,
+      options,
+      undefined,
+      requestOptions,
+    )
+  }
 
   // Upload updated grantee list
   const encryptedGranteeList = serializeAndEncryptGranteeList(
@@ -759,10 +805,14 @@ export async function revokeGranteesFromAct(
   )
 
   // Save history tree bottom-up using Bee's actual returned references
+  const encryptHistory = !beeCompatible
+  if (encryptHistory) {
+    normalizeEncryptedMantarayRefSize(historyManifest)
+  }
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = beeCompatible
+      const result = !encryptHistory
         ? await uploadDataWithSigning(
             context,
             data,
