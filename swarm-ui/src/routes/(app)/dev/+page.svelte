@@ -195,7 +195,7 @@ Check console logs for details:
 					<CopyButton text="http://localhost:11633" />
 				</Horizontal>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
-					<StatusDot endpoint="http://localhost:9545" />
+					<StatusDot endpoint="http://localhost:9545" method="json-rpc" />
 					<Typography variant="small" font="mono">Blockchain RPC:</Typography>
 					<a href="http://localhost:9545" target="_blank" rel="noopener">
 						<Typography variant="small" font="mono" style="color: var(--colors-link);"
