@@ -11,6 +11,7 @@
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { syncStore } from '$lib/stores/sync.svelte'
 	import Tabs from './tabs.svelte'
+	import CopyButton from './copy-button.svelte'
 	import routes from '$lib/routes'
 
 	// Tab state
@@ -130,10 +131,6 @@ Check console logs for details:
 			buying = false
 		}
 	}
-
-	async function copyToClipboard(text: string) {
-		await navigator.clipboard.writeText(text)
-	}
 </script>
 
 <Vertical
@@ -183,11 +180,7 @@ Check console logs for details:
 							>http://localhost:1633</Typography
 						>
 					</a>
-					<Button
-						variant="ghost"
-						dimension="small"
-						onclick={() => copyToClipboard('http://localhost:1633')}>Copy</Button
-					>
+					<CopyButton text="http://localhost:1633" />
 				</Horizontal>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
 					<Typography variant="small" font="mono">Worker API:</Typography>
@@ -196,11 +189,7 @@ Check console logs for details:
 							>http://localhost:11633</Typography
 						>
 					</a>
-					<Button
-						variant="ghost"
-						dimension="small"
-						onclick={() => copyToClipboard('http://localhost:11633')}>Copy</Button
-					>
+					<CopyButton text="http://localhost:11633" />
 				</Horizontal>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
 					<Typography variant="small" font="mono">Blockchain RPC:</Typography>
@@ -209,11 +198,7 @@ Check console logs for details:
 							>http://localhost:9545</Typography
 						>
 					</a>
-					<Button
-						variant="ghost"
-						dimension="small"
-						onclick={() => copyToClipboard('http://localhost:9545')}>Copy</Button
-					>
+					<CopyButton text="http://localhost:9545" />
 				</Horizontal>
 			</Vertical>
 
@@ -228,9 +213,7 @@ Check console logs for details:
 							>localhost:3000 (demo)</Typography
 						>
 					</a>
-					<Button variant="ghost" dimension="small" onclick={() => copyToClipboard(connectUrl)}
-						>Copy URL</Button
-					>
+					<CopyButton text={connectUrl} />
 				</Horizontal>
 			</Vertical>
 		</Vertical>
@@ -273,9 +256,7 @@ Check console logs for details:
 							<Typography font="mono" variant="small" style="word-break: break-all;"
 								>{batchId}</Typography
 							>
-							<Button variant="ghost" dimension="small" onclick={() => copyToClipboard(batchId)}
-								>Copy</Button
-							>
+							<CopyButton text={batchId} />
 						</Horizontal>
 					</Vertical>
 
@@ -284,22 +265,14 @@ Check console logs for details:
 							<Typography variant="small" style="color: var(--colors-medium);">Amount</Typography>
 							<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
 								<Typography font="mono" variant="small">{stampAmount}</Typography>
-								<Button
-									variant="ghost"
-									dimension="small"
-									onclick={() => copyToClipboard(stampAmount)}>Copy</Button
-								>
+								<CopyButton text={stampAmount} />
 							</Horizontal>
 						</Vertical>
 						<Vertical --vertical-gap="var(--half-padding)">
 							<Typography variant="small" style="color: var(--colors-medium);">Depth</Typography>
 							<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
 								<Typography font="mono" variant="small">{stampDepth}</Typography>
-								<Button
-									variant="ghost"
-									dimension="small"
-									onclick={() => copyToClipboard(stampDepth)}>Copy</Button
-								>
+								<CopyButton text={stampDepth} />
 							</Horizontal>
 						</Vertical>
 					</Horizontal>
@@ -312,11 +285,7 @@ Check console logs for details:
 							<Typography font="mono" variant="small" style="word-break: break-all;"
 								>{selectedSigner}</Typography
 							>
-							<Button
-								variant="ghost"
-								dimension="small"
-								onclick={() => copyToClipboard(selectedSigner)}>Copy</Button
-							>
+							<CopyButton text={selectedSigner} />
 						</Horizontal>
 					</Vertical>
 
@@ -326,9 +295,7 @@ Check console logs for details:
 							<Typography font="mono" variant="small" style="word-break: break-all;"
 								>{txHash}</Typography
 							>
-							<Button variant="ghost" dimension="small" onclick={() => copyToClipboard(txHash)}
-								>Copy</Button
-							>
+							<CopyButton text={txHash} />
 						</Horizontal>
 					</Vertical>
 
@@ -336,8 +303,7 @@ Check console logs for details:
 						variant="small"
 						style="color: var(--colors-medium); margin-top: var(--half-padding);"
 					>
-						Note: Wait ~30s for stamp to become usable. Use the signer key above with
-						Stamper.fromBlank(signerKey, batchId, depth) for client-side stamping.
+						Note: Wait ~30s for stamp to become usable.
 					</Typography>
 				</Vertical>
 			{/if}
