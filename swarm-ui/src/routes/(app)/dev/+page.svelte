@@ -1,5 +1,6 @@
 <script lang="ts">
 	import { resolve } from '$app/paths'
+	import { goto } from '$app/navigation'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
 	import Select from '$lib/components/ui/select/select.svelte'
@@ -9,6 +10,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { syncStore } from '$lib/stores/sync.svelte'
 	import Tabs from './tabs.svelte'
 	import CopyButton from './copy-button.svelte'
@@ -132,6 +134,13 @@ Check console logs for details:
 			buying = false
 		}
 	}
+
+	function clearAllData() {
+		accountsStore.clear()
+		identitiesStore.clear()
+		connectedAppsStore.clear()
+		postageStampsStore.clear()
+	}
 </script>
 
 <Vertical
@@ -144,34 +153,11 @@ Check console logs for details:
 
 	<!-- Overview Tab -->
 	{#if activeTab === 'overview'}
+		{@const accountCount = accountsStore.accounts.length}
+		{@const identityCount = identitiesStore.identities.length}
+		{@const connectionCount = connectedAppsStore.apps.length}
+		{@const stampCount = postageStampsStore.stamps.length}
 		<Vertical --vertical-gap="var(--padding)">
-			<Typography variant="small">
-				Development utilities for testing Swarm Identity features with a local Bee cluster (FDP
-				Play).
-			</Typography>
-
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Typography variant="h4">Quick Start</Typography>
-				<Typography variant="small" font="mono"
-					>1. Start local Bee cluster: pnpm dev:bee:detach</Typography
-				>
-				<Typography variant="small" font="mono">2. Buy a postage stamp in the Stamps tab</Typography
-				>
-				<Typography variant="small" font="mono">3. Use the stamp for uploads and testing</Typography
-				>
-			</Vertical>
-
-			<Vertical --vertical-gap="var(--half-padding)">
-				<Typography variant="h4">Available Tools</Typography>
-				<Typography variant="small">
-					<strong>Stamps</strong> - Buy postage stamps from the local Bee node with pre-funded signer
-					keys.
-				</Typography>
-				<Typography variant="small">
-					<strong>Sync</strong> - Manually trigger account sync to test postage stamp utilization tracking.
-				</Typography>
-			</Vertical>
-
 			<Vertical --vertical-gap="var(--half-padding)">
 				<Typography variant="h4">Local Bee Endpoints</Typography>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
@@ -220,6 +206,15 @@ Check console logs for details:
 					</a>
 					<CopyButton text={connectUrl} />
 				</Horizontal>
+			</Vertical>
+
+			<Vertical --vertical-gap="var(--half-padding)" --vertical-align-items="start">
+				<Typography variant="h4">Local Data</Typography>
+				<Typography>
+					{accountCount} accounts, {identityCount} identities, {connectionCount} connections, {stampCount}
+					stamps
+				</Typography>
+				<Button variant="secondary" danger onclick={clearAllData}>Clear All Data</Button>
 			</Vertical>
 		</Vertical>
 	{/if}
