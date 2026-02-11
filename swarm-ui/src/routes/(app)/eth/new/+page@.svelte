@@ -1,15 +1,17 @@
 <script lang="ts">
 	import { goto } from '$app/navigation'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Button from '$lib/components/ui/button.svelte'
 	import Input from '$lib/components/ui/input/input.svelte'
+	import Select from '$lib/components/ui/select/select.svelte'
 	import WorkflowAutomation from 'carbon-icons-svelte/lib/WorkflowAutomation.svelte'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
+	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import routes from '$lib/routes'
 	import { resolve } from '$app/paths'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
+	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import GenerateSeedModal from '$lib/components/generate-seed-modal.svelte'
@@ -30,12 +32,19 @@
 	import { onMount } from 'svelte'
 	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
 
-	let showTooltip = $state(false)
+	let showTypeTooltip = $state(false)
+	let showSeedTooltip = $state(false)
 	let showSeedModal = $state(false)
 	let accountName = $state('Ethereum')
+	let accountType = $state('local')
 	let secretSeed = $state('')
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
+
+	const accountTypeItems = [
+		{ value: 'local', label: 'Local' },
+		{ value: 'synced', label: 'Synced' },
+	]
 
 	onMount(() => {
 		const accountNameIsTaken = accountsStore.accounts.some(
@@ -134,28 +143,65 @@
 	<Confirmation authenticationType="ethereum" />
 {:else}
 	<CreationLayout
-		title="Create account with Ethereum"
-		description="Create a new Swarm ID account using an Ethereum wallet"
+		title="Sign up with Ethereum"
+		description="Create a Swarm ID account using your Ethereum wallet"
 		onClose={() =>
 			sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">
-				<!-- Row 1 -->
-				<Vertical --vertical-gap="var(--quarter-padding)">
-					<Horizontal --horizontal-gap="var(--half-padding)">
-						<Typography>Account name</Typography>
-					</Horizontal>
-					<Input
-						variant="outline"
-						dimension="compact"
-						name="account-name"
-						bind:value={accountName}
-						disabled={isProcessing}
-					/>
-				</Vertical>
+				<div class="form-row">
+					<div class="form-field account-name">
+						<Input
+							variant="outline"
+							dimension="compact"
+							name="account-name"
+							bind:value={accountName}
+							placeholder="Enter account name"
+							disabled={isProcessing}
+							label="Account name"
+						/>
+					</div>
+					<div class="form-field account-type">
+						<Select
+							variant="outline"
+							dimension="compact"
+							label="Account type"
+							bind:value={accountType}
+							items={accountTypeItems}
+						/>
+					</div>
+					<div class="info-button">
+						<Tooltip
+							show={showTypeTooltip}
+							position="bottom"
+							variant="small"
+							color="dark"
+							maxWidth="279px"
+						>
+							<Button
+								dimension="compact"
+								variant="ghost"
+								onmouseenter={() => (showTypeTooltip = true)}
+								onmouseleave={() => (showTypeTooltip = false)}
+								onclick={(e: MouseEvent) => {
+									e.stopPropagation()
+									showTypeTooltip = !showTypeTooltip
+								}}
+							>
+								<Information size={20} />
+							</Button>
+							{#snippet helperText()}
+								Local accounts are free and faster to set up but are limited to viewing content on
+								this device. Synced accounts enable uploading data and syncing across devices but
+								require purchasing a Swarm postage stamp. <strong
+									>Not sure yet? You can always upgrade from Local to Synced later.</strong
+								>
+							{/snippet}
+						</Tooltip>
+					</div>
+				</div>
 
-				<!-- Row 2 -->
 				<Vertical --vertical-gap="var(--quarter-padding)">
 					<Typography>Secret seed</Typography>
 					<Horizontal --horizontal-gap="var(--half-padding)">
@@ -183,7 +229,7 @@
 					{:else}
 						<Typography variant="small" class="accent"
 							>Generate one with the button above on the right or use your own. <Tooltip
-								show={showTooltip}
+								show={showSeedTooltip}
 								position="top"
 								variant="small"
 								color="dark"
@@ -192,11 +238,11 @@
 								<!-- svelte-ignore a11y_invalid_attribute -->
 								<a
 									href="#"
-									onmouseenter={() => (showTooltip = true)}
-									onmouseleave={() => (showTooltip = false)}
+									onmouseenter={() => (showSeedTooltip = true)}
+									onmouseleave={() => (showSeedTooltip = false)}
 									onclick={(e: MouseEvent) => {
 										e.stopPropagation()
-										showTooltip = !showTooltip
+										showSeedTooltip = !showSeedTooltip
 									}}>Learn more</a
 								>
 								{#snippet helperText()}
@@ -229,10 +275,17 @@
 
 		{#snippet buttonContent()}
 			<Vertical --vertical-gap="var(--half-padding)">
-				<Button dimension="compact" onclick={handleConfirm} disabled={isFormDisabled}
-					>{isProcessing ? 'Processing...' : 'Confirm with wallet'}
-					{#if !isProcessing}<ArrowRight />{/if}</Button
+				<Button
+					dimension="compact"
+					onclick={handleConfirm}
+					disabled={isFormDisabled}
+					class="mobile-full-width"
 				>
+					{isProcessing ? 'Processing...' : 'Confirm with wallet'}
+					<span class="mobile-only"
+						>{#if !isProcessing}<ArrowRight size={20} />{/if}</span
+					>
+				</Button>
 				{#if !isFormDisabled}
 					<Typography variant="small"
 						>For security, use a fresh Ethereum wallet without existing onchain activity.</Typography
@@ -246,7 +299,50 @@
 <GenerateSeedModal bind:open={showSeedModal} onUseSeed={(seed) => (secretSeed = seed)} />
 
 <style>
+	.form-row {
+		display: flex;
+		gap: var(--half-padding);
+		align-items: flex-end;
+	}
+
+	.form-field {
+		flex: 1;
+		min-width: 0;
+	}
+
+	.info-button {
+		flex-shrink: 0;
+	}
+
 	.secret-seed-input :global(.error-message) {
 		display: none;
+	}
+
+	.mobile-only {
+		display: none;
+	}
+
+	@media screen and (max-width: 640px) {
+		.form-row {
+			flex-wrap: wrap;
+		}
+
+		.account-name {
+			width: 100%;
+			flex: none;
+		}
+
+		.account-type {
+			flex: 1;
+		}
+
+		.mobile-only {
+			display: inline-flex;
+		}
+
+		:global(.mobile-full-width) {
+			width: 100%;
+			justify-content: center;
+		}
 	}
 </style>
