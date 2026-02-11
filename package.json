@@ -6,6 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n ui,demo -c blue,green \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
+    "dev:bee": "fdp-play start -w 1",
+    "dev:bee:detach": "fdp-play start -w 1 --detach",
+    "dev:bee:stop": "fdp-play stop",
+    "dev:bee:logs": "fdp-play logs queen --follow",
+    "dev:bee:fresh": "fdp-play start -w 1 --fresh --pull",
     "dev:demo": "serve demo -l 3000",
     "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
     "dev:swarm-ui": "pnpm --filter swarm-identity dev",
@@ -24,6 +29,7 @@
     "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all"
   },
   "devDependencies": {
+    "@fairdatasociety/fdp-play": "^3.3.0",
     "concurrently": "^9.1.2",
     "serve": "^14.2.4"
   },

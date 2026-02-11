@@ -6,8 +6,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **Swarm Identity Management** - A web-based identity and key management solution for decentralized applications on the Swarm network. This project implements a trusted domain with iframe-based architecture to manage user identities, keystores, and application permissions.
 
-This codebase was forked from Kalkul (a financial portfolio app), so you may see references to Kalkul in the code - these are leftovers and should be replaced with Swarm Identity references as development progresses.
-
 ### Key Architecture (from proposal.md)
 
 **Identity System:**
@@ -63,11 +61,6 @@ pnpm test               # Run all tests
 pnpm test:unit          # Run unit tests (Vitest)
 pnpm test:ct            # Run component tests (Playwright)
 pnpm test:integration   # Run e2e tests (Playwright)
-
-# Database (if using Supabase)
-pnpm supabase start     # Start local Supabase instance
-pnpm supabase stop      # Stop local Supabase
-pnpm supabase db reset  # Reset database and apply migrations
 ```
 
 ## Project Structure
@@ -82,8 +75,6 @@ src/
 │   ├── routes.ts      # Route definitions
 │   └── types.ts       # TypeScript type definitions
 ├── routes/            # SvelteKit routes (file-based routing)
-
-scripts/               # Utility scripts
 ```
 
 ## Important Patterns
@@ -101,9 +92,7 @@ This project uses Svelte 5 with runes for reactive state management:
 - TypeScript strict mode is enabled
 - Always run `pnpm check` before committing
 - **CRITICAL: Never use `null` in your code - always use `undefined` instead for optional/missing values**
-  - Exceptions where `null` is allowed:
-    - When `null` comes from external libraries or APIs (e.g., DOM methods that return `null`)
-    - In Supabase/SQL-related data where `null` translates to the SQL NULL type
+  - Exception: When `null` comes from external libraries or APIs (e.g., DOM methods that return `null`)
   - When checking for missing values, use `!value` or `value === undefined`, not `value === null`
   - **ENFORCEMENT**: Before any file edit, scan your changes for the literal `null` and replace with `undefined`
   - Return types should be `T | undefined`, never `T | null`
@@ -228,6 +217,24 @@ This project uses Svelte 5 with runes for reactive state management:
 - **Gateway node**: Remote access (may not be fully trusted)
 - **Bee in browser**: WASM implementation (experimental)
 
+## Developer Tools (/dev route)
+
+The `/dev` route provides development utilities for testing with local Bee clusters (FDP Play):
+
+- **Overview**: Quick start guide and local Bee endpoint links
+- **Stamps**: Buy postage stamps from the local Bee node with pre-funded signer keys
+- **Sync**: Manually trigger account sync to test postage stamp utilization tracking
+
+### Local Bee Cluster (FDP Play)
+
+Run from the monorepo root:
+
+```bash
+pnpm dev:bee:detach    # Start cluster (queen + 1 worker)
+pnpm dev:bee:logs      # View logs
+pnpm dev:bee:stop      # Stop cluster
+```
+
 ## Related Documentation
 
 - `docs/proposal.md`: Full PoC proposal with user flows and architecture decisions
@@ -238,4 +245,3 @@ This project uses Svelte 5 with runes for reactive state management:
 
 - Use conventional commits (`feat:`, `fix:`, `docs:`, etc.)
 - Run `pnpm check` before committing
-- When replacing Kalkul references, use "Swarm Identity" or appropriate identity management terminology

@@ -114,6 +114,77 @@ pnpm dev:demo        # Demo on port 3000
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
 ```
 
+### Local Bee Cluster (FDP Play)
+
+For local development with postage stamps and uploads, use FDP Play to run a local Bee cluster with blockchain. Requires Docker.
+
+```bash
+# Start cluster (queen + 1 worker node)
+pnpm dev:bee:detach
+
+# View logs
+pnpm dev:bee:logs
+
+# Stop cluster
+pnpm dev:bee:stop
+
+# Fresh start (pull latest images, purge data)
+pnpm dev:bee:fresh
+```
+
+**Endpoints:**
+
+| Service | URL |
+|---------|-----|
+| Queen Bee API | `http://localhost:1633` |
+| Worker 1 API | `http://localhost:11633` |
+| Blockchain RPC | `http://localhost:9545` |
+
+**Buying a Postage Stamp:**
+
+The easiest way is to use the Developer Tools page in the Identity UI:
+
+1. Navigate to http://localhost:5174/dev
+2. Go to the **Stamps** tab
+3. Click **Buy Stamp** with the default settings
+
+Or use the Bee API directly:
+
+```bash
+# Buy stamp (amount=10000000, depth=17)
+curl -X POST "http://localhost:1633/stamps/10000000/17"
+
+# Wait ~30 seconds, then verify it's usable:
+curl "http://localhost:1633/stamps/<batchID>"
+```
+
+**Client-Side Stamp Signing:**
+
+Stamps bought via the API are owned by the queen node. Use the queen's private key for client-side signing:
+
+```typescript
+import { Stamper } from '@ethersphere/bee-js'
+
+const queenKey = '566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9'
+const stamper = Stamper.fromBlank(queenKey, batchId, depth)
+const envelope = stamper.stamp(chunk)
+```
+
+**Known Keys:**
+
+| Node | Private Key | Address |
+|------|-------------|---------|
+| Queen | `566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9` | `0x26234a2ad3ba8b398a762f279b792cfacd536a3f` |
+| Worker 1 | `195cf6324303f6941ad119d0a1d2e862d810078e1370b8d205552a543ff40aab` | - |
+
+### Developer Tools (/dev route)
+
+The Identity UI includes a Developer Tools page at http://localhost:5174/dev with utilities for local development:
+
+- **Overview**: Quick start guide and local Bee endpoint links with copy buttons
+- **Stamps**: Buy postage stamps from the local Bee node using pre-funded signer keys
+- **Sync**: Manually trigger account sync to test postage stamp utilization tracking
+
 ### Testing with Real Domains (SSH Tunnel)
 
 To test storage partitioning behavior with real TLS certificates (as in production), you can use SSH tunnels to a VPS with nginx.
