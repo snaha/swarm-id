@@ -12,6 +12,7 @@
 	import { syncStore } from '$lib/stores/sync.svelte'
 	import Tabs from './tabs.svelte'
 	import CopyButton from './copy-button.svelte'
+	import StatusDot from './status-dot.svelte'
 	import routes from '$lib/routes'
 
 	// Tab state
@@ -174,6 +175,7 @@ Check console logs for details:
 			<Vertical --vertical-gap="var(--half-padding)">
 				<Typography variant="h4">Local Bee Endpoints</Typography>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+					<StatusDot endpoint="http://localhost:1633" />
 					<Typography variant="small" font="mono">Queen API:</Typography>
 					<a href="http://localhost:1633" target="_blank" rel="noopener">
 						<Typography variant="small" font="mono" style="color: var(--colors-link);"
@@ -183,6 +185,7 @@ Check console logs for details:
 					<CopyButton text="http://localhost:1633" />
 				</Horizontal>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+					<StatusDot endpoint="http://localhost:11633" />
 					<Typography variant="small" font="mono">Worker API:</Typography>
 					<a href="http://localhost:11633" target="_blank" rel="noopener">
 						<Typography variant="small" font="mono" style="color: var(--colors-link);"
@@ -192,6 +195,7 @@ Check console logs for details:
 					<CopyButton text="http://localhost:11633" />
 				</Horizontal>
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+					<StatusDot endpoint="http://localhost:9545" />
 					<Typography variant="small" font="mono">Blockchain RPC:</Typography>
 					<a href="http://localhost:9545" target="_blank" rel="noopener">
 						<Typography variant="small" font="mono" style="color: var(--colors-link);"
@@ -207,6 +211,7 @@ Check console logs for details:
 				<Typography variant="small">Test the connect flow with the demo app:</Typography>
 				{@const connectUrl = `${resolve(routes.CONNECT)}?origin=${encodeURIComponent(demoAppOrigin)}`}
 				<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+					<StatusDot endpoint={demoAppOrigin} />
 					<!-- eslint-disable-next-line svelte/no-navigation-without-resolve -- template literal with resolve() -->
 					<a href={connectUrl}>
 						<Typography variant="small" font="mono" style="color: var(--colors-link);"
@@ -224,8 +229,7 @@ Check console logs for details:
 		<Vertical --vertical-gap="var(--padding)">
 			<Typography variant="h3">Buy Postage Stamp</Typography>
 			<Typography variant="small">
-				Buy a stamp from the local Bee node. The stamp is owned by the node's key (queen). Select a
-				signer key for client-side stamping with Stamper.fromBlank().
+				Buy a postage stamp on the local blockchain for testing uploads.
 			</Typography>
 
 			<Vertical --vertical-gap="var(--half-padding)">
