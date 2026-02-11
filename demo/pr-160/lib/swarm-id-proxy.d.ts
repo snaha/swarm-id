@@ -157,6 +157,7 @@ export declare class SwarmIdProxy {
     private handleCheckAuth;
     private handleGetConnectionInfo;
     private handleIsConnected;
+    private handleGetNodeInfo;
     private handleDisconnect;
     private handleRequestAuth;
     /**
@@ -189,6 +190,11 @@ export declare class SwarmIdProxy {
     private handleDownloadChunk;
     private handleGsocMine;
     private handleGsocSend;
+    private handleActUploadData;
+    private handleActDownloadData;
+    private handleActAddGrantees;
+    private handleActRevokeGrantees;
+    private handleActGetGrantees;
 }
 /**
  * Initialize the proxy (called from HTML page)

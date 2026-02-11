@@ -20,6 +20,14 @@ export declare const UploadOptionsSchema: z.ZodOptional<z.ZodObject<{
     deferred: z.ZodOptional<z.ZodBoolean>;
     redundancyLevel: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>>;
+export declare const ActUploadOptionsSchema: z.ZodOptional<z.ZodObject<{
+    pin: z.ZodOptional<z.ZodBoolean>;
+    encrypt: z.ZodOptional<z.ZodBoolean>;
+    tag: z.ZodOptional<z.ZodNumber>;
+    deferred: z.ZodOptional<z.ZodBoolean>;
+    redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    beeCompatible: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>>;
 export declare const RequestOptionsSchema: z.ZodOptional<z.ZodObject<{
     timeout: z.ZodOptional<z.ZodNumber>;
     headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
@@ -47,6 +55,9 @@ export interface UploadOptions {
 }
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>;
 export type DownloadOptions = z.infer<typeof DownloadOptionsSchema>;
+export interface ActUploadOptions extends UploadOptions {
+    beeCompatible?: boolean;
+}
 export declare const UploadResultSchema: z.ZodObject<{
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
@@ -282,6 +293,10 @@ export declare const IsConnectedMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"isConnected">;
     requestId: z.ZodString;
 }, z.core.$strip>;
+export declare const GetNodeInfoMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfo">;
+    requestId: z.ZodString;
+}, z.core.$strip>;
 export declare const GsocMineMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"gsocMine">;
     requestId: z.ZodString;
@@ -302,6 +317,72 @@ export declare const GsocSendMessageSchema: z.ZodObject<{
         deferred: z.ZodOptional<z.ZodBoolean>;
         redundancyLevel: z.ZodOptional<z.ZodNumber>;
     }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const ActUploadDataMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actUploadData">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    grantees: z.ZodArray<z.ZodString>;
+    options: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+        beeCompatible: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    enableProgress: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>;
+export declare const ActDownloadDataMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actDownloadData">;
+    requestId: z.ZodString;
+    encryptedReference: z.ZodString;
+    historyReference: z.ZodString;
+    publisherPubKey: z.ZodString;
+    timestamp: z.ZodOptional<z.ZodNumber>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const ActAddGranteesMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actAddGrantees">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    grantees: z.ZodArray<z.ZodString>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const ActRevokeGranteesMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actRevokeGrantees">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    encryptedReference: z.ZodString;
+    revokeGrantees: z.ZodArray<z.ZodString>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const ActGetGranteesMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actGetGrantees">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
     requestOptions: z.ZodOptional<z.ZodObject<{
         timeout: z.ZodOptional<z.ZodNumber>;
         headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
@@ -458,6 +539,9 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     type: z.ZodLiteral<"isConnected">;
     requestId: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfo">;
+    requestId: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"gsocMine">;
     requestId: z.ZodString;
     targetOverlay: z.ZodString;
@@ -481,6 +565,67 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
         headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actUploadData">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    grantees: z.ZodArray<z.ZodString>;
+    options: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+        beeCompatible: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+    enableProgress: z.ZodOptional<z.ZodBoolean>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actDownloadData">;
+    requestId: z.ZodString;
+    encryptedReference: z.ZodString;
+    historyReference: z.ZodString;
+    publisherPubKey: z.ZodString;
+    timestamp: z.ZodOptional<z.ZodNumber>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actAddGrantees">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    grantees: z.ZodArray<z.ZodString>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actRevokeGrantees">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    encryptedReference: z.ZodString;
+    revokeGrantees: z.ZodArray<z.ZodString>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actGetGrantees">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
 }, z.core.$strip>], "type">;
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>;
 export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>;
@@ -494,8 +639,14 @@ export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>;
 export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>;
 export type GetConnectionInfoMessage = z.infer<typeof GetConnectionInfoMessageSchema>;
 export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>;
+export type GetNodeInfoMessage = z.infer<typeof GetNodeInfoMessageSchema>;
 export type GsocMineMessage = z.infer<typeof GsocMineMessageSchema>;
 export type GsocSendMessage = z.infer<typeof GsocSendMessageSchema>;
+export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>;
+export type ActDownloadDataMessage = z.infer<typeof ActDownloadDataMessageSchema>;
+export type ActAddGranteesMessage = z.infer<typeof ActAddGranteesMessageSchema>;
+export type ActRevokeGranteesMessage = z.infer<typeof ActRevokeGranteesMessageSchema>;
+export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>;
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>;
 export declare const ProxyReadyMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"proxyReady">;
@@ -585,6 +736,13 @@ export declare const IsConnectedResponseMessageSchema: z.ZodObject<{
     requestId: z.ZodString;
     connected: z.ZodBoolean;
 }, z.core.$strip>;
+export declare const GetNodeInfoResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfoResponse">;
+    requestId: z.ZodString;
+    beeMode: z.ZodString;
+    chequebookEnabled: z.ZodBoolean;
+    swapEnabled: z.ZodBoolean;
+}, z.core.$strip>;
 export declare const GsocMineResponseMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"gsocMineResponse">;
     requestId: z.ZodString;
@@ -595,6 +753,41 @@ export declare const GsocSendResponseMessageSchema: z.ZodObject<{
     requestId: z.ZodString;
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+export declare const ActUploadDataResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actUploadDataResponse">;
+    requestId: z.ZodString;
+    encryptedReference: z.ZodString;
+    historyReference: z.ZodString;
+    granteeListReference: z.ZodString;
+    publisherPubKey: z.ZodString;
+    actReference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+export declare const ActDownloadDataResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actDownloadDataResponse">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+}, z.core.$strip>;
+export declare const ActAddGranteesResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actAddGranteesResponse">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    granteeListReference: z.ZodString;
+    actReference: z.ZodString;
+}, z.core.$strip>;
+export declare const ActRevokeGranteesResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actRevokeGranteesResponse">;
+    requestId: z.ZodString;
+    encryptedReference: z.ZodString;
+    historyReference: z.ZodString;
+    granteeListReference: z.ZodString;
+    actReference: z.ZodString;
+}, z.core.$strip>;
+export declare const ActGetGranteesResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"actGetGranteesResponse">;
+    requestId: z.ZodString;
+    grantees: z.ZodArray<z.ZodString>;
 }, z.core.$strip>;
 export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"proxyReady">;
@@ -669,6 +862,12 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     requestId: z.ZodString;
     connected: z.ZodBoolean;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"getNodeInfoResponse">;
+    requestId: z.ZodString;
+    beeMode: z.ZodString;
+    chequebookEnabled: z.ZodBoolean;
+    swapEnabled: z.ZodBoolean;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"gsocMineResponse">;
     requestId: z.ZodString;
     signer: z.ZodString;
@@ -677,6 +876,36 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     requestId: z.ZodString;
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actUploadDataResponse">;
+    requestId: z.ZodString;
+    encryptedReference: z.ZodString;
+    historyReference: z.ZodString;
+    granteeListReference: z.ZodString;
+    publisherPubKey: z.ZodString;
+    actReference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actDownloadDataResponse">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actAddGranteesResponse">;
+    requestId: z.ZodString;
+    historyReference: z.ZodString;
+    granteeListReference: z.ZodString;
+    actReference: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actRevokeGranteesResponse">;
+    requestId: z.ZodString;
+    encryptedReference: z.ZodString;
+    historyReference: z.ZodString;
+    granteeListReference: z.ZodString;
+    actReference: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"actGetGranteesResponse">;
+    requestId: z.ZodString;
+    grantees: z.ZodArray<z.ZodString>;
 }, z.core.$strip>], "type">;
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>;
 export type InitErrorMessage = z.infer<typeof InitErrorMessageSchema>;
@@ -694,8 +923,14 @@ export type ErrorMessage = z.infer<typeof ErrorMessageSchema>;
 export type ConnectionInfoResponseMessage = z.infer<typeof ConnectionInfoResponseMessageSchema>;
 export type ConnectResponseMessage = z.infer<typeof ConnectResponseMessageSchema>;
 export type IsConnectedResponseMessage = z.infer<typeof IsConnectedResponseMessageSchema>;
+export type GetNodeInfoResponseMessage = z.infer<typeof GetNodeInfoResponseMessageSchema>;
 export type GsocMineResponseMessage = z.infer<typeof GsocMineResponseMessageSchema>;
 export type GsocSendResponseMessage = z.infer<typeof GsocSendResponseMessageSchema>;
+export type ActUploadDataResponseMessage = z.infer<typeof ActUploadDataResponseMessageSchema>;
+export type ActDownloadDataResponseMessage = z.infer<typeof ActDownloadDataResponseMessageSchema>;
+export type ActAddGranteesResponseMessage = z.infer<typeof ActAddGranteesResponseMessageSchema>;
+export type ActRevokeGranteesResponseMessage = z.infer<typeof ActRevokeGranteesResponseMessageSchema>;
+export type ActGetGranteesResponseMessage = z.infer<typeof ActGetGranteesResponseMessageSchema>;
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>;
 export declare const AuthDataSchema: z.ZodObject<{
     secret: z.ZodString;
