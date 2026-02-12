@@ -22,8 +22,10 @@ import type {
   ActAddGranteesMessage,
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
+  GetPostageBatchMessage,
   AppMetadata,
   PostageStamp,
+  PostageBatch,
   ConnectedApp,
 } from "./types"
 import {
@@ -57,6 +59,7 @@ import {
   createAccountsStorageManager,
 } from "./utils/storage-managers"
 import { hexToUint8Array, uint8ArrayToHex } from "./utils/key-derivation"
+import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
@@ -590,6 +593,10 @@ export class SwarmIdProxy {
 
       case "actGetGrantees":
         await this.handleActGetGrantees(message, event)
+        break
+
+      case "getPostageBatch":
+        await this.handleGetPostageBatch(message, event)
         break
 
       default:
@@ -2470,6 +2477,68 @@ export class SwarmIdProxy {
         error instanceof Error ? error.message : "ACT get grantees failed",
       )
     }
+  }
+
+  private async handleGetPostageBatch(
+    message: GetPostageBatchMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    console.log("[Proxy] Get postage batch request")
+
+    const stamp = this.lookupPostageStampForApp()
+
+    if (!stamp) {
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "getPostageBatchResponse",
+            requestId: message.requestId,
+            postageBatch: undefined,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+      console.log("[Proxy] No postage stamp found for app")
+      return
+    }
+
+    // Fetch current price from Swarmscan to calculate TTL
+    let batchTTL: number | undefined = stamp.batchTTL
+    try {
+      const pricePerGBPerMonth = await fetchSwarmPrice()
+      batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
+      console.log("[Proxy] Calculated TTL:", batchTTL, "seconds")
+    } catch (error) {
+      console.warn("[Proxy] Failed to calculate TTL:", error)
+    }
+
+    // Map PostageStamp to public PostageBatch (exclude signerKey, accountId)
+    const postageBatch: PostageBatch = {
+      batchID: stamp.batchID.toHex(),
+      utilization: stamp.utilization,
+      usable: stamp.usable,
+      label: "", // PostageStamp doesn't store label
+      depth: stamp.depth,
+      amount: stamp.amount.toString(),
+      bucketDepth: stamp.bucketDepth,
+      blockNumber: stamp.blockNumber,
+      immutableFlag: stamp.immutableFlag,
+      exists: stamp.exists,
+      batchTTL,
+    }
+
+    if (event.source) {
+      ;(event.source as WindowProxy).postMessage(
+        {
+          type: "getPostageBatchResponse",
+          requestId: message.requestId,
+          postageBatch,
+        } satisfies IframeToParentMessage,
+        { targetOrigin: event.origin },
+      )
+    }
+
+    console.log("[Proxy] Postage batch returned:", postageBatch.batchID)
   }
 }
 

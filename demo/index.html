@@ -75,6 +75,49 @@
         color: #721c24;
       }
 
+      .collapsible {
+        cursor: pointer;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        user-select: none;
+      }
+
+      .collapsible .chevron {
+        transition: transform 0.2s;
+        font-size: 12px;
+      }
+
+      .collapsible.expanded .chevron {
+        transform: rotate(90deg);
+      }
+
+      .collapsible-content {
+        display: none;
+        margin-top: 10px;
+      }
+
+      .collapsible-content.expanded {
+        display: block;
+      }
+
+      .stamp-info {
+        display: grid;
+        grid-template-columns: 140px 1fr;
+        gap: 8px 12px;
+        font-size: 13px;
+      }
+
+      .stamp-info dt {
+        color: #666;
+        font-weight: 500;
+      }
+
+      .stamp-info dd {
+        font-family: "Courier New", monospace;
+        word-break: break-all;
+      }
+
       .button-container {
         display: flex;
         flex-direction: row;
@@ -193,6 +236,17 @@
         <div class="button-container">
           Iframe button:
 <div id="swarm-id-button" style="width: 200px; height: 40px;"></div>
+        </div>
+      </div>
+
+      <!-- Postage Stamp Section (Collapsible) -->
+      <div id="stamp-section" class="section" style="display: none;">
+        <h2 class="collapsible" id="stamp-toggle">
+          <span class="chevron">▶</span>
+          Postage Stamp
+        </h2>
+        <div id="stamp-content" class="collapsible-content">
+          <dl id="stamp-info" class="stamp-info"></dl>
         </div>
       </div>
 
@@ -319,7 +373,7 @@ Hello, Swarm!</textarea
     </div>
 
     <script type="module">
-      import { SwarmIdClient } from "/lib/swarm-id.esm.js";
+      import { SwarmIdClient, formatTTL } from "/lib/swarm-id.esm.js";
 
       // Logging
       const logContainer = document.getElementById("log");
@@ -332,6 +386,14 @@ Hello, Swarm!</textarea
         logContainer.scrollTop = logContainer.scrollHeight;
         console.log(`[${type}]`, message);
       }
+
+      // Collapsible toggle
+      document.getElementById("stamp-toggle").addEventListener("click", () => {
+        const toggle = document.getElementById("stamp-toggle")
+        const content = document.getElementById("stamp-content")
+        toggle.classList.toggle("expanded")
+        content.classList.toggle("expanded")
+      })
 
       // Auto-detect local vs production environment
       // Support ?idDomain= parameter for ngrok testing
@@ -395,6 +457,51 @@ Hello, Swarm!</textarea
         }
       }
 
+      async function updatePostageStampInfo() {
+        const section = document.getElementById("stamp-section")
+        const infoEl = document.getElementById("stamp-info")
+
+        try {
+          const batch = await client.getPostageBatch()
+
+          if (batch) {
+            section.style.display = "block"
+
+            // Format TTL as human-readable time
+            const ttlText = formatTTL(batch.batchTTL)
+
+            infoEl.innerHTML = `
+              <dt>Batch ID</dt>
+              <dd>${batch.batchID}</dd>
+              <dt>Utilization</dt>
+              <dd>${batch.utilization.toFixed(2)}%</dd>
+              <dt>Usable</dt>
+              <dd>${batch.usable ? "✓ Yes" : "✗ No"}</dd>
+              <dt>Depth</dt>
+              <dd>${batch.depth}</dd>
+              <dt>Bucket Depth</dt>
+              <dd>${batch.bucketDepth}</dd>
+              <dt>Amount</dt>
+              <dd>${batch.amount}</dd>
+              <dt>Block Number</dt>
+              <dd>${batch.blockNumber}</dd>
+              <dt>Immutable</dt>
+              <dd>${batch.immutableFlag ? "Yes" : "No"}</dd>
+              <dt>TTL</dt>
+              <dd>${ttlText}</dd>
+            `
+
+            log(`Postage stamp loaded: ${batch.batchID.slice(0, 16)}...`, "info")
+          } else {
+            section.style.display = "none"
+            log("No postage stamp configured", "info")
+          }
+        } catch (error) {
+          section.style.display = "none"
+          log(`Failed to get postage stamp: ${error.message}`, "warn")
+        }
+      }
+
       try {
         log("Starting client initialization...", "info");
         await client.initialize();
@@ -445,6 +552,9 @@ Hello, Swarm!</textarea
             actUploadBtn.disabled = true;
             actAddGranteesBtn.disabled = true;
           }
+
+          // Fetch and display postage stamp info
+          await updatePostageStampInfo()
         } else {
           statusEl.className = "status unauthenticated";
           statusEl.textContent = "✗ Status: Not authenticated";
@@ -454,6 +564,7 @@ Hello, Swarm!</textarea
           actDownloadBtn.disabled = true;
           actAddGranteesBtn.disabled = true;
           connectBtn.textContent = "Connect";
+          document.getElementById("stamp-section").style.display = "none"
         }
       }
 

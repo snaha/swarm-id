@@ -13,6 +13,7 @@ import type {
   IframeToParentMessage,
   AppMetadata,
   ButtonConfig,
+  PostageBatch,
 } from "./types"
 import {
   IframeToParentMessageSchema,
@@ -542,6 +543,50 @@ export class SwarmIdClient {
       authenticated: response.authenticated,
       origin: response.origin,
     }
+  }
+
+  /**
+   * Gets the current postage batch for the authenticated identity.
+   *
+   * Returns information about the postage stamp associated with the
+   * connected identity, including batch ID, utilization, depth, and TTL.
+   *
+   * @returns A promise resolving to the PostageBatch or undefined if none is configured
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * const batch = await client.getPostageBatch()
+   * if (batch) {
+   *   console.log('Batch ID:', batch.batchID)
+   *   console.log('Utilization:', batch.utilization)
+   *   console.log('Depth:', batch.depth)
+   *   console.log('TTL:', batch.batchTTL)
+   * } else {
+   *   console.log('No postage batch configured')
+   * }
+   * ```
+   */
+  async getPostageBatch(): Promise<PostageBatch | undefined> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "getPostageBatchResponse"
+      requestId: string
+      postageBatch?: PostageBatch
+      error?: string
+    }>({
+      type: "getPostageBatch",
+      requestId,
+    })
+
+    if (response.error) {
+      throw new Error(response.error)
+    }
+
+    return response.postageBatch
   }
 
   /**

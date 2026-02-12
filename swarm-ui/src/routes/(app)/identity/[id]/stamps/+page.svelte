@@ -17,7 +17,10 @@
 	import CopyButton from '$lib/components/copy-button.svelte'
 	import type { PostageStamp } from '$lib/types'
 	import { onMount } from 'svelte'
-	import { WarningAltFilled } from 'carbon-icons-svelte'
+	import { SvelteMap } from 'svelte/reactivity'
+	import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
+	import { getBlockTimestamp } from '$lib/utils/ttl'
+	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 	const BATCH_ID_PREVIEW_LENGTH = 8
 	const CHUNK_SIZE_BYTES = 4096
@@ -47,16 +50,42 @@
 	)
 
 	let pricePerGBPerMonth = $state<number | undefined>(undefined)
+	const blockTimestamps = new SvelteMap<number, number>()
 
-	onMount(() => {
-		fetch(SWARMSCAN_STATS_URL)
-			.then((res) => res.json())
-			.then((data: { pricePerGBPerMonth: number }) => {
-				pricePerGBPerMonth = data.pricePerGBPerMonth
-			})
-			.catch(() => {
-				// Silently fail — expiry date just won't render
-			})
+	async function fetchBlockTimestamp(blockNumber: number): Promise<number | undefined> {
+		if (blockTimestamps.has(blockNumber)) {
+			return blockTimestamps.get(blockNumber)
+		}
+
+		try {
+			const timestamp = await getBlockTimestamp(
+				networkSettingsStore.settings.gnosisRpcUrl,
+				blockNumber,
+			)
+			blockTimestamps.set(blockNumber, timestamp)
+			return timestamp
+		} catch {
+			return undefined
+		}
+	}
+
+	onMount(async () => {
+		// Fetch Swarmscan price
+		try {
+			const res = await fetch(SWARMSCAN_STATS_URL)
+			const data: { pricePerGBPerMonth: number } = await res.json()
+			pricePerGBPerMonth = data.pricePerGBPerMonth
+		} catch {
+			// Silently fail — expiry date just won't render
+		}
+
+		// Fetch block timestamps for stamps
+		const stamps = [accountStamp, identityStamp].filter(Boolean) as PostageStamp[]
+		for (const stamp of stamps) {
+			if (stamp.blockNumber > 0) {
+				fetchBlockTimestamp(stamp.blockNumber)
+			}
+		}
 	})
 
 	function formatBytes(bytes: number): string {
@@ -78,18 +107,36 @@
 		return batchId.toHex().slice(0, BATCH_ID_PREVIEW_LENGTH)
 	}
 
-	function formatExpiryDate(stamp: PostageStamp, price: number): string {
+	function formatExpiryDate(
+		stamp: PostageStamp,
+		price: number,
+		blockTimestamp: number | undefined,
+	): string {
 		const perChunkPerMonthCost = (price * PLUR_PER_BZZ) / CHUNKS_PER_GB
 		const durationMonths = stamp.amount / perChunkPerMonthCost
-		const durationMs = durationMonths * SECONDS_PER_MONTH * MS_PER_SECOND
-		return new Date(stamp.createdAt + durationMs).toLocaleDateString()
+		const durationSeconds = durationMonths * SECONDS_PER_MONTH
+
+		// Use block timestamp if available, otherwise fall back to createdAt
+		const startTimeMs =
+			blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
+
+		return new Date(startTimeMs + durationSeconds * MS_PER_SECOND).toLocaleDateString()
 	}
 
-	function isExpiringSoon(stamp: PostageStamp, price: number): boolean {
+	function isExpiringSoon(
+		stamp: PostageStamp,
+		price: number,
+		blockTimestamp: number | undefined,
+	): boolean {
 		const perChunkPerMonthCost = (price * PLUR_PER_BZZ) / CHUNKS_PER_GB
 		const durationMonths = stamp.amount / perChunkPerMonthCost
 		const totalLifetimeMs = durationMonths * SECONDS_PER_MONTH * MS_PER_SECOND
-		const expiryTimestamp = stamp.createdAt + totalLifetimeMs
+
+		// Use block timestamp if available, otherwise fall back to createdAt
+		const startTimeMs =
+			blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
+
+		const expiryTimestamp = startTimeMs + totalLifetimeMs
 		const remainingMs = expiryTimestamp - Date.now()
 		const oneMonthMs = SECONDS_PER_MONTH * MS_PER_SECOND
 
@@ -140,12 +187,13 @@
 			</Horizontal>
 
 			{#if pricePerGBPerMonth}
-				{@const expiringSoon = isExpiringSoon(stamp, pricePerGBPerMonth)}
+				{@const stampBlockTimestamp = blockTimestamps.get(stamp.blockNumber)}
+				{@const expiringSoon = isExpiringSoon(stamp, pricePerGBPerMonth, stampBlockTimestamp)}
 				<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
 					<Typography>Expiry date</Typography>
 					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
 						<Typography --typography-color={expiringSoon ? 'var(--colors-red)' : undefined}>
-							{formatExpiryDate(stamp, pricePerGBPerMonth)}
+							{formatExpiryDate(stamp, pricePerGBPerMonth, stampBlockTimestamp)}
 						</Typography>
 						{#if expiringSoon}
 							<Badge variant="error" dimension="small"

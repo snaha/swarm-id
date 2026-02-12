@@ -390,6 +390,11 @@ export const ActGetGranteesMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+export const GetPostageBatchMessageSchema = z.object({
+  type: z.literal("getPostageBatch"),
+  requestId: z.string(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -411,6 +416,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesMessageSchema,
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
+  GetPostageBatchMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -439,6 +445,9 @@ export type ActRevokeGranteesMessage = z.infer<
   typeof ActRevokeGranteesMessageSchema
 >
 export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
+export type GetPostageBatchMessage = z.infer<
+  typeof GetPostageBatchMessageSchema
+>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -613,6 +622,13 @@ export const ActGetGranteesResponseMessageSchema = z.object({
   grantees: z.array(z.string()),
 })
 
+export const GetPostageBatchResponseMessageSchema = z.object({
+  type: z.literal("getPostageBatchResponse"),
+  requestId: z.string(),
+  postageBatch: PostageBatchSchema.optional(),
+  error: z.string().optional(),
+})
+
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -638,6 +654,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesResponseMessageSchema,
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
+  GetPostageBatchResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -701,6 +718,9 @@ export type ActRevokeGranteesResponseMessage = z.infer<
 >
 export type ActGetGranteesResponseMessage = z.infer<
   typeof ActGetGranteesResponseMessageSchema
+>
+export type GetPostageBatchResponseMessage = z.infer<
+  typeof GetPostageBatchResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
