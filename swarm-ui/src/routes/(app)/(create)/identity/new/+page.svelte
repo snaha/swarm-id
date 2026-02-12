@@ -34,7 +34,7 @@
 	const isSyncedAccount = $derived.by(() => {
 		const account = sessionStore.data.account
 		if (!account) return false
-		return account.syncType === 'synced'
+		return 'syncType' in account && account.syncType === 'synced'
 	})
 
 	// Get account's postage stamps
@@ -125,6 +125,15 @@
 		// Set as current account and identity
 		sessionStore.setCurrentAccount(account.id.toHex())
 		sessionStore.setCurrentIdentity(identity.id)
+
+		// Synced accounts need a new stamp if "separate" is selected or no default stamp exists
+		if (
+			isSyncedAccount &&
+			(selectedStampOption === 'separate' || !account.defaultPostageStampBatchID)
+		) {
+			goto(resolve(routes.STAMPS_NEW))
+			return
+		}
 
 		// Navigate back to /connect or home
 		if (sessionStore.data.appOrigin) {
