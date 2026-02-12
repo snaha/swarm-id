@@ -155,6 +155,22 @@ Always use component properties first, only resort to custom CSS if the property
 <Button class="ghost-button">Click</Button>
 ```
 
-## Pre-commit
+## Pre-commit Requirements
 
-Run `pnpm check:all` in the relevant package before committing.
+**IMPORTANT**: Before committing any changes, you MUST run and pass:
+
+- `pnpm format` - Formats code with Prettier
+- `pnpm lint` - Checks code style and quality with ESLint and Prettier
+- `pnpm check` - Runs Svelte Kit sync and TypeScript type checking
+- `pnpm knip` - Finds unused files, dependencies, and exports
+
+**Quick check**: Use `pnpm check:all` to run all the above checks at once (used in CI).
+
+## Testing Best Practices
+
+- **Unit tests** (`*.test.ts`): Business logic, utilities, stores (Vitest)
+- **Component tests** (`*.ct.spec.ts`): Component behavior in real browsers (Playwright)
+- **E2E tests** (`tests/*.test.ts`): Full application workflows (Playwright)
+- Use hardcoded expected values instead of regex patterns in assertions
+- Test cross-browser compatibility for user interaction components
+- Run `pnpm check` before committing
