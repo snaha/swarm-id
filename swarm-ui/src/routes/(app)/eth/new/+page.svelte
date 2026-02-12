@@ -228,10 +228,17 @@
 		{/snippet}
 
 		{#snippet buttonContent()}
-			<Button dimension="compact" onclick={handleConfirm} disabled={isFormDisabled}
-				>{isProcessing ? 'Processing...' : 'Confirm with wallet'}
-				{#if !isProcessing}<ArrowRight />{/if}</Button
-			>
+			<Vertical --vertical-gap="var(--half-padding)">
+				<Button dimension="compact" onclick={handleConfirm} disabled={isFormDisabled}
+					>{isProcessing ? 'Processing...' : 'Confirm with wallet'}
+					{#if !isProcessing}<ArrowRight />{/if}</Button
+				>
+				{#if !isFormDisabled}
+					<Typography variant="small"
+						>For security, use a fresh Ethereum wallet without existing onchain activity.</Typography
+					>
+				{/if}
+			</Vertical>
 		{/snippet}
 	</CreationLayout>
 {/if}
