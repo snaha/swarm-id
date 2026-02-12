@@ -112,16 +112,11 @@
 	}
 
 	.content-area {
+		flex: 1;
 		max-width: 560px;
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
 		width: 100%;
-	}
-
-	@media screen and (max-width: 640px) {
-		.content-area {
-			flex: 1;
-		}
 	}
 </style>

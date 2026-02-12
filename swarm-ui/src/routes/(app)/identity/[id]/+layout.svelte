@@ -20,44 +20,27 @@
 	)
 </script>
 
-<div class="page-content">
-	<div class="content-area tab-container">
-		<ul>
-			{#each tabs as tab (tab.href)}
-				<li>
-					<Button
-						variant="ghost"
-						dimension="default"
-						active={currentPath === tab.href}
-						href={tab.href}
-					>
-						{tab.label}
-					</Button>
-				</li>
-			{/each}
-		</ul>
-		<div class="tab-content">
-			{@render children()}
-		</div>
+<div class="tab-container">
+	<ul>
+		{#each tabs as tab (tab.href)}
+			<li>
+				<Button
+					variant="ghost"
+					dimension="default"
+					active={currentPath === tab.href}
+					href={tab.href}
+				>
+					{tab.label}
+				</Button>
+			</li>
+		{/each}
+	</ul>
+	<div class="tab-content">
+		{@render children()}
 	</div>
 </div>
 
 <style>
-	.page-content {
-		flex: 1;
-		display: flex;
-		justify-content: center;
-		padding-top: var(--double-padding);
-		flex-direction: column;
-		justify-content: flex-start;
-		align-items: center;
-		gap: var(--double-padding);
-	}
-
-	.content-area {
-		max-width: 560px;
-	}
-
 	ul {
 		display: flex;
 		flex-direction: row;
@@ -101,6 +84,7 @@
 	}
 
 	.tab-container {
+		flex: 1;
 		display: flex;
 		flex-direction: column;
 		width: 100%;
