@@ -17,6 +17,7 @@
 	import Divider from '$lib/components/ui/divider.svelte'
 	import routes from '$lib/routes'
 	import { BatchId, EthAddress } from '@ethersphere/bee-js'
+	import { SvelteMap } from 'svelte/reactivity'
 
 	// Tab state
 	type Tab = 'overview' | 'stamps' | 'sync'
@@ -108,7 +109,7 @@
 	const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
 	const stampAssignments = $derived(
 		(() => {
-			const map = new Map<string, { account?: string; identity?: string }>()
+			const map = new SvelteMap<string, { account?: string; identity?: string }>()
 			for (const account of accountsStore.accounts) {
 				const batch = account.defaultPostageStampBatchID?.toHex()
 				if (batch) {
