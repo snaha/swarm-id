@@ -106,30 +106,30 @@
 			: [],
 	)
 	const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
-	const stampAssignments = $derived((() => {
-		const map = new Map<string, { account?: string; identity?: string }>()
-		for (const account of accountsStore.accounts) {
-			const batch = account.defaultPostageStampBatchID?.toHex()
-			if (batch) {
-				map.set(batch, { ...(map.get(batch) ?? {}), account: account.name })
+	const stampAssignments = $derived(
+		(() => {
+			const map = new Map<string, { account?: string; identity?: string }>()
+			for (const account of accountsStore.accounts) {
+				const batch = account.defaultPostageStampBatchID?.toHex()
+				if (batch) {
+					map.set(batch, { ...(map.get(batch) ?? {}), account: account.name })
+				}
 			}
-		}
-		for (const identity of identitiesStore.identities) {
-			const batch = identity.defaultPostageStampBatchID?.toHex()
-			if (batch) {
-				const existing = map.get(batch) ?? {}
-				const accountName =
-					existing.account ??
-					accountsStore.getAccount(identity.accountId)?.name
-				map.set(batch, {
-					...existing,
-					account: accountName,
-					identity: identity.name,
-				})
+			for (const identity of identitiesStore.identities) {
+				const batch = identity.defaultPostageStampBatchID?.toHex()
+				if (batch) {
+					const existing = map.get(batch) ?? {}
+					const accountName = existing.account ?? accountsStore.getAccount(identity.accountId)?.name
+					map.set(batch, {
+						...existing,
+						account: accountName,
+						identity: identity.name,
+					})
+				}
 			}
-		}
-		return map
-	})())
+			return map
+		})(),
+	)
 
 	$effect(() => {
 		if (stampOptions.length && !selectedStampId) {
@@ -507,7 +507,10 @@ Check console logs for details:
 						<Vertical
 							style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
 						>
-							<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+							<Horizontal
+								--horizontal-justify-content="space-between"
+								--horizontal-align-items="center"
+							>
 								<Typography font="mono">{stamp.batchID}</Typography>
 								<CopyButton text={stamp.batchID} />
 							</Horizontal>
@@ -535,8 +538,8 @@ Check console logs for details:
 
 			<Typography variant="h3">Assign Existing Stamp</Typography>
 			<Vertical --vertical-gap="var(--half-padding)">
-			<Select label="Stamp" items={stampOptions} bind:value={selectedStampId} />
-			<Select label="Account" items={accountOptions} bind:value={selectedAccountId} />
+				<Select label="Stamp" items={stampOptions} bind:value={selectedStampId} />
+				<Select label="Account" items={accountOptions} bind:value={selectedAccountId} />
 				<Select
 					label="Identity"
 					items={identityOptions}
