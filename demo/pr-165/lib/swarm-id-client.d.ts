@@ -501,7 +501,41 @@ export declare class SwarmIdClient {
      * ```
      */
     downloadChunk(reference: Reference, options?: DownloadOptions, requestOptions?: RequestOptions): Promise<Uint8Array>;
+    /**
+     * Returns an object for reading single owner chunks (SOC).
+     *
+     * @param ownerAddress - Ethereum address of the SOC owner
+     * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+     * @returns SOCReader with `download` (encrypted) and `rawDownload` (unencrypted)
+     * @throws {Error} If the client is not initialized
+     * @throws {Error} If the request times out
+     *
+     * @example
+     * ```typescript
+     * const reader = client.makeSOCReader(owner)
+     * const soc = await reader.download(identifier, encryptionKey)
+     * console.log('Payload:', new TextDecoder().decode(soc.payload))
+     * ```
+     */
     makeSOCReader(ownerAddress: EthAddress | Uint8Array | string, requestOptions?: RequestOptions): SOCReader;
+    /**
+     * Returns an object for reading and writing single owner chunks (SOC).
+     *
+     * Uploads are encrypted by default. Use `rawUpload` for unencrypted SOCs.
+     *
+     * @param signer - Optional SOC signer private key. If omitted, the proxy uses the app signer.
+     * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+     * @returns SOCWriter with `upload`, `rawUpload`, `download`, and `rawDownload`
+     * @throws {Error} If the client is not initialized
+     * @throws {Error} If the request times out
+     *
+     * @example
+     * ```typescript
+     * const writer = client.makeSOCWriter()
+     * const upload = await writer.upload(identifier, payload)
+     * const soc = await writer.download(identifier, upload.encryptionKey!)
+     * ```
+     */
     makeSOCWriter(signer?: PrivateKey | Uint8Array | string, requestOptions?: RequestOptions): SOCWriter;
     /**
      * Mines a private key whose SOC address is proximate to a target overlay.

@@ -102,13 +102,50 @@ export interface SingleOwnerChunk {
     address: Reference;
     owner: Address;
 }
+/**
+ * Interface for downloading single owner chunks (SOC).
+ *
+ * `download` expects an encryption key and returns decrypted content.
+ * `rawDownload` returns unencrypted SOC data.
+ */
 export interface SOCReader {
     owner?: Address;
+    /**
+     * Download an unencrypted SOC by identifier.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     */
     rawDownload: (identifier: Identifier | Uint8Array | string) => Promise<SingleOwnerChunk>;
+    /**
+     * Download and decrypt an encrypted SOC by identifier.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     * @param encryptionKey - 32-byte encryption key returned by upload
+     */
     download: (identifier: Identifier | Uint8Array | string, encryptionKey: Uint8Array | string) => Promise<SingleOwnerChunk>;
 }
+/**
+ * Interface for downloading and uploading single owner chunks (SOC).
+ *
+ * `upload` creates an encrypted SOC by default.
+ * `rawUpload` creates an unencrypted SOC.
+ */
 export interface SOCWriter extends SOCReader {
+    /**
+     * Upload an encrypted SOC.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     * @param data - SOC payload data (1-4096 bytes)
+     * @param options - Optional upload configuration
+     */
     upload: (identifier: Identifier | Uint8Array | string, data: Uint8Array, options?: UploadOptions) => Promise<SocUploadResult>;
+    /**
+     * Upload an unencrypted SOC.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     * @param data - SOC payload data (1-4096 bytes)
+     * @param options - Optional upload configuration
+     */
     rawUpload: (identifier: Identifier | Uint8Array | string, data: Uint8Array, options?: UploadOptions) => Promise<SocUploadResult>;
 }
 export declare const AuthStatusSchema: z.ZodObject<{
