@@ -138,128 +138,85 @@
 	}
 </script>
 
-<div class="page-wrapper">
-	<div class="page-content">
-		<div class="content-area">
-			<CreationLayout
-				title="Create identity"
-				description={accountName ? `in ${accountName} account` : undefined}
-				onClose={() => goto(resolve(routes.HOME))}
-			>
-				{#snippet content()}
-					{#if !hasSessionData}
-						<Typography>No account data found. Please start from the home page.</Typography>
-					{:else}
-						<Vertical --vertical-gap="var(--padding)">
-							<!-- Identity name input -->
+<CreationLayout
+	title="Create identity"
+	description={accountName ? `in ${accountName} account` : undefined}
+	onClose={() => goto(resolve(routes.HOME))}
+>
+	{#snippet content()}
+		{#if !hasSessionData}
+			<Typography>No account data found. Please start from the home page.</Typography>
+		{:else}
+			<Vertical --vertical-gap="var(--padding)">
+				<!-- Identity name input -->
+				<Vertical --vertical-gap="var(--quarter-padding)">
+					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
+						<div class="input-grow">
+							<Input
+								variant="outline"
+								dimension="compact"
+								label="Identity name"
+								bind:value={idName}
+							/>
+						</div>
+						{#if derivedIdentity}
+							<Hashicon value={derivedIdentity.id} size={40} />
+						{/if}
+					</Horizontal>
+					<Typography variant="small">Displayed in your account and apps</Typography>
+				</Vertical>
+
+				<!-- Postage stamp selector (only for synced accounts) -->
+				{#if isSyncedAccount}
+					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
+						<div class="input-grow">
 							<Vertical --vertical-gap="var(--quarter-padding)">
-								<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
-									<div class="input-grow">
-										<Input
-											variant="outline"
-											dimension="compact"
-											label="Identity name"
-											bind:value={idName}
-										/>
-									</div>
-									{#if derivedIdentity}
-										<Hashicon value={derivedIdentity.id} size={40} />
-									{/if}
-								</Horizontal>
-								<Typography variant="small">Displayed in your account and apps</Typography>
+								<Typography>Postage stamp</Typography>
+								<div class="select-wrapper">
+									<select class="stamp-select" bind:value={selectedStampOption}>
+										<option value="account">Use account stamp</option>
+										<option value="separate">Use separate stamp (advanced)</option>
+									</select>
+									<ChevronDown size={20} class="select-icon" />
+								</div>
 							</Vertical>
-
-							<!-- Postage stamp selector (only for synced accounts) -->
-							{#if isSyncedAccount}
-								<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
-									<div class="input-grow">
-										<Vertical --vertical-gap="var(--quarter-padding)">
-											<Typography>Postage stamp</Typography>
-											<div class="select-wrapper">
-												<select class="stamp-select" bind:value={selectedStampOption}>
-													<option value="account">Use account stamp</option>
-													<option value="separate">Use separate stamp (advanced)</option>
-												</select>
-												<ChevronDown size={20} class="select-icon" />
-											</div>
-										</Vertical>
-									</div>
-									<Tooltip
-										helperText="Use your account stamp for simplicity, or assign a separate stamp to keep this identity's activity separate from your other identities. You can change this later."
-										position="left"
-										variant="small"
-										maxWidth="280px"
-										show={showStampTooltip}
-									>
-										<Button
-											variant="ghost"
-											dimension="compact"
-											onclick={() => (showStampTooltip = !showStampTooltip)}
-										>
-											<Information size={20} />
-										</Button>
-									</Tooltip>
-								</Horizontal>
-							{/if}
-						</Vertical>
-					{/if}
-				{/snippet}
-
-				{#snippet buttonContent()}
-					{#if hasSessionData}
-						<Button
-							variant="strong"
-							dimension="compact"
-							onclick={handleCreateIdentity}
-							disabled={!derivedIdentity}
+						</div>
+						<Tooltip
+							helperText="Use your account stamp for simplicity, or assign a separate stamp to keep this identity's activity separate from your other identities. You can change this later."
+							position="left"
+							variant="small"
+							maxWidth="280px"
+							show={showStampTooltip}
 						>
-							<Checkmark size={20} />Confirm
-						</Button>
-					{/if}
-				{/snippet}
-			</CreationLayout>
-		</div>
-	</div>
-</div>
+							<Button
+								variant="ghost"
+								dimension="compact"
+								onclick={() => (showStampTooltip = !showStampTooltip)}
+							>
+								<Information size={20} />
+							</Button>
+						</Tooltip>
+					</Horizontal>
+				{/if}
+			</Vertical>
+		{/if}
+	{/snippet}
+
+	{#snippet buttonContent()}
+		{#if hasSessionData}
+			<Button
+				variant="strong"
+				dimension="compact"
+				onclick={handleCreateIdentity}
+				disabled={!derivedIdentity}
+			>
+				<Checkmark size={20} />Confirm
+			</Button>
+		{/if}
+	{/snippet}
+</CreationLayout>
 
 <style>
-	.page-wrapper {
-		display: flex;
-		flex-direction: row;
-		min-height: 100vh;
-		background: var(--colors-ultra-low);
-		position: relative;
-		align-items: stretch;
-		justify-content: space-around;
-	}
-
-	.page-content {
-		flex: 1;
-		display: flex;
-		justify-content: center;
-		flex-direction: column;
-		align-items: center;
-		padding: var(--double-padding);
-	}
-
-	.content-area {
-		max-width: 560px;
-		display: flex;
-		flex-direction: column;
-		justify-content: center;
-		width: 100%;
-	}
-
-	@media screen and (max-width: 640px) {
-		.page-content {
-			padding: var(--padding);
-		}
-
-		.content-area {
-			flex: 1;
-		}
-	}
-
 	.input-grow {
 		flex: 1;
 		min-width: 0;
