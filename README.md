@@ -302,11 +302,11 @@ pnpm preview:docs
 ┌─────────────────────────────────────────────────────────┐
 │  Browser: http://localhost:3000 (Demo App)              │
 │  ┌────────────────────────────────────────────────┐     │
-│  │ Demo HTML                                       │     │
-│  │                                                 │     │
+│  │ Demo HTML                                     =│     │
+│  │                                                │     │
 │  │  ┌─────────────────────────────────────────┐   │     │
 │  │  │ <iframe src="http://localhost:5174">    │   │     │
-│  │  │                                          │   │     │
+│  │  │                                         │   │     │
 │  │  │ Identity UI (SvelteKit)                 │   │     │
 │  │  │   - Proxy for Bee API calls             │   │     │
 │  │  │   - Auth popup handler                  │   │     │
