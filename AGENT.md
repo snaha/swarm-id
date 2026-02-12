@@ -111,19 +111,49 @@ This project uses Svelte 5 with runes for reactive state management:
 - **Always use direct imports**:
   - ✅ `import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'`
   - ❌ `import { ArrowRight } from 'carbon-icons-svelte'` (causes SSR issues)
+- Browse icons at https://carbondesignsystem.com/guidelines/icons/library/
+
+Usage examples:
+```svelte
+<Information size={20} />
+<Wallet size={20} />
+<ArrowRight size={16} />
+<Copy size={20} />
+<Checkmark size={20} />
+```
 
 ### Layout Components
 
 - **Vertical** uses `--vertical-gap` (NOT `--gap`)
 - **Horizontal** uses `--horizontal-gap` (NOT `--gap`)
-- Example: `<Vertical --vertical-gap="var(--padding)">` and `<Horizontal --horizontal-gap="var(--half-padding)">`
-- Alignment: `--vertical-align-items`, `--horizontal-justify-content`, etc.
+- Alignment: `--vertical-align-items`, `--vertical-justify-content`, `--horizontal-align-items`, `--horizontal-justify-content`
+- Style properties can be passed directly: `<Divider --divider-color="black" />`
+
+Examples:
+```svelte
+<Vertical --vertical-gap="var(--padding)" --vertical-align-items="start">
+  <Typography>Content</Typography>
+</Vertical>
+
+<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+  <Button>Click</Button>
+</Horizontal>
+```
 
 ### Component Properties Over CSS
 
 Always use component properties first, only resort to custom CSS if the property doesn't exist:
-- ✅ `<Typography font="mono">` instead of ❌ `<Typography class="monospace">`
-- ✅ `<Button variant="ghost">` instead of ❌ `<Button class="ghost-button">`
+```svelte
+<!-- ✅ Good -->
+<Typography font="mono">code</Typography>
+<Typography variant="small">small text</Typography>
+<Button variant="ghost">Click</Button>
+
+<!-- ❌ Bad -->
+<Typography class="monospace">code</Typography>
+<Typography style="font-size: 0.875rem;">small text</Typography>
+<Button class="ghost-button">Click</Button>
+```
 
 ## Pre-commit
 
