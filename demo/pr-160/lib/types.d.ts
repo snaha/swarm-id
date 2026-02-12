@@ -389,6 +389,10 @@ export declare const ActGetGranteesMessageSchema: z.ZodObject<{
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
+export declare const GetPostageBatchMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"getPostageBatch">;
+    requestId: z.ZodString;
+}, z.core.$strip>;
 export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"parentIdentify">;
     beeApiUrl: z.ZodOptional<z.ZodString>;
@@ -626,6 +630,9 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
         headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"getPostageBatch">;
+    requestId: z.ZodString;
 }, z.core.$strip>], "type">;
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>;
 export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>;
@@ -647,6 +654,7 @@ export type ActDownloadDataMessage = z.infer<typeof ActDownloadDataMessageSchema
 export type ActAddGranteesMessage = z.infer<typeof ActAddGranteesMessageSchema>;
 export type ActRevokeGranteesMessage = z.infer<typeof ActRevokeGranteesMessageSchema>;
 export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>;
+export type GetPostageBatchMessage = z.infer<typeof GetPostageBatchMessageSchema>;
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>;
 export declare const ProxyReadyMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"proxyReady">;
@@ -789,6 +797,24 @@ export declare const ActGetGranteesResponseMessageSchema: z.ZodObject<{
     requestId: z.ZodString;
     grantees: z.ZodArray<z.ZodString>;
 }, z.core.$strip>;
+export declare const GetPostageBatchResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"getPostageBatchResponse">;
+    requestId: z.ZodString;
+    postageBatch: z.ZodOptional<z.ZodObject<{
+        batchID: z.ZodString;
+        utilization: z.ZodNumber;
+        usable: z.ZodBoolean;
+        label: z.ZodString;
+        depth: z.ZodNumber;
+        amount: z.ZodString;
+        bucketDepth: z.ZodNumber;
+        blockNumber: z.ZodNumber;
+        immutableFlag: z.ZodBoolean;
+        exists: z.ZodBoolean;
+        batchTTL: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    error: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>;
 export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"proxyReady">;
     authenticated: z.ZodBoolean;
@@ -906,6 +932,23 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     type: z.ZodLiteral<"actGetGranteesResponse">;
     requestId: z.ZodString;
     grantees: z.ZodArray<z.ZodString>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"getPostageBatchResponse">;
+    requestId: z.ZodString;
+    postageBatch: z.ZodOptional<z.ZodObject<{
+        batchID: z.ZodString;
+        utilization: z.ZodNumber;
+        usable: z.ZodBoolean;
+        label: z.ZodString;
+        depth: z.ZodNumber;
+        amount: z.ZodString;
+        bucketDepth: z.ZodNumber;
+        blockNumber: z.ZodNumber;
+        immutableFlag: z.ZodBoolean;
+        exists: z.ZodBoolean;
+        batchTTL: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    error: z.ZodOptional<z.ZodString>;
 }, z.core.$strip>], "type">;
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>;
 export type InitErrorMessage = z.infer<typeof InitErrorMessageSchema>;
@@ -931,6 +974,7 @@ export type ActDownloadDataResponseMessage = z.infer<typeof ActDownloadDataRespo
 export type ActAddGranteesResponseMessage = z.infer<typeof ActAddGranteesResponseMessageSchema>;
 export type ActRevokeGranteesResponseMessage = z.infer<typeof ActRevokeGranteesResponseMessageSchema>;
 export type ActGetGranteesResponseMessage = z.infer<typeof ActGetGranteesResponseMessageSchema>;
+export type GetPostageBatchResponseMessage = z.infer<typeof GetPostageBatchResponseMessageSchema>;
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>;
 export declare const AuthDataSchema: z.ZodObject<{
     secret: z.ZodString;

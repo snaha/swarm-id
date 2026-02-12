@@ -1,4 +1,4 @@
-import type { ClientOptions, AuthStatus, ConnectionInfo, UploadResult, FileData, UploadOptions, ActUploadOptions, DownloadOptions, RequestOptions, Reference } from "./types";
+import type { ClientOptions, AuthStatus, ConnectionInfo, UploadResult, FileData, UploadOptions, ActUploadOptions, DownloadOptions, RequestOptions, Reference, PostageBatch } from "./types";
 /**
  * Main client library for integrating Swarm ID authentication and storage capabilities
  * into web applications.
@@ -162,6 +162,30 @@ export declare class SwarmIdClient {
      * ```
      */
     checkAuthStatus(): Promise<AuthStatus>;
+    /**
+     * Gets the current postage batch for the authenticated identity.
+     *
+     * Returns information about the postage stamp associated with the
+     * connected identity, including batch ID, utilization, depth, and TTL.
+     *
+     * @returns A promise resolving to the PostageBatch or undefined if none is configured
+     * @throws {Error} If the client is not initialized
+     * @throws {Error} If the request times out
+     *
+     * @example
+     * ```typescript
+     * const batch = await client.getPostageBatch()
+     * if (batch) {
+     *   console.log('Batch ID:', batch.batchID)
+     *   console.log('Utilization:', batch.utilization)
+     *   console.log('Depth:', batch.depth)
+     *   console.log('TTL:', batch.batchTTL)
+     * } else {
+     *   console.log('No postage batch configured')
+     * }
+     * ```
+     */
+    getPostageBatch(): Promise<PostageBatch | undefined>;
     /**
      * Disconnects the current session and clears authentication data.
      *

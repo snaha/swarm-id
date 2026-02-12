@@ -195,6 +195,7 @@ export declare class SwarmIdProxy {
     private handleActAddGrantees;
     private handleActRevokeGrantees;
     private handleActGetGrantees;
+    private handleGetPostageBatch;
 }
 /**
  * Initialize the proxy (called from HTML page)
