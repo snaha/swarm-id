@@ -19,10 +19,10 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
-	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import { deriveAccountSwarmEncryptionKey, type AccountSyncType } from '@swarm-id/lib'
 
 	let accountName = $state('Passkey')
-	let accountType = $state('local')
+	let accountType = $state<AccountSyncType>('local')
 	let showTooltip = $state(false)
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
@@ -80,6 +80,7 @@
 				type: 'passkey',
 				credentialId: account.credentialId,
 				swarmEncryptionKey: swarmEncryptionKey,
+				syncType: accountType,
 			})
 			sessionStore.setAccount(newAccount)
 

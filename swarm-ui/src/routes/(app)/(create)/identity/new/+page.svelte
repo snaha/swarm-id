@@ -30,11 +30,11 @@
 	let selectedStampOption = $state<StampOption>('account')
 	let showStampTooltip = $state(false)
 
-	// Check if account is synced (has postage stamp)
+	// Check if account is synced
 	const isSyncedAccount = $derived.by(() => {
 		const account = sessionStore.data.account
 		if (!account) return false
-		return account.defaultPostageStampBatchID !== undefined
+		return account.syncType === 'synced'
 	})
 
 	// Get account's postage stamps
@@ -174,7 +174,7 @@
 								<Typography>Postage stamp</Typography>
 								<div class="select-wrapper">
 									<select class="stamp-select" bind:value={selectedStampOption}>
-										<option value="account">Use account stamp</option>
+										<option value="account">Use account stamp (default)</option>
 										<option value="separate">Use separate stamp (advanced)</option>
 									</select>
 									<ChevronDown size={20} class="select-icon" />

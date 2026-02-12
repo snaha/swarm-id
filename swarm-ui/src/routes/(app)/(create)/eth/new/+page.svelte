@@ -30,13 +30,13 @@
 	import { WarningAlt } from 'carbon-icons-svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
-	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import { deriveAccountSwarmEncryptionKey, type AccountSyncType } from '@swarm-id/lib'
 
 	let showTypeTooltip = $state(false)
 	let showSeedTooltip = $state(false)
 	let showSeedModal = $state(false)
 	let accountName = $state('Ethereum')
-	let accountType = $state('local')
+	let accountType = $state<AccountSyncType>('local')
 	let secretSeed = $state('')
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
@@ -121,6 +121,7 @@
 				encryptionSalt: encryptionSalt,
 				encryptedSecretSeed: encryptedSecretSeed,
 				swarmEncryptionKey: swarmEncryptionKey,
+				syncType: accountType,
 			})
 			sessionStore.setAccount(newAccount)
 

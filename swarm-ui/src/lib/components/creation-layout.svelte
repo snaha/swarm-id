@@ -21,10 +21,7 @@
 <div class="creation-layout">
 	<!-- Header -->
 	<div class="creation-header">
-		<Horizontal
-			--horizontal-justify-content="space-between"
-			--horizontal-align-items="center"
-		>
+		<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
 			{#if onBack}
 				<Horizontal --horizontal-gap="var(--half-padding)">
 					<Button dimension="compact" variant="ghost" onclick={onBack}><ArrowLeft /></Button>

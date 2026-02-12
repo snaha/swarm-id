@@ -56,6 +56,12 @@ const StoredBytes = z
 // ============================================================================
 
 /**
+ * Account Sync Type - whether account is local-only or synced to Swarm
+ */
+export const AccountSyncTypeSchema = z.enum(["local", "synced"])
+export type AccountSyncType = z.infer<typeof AccountSyncTypeSchema>
+
+/**
  * Passkey Account Schema V1
  */
 export const PasskeyAccountSchemaV1 = z.object({
@@ -64,8 +70,9 @@ export const PasskeyAccountSchemaV1 = z.object({
   createdAt: z.number(),
   type: z.literal("passkey"),
   credentialId: z.string(),
-  swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
-  defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
+  swarmEncryptionKey: z.string().length(64),
+  syncType: AccountSyncTypeSchema,
+  defaultPostageStampBatchID: StoredBatchId.optional(),
 })
 
 /**
@@ -79,9 +86,10 @@ export const EthereumAccountSchemaV1 = z.object({
   ethereumAddress: StoredEthAddress,
   encryptedMasterKey: StoredBytes,
   encryptionSalt: StoredBytes,
-  encryptedSecretSeed: StoredBytes, // Encrypted secret seed for later retrieval
-  swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
-  defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
+  encryptedSecretSeed: StoredBytes,
+  swarmEncryptionKey: z.string().length(64),
+  syncType: AccountSyncTypeSchema,
+  defaultPostageStampBatchID: StoredBatchId.optional(),
 })
 
 /**
