@@ -365,6 +365,50 @@ Hello, Swarm!</textarea
         <div id="act-add-grantees-result"></div>
       </div>
 
+      <!-- SOC Section -->
+      <div class="section">
+        <h2>SOC (Single Owner Chunk)</h2>
+        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+          Upload and download Single Owner Chunks. Encrypted upload returns an encryption key required for download.
+        </p>
+
+        <h3 style="font-size: 16px; color: #333; margin-bottom: 8px;">Upload</h3>
+        <input
+          type="text"
+          id="soc-identifier"
+          placeholder="Identifier (64 hex chars)"
+          value="0000000000000000000000000000000000000000000000000000000000000000"
+        />
+        <textarea id="soc-upload-data" placeholder="Enter SOC payload...">Hello SOC!</textarea>
+        <div class="button-container">
+          <button id="soc-upload-button" disabled>Upload Encrypted SOC</button>
+          <button id="soc-raw-upload-button" disabled>Upload Raw SOC</button>
+        </div>
+        <div id="soc-upload-result"></div>
+
+        <h3 style="font-size: 16px; color: #333; margin: 16px 0 8px;">Download</h3>
+        <input
+          type="text"
+          id="soc-owner"
+          placeholder="Owner Address (40 hex chars)"
+        />
+        <input
+          type="text"
+          id="soc-download-identifier"
+          placeholder="Identifier (64 hex chars)"
+        />
+        <input
+          type="text"
+          id="soc-encryption-key"
+          placeholder="Encryption Key (64 hex chars, required for encrypted download)"
+        />
+        <div class="button-container">
+          <button id="soc-download-button" disabled>Download Encrypted SOC</button>
+          <button id="soc-raw-download-button" disabled>Download Raw SOC</button>
+        </div>
+        <div id="soc-download-result"></div>
+      </div>
+
       <!-- Log Section -->
       <div class="section">
         <h2>Console Log</h2>
@@ -386,6 +430,8 @@ Hello, Swarm!</textarea
         logContainer.scrollTop = logContainer.scrollHeight;
         console.log(`[${type}]`, message);
       }
+
+      let socWriter = null
 
       // Collapsible toggle
       document.getElementById("stamp-toggle").addEventListener("click", () => {
@@ -505,6 +551,7 @@ Hello, Swarm!</textarea
       try {
         log("Starting client initialization...", "info");
         await client.initialize();
+        socWriter = client.makeSOCWriter()
         log("Client initialized successfully", "info");
 
         // Set deferred checkbox default based on Bee node mode
@@ -528,12 +575,18 @@ Hello, Swarm!</textarea
         const actUploadBtn = document.getElementById("act-upload-button");
         const actDownloadBtn = document.getElementById("act-download-button");
         const actAddGranteesBtn = document.getElementById("act-add-grantees-button");
+        const socUploadBtn = document.getElementById("soc-upload-button");
+        const socRawUploadBtn = document.getElementById("soc-raw-upload-button");
+        const socDownloadBtn = document.getElementById("soc-download-button");
+        const socRawDownloadBtn = document.getElementById("soc-raw-download-button");
 
         if (authenticated) {
           statusEl.className = "status authenticated";
           statusEl.textContent = "✓ Status: Authenticated";
           downloadBtn.disabled = false;
           actDownloadBtn.disabled = false;
+          socDownloadBtn.disabled = false;
+          socRawDownloadBtn.disabled = false;
           connectBtn.textContent = "Disconnect";
 
           // Check if upload is available (requires postage stamp)
@@ -543,6 +596,8 @@ Hello, Swarm!</textarea
             uploadBtn.disabled = !connectionInfo.canUpload;
             actUploadBtn.disabled = !connectionInfo.canUpload;
             actAddGranteesBtn.disabled = !connectionInfo.canUpload;
+            socUploadBtn.disabled = !connectionInfo.canUpload;
+            socRawUploadBtn.disabled = !connectionInfo.canUpload;
             if (!connectionInfo.canUpload) {
               log("Upload disabled: no postage stamp available", "warn");
             }
@@ -551,6 +606,8 @@ Hello, Swarm!</textarea
             uploadBtn.disabled = true;
             actUploadBtn.disabled = true;
             actAddGranteesBtn.disabled = true;
+            socUploadBtn.disabled = true;
+            socRawUploadBtn.disabled = true;
           }
 
           // Fetch and display postage stamp info
@@ -563,6 +620,10 @@ Hello, Swarm!</textarea
           actUploadBtn.disabled = true;
           actDownloadBtn.disabled = true;
           actAddGranteesBtn.disabled = true;
+          socUploadBtn.disabled = true;
+          socRawUploadBtn.disabled = true;
+          socDownloadBtn.disabled = true;
+          socRawDownloadBtn.disabled = true;
           connectBtn.textContent = "Connect";
           document.getElementById("stamp-section").style.display = "none"
         }
@@ -852,6 +913,196 @@ Hello, Swarm!</textarea
             resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
           }
         });
+
+      // SOC Upload handlers
+      document
+        .getElementById("soc-upload-button")
+        .addEventListener("click", async () => {
+          if (!socWriter) {
+            log("SOC writer not initialized", "error")
+            return
+          }
+          const identifier = document.getElementById("soc-identifier").value.trim()
+          const data = document.getElementById("soc-upload-data").value
+          const resultEl = document.getElementById("soc-upload-result")
+
+          if (!identifier || identifier.length !== 64) {
+            log("Invalid SOC identifier", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+            return
+          }
+
+          if (!data) {
+            log("No SOC data to upload", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter SOC payload</div>'
+            return
+          }
+
+          try {
+            const uint8Data = new TextEncoder().encode(data)
+            log("Uploading encrypted SOC...", "info")
+            const result = await socWriter.upload(identifier, uint8Data)
+
+            log(`SOC upload successful! Reference: ${result.reference}`, "info")
+            document.getElementById("soc-owner").value = result.owner
+            document.getElementById("soc-download-identifier").value = identifier
+            document.getElementById("soc-encryption-key").value = result.encryptionKey || ""
+
+            resultEl.innerHTML = `
+              <div class="result">
+                <strong>Encrypted SOC Upload Result:</strong><br/>
+                <strong>Reference:</strong> ${result.reference}<br/>
+                <strong>Owner:</strong> ${result.owner}<br/>
+                <strong>Encryption Key:</strong> ${result.encryptionKey || "N/A"}<br/>
+              </div>
+            `
+          } catch (error) {
+            log(`SOC upload failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          }
+        })
+
+      document
+        .getElementById("soc-raw-upload-button")
+        .addEventListener("click", async () => {
+          if (!socWriter) {
+            log("SOC writer not initialized", "error")
+            return
+          }
+          const identifier = document.getElementById("soc-identifier").value.trim()
+          const data = document.getElementById("soc-upload-data").value
+          const resultEl = document.getElementById("soc-upload-result")
+          document.getElementById("soc-encryption-key").value = ""
+
+          if (!identifier || identifier.length !== 64) {
+            log("Invalid SOC identifier", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+            return
+          }
+
+          if (!data) {
+            log("No SOC data to upload", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter SOC payload</div>'
+            return
+          }
+
+          try {
+            const uint8Data = new TextEncoder().encode(data)
+            log("Uploading raw SOC...", "info")
+            const result = await socWriter.rawUpload(identifier, uint8Data)
+
+            log(`SOC raw upload successful! Reference: ${result.reference}`, "info")
+            document.getElementById("soc-owner").value = result.owner
+            document.getElementById("soc-download-identifier").value = identifier
+            document.getElementById("soc-encryption-key").value = ""
+
+            resultEl.innerHTML = `
+              <div class="result">
+                <strong>Raw SOC Upload Result:</strong><br/>
+                <strong>Reference:</strong> ${result.reference}<br/>
+                <strong>Owner:</strong> ${result.owner}<br/>
+              </div>
+            `
+          } catch (error) {
+            log(`SOC raw upload failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          }
+        })
+
+      // SOC Download handlers
+      document
+        .getElementById("soc-download-button")
+        .addEventListener("click", async () => {
+          const owner = document.getElementById("soc-owner").value.trim()
+          const identifier = document.getElementById("soc-download-identifier").value.trim()
+          const encryptionKey = document.getElementById("soc-encryption-key").value.trim()
+          const resultEl = document.getElementById("soc-download-result")
+
+          if (!owner || owner.length !== 40) {
+            log("Invalid SOC owner", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Owner must be 40 hex chars</div>'
+            return
+          }
+
+          if (!identifier || identifier.length !== 64) {
+            log("Invalid SOC identifier", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+            return
+          }
+
+          if (!encryptionKey || encryptionKey.length !== 64) {
+            log("Missing encryption key", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Encryption key must be 64 hex chars</div>'
+            return
+          }
+
+          try {
+            const reader = client.makeSOCReader(owner)
+            log("Downloading encrypted SOC...", "info")
+            const soc = await reader.download(identifier, encryptionKey)
+            const text = new TextDecoder().decode(soc.payload)
+
+            resultEl.innerHTML = `
+              <div class="result">
+                <strong>Encrypted SOC Download Result:</strong><br/>
+                <strong>Owner:</strong> ${soc.owner}<br/>
+                <strong>Address:</strong> ${soc.address}<br/>
+                <strong>Payload:</strong> ${text}<br/>
+              </div>
+            `
+          } catch (error) {
+            log(`SOC download failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          }
+        })
+
+      document
+        .getElementById("soc-raw-download-button")
+        .addEventListener("click", async () => {
+          const owner = document.getElementById("soc-owner").value.trim()
+          const identifier = document.getElementById("soc-download-identifier").value.trim()
+          const resultEl = document.getElementById("soc-download-result")
+
+          if (!owner || owner.length !== 40) {
+            log("Invalid SOC owner", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Owner must be 40 hex chars</div>'
+            return
+          }
+
+          if (!identifier || identifier.length !== 64) {
+            log("Invalid SOC identifier", "error")
+            resultEl.innerHTML =
+              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+            return
+          }
+
+          try {
+            const reader = client.makeSOCReader(owner)
+            log("Downloading raw SOC...", "info")
+            const soc = await reader.rawDownload(identifier)
+            const text = new TextDecoder().decode(soc.payload)
+
+            resultEl.innerHTML = `
+              <div class="result">
+                <strong>Raw SOC Download Result:</strong><br/>
+                <strong>Owner:</strong> ${soc.owner}<br/>
+                <strong>Address:</strong> ${soc.address}<br/>
+                <strong>Payload:</strong> ${text}<br/>
+              </div>
+            `
+          } catch (error) {
+            log(`SOC raw download failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          }
+        })
 
       log("Demo application ready", "info");
 

@@ -2150,12 +2150,7 @@ export class SwarmIdProxy {
     console.log("[Proxy] SOC raw download request")
 
     try {
-      const soc = await downloadSOC(
-        this.bee,
-        owner,
-        identifier,
-        requestOptions,
-      )
+      const soc = await downloadSOC(this.bee, owner, identifier, requestOptions)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(

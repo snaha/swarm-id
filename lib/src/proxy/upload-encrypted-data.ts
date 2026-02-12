@@ -617,6 +617,11 @@ export async function uploadSOC(
   }
 
   const cac = makeContentAddressedChunk(data)
+  // Bee recognizes SOCs by full SOC size (32+65+4104). Pad CAC to 4104 bytes
+  // so /chunks treats this as a SOC instead of a regular chunk, avoiding
+  // "stamp signature is invalid" errors.
+  const cacData = new Uint8Array(8 + 4096)
+  cacData.set(cac.data)
   const owner = signer.publicKey().address()
 
   const toSign = Binary.concatBytes(
@@ -628,7 +633,7 @@ export async function uploadSOC(
   const socData = Binary.concatBytes(
     identifier.toUint8Array(),
     signature.toUint8Array(),
-    cac.data,
+    cacData,
   )
 
   const socAddress = makeSOCAddress(identifier, owner.toUint8Array())

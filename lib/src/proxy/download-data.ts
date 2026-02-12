@@ -41,7 +41,9 @@ class Encryption {
     const length = data.length
 
     if (this.padding > 0 && length !== this.padding) {
-      throw new Error(`data length ${length} different than padding ${this.padding}`)
+      throw new Error(
+        `data length ${length} different than padding ${this.padding}`,
+      )
     }
 
     const out = new Uint8Array(length)
@@ -167,6 +169,11 @@ function makeSingleOwnerChunkFromData(
   } else {
     spanBytes = data.slice(SOC_HEADER_SIZE, SOC_HEADER_SIZE + SPAN_SIZE)
     const span = readSpan(spanBytes)
+    if (span > 4096) {
+      throw new Error(
+        "SOC payload length is invalid; this chunk likely requires decryption",
+      )
+    }
     payload = data.slice(
       SOC_HEADER_SIZE + SPAN_SIZE,
       SOC_HEADER_SIZE + SPAN_SIZE + span,
@@ -243,7 +250,11 @@ export async function downloadSOC(
   const id = new Identifier(identifier)
   const socAddress = makeSocAddress(id, ownerAddress)
 
-  const data = await bee.downloadChunk(socAddress.toHex(), undefined, requestOptions)
+  const data = await bee.downloadChunk(
+    socAddress.toHex(),
+    undefined,
+    requestOptions,
+  )
 
   return makeSingleOwnerChunkFromData(data, socAddress, ownerAddress)
 }
@@ -259,9 +270,15 @@ export async function downloadEncryptedSOC(
   const id = new Identifier(identifier)
   const socAddress = makeSocAddress(id, ownerAddress)
   const keyBytes =
-    typeof encryptionKey === "string" ? hexToUint8Array(encryptionKey) : encryptionKey
+    typeof encryptionKey === "string"
+      ? hexToUint8Array(encryptionKey)
+      : encryptionKey
 
-  const data = await bee.downloadChunk(socAddress.toHex(), undefined, requestOptions)
+  const data = await bee.downloadChunk(
+    socAddress.toHex(),
+    undefined,
+    requestOptions,
+  )
 
   return makeSingleOwnerChunkFromData(data, socAddress, ownerAddress, keyBytes)
 }

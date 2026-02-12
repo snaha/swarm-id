@@ -1293,7 +1293,9 @@ export class SwarmIdClient {
           requestId,
           owner,
           identifier: this.normalizeSocIdentifier(identifier),
-          encryptionKey: this.normalizeSocKey(encryptionKey as Uint8Array | string),
+          encryptionKey: this.normalizeSocKey(
+            encryptionKey as Uint8Array | string,
+          ),
           requestOptions,
         })
 
@@ -1323,7 +1325,8 @@ export class SwarmIdClient {
 
     return {
       owner,
-      rawDownload: (identifier) => sendSocDownload("socRawDownload", identifier),
+      rawDownload: (identifier) =>
+        sendSocDownload("socRawDownload", identifier),
       download: (identifier, encryptionKey) =>
         sendSocDownload("socDownload", identifier, encryptionKey),
     }
@@ -1373,7 +1376,9 @@ export class SwarmIdClient {
           requestId,
           owner: currentOwner,
           identifier: this.normalizeSocIdentifier(identifier),
-          encryptionKey: this.normalizeSocKey(encryptionKey as Uint8Array | string),
+          encryptionKey: this.normalizeSocKey(
+            encryptionKey as Uint8Array | string,
+          ),
           requestOptions,
         })
 
@@ -1437,7 +1442,8 @@ export class SwarmIdClient {
 
     return {
       owner,
-      rawDownload: (identifier) => sendSocDownload("socRawDownload", identifier),
+      rawDownload: (identifier) =>
+        sendSocDownload("socRawDownload", identifier),
       download: (identifier, encryptionKey) =>
         sendSocDownload("socDownload", identifier, encryptionKey),
       upload: (identifier, data, options) =>

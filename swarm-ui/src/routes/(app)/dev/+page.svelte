@@ -14,7 +14,9 @@
 	import Tabs from './tabs.svelte'
 	import CopyButton from './copy-button.svelte'
 	import StatusDot from './status-dot.svelte'
+	import Divider from '$lib/components/ui/divider.svelte'
 	import routes from '$lib/routes'
+	import { BatchId, EthAddress } from '@ethersphere/bee-js'
 
 	// Tab state
 	type Tab = 'overview' | 'stamps' | 'sync'
@@ -39,6 +41,29 @@
 	let buying = $state(false)
 	let stampResult = $state<{ batchID: string; txHash: string } | undefined>(undefined)
 	let stampError = $state('')
+	let assignMessage = $state('')
+	let assignError = $state('')
+	let selectedStampId = $state<string | undefined>(undefined)
+	let selectedAccountId = $state<string | undefined>(undefined)
+	let selectedIdentityId = $state<string | undefined>(undefined)
+	let beeStamps = $state<
+		Array<{
+			batchID: string
+			utilization: number
+			usable: boolean
+			label: string
+			depth: number
+			amount: string
+			bucketDepth: number
+			blockNumber: number
+			immutableFlag: boolean
+			exists: boolean
+			batchTTL: number
+		}>
+	>([])
+	let beeStampsLoading = $state(false)
+	let beeStampsError = $state('')
+	let lastBeeUrl = $state('')
 
 	// FDP Play known signers (pre-funded with ETH + BZZ)
 	const KNOWN_SIGNERS = [
@@ -56,6 +81,88 @@
 		},
 	]
 	let selectedSigner = $state(KNOWN_SIGNERS[0].value)
+
+	const stampOptions = $derived(
+		beeStamps.map((stamp) => ({
+			value: stamp.batchID,
+			label: `${stamp.batchID.slice(0, 10)}… (depth ${stamp.depth})`,
+		})),
+	)
+	const accountOptions = $derived(
+		accountsStore.accounts.map((account) => ({
+			value: account.id.toHex(),
+			label: `${account.name} (${account.id.toHex().slice(0, 10)}…)`,
+		})),
+	)
+	const selectedAccount = $derived(
+		selectedAccountId ? accountsStore.getAccount(new EthAddress(selectedAccountId)) : undefined,
+	)
+	const identityOptions = $derived(
+		selectedAccount
+			? identitiesStore.getIdentitiesByAccount(selectedAccount.id).map((identity) => ({
+					value: identity.id,
+					label: `${identity.name} (${identity.id.slice(0, 8)}…)`,
+				}))
+			: [],
+	)
+	const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
+	const stampAssignments = $derived((() => {
+		const map = new Map<string, { account?: string; identity?: string }>()
+		for (const account of accountsStore.accounts) {
+			const batch = account.defaultPostageStampBatchID?.toHex()
+			if (batch) {
+				map.set(batch, { ...(map.get(batch) ?? {}), account: account.name })
+			}
+		}
+		for (const identity of identitiesStore.identities) {
+			const batch = identity.defaultPostageStampBatchID?.toHex()
+			if (batch) {
+				const existing = map.get(batch) ?? {}
+				const accountName =
+					existing.account ??
+					accountsStore.getAccount(identity.accountId)?.name
+				map.set(batch, {
+					...existing,
+					account: accountName,
+					identity: identity.name,
+				})
+			}
+		}
+		return map
+	})())
+
+	$effect(() => {
+		if (stampOptions.length && !selectedStampId) {
+			selectedStampId = stampOptions[0].value
+		} else if (
+			selectedStampId &&
+			!stampOptions.some((option) => option.value === selectedStampId)
+		) {
+			selectedStampId = stampOptions[0]?.value
+		}
+	})
+
+	$effect(() => {
+		if (accountOptions.length && !selectedAccountId) {
+			selectedAccountId = accountOptions[0].value
+		} else if (
+			selectedAccountId &&
+			!accountOptions.some((option) => option.value === selectedAccountId)
+		) {
+			selectedAccountId = accountOptions[0]?.value
+		}
+	})
+
+	$effect(() => {
+		if (identityOptions.length && !selectedIdentityId) {
+			selectedIdentityId = identityOptions[0].value
+		} else if (
+			selectedIdentityId &&
+			!identityOptions.some((option) => option.value === selectedIdentityId)
+		) {
+			selectedIdentityId = identityOptions[0]?.value
+		}
+	})
 
 	async function triggerManualSync() {
 		// Get all accounts with default stamps (account-level or via identities)
@@ -139,6 +246,69 @@ Check console logs for details:
 		identitiesStore.clear()
 		connectedAppsStore.clear()
 		postageStampsStore.clear()
+	}
+
+	async function loadBeeStamps() {
+		beeStampsLoading = true
+		beeStampsError = ''
+		try {
+			const response = await fetch(`${beeUrl}/stamps`)
+			if (!response.ok) {
+				const errorText = await response.text()
+				throw new Error(errorText || `HTTP ${response.status}`)
+			}
+			const data = await response.json()
+			beeStamps = data.stamps ?? []
+			lastBeeUrl = beeUrl
+		} catch (error) {
+			beeStampsError = error instanceof Error ? error.message : String(error)
+			beeStamps = []
+		} finally {
+			beeStampsLoading = false
+		}
+	}
+
+	$effect(() => {
+		if (activeTab === 'stamps' && beeUrl && beeUrl !== lastBeeUrl && !beeStampsLoading) {
+			loadBeeStamps()
+		}
+	})
+
+	function assignAccountStamp() {
+		assignError = ''
+		assignMessage = ''
+		if (!selectedStampId || !selectedAccountId) {
+			assignError = 'Select a stamp and an account first.'
+			return
+		}
+		try {
+			const batchId = new BatchId(selectedStampId)
+			const accountId = new EthAddress(selectedAccountId)
+			accountsStore.setDefaultStamp(accountId, batchId)
+			assignMessage = `✅ Set account stamp for ${accountId.toHex().slice(0, 8)}…`
+		} catch (error) {
+			assignError = error instanceof Error ? error.message : String(error)
+		}
+	}
+
+	function assignIdentityStamp() {
+		assignError = ''
+		assignMessage = ''
+		if (!accountHasDefaultStamp) {
+			assignError = 'Account must have a default stamp before assigning identity stamp.'
+			return
+		}
+		if (!selectedStampId || !selectedIdentityId) {
+			assignError = 'Select a stamp and an identity first.'
+			return
+		}
+		try {
+			const batchId = new BatchId(selectedStampId)
+			identitiesStore.setDefaultStamp(selectedIdentityId, batchId)
+			assignMessage = `✅ Set identity stamp for ${selectedIdentityId.slice(0, 8)}…`
+		} catch (error) {
+			assignError = error instanceof Error ? error.message : String(error)
+		}
 	}
 </script>
 
@@ -312,6 +482,88 @@ Check console logs for details:
 				>
 					<Typography font="mono" style="color: var(--colors-error);">❌ {stampError}</Typography>
 				</Vertical>
+			{/if}
+
+			<Divider --margin="var(--padding) 0" />
+
+			<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+				<Typography variant="h3">Existing Stamps (Bee Node)</Typography>
+				<Button variant="secondary" onclick={loadBeeStamps} busy={beeStampsLoading}>
+					{beeStampsLoading ? 'Refreshing...' : 'Refresh'}
+				</Button>
+			</Horizontal>
+			{#if beeStampsError}
+				<Typography variant="small" style="color: var(--colors-error);">
+					❌ {beeStampsError}
+				</Typography>
+			{/if}
+			{#if beeStamps.length === 0}
+				<Typography variant="small" style="color: var(--colors-medium);">
+					No stamps found on the Bee node.
+				</Typography>
+			{:else}
+				<Vertical --vertical-gap="var(--half-padding)">
+					{#each beeStamps as stamp (stamp.batchID)}
+						<Vertical
+							style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+						>
+							<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+								<Typography font="mono">{stamp.batchID}</Typography>
+								<CopyButton text={stamp.batchID} />
+							</Horizontal>
+							<Horizontal --horizontal-gap="var(--half-padding)">
+								<Typography variant="small" style="color: var(--colors-medium);">
+									Depth: {stamp.depth}
+								</Typography>
+								<Typography variant="small" style="color: var(--colors-medium);">
+									Utilization: {stamp.utilization}
+								</Typography>
+								{@const assignment = stampAssignments.get(stamp.batchID)}
+								<Typography variant="small" style="color: var(--colors-medium);">
+									Account: {assignment?.account ?? '—'}
+								</Typography>
+								<Typography variant="small" style="color: var(--colors-medium);">
+									Identity: {assignment?.identity ?? '—'}
+								</Typography>
+							</Horizontal>
+						</Vertical>
+					{/each}
+				</Vertical>
+			{/if}
+
+			<Divider --margin="var(--padding) 0" />
+
+			<Typography variant="h3">Assign Existing Stamp</Typography>
+			<Vertical --vertical-gap="var(--half-padding)">
+			<Select label="Stamp" items={stampOptions} bind:value={selectedStampId} />
+			<Select label="Account" items={accountOptions} bind:value={selectedAccountId} />
+				<Select
+					label="Identity"
+					items={identityOptions}
+					bind:value={selectedIdentityId}
+					disabled={!accountHasDefaultStamp}
+				/>
+			</Vertical>
+
+			<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+				<Button onclick={assignAccountStamp} disabled={!selectedStampId || !selectedAccountId}>
+					Set Account Stamp
+				</Button>
+				<Button
+					onclick={assignIdentityStamp}
+					disabled={!accountHasDefaultStamp || !selectedStampId || !selectedIdentityId}
+				>
+					Set Identity Stamp
+				</Button>
+			</Horizontal>
+
+			{#if assignMessage}
+				<Typography variant="small" style="color: var(--colors-success, #22c55e);"
+					>{assignMessage}</Typography
+				>
+			{/if}
+			{#if assignError}
+				<Typography variant="small" style="color: var(--colors-error);">{assignError}</Typography>
 			{/if}
 		</Vertical>
 	{/if}
