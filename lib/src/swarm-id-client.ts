@@ -9,6 +9,10 @@ import type {
   DownloadOptions,
   RequestOptions,
   Reference,
+  SOCReader,
+  SOCWriter,
+  SingleOwnerChunk,
+  SocUploadResult,
   ParentToIframeMessage,
   IframeToParentMessage,
   AppMetadata,
@@ -21,6 +25,8 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { buildAuthUrl } from "./utils/url"
+import { EthAddress, Identifier, PrivateKey } from "@ethersphere/bee-js"
+import { uint8ArrayToHex } from "./utils/key-derivation"
 
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -464,6 +470,45 @@ export class SwarmIdClient {
    */
   private generateRequestId(): string {
     return `req-${++this.requestIdCounter}-${Date.now()}`
+  }
+
+  private normalizeSocIdentifier(
+    identifier: Identifier | Uint8Array | string,
+  ): string {
+    if (identifier instanceof Identifier) {
+      return identifier.toHex()
+    }
+    if (identifier instanceof Uint8Array) {
+      return uint8ArrayToHex(identifier)
+    }
+    return identifier
+  }
+
+  private normalizeSocKey(key: Uint8Array | string): string {
+    if (key instanceof Uint8Array) {
+      return uint8ArrayToHex(key)
+    }
+    return key
+  }
+
+  private socChunkFromResponse(response: {
+    data: Uint8Array
+    identifier: string
+    signature: string
+    span: number
+    payload: Uint8Array
+    address: Reference
+    owner: string
+  }): SingleOwnerChunk {
+    return {
+      data: response.data,
+      identifier: response.identifier,
+      signature: response.signature,
+      span: response.span,
+      payload: response.payload,
+      address: response.address,
+      owner: response.owner,
+    }
   }
 
   /**
@@ -1213,6 +1258,193 @@ export class SwarmIdClient {
     })
 
     return new Uint8Array(response.data)
+  }
+
+  // ============================================================================
+  // SOC (Single Owner Chunk) Methods
+  // ============================================================================
+
+  makeSOCReader(
+    ownerAddress: EthAddress | Uint8Array | string,
+    requestOptions?: RequestOptions,
+  ): SOCReader {
+    this.ensureReady()
+    const owner = new EthAddress(ownerAddress).toHex()
+
+    const sendSocDownload = async (
+      type: "socDownload" | "socRawDownload",
+      identifier: Identifier | Uint8Array | string,
+      encryptionKey?: Uint8Array | string,
+    ): Promise<SingleOwnerChunk> => {
+      const requestId = this.generateRequestId()
+      if (type === "socDownload") {
+        const response = await this.sendRequest<{
+          type: "socDownloadResponse"
+          requestId: string
+          data: Uint8Array
+          identifier: string
+          signature: string
+          span: number
+          payload: Uint8Array
+          address: Reference
+          owner: string
+        }>({
+          type: "socDownload",
+          requestId,
+          owner,
+          identifier: this.normalizeSocIdentifier(identifier),
+          encryptionKey: this.normalizeSocKey(encryptionKey as Uint8Array | string),
+          requestOptions,
+        })
+
+        return this.socChunkFromResponse(response)
+      }
+
+      const response = await this.sendRequest<{
+        type: "socRawDownloadResponse"
+        requestId: string
+        data: Uint8Array
+        identifier: string
+        signature: string
+        span: number
+        payload: Uint8Array
+        address: Reference
+        owner: string
+      }>({
+        type: "socRawDownload",
+        requestId,
+        owner,
+        identifier: this.normalizeSocIdentifier(identifier),
+        requestOptions,
+      })
+
+      return this.socChunkFromResponse(response)
+    }
+
+    return {
+      owner,
+      rawDownload: (identifier) => sendSocDownload("socRawDownload", identifier),
+      download: (identifier, encryptionKey) =>
+        sendSocDownload("socDownload", identifier, encryptionKey),
+    }
+  }
+
+  makeSOCWriter(
+    signer?: PrivateKey | Uint8Array | string,
+    requestOptions?: RequestOptions,
+  ): SOCWriter {
+    this.ensureReady()
+    const signerObj = signer ? new PrivateKey(signer) : undefined
+    const signerKey = signerObj ? signerObj.toHex() : undefined
+    let owner: string | undefined = signerObj
+      ? signerObj.publicKey().address().toHex()
+      : undefined
+
+    const requireOwner = (): string => {
+      if (!owner) {
+        throw new Error(
+          "SOC owner is unknown. Provide signer to makeSOCWriter or upload first.",
+        )
+      }
+      return owner
+    }
+
+    const sendSocDownload = async (
+      type: "socDownload" | "socRawDownload",
+      identifier: Identifier | Uint8Array | string,
+      encryptionKey?: Uint8Array | string,
+    ): Promise<SingleOwnerChunk> => {
+      const requestId = this.generateRequestId()
+      const currentOwner = requireOwner()
+
+      if (type === "socDownload") {
+        const response = await this.sendRequest<{
+          type: "socDownloadResponse"
+          requestId: string
+          data: Uint8Array
+          identifier: string
+          signature: string
+          span: number
+          payload: Uint8Array
+          address: Reference
+          owner: string
+        }>({
+          type: "socDownload",
+          requestId,
+          owner: currentOwner,
+          identifier: this.normalizeSocIdentifier(identifier),
+          encryptionKey: this.normalizeSocKey(encryptionKey as Uint8Array | string),
+          requestOptions,
+        })
+
+        return this.socChunkFromResponse(response)
+      }
+
+      const response = await this.sendRequest<{
+        type: "socRawDownloadResponse"
+        requestId: string
+        data: Uint8Array
+        identifier: string
+        signature: string
+        span: number
+        payload: Uint8Array
+        address: Reference
+        owner: string
+      }>({
+        type: "socRawDownload",
+        requestId,
+        owner: currentOwner,
+        identifier: this.normalizeSocIdentifier(identifier),
+        requestOptions,
+      })
+
+      return this.socChunkFromResponse(response)
+    }
+
+    const sendSocUpload = async (
+      type: "socUpload" | "socRawUpload",
+      identifier: Identifier | Uint8Array | string,
+      data: Uint8Array,
+      options?: UploadOptions,
+    ): Promise<SocUploadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<{
+        type: "socUploadResponse" | "socRawUploadResponse"
+        requestId: string
+        reference: Reference
+        tagUid?: number
+        encryptionKey?: string
+        owner: string
+      }>({
+        type,
+        requestId,
+        identifier: this.normalizeSocIdentifier(identifier),
+        data: new Uint8Array(data),
+        signer: signerKey,
+        options,
+        requestOptions,
+      })
+
+      owner = response.owner
+
+      return {
+        reference: response.reference,
+        tagUid: response.tagUid,
+        encryptionKey: response.encryptionKey,
+        owner: response.owner,
+      }
+    }
+
+    return {
+      owner,
+      rawDownload: (identifier) => sendSocDownload("socRawDownload", identifier),
+      download: (identifier, encryptionKey) =>
+        sendSocDownload("socDownload", identifier, encryptionKey),
+      upload: (identifier, data, options) =>
+        sendSocUpload("socUpload", identifier, data, options),
+      rawUpload: (identifier, data, options) =>
+        sendSocUpload("socRawUpload", identifier, data, options),
+    }
   }
 
   // ============================================================================

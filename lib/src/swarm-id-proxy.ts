@@ -17,6 +17,10 @@ import type {
   GetNodeInfoMessage,
   GsocMineMessage,
   GsocSendMessage,
+  SocUploadMessage,
+  SocRawUploadMessage,
+  SocDownloadMessage,
+  SocRawDownloadMessage,
   ActUploadDataMessage,
   ActDownloadDataMessage,
   ActAddGranteesMessage,
@@ -37,12 +41,22 @@ import {
   makeContentAddressedChunk,
   BatchId,
   EthAddress,
+  PrivateKey,
+  Identifier,
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
-import { uploadEncryptedDataWithSigning } from "./proxy/upload-encrypted-data"
-import { downloadDataWithChunkAPI } from "./proxy/download-data"
+import {
+  uploadEncryptedDataWithSigning,
+  uploadEncryptedSOC,
+  uploadSOC,
+} from "./proxy/upload-encrypted-data"
+import {
+  downloadDataWithChunkAPI,
+  downloadSOC,
+  downloadEncryptedSOC,
+} from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
 import {
   loadMantarayTreeWithChunkAPI,
@@ -573,6 +587,18 @@ export class SwarmIdProxy {
 
       case "gsocSend":
         await this.handleGsocSend(message, event)
+        break
+      case "socUpload":
+        await this.handleSocUpload(message, event)
+        break
+      case "socRawUpload":
+        await this.handleSocRawUpload(message, event)
+        break
+      case "socDownload":
+        await this.handleSocDownload(message, event)
+        break
+      case "socRawDownload":
+        await this.handleSocRawDownload(message, event)
         break
 
       case "actUploadData":
@@ -1946,6 +1972,214 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "GSOC send failed",
+      )
+    }
+  }
+
+  // ============================================================================
+  // SOC (Single Owner Chunk) Handlers
+  // ============================================================================
+
+  private async handleSocUpload(
+    message: SocUploadMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, identifier, data, signer, options } = message
+
+    console.log("[Proxy] SOC upload request")
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
+
+      const signerKey = signer ?? this.appSecret
+      const signerKeyObj = new PrivateKey(signerKey)
+      const id = new Identifier(identifier)
+
+      const result = await uploadEncryptedSOC(
+        this.bee,
+        this.stamper,
+        signerKeyObj,
+        id,
+        data,
+        undefined,
+        options,
+      )
+
+      await this.saveStamperState()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "socUploadResponse",
+            requestId,
+            reference: uint8ArrayToHex(result.socAddress),
+            tagUid: result.tagUid,
+            encryptionKey: uint8ArrayToHex(result.encryptionKey),
+            owner: signerKeyObj.publicKey().address().toHex(),
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] SOC upload successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "SOC upload failed",
+      )
+    }
+  }
+
+  private async handleSocRawUpload(
+    message: SocRawUploadMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, identifier, data, signer, options } = message
+
+    console.log("[Proxy] SOC raw upload request")
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
+
+      const signerKey = signer ?? this.appSecret
+      const signerKeyObj = new PrivateKey(signerKey)
+      const id = new Identifier(identifier)
+
+      const result = await uploadSOC(
+        this.bee,
+        this.stamper,
+        signerKeyObj,
+        id,
+        data,
+        options,
+      )
+
+      await this.saveStamperState()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "socRawUploadResponse",
+            requestId,
+            reference: uint8ArrayToHex(result.socAddress),
+            tagUid: result.tagUid,
+            owner: signerKeyObj.publicKey().address().toHex(),
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] SOC raw upload successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "SOC raw upload failed",
+      )
+    }
+  }
+
+  private async handleSocDownload(
+    message: SocDownloadMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, owner, identifier, encryptionKey, requestOptions } =
+      message
+
+    console.log("[Proxy] SOC download request")
+
+    try {
+      const soc = await downloadEncryptedSOC(
+        this.bee,
+        owner,
+        identifier,
+        encryptionKey,
+        requestOptions,
+      )
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "socDownloadResponse",
+            requestId,
+            data: soc.data,
+            identifier: soc.identifier,
+            signature: soc.signature,
+            span: soc.span,
+            payload: soc.payload,
+            address: soc.address,
+            owner: soc.owner,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] SOC download successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "SOC download failed",
+      )
+    }
+  }
+
+  private async handleSocRawDownload(
+    message: SocRawDownloadMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, owner, identifier, requestOptions } = message
+
+    console.log("[Proxy] SOC raw download request")
+
+    try {
+      const soc = await downloadSOC(
+        this.bee,
+        owner,
+        identifier,
+        requestOptions,
+      )
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "socRawDownloadResponse",
+            requestId,
+            data: soc.data,
+            identifier: soc.identifier,
+            signature: soc.signature,
+            span: soc.span,
+            payload: soc.payload,
+            address: soc.address,
+            owner: soc.owner,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] SOC raw download successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "SOC raw download failed",
       )
     }
   }

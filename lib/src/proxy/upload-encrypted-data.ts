@@ -1,5 +1,6 @@
 import {
   makeEncryptedContentAddressedChunk,
+  makeContentAddressedChunk,
   Reference,
   calculateChunkAddress,
   PrivateKey,
@@ -373,6 +374,14 @@ export interface UploadEncryptedSOCResult {
 }
 
 /**
+ * Result of uploading a SOC
+ */
+export interface UploadSOCResult {
+  socAddress: Uint8Array
+  tagUid?: number
+}
+
+/**
  * Upload chunk via direct fetch to /chunks endpoint
  *
  * This is a temporary workaround for bee.uploadChunk's 4104-byte size limit.
@@ -580,6 +589,78 @@ export async function uploadEncryptedSOC(
   return {
     socAddress: socAddress.toUint8Array(),
     encryptionKey: encryptedChunk.encryptionKey,
+    tagUid: tag,
+  }
+}
+
+/**
+ * Upload a plain Single Owner Chunk (SOC) using the fast chunk upload path
+ *
+ * This constructs an unencrypted SOC and uploads it via /chunks to avoid /soc size limits.
+ */
+export async function uploadSOC(
+  bee: Bee,
+  stamper: Stamper,
+  signer: PrivateKey,
+  identifier: Identifier,
+  data: Uint8Array,
+  options?: UploadOptions,
+): Promise<UploadSOCResult> {
+  const startTime = performance.now()
+  console.log(`[UploadSOC] Starting SOC upload`, {
+    dataLength: data.length,
+    identifier: identifier.toHex().substring(0, 16) + "...",
+  })
+
+  if (data.length < 1 || data.length > 4096) {
+    throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
+  }
+
+  const cac = makeContentAddressedChunk(data)
+  const owner = signer.publicKey().address()
+
+  const toSign = Binary.concatBytes(
+    identifier.toUint8Array(),
+    cac.address.toUint8Array(),
+  )
+  const signature = signer.sign(toSign)
+
+  const socData = Binary.concatBytes(
+    identifier.toUint8Array(),
+    signature.toUint8Array(),
+    cac.data,
+  )
+
+  const socAddress = makeSOCAddress(identifier, owner.toUint8Array())
+
+  let tag: number | undefined = options?.tag
+  if (!tag) {
+    console.log(`[UploadSOC] Creating tag (required for dev mode)...`)
+    const tagResponse = await bee.createTag()
+    tag = tagResponse.uid
+    console.log(`[UploadSOC] Tag created successfully: ${tag}`)
+  }
+
+  const envelope = stamper.stamp({
+    hash: () => socAddress.toUint8Array(),
+    build: () => socData,
+    span: 0n,
+    writer: undefined as any,
+  })
+
+  console.log(
+    `[UploadSOC] Uploading to regular chunk endpoint... (+${(performance.now() - startTime).toFixed(2)}ms)`,
+  )
+
+  const uploadOptionsWithTag = { tag, deferred: false, pin: false, ...options }
+  await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
+
+  console.log(
+    `[UploadSOC] ✅ Upload complete (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
+  )
+
+  return {
+    socAddress: socAddress.toUint8Array(),
     tagUid: tag,
   }
 }

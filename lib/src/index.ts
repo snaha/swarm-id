@@ -147,6 +147,10 @@ export type {
   PostageBatch,
   UploadOptions,
   ActUploadOptions,
+  SOCReader,
+  SOCWriter,
+  SingleOwnerChunk,
+  SocUploadResult,
   UploadProgress,
   RequestOptions,
   DownloadOptions,
@@ -172,6 +176,14 @@ export type {
   ActAddGranteesResponseMessage,
   ActRevokeGranteesResponseMessage,
   ActGetGranteesResponseMessage,
+  SocUploadMessage,
+  SocRawUploadMessage,
+  SocDownloadMessage,
+  SocRawDownloadMessage,
+  SocUploadResponseMessage,
+  SocRawUploadResponseMessage,
+  SocDownloadResponseMessage,
+  SocRawDownloadResponseMessage,
 } from "./types"
 
 // Entity types from schemas
