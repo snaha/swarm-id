@@ -19,7 +19,7 @@
 	import { onMount } from 'svelte'
 	import { SvelteMap } from 'svelte/reactivity'
 	import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
-	import { getBlockTimestamp } from '$lib/utils/ttl'
+	import { getBlockTimestamp } from '@swarm-id/lib'
 	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 	const BATCH_ID_PREVIEW_LENGTH = 8
