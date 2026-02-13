@@ -777,6 +777,79 @@ console.log('Owner:', soc.owner)
 
 ---
 
+## Epoch Feed Methods
+
+Epoch feed methods provide time-indexed updates backed by Single Owner Chunks (SOCs). Feed updates are addressed by `(topic, owner)` and can be looked up by timestamp.
+
+### `makeEpochFeedReader(options, requestOptions?)`
+
+Creates a feed reader bound to a topic and optional owner.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options.topic` | `string` | Yes | Feed topic (32-byte hex string) |
+| `options.owner` | `string` | No | Feed owner address; if omitted, resolved via proxy |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+
+**Returns:** `FeedReader`
+
+| Method | Description |
+|--------|-------------|
+| `getOwner()` | Resolves the feed owner address |
+| `findAt(at, after?)` | Finds the feed update valid at timestamp `at` |
+
+**Returns (`findAt`):** `Promise<string | undefined>` - Swarm reference (hex string) or `undefined` if not found
+
+**Example:**
+
+```typescript
+const reader = client.makeEpochFeedReader({ topic })
+const owner = await reader.getOwner()
+const reference = await reader.findAt(BigInt(Date.now() / 1000))
+```
+
+---
+
+### `makeEpochFeedWriter(options, requestOptions?)`
+
+Creates a feed writer for updating and reading a topic. If `signer` is omitted, the proxy uses the app signer.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `options.topic` | `string` | Yes | Feed topic (32-byte hex string) |
+| `options.signer` | `string` | No | Private key hex string for the feed signer |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+
+**Returns:** `FeedWriter`
+
+| Method | Description |
+|--------|-------------|
+| `getOwner()` | Resolves the feed owner address |
+| `findAt(at, after?)` | Finds the feed update valid at timestamp `at` |
+| `update(at, reference)` | Updates the feed at timestamp `at` with `reference` |
+
+**Returns (`update`):** `Promise<string>` - SOC address/reference (hex string)
+
+**Example:**
+
+```typescript
+const writer = client.makeEpochFeedWriter({ topic })
+const socAddress = await writer.update(BigInt(Date.now() / 1000), reference)
+const latest = await writer.findAt(BigInt(Date.now() / 1000))
+```
+
+---
+
 ## GSOC Methods
 
 GSOC (Global Single Owner Chunk) methods enable proximity-based message routing on the Swarm network. These methods allow you to mine a private key that produces a SOC address proximate to a target overlay, then send messages using that key.

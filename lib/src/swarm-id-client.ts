@@ -17,6 +17,16 @@ import type {
   SocRawUploadMessage,
   SocGetOwnerMessage,
   SocGetOwnerResponseMessage,
+  FeedReaderOptions,
+  FeedWriterOptions,
+  FeedReader,
+  FeedWriter,
+  FeedFindAtMessage,
+  FeedFindAtResponseMessage,
+  FeedUpdateMessage,
+  FeedUpdateResponseMessage,
+  FeedGetOwnerMessage,
+  FeedGetOwnerResponseMessage,
   SocDownloadMessage,
   SocDownloadResponseMessage,
   SocRawDownloadMessage,
@@ -36,7 +46,7 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { buildAuthUrl } from "./utils/url"
-import { EthAddress, Identifier, PrivateKey } from "@ethersphere/bee-js"
+import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/key-derivation"
 
 const DEFAULT_TIMEOUT_MS = 30000
@@ -504,6 +514,38 @@ export class SwarmIdClient {
       return uint8ArrayToHex(key)
     }
     return key
+  }
+
+  private normalizeFeedTopic(
+    topic: Topic | Identifier | Uint8Array | string,
+  ): string {
+    if (topic instanceof Topic) {
+      return uint8ArrayToHex(topic.toUint8Array())
+    }
+    if (topic instanceof Identifier) {
+      return topic.toHex()
+    }
+    if (topic instanceof Uint8Array) {
+      return uint8ArrayToHex(topic)
+    }
+    return topic
+  }
+
+  private normalizeReference(reference: Uint8Array | string): string {
+    if (reference instanceof Uint8Array) {
+      return uint8ArrayToHex(reference)
+    }
+    return reference
+  }
+
+  private normalizeFeedTimestamp(value: bigint | number | string): string {
+    if (typeof value === "bigint") {
+      return value.toString()
+    }
+    if (typeof value === "number") {
+      return BigInt(Math.floor(value)).toString()
+    }
+    return value
   }
 
   private socChunkFromResponse(response: {
@@ -1520,6 +1562,164 @@ export class SwarmIdClient {
         sendSocUpload(identifier, data, options),
       rawUpload: (identifier, data, options) =>
         sendRawSocUpload(identifier, data, options),
+    }
+  }
+
+  /**
+   * Returns an object for reading epoch-based feeds.
+   *
+   * @param options - Feed reader options
+   * @param options.topic - Feed topic (32 bytes)
+   * @param options.owner - Optional feed owner address
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns FeedReader with `findAt` and `getOwner`
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the request times out
+   */
+  makeEpochFeedReader(
+    options: FeedReaderOptions,
+    requestOptions?: RequestOptions,
+  ): FeedReader {
+    this.ensureReady()
+    const topic = this.normalizeFeedTopic(options.topic)
+    let owner: string | undefined = options.owner
+      ? new EthAddress(options.owner).toHex()
+      : undefined
+
+    const resolveOwner = async (): Promise<string> => {
+      if (owner) {
+        return owner
+      }
+
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        FeedGetOwnerResponseMessage,
+        FeedGetOwnerMessage
+      >({
+        type: "feedGetOwner",
+        requestId,
+      })
+
+      owner = response.owner
+      return owner
+    }
+
+    const findAt = async (
+      at: bigint | number | string,
+      after?: bigint | number | string,
+    ): Promise<Reference | undefined> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        FeedFindAtResponseMessage,
+        FeedFindAtMessage
+      >({
+        type: "feedFindAt",
+        requestId,
+        topic,
+        owner,
+        at: this.normalizeFeedTimestamp(at),
+        after:
+          after !== undefined ? this.normalizeFeedTimestamp(after) : undefined,
+        requestOptions,
+      })
+
+      return response.reference
+    }
+
+    return {
+      getOwner: resolveOwner,
+      findAt,
+    }
+  }
+
+  /**
+   * Returns an object for reading and writing epoch-based feeds.
+   *
+   * @param options - Feed writer options
+   * @param options.topic - Feed topic (32 bytes)
+   * @param options.signer - Optional feed signer private key. If omitted, the proxy uses the app signer.
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns FeedWriter with `findAt`, `update`, and `getOwner`
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the request times out
+   */
+  makeEpochFeedWriter(
+    options: FeedWriterOptions,
+    requestOptions?: RequestOptions,
+  ): FeedWriter {
+    this.ensureReady()
+    const topic = this.normalizeFeedTopic(options.topic)
+    const signerObj = options.signer ? new PrivateKey(options.signer) : undefined
+    const signerKey = signerObj ? signerObj.toHex() : undefined
+    let owner: string | undefined = signerObj
+      ? signerObj.publicKey().address().toHex()
+      : undefined
+
+    const resolveOwner = async (): Promise<string> => {
+      if (owner) {
+        return owner
+      }
+
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        FeedGetOwnerResponseMessage,
+        FeedGetOwnerMessage
+      >({
+        type: "feedGetOwner",
+        requestId,
+      })
+
+      owner = response.owner
+      return owner
+    }
+
+    const findAt = async (
+      at: bigint | number | string,
+      after?: bigint | number | string,
+    ): Promise<Reference | undefined> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        FeedFindAtResponseMessage,
+        FeedFindAtMessage
+      >({
+        type: "feedFindAt",
+        requestId,
+        topic,
+        owner,
+        at: this.normalizeFeedTimestamp(at),
+        after:
+          after !== undefined ? this.normalizeFeedTimestamp(after) : undefined,
+        requestOptions,
+      })
+
+      return response.reference
+    }
+
+    const update = async (
+      at: bigint | number | string,
+      reference: Uint8Array | string,
+    ): Promise<Reference> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        FeedUpdateResponseMessage,
+        FeedUpdateMessage
+      >({
+        type: "feedUpdate",
+        requestId,
+        topic,
+        signer: signerKey,
+        at: this.normalizeFeedTimestamp(at),
+        reference: this.normalizeReference(reference),
+        requestOptions,
+      })
+
+      return response.socAddress
+    }
+
+    return {
+      getOwner: resolveOwner,
+      findAt,
+      update,
     }
   }
 

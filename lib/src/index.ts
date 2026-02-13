@@ -152,6 +152,10 @@ export type {
   SingleOwnerChunk,
   SocUploadResult,
   SocRawUploadResult,
+  FeedReaderOptions,
+  FeedWriterOptions,
+  FeedReader,
+  FeedWriter,
   UploadProgress,
   RequestOptions,
   DownloadOptions,
@@ -182,11 +186,17 @@ export type {
   SocDownloadMessage,
   SocRawDownloadMessage,
   SocGetOwnerMessage,
+  FeedFindAtMessage,
+  FeedUpdateMessage,
+  FeedGetOwnerMessage,
   SocUploadResponseMessage,
   SocRawUploadResponseMessage,
   SocDownloadResponseMessage,
   SocRawDownloadResponseMessage,
   SocGetOwnerResponseMessage,
+  FeedFindAtResponseMessage,
+  FeedUpdateResponseMessage,
+  FeedGetOwnerResponseMessage,
 } from "./types"
 
 // Entity types from schemas

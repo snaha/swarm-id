@@ -20,6 +20,9 @@ import type {
   SocDownloadMessage,
   SocRawDownloadMessage,
   SocGetOwnerMessage,
+  FeedFindAtMessage,
+  FeedUpdateMessage,
+  FeedGetOwnerMessage,
   ActUploadDataMessage,
   ActDownloadDataMessage,
   ActAddGranteesMessage,
@@ -39,6 +42,7 @@ import {
   EthAddress,
   PrivateKey,
   Identifier,
+  Topic,
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
@@ -69,6 +73,7 @@ import {
   createAccountsStorageManager,
 } from "./utils/storage-managers"
 import { hexToUint8Array, uint8ArrayToHex } from "./utils/key-derivation"
+import { createAsyncEpochFinder, createEpochUpdater } from "./proxy/feeds/epochs"
 import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
@@ -546,6 +551,15 @@ export class SwarmIdProxy {
         break
       case "socGetOwner":
         await this.handleSocGetOwner(message, event)
+        break
+      case "feedFindAt":
+        await this.handleFeedFindAt(message, event)
+        break
+      case "feedUpdate":
+        await this.handleFeedUpdate(message, event)
+        break
+      case "feedGetOwner":
+        await this.handleFeedGetOwner(message, event)
         break
 
       case "actUploadData":
@@ -2022,6 +2036,161 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "SOC get owner failed",
+      )
+    }
+  }
+
+  private parseFeedTimestamp(value: string | number): bigint {
+    if (typeof value === "number") {
+      return BigInt(Math.floor(value))
+    }
+    return BigInt(value)
+  }
+
+  private async handleFeedGetOwner(
+    message: FeedGetOwnerMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId } = message
+
+    console.log("[Proxy] Feed get owner request")
+
+    try {
+      if (!this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      const owner = new PrivateKey(this.appSecret)
+        .publicKey()
+        .address()
+        .toHex()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "feedGetOwnerResponse",
+            requestId,
+            owner,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] Feed get owner successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Feed get owner failed",
+      )
+    }
+  }
+
+  private async handleFeedFindAt(
+    message: FeedFindAtMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, topic, owner, at, after } = message
+
+    console.log("[Proxy] Feed findAt request")
+
+    try {
+      let resolvedOwner = owner
+      if (!resolvedOwner) {
+        if (!this.appSecret) {
+          throw new Error("Not authenticated. Please login first.")
+        }
+        resolvedOwner = new PrivateKey(this.appSecret)
+          .publicKey()
+          .address()
+          .toHex()
+      }
+
+      const topicObj = new Topic(hexToUint8Array(topic))
+      const ownerObj = new EthAddress(resolvedOwner)
+      const finder = createAsyncEpochFinder({
+        bee: this.bee,
+        topic: topicObj,
+        owner: ownerObj,
+      })
+
+      const atValue = this.parseFeedTimestamp(at)
+      const afterValue = after !== undefined ? this.parseFeedTimestamp(after) : 0n
+      const reference = await finder.findAt(atValue, afterValue)
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "feedFindAtResponse",
+            requestId,
+            reference: reference ? uint8ArrayToHex(reference) : undefined,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] Feed findAt successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Feed findAt failed",
+      )
+    }
+  }
+
+  private async handleFeedUpdate(
+    message: FeedUpdateMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, topic, signer, at, reference } = message
+
+    console.log("[Proxy] Feed update request")
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
+
+      const signerKey = signer ?? this.appSecret
+      const signerKeyObj = new PrivateKey(signerKey)
+      const topicObj = new Topic(hexToUint8Array(topic))
+      const updater = createEpochUpdater({
+        bee: this.bee,
+        topic: topicObj,
+        owner: signerKeyObj.publicKey().address(),
+        signer: signerKeyObj,
+      })
+
+      const atValue = this.parseFeedTimestamp(at)
+      const referenceBytes = hexToUint8Array(reference)
+      const socAddress = await updater.update(atValue, referenceBytes, this.stamper)
+
+      await this.saveStamperState()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "feedUpdateResponse",
+            requestId,
+            socAddress: uint8ArrayToHex(socAddress),
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] Feed update successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "Feed update failed",
       )
     }
   }

@@ -1,4 +1,5 @@
 import { z } from "zod"
+import type { PrivateKey as BeePrivateKey, Topic as BeeTopic } from "@ethersphere/bee-js"
 import { NetworkSettingsSchemaV1 } from "./schemas"
 
 // ============================================================================
@@ -36,6 +37,7 @@ export const AddressSchema = hexString(40) // 20 bytes
 export const PrivateKeySchema = hexString(64) // 32 bytes
 export const IdentifierSchema = hexString(64) // 32 bytes
 export const SignatureSchema = hexString(130) // 65 bytes
+export const TimestampSchema = z.union([z.number(), z.string()])
 
 export type Reference = z.infer<typeof ReferenceSchema>
 export type BatchId = z.infer<typeof BatchIdSchema>
@@ -43,6 +45,7 @@ export type Address = z.infer<typeof AddressSchema>
 export type PrivateKey = z.infer<typeof PrivateKeySchema>
 export type Identifier = z.infer<typeof IdentifierSchema>
 export type Signature = z.infer<typeof SignatureSchema>
+export type Timestamp = z.infer<typeof TimestampSchema>
 
 // ============================================================================
 // Upload/Download Options
@@ -225,6 +228,35 @@ export interface SOCWriter extends SOCReader {
     data: Uint8Array,
     options?: UploadOptions,
   ) => Promise<SocRawUploadResult>
+}
+
+// ============================================================================
+// Feed Types
+// ============================================================================
+
+export interface FeedReaderOptions {
+  topic: Identifier | Uint8Array | string | BeeTopic
+  owner?: Address | Uint8Array | string
+}
+
+export interface FeedWriterOptions {
+  topic: Identifier | Uint8Array | string | BeeTopic
+  signer?: BeePrivateKey | Uint8Array | string
+}
+
+export interface FeedReader {
+  getOwner: () => Promise<Address>
+  findAt: (
+    at: bigint | number | string,
+    after?: bigint | number | string,
+  ) => Promise<Reference | undefined>
+}
+
+export interface FeedWriter extends FeedReader {
+  update: (
+    at: bigint | number | string,
+    reference: Uint8Array | string,
+  ) => Promise<Reference>
 }
 
 // ============================================================================
@@ -485,6 +517,31 @@ export const SocGetOwnerMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const FeedFindAtMessageSchema = z.object({
+  type: z.literal("feedFindAt"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  owner: AddressSchema.optional(),
+  at: TimestampSchema,
+  after: TimestampSchema.optional(),
+  requestOptions: RequestOptionsSchema,
+})
+
+export const FeedUpdateMessageSchema = z.object({
+  type: z.literal("feedUpdate"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  signer: PrivateKeySchema.optional(),
+  at: TimestampSchema,
+  reference: ReferenceSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
+export const FeedGetOwnerMessageSchema = z.object({
+  type: z.literal("feedGetOwner"),
+  requestId: z.string(),
+})
+
 // ACT (Access Control Tries) Message Schemas
 export const ActUploadDataMessageSchema = z.object({
   type: z.literal("actUploadData"),
@@ -556,6 +613,9 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   SocDownloadMessageSchema,
   SocRawDownloadMessageSchema,
   SocGetOwnerMessageSchema,
+  FeedFindAtMessageSchema,
+  FeedUpdateMessageSchema,
+  FeedGetOwnerMessageSchema,
   ActUploadDataMessageSchema,
   ActDownloadDataMessageSchema,
   ActAddGranteesMessageSchema,
@@ -586,6 +646,9 @@ export type SocRawUploadMessage = z.infer<typeof SocRawUploadMessageSchema>
 export type SocDownloadMessage = z.infer<typeof SocDownloadMessageSchema>
 export type SocRawDownloadMessage = z.infer<typeof SocRawDownloadMessageSchema>
 export type SocGetOwnerMessage = z.infer<typeof SocGetOwnerMessageSchema>
+export type FeedFindAtMessage = z.infer<typeof FeedFindAtMessageSchema>
+export type FeedUpdateMessage = z.infer<typeof FeedUpdateMessageSchema>
+export type FeedGetOwnerMessage = z.infer<typeof FeedGetOwnerMessageSchema>
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>
 export type ActDownloadDataMessage = z.infer<
   typeof ActDownloadDataMessageSchema
@@ -779,6 +842,24 @@ export const SocGetOwnerResponseMessageSchema = z.object({
   owner: AddressSchema,
 })
 
+export const FeedFindAtResponseMessageSchema = z.object({
+  type: z.literal("feedFindAtResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema.optional(),
+})
+
+export const FeedUpdateResponseMessageSchema = z.object({
+  type: z.literal("feedUpdateResponse"),
+  requestId: z.string(),
+  socAddress: ReferenceSchema,
+})
+
+export const FeedGetOwnerResponseMessageSchema = z.object({
+  type: z.literal("feedGetOwnerResponse"),
+  requestId: z.string(),
+  owner: AddressSchema,
+})
+
 // ACT Response Message Schemas
 export const ActUploadDataResponseMessageSchema = z.object({
   type: z.literal("actUploadDataResponse"),
@@ -852,6 +933,9 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   SocDownloadResponseMessageSchema,
   SocRawDownloadResponseMessageSchema,
   SocGetOwnerResponseMessageSchema,
+  FeedFindAtResponseMessageSchema,
+  FeedUpdateResponseMessageSchema,
+  FeedGetOwnerResponseMessageSchema,
   ActUploadDataResponseMessageSchema,
   ActDownloadDataResponseMessageSchema,
   ActAddGranteesResponseMessageSchema,
@@ -921,6 +1005,15 @@ export type SocRawDownloadResponseMessage = z.infer<
 >
 export type SocGetOwnerResponseMessage = z.infer<
   typeof SocGetOwnerResponseMessageSchema
+>
+export type FeedFindAtResponseMessage = z.infer<
+  typeof FeedFindAtResponseMessageSchema
+>
+export type FeedUpdateResponseMessage = z.infer<
+  typeof FeedUpdateResponseMessageSchema
+>
+export type FeedGetOwnerResponseMessage = z.infer<
+  typeof FeedGetOwnerResponseMessageSchema
 >
 export type ActUploadDataResponseMessage = z.infer<
   typeof ActUploadDataResponseMessageSchema
