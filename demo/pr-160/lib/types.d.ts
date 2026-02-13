@@ -9,10 +9,14 @@ export declare const ReferenceSchema: z.ZodString;
 export declare const BatchIdSchema: z.ZodString;
 export declare const AddressSchema: z.ZodString;
 export declare const PrivateKeySchema: z.ZodString;
+export declare const IdentifierSchema: z.ZodString;
+export declare const SignatureSchema: z.ZodString;
 export type Reference = z.infer<typeof ReferenceSchema>;
 export type BatchId = z.infer<typeof BatchIdSchema>;
 export type Address = z.infer<typeof AddressSchema>;
 export type PrivateKey = z.infer<typeof PrivateKeySchema>;
+export type Identifier = z.infer<typeof IdentifierSchema>;
+export type Signature = z.infer<typeof SignatureSchema>;
 export declare const UploadOptionsSchema: z.ZodOptional<z.ZodObject<{
     pin: z.ZodOptional<z.ZodBoolean>;
     encrypt: z.ZodOptional<z.ZodBoolean>;
@@ -62,6 +66,18 @@ export declare const UploadResultSchema: z.ZodObject<{
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
+export declare const SocUploadResultSchema: z.ZodObject<{
+    reference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+    encryptionKey: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>;
+export declare const SocRawUploadResultSchema: z.ZodObject<{
+    reference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+    encryptionKey: z.ZodOptional<z.ZodString>;
+    owner: z.ZodString;
+}, z.core.$strip>;
 export declare const FileDataSchema: z.ZodObject<{
     name: z.ZodString;
     data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
@@ -80,8 +96,69 @@ export declare const PostageBatchSchema: z.ZodObject<{
     batchTTL: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>;
 export type UploadResult = z.infer<typeof UploadResultSchema>;
+export type SocUploadResult = z.infer<typeof SocUploadResultSchema>;
+export type SocRawUploadResult = z.infer<typeof SocRawUploadResultSchema>;
 export type FileData = z.infer<typeof FileDataSchema>;
 export type PostageBatch = z.infer<typeof PostageBatchSchema>;
+export interface SingleOwnerChunk {
+    data: Uint8Array;
+    identifier: Identifier;
+    signature: Signature;
+    span: number;
+    payload: Uint8Array;
+    address: Reference;
+    owner: Address;
+}
+/**
+ * Interface for downloading single owner chunks (SOC).
+ *
+ * `download` expects an encryption key and returns decrypted content.
+ * `rawDownload` returns unencrypted SOC data.
+ */
+export interface SOCReader {
+    /**
+     * Resolve SOC owner address. For SOCWriter without signer, this may be
+     * resolved via the proxy.
+     */
+    getOwner: () => Promise<Address>;
+    /**
+     * Download an unencrypted SOC by identifier.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     */
+    rawDownload: (identifier: Identifier | Uint8Array | string, encryptionKey?: Uint8Array | string) => Promise<SingleOwnerChunk>;
+    /**
+     * Download and decrypt an encrypted SOC by identifier.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     * @param encryptionKey - 32-byte encryption key returned by upload
+     */
+    download: (identifier: Identifier | Uint8Array | string, encryptionKey: Uint8Array | string) => Promise<SingleOwnerChunk>;
+}
+/**
+ * Interface for downloading and uploading single owner chunks (SOC).
+ *
+ * `upload` creates an encrypted SOC by default.
+ * `rawUpload` creates an unencrypted SOC.
+ */
+export interface SOCWriter extends SOCReader {
+    /**
+     * Upload an encrypted SOC.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     * @param data - SOC payload data (1-4096 bytes)
+     * @param options - Optional upload configuration
+     */
+    upload: (identifier: Identifier | Uint8Array | string, data: Uint8Array, options?: UploadOptions) => Promise<SocUploadResult>;
+    /**
+     * Upload an unencrypted SOC.
+     *
+     * @param identifier - SOC identifier (32-byte value)
+     * @param data - SOC payload data (1-4096 bytes)
+     * @param options - Optional upload configuration
+     */
+    rawUpload: (identifier: Identifier | Uint8Array | string, data: Uint8Array, options?: UploadOptions) => Promise<SocRawUploadResult>;
+}
 export declare const AuthStatusSchema: z.ZodObject<{
     authenticated: z.ZodBoolean;
     origin: z.ZodOptional<z.ZodString>;
@@ -322,6 +399,72 @@ export declare const GsocSendMessageSchema: z.ZodObject<{
         headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const SocUploadMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socUpload">;
+    requestId: z.ZodString;
+    identifier: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    signer: z.ZodOptional<z.ZodString>;
+    options: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const SocRawUploadMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socRawUpload">;
+    requestId: z.ZodString;
+    identifier: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    signer: z.ZodOptional<z.ZodString>;
+    options: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const SocDownloadMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socDownload">;
+    requestId: z.ZodString;
+    owner: z.ZodOptional<z.ZodString>;
+    identifier: z.ZodString;
+    encryptionKey: z.ZodString;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const SocRawDownloadMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socRawDownload">;
+    requestId: z.ZodString;
+    owner: z.ZodOptional<z.ZodString>;
+    identifier: z.ZodString;
+    encryptionKey: z.ZodOptional<z.ZodString>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
+export declare const SocGetOwnerMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socGetOwner">;
+    requestId: z.ZodString;
 }, z.core.$strip>;
 export declare const ActUploadDataMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"actUploadData">;
@@ -570,6 +713,67 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socUpload">;
+    requestId: z.ZodString;
+    identifier: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    signer: z.ZodOptional<z.ZodString>;
+    options: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socRawUpload">;
+    requestId: z.ZodString;
+    identifier: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    signer: z.ZodOptional<z.ZodString>;
+    options: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socDownload">;
+    requestId: z.ZodString;
+    owner: z.ZodOptional<z.ZodString>;
+    identifier: z.ZodString;
+    encryptionKey: z.ZodString;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socRawDownload">;
+    requestId: z.ZodString;
+    owner: z.ZodOptional<z.ZodString>;
+    identifier: z.ZodString;
+    encryptionKey: z.ZodOptional<z.ZodString>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socGetOwner">;
+    requestId: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"actUploadData">;
     requestId: z.ZodString;
     data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
@@ -649,6 +853,11 @@ export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>;
 export type GetNodeInfoMessage = z.infer<typeof GetNodeInfoMessageSchema>;
 export type GsocMineMessage = z.infer<typeof GsocMineMessageSchema>;
 export type GsocSendMessage = z.infer<typeof GsocSendMessageSchema>;
+export type SocUploadMessage = z.infer<typeof SocUploadMessageSchema>;
+export type SocRawUploadMessage = z.infer<typeof SocRawUploadMessageSchema>;
+export type SocDownloadMessage = z.infer<typeof SocDownloadMessageSchema>;
+export type SocRawDownloadMessage = z.infer<typeof SocRawDownloadMessageSchema>;
+export type SocGetOwnerMessage = z.infer<typeof SocGetOwnerMessageSchema>;
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>;
 export type ActDownloadDataMessage = z.infer<typeof ActDownloadDataMessageSchema>;
 export type ActAddGranteesMessage = z.infer<typeof ActAddGranteesMessageSchema>;
@@ -761,6 +970,49 @@ export declare const GsocSendResponseMessageSchema: z.ZodObject<{
     requestId: z.ZodString;
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+export declare const SocUploadResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socUploadResponse">;
+    requestId: z.ZodString;
+    reference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+    encryptionKey: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>;
+export declare const SocRawUploadResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socRawUploadResponse">;
+    requestId: z.ZodString;
+    reference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+    encryptionKey: z.ZodOptional<z.ZodString>;
+    owner: z.ZodString;
+}, z.core.$strip>;
+export declare const SocDownloadResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socDownloadResponse">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    identifier: z.ZodString;
+    signature: z.ZodString;
+    span: z.ZodNumber;
+    payload: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    address: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>;
+export declare const SocRawDownloadResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socRawDownloadResponse">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    identifier: z.ZodString;
+    signature: z.ZodString;
+    span: z.ZodNumber;
+    payload: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    address: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>;
+export declare const SocGetOwnerResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"socGetOwnerResponse">;
+    requestId: z.ZodString;
+    owner: z.ZodString;
 }, z.core.$strip>;
 export declare const ActUploadDataResponseMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"actUploadDataResponse">;
@@ -903,6 +1155,44 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     reference: z.ZodString;
     tagUid: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socUploadResponse">;
+    requestId: z.ZodString;
+    reference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+    encryptionKey: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socRawUploadResponse">;
+    requestId: z.ZodString;
+    reference: z.ZodString;
+    tagUid: z.ZodOptional<z.ZodNumber>;
+    encryptionKey: z.ZodOptional<z.ZodString>;
+    owner: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socDownloadResponse">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    identifier: z.ZodString;
+    signature: z.ZodString;
+    span: z.ZodNumber;
+    payload: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    address: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socRawDownloadResponse">;
+    requestId: z.ZodString;
+    data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    identifier: z.ZodString;
+    signature: z.ZodString;
+    span: z.ZodNumber;
+    payload: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
+    address: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"socGetOwnerResponse">;
+    requestId: z.ZodString;
+    owner: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"actUploadDataResponse">;
     requestId: z.ZodString;
     encryptedReference: z.ZodString;
@@ -969,6 +1259,11 @@ export type IsConnectedResponseMessage = z.infer<typeof IsConnectedResponseMessa
 export type GetNodeInfoResponseMessage = z.infer<typeof GetNodeInfoResponseMessageSchema>;
 export type GsocMineResponseMessage = z.infer<typeof GsocMineResponseMessageSchema>;
 export type GsocSendResponseMessage = z.infer<typeof GsocSendResponseMessageSchema>;
+export type SocUploadResponseMessage = z.infer<typeof SocUploadResponseMessageSchema>;
+export type SocRawUploadResponseMessage = z.infer<typeof SocRawUploadResponseMessageSchema>;
+export type SocDownloadResponseMessage = z.infer<typeof SocDownloadResponseMessageSchema>;
+export type SocRawDownloadResponseMessage = z.infer<typeof SocRawDownloadResponseMessageSchema>;
+export type SocGetOwnerResponseMessage = z.infer<typeof SocGetOwnerResponseMessageSchema>;
 export type ActUploadDataResponseMessage = z.infer<typeof ActUploadDataResponseMessageSchema>;
 export type ActDownloadDataResponseMessage = z.infer<typeof ActDownloadDataResponseMessageSchema>;
 export type ActAddGranteesResponseMessage = z.infer<typeof ActAddGranteesResponseMessageSchema>;

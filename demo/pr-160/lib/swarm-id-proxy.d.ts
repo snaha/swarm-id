@@ -190,6 +190,11 @@ export declare class SwarmIdProxy {
     private handleDownloadChunk;
     private handleGsocMine;
     private handleGsocSend;
+    private handleSocUpload;
+    private handleSocRawUpload;
+    private handleSocDownload;
+    private handleSocRawDownload;
+    private handleSocGetOwner;
     private handleActUploadData;
     private handleActDownloadData;
     private handleActAddGrantees;

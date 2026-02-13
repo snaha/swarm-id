@@ -42,6 +42,13 @@ export interface UploadEncryptedSOCResult {
     tagUid?: number;
 }
 /**
+ * Result of uploading a SOC
+ */
+export interface UploadSOCResult {
+    socAddress: Uint8Array;
+    tagUid?: number;
+}
+/**
  * Upload an encrypted Single Owner Chunk (SOC) using the fast chunk upload path
  *
  * This function constructs an encrypted SOC manually and uploads it via the regular
@@ -66,4 +73,10 @@ export interface UploadEncryptedSOCResult {
  * @returns SOC address, encryption key, and optional tag UID
  */
 export declare function uploadEncryptedSOC(bee: Bee, stamper: Stamper, signer: PrivateKey, identifier: Identifier, data: Uint8Array, encryptionKey?: Uint8Array, options?: UploadOptions): Promise<UploadEncryptedSOCResult>;
+/**
+ * Upload a plain Single Owner Chunk (SOC) using the fast chunk upload path
+ *
+ * This constructs an unencrypted SOC and uploads it via /chunks to avoid /soc size limits.
+ */
+export declare function uploadSOC(bee: Bee, stamper: Stamper, signer: PrivateKey, identifier: Identifier, data: Uint8Array, options?: UploadOptions): Promise<UploadSOCResult>;
 //# sourceMappingURL=upload-encrypted-data.d.ts.map
