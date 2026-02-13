@@ -27,6 +27,29 @@ import type {
   FeedUpdateResponseMessage,
   FeedGetOwnerMessage,
   FeedGetOwnerResponseMessage,
+  SequentialFeedReaderOptions,
+  SequentialFeedWriterOptions,
+  SequentialFeedUpdateOptions,
+  SequentialFeedUploadOptions,
+  SequentialFeedPayloadResult,
+  SequentialFeedReferenceResult,
+  SequentialFeedUploadResult,
+  SequentialFeedReader,
+  SequentialFeedWriter,
+  SequentialFeedGetOwnerMessage,
+  SequentialFeedGetOwnerResponseMessage,
+  SequentialFeedDownloadPayloadMessage,
+  SequentialFeedDownloadPayloadResponseMessage,
+  SequentialFeedDownloadRawPayloadMessage,
+  SequentialFeedDownloadRawPayloadResponseMessage,
+  SequentialFeedDownloadReferenceMessage,
+  SequentialFeedDownloadReferenceResponseMessage,
+  SequentialFeedUploadPayloadMessage,
+  SequentialFeedUploadPayloadResponseMessage,
+  SequentialFeedUploadRawPayloadMessage,
+  SequentialFeedUploadRawPayloadResponseMessage,
+  SequentialFeedUploadReferenceMessage,
+  SequentialFeedUploadReferenceResponseMessage,
   SocDownloadMessage,
   SocDownloadResponseMessage,
   SocRawDownloadMessage,
@@ -39,6 +62,7 @@ import type {
   AppMetadata,
   ButtonConfig,
   PostageBatch,
+  BatchId,
 } from "./types"
 import {
   IframeToParentMessageSchema,
@@ -546,6 +570,30 @@ export class SwarmIdClient {
       return BigInt(Math.floor(value)).toString()
     }
     return value
+  }
+
+  private normalizeFeedIndex(value: bigint | number | string): string {
+    if (typeof value === "bigint") {
+      return value.toString()
+    }
+    if (typeof value === "number") {
+      return BigInt(Math.floor(value)).toString()
+    }
+    return value
+  }
+
+  private normalizeBatchId(batchId: BatchId | Uint8Array | string): string {
+    if (batchId instanceof Uint8Array) {
+      return uint8ArrayToHex(batchId)
+    }
+    return batchId
+  }
+
+  private normalizePayload(data: Uint8Array | string): Uint8Array {
+    if (data instanceof Uint8Array) {
+      return data
+    }
+    return new TextEncoder().encode(data)
   }
 
   private socChunkFromResponse(response: {
@@ -1649,7 +1697,9 @@ export class SwarmIdClient {
   ): FeedWriter {
     this.ensureReady()
     const topic = this.normalizeFeedTopic(options.topic)
-    const signerObj = options.signer ? new PrivateKey(options.signer) : undefined
+    const signerObj = options.signer
+      ? new PrivateKey(options.signer)
+      : undefined
     const signerKey = signerObj ? signerObj.toHex() : undefined
     let owner: string | undefined = signerObj
       ? signerObj.publicKey().address().toHex()
@@ -1720,6 +1770,444 @@ export class SwarmIdClient {
       getOwner: resolveOwner,
       findAt,
       update,
+    }
+  }
+
+  /**
+   * Returns a sequential feed reader (chunk API only).
+   *
+   * @param options - Sequential feed reader options
+   * @param options.topic - Feed topic (32 bytes)
+   * @param options.owner - Optional feed owner address
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns SequentialFeedReader with payload/reference download helpers
+   */
+  makeSequentialFeedReader(
+    options: SequentialFeedReaderOptions,
+    requestOptions?: RequestOptions,
+  ): SequentialFeedReader {
+    this.ensureReady()
+    const topic = this.normalizeFeedTopic(options.topic)
+    let owner: string | undefined = options.owner
+      ? new EthAddress(options.owner).toHex()
+      : undefined
+
+    const resolveOwner = async (): Promise<string> => {
+      if (owner) {
+        return owner
+      }
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedGetOwnerResponseMessage,
+        SequentialFeedGetOwnerMessage
+      >({
+        type: "seqFeedGetOwner",
+        requestId,
+      })
+      owner = response.owner
+      return owner
+    }
+
+    const downloadPayload = async (
+      encryptionKey: Uint8Array | string,
+      options?: SequentialFeedUpdateOptions,
+    ): Promise<SequentialFeedPayloadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedDownloadPayloadResponseMessage,
+        SequentialFeedDownloadPayloadMessage
+      >({
+        type: "seqFeedDownloadPayload",
+        requestId,
+        topic,
+        owner,
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: this.normalizeSocKey(encryptionKey),
+        requestOptions,
+      })
+
+      return {
+        payload: response.payload,
+        timestamp: response.timestamp,
+        feedIndex: response.feedIndex,
+        feedIndexNext: response.feedIndexNext,
+      }
+    }
+
+    const downloadRawPayload = async (
+      options?: SequentialFeedUpdateOptions,
+      encryptionKey?: Uint8Array | string,
+    ): Promise<SequentialFeedPayloadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedDownloadRawPayloadResponseMessage,
+        SequentialFeedDownloadRawPayloadMessage
+      >({
+        type: "seqFeedDownloadRawPayload",
+        requestId,
+        topic,
+        owner,
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: encryptionKey
+          ? this.normalizeSocKey(encryptionKey)
+          : undefined,
+        requestOptions,
+      })
+
+      return {
+        payload: response.payload,
+        timestamp: response.timestamp,
+        feedIndex: response.feedIndex,
+        feedIndexNext: response.feedIndexNext,
+      }
+    }
+
+    const downloadReference = async (
+      encryptionKey: Uint8Array | string,
+      options?: SequentialFeedUpdateOptions,
+    ): Promise<SequentialFeedReferenceResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedDownloadReferenceResponseMessage,
+        SequentialFeedDownloadReferenceMessage
+      >({
+        type: "seqFeedDownloadReference",
+        requestId,
+        topic,
+        owner,
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: this.normalizeSocKey(encryptionKey),
+        requestOptions,
+      })
+
+      return {
+        reference: response.reference,
+        feedIndex: response.feedIndex,
+        feedIndexNext: response.feedIndexNext,
+      }
+    }
+
+    return {
+      getOwner: resolveOwner,
+      downloadPayload,
+      downloadRawPayload,
+      downloadReference,
+    }
+  }
+
+  /**
+   * Returns a sequential feed writer (chunk API only).
+   *
+   * @param options - Sequential feed writer options
+   * @param options.topic - Feed topic (32 bytes)
+   * @param options.signer - Optional signer private key. If omitted, proxy uses app signer.
+   * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
+   * @returns SequentialFeedWriter with payload/reference upload helpers
+   */
+  makeSequentialFeedWriter(
+    options: SequentialFeedWriterOptions,
+    requestOptions?: RequestOptions,
+  ): SequentialFeedWriter {
+    this.ensureReady()
+    const topic = this.normalizeFeedTopic(options.topic)
+    const signerObj = options.signer
+      ? new PrivateKey(options.signer)
+      : undefined
+    const signerKey = signerObj ? signerObj.toHex() : undefined
+    let owner: string | undefined = signerObj
+      ? signerObj.publicKey().address().toHex()
+      : undefined
+
+    const resolveOwner = async (): Promise<string> => {
+      if (owner) {
+        return owner
+      }
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedGetOwnerResponseMessage,
+        SequentialFeedGetOwnerMessage
+      >({
+        type: "seqFeedGetOwner",
+        requestId,
+      })
+      owner = response.owner
+      return owner
+    }
+
+    const downloadPayload = async (
+      encryptionKey: Uint8Array | string,
+      options?: SequentialFeedUpdateOptions,
+    ): Promise<SequentialFeedPayloadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedDownloadPayloadResponseMessage,
+        SequentialFeedDownloadPayloadMessage
+      >({
+        type: "seqFeedDownloadPayload",
+        requestId,
+        topic,
+        owner,
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: this.normalizeSocKey(encryptionKey),
+        requestOptions,
+      })
+
+      return {
+        payload: response.payload,
+        timestamp: response.timestamp,
+        feedIndex: response.feedIndex,
+        feedIndexNext: response.feedIndexNext,
+      }
+    }
+
+    const downloadRawPayload = async (
+      options?: SequentialFeedUpdateOptions,
+      encryptionKey?: Uint8Array | string,
+    ): Promise<SequentialFeedPayloadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedDownloadRawPayloadResponseMessage,
+        SequentialFeedDownloadRawPayloadMessage
+      >({
+        type: "seqFeedDownloadRawPayload",
+        requestId,
+        topic,
+        owner,
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: encryptionKey
+          ? this.normalizeSocKey(encryptionKey)
+          : undefined,
+        requestOptions,
+      })
+
+      return {
+        payload: response.payload,
+        timestamp: response.timestamp,
+        feedIndex: response.feedIndex,
+        feedIndexNext: response.feedIndexNext,
+      }
+    }
+
+    const downloadReference = async (
+      encryptionKey: Uint8Array | string,
+      options?: SequentialFeedUpdateOptions,
+    ): Promise<SequentialFeedReferenceResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedDownloadReferenceResponseMessage,
+        SequentialFeedDownloadReferenceMessage
+      >({
+        type: "seqFeedDownloadReference",
+        requestId,
+        topic,
+        owner,
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: this.normalizeSocKey(encryptionKey),
+        requestOptions,
+      })
+
+      return {
+        reference: response.reference,
+        feedIndex: response.feedIndex,
+        feedIndexNext: response.feedIndexNext,
+      }
+    }
+
+    const uploadPayload = async (
+      postageBatchId: BatchId | Uint8Array | string,
+      data: Uint8Array | string,
+      options?: SequentialFeedUploadOptions,
+    ): Promise<SequentialFeedUploadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedUploadPayloadResponseMessage,
+        SequentialFeedUploadPayloadMessage
+      >({
+        type: "seqFeedUploadPayload",
+        requestId,
+        topic,
+        signer: signerKey,
+        postageBatchId: this.normalizeBatchId(postageBatchId),
+        data: this.normalizePayload(data),
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        options,
+        requestOptions,
+      })
+
+      owner = response.owner
+
+      return {
+        reference: response.reference,
+        owner: response.owner,
+        encryptionKey: response.encryptionKey,
+        tagUid: response.tagUid,
+      }
+    }
+
+    const uploadRawPayload = async (
+      postageBatchId: BatchId | Uint8Array | string,
+      data: Uint8Array | string,
+      options?: SequentialFeedUploadOptions,
+      encryptionKey?: Uint8Array | string,
+    ): Promise<SequentialFeedUploadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedUploadRawPayloadResponseMessage,
+        SequentialFeedUploadRawPayloadMessage
+      >({
+        type: "seqFeedUploadRawPayload",
+        requestId,
+        topic,
+        signer: signerKey,
+        postageBatchId: this.normalizeBatchId(postageBatchId),
+        data: this.normalizePayload(data),
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        encryptionKey: encryptionKey
+          ? this.normalizeSocKey(encryptionKey)
+          : undefined,
+        options,
+        requestOptions,
+      })
+
+      owner = response.owner
+
+      return {
+        reference: response.reference,
+        owner: response.owner,
+        encryptionKey: response.encryptionKey,
+        tagUid: response.tagUid,
+      }
+    }
+
+    const uploadReference = async (
+      postageBatchId: BatchId | Uint8Array | string,
+      reference: Uint8Array | string,
+      options?: SequentialFeedUploadOptions,
+    ): Promise<SequentialFeedUploadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SequentialFeedUploadReferenceResponseMessage,
+        SequentialFeedUploadReferenceMessage
+      >({
+        type: "seqFeedUploadReference",
+        requestId,
+        topic,
+        signer: signerKey,
+        postageBatchId: this.normalizeBatchId(postageBatchId),
+        reference: this.normalizeReference(reference),
+        index:
+          options?.index !== undefined
+            ? this.normalizeFeedIndex(options.index as bigint | number | string)
+            : undefined,
+        at:
+          options?.at !== undefined
+            ? this.normalizeFeedTimestamp(
+                options.at as bigint | number | string,
+              )
+            : undefined,
+        hasTimestamp: options?.hasTimestamp,
+        options,
+        requestOptions,
+      })
+
+      owner = response.owner
+
+      return {
+        reference: response.reference,
+        owner: response.owner,
+        encryptionKey: response.encryptionKey,
+        tagUid: response.tagUid,
+      }
+    }
+
+    return {
+      getOwner: resolveOwner,
+      downloadPayload,
+      downloadRawPayload,
+      downloadReference,
+      uploadPayload,
+      uploadRawPayload,
+      uploadReference,
     }
   }
 

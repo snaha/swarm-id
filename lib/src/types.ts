@@ -1,5 +1,8 @@
 import { z } from "zod"
-import type { PrivateKey as BeePrivateKey, Topic as BeeTopic } from "@ethersphere/bee-js"
+import type {
+  PrivateKey as BeePrivateKey,
+  Topic as BeeTopic,
+} from "@ethersphere/bee-js"
 import { NetworkSettingsSchemaV1 } from "./schemas"
 
 // ============================================================================
@@ -38,6 +41,7 @@ export const PrivateKeySchema = hexString(64) // 32 bytes
 export const IdentifierSchema = hexString(64) // 32 bytes
 export const SignatureSchema = hexString(130) // 65 bytes
 export const TimestampSchema = z.union([z.number(), z.string()])
+export const FeedIndexSchema = z.union([z.number(), z.string()])
 
 export type Reference = z.infer<typeof ReferenceSchema>
 export type BatchId = z.infer<typeof BatchIdSchema>
@@ -46,6 +50,7 @@ export type PrivateKey = z.infer<typeof PrivateKeySchema>
 export type Identifier = z.infer<typeof IdentifierSchema>
 export type Signature = z.infer<typeof SignatureSchema>
 export type Timestamp = z.infer<typeof TimestampSchema>
+export type FeedIndex = z.infer<typeof FeedIndexSchema>
 
 // ============================================================================
 // Upload/Download Options
@@ -257,6 +262,84 @@ export interface FeedWriter extends FeedReader {
     at: bigint | number | string,
     reference: Uint8Array | string,
   ) => Promise<Reference>
+}
+
+// ============================================================================
+// Sequential Feed Types
+// ============================================================================
+
+export interface SequentialFeedReaderOptions {
+  topic: Identifier | Uint8Array | string | BeeTopic
+  owner?: Address | Uint8Array | string
+}
+
+export interface SequentialFeedWriterOptions {
+  topic: Identifier | Uint8Array | string | BeeTopic
+  signer?: BeePrivateKey | Uint8Array | string
+}
+
+export interface SequentialFeedUpdateOptions {
+  index?: FeedIndex | bigint
+  at?: Timestamp | bigint
+  hasTimestamp?: boolean
+}
+
+export interface SequentialFeedUploadOptions
+  extends UploadOptions, SequentialFeedUpdateOptions {}
+
+export interface SequentialFeedPayloadResult {
+  payload: Uint8Array
+  timestamp?: number
+  feedIndex: string
+  feedIndexNext: string
+}
+
+export interface SequentialFeedReferenceResult {
+  reference: string
+  feedIndex: string
+  feedIndexNext: string
+}
+
+export interface SequentialFeedUploadResult {
+  reference: string
+  owner: string
+  encryptionKey?: string
+  tagUid?: number
+}
+
+export interface SequentialFeedReader {
+  getOwner: () => Promise<Address>
+  downloadPayload: (
+    encryptionKey: Uint8Array | string,
+    options?: SequentialFeedUpdateOptions,
+  ) => Promise<SequentialFeedPayloadResult>
+  downloadRawPayload: (
+    options?: SequentialFeedUpdateOptions,
+    encryptionKey?: Uint8Array | string,
+  ) => Promise<SequentialFeedPayloadResult>
+  downloadReference: (
+    encryptionKey: Uint8Array | string,
+    options?: SequentialFeedUpdateOptions,
+  ) => Promise<SequentialFeedReferenceResult>
+}
+
+export interface SequentialFeedWriter extends SequentialFeedReader {
+  uploadPayload: (
+    postageBatchId: BatchId | Uint8Array | string,
+    data: Uint8Array | string,
+    options?: SequentialFeedUploadOptions,
+  ) => Promise<SequentialFeedUploadResult>
+  uploadRawPayload: (
+    postageBatchId: BatchId | Uint8Array | string,
+    data: Uint8Array | string,
+    options?: SequentialFeedUploadOptions,
+    encryptionKey?: Uint8Array | string,
+  ) => Promise<SequentialFeedUploadResult>
+  uploadReference: (
+    postageBatchId: BatchId | Uint8Array | string,
+    reference: Uint8Array | string,
+    options?: SequentialFeedUploadOptions,
+  ) => Promise<SequentialFeedUploadResult>
 }
 
 // ============================================================================
@@ -542,6 +625,90 @@ export const FeedGetOwnerMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const SequentialFeedGetOwnerMessageSchema = z.object({
+  type: z.literal("seqFeedGetOwner"),
+  requestId: z.string(),
+})
+
+export const SequentialFeedDownloadPayloadMessageSchema = z.object({
+  type: z.literal("seqFeedDownloadPayload"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  owner: AddressSchema.optional(),
+  index: FeedIndexSchema.optional(),
+  at: TimestampSchema.optional(),
+  hasTimestamp: z.boolean().optional(),
+  encryptionKey: PrivateKeySchema,
+  requestOptions: RequestOptionsSchema,
+})
+
+export const SequentialFeedDownloadRawPayloadMessageSchema = z.object({
+  type: z.literal("seqFeedDownloadRawPayload"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  owner: AddressSchema.optional(),
+  index: FeedIndexSchema.optional(),
+  at: TimestampSchema.optional(),
+  hasTimestamp: z.boolean().optional(),
+  encryptionKey: PrivateKeySchema.optional(),
+  requestOptions: RequestOptionsSchema,
+})
+
+export const SequentialFeedDownloadReferenceMessageSchema = z.object({
+  type: z.literal("seqFeedDownloadReference"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  owner: AddressSchema.optional(),
+  index: FeedIndexSchema.optional(),
+  at: TimestampSchema.optional(),
+  hasTimestamp: z.boolean().optional(),
+  encryptionKey: PrivateKeySchema,
+  requestOptions: RequestOptionsSchema,
+})
+
+export const SequentialFeedUploadPayloadMessageSchema = z.object({
+  type: z.literal("seqFeedUploadPayload"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  signer: PrivateKeySchema.optional(),
+  postageBatchId: BatchIdSchema,
+  data: z.instanceof(Uint8Array),
+  index: FeedIndexSchema.optional(),
+  at: TimestampSchema.optional(),
+  hasTimestamp: z.boolean().optional(),
+  options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
+export const SequentialFeedUploadRawPayloadMessageSchema = z.object({
+  type: z.literal("seqFeedUploadRawPayload"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  signer: PrivateKeySchema.optional(),
+  postageBatchId: BatchIdSchema,
+  data: z.instanceof(Uint8Array),
+  index: FeedIndexSchema.optional(),
+  at: TimestampSchema.optional(),
+  hasTimestamp: z.boolean().optional(),
+  encryptionKey: PrivateKeySchema.optional(),
+  options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
+export const SequentialFeedUploadReferenceMessageSchema = z.object({
+  type: z.literal("seqFeedUploadReference"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  signer: PrivateKeySchema.optional(),
+  postageBatchId: BatchIdSchema,
+  reference: ReferenceSchema,
+  index: FeedIndexSchema.optional(),
+  at: TimestampSchema.optional(),
+  hasTimestamp: z.boolean().optional(),
+  options: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
 // ACT (Access Control Tries) Message Schemas
 export const ActUploadDataMessageSchema = z.object({
   type: z.literal("actUploadData"),
@@ -616,6 +783,13 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   FeedFindAtMessageSchema,
   FeedUpdateMessageSchema,
   FeedGetOwnerMessageSchema,
+  SequentialFeedGetOwnerMessageSchema,
+  SequentialFeedDownloadPayloadMessageSchema,
+  SequentialFeedDownloadRawPayloadMessageSchema,
+  SequentialFeedDownloadReferenceMessageSchema,
+  SequentialFeedUploadPayloadMessageSchema,
+  SequentialFeedUploadRawPayloadMessageSchema,
+  SequentialFeedUploadReferenceMessageSchema,
   ActUploadDataMessageSchema,
   ActDownloadDataMessageSchema,
   ActAddGranteesMessageSchema,
@@ -649,6 +823,27 @@ export type SocGetOwnerMessage = z.infer<typeof SocGetOwnerMessageSchema>
 export type FeedFindAtMessage = z.infer<typeof FeedFindAtMessageSchema>
 export type FeedUpdateMessage = z.infer<typeof FeedUpdateMessageSchema>
 export type FeedGetOwnerMessage = z.infer<typeof FeedGetOwnerMessageSchema>
+export type SequentialFeedGetOwnerMessage = z.infer<
+  typeof SequentialFeedGetOwnerMessageSchema
+>
+export type SequentialFeedDownloadPayloadMessage = z.infer<
+  typeof SequentialFeedDownloadPayloadMessageSchema
+>
+export type SequentialFeedDownloadRawPayloadMessage = z.infer<
+  typeof SequentialFeedDownloadRawPayloadMessageSchema
+>
+export type SequentialFeedDownloadReferenceMessage = z.infer<
+  typeof SequentialFeedDownloadReferenceMessageSchema
+>
+export type SequentialFeedUploadPayloadMessage = z.infer<
+  typeof SequentialFeedUploadPayloadMessageSchema
+>
+export type SequentialFeedUploadRawPayloadMessage = z.infer<
+  typeof SequentialFeedUploadRawPayloadMessageSchema
+>
+export type SequentialFeedUploadReferenceMessage = z.infer<
+  typeof SequentialFeedUploadReferenceMessageSchema
+>
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>
 export type ActDownloadDataMessage = z.infer<
   typeof ActDownloadDataMessageSchema
@@ -860,6 +1055,65 @@ export const FeedGetOwnerResponseMessageSchema = z.object({
   owner: AddressSchema,
 })
 
+export const SequentialFeedGetOwnerResponseMessageSchema = z.object({
+  type: z.literal("seqFeedGetOwnerResponse"),
+  requestId: z.string(),
+  owner: AddressSchema,
+})
+
+export const SequentialFeedDownloadPayloadResponseMessageSchema = z.object({
+  type: z.literal("seqFeedDownloadPayloadResponse"),
+  requestId: z.string(),
+  payload: z.instanceof(Uint8Array),
+  timestamp: z.number().optional(),
+  feedIndex: z.string(),
+  feedIndexNext: z.string(),
+})
+
+export const SequentialFeedDownloadRawPayloadResponseMessageSchema = z.object({
+  type: z.literal("seqFeedDownloadRawPayloadResponse"),
+  requestId: z.string(),
+  payload: z.instanceof(Uint8Array),
+  timestamp: z.number().optional(),
+  feedIndex: z.string(),
+  feedIndexNext: z.string(),
+})
+
+export const SequentialFeedDownloadReferenceResponseMessageSchema = z.object({
+  type: z.literal("seqFeedDownloadReferenceResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  feedIndex: z.string(),
+  feedIndexNext: z.string(),
+})
+
+export const SequentialFeedUploadPayloadResponseMessageSchema = z.object({
+  type: z.literal("seqFeedUploadPayloadResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  owner: AddressSchema,
+  encryptionKey: z.string().optional(),
+  tagUid: z.number().optional(),
+})
+
+export const SequentialFeedUploadRawPayloadResponseMessageSchema = z.object({
+  type: z.literal("seqFeedUploadRawPayloadResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  owner: AddressSchema,
+  encryptionKey: z.string().optional(),
+  tagUid: z.number().optional(),
+})
+
+export const SequentialFeedUploadReferenceResponseMessageSchema = z.object({
+  type: z.literal("seqFeedUploadReferenceResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+  owner: AddressSchema,
+  encryptionKey: z.string().optional(),
+  tagUid: z.number().optional(),
+})
+
 // ACT Response Message Schemas
 export const ActUploadDataResponseMessageSchema = z.object({
   type: z.literal("actUploadDataResponse"),
@@ -936,6 +1190,13 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   FeedFindAtResponseMessageSchema,
   FeedUpdateResponseMessageSchema,
   FeedGetOwnerResponseMessageSchema,
+  SequentialFeedGetOwnerResponseMessageSchema,
+  SequentialFeedDownloadPayloadResponseMessageSchema,
+  SequentialFeedDownloadRawPayloadResponseMessageSchema,
+  SequentialFeedDownloadReferenceResponseMessageSchema,
+  SequentialFeedUploadPayloadResponseMessageSchema,
+  SequentialFeedUploadRawPayloadResponseMessageSchema,
+  SequentialFeedUploadReferenceResponseMessageSchema,
   ActUploadDataResponseMessageSchema,
   ActDownloadDataResponseMessageSchema,
   ActAddGranteesResponseMessageSchema,
@@ -1014,6 +1275,27 @@ export type FeedUpdateResponseMessage = z.infer<
 >
 export type FeedGetOwnerResponseMessage = z.infer<
   typeof FeedGetOwnerResponseMessageSchema
+>
+export type SequentialFeedGetOwnerResponseMessage = z.infer<
+  typeof SequentialFeedGetOwnerResponseMessageSchema
+>
+export type SequentialFeedDownloadPayloadResponseMessage = z.infer<
+  typeof SequentialFeedDownloadPayloadResponseMessageSchema
+>
+export type SequentialFeedDownloadRawPayloadResponseMessage = z.infer<
+  typeof SequentialFeedDownloadRawPayloadResponseMessageSchema
+>
+export type SequentialFeedDownloadReferenceResponseMessage = z.infer<
+  typeof SequentialFeedDownloadReferenceResponseMessageSchema
+>
+export type SequentialFeedUploadPayloadResponseMessage = z.infer<
+  typeof SequentialFeedUploadPayloadResponseMessageSchema
+>
+export type SequentialFeedUploadRawPayloadResponseMessage = z.infer<
+  typeof SequentialFeedUploadRawPayloadResponseMessageSchema
+>
+export type SequentialFeedUploadReferenceResponseMessage = z.infer<
+  typeof SequentialFeedUploadReferenceResponseMessageSchema
 >
 export type ActUploadDataResponseMessage = z.infer<
   typeof ActUploadDataResponseMessageSchema
