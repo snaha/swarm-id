@@ -322,6 +322,48 @@ pnpm preview:docs
 - **Hot Reload**: Changes in `swarm-ui/src/` will automatically reload in the browser
 - **Debugging**: Use browser DevTools on both the parent page and the iframe
 
+## AI Coding Agent Configuration
+
+This project includes configuration for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other AI coding agents, following [best practices](https://code.claude.com/docs/en/best-practices.md) for effective AI-assisted development.
+
+### Structure
+
+```
+CLAUDE.md                        → symlink to AGENT.md
+AGENT.md                         # Core project context: architecture, commands, code style rules
+.claude/
+├── settings.json                # Shared team settings (permissions, hooks)
+├── settings.local.json          # Personal overrides (gitignored)
+└── rules/                       # Modular, path-scoped instructions
+    ├── swarm-ui.md              # Svelte 5, Diete, Carbon Icons (loads for swarm-ui/** only)
+    ├── figma.md                 # Figma MCP workflow (loads for swarm-ui/** only)
+    └── bee-cluster.md           # Local Bee cluster commands and keys
+```
+
+### How It Works
+
+- **`AGENT.md`** is the main instruction file, kept concise (~100 lines). It contains only information that would cause mistakes if absent: architecture overview, essential commands, code style rules (no-semicolons, no-null, no-any), and pre-commit requirements.
+
+- **`.claude/rules/`** contains modular rules that load automatically based on which files are being edited. For example, Svelte 5 rune patterns and Diete design system conventions only load when working in `swarm-ui/`.
+
+- **`.claude/settings.json`** defines shared team configuration:
+  - **Permissions**: Pre-approved commands (`pnpm build`, `pnpm check:all`, `git status`, Figma MCP tools, etc.) so agents don't prompt for common operations.
+
+- **`settings.local.json`** (gitignored) is for personal permission overrides.
+
+### Adding New Rules
+
+To add context that only applies to a specific package or directory, create a new `.md` file in `.claude/rules/` with a YAML frontmatter `paths` filter:
+
+```markdown
+---
+paths:
+  - "lib/**"
+---
+
+# lib-specific instructions here
+```
+
 ## Troubleshooting
 
 ### Demo not loading
