@@ -642,6 +642,122 @@ console.log('Chunk size:', chunk.length)
 
 ---
 
+## SOC Methods
+
+SOC (Single Owner Chunk) methods provide read/write helpers for SOCs, which are signed chunks owned by an Ethereum address. Uploads via `SOCWriter.upload` are encrypted by default and return an `encryptionKey` for later decryption.
+
+### `makeSOCReader(ownerAddress, requestOptions?)`
+
+Creates an SOC reader bound to the given owner address.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `ownerAddress` | `string` | Yes | Ethereum address of the SOC owner |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+
+**Returns:** `SOCReader`
+
+| Method | Description |
+|--------|-------------|
+| `getOwner()` | Resolves the SOC owner address |
+| `download(identifier, encryptionKey)` | Downloads and decrypts an encrypted SOC |
+| `rawDownload(identifier, encryptionKey?)` | Downloads an unencrypted SOC, or decrypts if `encryptionKey` is provided |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const owner = '0x1234...'
+const reader = client.makeSOCReader(owner)
+const resolvedOwner = await reader.getOwner()
+const soc = await reader.download(identifier, encryptionKey)
+console.log('Payload:', new TextDecoder().decode(soc.payload))
+```
+
+---
+
+### `makeSOCWriter(signer?, requestOptions?)`
+
+Creates an SOC writer for uploading and downloading SOCs. If `signer` is omitted, the proxy uses the app signer.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `signer` | `string` | No | Private key hex string for the SOC signer |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+
+**Returns:** `SOCWriter`
+
+| Method | Description |
+|--------|-------------|
+| `getOwner()` | Resolves the SOC owner address |
+| `upload(identifier, data, options?)` | Uploads an encrypted SOC |
+| `rawUpload(identifier, data, options?)` | Uploads an unencrypted SOC |
+| `download(identifier, encryptionKey)` | Downloads and decrypts an encrypted SOC |
+| `rawDownload(identifier, encryptionKey?)` | Downloads an unencrypted SOC, or decrypts if `encryptionKey` is provided |
+
+**Returns (`upload`):** `Promise<SocUploadResult>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `reference` | `string` | SOC chunk reference |
+| `owner` | `string` | SOC owner address |
+| `encryptionKey` | `string` | Encryption key for decrypting the SOC |
+| `tagUid` | `number` | Upload tag UID, if provided |
+
+**Returns (`rawUpload`):** `Promise<SocRawUploadResult>`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `reference` | `string` | SOC chunk reference |
+| `owner` | `string` | SOC owner address |
+| `encryptionKey` | `string` | Optional; present only if returned by proxy |
+| `tagUid` | `number` | Upload tag UID, if provided |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const writer = client.makeSOCWriter()
+const payload = new TextEncoder().encode('Hello SOC')
+const upload = await writer.upload(identifier, payload)
+
+const owner = await writer.getOwner()
+const soc = await writer.download(identifier, upload.encryptionKey)
+console.log('Owner:', soc.owner)
+```
+
+---
+
+**SOC Payload Structure (download methods):** `SingleOwnerChunk`
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `data` | `Uint8Array` | Full SOC chunk data |
+| `identifier` | `string` | SOC identifier |
+| `signature` | `string` | SOC signature |
+| `span` | `number` | Payload span (bytes) |
+| `payload` | `Uint8Array` | SOC payload data |
+| `address` | `string` | SOC address/reference |
+| `owner` | `string` | SOC owner address |
+
+---
+
 ## GSOC Methods
 
 GSOC (Global Single Owner Chunk) methods enable proximity-based message routing on the Swarm network. These methods allow you to mine a private key that produces a SOC address proximate to a target overlay, then send messages using that key.

@@ -113,6 +113,11 @@ export const UploadResultSchema = z.object({
 })
 
 export const SocUploadResultSchema = UploadResultSchema.extend({
+  encryptionKey: z.string(),
+  owner: AddressSchema,
+})
+
+export const SocRawUploadResultSchema = UploadResultSchema.extend({
   encryptionKey: z.string().optional(),
   owner: AddressSchema,
 })
@@ -138,6 +143,7 @@ export const PostageBatchSchema = z.object({
 
 export type UploadResult = z.infer<typeof UploadResultSchema>
 export type SocUploadResult = z.infer<typeof SocUploadResultSchema>
+export type SocRawUploadResult = z.infer<typeof SocRawUploadResultSchema>
 export type FileData = z.infer<typeof FileDataSchema>
 export type PostageBatch = z.infer<typeof PostageBatchSchema>
 
@@ -162,7 +168,11 @@ export interface SingleOwnerChunk {
  * `rawDownload` returns unencrypted SOC data.
  */
 export interface SOCReader {
-  owner?: Address
+  /**
+   * Resolve SOC owner address. For SOCWriter without signer, this may be
+   * resolved via the proxy.
+   */
+  getOwner: () => Promise<Address>
   /**
    * Download an unencrypted SOC by identifier.
    *
@@ -170,6 +180,7 @@ export interface SOCReader {
    */
   rawDownload: (
     identifier: Identifier | Uint8Array | string,
+    encryptionKey?: Uint8Array | string,
   ) => Promise<SingleOwnerChunk>
   /**
    * Download and decrypt an encrypted SOC by identifier.
@@ -213,7 +224,7 @@ export interface SOCWriter extends SOCReader {
     identifier: Identifier | Uint8Array | string,
     data: Uint8Array,
     options?: UploadOptions,
-  ) => Promise<SocUploadResult>
+  ) => Promise<SocRawUploadResult>
 }
 
 // ============================================================================
@@ -454,7 +465,7 @@ export const SocRawUploadMessageSchema = z.object({
 export const SocDownloadMessageSchema = z.object({
   type: z.literal("socDownload"),
   requestId: z.string(),
-  owner: AddressSchema,
+  owner: AddressSchema.optional(),
   identifier: IdentifierSchema,
   encryptionKey: PrivateKeySchema,
   requestOptions: RequestOptionsSchema,
@@ -463,9 +474,15 @@ export const SocDownloadMessageSchema = z.object({
 export const SocRawDownloadMessageSchema = z.object({
   type: z.literal("socRawDownload"),
   requestId: z.string(),
-  owner: AddressSchema,
+  owner: AddressSchema.optional(),
   identifier: IdentifierSchema,
+  encryptionKey: PrivateKeySchema.optional(),
   requestOptions: RequestOptionsSchema,
+})
+
+export const SocGetOwnerMessageSchema = z.object({
+  type: z.literal("socGetOwner"),
+  requestId: z.string(),
 })
 
 // ACT (Access Control Tries) Message Schemas
@@ -538,6 +555,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   SocRawUploadMessageSchema,
   SocDownloadMessageSchema,
   SocRawDownloadMessageSchema,
+  SocGetOwnerMessageSchema,
   ActUploadDataMessageSchema,
   ActDownloadDataMessageSchema,
   ActAddGranteesMessageSchema,
@@ -567,6 +585,7 @@ export type SocUploadMessage = z.infer<typeof SocUploadMessageSchema>
 export type SocRawUploadMessage = z.infer<typeof SocRawUploadMessageSchema>
 export type SocDownloadMessage = z.infer<typeof SocDownloadMessageSchema>
 export type SocRawDownloadMessage = z.infer<typeof SocRawDownloadMessageSchema>
+export type SocGetOwnerMessage = z.infer<typeof SocGetOwnerMessageSchema>
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>
 export type ActDownloadDataMessage = z.infer<
   typeof ActDownloadDataMessageSchema
@@ -717,7 +736,7 @@ export const SocUploadResponseMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
-  encryptionKey: z.string().optional(),
+  encryptionKey: z.string(),
   owner: AddressSchema,
 })
 
@@ -726,6 +745,7 @@ export const SocRawUploadResponseMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
+  encryptionKey: z.string().optional(),
   owner: AddressSchema,
 })
 
@@ -750,6 +770,12 @@ export const SocRawDownloadResponseMessageSchema = z.object({
   span: z.number(),
   payload: z.instanceof(Uint8Array),
   address: ReferenceSchema,
+  owner: AddressSchema,
+})
+
+export const SocGetOwnerResponseMessageSchema = z.object({
+  type: z.literal("socGetOwnerResponse"),
+  requestId: z.string(),
   owner: AddressSchema,
 })
 
@@ -825,6 +851,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   SocRawUploadResponseMessageSchema,
   SocDownloadResponseMessageSchema,
   SocRawDownloadResponseMessageSchema,
+  SocGetOwnerResponseMessageSchema,
   ActUploadDataResponseMessageSchema,
   ActDownloadDataResponseMessageSchema,
   ActAddGranteesResponseMessageSchema,
@@ -891,6 +918,9 @@ export type SocDownloadResponseMessage = z.infer<
 >
 export type SocRawDownloadResponseMessage = z.infer<
   typeof SocRawDownloadResponseMessageSchema
+>
+export type SocGetOwnerResponseMessage = z.infer<
+  typeof SocGetOwnerResponseMessageSchema
 >
 export type ActUploadDataResponseMessage = z.infer<
   typeof ActUploadDataResponseMessageSchema

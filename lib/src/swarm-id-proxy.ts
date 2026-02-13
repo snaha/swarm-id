@@ -21,6 +21,7 @@ import type {
   SocRawUploadMessage,
   SocDownloadMessage,
   SocRawDownloadMessage,
+  SocGetOwnerMessage,
   ActUploadDataMessage,
   ActDownloadDataMessage,
   ActAddGranteesMessage,
@@ -599,6 +600,9 @@ export class SwarmIdProxy {
         break
       case "socRawDownload":
         await this.handleSocRawDownload(message, event)
+        break
+      case "socGetOwner":
+        await this.handleSocGetOwner(message, event)
         break
 
       case "actUploadData":
@@ -2080,6 +2084,7 @@ export class SwarmIdProxy {
             requestId,
             reference: uint8ArrayToHex(result.socAddress),
             tagUid: result.tagUid,
+            encryptionKey: undefined,
             owner: signerKeyObj.publicKey().address().toHex(),
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
@@ -2106,9 +2111,20 @@ export class SwarmIdProxy {
     console.log("[Proxy] SOC download request")
 
     try {
+      let resolvedOwner = owner
+      if (!resolvedOwner) {
+        if (!this.appSecret) {
+          throw new Error("Not authenticated. Please login first.")
+        }
+        resolvedOwner = new PrivateKey(this.appSecret)
+          .publicKey()
+          .address()
+          .toHex()
+      }
+
       const soc = await downloadEncryptedSOC(
         this.bee,
-        owner,
+        resolvedOwner,
         identifier,
         encryptionKey,
         requestOptions,
@@ -2145,12 +2161,32 @@ export class SwarmIdProxy {
     message: SocRawDownloadMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, owner, identifier, requestOptions } = message
+    const { requestId, owner, identifier, encryptionKey, requestOptions } =
+      message
 
     console.log("[Proxy] SOC raw download request")
 
     try {
-      const soc = await downloadSOC(this.bee, owner, identifier, requestOptions)
+      let resolvedOwner = owner
+      if (!resolvedOwner) {
+        if (!this.appSecret) {
+          throw new Error("Not authenticated. Please login first.")
+        }
+        resolvedOwner = new PrivateKey(this.appSecret)
+          .publicKey()
+          .address()
+          .toHex()
+      }
+
+      const soc = encryptionKey
+        ? await downloadEncryptedSOC(
+            this.bee,
+            resolvedOwner,
+            identifier,
+            encryptionKey,
+            requestOptions,
+          )
+        : await downloadSOC(this.bee, resolvedOwner, identifier, requestOptions)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -2175,6 +2211,42 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "SOC raw download failed",
+      )
+    }
+  }
+
+  private async handleSocGetOwner(
+    message: SocGetOwnerMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId } = message
+
+    console.log("[Proxy] SOC get owner request")
+
+    try {
+      if (!this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "socGetOwnerResponse",
+            requestId,
+            owner,
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] SOC get owner successful")
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "SOC get owner failed",
       )
     }
   }

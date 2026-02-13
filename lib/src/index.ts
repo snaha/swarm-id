@@ -151,6 +151,7 @@ export type {
   SOCWriter,
   SingleOwnerChunk,
   SocUploadResult,
+  SocRawUploadResult,
   UploadProgress,
   RequestOptions,
   DownloadOptions,
@@ -180,10 +181,12 @@ export type {
   SocRawUploadMessage,
   SocDownloadMessage,
   SocRawDownloadMessage,
+  SocGetOwnerMessage,
   SocUploadResponseMessage,
   SocRawUploadResponseMessage,
   SocDownloadResponseMessage,
   SocRawDownloadResponseMessage,
+  SocGetOwnerResponseMessage,
 } from "./types"
 
 // Entity types from schemas

@@ -12,7 +12,18 @@ import type {
   SOCReader,
   SOCWriter,
   SingleOwnerChunk,
+  SocRawUploadResult,
+  SocRawUploadResponseMessage,
+  SocRawUploadMessage,
+  SocGetOwnerMessage,
+  SocGetOwnerResponseMessage,
+  SocDownloadMessage,
+  SocDownloadResponseMessage,
+  SocRawDownloadMessage,
+  SocRawDownloadResponseMessage,
   SocUploadResult,
+  SocUploadResponseMessage,
+  SocUploadMessage,
   ParentToIframeMessage,
   IframeToParentMessage,
   AppMetadata,
@@ -446,9 +457,13 @@ export class SwarmIdClient {
   /**
    * Send request and wait for response
    */
-  private async sendRequest<T>(
-    message: ParentToIframeMessage & { requestId: string },
-  ): Promise<T> {
+  private async sendRequest<
+    TResponse,
+    TRequest extends ParentToIframeMessage & { requestId: string } =
+      ParentToIframeMessage & {
+        requestId: string
+      },
+  >(message: TRequest): Promise<TResponse> {
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(message.requestId)
@@ -1288,51 +1303,41 @@ export class SwarmIdClient {
     const owner = new EthAddress(ownerAddress).toHex()
 
     const sendSocDownload = async (
-      type: "socDownload" | "socRawDownload",
+      identifier: Identifier | Uint8Array | string,
+      encryptionKey: Uint8Array | string,
+    ): Promise<SingleOwnerChunk> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SocDownloadResponseMessage,
+        SocDownloadMessage
+      >({
+        type: "socDownload",
+        requestId,
+        owner,
+        identifier: this.normalizeSocIdentifier(identifier),
+        encryptionKey: this.normalizeSocKey(encryptionKey),
+        requestOptions,
+      })
+
+      return this.socChunkFromResponse(response)
+    }
+
+    const sendRawSocDownload = async (
       identifier: Identifier | Uint8Array | string,
       encryptionKey?: Uint8Array | string,
     ): Promise<SingleOwnerChunk> => {
       const requestId = this.generateRequestId()
-      if (type === "socDownload") {
-        const response = await this.sendRequest<{
-          type: "socDownloadResponse"
-          requestId: string
-          data: Uint8Array
-          identifier: string
-          signature: string
-          span: number
-          payload: Uint8Array
-          address: Reference
-          owner: string
-        }>({
-          type: "socDownload",
-          requestId,
-          owner,
-          identifier: this.normalizeSocIdentifier(identifier),
-          encryptionKey: this.normalizeSocKey(
-            encryptionKey as Uint8Array | string,
-          ),
-          requestOptions,
-        })
-
-        return this.socChunkFromResponse(response)
-      }
-
-      const response = await this.sendRequest<{
-        type: "socRawDownloadResponse"
-        requestId: string
-        data: Uint8Array
-        identifier: string
-        signature: string
-        span: number
-        payload: Uint8Array
-        address: Reference
-        owner: string
-      }>({
+      const response = await this.sendRequest<
+        SocRawDownloadResponseMessage,
+        SocRawDownloadMessage
+      >({
         type: "socRawDownload",
         requestId,
         owner,
         identifier: this.normalizeSocIdentifier(identifier),
+        encryptionKey: encryptionKey
+          ? this.normalizeSocKey(encryptionKey)
+          : undefined,
         requestOptions,
       })
 
@@ -1340,11 +1345,11 @@ export class SwarmIdClient {
     }
 
     return {
-      owner,
-      rawDownload: (identifier) =>
-        sendSocDownload("socRawDownload", identifier),
+      getOwner: async () => owner,
+      rawDownload: (identifier, encryptionKey) =>
+        sendRawSocDownload(identifier, encryptionKey),
       download: (identifier, encryptionKey) =>
-        sendSocDownload("socDownload", identifier, encryptionKey),
+        sendSocDownload(identifier, encryptionKey),
     }
   }
 
@@ -1363,7 +1368,7 @@ export class SwarmIdClient {
    * ```typescript
    * const writer = client.makeSOCWriter()
    * const upload = await writer.upload(identifier, payload)
-   * const soc = await writer.download(identifier, upload.encryptionKey!)
+   * const soc = await writer.download(identifier, upload.encryptionKey)
    * ```
    */
   makeSOCWriter(
@@ -1377,63 +1382,62 @@ export class SwarmIdClient {
       ? signerObj.publicKey().address().toHex()
       : undefined
 
-    const requireOwner = (): string => {
-      if (!owner) {
-        throw new Error(
-          "SOC owner is unknown. Provide signer to makeSOCWriter or upload first.",
-        )
+    const resolveOwner = async (): Promise<string> => {
+      if (owner) {
+        return owner
       }
+
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SocGetOwnerResponseMessage,
+        SocGetOwnerMessage
+      >({
+        type: "socGetOwner",
+        requestId,
+      })
+
+      owner = response.owner
       return owner
     }
 
     const sendSocDownload = async (
-      type: "socDownload" | "socRawDownload",
+      identifier: Identifier | Uint8Array | string,
+      encryptionKey: Uint8Array | string,
+    ): Promise<SingleOwnerChunk> => {
+      const requestId = this.generateRequestId()
+
+      const response = await this.sendRequest<
+        SocDownloadResponseMessage,
+        SocDownloadMessage
+      >({
+        type: "socDownload",
+        requestId,
+        owner,
+        identifier: this.normalizeSocIdentifier(identifier),
+        encryptionKey: this.normalizeSocKey(encryptionKey),
+        requestOptions,
+      })
+
+      return this.socChunkFromResponse(response)
+    }
+
+    const sendRawSocDownload = async (
       identifier: Identifier | Uint8Array | string,
       encryptionKey?: Uint8Array | string,
     ): Promise<SingleOwnerChunk> => {
       const requestId = this.generateRequestId()
-      const currentOwner = requireOwner()
 
-      if (type === "socDownload") {
-        const response = await this.sendRequest<{
-          type: "socDownloadResponse"
-          requestId: string
-          data: Uint8Array
-          identifier: string
-          signature: string
-          span: number
-          payload: Uint8Array
-          address: Reference
-          owner: string
-        }>({
-          type: "socDownload",
-          requestId,
-          owner: currentOwner,
-          identifier: this.normalizeSocIdentifier(identifier),
-          encryptionKey: this.normalizeSocKey(
-            encryptionKey as Uint8Array | string,
-          ),
-          requestOptions,
-        })
-
-        return this.socChunkFromResponse(response)
-      }
-
-      const response = await this.sendRequest<{
-        type: "socRawDownloadResponse"
-        requestId: string
-        data: Uint8Array
-        identifier: string
-        signature: string
-        span: number
-        payload: Uint8Array
-        address: Reference
-        owner: string
-      }>({
+      const response = await this.sendRequest<
+        SocRawDownloadResponseMessage,
+        SocRawDownloadMessage
+      >({
         type: "socRawDownload",
         requestId,
-        owner: currentOwner,
+        owner,
         identifier: this.normalizeSocIdentifier(identifier),
+        encryptionKey: encryptionKey
+          ? this.normalizeSocKey(encryptionKey)
+          : undefined,
         requestOptions,
       })
 
@@ -1441,21 +1445,45 @@ export class SwarmIdClient {
     }
 
     const sendSocUpload = async (
-      type: "socUpload" | "socRawUpload",
       identifier: Identifier | Uint8Array | string,
       data: Uint8Array,
       options?: UploadOptions,
     ): Promise<SocUploadResult> => {
       const requestId = this.generateRequestId()
-      const response = await this.sendRequest<{
-        type: "socUploadResponse" | "socRawUploadResponse"
-        requestId: string
-        reference: Reference
-        tagUid?: number
-        encryptionKey?: string
-        owner: string
-      }>({
-        type,
+      const response = await this.sendRequest<
+        SocUploadResponseMessage,
+        SocUploadMessage
+      >({
+        type: "socUpload",
+        requestId,
+        identifier: this.normalizeSocIdentifier(identifier),
+        data: new Uint8Array(data),
+        signer: signerKey,
+        options,
+        requestOptions,
+      })
+
+      owner = response.owner
+
+      return {
+        reference: response.reference,
+        tagUid: response.tagUid,
+        encryptionKey: response.encryptionKey,
+        owner: response.owner,
+      }
+    }
+
+    const sendRawSocUpload = async (
+      identifier: Identifier | Uint8Array | string,
+      data: Uint8Array,
+      options?: UploadOptions,
+    ): Promise<SocRawUploadResult> => {
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        SocRawUploadResponseMessage,
+        SocRawUploadMessage
+      >({
+        type: "socRawUpload",
         requestId,
         identifier: this.normalizeSocIdentifier(identifier),
         data: new Uint8Array(data),
@@ -1475,15 +1503,15 @@ export class SwarmIdClient {
     }
 
     return {
-      owner,
-      rawDownload: (identifier) =>
-        sendSocDownload("socRawDownload", identifier),
+      getOwner: resolveOwner,
+      rawDownload: (identifier, encryptionKey) =>
+        sendRawSocDownload(identifier, encryptionKey),
       download: (identifier, encryptionKey) =>
-        sendSocDownload("socDownload", identifier, encryptionKey),
+        sendSocDownload(identifier, encryptionKey),
       upload: (identifier, data, options) =>
-        sendSocUpload("socUpload", identifier, data, options),
+        sendSocUpload(identifier, data, options),
       rawUpload: (identifier, data, options) =>
-        sendSocUpload("socRawUpload", identifier, data, options),
+        sendRawSocUpload(identifier, data, options),
     }
   }
 
