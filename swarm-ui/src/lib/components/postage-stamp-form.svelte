@@ -38,10 +38,10 @@
 		if (depth < 17 || depth > 40) return 'Depth must be between 17 and 40'
 
 		if (isNaN(amount)) return 'Amount must be a number'
-		if (amount < 0) return 'Amount must be greater than 0'
+		if (amount < 0) return 'Amount must be 0 or greater'
 
 		if (isNaN(blockNumber)) return 'Block number must be a number'
-		if (blockNumber < 0) return 'Block number must be greater than 0'
+		if (blockNumber < 0) return 'Block number must be 0 or greater'
 
 		return undefined
 	})

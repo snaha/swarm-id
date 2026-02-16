@@ -48,7 +48,7 @@
 
 			console.log('Postage stamp added:', stamp.batchID.toHex(), stamp)
 
-			// If this is the first stamp for this account, make it default for this identity
+			// If this account already has a default stamp, set this as the identity's default; otherwise make it the account's default
 			if (account.defaultPostageStampBatchID) {
 				identitiesStore.setDefaultStamp(identity.id, stamp.batchID)
 			} else {

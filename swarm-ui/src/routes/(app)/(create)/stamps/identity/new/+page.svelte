@@ -52,7 +52,7 @@
 				depth,
 				amount,
 				bucketDepth: 16,
-				blockNumber: 0,
+				blockNumber,
 				immutableFlag: false,
 				exists: true,
 			})
@@ -69,8 +69,7 @@
 
 <CreationLayout
 	title="Add postage stamp (for identity)"
-	onClose={() =>
-		sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
+	onClose={navigateToConnectOrHome}
 >
 	{#snippet content()}
 		{#if !account || !currentIdentityId}

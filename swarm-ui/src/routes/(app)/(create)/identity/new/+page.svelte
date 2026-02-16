@@ -143,7 +143,7 @@
 <CreationLayout
 	title="Create identity"
 	description={accountName ? `in ${accountName} account` : undefined}
-	onClose={() => goto(resolve(routes.HOME))}
+	onClose={navigateToConnectOrHome}
 >
 	{#snippet content()}
 		{#if !hasSessionData}
