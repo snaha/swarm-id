@@ -41,7 +41,7 @@
 				depth,
 				amount,
 				bucketDepth: 16,
-				blockNumber: 0,
+				blockNumber,
 				immutableFlag: false,
 				exists: true,
 			})
