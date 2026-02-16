@@ -57,7 +57,9 @@ pnpm clean            # Clean build outputs
 
 ## IMPORTANT: Pre-commit Requirements
 
-Before committing, you MUST pass `pnpm check:all` which runs: `pnpm format`, `pnpm lint`, `pnpm check`, `pnpm knip`.
+Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
+- **@swarm-id/lib**: `format:check`, `lint`, `typecheck`, `test`
+- **swarm-identity**: `lint`, `check`, `knip`
 
 ## Library Core (`lib/`)
 
