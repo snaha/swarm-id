@@ -9,11 +9,12 @@
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-	import { accountsStore } from '$lib/stores/accounts.svelte'
+	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 
 	const account = $derived(sessionStore.data.account)
+	const currentIdentityId = $derived(sessionStore.data.currentIdentityId)
 
 	let batchID = $state('')
 	let depth = $state(20)
@@ -32,14 +33,14 @@
 		}
 	}
 
-	function handleSkip() {
+	function handleUseAccountStamp() {
 		navigateToConnectOrHome()
 	}
 
 	function handleConfirm() {
 		submitError = undefined
 
-		if (!account) return
+		if (!account || !currentIdentityId) return
 
 		try {
 			const stamp = postageStampsStore.addStamp({
@@ -56,14 +57,8 @@
 				exists: true,
 			})
 
-			// Set as default stamp for the account
-			accountsStore.setDefaultStamp(account.id, stamp.batchID)
-
-			// If user chose separate stamps, go to identity stamp page next
-			if (sessionStore.data.selectedStampOption === 'separate') {
-				goto(resolve(routes.STAMPS_IDENTITY_NEW))
-				return
-			}
+			// Set as default stamp for the identity
+			identitiesStore.setDefaultStamp(currentIdentityId, stamp.batchID)
 
 			navigateToConnectOrHome()
 		} catch (error) {
@@ -73,17 +68,18 @@
 </script>
 
 <CreationLayout
-	title="Add postage stamp"
+	title="Add postage stamp (for identity)"
 	onClose={() =>
 		sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
 >
 	{#snippet content()}
-		{#if !account}
+		{#if !account || !currentIdentityId}
 			<Typography>No account data found. Please start from the home page.</Typography>
 		{:else}
 			<Vertical --vertical-gap="var(--half-padding)">
 				<Typography
-					>Synced accounts require a Swarm postage stamp. Paste your stamp details below to continue.</Typography
+					>You chose to use a separate stamp for this identity. Please paste the details below to
+					proceed.</Typography
 				>
 				<PostageStampForm
 					bind:batchID
@@ -99,7 +95,7 @@
 	{/snippet}
 
 	{#snippet buttonContent()}
-		{#if account}
+		{#if account && currentIdentityId}
 			<Button
 				variant="strong"
 				dimension="compact"
@@ -109,16 +105,16 @@
 				<Checkmark size={20} />Confirm
 			</Button>
 			<Typography variant="small"
-				>Not ready? <button class="skip-link" onclick={handleSkip}
-					>Skip this step</button
-				> and create a local account instead (limited to viewing only).</Typography
+				>Changed your mind? <button class="alt-link" onclick={handleUseAccountStamp}
+					>Use your account stamp instead</button
+				>.</Typography
 			>
 		{/if}
 	{/snippet}
 </CreationLayout>
 
 <style>
-	.skip-link {
+	.alt-link {
 		background: none;
 		border: none;
 		padding: 0;
@@ -128,7 +124,7 @@
 		cursor: pointer;
 	}
 
-	.skip-link:hover {
+	.alt-link:hover {
 		color: var(--colors-top);
 	}
 </style>

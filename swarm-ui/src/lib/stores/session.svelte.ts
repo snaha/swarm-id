@@ -15,6 +15,12 @@ export type SessionData = {
 	currentAccountId?: string
 	currentIdentityId?: string
 
+	// Creation flow: whether account is being created as synced
+	isSyncedCreation?: boolean
+
+	// Stamp flow: tracks whether user chose 'account' or 'separate' stamp
+	selectedStampOption?: 'account' | 'separate'
+
 	// App data
 	appData?: AppData
 	appOrigin?: string
@@ -70,6 +76,18 @@ export const sessionStore = {
 
 	clearAppData() {
 		session = { ...session, appData: undefined }
+	},
+
+	setSyncedCreation(synced: boolean) {
+		session = { ...session, isSyncedCreation: synced }
+	},
+
+	setStampOption(option: 'account' | 'separate') {
+		session = { ...session, selectedStampOption: option }
+	},
+
+	clearStampOption() {
+		session = { ...session, selectedStampOption: undefined }
 	},
 
 	clear() {

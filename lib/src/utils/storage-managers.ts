@@ -104,7 +104,6 @@ export function serializeAccount(account: Account): Record<string, unknown> {
       type: account.type,
       credentialId: account.credentialId,
       swarmEncryptionKey: account.swarmEncryptionKey,
-      syncType: account.syncType,
       defaultPostageStampBatchID:
         account.defaultPostageStampBatchID?.toString(),
     }
@@ -121,7 +120,6 @@ export function serializeAccount(account: Account): Record<string, unknown> {
         account.encryptedSecretSeed.toUint8Array(),
       ),
       swarmEncryptionKey: account.swarmEncryptionKey,
-      syncType: account.syncType,
       defaultPostageStampBatchID:
         account.defaultPostageStampBatchID?.toString(),
     }

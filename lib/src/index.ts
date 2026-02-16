@@ -198,7 +198,6 @@ export type {
   ConnectedApp,
   PostageStamp,
   NetworkSettings,
-  AccountSyncType,
 } from "./schemas"
 
 // Network settings constants and schema

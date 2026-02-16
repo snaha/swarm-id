@@ -56,12 +56,6 @@ const StoredBytes = z
 // ============================================================================
 
 /**
- * Account Sync Type - whether account is local-only or synced to Swarm
- */
-export const AccountSyncTypeSchema = z.enum(["local", "synced"])
-export type AccountSyncType = z.infer<typeof AccountSyncTypeSchema>
-
-/**
  * Passkey Account Schema V1
  */
 export const PasskeyAccountSchemaV1 = z.object({
@@ -71,7 +65,6 @@ export const PasskeyAccountSchemaV1 = z.object({
   type: z.literal("passkey"),
   credentialId: z.string(),
   swarmEncryptionKey: z.string().length(64),
-  syncType: AccountSyncTypeSchema,
   defaultPostageStampBatchID: StoredBatchId.optional(),
 })
 
@@ -88,7 +81,6 @@ export const EthereumAccountSchemaV1 = z.object({
   encryptionSalt: StoredBytes,
   encryptedSecretSeed: StoredBytes,
   swarmEncryptionKey: z.string().length(64),
-  syncType: AccountSyncTypeSchema,
   defaultPostageStampBatchID: StoredBatchId.optional(),
 })
 

@@ -9,6 +9,8 @@ import { z } from 'zod'
 
 export type { Account, Identity, ConnectedApp, PostageStamp } from '@swarm-id/lib'
 
+export type AccountSyncType = 'local' | 'synced'
+
 // ============================================================================
 // App Metadata (used for connection requests - local to swarm-ui)
 // ============================================================================

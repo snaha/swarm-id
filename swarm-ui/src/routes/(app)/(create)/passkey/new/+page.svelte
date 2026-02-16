@@ -19,7 +19,8 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
-	import { deriveAccountSwarmEncryptionKey, type AccountSyncType } from '@swarm-id/lib'
+	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import type { AccountSyncType } from '$lib/types'
 
 	let accountName = $state('Passkey')
 	let accountType = $state<AccountSyncType>('local')
@@ -80,9 +81,9 @@
 				type: 'passkey',
 				credentialId: account.credentialId,
 				swarmEncryptionKey: swarmEncryptionKey,
-				syncType: accountType,
 			})
 			sessionStore.setAccount(newAccount)
+			sessionStore.setSyncedCreation(accountType === 'synced')
 
 			// Keep masterKey in session ONLY (not in account)
 			sessionStore.setTemporaryMasterKey(account.masterKey)

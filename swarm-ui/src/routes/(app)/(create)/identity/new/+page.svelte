@@ -16,10 +16,9 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import type { Identity, Account } from '$lib/types'
 	import { HDNodeWallet } from 'ethers'
-	import { Bytes, BatchId } from '@ethersphere/bee-js'
+	import { Bytes } from '@ethersphere/bee-js'
 	import { toPrefixedHex } from '$lib/utils/hex'
 	import { generateDockerName } from '$lib/docker-name'
 	import Vertical from '$lib/components/ui/vertical.svelte'
@@ -30,19 +29,8 @@
 	let selectedStampOption = $state<StampOption>('account')
 	let showStampTooltip = $state(false)
 
-	// Check if account is synced
-	const isSyncedAccount = $derived.by(() => {
-		const account = sessionStore.data.account
-		if (!account) return false
-		return 'syncType' in account && account.syncType === 'synced'
-	})
-
-	// Get account's postage stamps
-	const accountStamps = $derived.by(() => {
-		const account = sessionStore.data.account
-		if (!account) return []
-		return postageStampsStore.getStampsByAccount(account.id.toHex())
-	})
+	// Check if this is a synced account creation
+	const isSyncedCreation = $derived(sessionStore.data.isSyncedCreation ?? false)
 
 	// Derive identity using temporary masterKey from session
 	const derivedIdentity = $derived.by(() => {
@@ -85,6 +73,15 @@
 		return identity
 	}
 
+	function navigateToConnectOrHome() {
+		if (sessionStore.data.appOrigin) {
+			goto(resolve(routes.CONNECT))
+		} else {
+			sessionStore.clearTemporaryMasterKey()
+			goto(resolve(routes.HOME))
+		}
+	}
+
 	async function handleCreateIdentity() {
 		const sessionAccount = sessionStore.data.account
 		const tempMasterKey = sessionStore.data.temporaryMasterKey
@@ -105,19 +102,10 @@
 			return
 		}
 
-		// Determine postage stamp based on selection
-		let defaultPostageStampBatchID: BatchId | undefined
-		if (isSyncedAccount && selectedStampOption === 'separate' && accountStamps.length > 0) {
-			// For separate stamp, use the first account stamp as identity-specific
-			defaultPostageStampBatchID = accountStamps[0].batchID
-		}
-		// If 'account' is selected or not synced, don't set identity-specific stamp (uses account stamp)
-
-		// Create the identity with custom name
+		// Create the identity with custom name (identity stamp will be set on the identity stamp page)
 		const identity = identitiesStore.addIdentity({
 			...derivedIdentity,
 			name: idName || derivedIdentity.name,
-			defaultPostageStampBatchID,
 		})
 
 		console.log('✅ Identity created:', identity.id)
@@ -126,24 +114,29 @@
 		sessionStore.setCurrentAccount(account.id.toHex())
 		sessionStore.setCurrentIdentity(identity.id)
 
-		// Synced accounts need a new stamp if "separate" is selected or no default stamp exists
-		if (
-			isSyncedAccount &&
-			(selectedStampOption === 'separate' || !account.defaultPostageStampBatchID)
-		) {
+		// Store stamp option in session for downstream pages
+		sessionStore.setStampOption(selectedStampOption)
+
+		// Local accounts skip stamps entirely
+		if (!isSyncedCreation) {
+			navigateToConnectOrHome()
+			return
+		}
+
+		// Synced account without an account stamp → go to account stamp page first
+		if (!account.defaultPostageStampBatchID) {
 			goto(resolve(routes.STAMPS_NEW))
 			return
 		}
 
-		// Navigate back to /connect or home
-		if (sessionStore.data.appOrigin) {
-			goto(resolve(routes.CONNECT))
-		} else {
-			// Clear temporary masterKey for security
-			sessionStore.clearTemporaryMasterKey()
-
-			goto(resolve(routes.HOME))
+		// Synced account with account stamp + "separate" → go to identity stamp page
+		if (selectedStampOption === 'separate') {
+			goto(resolve(routes.STAMPS_IDENTITY_NEW))
+			return
 		}
+
+		// Synced account with account stamp + "account" option → done
+		navigateToConnectOrHome()
 	}
 </script>
 
@@ -176,7 +169,7 @@
 				</Vertical>
 
 				<!-- Postage stamp selector (only for synced accounts) -->
-				{#if isSyncedAccount}
+				{#if isSyncedCreation}
 					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
 						<div class="input-grow">
 							<Vertical --vertical-gap="var(--quarter-padding)">

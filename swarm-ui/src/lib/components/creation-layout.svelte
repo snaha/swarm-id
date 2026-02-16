@@ -73,6 +73,7 @@
 		display: flex;
 		flex-direction: column;
 		align-items: flex-start;
+		gap: var(--half-padding);
 	}
 
 	@media screen and (max-width: 640px) {

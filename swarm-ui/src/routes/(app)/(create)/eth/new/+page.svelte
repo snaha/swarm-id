@@ -30,7 +30,8 @@
 	import { WarningAlt } from 'carbon-icons-svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import { onMount } from 'svelte'
-	import { deriveAccountSwarmEncryptionKey, type AccountSyncType } from '@swarm-id/lib'
+	import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import type { AccountSyncType } from '$lib/types'
 
 	let showTypeTooltip = $state(false)
 	let showSeedTooltip = $state(false)
@@ -121,9 +122,9 @@
 				encryptionSalt: encryptionSalt,
 				encryptedSecretSeed: encryptedSecretSeed,
 				swarmEncryptionKey: swarmEncryptionKey,
-				syncType: accountType,
 			})
 			sessionStore.setAccount(newAccount)
+			sessionStore.setSyncedCreation(accountType === 'synced')
 
 			// Keep unencrypted masterKey in session temporarily for identity creation
 			sessionStore.setTemporaryMasterKey(masterKey)
