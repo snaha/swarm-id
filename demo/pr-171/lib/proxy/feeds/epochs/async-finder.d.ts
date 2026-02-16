@@ -4,9 +4,9 @@
  * Concurrent implementation for finding feed updates at specific timestamps
  * using epoch-based indexing with parallel chunk fetching.
  */
-import type { Bee } from '@ethersphere/bee-js';
-import { EthAddress, Topic } from '@ethersphere/bee-js';
-import type { EpochFinder } from './types';
+import type { Bee } from "@ethersphere/bee-js";
+import { EthAddress, Topic } from "@ethersphere/bee-js";
+import type { EpochFinder } from "./types";
 /**
  * Async concurrent finder for epoch-based feeds
  *

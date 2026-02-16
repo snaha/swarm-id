@@ -5,11 +5,11 @@
  * to Swarm. This integrates store access, key derivation, and utilization
  * tracking.
  */
-import { Bee } from '@ethersphere/bee-js';
-import type { UtilizationStoreDB } from '../storage/utilization-store';
-import type { DebouncedUtilizationUploader } from '../storage/debounced-uploader';
-import type { AccountsStoreInterface, IdentitiesStoreInterface, ConnectedAppsStoreInterface, PostageStampsStoreInterface } from './store-interfaces';
-import type { SyncResult } from './types';
+import { Bee } from "@ethersphere/bee-js";
+import type { UtilizationStoreDB } from "../storage/utilization-store";
+import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader";
+import type { AccountsStoreInterface, IdentitiesStoreInterface, ConnectedAppsStoreInterface, PostageStampsStoreInterface } from "./store-interfaces";
+import type { SyncResult } from "./types";
 export declare const ACCOUNT_SYNC_TOPIC_PREFIX = "swarm-id-backup-v1:account";
 /**
  * Options for creating a sync account function

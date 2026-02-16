@@ -1,5 +1,5 @@
-import type { ClientOptions, AuthStatus, ConnectionInfo, UploadResult, FileData, UploadOptions, ActUploadOptions, DownloadOptions, RequestOptions, Reference, SOCReader, SOCWriter, PostageBatch } from './types';
-import { EthAddress, PrivateKey } from '@ethersphere/bee-js';
+import type { ClientOptions, AuthStatus, ConnectionInfo, UploadResult, FileData, UploadOptions, ActUploadOptions, DownloadOptions, RequestOptions, Reference, SOCReader, SOCWriter, PostageBatch } from "./types";
+import { EthAddress, PrivateKey } from "@ethersphere/bee-js";
 /**
  * Main client library for integrating Swarm ID authentication and storage capabilities
  * into web applications.
@@ -234,7 +234,7 @@ export declare class SwarmIdClient {
      * client.connect("popup")
      * ```
      */
-    connect(popupMode?: 'window' | 'popup'): string;
+    connect(popupMode?: "window" | "popup"): string;
     /**
      * Retrieves connection information including upload capability and identity details.
      *

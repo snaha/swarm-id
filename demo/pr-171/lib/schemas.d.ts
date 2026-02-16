@@ -5,8 +5,8 @@
  * serialized primitives to bee-js runtime types. Types are derived using
  * z.infer to guarantee schema/type consistency.
  */
-import { z } from 'zod';
-import { EthAddress, BatchId, Bytes, PrivateKey } from '@ethersphere/bee-js';
+import { z } from "zod";
+import { EthAddress, BatchId, Bytes, PrivateKey } from "@ethersphere/bee-js";
 export declare const DEFAULT_BEE_NODE_URL = "https://api.gateway.ethswarm.org/";
 export declare const DEFAULT_GNOSIS_RPC_URL = "https://xdai.fairdatasociety.org/";
 /**

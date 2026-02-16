@@ -9,9 +9,9 @@
  * The system uses pre-calculation to handle the circular dependency of storing
  * utilization data that tracks the storage of itself.
  */
-import { Stamper, BatchId, Topic, Identifier, type Bee, EthAddress, type EnvelopeWithBatchId, type Chunk as BeeChunk } from '@ethersphere/bee-js';
-import { type Chunk as CafeChunk } from 'cafe-utility';
-import type { UtilizationStoreDB } from '../storage/utilization-store';
+import { Stamper, BatchId, Topic, Identifier, type Bee, EthAddress, type EnvelopeWithBatchId, type Chunk as BeeChunk } from "@ethersphere/bee-js";
+import { type Chunk as CafeChunk } from "cafe-utility";
+import type { UtilizationStoreDB } from "../storage/utilization-store";
 /** Number of buckets in a postage batch (2^16) */
 export declare const NUM_BUCKETS = 65536;
 /** Bucket depth parameter (determines bucket count) */

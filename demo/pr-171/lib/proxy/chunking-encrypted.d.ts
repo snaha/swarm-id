@@ -1,4 +1,4 @@
-import { Reference } from '@ethersphere/bee-js';
+import { Reference } from "@ethersphere/bee-js";
 export declare const CHUNK_SIZE = 4096;
 export declare const ENCRYPTED_REFS_PER_CHUNK = 64;
 /**

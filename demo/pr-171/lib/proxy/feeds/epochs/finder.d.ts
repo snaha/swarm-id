@@ -4,9 +4,9 @@
  * Recursive implementation for finding feed updates at specific timestamps
  * using epoch-based indexing.
  */
-import type { Bee } from '@ethersphere/bee-js';
-import { EthAddress, Topic } from '@ethersphere/bee-js';
-import type { EpochFinder } from './types';
+import type { Bee } from "@ethersphere/bee-js";
+import { EthAddress, Topic } from "@ethersphere/bee-js";
+import type { EpochFinder } from "./types";
 /**
  * Synchronous recursive finder for epoch-based feeds
  *

@@ -3,7 +3,7 @@
  *
  * Provides mock storage and helpers for testing epoch feed operations
  */
-import { PrivateKey, Topic, EthAddress } from '@ethersphere/bee-js';
+import { PrivateKey, Topic, EthAddress } from "@ethersphere/bee-js";
 /**
  * In-memory chunk storage for testing
  */

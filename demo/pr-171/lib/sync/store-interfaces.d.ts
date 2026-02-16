@@ -5,8 +5,8 @@
  * to be used with the sync coordinator. This allows the coordinator to be
  * used with different store implementations (Svelte stores, plain objects, etc.)
  */
-import type { EthAddress, BatchId, Stamper } from '@ethersphere/bee-js';
-import type { Account, Identity, ConnectedApp, PostageStamp } from '../schemas';
+import type { EthAddress, BatchId, Stamper } from "@ethersphere/bee-js";
+import type { Account, Identity, ConnectedApp, PostageStamp } from "../schemas";
 /**
  * Options for creating a stamper with utilization tracking
  */

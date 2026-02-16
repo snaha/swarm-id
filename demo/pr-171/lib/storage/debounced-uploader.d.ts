@@ -4,7 +4,7 @@
  * Batches multiple utilization updates together to minimize upload frequency.
  * Uses a per-batch debounce mechanism with configurable delay.
  */
-import type { DirtyChunkTracker } from '../utils/batch-utilization';
+import type { DirtyChunkTracker } from "../utils/batch-utilization";
 /**
  * Debounced uploader for batch utilization data
  *

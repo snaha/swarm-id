@@ -18,7 +18,7 @@
  * content addresses (selfAddress). To read entries, all child nodes must be
  * loaded recursively.
  */
-import { MantarayNode } from '@ethersphere/bee-js';
+import { MantarayNode } from "@ethersphere/bee-js";
 /**
  * Single history entry metadata
  */

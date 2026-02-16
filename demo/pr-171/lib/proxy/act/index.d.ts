@@ -7,8 +7,8 @@
  * - Encrypted grantee list (stored separately)
  * - History manifest (tracks ACT versions over time)
  */
-import type { Bee, BeeRequestOptions, UploadOptions } from '@ethersphere/bee-js';
-import type { UploadContext, UploadProgress } from '../types';
+import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js";
+import type { UploadContext, UploadProgress } from "../types";
 type ActUploadOptions = UploadOptions & {
     beeCompatible?: boolean;
 };
@@ -97,8 +97,8 @@ export declare function parseCompressedPublicKey(hex: string): {
     x: Uint8Array;
     y: Uint8Array;
 };
-export { type ActEntry } from './act';
-export { type UncompressedPublicKey } from './grantee-list';
-export { type HistoryEntry, type HistoryEntryMetadata } from './history';
-export { publicKeyFromPrivate, compressPublicKey, publicKeyFromCompressed } from './crypto';
+export { type ActEntry } from "./act";
+export { type UncompressedPublicKey } from "./grantee-list";
+export { type HistoryEntry, type HistoryEntryMetadata } from "./history";
+export { publicKeyFromPrivate, compressPublicKey, publicKeyFromCompressed, } from "./crypto";
 //# sourceMappingURL=index.d.ts.map

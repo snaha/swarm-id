@@ -1,5 +1,5 @@
-import type { BeeRequestOptions, UploadOptions } from '@ethersphere/bee-js';
-import type { UploadContext, UploadProgress } from './types';
+import type { BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js";
+import type { UploadContext, UploadProgress } from "./types";
 /**
  * Upload data with client-side signing
  * Handles chunking, merkle tree building, and progress reporting

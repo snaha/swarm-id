@@ -4,10 +4,10 @@
  * Handles writing updates to epoch-based feeds by calculating the next
  * epoch and uploading chunks.
  */
-import type { Bee, Stamper } from '@ethersphere/bee-js';
-import { EthAddress, Topic, PrivateKey } from '@ethersphere/bee-js';
-import { EpochIndex } from './epoch';
-import type { EpochUpdater } from './types';
+import type { Bee, Stamper } from "@ethersphere/bee-js";
+import { EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js";
+import { EpochIndex } from "./epoch";
+import type { EpochUpdater } from "./types";
 /**
  * Basic updater for epoch-based feeds
  *

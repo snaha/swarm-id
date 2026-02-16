@@ -4,9 +4,9 @@
  * Provides ready-to-use storage managers for accounts, identities,
  * connected apps, and postage stamps with versioning support.
  */
-import { VersionedStorageManager } from './versioned-storage';
-import type { Account, Identity, ConnectedApp, PostageStamp } from '../types';
-import { type NetworkSettings } from '../schemas';
+import { VersionedStorageManager } from "./versioned-storage";
+import type { Account, Identity, ConnectedApp, PostageStamp } from "../types";
+import { type NetworkSettings } from "../schemas";
 /**
  * Serialize Account for storage
  */

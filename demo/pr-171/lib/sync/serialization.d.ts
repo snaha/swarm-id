@@ -1,4 +1,4 @@
-import type { AccountStateSnapshot } from './types';
+import type { AccountStateSnapshot } from "./types";
 /**
  * Serialize account state snapshot to JSON bytes
  *

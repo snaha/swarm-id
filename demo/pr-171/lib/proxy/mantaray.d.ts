@@ -1,5 +1,5 @@
-import { MantarayNode } from '@ethersphere/bee-js';
-import type { Bee, BeeRequestOptions } from '@ethersphere/bee-js';
+import { MantarayNode } from "@ethersphere/bee-js";
+import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js";
 /**
  * Upload callback type for saveMantarayTreeRecursively
  */

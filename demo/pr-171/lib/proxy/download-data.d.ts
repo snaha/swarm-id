@@ -1,7 +1,7 @@
-import { EthAddress, Identifier } from '@ethersphere/bee-js';
-import type { Bee, BeeRequestOptions, DownloadOptions } from '@ethersphere/bee-js';
-import type { UploadProgress } from './types';
-import type { SingleOwnerChunk } from '../types';
+import { EthAddress, Identifier } from "@ethersphere/bee-js";
+import type { Bee, BeeRequestOptions, DownloadOptions } from "@ethersphere/bee-js";
+import type { UploadProgress } from "./types";
+import type { SingleOwnerChunk } from "../types";
 /**
  * Download data using only the chunk API
  * This ensures encrypted data remains encrypted during transmission and avoids metadata leakage

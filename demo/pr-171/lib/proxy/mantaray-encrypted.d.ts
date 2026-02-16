@@ -1,4 +1,4 @@
-import type { MantarayNode } from '@ethersphere/bee-js';
+import type { MantarayNode } from "@ethersphere/bee-js";
 /**
  * Upload callback type for saveMantarayTreeRecursivelyEncrypted
  *

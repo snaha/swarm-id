@@ -1,8 +1,8 @@
 /**
  * Types for Epoch-Based Feeds
  */
-import type { Bee, EthAddress, Topic, PrivateKey, Stamper } from '@ethersphere/bee-js';
-import type { EpochIndex } from './epoch';
+import type { Bee, EthAddress, Topic, PrivateKey, Stamper } from "@ethersphere/bee-js";
+import type { EpochIndex } from "./epoch";
 /**
  * Options for creating an epoch feed reader
  */

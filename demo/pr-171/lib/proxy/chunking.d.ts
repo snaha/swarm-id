@@ -1,6 +1,6 @@
-import { Reference } from '@ethersphere/bee-js';
-import type { Chunk as BeeChunk } from '@ethersphere/bee-js';
-import type { ChunkReference } from './types';
+import { Reference } from "@ethersphere/bee-js";
+import type { Chunk as BeeChunk } from "@ethersphere/bee-js";
+import type { ChunkReference } from "./types";
 export declare const CHUNK_SIZE = 4096;
 export declare const REFS_PER_CHUNK = 64;
 /**

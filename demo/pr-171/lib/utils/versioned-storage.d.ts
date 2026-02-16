@@ -4,7 +4,7 @@
  * Provides a framework-agnostic way to store and retrieve versioned data
  * with automatic migration support.
  */
-import { z } from 'zod';
+import { z } from "zod";
 /**
  * Versioned storage wrapper schema
  * Used to check if data is in versioned format
@@ -119,11 +119,11 @@ export declare class VersionedStorageManager<T> {
 /**
  * Create a versioned storage manager with localStorage
  */
-export declare function createLocalStorageManager<T>(options: Omit<VersionedStorageOptions<T>, 'storage'>): VersionedStorageManager<T>;
+export declare function createLocalStorageManager<T>(options: Omit<VersionedStorageOptions<T>, "storage">): VersionedStorageManager<T>;
 /**
  * Create a versioned storage manager with memory storage
  */
-export declare function createMemoryStorageManager<T>(options: Omit<VersionedStorageOptions<T>, 'storage'>): VersionedStorageManager<T>;
+export declare function createMemoryStorageManager<T>(options: Omit<VersionedStorageOptions<T>, "storage">): VersionedStorageManager<T>;
 /**
  * Create a simple Zod-based parser for a single version
  */

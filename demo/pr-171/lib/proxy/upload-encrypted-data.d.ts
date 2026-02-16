@@ -1,6 +1,6 @@
-import { PrivateKey, Identifier } from '@ethersphere/bee-js';
-import type { Bee, BeeRequestOptions, Stamper, UploadOptions } from '@ethersphere/bee-js';
-import type { UploadContext, UploadProgress } from './types';
+import { PrivateKey, Identifier } from "@ethersphere/bee-js";
+import type { Bee, BeeRequestOptions, Stamper, UploadOptions } from "@ethersphere/bee-js";
+import type { UploadContext, UploadProgress } from "./types";
 /**
  * Result of uploading encrypted data
  */

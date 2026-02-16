@@ -4,12 +4,12 @@
  * Time-based feed indexing using a binary tree structure for efficient
  * sparse updates across long time periods.
  */
-export { EpochIndex, lca, next, MAX_LEVEL, type Epoch } from './epoch';
-export type { EpochFinder, EpochUpdater, EpochFeedOptions, EpochFeedWriterOptions, EpochLookupResult, } from './types';
-export { SyncEpochFinder } from './finder';
-export { AsyncEpochFinder } from './async-finder';
-export { BasicEpochUpdater } from './updater';
-import type { EpochFinder, EpochUpdater, EpochFeedOptions, EpochFeedWriterOptions } from './types';
+export { EpochIndex, lca, next, MAX_LEVEL, type Epoch } from "./epoch";
+export type { EpochFinder, EpochUpdater, EpochFeedOptions, EpochFeedWriterOptions, EpochLookupResult, } from "./types";
+export { SyncEpochFinder } from "./finder";
+export { AsyncEpochFinder } from "./async-finder";
+export { BasicEpochUpdater } from "./updater";
+import type { EpochFinder, EpochUpdater, EpochFeedOptions, EpochFeedWriterOptions } from "./types";
 /**
  * Create a synchronous epoch feed finder (non-concurrent)
  *

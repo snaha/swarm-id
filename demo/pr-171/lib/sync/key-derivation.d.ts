@@ -1,4 +1,4 @@
-import { PrivateKey } from '@ethersphere/bee-js';
+import { PrivateKey } from "@ethersphere/bee-js";
 /**
  * Derive account backup key from account master key
  *

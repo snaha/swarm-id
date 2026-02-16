@@ -1,4 +1,4 @@
-import type { AppMetadata } from '../types';
+import type { AppMetadata } from "../types";
 /**
  * Build the authentication URL for connecting to Swarm ID
  *

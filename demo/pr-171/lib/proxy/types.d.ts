@@ -1,4 +1,4 @@
-import type { Bee, Stamper } from '@ethersphere/bee-js';
+import type { Bee, Stamper } from "@ethersphere/bee-js";
 /**
  * Upload context shared across handlers
  */

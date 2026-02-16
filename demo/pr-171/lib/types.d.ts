@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { z } from "zod";
 export declare const SWARM_SECRET_PREFIX = "swarm-secret-";
 export declare const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts";
 export declare const STORAGE_KEY_IDENTITIES = "swarm-id-identities";
@@ -1315,7 +1315,7 @@ export interface ClientOptions {
     timeout?: number;
     initializationTimeout?: number;
     onAuthChange?: (authenticated: boolean) => void;
-    popupMode?: 'popup' | 'window';
+    popupMode?: "popup" | "window";
     metadata: AppMetadata;
     buttonConfig?: ButtonConfig;
     containerId?: string;
@@ -1323,5 +1323,5 @@ export interface ClientOptions {
 export interface AuthOptions {
     masterKeyStorageKey?: string;
 }
-export type { PasskeyAccount, EthereumAccount, Account, Identity, ConnectedApp, PostageStamp, } from './schemas';
+export type { PasskeyAccount, EthereumAccount, Account, Identity, ConnectedApp, PostageStamp, } from "./schemas";
 //# sourceMappingURL=types.d.ts.map
