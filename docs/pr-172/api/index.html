@@ -1,0 +1,1865 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-i2xivywe"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>SwarmIdClient API Reference | Swarm ID</title><link rel="canonical" href="https://swarm-docs.snaha.net/docs/pr-172/api/"/><link rel="sitemap" href="/docs/pr-172/sitemap-index.xml"/><link rel="shortcut icon" href="/docs/pr-172/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v5.16.7"/><meta name="generator" content="Starlight v0.31.1"/><meta property="og:title" content="SwarmIdClient API Reference"/><meta property="og:type" content="article"/><meta property="og:url" content="https://swarm-docs.snaha.net/docs/pr-172/api/"/><meta property="og:locale" content="en"/><meta property="og:description" content="Complete API documentation for the SwarmIdClient class"/><meta property="og:site_name" content="Swarm ID"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="Complete API documentation for the SwarmIdClient class"/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg> <svg aria-hidden="true" class="dark astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg> <svg aria-hidden="true" class="auto astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg> </template><link rel="stylesheet" href="/docs/pr-172/_astro/print.BJ0teN4y.css" media="print"><link rel="stylesheet" href="/docs/pr-172/_astro/index.BJylY_q9.css"><script type="module" src="/docs/pr-172/_astro/page.B1D-nYk3.js"></script></head> <body class="astro-i2xivywe"> <a href="#_top" class="astro-nlc2f7ov">Skip to content</a>  <div class="page sl-flex astro-fskzycpk"> <header class="header astro-fskzycpk"><div class="header sl-flex astro-u45jmsqw"> <div class="title-wrapper sl-flex astro-u45jmsqw"> <a href="/docs/pr-172/" class="site-title sl-flex astro-v7hgbntt">  <span class="astro-v7hgbntt" translate="no"> Swarm ID </span> </a>  </div> <div class="sl-flex print:hidden astro-u45jmsqw"> <site-search class="astro-u45jmsqw astro-nq44mfux" data-translations="{&#34;placeholder&#34;:&#34;Search&#34;}"> <button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-nq44mfux"> <svg aria-hidden="true" class="astro-nq44mfux astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg>  <span class="sl-hidden md:sl-block astro-nq44mfux" aria-hidden="true">Search</span> <kbd class="sl-hidden md:sl-flex astro-nq44mfux" style="display: none;"> <kbd class="astro-nq44mfux">Ctrl</kbd><kbd class="astro-nq44mfux">K</kbd> </kbd> </button> <dialog style="padding:0" aria-label="Search" class="astro-nq44mfux"> <div class="dialog-frame sl-flex astro-nq44mfux">  <button data-close-modal class="sl-flex md:sl-hidden astro-nq44mfux"> Cancel </button> <div class="search-container astro-nq44mfux"> <div id="starlight__search" class="astro-nq44mfux"></div> </div> </div> </dialog> </site-search>  <script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script> <script type="module" src="/docs/pr-172/_astro/Search.astro_astro_type_script_index_0_lang.Ch_-nysO.js"></script>   </div> <div class="sl-hidden md:sl-flex print:hidden right-group astro-u45jmsqw"> <div class="sl-flex social-icons astro-u45jmsqw"> <a href="https://github.com/snaha/swarm-id" rel="me" class="sl-flex astro-rqtckygt"><span class="sr-only astro-rqtckygt">GitHub</span><svg aria-hidden="true" class="astro-rqtckygt astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </a> </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-ska3fvfo"> <span class="sr-only astro-ska3fvfo">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-ska3fvfo astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg>  <select value="auto" autocomplete="off" class="astro-ska3fvfo"> <option value="dark" class="astro-ska3fvfo">Dark</option><option value="light" class="astro-ska3fvfo">Light</option><option value="auto" selected class="astro-ska3fvfo">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-ska3fvfo astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </label>  </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script> <script type="module">const r="starlight-theme",o=e=>e==="auto"||e==="dark"||e==="light"?e:"auto",c=()=>o(typeof localStorage<"u"&&localStorage.getItem(r));function n(e){typeof localStorage<"u"&&localStorage.setItem(r,e==="light"||e==="dark"?e:"")}const l=()=>matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";function t(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e==="auto"?l():e,n(e)}matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{c()==="auto"&&t("auto")});class s extends HTMLElement{constructor(){super(),t(c()),this.querySelector("select")?.addEventListener("change",a=>{a.currentTarget instanceof HTMLSelectElement&&t(o(a.currentTarget.value))})}}customElements.define("starlight-theme-select",s);</script> <script type="module">class s extends HTMLElement{constructor(){super();const e=this.querySelector("select");e&&(e.addEventListener("change",t=>{t.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=t.currentTarget.value)}),window.addEventListener("pageshow",t=>{if(!t.persisted)return;const n=e.querySelector("option[selected]")?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}}customElements.define("starlight-lang-select",s);</script> </div> </div> </header> <nav class="sidebar print:hidden astro-fskzycpk" aria-label="Main"> <starlight-menu-button class="print:hidden astro-vmz7o57y"> <button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-vmz7o57y"> <svg aria-hidden="true" class="astro-vmz7o57y astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg>  </button> </starlight-menu-button> <script type="module">class s extends HTMLElement{constructor(){super(),this.btn=this.querySelector("button"),this.btn.addEventListener("click",()=>this.toggleExpanded());const t=this.closest("nav");t&&t.addEventListener("keyup",e=>this.closeOnEscape(e))}setExpanded(t){this.setAttribute("aria-expanded",String(t)),document.body.toggleAttribute("data-mobile-menu-expanded",t)}toggleExpanded(){this.setExpanded(this.getAttribute("aria-expanded")!=="true")}closeOnEscape(t){t.code==="Escape"&&(this.setExpanded(!1),this.btn.focus())}}customElements.define("starlight-menu-button",s);</script>   <div id="starlight__sidebar" class="sidebar-pane astro-fskzycpk"> <div class="sidebar-content sl-flex astro-fskzycpk"> <sl-sidebar-state-persist data-hash="1kj5xkb" class="astro-l6vm5ssn"> <script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script>  <ul class="top-level astro-5mbuw2gw"> <li class="astro-5mbuw2gw"> <details open class="astro-5mbuw2gw"> <sl-sidebar-restore data-index="0"></sl-sidebar-restore> <summary class="astro-5mbuw2gw"> <div class="group-label astro-5mbuw2gw"> <span class="large astro-5mbuw2gw">Getting Started</span>  </div> <svg aria-hidden="true" class="caret astro-5mbuw2gw astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </summary> <ul class="astro-5mbuw2gw"> <li class="astro-5mbuw2gw"> <a href="/docs/pr-172/" aria-current="false" class="astro-5mbuw2gw"> <span class="astro-5mbuw2gw">Introduction</span>  </a> </li><li class="astro-5mbuw2gw"> <a href="/docs/pr-172/getting-started" aria-current="false" class="astro-5mbuw2gw"> <span class="astro-5mbuw2gw">Quick Start</span>  </a> </li><li class="astro-5mbuw2gw"> <a href="/docs/pr-172/architecture" aria-current="false" class="astro-5mbuw2gw"> <span class="astro-5mbuw2gw">Architecture</span>  </a> </li> </ul>  </details> </li><li class="astro-5mbuw2gw"> <details open class="astro-5mbuw2gw"> <sl-sidebar-restore data-index="1"></sl-sidebar-restore> <summary class="astro-5mbuw2gw"> <div class="group-label astro-5mbuw2gw"> <span class="large astro-5mbuw2gw">API Reference</span>  </div> <svg aria-hidden="true" class="caret astro-5mbuw2gw astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </summary> <ul class="astro-5mbuw2gw"> <li class="astro-5mbuw2gw"> <a href="/docs/pr-172/api/" aria-current="page" class="astro-5mbuw2gw"> <span class="astro-5mbuw2gw">SwarmIdClient API Reference</span>  </a> </li> </ul>  </details> </li> </ul>   <script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script> </sl-sidebar-state-persist>  <div class="md:sl-hidden"> <div class="mobile-preferences sl-flex astro-sr6qt3gd"> <div class="sl-flex social-icons astro-sr6qt3gd"> <a href="https://github.com/snaha/swarm-id" rel="me" class="sl-flex astro-rqtckygt"><span class="sr-only astro-rqtckygt">GitHub</span><svg aria-hidden="true" class="astro-rqtckygt astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </a> </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-ska3fvfo"> <span class="sr-only astro-ska3fvfo">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-ska3fvfo astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg>  <select value="auto" autocomplete="off" class="astro-ska3fvfo"> <option value="dark" class="astro-ska3fvfo">Dark</option><option value="light" class="astro-ska3fvfo">Light</option><option value="auto" selected class="astro-ska3fvfo">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-ska3fvfo astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </label>  </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script>   </div>  </div> </div> </div> </nav> <div class="main-frame astro-fskzycpk">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-kdmbh7mm"> <aside class="right-sidebar-container print:hidden astro-kdmbh7mm"> <div class="right-sidebar astro-kdmbh7mm"> <div class="lg:sl-hidden astro-itmr7i6z"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-y7r7pqnn"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-y7r7pqnn"><details id="starlight__mobile-toc" class="astro-y7r7pqnn"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-y7r7pqnn"><div class="toggle sl-flex astro-y7r7pqnn">On this page<svg aria-hidden="true" class="caret astro-y7r7pqnn astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </div><span class="display-current astro-y7r7pqnn"></span></summary><div class="dropdown astro-y7r7pqnn"><ul class="isMobile astro-yq7tuj27" style="--depth: 0;"> <li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#_top" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#installation" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Installation</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#quick-start" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Quick Start</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#constructor" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Constructor</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#new-swarmidclientoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">new SwarmIdClient(options)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#lifecycle-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Lifecycle Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#initialize" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">initialize()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#destroy" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">destroy()</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#authentication-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Authentication Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#getauthiframe" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">getAuthIframe()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#button-configuration" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">Button Configuration</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#manual-authentication" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">Manual Authentication</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#checkauthstatus" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">checkAuthStatus()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#connectpopupmode" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">connect(popupMode?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#disconnect" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">disconnect()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#getconnectioninfo" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">getConnectionInfo()</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#bee-connectivity-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Bee Connectivity Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#isbeeconnected" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">isBeeConnected()</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#data-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Data Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#uploaddatadata-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">uploadData(data, options?, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#downloaddatareference-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">downloadData(reference, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#file-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">File Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#uploadfilefile-name-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">uploadFile(file, name?, options?, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#downloadfilereference-path-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">downloadFile(reference, path?, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#chunk-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Chunk Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#uploadchunkdata-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">uploadChunk(data, options?, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#downloadchunkreference-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">downloadChunk(reference, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#soc-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">SOC Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesocreaderowneraddress-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSOCReader(ownerAddress, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesocwritersigner-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSOCWriter(signer?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#epoch-feed-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Epoch Feed Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makeepochfeedreaderoptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeEpochFeedReader(options, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makeepochfeedwriteroptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeEpochFeedWriter(options, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#sequential-feed-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Sequential Feed Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesequentialfeedreaderoptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSequentialFeedReader(options, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesequentialfeedwriteroptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSequentialFeedWriter(options, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#gsoc-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">GSOC Methods</span> </a> <ul class="isMobile astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#gsocminetargetoverlay-identifier-proximity" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">gsocMine(targetOverlay, identifier, proximity?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#gsocsendsigner-identifier-data-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">gsocSend(signer, identifier, data, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#types" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Types</span> </a>  </li> </ul> </div></details></nav></mobile-starlight-toc><script type="module" src="/docs/pr-172/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C181hMzK.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-itmr7i6z"><div class="sl-container astro-itmr7i6z"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-yq7tuj27" style="--depth: 0;"> <li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#_top" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#installation" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Installation</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#quick-start" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Quick Start</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#constructor" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Constructor</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#new-swarmidclientoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">new SwarmIdClient(options)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#lifecycle-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Lifecycle Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#initialize" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">initialize()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#destroy" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">destroy()</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#authentication-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Authentication Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#getauthiframe" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">getAuthIframe()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#button-configuration" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">Button Configuration</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#manual-authentication" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">Manual Authentication</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#checkauthstatus" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">checkAuthStatus()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#connectpopupmode" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">connect(popupMode?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#disconnect" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">disconnect()</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#getconnectioninfo" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">getConnectionInfo()</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#bee-connectivity-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Bee Connectivity Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#isbeeconnected" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">isBeeConnected()</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#data-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Data Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#uploaddatadata-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">uploadData(data, options?, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#downloaddatareference-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">downloadData(reference, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#file-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">File Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#uploadfilefile-name-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">uploadFile(file, name?, options?, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#downloadfilereference-path-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">downloadFile(reference, path?, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#chunk-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Chunk Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#uploadchunkdata-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">uploadChunk(data, options?, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#downloadchunkreference-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">downloadChunk(reference, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#soc-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">SOC Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesocreaderowneraddress-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSOCReader(ownerAddress, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesocwritersigner-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSOCWriter(signer?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#epoch-feed-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Epoch Feed Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makeepochfeedreaderoptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeEpochFeedReader(options, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makeepochfeedwriteroptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeEpochFeedWriter(options, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#sequential-feed-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Sequential Feed Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesequentialfeedreaderoptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSequentialFeedReader(options, requestOptions?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#makesequentialfeedwriteroptions-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">makeSequentialFeedWriter(options, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#gsoc-methods" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">GSOC Methods</span> </a> <ul class="astro-yq7tuj27" style="--depth: 1;"> <li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#gsocminetargetoverlay-identifier-proximity" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">gsocMine(targetOverlay, identifier, proximity?)</span> </a>  </li><li class="astro-yq7tuj27" style="--depth: 1;"> <a href="#gsocsendsigner-identifier-data-options-requestoptions" class="astro-yq7tuj27" style="--depth: 1;"> <span class="astro-yq7tuj27" style="--depth: 1;">gsocSend(signer, identifier, data, options?, requestOptions?)</span> </a>  </li> </ul>  </li><li class="astro-yq7tuj27" style="--depth: 0;"> <a href="#types" class="astro-yq7tuj27" style="--depth: 0;"> <span class="astro-yq7tuj27" style="--depth: 0;">Types</span> </a>  </li> </ul> </nav></starlight-toc><script type="module" src="/docs/pr-172/_astro/TableOfContents.astro_astro_type_script_index_0_lang.CKWWgpjV.js"></script></div></div> </div> </aside> <div class="main-pane astro-kdmbh7mm">  <main data-pagefind-body class="astro-i2xivywe" lang="en" dir="ltr">    <div class="content-panel astro-tirbdlxj"> <div class="sl-container astro-tirbdlxj"> <h1 id="_top" class="astro-dveapozv">SwarmIdClient API Reference</h1>  </div> </div>  <div class="content-panel astro-tirbdlxj"> <div class="sl-container astro-tirbdlxj"> <div class="sl-markdown-content"> <p>The <code dir="auto">SwarmIdClient</code> is the main class for integrating Swarm ID authentication and storage capabilities into web applications. It enables parent windows to interact with a Swarm ID iframe proxy, providing secure authentication, identity management, and data upload/download functionality to the Swarm decentralized storage network.</p>
+<h2 id="installation">Installation</h2>
+<div class="expressive-code"><link rel="stylesheet" href="/docs/pr-172/_astro/ec.tm3va.css"><script type="module" src="/docs/pr-172/_astro/ec.8zarh.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">pnpm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">add</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">@swarm-id/lib</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="pnpm add @swarm-id/lib"><div></div></button></div></figure></div>
+<h2 id="quick-start">Quick Start</h2>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">import</span><span style="--0:#D6DEEB;--1:#403F53"> { SwarmIdClient } </span><span style="--0:#C792EA;--1:#8844AE">from</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">@swarm-id/lib</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">iframeOrigin: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">https://swarm-id.example.com</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">metadata: {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">name: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">My App</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">description: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">A decentralized application</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">},</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">onAuthChange</span><span style="--0:#C792EA;--1:#8844AE">: </span><span style="--0:#D9F5DD;--1:#111111">(</span><span style="--0:#D7DBE0;--1:#403F53">authenticated</span><span style="--0:#D9F5DD;--1:#111111">)</span><span style="--0:#C792EA;--1:#8844AE"> => {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Auth status changed:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">authenticated)</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">}</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Option 1: Open authentication page manually</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">authUrl</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">connect</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Authentication opened at:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, authUrl)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Option 2: Check authentication status and upload if authenticated</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">status</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">checkAuthStatus</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (status</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">authenticated</span><span style="--0:#D6DEEB;--1:#403F53">) {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">result</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadData</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">Uint8Array</span><span style="--0:#D6DEEB;--1:#403F53">([</span><span style="--0:#F78C6C;--1:#AA0982">1</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#F78C6C;--1:#AA0982">2</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#F78C6C;--1:#AA0982">3</span><span style="--0:#D6DEEB;--1:#403F53">]))</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Uploaded with reference:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, result</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">reference</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="import { SwarmIdClient } from &#x27;@swarm-id/lib&#x27;const client = new SwarmIdClient({  iframeOrigin: &#x27;https://swarm-id.example.com&#x27;,  metadata: {    name: &#x27;My App&#x27;,    description: &#x27;A decentralized application&#x27;  },  onAuthChange: (authenticated) => {    console.log(&#x27;Auth status changed:&#x27;, authenticated)  }})await client.initialize()// Option 1: Open authentication page manuallyconst authUrl = client.connect()console.log(&#x27;Authentication opened at:&#x27;, authUrl)// Option 2: Check authentication status and upload if authenticatedconst status = await client.checkAuthStatus()if (status.authenticated) {  const result = await client.uploadData(new Uint8Array([1, 2, 3]))  console.log(&#x27;Uploaded with reference:&#x27;, result.reference)}"><div></div></button></div></figure></div>
+<h2 id="constructor">Constructor</h2>
+<h3 id="new-swarmidclientoptions"><code dir="auto">new SwarmIdClient(options)</code></h3>
+<p>Creates a new SwarmIdClient instance.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">options.iframeOrigin</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The origin URL where the Swarm ID proxy iframe is hosted</td></tr><tr><td><code dir="auto">options.iframePath</code></td><td><code dir="auto">string</code></td><td>No</td><td>The path to the proxy iframe (defaults to <code dir="auto">"/proxy"</code>)</td></tr><tr><td><code dir="auto">options.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds (defaults to <code dir="auto">30000</code>)</td></tr><tr><td><code dir="auto">options.initializationTimeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Initialization timeout in milliseconds (defaults to <code dir="auto">30000</code>)</td></tr><tr><td><code dir="auto">options.onAuthChange</code></td><td><code dir="auto">(authenticated: boolean) => void</code></td><td>No</td><td>Callback function invoked when authentication status changes</td></tr><tr><td><code dir="auto">options.popupMode</code></td><td><code dir="auto">"popup" | "window"</code></td><td>No</td><td>How to display the authentication popup (defaults to <code dir="auto">"window"</code>)</td></tr><tr><td><code dir="auto">options.metadata</code></td><td><code dir="auto">AppMetadata</code></td><td>Yes</td><td>Application metadata shown to users during authentication</td></tr><tr><td><code dir="auto">options.metadata.name</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>Application name (1-100 characters)</td></tr><tr><td><code dir="auto">options.metadata.description</code></td><td><code dir="auto">string</code></td><td>No</td><td>Application description (max 500 characters)</td></tr><tr><td><code dir="auto">options.metadata.icon</code></td><td><code dir="auto">string</code></td><td>No</td><td>Application icon as a data URL (SVG or PNG, max 4KB)</td></tr><tr><td><code dir="auto">options.buttonConfig</code></td><td><code dir="auto">ButtonConfig</code></td><td>No</td><td>Button configuration for the authentication UI</td></tr><tr><td><code dir="auto">options.containerId</code></td><td><code dir="auto">string</code></td><td>No</td><td>ID of container element to place iframe in (optional)</td></tr></tbody></table>
+<p><strong>Throws:</strong> <code dir="auto">Error</code> if the provided app metadata is invalid</p>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">iframeOrigin: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">https://id.swarm.example.com</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">timeout: </span><span style="--0:#F78C6C;--1:#AA0982">60000</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">metadata: {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">name: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">My dApp</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">description: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">A decentralized application built on Swarm</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">icon: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">data:image/svg+xml;base64,...</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">},</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">onAuthChange</span><span style="--0:#C792EA;--1:#8844AE">: </span><span style="--0:#D9F5DD;--1:#111111">(</span><span style="--0:#D7DBE0;--1:#403F53">authenticated</span><span style="--0:#D9F5DD;--1:#111111">)</span><span style="--0:#C792EA;--1:#8844AE"> => {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#82AAFF;--1:#3B61B0">updateUI</span><span style="--0:#D6DEEB;--1:#403F53">(authenticated)</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">}</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const client = new SwarmIdClient({  iframeOrigin: &#x27;https://id.swarm.example.com&#x27;,  timeout: 60000,  metadata: {    name: &#x27;My dApp&#x27;,    description: &#x27;A decentralized application built on Swarm&#x27;,    icon: &#x27;data:image/svg+xml;base64,...&#x27;  },  onAuthChange: (authenticated) => {    updateUI(authenticated)  }})"><div></div></button></div></figure></div>
+<hr>
+<h2 id="lifecycle-methods">Lifecycle Methods</h2>
+<h3 id="initialize"><code dir="auto">initialize()</code></h3>
+<p>Initializes the client by creating and embedding the proxy iframe.</p>
+<p>This method must be called before using any other client methods. It creates a hidden iframe, waits for the proxy to initialize, identifies the parent application to the proxy, and waits for the proxy to signal readiness.</p>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;void></code> - Resolves when the client is fully initialized</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is already initialized</li>
+<li><code dir="auto">Error</code> if the iframe fails to load</li>
+<li><code dir="auto">Error</code> if the proxy does not respond within the initialization timeout period (configurable via <code dir="auto">initializationTimeout</code>, defaults to 30 seconds)</li>
+<li><code dir="auto">Error</code> if origin validation fails on the proxy side</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">try</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Client ready</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">catch</span><span style="--0:#D6DEEB;--1:#403F53"> (error) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">error</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Failed to initialize:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, error)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const client = new SwarmIdClient({ ... })try {  await client.initialize()  console.log(&#x27;Client ready&#x27;)} catch (error) {  console.error(&#x27;Failed to initialize:&#x27;, error)}"><div></div></button></div></figure></div>
+<hr>
+<h3 id="destroy"><code dir="auto">destroy()</code></h3>
+<p>Destroys the client and releases all resources.</p>
+<p>This method should be called when the client is no longer needed. It performs the following cleanup:</p>
+<ul>
+<li>Cancels all pending requests with an error</li>
+<li>Removes the message event listener</li>
+<li>Removes the iframe from the DOM</li>
+<li>Resets the client to an uninitialized state</li>
+</ul>
+<p>After calling <code dir="auto">destroy()</code>, the client instance cannot be reused. Create a new instance if you need to reconnect.</p>
+<p><strong>Returns:</strong> <code dir="auto">void</code></p>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Clean up when component unmounts</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">useEffect</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">()</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">=></span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#C792EA;--1:#8844AE">return</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#D9F5DD;--1:#111111">()</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">=></span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">    </span></span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">destroy</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}, [])</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="// Clean up when component unmountsuseEffect(() => {  const client = new SwarmIdClient({ ... })  client.initialize()  return () => {    client.destroy()  }}, [])"><div></div></button></div></figure></div>
+<hr>
+<h2 id="authentication-methods">Authentication Methods</h2>
+<h3 id="getauthiframe"><code dir="auto">getAuthIframe()</code></h3>
+<p>Returns the authentication iframe element.</p>
+<p>The iframe displays authentication UI based on the current auth status:</p>
+<ul>
+<li>If not authenticated: shows a “Connect” button</li>
+<li>If authenticated: shows identity info and a “Disconnect” button</li>
+</ul>
+<p>The iframe is positioned fixed in the bottom-right corner of the viewport.</p>
+<p><strong>Returns:</strong> <code dir="auto">HTMLIFrameElement</code> - The iframe element displaying the authentication UI</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the iframe is not available</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">iframe</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getAuthIframe</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// The iframe is already displayed; this returns a reference to it</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const iframe = client.getAuthIframe()// The iframe is already displayed; this returns a reference to it"><div></div></button></div></figure></div>
+<hr>
+<h3 id="button-configuration">Button Configuration</h3>
+<p>The authentication button in the iframe can be customized using the <code dir="auto">buttonConfig</code> option in the constructor. This configuration allows you to customize the button text, colors, and styling.</p>
+<p><strong>ButtonConfig Interface:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">interface</span><span style="--0:#D6DEEB;--1:#403F53"> ButtonConfig {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">connectText</span><span style="--0:#7FDBCA;--1:#096E72">?:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">disconnectText</span><span style="--0:#7FDBCA;--1:#096E72">?:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">loadingText</span><span style="--0:#7FDBCA;--1:#096E72">?:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">backgroundColor</span><span style="--0:#7FDBCA;--1:#096E72">?:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">color</span><span style="--0:#7FDBCA;--1:#096E72">?:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">borderRadius</span><span style="--0:#7FDBCA;--1:#096E72">?:</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C5E478;--1:#3B61B0">string</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="interface ButtonConfig {  connectText?: string  disconnectText?: string  loadingText?: string  backgroundColor?: string  color?: string  borderRadius?: string}"><div></div></button></div></figure></div>
+<p><strong>Example: Customizing Button Configuration</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">iframeOrigin: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">https://swarm-id.example.com</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">metadata: {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">name: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">My App</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">description: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">A decentralized application</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">},</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">buttonConfig: {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">connectText: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Connect with Swarm</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">disconnectText: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Disconnect</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">loadingText: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Loading...</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">backgroundColor: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">#4CAF50</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">color: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">white</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">    </span></span><span style="--0:#C792EA;--1:#8844AE">borderRadius: </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">8px</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">},</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">onAuthChange</span><span style="--0:#C792EA;--1:#8844AE">: </span><span style="--0:#D9F5DD;--1:#111111">(</span><span style="--0:#D7DBE0;--1:#403F53">authenticated</span><span style="--0:#D9F5DD;--1:#111111">)</span><span style="--0:#C792EA;--1:#8844AE"> => {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Auth status changed:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">authenticated)</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">}</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const client = new SwarmIdClient({  iframeOrigin: &#x27;https://swarm-id.example.com&#x27;,  metadata: {    name: &#x27;My App&#x27;,    description: &#x27;A decentralized application&#x27;  },  buttonConfig: {    connectText: &#x27;Connect with Swarm&#x27;,    disconnectText: &#x27;Disconnect&#x27;,    loadingText: &#x27;Loading...&#x27;,    backgroundColor: &#x27;#4CAF50&#x27;,    color: &#x27;white&#x27;,    borderRadius: &#x27;8px&#x27;  },  onAuthChange: (authenticated) => {    console.log(&#x27;Auth status changed:&#x27;, authenticated)  }})await client.initialize()"><div></div></button></div></figure></div>
+<p><strong>ButtonConfig Properties:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Required</th><th>Description</th><th>Default Value</th></tr></thead><tbody><tr><td><code dir="auto">connectText</code></td><td><code dir="auto">string</code></td><td>No</td><td>Text for the connect button</td><td>”🔐 Login with Swarm ID”</td></tr><tr><td><code dir="auto">disconnectText</code></td><td><code dir="auto">string</code></td><td>No</td><td>Text for the disconnect button</td><td>”🔓 Disconnect from Swarm ID”</td></tr><tr><td><code dir="auto">loadingText</code></td><td><code dir="auto">string</code></td><td>No</td><td>Text shown during loading</td><td>”⏳ Loading…”</td></tr><tr><td><code dir="auto">backgroundColor</code></td><td><code dir="auto">string</code></td><td>No</td><td>Background color for buttons</td><td><code dir="auto">#dd7200</code> (connect), <code dir="auto">#666</code> (disconnect)</td></tr><tr><td><code dir="auto">color</code></td><td><code dir="auto">string</code></td><td>No</td><td>Text color for buttons</td><td><code dir="auto">white</code></td></tr><tr><td><code dir="auto">borderRadius</code></td><td><code dir="auto">string</code></td><td>No</td><td>Border radius for buttons and iframe</td><td><code dir="auto">0</code></td></tr></tbody></table>
+<p><strong>Notes:</strong></p>
+<ul>
+<li>Button configuration is passed directly to the constructor, not via postMessage</li>
+<li>The <code dir="auto">borderRadius</code> property affects both the buttons and the iframe container</li>
+<li>Colors should be valid CSS color strings (e.g., <code dir="auto">'#FF0000'</code>, <code dir="auto">'rgb(255, 0, 0)'</code>, <code dir="auto">'red'</code>)</li>
+<li>Text properties support plain text or emoji combinations</li>
+<li>The configuration applies to both authentication states (connect/disconnect)</li>
+</ul>
+<hr>
+<h3 id="manual-authentication">Manual Authentication</h3>
+<p>In addition to the iframe-based authentication (via <code dir="auto">getAuthIframe()</code>), you can manually trigger the authentication flow by calling <code dir="auto">connect()</code>. This opens the same authentication URL in a new window:</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Open authentication manually (opens in new window)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">url</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">connect</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">popup</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Or open as full window</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">url</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">connect</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">window</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="// Open authentication manually (opens in new window)const url = client.connect(&#x22;popup&#x22;)// Or open as full windowconst url = client.connect(&#x22;window&#x22;)"><div></div></button></div></figure></div>
+<p><strong>When to use <code dir="auto">connect()</code>:</strong></p>
+<ul>
+<li>When you want to trigger authentication from a custom UI element</li>
+<li>When you prefer the authentication to open in a new window instead of an iframe</li>
+<li>When you need the authentication URL for testing or debugging</li>
+</ul>
+<p><strong>Authentication Flow:</strong></p>
+<ol>
+<li>User calls <code dir="auto">client.connect()</code> or clicks the iframe button</li>
+<li>Authentication page opens with the app metadata</li>
+<li>User authenticates with their Swarm ID</li>
+<li>Authentication state is shared with the iframe proxy</li>
+<li><code dir="auto">onAuthChange</code> callback is invoked with <code dir="auto">true</code></li>
+</ol>
+<hr>
+<h3 id="checkauthstatus"><code dir="auto">checkAuthStatus()</code></h3>
+<p>Checks the current authentication status with the Swarm ID proxy.</p>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;AuthStatus></code> - The authentication status object</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">authenticated</code></td><td><code dir="auto">boolean</code></td><td>Whether the user is currently authenticated</td></tr><tr><td><code dir="auto">origin</code></td><td><code dir="auto">string | undefined</code></td><td>The origin that authenticated (if authenticated)</td></tr></tbody></table>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">status</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">checkAuthStatus</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (status</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">authenticated</span><span style="--0:#D6DEEB;--1:#403F53">) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Authenticated from:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, status</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">origin</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const status = await client.checkAuthStatus()if (status.authenticated) {  console.log(&#x27;Authenticated from:&#x27;, status.origin)}"><div></div></button></div></figure></div>
+<hr>
+<h3 id="connectpopupmode"><code dir="auto">connect(popupMode?)</code></h3>
+<p>Opens Swarm ID authentication page in a new window.</p>
+<p>This method creates the same authentication URL as used by the iframe proxy and opens it in a new browser window. The user can authenticate with their Swarm ID, and the resulting authentication will be available to the client when they return.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">popupMode</code></td><td><code dir="auto">"window" | "popup"</code></td><td>No</td><td>Whether to open as a popup window (“popup”) or full window (“window”, default)</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">string</code> - The URL that was opened (useful for testing or reference)</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">client</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">SwarmIdClient</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">initialize</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Open authentication page</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">url</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">connect</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Authentication opened at:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, url)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Open as popup window</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">connect</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#ECC48D;--1:#984E4D">popup</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const client = new SwarmIdClient({ ... })await client.initialize()// Open authentication pageconst url = client.connect()console.log(&#x27;Authentication opened at:&#x27;, url)// Open as popup windowclient.connect(&#x22;popup&#x22;)"><div></div></button></div></figure></div>
+<hr>
+<h3 id="disconnect"><code dir="auto">disconnect()</code></h3>
+<p>Disconnects the current session and clears authentication data.</p>
+<p>After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The <code dir="auto">onAuthChange</code> callback will be invoked with <code dir="auto">false</code>.</p>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;void></code> - Resolves when disconnection is complete</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the disconnect operation fails</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">await</span><span style="--0:#D6DEEB;--1:#403F53"> client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">disconnect</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">User logged out</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="await client.disconnect()console.log(&#x27;User logged out&#x27;)"><div></div></button></div></figure></div>
+<hr>
+<h3 id="getconnectioninfo"><code dir="auto">getConnectionInfo()</code></h3>
+<p>Retrieves connection information including upload capability and identity details.</p>
+<p>Use this method to check if the user can upload data and to get information about the currently connected identity.</p>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;ConnectionInfo></code> - The connection info object</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">canUpload</code></td><td><code dir="auto">boolean</code></td><td>Whether the user can upload data (has valid postage stamp)</td></tr><tr><td><code dir="auto">identity</code></td><td><code dir="auto">object | undefined</code></td><td>The connected identity details (if authenticated)</td></tr><tr><td><code dir="auto">identity.id</code></td><td><code dir="auto">string</code></td><td>Unique identifier for the identity</td></tr><tr><td><code dir="auto">identity.name</code></td><td><code dir="auto">string</code></td><td>Display name of the identity</td></tr><tr><td><code dir="auto">identity.address</code></td><td><code dir="auto">string</code></td><td>Ethereum address associated with the identity</td></tr></tbody></table>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">info</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getConnectionInfo</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (info</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">canUpload</span><span style="--0:#D6DEEB;--1:#403F53">) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Ready to upload as:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, info</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#FAF39F;--1:#111111">identity</span><span style="--0:#C792EA;--1:#8844AE">?.</span><span style="--0:#7FDBCA;--1:#096E72">name</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">else</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">No postage stamp available</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const info = await client.getConnectionInfo()if (info.canUpload) {  console.log(&#x27;Ready to upload as:&#x27;, info.identity?.name)} else {  console.log(&#x27;No postage stamp available&#x27;)}"><div></div></button></div></figure></div>
+<hr>
+<h2 id="bee-connectivity-methods">Bee Connectivity Methods</h2>
+<h3 id="isbeeconnected"><code dir="auto">isBeeConnected()</code></h3>
+<p>Checks whether the Bee node is reachable.</p>
+<p>This method never throws an exception. If the client is not initialized, the request times out, or any other error occurs, it returns <code dir="auto">false</code>.</p>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;boolean></code> - <code dir="auto">true</code> if the Bee node is reachable, <code dir="auto">false</code> otherwise</p>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">connected</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">isBeeConnected</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (connected) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Bee node is online</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">else</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Bee node is offline</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const connected = await client.isBeeConnected()if (connected) {  console.log(&#x27;Bee node is online&#x27;)} else {  console.log(&#x27;Bee node is offline&#x27;)}"><div></div></button></div></figure></div>
+<hr>
+<h2 id="data-methods">Data Methods</h2>
+<h3 id="uploaddatadata-options-requestoptions"><code dir="auto">uploadData(data, options?, requestOptions?)</code></h3>
+<p>Uploads raw binary data to the Swarm network.</p>
+<p>The data is uploaded using the authenticated user’s postage stamp. Progress can be tracked via the <code dir="auto">options.onProgress</code> callback.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">data</code></td><td><code dir="auto">Uint8Array</code></td><td>Yes</td><td>The binary data to upload</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">UploadOptions</code></td><td>No</td><td>Upload configuration</td></tr><tr><td><code dir="auto">options.pin</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to pin the data locally (defaults to <code dir="auto">false</code>)</td></tr><tr><td><code dir="auto">options.encrypt</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to encrypt the data (defaults to <code dir="auto">false</code>)</td></tr><tr><td><code dir="auto">options.tag</code></td><td><code dir="auto">number</code></td><td>No</td><td>Tag ID for tracking upload progress</td></tr><tr><td><code dir="auto">options.deferred</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to use deferred upload (defaults to <code dir="auto">false</code>)</td></tr><tr><td><code dir="auto">options.redundancyLevel</code></td><td><code dir="auto">0-4</code></td><td>No</td><td>Redundancy level for data availability</td></tr><tr><td><code dir="auto">options.onProgress</code></td><td><code dir="auto">(progress) => void</code></td><td>No</td><td>Callback for tracking upload progress</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;UploadResult></code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>The Swarm reference (hash) of the uploaded data</td></tr><tr><td><code dir="auto">tagUid</code></td><td><code dir="auto">number | undefined</code></td><td>The tag UID if a tag was created</td></tr></tbody></table>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the user is not authenticated or cannot upload</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">data</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">TextEncoder</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">encode</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Hello, Swarm!</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">result</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadData</span><span style="--0:#D6DEEB;--1:#403F53">(data</span><span style="--0:#C792EA;--1:#8844AE">, {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">encrypt: </span><span style="--0:#FF6A83;--1:#A24848">true</span><span style="--0:#C792EA;--1:#8844AE">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#82AAFF;--1:#3B61B0">onProgress</span><span style="--0:#C792EA;--1:#8844AE">: </span><span style="--0:#D9F5DD;--1:#111111">(</span><span style="--0:#D7DBE0;--1:#403F53">progress</span><span style="--0:#D9F5DD;--1:#111111">)</span><span style="--0:#C792EA;--1:#8844AE"> => {</span></div></div><div class="ec-line"><div class="code"><span class="indent">    </span><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D6DEEB;--1:#403F53">`</span><span style="--0:#ECC48D;--1:#3B61B0">Progress: </span><span style="--0:#E2817F;--1:#B23834">${</span><span style="--0:#D6DEEB;--1:#403F53">progress</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">processed</span><span style="--0:#E2817F;--1:#B23834">}</span><span style="--0:#ECC48D;--1:#3B61B0">/</span><span style="--0:#E2817F;--1:#B23834">${</span><span style="--0:#D6DEEB;--1:#403F53">progress</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">total</span><span style="--0:#E2817F;--1:#B23834">}</span><span style="--0:#D6DEEB;--1:#403F53">`</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#C792EA;--1:#8844AE">  </span></span><span style="--0:#C792EA;--1:#8844AE">}</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">}</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Reference:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, result</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">reference</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const data = new TextEncoder().encode(&#x27;Hello, Swarm!&#x27;)const result = await client.uploadData(data, {  encrypt: true,  onProgress: (progress) => {    console.log(&#x60;Progress: ${progress.processed}/${progress.total}&#x60;)  }})console.log(&#x27;Reference:&#x27;, result.reference)"><div></div></button></div></figure></div>
+<hr>
+<h3 id="downloaddatareference-options-requestoptions"><code dir="auto">downloadData(reference, options?, requestOptions?)</code></h3>
+<p>Downloads raw binary data from the Swarm network.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The Swarm reference (64 or 128 hex chars)</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">DownloadOptions</code></td><td>No</td><td>Download configuration</td></tr><tr><td><code dir="auto">options.redundancyStrategy</code></td><td><code dir="auto">0-3</code></td><td>No</td><td>Strategy for handling redundancy</td></tr><tr><td><code dir="auto">options.fallback</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to use fallback retrieval</td></tr><tr><td><code dir="auto">options.timeoutMs</code></td><td><code dir="auto">number</code></td><td>No</td><td>Download timeout in milliseconds</td></tr><tr><td><code dir="auto">options.actPublisher</code></td><td><code dir="auto">Uint8Array | string</code></td><td>No</td><td>ACT publisher for encrypted content</td></tr><tr><td><code dir="auto">options.actHistoryAddress</code></td><td><code dir="auto">Uint8Array | string</code></td><td>No</td><td>ACT history address for encrypted content</td></tr><tr><td><code dir="auto">options.actTimestamp</code></td><td><code dir="auto">number | string</code></td><td>No</td><td>ACT timestamp for encrypted content</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;Uint8Array></code> - The downloaded data</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the reference is not found</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">data</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadData</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">a1b2c3...</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#919F9F;--1:#5D6376">// 64 char hex reference</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">text</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">TextDecoder</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">decode</span><span style="--0:#D6DEEB;--1:#403F53">(data)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Downloaded:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, text)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const data = await client.downloadData(&#x27;a1b2c3...&#x27;) // 64 char hex referenceconst text = new TextDecoder().decode(data)console.log(&#x27;Downloaded:&#x27;, text)"><div></div></button></div></figure></div>
+<hr>
+<h2 id="file-methods">File Methods</h2>
+<h3 id="uploadfilefile-name-options-requestoptions"><code dir="auto">uploadFile(file, name?, options?, requestOptions?)</code></h3>
+<p>Uploads a file to the Swarm network.</p>
+<p>Accepts either a File object (from file input) or raw Uint8Array data. When using a File object, the filename is automatically extracted unless explicitly overridden.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">file</code></td><td><code dir="auto">File | Uint8Array</code></td><td>Yes</td><td>The file to upload</td></tr><tr><td><code dir="auto">name</code></td><td><code dir="auto">string</code></td><td>No</td><td>Filename (extracted from File object if not provided)</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">UploadOptions</code></td><td>No</td><td>Upload configuration (see <code dir="auto">uploadData</code>)</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;UploadResult></code> - Contains <code dir="auto">reference</code> and optional <code dir="auto">tagUid</code></p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the user is not authenticated or cannot upload</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// From file input</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">fileInput</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">document</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">querySelector</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">input[type="file"]</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">file</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">fileInput</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">files</span><span style="--0:#D6DEEB;--1:#403F53">[</span><span style="--0:#F78C6C;--1:#AA0982">0</span><span style="--0:#D6DEEB;--1:#403F53">]</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">result</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadFile</span><span style="--0:#D6DEEB;--1:#403F53">(file)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// From Uint8Array with custom name</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">data</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">Uint8Array</span><span style="--0:#D6DEEB;--1:#403F53">([</span><span style="--0:#7FDBCA;--1:#096E72">...</span><span style="--0:#D6DEEB;--1:#403F53">])</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">result</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadFile</span><span style="--0:#D6DEEB;--1:#403F53">(data</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">document.pdf</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="// From file inputconst fileInput = document.querySelector(&#x27;input[type=&#x22;file&#x22;]&#x27;)const file = fileInput.files[0]const result = await client.uploadFile(file)// From Uint8Array with custom nameconst data = new Uint8Array([...])const result = await client.uploadFile(data, &#x27;document.pdf&#x27;)"><div></div></button></div></figure></div>
+<hr>
+<h3 id="downloadfilereference-path-options-requestoptions"><code dir="auto">downloadFile(reference, path?, options?, requestOptions?)</code></h3>
+<p>Downloads a file from the Swarm network.</p>
+<p>Returns both the file data and its original filename (if available). For manifest references, an optional path can be specified to retrieve a specific file from the manifest.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The Swarm reference of the file</td></tr><tr><td><code dir="auto">path</code></td><td><code dir="auto">string</code></td><td>No</td><td>Path within a manifest to retrieve a specific file</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">DownloadOptions</code></td><td>No</td><td>Download configuration (see <code dir="auto">downloadData</code>)</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;FileData></code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">name</code></td><td><code dir="auto">string</code></td><td>The filename</td></tr><tr><td><code dir="auto">data</code></td><td><code dir="auto">Uint8Array</code></td><td>The file contents</td></tr></tbody></table>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the reference is not found</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">file</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadFile</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">a1b2c3...</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Filename:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, file</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">name</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Create download link</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">blob</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">Blob</span><span style="--0:#D6DEEB;--1:#403F53">([file</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">data</span><span style="--0:#D6DEEB;--1:#403F53">])</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">url</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#82AAFF;--1:#3B61B0">URL</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">createObjectURL</span><span style="--0:#D6DEEB;--1:#403F53">(blob)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const file = await client.downloadFile(&#x27;a1b2c3...&#x27;)console.log(&#x27;Filename:&#x27;, file.name)// Create download linkconst blob = new Blob([file.data])const url = URL.createObjectURL(blob)"><div></div></button></div></figure></div>
+<hr>
+<h2 id="chunk-methods">Chunk Methods</h2>
+<h3 id="uploadchunkdata-options-requestoptions"><code dir="auto">uploadChunk(data, options?, requestOptions?)</code></h3>
+<p>Uploads a single chunk to the Swarm network.</p>
+<p>Chunks are the fundamental unit of storage in Swarm (4KB each). This method is useful for low-level operations or when implementing custom chunking strategies.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">data</code></td><td><code dir="auto">Uint8Array</code></td><td>Yes</td><td>The chunk data (should be exactly 4KB for optimal storage)</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">UploadOptions</code></td><td>No</td><td>Upload configuration (see <code dir="auto">uploadData</code>)</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;UploadResult></code> - Contains the <code dir="auto">reference</code> of the uploaded chunk</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the user is not authenticated or cannot upload</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">chunk</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">Uint8Array</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#F78C6C;--1:#AA0982">4096</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#919F9F;--1:#5D6376">// 4KB chunk</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">chunk</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">fill</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#F78C6C;--1:#AA0982">0x42</span><span style="--0:#D6DEEB;--1:#403F53">) </span><span style="--0:#919F9F;--1:#5D6376">// Fill with data</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">result</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadChunk</span><span style="--0:#D6DEEB;--1:#403F53">(chunk)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Chunk reference:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, result</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">reference</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const chunk = new Uint8Array(4096) // 4KB chunkchunk.fill(0x42) // Fill with dataconst result = await client.uploadChunk(chunk)console.log(&#x27;Chunk reference:&#x27;, result.reference)"><div></div></button></div></figure></div>
+<hr>
+<h3 id="downloadchunkreference-options-requestoptions"><code dir="auto">downloadChunk(reference, options?, requestOptions?)</code></h3>
+<p>Downloads a single chunk from the Swarm network.</p>
+<p>Retrieves a chunk by its reference hash. This method is useful for low-level operations or when implementing custom retrieval strategies.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The Swarm reference of the chunk</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">DownloadOptions</code></td><td>No</td><td>Download configuration (see <code dir="auto">downloadData</code>)</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;Uint8Array></code> - The chunk data</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the reference is not found</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">chunk</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadChunk</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">a1b2c3...</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Chunk size:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, chunk</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">length</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const chunk = await client.downloadChunk(&#x27;a1b2c3...&#x27;)console.log(&#x27;Chunk size:&#x27;, chunk.length)"><div></div></button></div></figure></div>
+<hr>
+<h2 id="soc-methods">SOC Methods</h2>
+<p>SOC (Single Owner Chunk) methods provide read/write helpers for SOCs, which are signed chunks owned by an Ethereum address. Uploads via <code dir="auto">SOCWriter.upload</code> are encrypted by default and return an <code dir="auto">encryptionKey</code> for later decryption.</p>
+<h3 id="makesocreaderowneraddress-requestoptions"><code dir="auto">makeSOCReader(ownerAddress, requestOptions?)</code></h3>
+<p>Creates an SOC reader bound to the given owner address.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">ownerAddress</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>Ethereum address of the SOC owner</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">SOCReader</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">getOwner()</code></td><td>Resolves the SOC owner address</td></tr><tr><td><code dir="auto">download(identifier, encryptionKey)</code></td><td>Downloads and decrypts an encrypted SOC</td></tr><tr><td><code dir="auto">rawDownload(identifier, encryptionKey?)</code></td><td>Downloads an unencrypted SOC, or decrypts if <code dir="auto">encryptionKey</code> is provided</td></tr></tbody></table>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">owner</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">0x1234...</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">reader</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">makeSOCReader</span><span style="--0:#D6DEEB;--1:#403F53">(owner)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">resolvedOwner</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getOwner</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">soc</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">download</span><span style="--0:#D6DEEB;--1:#403F53">(identifier</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">encryptionKey)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Payload:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#82AAFF;--1:#3B61B0">TextDecoder</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">decode</span><span style="--0:#D6DEEB;--1:#403F53">(soc</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">payload</span><span style="--0:#D6DEEB;--1:#403F53">))</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const owner = &#x27;0x1234...&#x27;const reader = client.makeSOCReader(owner)const resolvedOwner = await reader.getOwner()const soc = await reader.download(identifier, encryptionKey)console.log(&#x27;Payload:&#x27;, new TextDecoder().decode(soc.payload))"><div></div></button></div></figure></div>
+<hr>
+<h3 id="makesocwritersigner-requestoptions"><code dir="auto">makeSOCWriter(signer?, requestOptions?)</code></h3>
+<p>Creates an SOC writer for uploading and downloading SOCs. If <code dir="auto">signer</code> is omitted, the proxy uses the app signer.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">signer</code></td><td><code dir="auto">string</code></td><td>No</td><td>Private key hex string for the SOC signer</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">SOCWriter</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">getOwner()</code></td><td>Resolves the SOC owner address</td></tr><tr><td><code dir="auto">upload(identifier, data, options?)</code></td><td>Uploads an encrypted SOC</td></tr><tr><td><code dir="auto">rawUpload(identifier, data, options?)</code></td><td>Uploads an unencrypted SOC</td></tr><tr><td><code dir="auto">download(identifier, encryptionKey)</code></td><td>Downloads and decrypts an encrypted SOC</td></tr><tr><td><code dir="auto">rawDownload(identifier, encryptionKey?)</code></td><td>Downloads an unencrypted SOC, or decrypts if <code dir="auto">encryptionKey</code> is provided</td></tr></tbody></table>
+<p><strong>Returns (<code dir="auto">upload</code>):</strong> <code dir="auto">Promise&#x3C;SocUploadResult></code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>SOC chunk reference</td></tr><tr><td><code dir="auto">owner</code></td><td><code dir="auto">string</code></td><td>SOC owner address</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string</code></td><td>Encryption key for decrypting the SOC</td></tr><tr><td><code dir="auto">tagUid</code></td><td><code dir="auto">number</code></td><td>Upload tag UID, if provided</td></tr></tbody></table>
+<p><strong>Returns (<code dir="auto">rawUpload</code>):</strong> <code dir="auto">Promise&#x3C;SocRawUploadResult></code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>SOC chunk reference</td></tr><tr><td><code dir="auto">owner</code></td><td><code dir="auto">string</code></td><td>SOC owner address</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string</code></td><td>Optional; present only if returned by proxy</td></tr><tr><td><code dir="auto">tagUid</code></td><td><code dir="auto">number</code></td><td>Upload tag UID, if provided</td></tr></tbody></table>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">writer</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">makeSOCWriter</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">payload</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">TextEncoder</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">encode</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Hello SOC</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">upload</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">upload</span><span style="--0:#D6DEEB;--1:#403F53">(identifier</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">payload)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">owner</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getOwner</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">soc</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">download</span><span style="--0:#D6DEEB;--1:#403F53">(identifier</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">upload</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">encryptionKey</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Owner:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, soc</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">owner</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const writer = client.makeSOCWriter()const payload = new TextEncoder().encode(&#x27;Hello SOC&#x27;)const upload = await writer.upload(identifier, payload)const owner = await writer.getOwner()const soc = await writer.download(identifier, upload.encryptionKey)console.log(&#x27;Owner:&#x27;, soc.owner)"><div></div></button></div></figure></div>
+<hr>
+<p><strong>SOC Payload Structure (download methods):</strong> <code dir="auto">SingleOwnerChunk</code></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">data</code></td><td><code dir="auto">Uint8Array</code></td><td>Full SOC chunk data</td></tr><tr><td><code dir="auto">identifier</code></td><td><code dir="auto">string</code></td><td>SOC identifier</td></tr><tr><td><code dir="auto">signature</code></td><td><code dir="auto">string</code></td><td>SOC signature</td></tr><tr><td><code dir="auto">span</code></td><td><code dir="auto">number</code></td><td>Payload span (bytes)</td></tr><tr><td><code dir="auto">payload</code></td><td><code dir="auto">Uint8Array</code></td><td>SOC payload data</td></tr><tr><td><code dir="auto">address</code></td><td><code dir="auto">string</code></td><td>SOC address/reference</td></tr><tr><td><code dir="auto">owner</code></td><td><code dir="auto">string</code></td><td>SOC owner address</td></tr></tbody></table>
+<hr>
+<h2 id="epoch-feed-methods">Epoch Feed Methods</h2>
+<p>Epoch feed methods provide time-indexed updates backed by Single Owner Chunks (SOCs). Feed updates are addressed by <code dir="auto">(topic, owner)</code> and can be looked up by timestamp. The interface mirrors sequential feeds with upload and download helpers.</p>
+<h3 id="makeepochfeedreaderoptions-requestoptions"><code dir="auto">makeEpochFeedReader(options, requestOptions?)</code></h3>
+<p>Creates a feed reader bound to a topic and optional owner.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">options.topic</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>Feed topic (32-byte hex string)</td></tr><tr><td><code dir="auto">options.owner</code></td><td><code dir="auto">string</code></td><td>No</td><td>Feed owner address; if omitted, resolved via proxy</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">FeedReader</code></p>
+<h4 id="feedreader">FeedReader</h4>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">getOwner()</code></td><td>Resolves the feed owner address</td></tr><tr><td><code dir="auto">downloadReference(options?)</code></td><td>Returns the reference for timestamp <code dir="auto">options.at</code></td></tr><tr><td><code dir="auto">downloadPayload(options?)</code></td><td>Downloads payload data for timestamp <code dir="auto">options.at</code></td></tr></tbody></table>
+<p><strong>Epoch download options (<code dir="auto">options</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">at</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Unix timestamp (seconds); defaults to current time</td></tr><tr><td><code dir="auto">after</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Hint for latest known update timestamp</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string</code></td><td>No</td><td>Encryption key (hex) for encrypted feed updates</td></tr></tbody></table>
+<p><strong>Returns (<code dir="auto">downloadReference</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string | undefined</code></td><td>Swarm reference (hex) if found</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string | undefined</code></td><td>Encryption key (hex) if reference is encrypted</td></tr></tbody></table>
+<p><strong>Returns (<code dir="auto">downloadPayload</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">payload</code></td><td><code dir="auto">Uint8Array | undefined</code></td><td>Payload bytes if found</td></tr><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string | undefined</code></td><td>Swarm reference (hex) if found</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string | undefined</code></td><td>Encryption key (hex) if reference is encrypted</td></tr></tbody></table>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">reader</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">makeEpochFeedReader</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#D6DEEB;--1:#403F53">topic</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">owner</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getOwner</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">reference</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadReference</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ at: </span><span style="--0:#82AAFF;--1:#3B61B0">BigInt</span><span style="--0:#D6DEEB;--1:#403F53">(Date</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">now</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE"> / </span><span style="--0:#F78C6C;--1:#AA0982">1000</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">payload</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadPayload</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ at: </span><span style="--0:#82AAFF;--1:#3B61B0">BigInt</span><span style="--0:#D6DEEB;--1:#403F53">(Date</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">now</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE"> / </span><span style="--0:#F78C6C;--1:#AA0982">1000</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const reader = client.makeEpochFeedReader({ topic })const owner = await reader.getOwner()const reference = await reader.downloadReference({ at: BigInt(Date.now() / 1000) })const payload = await reader.downloadPayload({ at: BigInt(Date.now() / 1000) })"><div></div></button></div></figure></div>
+<hr>
+<h3 id="makeepochfeedwriteroptions-requestoptions"><code dir="auto">makeEpochFeedWriter(options, requestOptions?)</code></h3>
+<p>Creates a feed writer for updating and reading a topic. If <code dir="auto">signer</code> is omitted, the proxy uses the app signer.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">options.topic</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>Feed topic (32-byte hex string)</td></tr><tr><td><code dir="auto">options.signer</code></td><td><code dir="auto">string</code></td><td>No</td><td>Private key hex string for the feed signer</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">FeedWriter</code></p>
+<h4 id="feedwriter">FeedWriter</h4>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">getOwner()</code></td><td>Resolves the feed owner address</td></tr><tr><td><code dir="auto">downloadReference(options?)</code></td><td>Returns the reference for timestamp <code dir="auto">options.at</code></td></tr><tr><td><code dir="auto">downloadPayload(options?)</code></td><td>Downloads payload data for timestamp <code dir="auto">options.at</code></td></tr><tr><td><code dir="auto">uploadPayload(data, options?)</code></td><td>Uploads payload data and updates the feed</td></tr><tr><td><code dir="auto">uploadReference(reference, options?)</code></td><td>Updates the feed with a reference</td></tr></tbody></table>
+<p><strong>Epoch upload options (<code dir="auto">options</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">at</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Unix timestamp (seconds); defaults to current time</td></tr><tr><td><code dir="auto">encrypt</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether payload uploads are encrypted (default <code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">uploadOptions</code></td><td><code dir="auto">UploadOptions</code></td><td>No</td><td>Upload configuration (tag, pin, deferred, etc.)</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string</code></td><td>No</td><td>Encryption key (hex) for encrypted feed updates</td></tr></tbody></table>
+<p><strong>Returns (<code dir="auto">uploadPayload</code> / <code dir="auto">uploadReference</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Property</th><th>Type</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">socAddress</code></td><td><code dir="auto">string</code></td><td>SOC address for the feed update</td></tr><tr><td><code dir="auto">reference</code></td><td><code dir="auto">string</code></td><td>Swarm reference stored in the feed</td></tr><tr><td><code dir="auto">encryptionKey</code></td><td><code dir="auto">string | undefined</code></td><td>Encryption key (hex) if reference is encrypted</td></tr></tbody></table>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">writer</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">makeEpochFeedWriter</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#D6DEEB;--1:#403F53">topic</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">upload</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadPayload</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Hello feed</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">, { at: </span><span style="--0:#82AAFF;--1:#3B61B0">BigInt</span><span style="--0:#D6DEEB;--1:#403F53">(Date</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">now</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE"> / </span><span style="--0:#F78C6C;--1:#AA0982">1000</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">latest</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadReference</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ at: </span><span style="--0:#82AAFF;--1:#3B61B0">BigInt</span><span style="--0:#D6DEEB;--1:#403F53">(Date</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">now</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE"> / </span><span style="--0:#F78C6C;--1:#AA0982">1000</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const writer = client.makeEpochFeedWriter({ topic })const upload = await writer.uploadPayload(&#x27;Hello feed&#x27;, { at: BigInt(Date.now() / 1000) })const latest = await writer.downloadReference({ at: BigInt(Date.now() / 1000) })"><div></div></button></div></figure></div>
+<hr>
+<h2 id="sequential-feed-methods">Sequential Feed Methods</h2>
+<p>Sequential feed methods provide index-based updates backed by Single Owner Chunks (SOCs) and use the chunk API only. Payload uploads are encrypted by default; raw uploads allow supplying or omitting an encryption key.</p>
+<h3 id="makesequentialfeedreaderoptions-requestoptions"><code dir="auto">makeSequentialFeedReader(options, requestOptions?)</code></h3>
+<p>Creates a sequential feed reader bound to a topic and optional owner.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">options.topic</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>Feed topic (32-byte hex string)</td></tr><tr><td><code dir="auto">options.owner</code></td><td><code dir="auto">string</code></td><td>No</td><td>Feed owner address; if omitted, resolved via proxy</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">SequentialFeedReader</code></p>
+<h4 id="feedreader-1">FeedReader</h4>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">getOwner()</code></td><td>Resolves the feed owner address</td></tr><tr><td><code dir="auto">downloadPayload(encryptionKey, options?)</code></td><td>Downloads payload data for the given index or timestamp (requires encryption key)</td></tr><tr><td><code dir="auto">downloadRawPayload(options?, encryptionKey?)</code></td><td>Downloads raw payload data (encryption key optional)</td></tr><tr><td><code dir="auto">downloadReference(encryptionKey, options?)</code></td><td>Downloads reference for the given index or timestamp (requires encryption key)</td></tr></tbody></table>
+<p><strong>Sequential download options (<code dir="auto">options</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">index</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Feed index to read (0..2^64-1)</td></tr><tr><td><code dir="auto">at</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Unix timestamp (seconds); resolves nearest update at or before <code dir="auto">at</code></td></tr><tr><td><code dir="auto">hasTimestamp</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether payloads include a timestamp prefix (default <code dir="auto">true</code>)</td></tr></tbody></table>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">reader</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">makeSequentialFeedReader</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#D6DEEB;--1:#403F53">topic</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">owner</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getOwner</span><span style="--0:#D6DEEB;--1:#403F53">()</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">payload</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">reader</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadPayload</span><span style="--0:#D6DEEB;--1:#403F53">(encryptionKey</span><span style="--0:#C792EA;--1:#8844AE">, { index: </span><span style="--0:#F78C6C;--1:#AA0982">0</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const reader = client.makeSequentialFeedReader({ topic })const owner = await reader.getOwner()const payload = await reader.downloadPayload(encryptionKey, { index: 0 })"><div></div></button></div></figure></div>
+<hr>
+<h3 id="makesequentialfeedwriteroptions-requestoptions"><code dir="auto">makeSequentialFeedWriter(options, requestOptions?)</code></h3>
+<p>Creates a sequential feed writer for updating and reading a topic. If <code dir="auto">signer</code> is omitted, the proxy uses the app signer.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">options.topic</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>Feed topic (32-byte hex string)</td></tr><tr><td><code dir="auto">options.signer</code></td><td><code dir="auto">string</code></td><td>No</td><td>Private key hex string for the feed signer</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">SequentialFeedWriter</code></p>
+<h4 id="feedwriter-1">FeedWriter</h4>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Method</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">getOwner()</code></td><td>Resolves the feed owner address</td></tr><tr><td><code dir="auto">downloadPayload(encryptionKey, options?)</code></td><td>Downloads payload data for the given index or timestamp (requires encryption key)</td></tr><tr><td><code dir="auto">downloadRawPayload(options?, encryptionKey?)</code></td><td>Downloads raw payload data (encryption key optional)</td></tr><tr><td><code dir="auto">downloadReference(encryptionKey, options?)</code></td><td>Downloads reference for the given index or timestamp (requires encryption key)</td></tr><tr><td><code dir="auto">uploadPayload(data, options?)</code></td><td>Uploads payload data (encrypted) and updates the feed</td></tr><tr><td><code dir="auto">uploadRawPayload(data, options?, encryptionKey?)</code></td><td>Uploads raw payload data (encryption optional) and updates the feed</td></tr><tr><td><code dir="auto">uploadReference(reference, options?)</code></td><td>Uploads a reference (encrypted) and updates the feed</td></tr></tbody></table>
+<p><strong>Sequential upload options (<code dir="auto">options</code>):</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Option</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">index</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Feed index to write (0..2^64-1); defaults to next index</td></tr><tr><td><code dir="auto">at</code></td><td><code dir="auto">number | string | bigint</code></td><td>No</td><td>Unix timestamp (seconds); used when <code dir="auto">hasTimestamp</code> is true</td></tr><tr><td><code dir="auto">hasTimestamp</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether payloads include a timestamp prefix (default <code dir="auto">true</code>)</td></tr><tr><td><code dir="auto">uploadOptions</code></td><td><code dir="auto">UploadOptions</code></td><td>No</td><td>Upload configuration (tag, pin, deferred, etc.)</td></tr></tbody></table>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">writer</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">makeSequentialFeedWriter</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ </span><span style="--0:#D6DEEB;--1:#403F53">topic</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">upload</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">uploadPayload</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Hello feed!</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#C792EA;--1:#8844AE">, { index: </span><span style="--0:#F78C6C;--1:#AA0982">0</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">payload</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">writer</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">downloadPayload</span><span style="--0:#D6DEEB;--1:#403F53">(upload</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">encryptionKey</span><span style="--0:#C792EA;--1:#8844AE">, { index: </span><span style="--0:#F78C6C;--1:#AA0982">0</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const writer = client.makeSequentialFeedWriter({ topic })const upload = await writer.uploadPayload(&#x27;Hello feed!&#x27;, { index: 0 })const payload = await writer.downloadPayload(upload.encryptionKey, { index: 0 })"><div></div></button></div></figure></div>
+<hr>
+<h2 id="gsoc-methods">GSOC Methods</h2>
+<p>GSOC (Global Single Owner Chunk) methods enable proximity-based message routing on the Swarm network. These methods allow you to mine a private key that produces a SOC address proximate to a target overlay, then send messages using that key.</p>
+<h3 id="gsocminetargetoverlay-identifier-proximity"><code dir="auto">gsocMine(targetOverlay, identifier, proximity?)</code></h3>
+<p>Mines a private key whose SOC (Single Owner Chunk) address is proximate to a target overlay address.</p>
+<p>This is useful for sending messages to specific nodes in the Swarm network based on their overlay address.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">targetOverlay</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The target overlay address to be proximate to</td></tr><tr><td><code dir="auto">identifier</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The identifier for the SOC</td></tr><tr><td><code dir="auto">proximity</code></td><td><code dir="auto">number</code></td><td>No</td><td>The required proximity (number of matching prefix bits)</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;string></code> - The mined signer as a hex string (private key)</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if mining fails</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">targetOverlay</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">a1b2c3d4e5f6...</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">identifier</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">my-channel</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">signer</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">gsocMine</span><span style="--0:#D6DEEB;--1:#403F53">(targetOverlay</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">identifier</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#F78C6C;--1:#AA0982">8</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Mined signer:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, signer)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="const targetOverlay = &#x27;a1b2c3d4e5f6...&#x27;const identifier = &#x27;my-channel&#x27;const signer = await client.gsocMine(targetOverlay, identifier, 8)console.log(&#x27;Mined signer:&#x27;, signer)"><div></div></button></div></figure></div>
+<hr>
+<h3 id="gsocsendsigner-identifier-data-options-requestoptions"><code dir="auto">gsocSend(signer, identifier, data, options?, requestOptions?)</code></h3>
+<p>Sends a GSOC (Global Single Owner Chunk) message using a mined signer.</p>
+<p>Use the signer obtained from <code dir="auto">gsocMine()</code> to send messages that will be routed to nodes with the target overlay address.</p>
+<p><strong>Parameters:</strong></p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Parameter</th><th>Type</th><th>Required</th><th>Description</th></tr></thead><tbody><tr><td><code dir="auto">signer</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The mined signer (private key) from <code dir="auto">gsocMine()</code></td></tr><tr><td><code dir="auto">identifier</code></td><td><code dir="auto">string</code></td><td>Yes</td><td>The identifier for the SOC (must match the one used in mining)</td></tr><tr><td><code dir="auto">data</code></td><td><code dir="auto">Uint8Array</code></td><td>Yes</td><td>The message data to send</td></tr><tr><td><code dir="auto">options</code></td><td><code dir="auto">UploadOptions</code></td><td>No</td><td>Upload configuration (see <code dir="auto">uploadData</code>)</td></tr><tr><td><code dir="auto">requestOptions</code></td><td><code dir="auto">RequestOptions</code></td><td>No</td><td>Request configuration</td></tr><tr><td><code dir="auto">requestOptions.timeout</code></td><td><code dir="auto">number</code></td><td>No</td><td>Request timeout in milliseconds</td></tr><tr><td><code dir="auto">requestOptions.headers</code></td><td><code dir="auto">Record&#x3C;string, string></code></td><td>No</td><td>Custom headers</td></tr><tr><td><code dir="auto">requestOptions.endlesslyRetry</code></td><td><code dir="auto">boolean</code></td><td>No</td><td>Whether to retry endlessly</td></tr></tbody></table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;UploadResult></code> - Contains the <code dir="auto">reference</code> of the uploaded chunk</p>
+<p><strong>Throws:</strong></p>
+<ul>
+<li><code dir="auto">Error</code> if the client is not initialized</li>
+<li><code dir="auto">Error</code> if the user is not authenticated or cannot upload</li>
+<li><code dir="auto">Error</code> if the request times out</li>
+</ul>
+<p><strong>Example:</strong></p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// First, mine a signer for the target overlay</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">targetOverlay</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">a1b2c3d4e5f6...</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">identifier</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">my-channel</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">signer</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">gsocMine</span><span style="--0:#D6DEEB;--1:#403F53">(targetOverlay</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">identifier</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#F78C6C;--1:#AA0982">8</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5D6376">// Then send a message using the mined signer</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">message</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#7FDBCA;--1:#096E72">new</span><span style="--0:#C792EA;--1:#8844AE"> </span><span style="--0:#82AAFF;--1:#3B61B0">TextEncoder</span><span style="--0:#D6DEEB;--1:#403F53">()</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">encode</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Hello, Swarm!</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">result</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">gsocSend</span><span style="--0:#D6DEEB;--1:#403F53">(signer</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">identifier</span><span style="--0:#C792EA;--1:#8844AE">, </span><span style="--0:#D6DEEB;--1:#403F53">message)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">console</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">log</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">Message sent with reference:</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">, result</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">reference</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="// First, mine a signer for the target overlayconst targetOverlay = &#x27;a1b2c3d4e5f6...&#x27;const identifier = &#x27;my-channel&#x27;const signer = await client.gsocMine(targetOverlay, identifier, 8)// Then send a message using the mined signerconst message = new TextEncoder().encode(&#x27;Hello, Swarm!&#x27;)const result = await client.gsocSend(signer, identifier, message)console.log(&#x27;Message sent with reference:&#x27;, result.reference)"><div></div></button></div></figure></div>
+<hr>
+<h2 id="types">Types</h2>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">import</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">type</span><span style="--0:#D6DEEB;--1:#403F53"> {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">ClientOptions,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">AuthStatus,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">ConnectionInfo,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">UploadOptions,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">DownloadOptions,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">UploadResult,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">FileData,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">Reference,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">AppMetadata,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">ButtonConfig,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">RequestOptions,</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">from</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">@swarm-id/lib</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="import type {  ClientOptions,  AuthStatus,  ConnectionInfo,  UploadOptions,  DownloadOptions,  UploadResult,  FileData,  Reference,  AppMetadata,  ButtonConfig,  RequestOptions,} from &#x27;@swarm-id/lib&#x27;"><div></div></button></div></figure></div> </div> <footer class="sl-flex astro-f4cbe5rl"> <div class="meta sl-flex astro-f4cbe5rl">   </div> <div class="pagination-links print:hidden astro-m5vpit7u" dir="ltr"> <a href="/docs/pr-172/architecture" rel="prev" class="astro-m5vpit7u"> <svg aria-hidden="true" class="astro-m5vpit7u astro-jb6ssoep" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg>  <span class="astro-m5vpit7u"> Previous <br class="astro-m5vpit7u"> <span class="link-title astro-m5vpit7u">Architecture</span> </span> </a>  </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>
