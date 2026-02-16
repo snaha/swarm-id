@@ -83,7 +83,8 @@
 		{:else}
 			<Vertical --vertical-gap="var(--half-padding)">
 				<Typography
-					>Synced accounts require a Swarm postage stamp. Paste your stamp details below to continue.</Typography
+					>Synced accounts require a Swarm postage stamp. Paste your stamp details below to
+					continue.</Typography
 				>
 				<PostageStampForm
 					bind:batchID
@@ -109,9 +110,8 @@
 				<Checkmark size={20} />Confirm
 			</Button>
 			<Typography variant="small"
-				>Not ready? <button class="skip-link" onclick={handleSkip}
-					>Skip this step</button
-				> and create a local account instead (limited to viewing only).</Typography
+				>Not ready? <button class="skip-link" onclick={handleSkip}>Skip this step</button> and create
+				a local account instead (limited to viewing only).</Typography
 			>
 		{/if}
 	{/snippet}
