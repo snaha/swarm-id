@@ -11,7 +11,10 @@
       "Bash(pnpm install:*)",
       "Bash(pnpm dev:*)",
       "Bash(pnpm clean:*)",
-      "Bash(pnpm --filter *)",
+      "Bash(pnpm --filter * build)",
+      "Bash(pnpm --filter * check:all)",
+      "Bash(pnpm --filter * lint)",
+      "Bash(pnpm --filter * test)",
       "Bash(pnpm docs:*)",
       "Bash(ls:*)",
       "Bash(wc:*)",
@@ -35,7 +38,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "FILE=$(jq -r '.tool_input.file_path // empty') && [ -n \"$FILE\" ] && echo \"$FILE\" | grep -qE '\\.(ts|js|svelte|json|css|html)$' && npx prettier --write \"$FILE\" 2>/dev/null || true"
+            "command": "FILE=$(jq -r '.tool_input.file_path // empty') && [ -n \"$FILE\" ] && echo \"$FILE\" | grep -qE '\\.(ts|js|svelte|json|css|html)$' && pnpm exec prettier --write \"$FILE\""
           }
         ]
       }

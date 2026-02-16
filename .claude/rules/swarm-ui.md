@@ -19,8 +19,8 @@ Use Svelte 5 runes for reactive state: `$state()`, `$derived()`, `$effect()`.
 ## Icons (Carbon Icons)
 
 - **Always use direct imports** (barrel imports cause SSR issues):
-  - `import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'`
-  - `import { ArrowRight } from 'carbon-icons-svelte'`
+  - Good (direct import): `import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'`
+  - Bad (barrel import – causes SSR issues, do not use): `import { ArrowRight } from 'carbon-icons-svelte'`
 - Browse: https://carbondesignsystem.com/guidelines/icons/library/
 
 ## Layout Components

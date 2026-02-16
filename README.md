@@ -337,7 +337,7 @@ AGENT.md                         # Core project context: architecture, commands,
 └── rules/                       # Modular, path-scoped instructions
     ├── swarm-ui.md              # Svelte 5, Diete, Carbon Icons (loads for swarm-ui/** only)
     ├── figma.md                 # Figma MCP workflow (loads for swarm-ui/** only)
-    └── bee-cluster.md           # Local Bee cluster commands and keys
+    └── bee-cluster.md           # Local Bee cluster commands and known dev keys
 ```
 
 ### How It Works
