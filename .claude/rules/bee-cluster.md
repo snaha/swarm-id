@@ -1,3 +1,10 @@
+---
+paths:
+  - "swarm-ui/**"
+  - "demo/**"
+  - "lib/**"
+---
+
 # Local Bee Development Cluster (FDP Play)
 
 Docker-based local Bee cluster for development with postage stamps.
