@@ -20,8 +20,8 @@ import type {
   SocDownloadMessage,
   SocRawDownloadMessage,
   SocGetOwnerMessage,
-  FeedFindAtMessage,
-  FeedUpdateMessage,
+  EpochFeedDownloadReferenceMessage,
+  EpochFeedUploadReferenceMessage,
   FeedGetOwnerMessage,
   SequentialFeedGetOwnerMessage,
   SequentialFeedDownloadPayloadMessage,
@@ -564,11 +564,11 @@ export class SwarmIdProxy {
       case "socGetOwner":
         await this.handleSocGetOwner(message, event)
         break
-      case "feedFindAt":
-        await this.handleFeedFindAt(message, event)
+      case "epochFeedDownloadReference":
+        await this.handleEpochFeedDownloadReference(message, event)
         break
-      case "feedUpdate":
-        await this.handleFeedUpdate(message, event)
+      case "epochFeedUploadReference":
+        await this.handleEpochFeedUploadReference(message, event)
         break
       case "feedGetOwner":
         await this.handleFeedGetOwner(message, event)
@@ -2202,13 +2202,18 @@ export class SwarmIdProxy {
     }
   }
 
-  private async handleFeedFindAt(
-    message: FeedFindAtMessage,
+  private async handleEpochFeedDownloadReference(
+    message: EpochFeedDownloadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, owner, at, after } = message
+    const { requestId, topic, owner, at, after, encryptionKey } = message
 
-    console.log("[Proxy] Feed findAt request")
+    console.log("[Proxy] Epoch feed download reference request", {
+      topic,
+      owner: owner ?? "proxy",
+      at,
+      hasEncryptionKey: !!encryptionKey,
+    })
 
     try {
       let resolvedOwner = owner
@@ -2228,17 +2233,22 @@ export class SwarmIdProxy {
         bee: this.bee,
         topic: topicObj,
         owner: ownerObj,
+        encryptionKey: encryptionKey ? hexToUint8Array(encryptionKey) : undefined,
       })
 
       const atValue = this.parseFeedTimestamp(at)
       const afterValue =
         after !== undefined ? this.parseFeedTimestamp(after) : 0n
       const reference = await finder.findAt(atValue, afterValue)
+      console.log("[Proxy] Epoch feed download reference result", {
+        found: !!reference,
+        length: reference ? reference.length : 0,
+      })
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
-            type: "feedFindAtResponse",
+            type: "epochFeedDownloadReferenceResponse",
             requestId,
             reference: reference ? uint8ArrayToHex(reference) : undefined,
           } satisfies IframeToParentMessage,
@@ -2246,23 +2256,31 @@ export class SwarmIdProxy {
         )
       }
 
-      console.log("[Proxy] Feed findAt successful")
+      console.log("[Proxy] Epoch feed download reference successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error ? error.message : "Feed findAt failed",
+        error instanceof Error
+          ? error.message
+          : "Epoch feed download reference failed",
       )
     }
   }
 
-  private async handleFeedUpdate(
-    message: FeedUpdateMessage,
+  private async handleEpochFeedUploadReference(
+    message: EpochFeedUploadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, signer, at, reference } = message
+    const { requestId, topic, signer, at, reference, encryptionKey } = message
 
-    console.log("[Proxy] Feed update request")
+    console.log("[Proxy] Epoch feed upload reference request", {
+      topic,
+      signer: signer ? "provided" : "proxy",
+      at,
+      referenceLength: reference.length,
+      hasEncryptionKey: !!encryptionKey,
+    })
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -2291,6 +2309,7 @@ export class SwarmIdProxy {
         atValue,
         referenceBytes,
         this.stamper,
+        encryptionKey ? hexToUint8Array(encryptionKey) : undefined,
       )
 
       await this.saveStamperState()
@@ -2298,20 +2317,23 @@ export class SwarmIdProxy {
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
-            type: "feedUpdateResponse",
+            type: "epochFeedUploadReferenceResponse",
             requestId,
             socAddress: uint8ArrayToHex(socAddress),
+            encryptionKey: encryptionKey ? encryptionKey : undefined,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
       }
 
-      console.log("[Proxy] Feed update successful")
+      console.log("[Proxy] Epoch feed upload reference successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error ? error.message : "Feed update failed",
+        error instanceof Error
+          ? error.message
+          : "Epoch feed upload reference failed",
       )
     }
   }
@@ -2721,7 +2743,6 @@ export class SwarmIdProxy {
       requestId,
       topic,
       signer,
-      postageBatchId,
       data,
       index,
       at,
@@ -2729,7 +2750,6 @@ export class SwarmIdProxy {
       options,
       requestOptions,
     } = message
-    void postageBatchId
 
     console.log("[Proxy] Sequential feed upload payload request")
 
@@ -2824,7 +2844,6 @@ export class SwarmIdProxy {
       requestId,
       topic,
       signer,
-      postageBatchId,
       data,
       index,
       at,
@@ -2833,7 +2852,6 @@ export class SwarmIdProxy {
       options,
       requestOptions,
     } = message
-    void postageBatchId
 
     console.log("[Proxy] Sequential feed upload raw payload request")
 
@@ -2938,7 +2956,6 @@ export class SwarmIdProxy {
       requestId,
       topic,
       signer,
-      postageBatchId,
       reference,
       index,
       at,
@@ -2946,7 +2963,6 @@ export class SwarmIdProxy {
       options,
       requestOptions,
     } = message
-    void postageBatchId
 
     console.log("[Proxy] Sequential feed upload reference request")
 

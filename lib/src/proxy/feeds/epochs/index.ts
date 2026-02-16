@@ -48,7 +48,12 @@ export function createSyncEpochFinder(options: EpochFeedOptions): EpochFinder {
  * @returns EpochFinder implementation
  */
 export function createAsyncEpochFinder(options: EpochFeedOptions): EpochFinder {
-  return new AsyncEpochFinder(options.bee, options.topic, options.owner)
+  return new AsyncEpochFinder(
+    options.bee,
+    options.topic,
+    options.owner,
+    options.encryptionKey,
+  )
 }
 
 /**

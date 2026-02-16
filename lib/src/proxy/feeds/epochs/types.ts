@@ -23,6 +23,9 @@ export interface EpochFeedOptions {
 
   /** Feed owner address */
   owner: EthAddress
+
+  /** Optional encryption key for encrypted feed updates */
+  encryptionKey?: Uint8Array
 }
 
 /**
@@ -81,6 +84,7 @@ export interface EpochUpdater {
     at: bigint,
     reference: Uint8Array,
     stamper: Stamper,
+    encryptionKey?: Uint8Array,
   ): Promise<Uint8Array>
 
   /**

@@ -411,12 +411,85 @@ Secret message for ACT test!</textarea
 				<div id="soc-download-result"></div>
 			</div>
 
-			<!-- Log Section -->
-			<div class="section">
-				<h2>Console Log</h2>
-				<div id="log" class="log"></div>
-			</div>
-		</div>
+      <!-- Feeds Section -->
+      <div class="section">
+        <h2>Feeds</h2>
+        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
+          Test sequential feeds (chunk API, encrypted by default) or epoch feeds.
+        </p>
+
+        <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 10px; cursor: pointer;">
+          <input type="checkbox" id="feed-epoch-toggle" style="width: auto; cursor: pointer" />
+          <span style="font-size: 14px; color: #333">
+            Use epoch feeds (unchecked = sequential)
+          </span>
+        </label>
+
+        <h3 style="font-size: 16px; color: #333; margin-bottom: 8px;">Parameters</h3>
+        <input
+          type="text"
+          id="feed-topic"
+          placeholder="Topic (64 hex chars)"
+          value="0000000000000000000000000000000000000000000000000000000000000000"
+        />
+        <input
+          type="text"
+          id="feed-index"
+          placeholder="Index (optional, integer)"
+        />
+        <input
+          type="text"
+          id="feed-at"
+          placeholder="At (unix timestamp, optional)"
+        />
+        <h3 style="font-size: 16px; color: #333; margin: 16px 0 8px;">Upload</h3>
+        <input
+          type="text"
+          id="feed-upload-encryption-key"
+          placeholder="Upload Encryption Key (64 hex chars, optional)"
+        />
+        <textarea id="feed-upload-payload" placeholder="Payload to upload...">Hello feed!</textarea>
+        <input
+          type="text"
+          id="feed-upload-reference"
+          placeholder="Reference (64/128 hex chars)"
+          value="0000000000000000000000000000000000000000000000000000000000000000"
+        />
+        <div class="button-container">
+          <button id="feed-upload-payload-button" disabled>Upload Payload</button>
+          <button id="feed-upload-reference-button" disabled>Upload Reference</button>
+        </div>
+        <div id="feed-upload-result"></div>
+
+        <h3 style="font-size: 16px; color: #333; margin: 16px 0 8px;">Download</h3>
+        <input
+          type="text"
+          id="feed-download-at"
+          placeholder="At (unix timestamp, optional)"
+        />
+        <input
+          type="text"
+          id="feed-owner"
+          placeholder="Owner (40 hex chars, optional)"
+        />
+        <input
+          type="text"
+          id="feed-encryption-key"
+          placeholder="Encryption Key (64 hex chars, required for sequential download)"
+        />
+        <div class="button-container">
+          <button id="feed-download-payload-button" disabled>Download Payload</button>
+          <button id="feed-download-reference-button" disabled>Download Reference</button>
+        </div>
+        <div id="feed-download-result"></div>
+      </div>
+
+      <!-- Log Section -->
+      <div class="section">
+        <h2>Console Log</h2>
+        <div id="log" class="log"></div>
+      </div>
+    </div>
 
 		<script type="module">
 			import { SwarmIdClient, formatTTL } from '/lib/swarm-id.esm.js'
@@ -439,6 +512,20 @@ Secret message for ACT test!</textarea
 			// This affects both HTTP (localhost) and HTTPS (production) contexts.
 			const hasITPRestriction = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 			const isHTTP = window.location.protocol === 'http:'
+      function bytesToHex(bytes) {
+        return Array.from(bytes)
+          .map((b) => b.toString(16).padStart(2, "0"))
+          .join("")
+      }
+
+      function hexToBytes(hex) {
+        const clean = hex.startsWith("0x") ? hex.slice(2) : hex
+        const bytes = new Uint8Array(clean.length / 2)
+        for (let i = 0; i < bytes.length; i++) {
+          bytes[i] = parseInt(clean.substr(i * 2, 2), 16)
+        }
+        return bytes
+      }
 
 			if (hasITPRestriction) {
 				log(
@@ -654,8 +741,13 @@ Secret message for ACT test!</textarea
 				socWriter = client.makeSOCWriter()
 				log('Client initialized successfully', 'info')
 
-				// Set deferred checkbox default based on Bee node mode
-				await initializeDeferredDefault()
+        const feedDownloadAtEl = document.getElementById("feed-download-at")
+        if (feedDownloadAtEl && !feedDownloadAtEl.value) {
+          feedDownloadAtEl.value = Math.floor(Date.now() / 1000).toString()
+        }
+
+        // Set deferred checkbox default based on Bee node mode
+        await initializeDeferredDefault();
 
 				// Check initial auth status
 				log('Checking auth status...', 'info')
@@ -666,70 +758,81 @@ Secret message for ACT test!</textarea
 				log(`Initialization failed: ${error.message}`, 'error')
 			}
 
-			async function updateAuthStatus(authenticated) {
-				const statusEl = document.getElementById('auth-status')
-				const uploadBtn = document.getElementById('upload-button')
-				const downloadBtn = document.getElementById('download-button')
-				const connectBtn = document.getElementById('connect-button')
-				const actUploadBtn = document.getElementById('act-upload-button')
-				const actDownloadBtn = document.getElementById('act-download-button')
-				const actAddGranteesBtn = document.getElementById('act-add-grantees-button')
-				const socUploadBtn = document.getElementById('soc-upload-button')
-				const socRawUploadBtn = document.getElementById('soc-raw-upload-button')
-				const socDownloadBtn = document.getElementById('soc-download-button')
-				const socRawDownloadBtn = document.getElementById('soc-raw-download-button')
+      async function updateAuthStatus(authenticated) {
+        const statusEl = document.getElementById("auth-status");
+        const uploadBtn = document.getElementById("upload-button");
+        const downloadBtn = document.getElementById("download-button");
+        const connectBtn = document.getElementById("connect-button");
+        const actUploadBtn = document.getElementById("act-upload-button");
+        const actDownloadBtn = document.getElementById("act-download-button");
+        const actAddGranteesBtn = document.getElementById("act-add-grantees-button");
+        const socUploadBtn = document.getElementById("soc-upload-button");
+        const socRawUploadBtn = document.getElementById("soc-raw-upload-button");
+        const socDownloadBtn = document.getElementById("soc-download-button");
+        const socRawDownloadBtn = document.getElementById("soc-raw-download-button");
+        const feedUploadPayloadBtn = document.getElementById("feed-upload-payload-button");
+        const feedUploadReferenceBtn = document.getElementById("feed-upload-reference-button");
+        const feedDownloadPayloadBtn = document.getElementById("feed-download-payload-button");
+        const feedDownloadReferenceBtn = document.getElementById("feed-download-reference-button");
 
-				if (authenticated) {
-					statusEl.className = 'status authenticated'
-					statusEl.textContent = '✓ Status: Authenticated'
-					downloadBtn.disabled = false
-					actDownloadBtn.disabled = false
-					socDownloadBtn.disabled = false
-					socRawDownloadBtn.disabled = false
-					connectBtn.textContent = 'Disconnect'
+        if (authenticated) {
+          statusEl.className = "status authenticated";
+          statusEl.textContent = "✓ Status: Authenticated";
+          downloadBtn.disabled = false;
+          actDownloadBtn.disabled = false;
+          socDownloadBtn.disabled = false;
+          socRawDownloadBtn.disabled = false;
+          feedDownloadPayloadBtn.disabled = false;
+          feedDownloadReferenceBtn.disabled = false;
+          connectBtn.textContent = "Disconnect";
 
-					// Check if upload is available (requires postage stamp)
-					try {
-						const connectionInfo = await client.getConnectionInfo()
-						log(
-							`Connection info: canUpload=${connectionInfo.canUpload}, identity=${connectionInfo.identity}`,
-							'info',
-						)
-						uploadBtn.disabled = !connectionInfo.canUpload
-						actUploadBtn.disabled = !connectionInfo.canUpload
-						actAddGranteesBtn.disabled = !connectionInfo.canUpload
-						socUploadBtn.disabled = !connectionInfo.canUpload
-						socRawUploadBtn.disabled = !connectionInfo.canUpload
-						if (!connectionInfo.canUpload) {
-							log('Upload disabled: no postage stamp available', 'warn')
-						}
-					} catch (error) {
-						log(`Failed to get connection info: ${error.message}`, 'error')
-						uploadBtn.disabled = true
-						actUploadBtn.disabled = true
-						actAddGranteesBtn.disabled = true
-						socUploadBtn.disabled = true
-						socRawUploadBtn.disabled = true
-					}
+          // Check if upload is available (requires postage stamp)
+          try {
+            const connectionInfo = await client.getConnectionInfo();
+            log(`Connection info: canUpload=${connectionInfo.canUpload}, identity=${connectionInfo.identity}`, "info");
+            uploadBtn.disabled = !connectionInfo.canUpload;
+            actUploadBtn.disabled = !connectionInfo.canUpload;
+            actAddGranteesBtn.disabled = !connectionInfo.canUpload;
+            socUploadBtn.disabled = !connectionInfo.canUpload;
+            socRawUploadBtn.disabled = !connectionInfo.canUpload;
+            feedUploadPayloadBtn.disabled = !connectionInfo.canUpload;
+            feedUploadReferenceBtn.disabled = !connectionInfo.canUpload;
+            if (!connectionInfo.canUpload) {
+              log("Upload disabled: no postage stamp available", "warn");
+            }
+          } catch (error) {
+            log(`Failed to get connection info: ${error.message}`, "error");
+            uploadBtn.disabled = true;
+            actUploadBtn.disabled = true;
+            actAddGranteesBtn.disabled = true;
+            socUploadBtn.disabled = true;
+            socRawUploadBtn.disabled = true;
+            feedUploadPayloadBtn.disabled = true;
+            feedUploadReferenceBtn.disabled = true;
+          }
 
-					// Fetch and display postage stamp info
-					await updatePostageStampInfo()
-				} else {
-					statusEl.className = 'status unauthenticated'
-					statusEl.textContent = '✗ Status: Not authenticated'
-					uploadBtn.disabled = true
-					downloadBtn.disabled = true
-					actUploadBtn.disabled = true
-					actDownloadBtn.disabled = true
-					actAddGranteesBtn.disabled = true
-					socUploadBtn.disabled = true
-					socRawUploadBtn.disabled = true
-					socDownloadBtn.disabled = true
-					socRawDownloadBtn.disabled = true
-					connectBtn.textContent = 'Connect'
-					document.getElementById('stamp-section').style.display = 'none'
-				}
-			}
+          // Fetch and display postage stamp info
+          await updatePostageStampInfo()
+        } else {
+          statusEl.className = "status unauthenticated";
+          statusEl.textContent = "✗ Status: Not authenticated";
+          uploadBtn.disabled = true;
+          downloadBtn.disabled = true;
+          actUploadBtn.disabled = true;
+          actDownloadBtn.disabled = true;
+          actAddGranteesBtn.disabled = true;
+          socUploadBtn.disabled = true;
+          socRawUploadBtn.disabled = true;
+          socDownloadBtn.disabled = true;
+          socRawDownloadBtn.disabled = true;
+          feedUploadPayloadBtn.disabled = true;
+          feedUploadReferenceBtn.disabled = true;
+          feedDownloadPayloadBtn.disabled = true;
+          feedDownloadReferenceBtn.disabled = true;
+          connectBtn.textContent = "Connect";
+          document.getElementById("stamp-section").style.display = "none"
+        }
+      }
 
 			// Upload handler
 			document.getElementById('upload-button').addEventListener('click', async () => {
@@ -1196,7 +1299,480 @@ Secret message for ACT test!</textarea
 				}
 			})
 
-			log('Demo application ready', 'info')
+      const getFeedUploadOptions = () => {
+        const indexRaw = document.getElementById("feed-index").value.trim()
+        const atRaw = document.getElementById("feed-at").value.trim()
+        const opts = {}
+        if (indexRaw) {
+          opts.index = indexRaw
+        }
+        if (atRaw) {
+          opts.at = atRaw
+        }
+        return opts
+      }
+
+      const isEpochFeed = () => document.getElementById("feed-epoch-toggle").checked
+
+      const getFeedDownloadOptions = () => {
+        const indexRaw = document.getElementById("feed-index").value.trim()
+        const atRaw = document.getElementById("feed-download-at").value.trim()
+        const opts = {}
+        if (indexRaw) {
+          opts.index = indexRaw
+        }
+        if (atRaw) {
+          opts.at = atRaw
+        }
+        return opts
+      }
+
+      const getFeedOwner = () => {
+        const ownerRaw = document.getElementById("feed-owner").value.trim()
+        if (!ownerRaw) {
+          return undefined
+        }
+        return ownerRaw.startsWith("0x") ? ownerRaw.slice(2) : ownerRaw
+      }
+
+      const ensureDownloadIndex = (options) => {
+        const indexInput = document.getElementById("feed-index")
+        const indexRaw = indexInput.value.trim()
+        if (indexRaw) {
+          return options
+        }
+        const lastIndex = indexInput.dataset.lastIndex
+        if (lastIndex) {
+          indexInput.value = lastIndex
+          options.index = lastIndex
+        }
+        return options
+      }
+
+      const incrementPayloadValue = (value) => {
+        const match = value.match(/^(.*?)(\d+)\s*$/)
+        if (!match) {
+          return `${value}1`
+        }
+        const prefix = match[1]
+        const num = BigInt(match[2])
+        return `${prefix}${(num + 1n).toString()}`
+      }
+
+      const setDownloadEncryptionKey = (value) => {
+        const keyInput = document.getElementById("feed-encryption-key")
+        keyInput.value = value || ""
+        if (!keyInput.value) {
+          log("Download encryption key is empty after upload", "error")
+        }
+      }
+
+      const setDownloadEncryptionKeyFromReference = (reference) => {
+        if (!reference || typeof reference !== "string") {
+          setDownloadEncryptionKey("")
+          return
+        }
+        const clean = reference.startsWith("0x") ? reference.slice(2) : reference
+        if (clean.length === 128) {
+          setDownloadEncryptionKey(clean.slice(64))
+        } else {
+          setDownloadEncryptionKey("")
+        }
+      }
+
+      const validateHex = (value, length, label) => {
+        if (!value || value.length !== length) {
+          return `${label} must be ${length} hex chars`
+        }
+        return null
+      }
+
+      // Feed Upload Payload
+      document
+        .getElementById("feed-upload-payload-button")
+        .addEventListener("click", async () => {
+          const uploadBtn = document.getElementById("feed-upload-payload-button")
+          const resultEl = document.getElementById("feed-upload-result")
+          const topic = document.getElementById("feed-topic").value.trim()
+          const payload = document.getElementById("feed-upload-payload").value
+          const uploadEncryptionKey = document.getElementById("feed-upload-encryption-key").value.trim()
+          const options = getFeedUploadOptions()
+
+          if (uploadBtn.disabled) return
+          uploadBtn.disabled = true
+
+          const topicErr = validateHex(topic, 64, "Topic")
+          if (topicErr) {
+            log(topicErr, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">${topicErr}</div>`
+            uploadBtn.disabled = false
+            return
+          }
+          if (!payload) {
+            log("No payload provided", "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Please enter payload</div>`
+            uploadBtn.disabled = false
+            return
+          }
+
+          try {
+            if (isEpochFeed()) {
+              let atRaw = document.getElementById("feed-at").value.trim()
+              if (!atRaw) {
+                atRaw = Math.floor(Date.now() / 1000).toString()
+              }
+              const writer = client.makeEpochFeedWriter({ topic })
+              const uploadResult = await writer.uploadPayload(payload, {
+                at: atRaw,
+              })
+              setDownloadEncryptionKeyFromReference(uploadResult.reference)
+              document.getElementById("feed-download-at").value = atRaw
+              try {
+                document.getElementById("feed-owner").value =
+                  (await writer.getOwner()) || ""
+              } catch {}
+              resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Upload Result:</strong><br/>SOC: ${uploadResult.socAddress}<br/>Reference: ${uploadResult.reference || "N/A"}</div>`
+              log(
+                `Epoch feed upload successful: soc=${uploadResult.socAddress} reference=${uploadResult.reference || "N/A"} at=${atRaw} topic=${topic}`,
+                "info",
+              )
+            } else {
+              const indexInput = document.getElementById("feed-index")
+              const indexRaw = indexInput.value.trim()
+              if (!indexRaw) {
+                const nextIndex = indexInput.dataset.nextIndex || "0"
+                indexInput.value = nextIndex
+                options.index = nextIndex
+              }
+              if (uploadEncryptionKey && uploadEncryptionKey.length !== 64) {
+                log("Invalid upload encryption key", "error")
+                resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Upload encryption key must be 64 hex chars</div>`
+                uploadBtn.disabled = false
+                return
+              }
+              const writer = client.makeSequentialFeedWriter({ topic })
+              const result = uploadEncryptionKey
+                ? await writer.uploadRawPayload(payload, options, uploadEncryptionKey)
+                : await writer.uploadPayload(payload, options)
+              resultEl.innerHTML = `<div class="result"><strong>Sequential Payload Upload:</strong><br/>Reference: ${result.reference}<br/>Owner: ${result.owner}<br/>Encryption Key: ${result.encryptionKey || "N/A"}</div>`
+              setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || "")
+              document.getElementById("feed-owner").value = result.owner || ""
+              const currentIndex = indexInput.value || "0"
+              indexInput.value = currentIndex
+              indexInput.dataset.lastIndex = currentIndex
+              const atInput = document.getElementById("feed-at")
+              atInput.value = ""
+              const nextIndex = (BigInt(currentIndex) + 1n).toString()
+              indexInput.dataset.nextIndex = nextIndex
+              const payloadInput = document.getElementById("feed-upload-payload")
+              payloadInput.value = incrementPayloadValue(payloadInput.value)
+              log(`Sequential payload upload successful: ${result.reference}`, "info")
+            }
+          } catch (error) {
+            log(`Feed upload payload failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          } finally {
+            uploadBtn.disabled = false
+          }
+        })
+
+      // Feed Upload Reference
+      document
+        .getElementById("feed-upload-reference-button")
+        .addEventListener("click", async () => {
+          const uploadBtn = document.getElementById("feed-upload-reference-button")
+          const resultEl = document.getElementById("feed-upload-result")
+          const topic = document.getElementById("feed-topic").value.trim()
+          const reference = document.getElementById("feed-upload-reference").value.trim()
+          const uploadEncryptionKey = document.getElementById("feed-upload-encryption-key").value.trim()
+          const options = getFeedUploadOptions()
+
+          if (uploadBtn.disabled) return
+          uploadBtn.disabled = true
+
+          const topicErr = validateHex(topic, 64, "Topic")
+          if (topicErr) {
+            log(topicErr, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">${topicErr}</div>`
+            uploadBtn.disabled = false
+            return
+          }
+          if (!reference || (reference.length !== 64 && reference.length !== 128)) {
+            log("Invalid reference", "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Reference must be 64 or 128 hex chars</div>`
+            uploadBtn.disabled = false
+            return
+          }
+
+          try {
+            if (isEpochFeed()) {
+              let atRaw = document.getElementById("feed-at").value.trim()
+              if (!atRaw) {
+                atRaw = Math.floor(Date.now() / 1000).toString()
+              }
+              const writer = client.makeEpochFeedWriter({ topic })
+              const uploadResult = await writer.uploadReference(reference, {
+                at: atRaw,
+              })
+              setDownloadEncryptionKeyFromReference(reference)
+              document.getElementById("feed-download-at").value = atRaw
+              try {
+                document.getElementById("feed-owner").value =
+                  (await writer.getOwner()) || ""
+              } catch {}
+              resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Upload Result:</strong><br/>SOC: ${uploadResult.socAddress}<br/>Reference: ${uploadResult.reference || "N/A"}</div>`
+              log(
+                `Epoch feed upload successful: soc=${uploadResult.socAddress} reference=${uploadResult.reference || "N/A"} at=${atRaw} topic=${topic}`,
+                "info",
+              )
+            } else {
+              const indexInput = document.getElementById("feed-index")
+              const indexRaw = indexInput.value.trim()
+              if (!indexRaw) {
+                const nextIndex = indexInput.dataset.nextIndex || "0"
+                indexInput.value = nextIndex
+                options.index = nextIndex
+              }
+              if (uploadEncryptionKey && uploadEncryptionKey.length !== 64) {
+                log("Invalid upload encryption key", "error")
+                resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Upload encryption key must be 64 hex chars</div>`
+                uploadBtn.disabled = false
+                return
+              }
+              const writer = client.makeSequentialFeedWriter({ topic })
+              const result = uploadEncryptionKey
+                ? await writer.uploadRawPayload(
+                    hexToBytes(reference),
+                    options,
+                    uploadEncryptionKey,
+                  )
+                : await writer.uploadReference(reference, options)
+              resultEl.innerHTML = `<div class="result"><strong>Sequential Reference Upload:</strong><br/>Reference: ${result.reference}<br/>Owner: ${result.owner}<br/>Encryption Key: ${result.encryptionKey || "N/A"}</div>`
+              setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || "")
+              document.getElementById("feed-owner").value = result.owner || ""
+              const currentIndex = indexInput.value || "0"
+              indexInput.value = currentIndex
+              indexInput.dataset.lastIndex = currentIndex
+              const atInput = document.getElementById("feed-at")
+              atInput.value = ""
+              const nextIndex = (BigInt(currentIndex) + 1n).toString()
+              indexInput.dataset.nextIndex = nextIndex
+              log(`Sequential reference upload successful: ${result.reference}`, "info")
+            }
+          } catch (error) {
+            log(`Feed upload reference failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          } finally {
+            uploadBtn.disabled = false
+          }
+        })
+
+      // Feed Download Payload
+      document
+        .getElementById("feed-download-payload-button")
+        .addEventListener("click", async () => {
+          const downloadBtn = document.getElementById("feed-download-payload-button")
+          const downloadOtherBtn = document.getElementById("feed-download-reference-button")
+          const resultEl = document.getElementById("feed-download-result")
+          const topic = document.getElementById("feed-topic").value.trim()
+          const encryptionKey = document.getElementById("feed-encryption-key").value.trim()
+          const options = ensureDownloadIndex(getFeedDownloadOptions())
+          const owner = getFeedOwner()
+
+          if (downloadBtn.disabled) return
+          downloadBtn.disabled = true
+          downloadOtherBtn.disabled = true
+          resultEl.innerHTML = `<div class="result">Downloading...</div>`
+
+          const topicErr = validateHex(topic, 64, "Topic")
+          if (topicErr) {
+            log(topicErr, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">${topicErr}</div>`
+            downloadBtn.disabled = false
+            downloadOtherBtn.disabled = false
+            return
+          }
+          if (owner) {
+            const ownerErr = validateHex(owner, 40, "Owner")
+            if (ownerErr) {
+              log(ownerErr, "error")
+              resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">${ownerErr}</div>`
+              downloadBtn.disabled = false
+              downloadOtherBtn.disabled = false
+              return
+            }
+          }
+
+          try {
+            if (isEpochFeed()) {
+              let atRaw = document.getElementById("feed-download-at").value.trim()
+              if (!atRaw) {
+                const now = Math.floor(Date.now() / 1000).toString()
+                document.getElementById("feed-download-at").value = now
+                log(`Epoch feed download using current time: ${now}`, "info")
+              log(
+                `Epoch download payload start: at=${now} topic=${topic} owner=${owner || "proxy"}`,
+                "info",
+              )
+              const reader = client.makeEpochFeedReader({ topic, owner })
+              let result = await reader.downloadPayload({ at: now })
+              if (!result.reference && owner) {
+                log("Epoch download retrying without owner", "info")
+                const fallbackReader = client.makeEpochFeedReader({ topic })
+                result = await fallbackReader.downloadPayload({ at: now })
+              }
+              if (!result.reference || !result.payload) {
+                resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Not found</div>`
+                log("Epoch feed download payload not found", "info")
+              } else {
+                const text = new TextDecoder().decode(result.payload)
+                const hex = bytesToHex(result.payload)
+                resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Payload: ${text}<br/>Reference: ${result.reference}</div>`
+                resultEl.innerHTML += `<div class="result"><strong>Payload (hex):</strong><br/>${hex}</div>`
+                log("Epoch feed download successful", "info")
+              }
+              return
+            }
+              log(
+                `Epoch download payload start: at=${atRaw} topic=${topic} owner=${owner || "proxy"}`,
+                "info",
+              )
+              const reader = client.makeEpochFeedReader({ topic, owner })
+              let result = await reader.downloadPayload({ at: atRaw })
+              if (!result.reference && owner) {
+                log("Epoch download retrying without owner", "info")
+                const fallbackReader = client.makeEpochFeedReader({ topic })
+                result = await fallbackReader.downloadPayload({ at: atRaw })
+              }
+              if (!result.reference || !result.payload) {
+                resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Not found</div>`
+                log("Epoch feed download payload not found", "info")
+              } else {
+                const text = new TextDecoder().decode(result.payload)
+                const hex = bytesToHex(result.payload)
+                resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Payload: ${text}<br/>Reference: ${result.reference}</div>`
+                resultEl.innerHTML += `<div class="result"><strong>Payload (hex):</strong><br/>${hex}</div>`
+                log("Epoch feed download successful", "info")
+              }
+            } else {
+              if (!encryptionKey || encryptionKey.length !== 64) {
+                log("Missing encryption key", "error")
+                resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Encryption key must be 64 hex chars</div>`
+                downloadBtn.disabled = false
+                downloadOtherBtn.disabled = false
+                return
+              }
+              const reader = client.makeSequentialFeedReader({ topic, owner })
+              const result = await reader.downloadPayload(encryptionKey, options)
+              const text = new TextDecoder().decode(result.payload)
+              const hex = bytesToHex(result.payload)
+              resultEl.innerHTML = `<div class="result"><strong>Sequential Payload:</strong><br/>Payload: ${text}<br/>Timestamp: ${result.timestamp ?? "N/A"}<br/>Index: ${result.feedIndex}<br/>Next: ${result.feedIndexNext}</div>`
+              resultEl.innerHTML += `<div class="result"><strong>Payload (hex):</strong><br/>${hex}</div>`
+              log("Sequential feed download payload successful", "info")
+            }
+          } catch (error) {
+            log(`Feed download payload failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          } finally {
+            downloadBtn.disabled = false
+            downloadOtherBtn.disabled = false
+          }
+        })
+
+      // Feed Download Reference
+      document
+        .getElementById("feed-download-reference-button")
+        .addEventListener("click", async () => {
+          const downloadBtn = document.getElementById("feed-download-reference-button")
+          const downloadOtherBtn = document.getElementById("feed-download-payload-button")
+          const resultEl = document.getElementById("feed-download-result")
+          const topic = document.getElementById("feed-topic").value.trim()
+          const encryptionKey = document.getElementById("feed-encryption-key").value.trim()
+          const options = ensureDownloadIndex(getFeedDownloadOptions())
+          const owner = getFeedOwner()
+
+          if (downloadBtn.disabled) return
+          downloadBtn.disabled = true
+          downloadOtherBtn.disabled = true
+          resultEl.innerHTML = `<div class="result">Downloading...</div>`
+
+          const topicErr = validateHex(topic, 64, "Topic")
+          if (topicErr) {
+            log(topicErr, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">${topicErr}</div>`
+            downloadBtn.disabled = false
+            downloadOtherBtn.disabled = false
+            return
+          }
+          if (owner) {
+            const ownerErr = validateHex(owner, 40, "Owner")
+            if (ownerErr) {
+              log(ownerErr, "error")
+              resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">${ownerErr}</div>`
+              downloadBtn.disabled = false
+              downloadOtherBtn.disabled = false
+              return
+            }
+          }
+
+          try {
+            if (isEpochFeed()) {
+              let atRaw = document.getElementById("feed-download-at").value.trim()
+              if (!atRaw) {
+                const now = Math.floor(Date.now() / 1000).toString()
+                document.getElementById("feed-download-at").value = now
+                log(`Epoch feed download using current time: ${now}`, "info")
+              log(
+                `Epoch download reference start: at=${now} topic=${topic} owner=${owner || "proxy"}`,
+                "info",
+              )
+              const reader = client.makeEpochFeedReader({ topic, owner })
+              let result = await reader.downloadReference({ at: now })
+              if (!result.reference && owner) {
+                log("Epoch download retrying without owner", "info")
+                const fallbackReader = client.makeEpochFeedReader({ topic })
+                result = await fallbackReader.downloadReference({ at: now })
+              }
+              resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Reference:</strong><br/>${result.reference || "Not found"}</div>`
+              log("Epoch feed download reference successful", "info")
+              return
+            }
+              log(
+                `Epoch download reference start: at=${atRaw} topic=${topic} owner=${owner || "proxy"}`,
+                "info",
+              )
+              const reader = client.makeEpochFeedReader({ topic, owner })
+              let result = await reader.downloadReference({ at: atRaw })
+              if (!result.reference && owner) {
+                log("Epoch download retrying without owner", "info")
+                const fallbackReader = client.makeEpochFeedReader({ topic })
+                result = await fallbackReader.downloadReference({ at: atRaw })
+              }
+              resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Reference:</strong><br/>${result.reference || "Not found"}</div>`
+              log("Epoch feed download reference successful", "info")
+            } else {
+              if (!encryptionKey || encryptionKey.length !== 64) {
+                log("Missing encryption key", "error")
+                resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Encryption key must be 64 hex chars</div>`
+                downloadBtn.disabled = false
+                downloadOtherBtn.disabled = false
+                return
+              }
+              const reader = client.makeSequentialFeedReader({ topic, owner })
+              const result = await reader.downloadReference(encryptionKey, options)
+              resultEl.innerHTML = `<div class="result"><strong>Sequential Reference:</strong><br/>Reference: ${result.reference}<br/>Index: ${result.feedIndex}<br/>Next: ${result.feedIndexNext}</div>`
+              log("Sequential feed download reference successful", "info")
+            }
+          } catch (error) {
+            log(`Feed download reference failed: ${error.message}`, "error")
+            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+          } finally {
+            downloadBtn.disabled = false
+            downloadOtherBtn.disabled = false
+          }
+        })
+
+      log("Demo application ready", "info");
 
 			// Cleanup on page unload
 			window.addEventListener('beforeunload', () => {

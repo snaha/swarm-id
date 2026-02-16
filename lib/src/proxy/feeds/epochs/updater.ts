@@ -9,7 +9,7 @@ import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, next } from "./epoch"
-import { uploadEncryptedSOC } from "../../upload-encrypted-data"
+import { uploadEncryptedSOC, uploadSOC } from "../../upload-encrypted-data"
 import type { EpochUpdater } from "./types"
 
 /**
@@ -42,6 +42,7 @@ export class BasicEpochUpdater implements EpochUpdater {
     at: bigint,
     reference: Uint8Array,
     stamper: Stamper,
+    encryptionKey?: Uint8Array,
   ): Promise<Uint8Array> {
     if (reference.length !== 32 && reference.length !== 64) {
       throw new Error(
@@ -58,6 +59,7 @@ export class BasicEpochUpdater implements EpochUpdater {
       at,
       reference,
       stamper,
+      encryptionKey,
     )
 
     // Update state
@@ -88,6 +90,7 @@ export class BasicEpochUpdater implements EpochUpdater {
     at: bigint,
     reference: Uint8Array,
     stamper: Stamper,
+    encryptionKey?: Uint8Array,
   ): Promise<Uint8Array> {
     // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
     const epochHash = await epoch.marshalBinary()
@@ -104,16 +107,30 @@ export class BasicEpochUpdater implements EpochUpdater {
 
     const payload = Binary.concatBytes(timestamp, reference)
 
-    // Upload as encrypted Single Owner Chunk
-    const result = await uploadEncryptedSOC(
-      this.bee,
-      stamper,
-      this.signer,
-      identifier,
-      payload,
-      undefined, // Use random encryption key
-      { deferred: false }, // Fast upload mode
-    )
+    console.log("[EpochUpdater] Uploading epoch update", {
+      at: at.toString(),
+      referenceLength: reference.length,
+      hasEncryptionKey: !!encryptionKey,
+    })
+
+    const result = encryptionKey
+      ? await uploadEncryptedSOC(
+          this.bee,
+          stamper,
+          this.signer,
+          identifier,
+          payload,
+          encryptionKey,
+          { deferred: false }, // Fast upload mode
+        )
+      : await uploadSOC(
+          this.bee,
+          stamper,
+          this.signer,
+          identifier,
+          payload,
+          { deferred: false }, // Fast upload mode
+        )
 
     return result.socAddress
   }

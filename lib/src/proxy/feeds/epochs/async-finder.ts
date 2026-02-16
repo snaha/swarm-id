@@ -10,6 +10,7 @@ import type { Bee } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochFinder } from "./types"
+import { downloadEncryptedSOC } from "../../download-data"
 
 /**
  * Async concurrent finder for epoch-based feeds
@@ -24,6 +25,7 @@ export class AsyncEpochFinder implements EpochFinder {
     private readonly bee: Bee,
     private readonly topic: Topic,
     private readonly owner: EthAddress,
+    private readonly encryptionKey?: Uint8Array,
   ) {}
 
   /**
@@ -121,35 +123,51 @@ export class AsyncEpochFinder implements EpochFinder {
       Binary.concatBytes(this.topic.toUint8Array(), epochHash),
     )
 
-    // Calculate chunk address: Keccak256(identifier || owner)
-    const address = new Reference(
-      Binary.keccak256(
-        Binary.concatBytes(identifier, this.owner.toUint8Array()),
-      ),
-    )
+    let payload: Uint8Array
+    if (this.encryptionKey) {
+      const soc = await downloadEncryptedSOC(
+        this.bee,
+        this.owner,
+        identifier,
+        this.encryptionKey,
+      )
+      payload = soc.payload
+    } else {
+      // Calculate chunk address: Keccak256(identifier || owner)
+      const address = new Reference(
+        Binary.keccak256(
+          Binary.concatBytes(identifier, this.owner.toUint8Array()),
+        ),
+      )
 
-    // Download chunk
-    const chunkData = await this.bee.downloadChunk(address.toHex())
+      // Download chunk
+      const chunkData = await this.bee.downloadChunk(address.toHex())
 
     // Extract payload from SOC (Single Owner Chunk)
     // SOC structure: [identifier (32 bytes)][signature (65 bytes)][span (8 bytes)][payload]
     const IDENTIFIER_SIZE = 32
     const SIGNATURE_SIZE = 65
     const SPAN_SIZE = 8
-    const TIMESTAMP_SIZE = 8
-    const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
+      const TIMESTAMP_SIZE = 8
+      const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
 
-    // Read span to get payload length
-    const spanStart = SOC_HEADER_SIZE
-    const span = chunkData.slice(spanStart, spanStart + SPAN_SIZE)
-    const spanView = new DataView(span.buffer, span.byteOffset, span.byteLength)
-    const payloadLength = Number(spanView.getBigUint64(0, true)) // little-endian
+      // Read span to get payload length
+      const spanStart = SOC_HEADER_SIZE
+      const span = chunkData.slice(spanStart, spanStart + SPAN_SIZE)
+      const spanView = new DataView(
+        span.buffer,
+        span.byteOffset,
+        span.byteLength,
+      )
+      const payloadLength = Number(spanView.getBigUint64(0, true)) // little-endian
 
-    // Extract full payload (timestamp + reference)
-    const payloadStart = spanStart + SPAN_SIZE
-    const payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
+      // Extract full payload (timestamp + reference)
+      const payloadStart = spanStart + SPAN_SIZE
+      payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
+    }
 
     // Read timestamp from payload (first 8 bytes, big-endian)
+    const TIMESTAMP_SIZE = 8
     const timestampBytes = payload.slice(0, TIMESTAMP_SIZE)
     const timestampView = new DataView(
       timestampBytes.buffer,
