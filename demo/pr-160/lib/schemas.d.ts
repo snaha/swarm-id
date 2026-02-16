@@ -10,14 +10,6 @@ import { EthAddress, BatchId, Bytes, PrivateKey } from "@ethersphere/bee-js";
 export declare const DEFAULT_BEE_NODE_URL = "https://api.gateway.ethswarm.org/";
 export declare const DEFAULT_GNOSIS_RPC_URL = "https://xdai.fairdatasociety.org/";
 /**
- * Account Sync Type - whether account is local-only or synced to Swarm
- */
-export declare const AccountSyncTypeSchema: z.ZodEnum<{
-    local: "local";
-    synced: "synced";
-}>;
-export type AccountSyncType = z.infer<typeof AccountSyncTypeSchema>;
-/**
  * Passkey Account Schema V1
  */
 export declare const PasskeyAccountSchemaV1: z.ZodObject<{
@@ -27,10 +19,6 @@ export declare const PasskeyAccountSchemaV1: z.ZodObject<{
     type: z.ZodLiteral<"passkey">;
     credentialId: z.ZodString;
     swarmEncryptionKey: z.ZodString;
-    syncType: z.ZodEnum<{
-        local: "local";
-        synced: "synced";
-    }>;
     defaultPostageStampBatchID: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<BatchId, string>>>;
 }, z.core.$strip>;
 /**
@@ -46,10 +34,6 @@ export declare const EthereumAccountSchemaV1: z.ZodObject<{
     encryptionSalt: z.ZodPipe<z.ZodArray<z.ZodNumber>, z.ZodTransform<Bytes, number[]>>;
     encryptedSecretSeed: z.ZodPipe<z.ZodArray<z.ZodNumber>, z.ZodTransform<Bytes, number[]>>;
     swarmEncryptionKey: z.ZodString;
-    syncType: z.ZodEnum<{
-        local: "local";
-        synced: "synced";
-    }>;
     defaultPostageStampBatchID: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<BatchId, string>>>;
 }, z.core.$strip>;
 /**
@@ -62,10 +46,6 @@ export declare const AccountSchemaV1: z.ZodDiscriminatedUnion<[z.ZodObject<{
     type: z.ZodLiteral<"passkey">;
     credentialId: z.ZodString;
     swarmEncryptionKey: z.ZodString;
-    syncType: z.ZodEnum<{
-        local: "local";
-        synced: "synced";
-    }>;
     defaultPostageStampBatchID: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<BatchId, string>>>;
 }, z.core.$strip>, z.ZodObject<{
     id: z.ZodPipe<z.ZodString, z.ZodTransform<EthAddress, string>>;
@@ -77,10 +57,6 @@ export declare const AccountSchemaV1: z.ZodDiscriminatedUnion<[z.ZodObject<{
     encryptionSalt: z.ZodPipe<z.ZodArray<z.ZodNumber>, z.ZodTransform<Bytes, number[]>>;
     encryptedSecretSeed: z.ZodPipe<z.ZodArray<z.ZodNumber>, z.ZodTransform<Bytes, number[]>>;
     swarmEncryptionKey: z.ZodString;
-    syncType: z.ZodEnum<{
-        local: "local";
-        synced: "synced";
-    }>;
     defaultPostageStampBatchID: z.ZodOptional<z.ZodPipe<z.ZodString, z.ZodTransform<BatchId, string>>>;
 }, z.core.$strip>], "type">;
 /**
