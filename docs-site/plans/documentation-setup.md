@@ -42,28 +42,32 @@ docs-site/
 **pnpm-workspace.yaml** - Add `docs-site` to packages list
 
 **Root package.json** - Add scripts:
+
 ```json
 {
-  "docs:dev": "pnpm --filter @swarm-id/docs dev",
-  "docs:build": "pnpm --filter @swarm-id/docs build",
-  "docs:preview": "pnpm --filter @swarm-id/docs preview"
+	"docs:dev": "pnpm --filter @swarm-id/docs dev",
+	"docs:build": "pnpm --filter @swarm-id/docs build",
+	"docs:preview": "pnpm --filter @swarm-id/docs preview"
 }
 ```
 
 ### 3. Create initial content
 
 **Introduction page (index.mdx):**
+
 - What is Swarm ID
 - Key features (cross-browser, no extension, secure)
 - How it works (high-level)
 - Links to other pages
 
 **Getting Started page:**
+
 - Installation instructions
 - Basic usage example
 - Link to demo
 
 **Architecture page:**
+
 - Three components (trusted domain, popup, iframe)
 - Security model overview
 - Reference existing diagrams from `docs/images/`
@@ -71,6 +75,7 @@ docs-site/
 ### 4. Configure Starlight
 
 **astro.config.mjs:**
+
 - Site title: "Swarm ID"
 - Social links (GitHub)
 - Sidebar navigation
@@ -78,31 +83,31 @@ docs-site/
 
 ## Files Created
 
-| File | Purpose |
-|------|---------|
-| `docs-site/package.json` | Package config with Astro/Starlight deps |
-| `docs-site/astro.config.mjs` | Starlight configuration |
-| `docs-site/tsconfig.json` | TypeScript config |
-| `docs-site/src/content/config.ts` | Content collection schema |
-| `docs-site/src/content/docs/index.mdx` | Introduction page |
-| `docs-site/src/content/docs/getting-started.mdx` | Quick start guide |
-| `docs-site/src/content/docs/architecture.mdx` | Architecture overview |
-| `docs-site/src/content/docs/api/index.mdx` | API reference placeholder |
+| File                                             | Purpose                                  |
+| ------------------------------------------------ | ---------------------------------------- |
+| `docs-site/package.json`                         | Package config with Astro/Starlight deps |
+| `docs-site/astro.config.mjs`                     | Starlight configuration                  |
+| `docs-site/tsconfig.json`                        | TypeScript config                        |
+| `docs-site/src/content/config.ts`                | Content collection schema                |
+| `docs-site/src/content/docs/index.mdx`           | Introduction page                        |
+| `docs-site/src/content/docs/getting-started.mdx` | Quick start guide                        |
+| `docs-site/src/content/docs/architecture.mdx`    | Architecture overview                    |
+| `docs-site/src/content/docs/api/index.mdx`       | API reference placeholder                |
 
 ## Files Modified
 
-| File | Change |
-|------|--------|
-| `pnpm-workspace.yaml` | Add `'docs-site'` to packages |
+| File                  | Change                                               |
+| --------------------- | ---------------------------------------------------- |
+| `pnpm-workspace.yaml` | Add `'docs-site'` to packages                        |
 | `package.json` (root) | Add `docs:dev`, `docs:build`, `docs:preview` scripts |
 
 ## Dependencies
 
 ```json
 {
-  "@astrojs/starlight": "^0.31.1",
-  "astro": "^5.1.5",
-  "sharp": "^0.33.5"
+	"@astrojs/starlight": "^0.31.1",
+	"astro": "^5.1.5",
+	"sharp": "^0.33.5"
 }
 ```
 

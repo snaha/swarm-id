@@ -88,16 +88,16 @@ dist/                           # Built output (generated)
 ### In a Parent dApp
 
 ```typescript
-import { SwarmIdClient } from 'swarm-id'
+import { SwarmIdClient } from "swarm-id"
 
 // Initialize the client
 const client = new SwarmIdClient({
-  iframeOrigin: 'https://swarm-id.local:8081',
-  beeApiUrl: 'http://localhost:1633',
+  iframeOrigin: "https://swarm-id.local:8081",
+  beeApiUrl: "http://localhost:1633",
   timeout: 30000,
   onAuthChange: (authenticated) => {
-    console.log('Auth status changed:', authenticated)
-  }
+    console.log("Auth status changed:", authenticated)
+  },
 })
 
 // Initialize and wait for ready
@@ -108,32 +108,29 @@ const iframe = client.getAuthIframe()
 
 // Check auth status
 const status = await client.checkAuthStatus()
-console.log('Authenticated:', status.authenticated)
+console.log("Authenticated:", status.authenticated)
 
 // Upload data
 const result = await client.uploadData(
-  'your-postage-batch-id',
+  "your-postage-batch-id",
   new Uint8Array([1, 2, 3, 4, 5]),
-  { pin: true }
+  { pin: true },
 )
-console.log('Uploaded:', result.reference)
+console.log("Uploaded:", result.reference)
 
 // Download data
 const data = await client.downloadData(result.reference)
-console.log('Downloaded:', data)
+console.log("Downloaded:", data)
 
 // Upload file
-const file = new File(['Hello World'], 'hello.txt')
-const fileResult = await client.uploadFile(
-  'your-postage-batch-id',
-  file
-)
-console.log('File uploaded:', fileResult.reference)
+const file = new File(["Hello World"], "hello.txt")
+const fileResult = await client.uploadFile("your-postage-batch-id", file)
+console.log("File uploaded:", fileResult.reference)
 
 // Download file
 const downloadedFile = await client.downloadFile(fileResult.reference)
-console.log('File name:', downloadedFile.name)
-console.log('File data:', downloadedFile.data)
+console.log("File name:", downloadedFile.name)
+console.log("File data:", downloadedFile.data)
 
 // Cleanup
 client.destroy()
@@ -142,39 +139,39 @@ client.destroy()
 ### In the Iframe (SvelteKit `/proxy` route)
 
 ```typescript
-import { initProxy } from 'swarm-id/proxy'
+import { initProxy } from "swarm-id/proxy"
 
 const proxy = initProxy({
-  beeApiUrl: 'http://localhost:1633',
+  beeApiUrl: "http://localhost:1633",
 })
 ```
 
 ### In the Auth Popup (SvelteKit `/connect` route)
 
 ```typescript
-import { initAuth } from 'swarm-id/auth'
+import { initAuth } from "swarm-id/auth"
 
 try {
   const auth = await initAuth()
 
   // Display app origin
-  console.log('App requesting access:', auth.getAppOrigin())
+  console.log("App requesting access:", auth.getAppOrigin())
 
   // Check if user has master key
   if (!auth.hasMasterKey()) {
     // Setup new identity
     const masterKey = await auth.setupNewIdentity()
-    console.log('New identity created')
+    console.log("New identity created")
   }
 
   // Authenticate
   await auth.authenticate()
-  console.log('Authentication successful')
+  console.log("Authentication successful")
 
   // Close popup
   auth.close(1500)
 } catch (error) {
-  console.error('Auth failed:', error)
+  console.error("Auth failed:", error)
 }
 ```
 
@@ -189,6 +186,7 @@ new SwarmIdClient(options: ClientOptions)
 ```
 
 Options:
+
 - `iframeOrigin` (string, required) - Origin of the Swarm ID iframe
 - `beeApiUrl` (string, optional) - Bee node API URL (default: 'http://localhost:1633')
 - `timeout` (number, optional) - Request timeout in ms (default: 30000)
@@ -197,6 +195,7 @@ Options:
 #### Methods
 
 **Authentication**
+
 - `initialize()` - Initialize the client and embed iframe
 - `getAuthIframe()` - Get the auth iframe element
 - `checkAuthStatus()` - Check authentication status
@@ -205,22 +204,27 @@ Options:
 - `getConnectionInfo()` - Get connection info including upload capability
 
 **Data Operations**
+
 - `uploadData(batchId, data, options?)` - Upload raw data
 - `downloadData(reference, options?)` - Download raw data
 
 **File Operations**
+
 - `uploadFile(batchId, file, name?, options?)` - Upload file
 - `downloadFile(reference, path?, options?)` - Download file
 
 **Chunk Operations**
+
 - `uploadChunk(batchId, data, options?)` - Upload chunk
 - `downloadChunk(reference, options?)` - Download chunk
 
 **Postage Operations**
+
 - `createPostageBatch(amount, depth, options?)` - Create postage batch
 - `getPostageBatch(batchId)` - Get postage batch info
 
 **Cleanup**
+
 - `destroy()` - Destroy client and clean up resources
 
 ### SwarmIdProxy
@@ -232,6 +236,7 @@ new SwarmIdProxy(options: ProxyOptions)
 ```
 
 Options:
+
 - `beeApiUrl` (string, required) - Bee node API URL
 
 ### SwarmIdAuth
@@ -243,6 +248,7 @@ new SwarmIdAuth(options?: AuthOptions)
 ```
 
 Options:
+
 - `masterKeyStorageKey` (string, optional) - LocalStorage key for master key (default: 'swarm-master-key')
 
 #### Methods
@@ -260,6 +266,7 @@ Options:
 The library uses postMessage for secure cross-origin communication with Zod schema validation.
 
 ### Parent → Iframe Messages
+
 - `parentIdentify` - Identify parent to iframe
 - `checkAuth` - Check authentication status
 - `requestAuth` - Request authentication (open popup)
@@ -268,6 +275,7 @@ The library uses postMessage for secure cross-origin communication with Zod sche
 - (and other Bee API operations)
 
 ### Iframe → Parent Messages
+
 - `proxyReady` - Iframe is ready
 - `authStatusResponse` - Auth status response
 - `authSuccess` - Authentication succeeded
@@ -276,6 +284,7 @@ The library uses postMessage for secure cross-origin communication with Zod sche
 - `error` - Error message
 
 ### Popup → Iframe Messages
+
 - `setSecret` - Send derived secret to iframe
 
 ## Security Features

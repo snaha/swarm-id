@@ -23,12 +23,14 @@ swarm-id-explorations/
 **Purpose:** Demonstrates Swarm ID authentication flows
 
 **Builds:**
+
 - `lib/` - Swarm ID library
 - `demo/` - Demo HTML pages with bundled library
 
 **Output:** `demo/build/`
 
 **Files:**
+
 - `/index.html` - Demo app
 
 **CORS:** Allows requests from `https://swarm-id.snaha.net`
@@ -38,6 +40,7 @@ swarm-id-explorations/
 **Purpose:** Hosts identity management UI and proxy/auth pages
 
 **Builds:**
+
 - `lib/` - Swarm ID library
 - `swarm-ui/` - SvelteKit app
 - Proxy/auth pages with bundled library
@@ -45,6 +48,7 @@ swarm-id-explorations/
 **Output:** `swarm-id-build/`
 
 **Routes:**
+
 - `/` - SvelteKit app (identity management UI)
 - `/proxy` - Iframe proxy for Bee API calls (SvelteKit route)
 - `/connect` - Authentication page (SvelteKit route)
@@ -92,16 +96,19 @@ cd swarm-ui && pnpm build
 ### Digital Ocean App Platform
 
 **Deploy from GitHub:**
+
 - Repository: `snaha/swarm-id-explorations`
 - Branch: `main`
 
 **App 1: swarm-demo**
+
 - Config: `.do/swarm-demo-app.yaml`
 - Build: `pnpm install && pnpm build:swarm-demo`
 - Output: `demo/build`
 - Domain: `swarm-demo.snaha.net`
 
 **App 2: swarm-id**
+
 - Config: `.do/swarm-id-app.yaml`
 - Build: `pnpm install && pnpm build:swarm-id`
 - Output: `swarm-id-build`
@@ -145,6 +152,7 @@ Both apps use these environment variables (injected at build time):
 ### Key Architectural Decision
 
 **Library Distribution:**
+
 - Library files are served as separate ES6 modules from `/lib/` path
 - HTML files import via standard module syntax: `import { initProxy } from '/lib/swarm-id-proxy.js'`
 - This provides better debugging, proper source maps, and follows web standards
@@ -153,12 +161,14 @@ Both apps use these environment variables (injected at build time):
 ### Cross-Origin Communication
 
 **Demo App** (swarm-demo.snaha.net):
+
 - Embeds hidden iframe from `swarm-id.snaha.net/proxy`
 - Opens auth popup to `swarm-id.snaha.net/connect`
 - Uses postMessage for cross-origin communication
 - Imports library from `/lib/swarm-id-client.js`
 
 **Identity App** (swarm-id.snaha.net):
+
 - Serves `/proxy` route as iframe that handles Bee API calls
 - Serves `/connect` route for authentication
 - Stores secrets in first-party localStorage (partitioned by browser)

@@ -17,14 +17,14 @@ pnpm add @swarm-id/lib
 import { SwarmIdClient } from '@swarm-id/lib'
 
 const client = new SwarmIdClient({
-  iframeOrigin: 'https://swarm-id.example.com',
-  metadata: {
-    name: 'My App',
-    description: 'A decentralized application'
-  },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status changed:', authenticated)
-  }
+	iframeOrigin: 'https://swarm-id.example.com',
+	metadata: {
+		name: 'My App',
+		description: 'A decentralized application',
+	},
+	onAuthChange: (authenticated) => {
+		console.log('Auth status changed:', authenticated)
+	},
 })
 
 await client.initialize()
@@ -36,8 +36,8 @@ console.log('Authentication opened at:', authUrl)
 // Option 2: Check authentication status and upload if authenticated
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
-  const result = await client.uploadData(new Uint8Array([1, 2, 3]))
-  console.log('Uploaded with reference:', result.reference)
+	const result = await client.uploadData(new Uint8Array([1, 2, 3]))
+	console.log('Uploaded with reference:', result.reference)
 }
 ```
 
@@ -49,20 +49,20 @@ Creates a new SwarmIdClient instance.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `options.iframeOrigin` | `string` | Yes | The origin URL where the Swarm ID proxy iframe is hosted |
-| `options.iframePath` | `string` | No | The path to the proxy iframe (defaults to `"/proxy"`) |
-| `options.timeout` | `number` | No | Request timeout in milliseconds (defaults to `30000`) |
-| `options.initializationTimeout` | `number` | No | Initialization timeout in milliseconds (defaults to `30000`) |
-| `options.onAuthChange` | `(authenticated: boolean) => void` | No | Callback function invoked when authentication status changes |
-| `options.popupMode` | `"popup" \| "window"` | No | How to display the authentication popup (defaults to `"window"`) |
-| `options.metadata` | `AppMetadata` | Yes | Application metadata shown to users during authentication |
-| `options.metadata.name` | `string` | Yes | Application name (1-100 characters) |
-| `options.metadata.description` | `string` | No | Application description (max 500 characters) |
-| `options.metadata.icon` | `string` | No | Application icon as a data URL (SVG or PNG, max 4KB) |
-| `options.buttonConfig` | `ButtonConfig` | No | Button configuration for the authentication UI |
-| `options.containerId` | `string` | No | ID of container element to place iframe in (optional) |
+| Parameter                       | Type                               | Required | Description                                                      |
+| ------------------------------- | ---------------------------------- | -------- | ---------------------------------------------------------------- |
+| `options.iframeOrigin`          | `string`                           | Yes      | The origin URL where the Swarm ID proxy iframe is hosted         |
+| `options.iframePath`            | `string`                           | No       | The path to the proxy iframe (defaults to `"/proxy"`)            |
+| `options.timeout`               | `number`                           | No       | Request timeout in milliseconds (defaults to `30000`)            |
+| `options.initializationTimeout` | `number`                           | No       | Initialization timeout in milliseconds (defaults to `30000`)     |
+| `options.onAuthChange`          | `(authenticated: boolean) => void` | No       | Callback function invoked when authentication status changes     |
+| `options.popupMode`             | `"popup" \| "window"`              | No       | How to display the authentication popup (defaults to `"window"`) |
+| `options.metadata`              | `AppMetadata`                      | Yes      | Application metadata shown to users during authentication        |
+| `options.metadata.name`         | `string`                           | Yes      | Application name (1-100 characters)                              |
+| `options.metadata.description`  | `string`                           | No       | Application description (max 500 characters)                     |
+| `options.metadata.icon`         | `string`                           | No       | Application icon as a data URL (SVG or PNG, max 4KB)             |
+| `options.buttonConfig`          | `ButtonConfig`                     | No       | Button configuration for the authentication UI                   |
+| `options.containerId`           | `string`                           | No       | ID of container element to place iframe in (optional)            |
 
 **Throws:** `Error` if the provided app metadata is invalid
 
@@ -70,16 +70,16 @@ Creates a new SwarmIdClient instance.
 
 ```typescript
 const client = new SwarmIdClient({
-  iframeOrigin: 'https://id.swarm.example.com',
-  timeout: 60000,
-  metadata: {
-    name: 'My dApp',
-    description: 'A decentralized application built on Swarm',
-    icon: 'data:image/svg+xml;base64,...'
-  },
-  onAuthChange: (authenticated) => {
-    updateUI(authenticated)
-  }
+	iframeOrigin: 'https://id.swarm.example.com',
+	timeout: 60000,
+	metadata: {
+		name: 'My dApp',
+		description: 'A decentralized application built on Swarm',
+		icon: 'data:image/svg+xml;base64,...',
+	},
+	onAuthChange: (authenticated) => {
+		updateUI(authenticated)
+	},
 })
 ```
 
@@ -96,6 +96,7 @@ This method must be called before using any other client methods. It creates a h
 **Returns:** `Promise<void>` - Resolves when the client is fully initialized
 
 **Throws:**
+
 - `Error` if the client is already initialized
 - `Error` if the iframe fails to load
 - `Error` if the proxy does not respond within the initialization timeout period (configurable via `initializationTimeout`, defaults to 30 seconds)
@@ -120,6 +121,7 @@ try {
 Destroys the client and releases all resources.
 
 This method should be called when the client is no longer needed. It performs the following cleanup:
+
 - Cancels all pending requests with an error
 - Removes the message event listener
 - Removes the iframe from the DOM
@@ -152,6 +154,7 @@ useEffect(() => {
 Returns the authentication iframe element.
 
 The iframe displays authentication UI based on the current auth status:
+
 - If not authenticated: shows a "Connect" button
 - If authenticated: shows identity info and a "Disconnect" button
 
@@ -160,6 +163,7 @@ The iframe is positioned fixed in the bottom-right corner of the viewport.
 **Returns:** `HTMLIFrameElement` - The iframe element displaying the authentication UI
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the iframe is not available
 
@@ -180,12 +184,12 @@ The authentication button in the iframe can be customized using the `buttonConfi
 
 ```typescript
 interface ButtonConfig {
-  connectText?: string
-  disconnectText?: string
-  loadingText?: string
-  backgroundColor?: string
-  color?: string
-  borderRadius?: string
+	connectText?: string
+	disconnectText?: string
+	loadingText?: string
+	backgroundColor?: string
+	color?: string
+	borderRadius?: string
 }
 ```
 
@@ -193,22 +197,22 @@ interface ButtonConfig {
 
 ```typescript
 const client = new SwarmIdClient({
-  iframeOrigin: 'https://swarm-id.example.com',
-  metadata: {
-    name: 'My App',
-    description: 'A decentralized application'
-  },
-  buttonConfig: {
-    connectText: 'Connect with Swarm',
-    disconnectText: 'Disconnect',
-    loadingText: 'Loading...',
-    backgroundColor: '#4CAF50',
-    color: 'white',
-    borderRadius: '8px'
-  },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status changed:', authenticated)
-  }
+	iframeOrigin: 'https://swarm-id.example.com',
+	metadata: {
+		name: 'My App',
+		description: 'A decentralized application',
+	},
+	buttonConfig: {
+		connectText: 'Connect with Swarm',
+		disconnectText: 'Disconnect',
+		loadingText: 'Loading...',
+		backgroundColor: '#4CAF50',
+		color: 'white',
+		borderRadius: '8px',
+	},
+	onAuthChange: (authenticated) => {
+		console.log('Auth status changed:', authenticated)
+	},
 })
 
 await client.initialize()
@@ -216,16 +220,17 @@ await client.initialize()
 
 **ButtonConfig Properties:**
 
-| Property | Type | Required | Description | Default Value |
-|----------|------|----------|-------------|---------------|
-| `connectText` | `string` | No | Text for the connect button | "🔐 Login with Swarm ID" |
-| `disconnectText` | `string` | No | Text for the disconnect button | "🔓 Disconnect from Swarm ID" |
-| `loadingText` | `string` | No | Text shown during loading | "⏳ Loading..." |
-| `backgroundColor` | `string` | No | Background color for buttons | `#dd7200` (connect), `#666` (disconnect) |
-| `color` | `string` | No | Text color for buttons | `white` |
-| `borderRadius` | `string` | No | Border radius for buttons and iframe | `0` |
+| Property          | Type     | Required | Description                          | Default Value                            |
+| ----------------- | -------- | -------- | ------------------------------------ | ---------------------------------------- |
+| `connectText`     | `string` | No       | Text for the connect button          | "🔐 Login with Swarm ID"                 |
+| `disconnectText`  | `string` | No       | Text for the disconnect button       | "🔓 Disconnect from Swarm ID"            |
+| `loadingText`     | `string` | No       | Text shown during loading            | "⏳ Loading..."                          |
+| `backgroundColor` | `string` | No       | Background color for buttons         | `#dd7200` (connect), `#666` (disconnect) |
+| `color`           | `string` | No       | Text color for buttons               | `white`                                  |
+| `borderRadius`    | `string` | No       | Border radius for buttons and iframe | `0`                                      |
 
 **Notes:**
+
 - Button configuration is passed directly to the constructor, not via postMessage
 - The `borderRadius` property affects both the buttons and the iframe container
 - Colors should be valid CSS color strings (e.g., `'#FF0000'`, `'rgb(255, 0, 0)'`, `'red'`)
@@ -240,18 +245,20 @@ In addition to the iframe-based authentication (via `getAuthIframe()`), you can 
 
 ```typescript
 // Open authentication manually (opens in new window)
-const url = client.connect("popup")
+const url = client.connect('popup')
 
 // Or open as full window
-const url = client.connect("window")
+const url = client.connect('window')
 ```
 
 **When to use `connect()`:**
+
 - When you want to trigger authentication from a custom UI element
 - When you prefer the authentication to open in a new window instead of an iframe
 - When you need the authentication URL for testing or debugging
 
 **Authentication Flow:**
+
 1. User calls `client.connect()` or clicks the iframe button
 2. Authentication page opens with the app metadata
 3. User authenticates with their Swarm ID
@@ -266,12 +273,13 @@ Checks the current authentication status with the Swarm ID proxy.
 
 **Returns:** `Promise<AuthStatus>` - The authentication status object
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `authenticated` | `boolean` | Whether the user is currently authenticated |
-| `origin` | `string \| undefined` | The origin that authenticated (if authenticated) |
+| Property        | Type                  | Description                                      |
+| --------------- | --------------------- | ------------------------------------------------ |
+| `authenticated` | `boolean`             | Whether the user is currently authenticated      |
+| `origin`        | `string \| undefined` | The origin that authenticated (if authenticated) |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the request times out
 
@@ -280,7 +288,7 @@ Checks the current authentication status with the Swarm ID proxy.
 ```typescript
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
-  console.log('Authenticated from:', status.origin)
+	console.log('Authenticated from:', status.origin)
 }
 ```
 
@@ -294,13 +302,14 @@ This method creates the same authentication URL as used by the iframe proxy and 
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `popupMode` | `"window" \| "popup"` | No | Whether to open as a popup window ("popup") or full window ("window", default) |
+| Parameter   | Type                  | Required | Description                                                                    |
+| ----------- | --------------------- | -------- | ------------------------------------------------------------------------------ |
+| `popupMode` | `"window" \| "popup"` | No       | Whether to open as a popup window ("popup") or full window ("window", default) |
 
 **Returns:** `string` - The URL that was opened (useful for testing or reference)
 
 **Throws:**
+
 - `Error` if the client is not initialized
 
 **Example:**
@@ -328,6 +337,7 @@ After disconnection, the user will need to re-authenticate to perform uploads or
 **Returns:** `Promise<void>` - Resolves when disconnection is complete
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the disconnect operation fails
 - `Error` if the request times out
@@ -349,15 +359,16 @@ Use this method to check if the user can upload data and to get information abou
 
 **Returns:** `Promise<ConnectionInfo>` - The connection info object
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `canUpload` | `boolean` | Whether the user can upload data (has valid postage stamp) |
-| `identity` | `object \| undefined` | The connected identity details (if authenticated) |
-| `identity.id` | `string` | Unique identifier for the identity |
-| `identity.name` | `string` | Display name of the identity |
-| `identity.address` | `string` | Ethereum address associated with the identity |
+| Property           | Type                  | Description                                                |
+| ------------------ | --------------------- | ---------------------------------------------------------- |
+| `canUpload`        | `boolean`             | Whether the user can upload data (has valid postage stamp) |
+| `identity`         | `object \| undefined` | The connected identity details (if authenticated)          |
+| `identity.id`      | `string`              | Unique identifier for the identity                         |
+| `identity.name`    | `string`              | Display name of the identity                               |
+| `identity.address` | `string`              | Ethereum address associated with the identity              |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the request times out
 
@@ -366,9 +377,9 @@ Use this method to check if the user can upload data and to get information abou
 ```typescript
 const info = await client.getConnectionInfo()
 if (info.canUpload) {
-  console.log('Ready to upload as:', info.identity?.name)
+	console.log('Ready to upload as:', info.identity?.name)
 } else {
-  console.log('No postage stamp available')
+	console.log('No postage stamp available')
 }
 ```
 
@@ -389,9 +400,9 @@ This method never throws an exception. If the client is not initialized, the req
 ```typescript
 const connected = await client.isBeeConnected()
 if (connected) {
-  console.log('Bee node is online')
+	console.log('Bee node is online')
 } else {
-  console.log('Bee node is offline')
+	console.log('Bee node is offline')
 }
 ```
 
@@ -407,29 +418,30 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `data` | `Uint8Array` | Yes | The binary data to upload |
-| `options` | `UploadOptions` | No | Upload configuration |
-| `options.pin` | `boolean` | No | Whether to pin the data locally (defaults to `false`) |
-| `options.encrypt` | `boolean` | No | Whether to encrypt the data (defaults to `false`) |
-| `options.tag` | `number` | No | Tag ID for tracking upload progress |
-| `options.deferred` | `boolean` | No | Whether to use deferred upload (defaults to `false`) |
-| `options.redundancyLevel` | `0-4` | No | Redundancy level for data availability |
-| `options.onProgress` | `(progress) => void` | No | Callback for tracking upload progress |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                           |
+| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                             |
+| `options`                       | `UploadOptions`          | No       | Upload configuration                                  |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`) |
+| `options.encrypt`               | `boolean`                | No       | Whether to encrypt the data (defaults to `false`)     |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress                   |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)  |
+| `options.redundancyLevel`       | `0-4`                    | No       | Redundancy level for data availability                |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                 |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
 
 **Returns:** `Promise<UploadResult>`
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `reference` | `string` | The Swarm reference (hash) of the uploaded data |
-| `tagUid` | `number \| undefined` | The tag UID if a tag was created |
+| Property    | Type                  | Description                                     |
+| ----------- | --------------------- | ----------------------------------------------- |
+| `reference` | `string`              | The Swarm reference (hash) of the uploaded data |
+| `tagUid`    | `number \| undefined` | The tag UID if a tag was created                |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the user is not authenticated or cannot upload
 - `Error` if the request times out
@@ -439,10 +451,10 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 ```typescript
 const data = new TextEncoder().encode('Hello, Swarm!')
 const result = await client.uploadData(data, {
-  encrypt: true,
-  onProgress: (progress) => {
-    console.log(`Progress: ${progress.processed}/${progress.total}`)
-  }
+	encrypt: true,
+	onProgress: (progress) => {
+		console.log(`Progress: ${progress.processed}/${progress.total}`)
+	},
 })
 console.log('Reference:', result.reference)
 ```
@@ -455,24 +467,25 @@ Downloads raw binary data from the Swarm network.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `reference` | `string` | Yes | The Swarm reference (64 or 128 hex chars) |
-| `options` | `DownloadOptions` | No | Download configuration |
-| `options.redundancyStrategy` | `0-3` | No | Strategy for handling redundancy |
-| `options.fallback` | `boolean` | No | Whether to use fallback retrieval |
-| `options.timeoutMs` | `number` | No | Download timeout in milliseconds |
-| `options.actPublisher` | `Uint8Array \| string` | No | ACT publisher for encrypted content |
-| `options.actHistoryAddress` | `Uint8Array \| string` | No | ACT history address for encrypted content |
-| `options.actTimestamp` | `number \| string` | No | ACT timestamp for encrypted content |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                               |
+| ------------------------------- | ------------------------ | -------- | ----------------------------------------- |
+| `reference`                     | `string`                 | Yes      | The Swarm reference (64 or 128 hex chars) |
+| `options`                       | `DownloadOptions`        | No       | Download configuration                    |
+| `options.redundancyStrategy`    | `0-3`                    | No       | Strategy for handling redundancy          |
+| `options.fallback`              | `boolean`                | No       | Whether to use fallback retrieval         |
+| `options.timeoutMs`             | `number`                 | No       | Download timeout in milliseconds          |
+| `options.actPublisher`          | `Uint8Array \| string`   | No       | ACT publisher for encrypted content       |
+| `options.actHistoryAddress`     | `Uint8Array \| string`   | No       | ACT history address for encrypted content |
+| `options.actTimestamp`          | `number \| string`       | No       | ACT timestamp for encrypted content       |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                     |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds           |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                            |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                |
 
 **Returns:** `Promise<Uint8Array>` - The downloaded data
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the reference is not found
 - `Error` if the request times out
@@ -497,19 +510,20 @@ Accepts either a File object (from file input) or raw Uint8Array data. When usin
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `file` | `File \| Uint8Array` | Yes | The file to upload |
-| `name` | `string` | No | Filename (extracted from File object if not provided) |
-| `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                           |
+| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
+| `file`                          | `File \| Uint8Array`     | Yes      | The file to upload                                    |
+| `name`                          | `string`                 | No       | Filename (extracted from File object if not provided) |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)               |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
 
 **Returns:** `Promise<UploadResult>` - Contains `reference` and optional `tagUid`
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the user is not authenticated or cannot upload
 - `Error` if the request times out
@@ -537,24 +551,25 @@ Returns both the file data and its original filename (if available). For manifes
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `reference` | `string` | Yes | The Swarm reference of the file |
-| `path` | `string` | No | Path within a manifest to retrieve a specific file |
-| `options` | `DownloadOptions` | No | Download configuration (see `downloadData`) |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                        |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------- |
+| `reference`                     | `string`                 | Yes      | The Swarm reference of the file                    |
+| `path`                          | `string`                 | No       | Path within a manifest to retrieve a specific file |
+| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`)        |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                              |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                    |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                     |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                         |
 
 **Returns:** `Promise<FileData>`
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `name` | `string` | The filename |
-| `data` | `Uint8Array` | The file contents |
+| Property | Type         | Description       |
+| -------- | ------------ | ----------------- |
+| `name`   | `string`     | The filename      |
+| `data`   | `Uint8Array` | The file contents |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the reference is not found
 - `Error` if the request times out
@@ -582,18 +597,19 @@ Chunks are the fundamental unit of storage in Swarm (4KB each). This method is u
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `data` | `Uint8Array` | Yes | The chunk data (should be exactly 4KB for optimal storage) |
-| `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                                |
+| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The chunk data (should be exactly 4KB for optimal storage) |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                    |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                      |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                            |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                             |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                 |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the user is not authenticated or cannot upload
 - `Error` if the request times out
@@ -617,18 +633,19 @@ Retrieves a chunk by its reference hash. This method is useful for low-level ope
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `reference` | `string` | Yes | The Swarm reference of the chunk |
-| `options` | `DownloadOptions` | No | Download configuration (see `downloadData`) |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                 |
+| ------------------------------- | ------------------------ | -------- | ------------------------------------------- |
+| `reference`                     | `string`                 | Yes      | The Swarm reference of the chunk            |
+| `options`                       | `DownloadOptions`        | No       | Download configuration (see `downloadData`) |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                       |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds             |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                              |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                  |
 
 **Returns:** `Promise<Uint8Array>` - The chunk data
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the reference is not found
 - `Error` if the request times out
@@ -652,23 +669,24 @@ Creates an SOC reader bound to the given owner address.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `ownerAddress` | `string` | Yes | Ethereum address of the SOC owner |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                       |
+| ------------------------------- | ------------------------ | -------- | --------------------------------- |
+| `ownerAddress`                  | `string`                 | Yes      | Ethereum address of the SOC owner |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration             |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds   |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                    |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly        |
 
 **Returns:** `SOCReader`
 
-| Method | Description |
-|--------|-------------|
-| `getOwner()` | Resolves the SOC owner address |
-| `download(identifier, encryptionKey)` | Downloads and decrypts an encrypted SOC |
+| Method                                    | Description                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------ |
+| `getOwner()`                              | Resolves the SOC owner address                                           |
+| `download(identifier, encryptionKey)`     | Downloads and decrypts an encrypted SOC                                  |
 | `rawDownload(identifier, encryptionKey?)` | Downloads an unencrypted SOC, or decrypts if `encryptionKey` is provided |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the request times out
 
@@ -690,43 +708,44 @@ Creates an SOC writer for uploading and downloading SOCs. If `signer` is omitted
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `signer` | `string` | No | Private key hex string for the SOC signer |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                               |
+| ------------------------------- | ------------------------ | -------- | ----------------------------------------- |
+| `signer`                        | `string`                 | No       | Private key hex string for the SOC signer |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                     |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds           |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                            |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                |
 
 **Returns:** `SOCWriter`
 
-| Method | Description |
-|--------|-------------|
-| `getOwner()` | Resolves the SOC owner address |
-| `upload(identifier, data, options?)` | Uploads an encrypted SOC |
-| `rawUpload(identifier, data, options?)` | Uploads an unencrypted SOC |
-| `download(identifier, encryptionKey)` | Downloads and decrypts an encrypted SOC |
+| Method                                    | Description                                                              |
+| ----------------------------------------- | ------------------------------------------------------------------------ |
+| `getOwner()`                              | Resolves the SOC owner address                                           |
+| `upload(identifier, data, options?)`      | Uploads an encrypted SOC                                                 |
+| `rawUpload(identifier, data, options?)`   | Uploads an unencrypted SOC                                               |
+| `download(identifier, encryptionKey)`     | Downloads and decrypts an encrypted SOC                                  |
 | `rawDownload(identifier, encryptionKey?)` | Downloads an unencrypted SOC, or decrypts if `encryptionKey` is provided |
 
 **Returns (`upload`):** `Promise<SocUploadResult>`
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `reference` | `string` | SOC chunk reference |
-| `owner` | `string` | SOC owner address |
+| Property        | Type     | Description                           |
+| --------------- | -------- | ------------------------------------- |
+| `reference`     | `string` | SOC chunk reference                   |
+| `owner`         | `string` | SOC owner address                     |
 | `encryptionKey` | `string` | Encryption key for decrypting the SOC |
-| `tagUid` | `number` | Upload tag UID, if provided |
+| `tagUid`        | `number` | Upload tag UID, if provided           |
 
 **Returns (`rawUpload`):** `Promise<SocRawUploadResult>`
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `reference` | `string` | SOC chunk reference |
-| `owner` | `string` | SOC owner address |
+| Property        | Type     | Description                                 |
+| --------------- | -------- | ------------------------------------------- |
+| `reference`     | `string` | SOC chunk reference                         |
+| `owner`         | `string` | SOC owner address                           |
 | `encryptionKey` | `string` | Optional; present only if returned by proxy |
-| `tagUid` | `number` | Upload tag UID, if provided |
+| `tagUid`        | `number` | Upload tag UID, if provided                 |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the request times out
 
@@ -746,15 +765,15 @@ console.log('Owner:', soc.owner)
 
 **SOC Payload Structure (download methods):** `SingleOwnerChunk`
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `data` | `Uint8Array` | Full SOC chunk data |
-| `identifier` | `string` | SOC identifier |
-| `signature` | `string` | SOC signature |
-| `span` | `number` | Payload span (bytes) |
-| `payload` | `Uint8Array` | SOC payload data |
-| `address` | `string` | SOC address/reference |
-| `owner` | `string` | SOC owner address |
+| Property     | Type         | Description           |
+| ------------ | ------------ | --------------------- |
+| `data`       | `Uint8Array` | Full SOC chunk data   |
+| `identifier` | `string`     | SOC identifier        |
+| `signature`  | `string`     | SOC signature         |
+| `span`       | `number`     | Payload span (bytes)  |
+| `payload`    | `Uint8Array` | SOC payload data      |
+| `address`    | `string`     | SOC address/reference |
+| `owner`      | `string`     | SOC owner address     |
 
 ---
 
@@ -770,15 +789,16 @@ This is useful for sending messages to specific nodes in the Swarm network based
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `targetOverlay` | `string` | Yes | The target overlay address to be proximate to |
-| `identifier` | `string` | Yes | The identifier for the SOC |
-| `proximity` | `number` | No | The required proximity (number of matching prefix bits) |
+| Parameter       | Type     | Required | Description                                             |
+| --------------- | -------- | -------- | ------------------------------------------------------- |
+| `targetOverlay` | `string` | Yes      | The target overlay address to be proximate to           |
+| `identifier`    | `string` | Yes      | The identifier for the SOC                              |
+| `proximity`     | `number` | No       | The required proximity (number of matching prefix bits) |
 
 **Returns:** `Promise<string>` - The mined signer as a hex string (private key)
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if mining fails
 - `Error` if the request times out
@@ -802,20 +822,21 @@ Use the signer obtained from `gsocMine()` to send messages that will be routed t
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `signer` | `string` | Yes | The mined signer (private key) from `gsocMine()` |
-| `identifier` | `string` | Yes | The identifier for the SOC (must match the one used in mining) |
-| `data` | `Uint8Array` | Yes | The message data to send |
-| `options` | `UploadOptions` | No | Upload configuration (see `uploadData`) |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                                    |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------------- |
+| `signer`                        | `string`                 | Yes      | The mined signer (private key) from `gsocMine()`               |
+| `identifier`                    | `string`                 | Yes      | The identifier for the SOC (must match the one used in mining) |
+| `data`                          | `Uint8Array`             | Yes      | The message data to send                                       |
+| `options`                       | `UploadOptions`          | No       | Upload configuration (see `uploadData`)                        |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                          |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                 |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                     |
 
 **Returns:** `Promise<UploadResult>` - Contains the `reference` of the uploaded chunk
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the user is not authenticated or cannot upload
 - `Error` if the request times out
@@ -840,16 +861,16 @@ console.log('Message sent with reference:', result.reference)
 
 ```typescript
 import type {
-  ClientOptions,
-  AuthStatus,
-  ConnectionInfo,
-  UploadOptions,
-  DownloadOptions,
-  UploadResult,
-  FileData,
-  Reference,
-  AppMetadata,
-  ButtonConfig,
-  RequestOptions,
+	ClientOptions,
+	AuthStatus,
+	ConnectionInfo,
+	UploadOptions,
+	DownloadOptions,
+	UploadResult,
+	FileData,
+	Reference,
+	AppMetadata,
+	ButtonConfig,
+	RequestOptions,
 } from '@swarm-id/lib'
 ```

@@ -15,9 +15,11 @@ In this setup there would be a Trusted Domain (e.g. `id.ethswarm.org`) where peo
 Apps would need to use a Library to access the keystore. The Library would load code from the Trusted Domain in an Iframe and would set up a secure communication channel so that the app can invoke operations using keys from the keystore.
 
 Advantages of this approach:
+
 - There is no need to install anything, the user just visits the website of the app
 
 Disadvantages:
+
 - The Trusted Domain is a single point of failure or a centralization point. In case it is not working or blocked then the App cannot be loaded either. This puts a burden on the future maintainers of the trusted domain website.
 - Storing keys locally would either use localStorage or IndexedDB, but both can be challenging with IFrames due to Safari ITP
 
@@ -30,10 +32,12 @@ Disadvantages:
 In this setup the Browser Extension would be responsible for storing the keys securely and it would have a User Interface for managing the keys. It would set up the Library for applications for trusted communications.
 
 Advantages:
+
 - Fully self custodial and once the Extension is installed the user can always have access to the local copy of keys
 - Familiar setup for existing wallet users
 
 Disadvantages:
+
 - The Extension needs to be installed and that may cause friction for adoption
 - The distribution channel is an App Store that is controlled by gatekeepers with arbitrary rules that may change anytime
 
@@ -108,6 +112,7 @@ There are also **high-stakes keys** that have either direct or indirect monetary
 ## Network access
 
 The network can be accessed with the following modes:
+
 - Bee node (e.g. Swarm Desktop, full node)
 - Gateway node (may not be fully trusted)
 - Bee in browser (with WASM, currently experimental)

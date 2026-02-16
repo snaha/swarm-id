@@ -34,6 +34,7 @@ pnpm build:swarm-demo
 ```
 
 This will:
+
 1. Build the Bee.js fork
 2. Build the Swarm ID library
 3. Bundle the demo with environment configuration
@@ -64,18 +65,19 @@ The demo creates a `SwarmIdClient` instance:
 
 ```javascript
 const client = new SwarmIdClient({
-  iframeOrigin: window.__ID_DOMAIN__ || 'https://swarm-id.snaha.net',
-  beeApiUrl: 'http://localhost:1633',
-  timeout: 30000,
-  onAuthChange: (authenticated) => {
-    // Handle auth status changes
-  }
+	iframeOrigin: window.__ID_DOMAIN__ || 'https://swarm-id.snaha.net',
+	beeApiUrl: 'http://localhost:1633',
+	timeout: 30000,
+	onAuthChange: (authenticated) => {
+		// Handle auth status changes
+	},
 })
 
 await client.initialize()
 ```
 
 The client automatically:
+
 - Embeds a hidden iframe to the identity site
 - Handles secure postMessage communication
 - Validates all messages with Zod schemas
@@ -89,11 +91,7 @@ The identity management (authentication, key derivation, storage) is handled by 
 
 ```javascript
 const data = new TextEncoder().encode('Hello, Swarm!')
-const result = await client.uploadData(
-  'your-postage-batch-id',
-  data,
-  { pin: true }
-)
+const result = await client.uploadData('your-postage-batch-id', data, { pin: true })
 console.log('Reference:', result.reference)
 ```
 
@@ -110,7 +108,7 @@ console.log('Downloaded:', text)
 ```javascript
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
-  console.log('User is authenticated')
+	console.log('User is authenticated')
 }
 ```
 
@@ -136,6 +134,7 @@ const iframe = client.getAuthIframe()
 ### Build errors
 
 Make sure you've installed dependencies and built the library:
+
 ```bash
 pnpm install
 pnpm build:swarm-demo

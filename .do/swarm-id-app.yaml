@@ -37,12 +37,12 @@ static_sites:
       allow_headers:
         - Content-Type
       allow_credentials: true
-      max_age: "600s"
+      max_age: '600s'
 
 # Environment variables
 envs:
   - key: NODE_VERSION
-    value: "22"
+    value: '22'
 
   - key: NODE_ENV
     value: production

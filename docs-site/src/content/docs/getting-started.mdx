@@ -25,15 +25,15 @@ import { SwarmIdClient } from '@swarm-id/lib'
 
 // 1. Create the client
 const client = new SwarmIdClient({
-  iframeOrigin: 'https://swarm-id.snaha.net',
-  beeApiUrl: 'http://localhost:1633',
-  metadata: {
-    name: 'My dApp',
-    description: 'A demo Swarm application'
-  },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status:', authenticated)
-  }
+	iframeOrigin: 'https://swarm-id.snaha.net',
+	beeApiUrl: 'http://localhost:1633',
+	metadata: {
+		name: 'My dApp',
+		description: 'A demo Swarm application',
+	},
+	onAuthChange: (authenticated) => {
+		console.log('Auth status:', authenticated)
+	},
 })
 
 // 2. Initialize (creates hidden iframe)
@@ -44,7 +44,7 @@ await client.initialize()
 
 // 3b. Option B: Manual authentication with connect()
 // Open authentication page in new window/browser tab (useful for custom UI)
-const authUrl = client.connect("window") // or "popup" for a popup
+const authUrl = client.connect('window') // or "popup" for a popup
 console.log('Authentication opened at:', authUrl)
 
 // 4. Check if user is authenticated
@@ -52,10 +52,8 @@ const status = await client.checkAuthStatus()
 
 // 5. Upload data (after authentication)
 if (status.authenticated) {
-  const result = await client.uploadData(
-    new TextEncoder().encode('Hello, Swarm!')
-  )
-  console.log('Uploaded:', result.reference)
+	const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
+	console.log('Uploaded:', result.reference)
 }
 
 // 6. Cleanup when done
@@ -66,14 +64,14 @@ client.destroy()
 
 The `SwarmIdClient` constructor accepts the following options:
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `iframeOrigin` | `string` | Yes | Origin of the Swarm ID iframe (e.g., `https://swarm-id.snaha.net`) |
-| `beeApiUrl` | `string` | No | Bee node API URL (default: `http://localhost:1633`) |
-| `metadata` | `object` | No | App metadata shown during authentication |
-| `metadata.name` | `string` | No | Your app's name |
-| `metadata.description` | `string` | No | Brief description of your app |
-| `onAuthChange` | `function` | No | Callback when authentication status changes |
+| Option                 | Type       | Required | Description                                                        |
+| ---------------------- | ---------- | -------- | ------------------------------------------------------------------ |
+| `iframeOrigin`         | `string`   | Yes      | Origin of the Swarm ID iframe (e.g., `https://swarm-id.snaha.net`) |
+| `beeApiUrl`            | `string`   | No       | Bee node API URL (default: `http://localhost:1633`)                |
+| `metadata`             | `object`   | No       | App metadata shown during authentication                           |
+| `metadata.name`        | `string`   | No       | Your app's name                                                    |
+| `metadata.description` | `string`   | No       | Brief description of your app                                      |
+| `onAuthChange`         | `function` | No       | Callback when authentication status changes                        |
 
 ## Data Operations
 
@@ -90,7 +88,7 @@ const result = await client.uploadData(data, { encrypt: true })
 
 // Upload with progress tracking
 const result = await client.uploadData(data, {}, (progress) => {
-  console.log(`${progress.percent}% uploaded`)
+	console.log(`${progress.percent}% uploaded`)
 })
 ```
 

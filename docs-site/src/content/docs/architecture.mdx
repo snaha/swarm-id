@@ -72,7 +72,7 @@ App-specific secrets are derived deterministically from the master key:
 
 ```typescript
 // Pseudocode for key derivation
-appSecret = HMAC-SHA256(masterKey, appOrigin)
+appSecret = HMAC - SHA256(masterKey, appOrigin)
 ```
 
 This ensures:
@@ -96,29 +96,29 @@ All cross-origin communication uses postMessage with Zod validation:
 
 ### Parent → Iframe Messages
 
-| Message | Purpose |
-|---------|---------|
-| `parentIdentify` | Identify parent to iframe |
-| `checkAuth` | Check authentication status |
-| `requestAuth` | Request authentication (open popup) |
-| `uploadData` | Upload data to Swarm |
-| `downloadData` | Download data from Swarm |
+| Message          | Purpose                             |
+| ---------------- | ----------------------------------- |
+| `parentIdentify` | Identify parent to iframe           |
+| `checkAuth`      | Check authentication status         |
+| `requestAuth`    | Request authentication (open popup) |
+| `uploadData`     | Upload data to Swarm                |
+| `downloadData`   | Download data from Swarm            |
 
 ### Iframe → Parent Messages
 
-| Message | Purpose |
-|---------|---------|
-| `proxyReady` | Iframe is initialized |
-| `authStatusResponse` | Authentication status |
-| `authSuccess` | Authentication completed |
-| `uploadDataResponse` | Upload result |
-| `downloadDataResponse` | Download result |
-| `error` | Error occurred |
+| Message                | Purpose                  |
+| ---------------------- | ------------------------ |
+| `proxyReady`           | Iframe is initialized    |
+| `authStatusResponse`   | Authentication status    |
+| `authSuccess`          | Authentication completed |
+| `uploadDataResponse`   | Upload result            |
+| `downloadDataResponse` | Download result          |
+| `error`                | Error occurred           |
 
 ### Popup → Iframe Messages
 
-| Message | Purpose |
-|---------|---------|
+| Message     | Purpose                          |
+| ----------- | -------------------------------- |
 | `setSecret` | Send derived app-specific secret |
 
 ## Security Considerations

@@ -28,11 +28,13 @@ The applications are deployed and available at:
 Both apps are deployed to Digital Ocean App Platform as separate static sites:
 
 **swarm-demo.snaha.net** (`demo/build/`)
+
 - Simple HTML demos with SwarmIdClient library
 - Library files served from `/lib/` directory
 - Standard ES6 module imports
 
 **swarm-id.snaha.net** (`swarm-id-build/`)
+
 - SvelteKit identity management UI
 - Proxy/auth pages for iframe communication
 - Library files served from `/lib/` directory
@@ -64,6 +66,7 @@ pnpm build:swarm-id      # Builds lib + identity UI
 ### Build Outputs
 
 **demo/build/** (Demo App)
+
 ```
 demo/build/
 ├── index.html          # Demo app
@@ -75,6 +78,7 @@ demo/build/
 ```
 
 **swarm-id-build/** (Identity UI)
+
 ```
 swarm-id-build/
 ├── [SvelteKit app files including prerendered routes: /proxy, /connect]
@@ -134,11 +138,11 @@ pnpm dev:bee:fresh
 
 **Endpoints:**
 
-| Service | URL |
-|---------|-----|
-| Queen Bee API | `http://localhost:1633` |
-| Worker 1 API | `http://localhost:11633` |
-| Blockchain RPC | `http://localhost:9545` |
+| Service        | URL                      |
+| -------------- | ------------------------ |
+| Queen Bee API  | `http://localhost:1633`  |
+| Worker 1 API   | `http://localhost:11633` |
+| Blockchain RPC | `http://localhost:9545`  |
 
 **Buying a Postage Stamp:**
 
@@ -172,10 +176,10 @@ const envelope = stamper.stamp(chunk)
 
 **Known Keys:**
 
-| Node | Private Key | Address |
-|------|-------------|---------|
-| Queen | `566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9` | `0x26234a2ad3ba8b398a762f279b792cfacd536a3f` |
-| Worker 1 | `195cf6324303f6941ad119d0a1d2e862d810078e1370b8d205552a543ff40aab` | - |
+| Node     | Private Key                                                        | Address                                      |
+| -------- | ------------------------------------------------------------------ | -------------------------------------------- |
+| Queen    | `566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9` | `0x26234a2ad3ba8b398a762f279b792cfacd536a3f` |
+| Worker 1 | `195cf6324303f6941ad119d0a1d2e862d810078e1370b8d205552a543ff40aab` | -                                            |
 
 ### Developer Tools (/dev route)
 
@@ -190,6 +194,7 @@ The Identity UI includes a Developer Tools page at http://localhost:5174/dev wit
 To test storage partitioning behavior with real TLS certificates (as in production), you can use SSH tunnels to a VPS with nginx.
 
 **Architecture:**
+
 ```
 Your VPS (nginx + HTTPS)              Your Local Machine
 ┌─────────────────────────┐           ┌─────────────────────┐
@@ -201,11 +206,13 @@ Your VPS (nginx + HTTPS)              Your Local Machine
 ```
 
 **VPS Setup (one-time):**
+
 1. Add nginx server blocks pointing to `127.0.0.1:18080` (demo) and `127.0.0.1:5174` (identity)
 2. Get SSL certificates with certbot
 3. Add DNS A records for both subdomains
 
 **Local usage:**
+
 ```bash
 # Terminal 1: Start demo server
 pnpm dev:demo
@@ -220,6 +227,7 @@ ssh -R 18080:localhost:3000 -R 5174:localhost:5174 user@your-vps
 **Note:** The `VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable is required when accessing the Vite dev server through a foreign hostname. Without it, Vite will reject requests from the tunneled domain.
 
 **Access the demo:**
+
 ```
 https://demo.yourdomain.com/?idDomain=https://id.yourdomain.com
 ```
@@ -227,6 +235,7 @@ https://demo.yourdomain.com/?idDomain=https://id.yourdomain.com
 The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies while still having hot reload for the identity UI.
 
 **Important:**
+
 - Demo HTML files import from `/lib/` which automatically maps to `lib/dist/`
 - If you change library code, rebuild it: `cd lib && pnpm build`
 - Use `cd lib && pnpm build:watch` for automatic rebuilds during development
@@ -257,18 +266,21 @@ The `?idDomain=` parameter tells the demo which identity service to use. This al
 ### Key Build Artifacts
 
 **Library Distribution** (`lib/dist/`)
+
 - ES6 modules with TypeScript definitions
 - Source maps for debugging
 - ~350KB per module (uncompressed)
 - Imported via standard `<script type="module">`
 
 **Demo App Build** (`demo/build/`)
+
 - Copies library files to `lib/`
 - Injects environment config into HTML
 - No inline bundling - uses module imports
 - Deployed to swarm-demo.snaha.net
 
 **Identity UI Build** (`swarm-id-build/`)
+
 - Full SvelteKit production build
 - Copies library files to `lib/`
 - Proxy/auth HTML pages in `demo/`
@@ -358,7 +370,7 @@ To add context that only applies to a specific package or directory, create a ne
 ```markdown
 ---
 paths:
-  - "lib/**"
+  - 'lib/**'
 ---
 
 # lib-specific instructions here
@@ -367,18 +379,22 @@ paths:
 ## Troubleshooting
 
 ### Demo not loading
+
 - Check if ports 3000 and 5174 are already in use: `lsof -i :3000 -i :5174`
 - Ensure both servers are running: `pnpm dev`
 
 ### Authentication popup blocked
+
 - Allow popups for localhost in browser settings
 - Ensure popup is triggered by user action (not programmatically)
 
 ### Changes not reflecting
+
 - Library changes: restart `pnpm dev:lib` or rebuild
 - SvelteKit changes: automatic hot reload
 
 ### Safari not working
+
 - Safari is not supported for local development due to strict storage partitioning
 - Use Chrome or Firefox instead
 

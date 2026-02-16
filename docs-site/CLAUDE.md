@@ -79,8 +79,9 @@ Page content here...
 
 Starlight provides built-in components. Common ones:
 
-```mdx
+````mdx
 <!-- Note/warning callouts -->
+
 :::note
 This is a note.
 :::
@@ -94,11 +95,14 @@ This is dangerous!
 :::
 
 <!-- Code blocks with titles -->
+
 ```typescript title="example.ts"
 const foo = 'bar'
 ```
+````
 
 <!-- Tabs for multiple code examples -->
+
 import { Tabs, TabItem } from '@astrojs/starlight/components';
 
 <Tabs>
@@ -152,7 +156,7 @@ sidebar: [
 Place images in `src/assets/` and import them:
 
 ```mdx
-import diagram from '../assets/architecture.png';
+import diagram from '../assets/architecture.png'
 
 <img src={diagram.src} alt="Architecture diagram" />
 ```
@@ -181,8 +185,8 @@ For sitemap generation and canonical URLs, add to `astro.config.mjs`:
 
 ```javascript
 export default defineConfig({
-  site: 'https://docs.swarm-id.snaha.net',
-  // ...
+	site: 'https://docs.swarm-id.snaha.net',
+	// ...
 })
 ```
 

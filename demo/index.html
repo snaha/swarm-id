@@ -1,528 +1,532 @@
 <!doctype html>
 <html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Swarm ID Demo</title>
-    <style>
-      * {
-        margin: 0;
-        padding: 0;
-        box-sizing: border-box;
-      }
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>Swarm ID Demo</title>
+		<style>
+			* {
+				margin: 0;
+				padding: 0;
+				box-sizing: border-box;
+			}
 
-      body {
-        font-family:
-          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        min-height: 100vh;
-        padding: 40px 20px;
-      }
+			body {
+				font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+				min-height: 100vh;
+				padding: 40px 20px;
+			}
 
-      .container {
-        max-width: 800px;
-        margin: 0 auto;
-        background: white;
-        border-radius: 16px;
-        box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
-        padding: 40px;
-      }
+			.container {
+				max-width: 800px;
+				margin: 0 auto;
+				background: white;
+				border-radius: 16px;
+				box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+				padding: 40px;
+			}
 
-      h1 {
-        color: #667eea;
-        font-size: 32px;
-        margin-bottom: 10px;
-      }
+			h1 {
+				color: #667eea;
+				font-size: 32px;
+				margin-bottom: 10px;
+			}
 
-      .subtitle {
-        color: #666;
-        font-size: 16px;
-        margin-bottom: 30px;
-        line-height: 1.5;
-      }
+			.subtitle {
+				color: #666;
+				font-size: 16px;
+				margin-bottom: 30px;
+				line-height: 1.5;
+			}
 
-      .section {
-        margin-bottom: 30px;
-        padding: 20px;
-        background: #f8f9fa;
-        border-radius: 8px;
-        gap: 8px;
-        display: flex;
-        flex-direction: column;
-      }
+			.section {
+				margin-bottom: 30px;
+				padding: 20px;
+				background: #f8f9fa;
+				border-radius: 8px;
+				gap: 8px;
+				display: flex;
+				flex-direction: column;
+			}
 
-      .section h2 {
-        color: #333;
-        font-size: 20px;
-        margin-bottom: 15px;
-      }
+			.section h2 {
+				color: #333;
+				font-size: 20px;
+				margin-bottom: 15px;
+			}
 
-      .status {
-        padding: 12px;
-        border-radius: 6px;
-        margin-bottom: 15px;
-      }
+			.status {
+				padding: 12px;
+				border-radius: 6px;
+				margin-bottom: 15px;
+			}
 
-      .status.authenticated {
-        background: #d4edda;
-        border: 1px solid #c3e6cb;
-        color: #155724;
-      }
+			.status.authenticated {
+				background: #d4edda;
+				border: 1px solid #c3e6cb;
+				color: #155724;
+			}
 
-      .status.unauthenticated {
-        background: #f8d7da;
-        border: 1px solid #f5c6cb;
-        color: #721c24;
-      }
+			.status.unauthenticated {
+				background: #f8d7da;
+				border: 1px solid #f5c6cb;
+				color: #721c24;
+			}
 
-      .collapsible {
-        cursor: pointer;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        user-select: none;
-      }
+			.collapsible {
+				cursor: pointer;
+				display: flex;
+				align-items: center;
+				gap: 8px;
+				user-select: none;
+			}
 
-      .collapsible .chevron {
-        transition: transform 0.2s;
-        font-size: 12px;
-      }
+			.collapsible .chevron {
+				transition: transform 0.2s;
+				font-size: 12px;
+			}
 
-      .collapsible.expanded .chevron {
-        transform: rotate(90deg);
-      }
+			.collapsible.expanded .chevron {
+				transform: rotate(90deg);
+			}
 
-      .collapsible-content {
-        display: none;
-        margin-top: 10px;
-      }
+			.collapsible-content {
+				display: none;
+				margin-top: 10px;
+			}
 
-      .collapsible-content.expanded {
-        display: block;
-      }
+			.collapsible-content.expanded {
+				display: block;
+			}
 
-      .stamp-info {
-        display: grid;
-        grid-template-columns: 140px 1fr;
-        gap: 8px 12px;
-        font-size: 13px;
-      }
+			.stamp-info {
+				display: grid;
+				grid-template-columns: 140px 1fr;
+				gap: 8px 12px;
+				font-size: 13px;
+			}
 
-      .stamp-info dt {
-        color: #666;
-        font-weight: 500;
-      }
+			.stamp-info dt {
+				color: #666;
+				font-weight: 500;
+			}
 
-      .stamp-info dd {
-        font-family: "Courier New", monospace;
-        word-break: break-all;
-      }
+			.stamp-info dd {
+				font-family: 'Courier New', monospace;
+				word-break: break-all;
+			}
 
-      .button-container {
-        display: flex;
-        flex-direction: row;
-        align-items: center;
-        gap: 8px;
-      }
+			.button-container {
+				display: flex;
+				flex-direction: row;
+				align-items: center;
+				gap: 8px;
+			}
 
-      button {
-        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-        color: white;
-        border: none;
-        padding: 12px 24px;
-        border-radius: 6px;
-        font-size: 14px;
-        font-weight: 600;
-        cursor: pointer;
-        transition:
-          transform 0.2s,
-          box-shadow 0.2s;
-        box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
-      }
+			button {
+				background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+				color: white;
+				border: none;
+				padding: 12px 24px;
+				border-radius: 6px;
+				font-size: 14px;
+				font-weight: 600;
+				cursor: pointer;
+				transition:
+					transform 0.2s,
+					box-shadow 0.2s;
+				box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+			}
 
-      button:hover:not(:disabled) {
-        transform: translateY(-1px);
-        box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
-      }
+			button:hover:not(:disabled) {
+				transform: translateY(-1px);
+				box-shadow: 0 4px 12px rgba(102, 126, 234, 0.5);
+			}
 
-      button:disabled {
-        background: #ccc;
-        cursor: not-allowed;
-        box-shadow: none;
-      }
+			button:disabled {
+				background: #ccc;
+				cursor: not-allowed;
+				box-shadow: none;
+			}
 
-      input,
-      textarea {
-        width: 100%;
-        padding: 10px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-        font-family: inherit;
-        margin-bottom: 10px;
-      }
+			input,
+			textarea {
+				width: 100%;
+				padding: 10px;
+				border: 1px solid #ddd;
+				border-radius: 4px;
+				font-family: inherit;
+				margin-bottom: 10px;
+			}
 
-      textarea {
-        min-height: 100px;
-        font-family: "Courier New", monospace;
-      }
+			textarea {
+				min-height: 100px;
+				font-family: 'Courier New', monospace;
+			}
 
-      .result {
-        background: white;
-        padding: 15px;
-        border-radius: 6px;
-        border: 1px solid #ddd;
-        margin-top: 15px;
-        word-break: break-all;
-        font-family: "Courier New", monospace;
-        font-size: 13px;
-      }
+			.result {
+				background: white;
+				padding: 15px;
+				border-radius: 6px;
+				border: 1px solid #ddd;
+				margin-top: 15px;
+				word-break: break-all;
+				font-family: 'Courier New', monospace;
+				font-size: 13px;
+			}
 
-      .log {
-        background: #2d2d2d;
-        color: #f8f8f8;
-        padding: 15px;
-        border-radius: 6px;
-        max-height: 300px;
-        overflow-y: auto;
-        font-family: "Courier New", monospace;
-        font-size: 12px;
-        margin-top: 15px;
-      }
+			.log {
+				background: #2d2d2d;
+				color: #f8f8f8;
+				padding: 15px;
+				border-radius: 6px;
+				max-height: 300px;
+				overflow-y: auto;
+				font-family: 'Courier New', monospace;
+				font-size: 12px;
+				margin-top: 15px;
+			}
 
-      .log-entry {
-        margin-bottom: 5px;
-      }
+			.log-entry {
+				margin-bottom: 5px;
+			}
 
-      .log-entry .time {
-        color: #888;
-      }
+			.log-entry .time {
+				color: #888;
+			}
 
-      .log-entry .type {
-        font-weight: bold;
-      }
+			.log-entry .type {
+				font-weight: bold;
+			}
 
-      .log-entry.info .type {
-        color: #4caf50;
-      }
+			.log-entry.info .type {
+				color: #4caf50;
+			}
 
-      .log-entry.error .type {
-        color: #f44336;
-      }
+			.log-entry.error .type {
+				color: #f44336;
+			}
 
-      .log-entry.warn .type {
-        color: #ff9800;
-      }
-    </style>
-  </head>
-  <body>
-    <div class="container">
-      <h1>🐝 Swarm ID Demo</h1>
-      <p class="subtitle">
-        This demo application shows how to use the Swarm ID library for
-        authentication and Bee API operations.
-      </p>
+			.log-entry.warn .type {
+				color: #ff9800;
+			}
+		</style>
+	</head>
+	<body>
+		<div class="container">
+			<h1>🐝 Swarm ID Demo</h1>
+			<p class="subtitle">
+				This demo application shows how to use the Swarm ID library for authentication and Bee API
+				operations.
+			</p>
 
-      <!-- Authentication Section -->
-      <div class="section">
-        <h2>Authentication</h2>
-        <div id="auth-status" class="status unauthenticated">
-          Status: Not authenticated
-        </div>
+			<!-- Authentication Section -->
+			<div class="section">
+				<h2>Authentication</h2>
+				<div id="auth-status" class="status unauthenticated">Status: Not authenticated</div>
 
-        <div class="button-container">
-          Custom button:
-          <button id="connect-button" style="width: 200px; height: 40px;">Connect</button>
-        </div>
-        <div class="button-container">
-          Iframe button:
-<div id="swarm-id-button" style="width: 200px; height: 40px;"></div>
-        </div>
-      </div>
+				<div class="button-container">
+					Custom button:
+					<button id="connect-button" style="width: 200px; height: 40px">Connect</button>
+				</div>
+				<div class="button-container">
+					Iframe button:
+					<div id="swarm-id-button" style="width: 200px; height: 40px"></div>
+				</div>
+			</div>
 
-      <!-- Postage Stamp Section (Collapsible) -->
-      <div id="stamp-section" class="section" style="display: none;">
-        <h2 class="collapsible" id="stamp-toggle">
-          <span class="chevron">▶</span>
-          Postage Stamp
-        </h2>
-        <div id="stamp-content" class="collapsible-content">
-          <dl id="stamp-info" class="stamp-info"></dl>
-        </div>
-      </div>
+			<!-- Postage Stamp Section (Collapsible) -->
+			<div id="stamp-section" class="section" style="display: none">
+				<h2 class="collapsible" id="stamp-toggle">
+					<span class="chevron">▶</span>
+					Postage Stamp
+				</h2>
+				<div id="stamp-content" class="collapsible-content">
+					<dl id="stamp-info" class="stamp-info"></dl>
+				</div>
+			</div>
 
-      <!-- Upload Section -->
-      <div class="section">
-        <h2>Upload Data</h2>
-        <textarea id="upload-data" placeholder="Enter data to upload...">
-Hello, Swarm!</textarea
-        >
-        <div style="margin-bottom: 15px">
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
-            <input type="checkbox" id="encrypt-checkbox" checked style="width: auto; cursor: pointer" />
-            <span style="font-size: 14px; color: #333">
-              Enable encryption (recommended)
-            </span>
-          </label>
-          <p style="font-size: 12px; color: #666; margin-top: 5px; margin-left: 24px">
-            When enabled, data is encrypted with unique keys. Reference will be 128 chars (64 bytes).
-          </p>
-        </div>
-        <div style="margin-bottom: 15px">
-          <label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
-            <input type="checkbox" id="deferred-checkbox" style="width: auto; cursor: pointer" />
-            <span style="font-size: 14px; color: #333">
-              Deferred upload mode
-            </span>
-          </label>
-          <p style="font-size: 12px; color: #666; margin-top: 5px; margin-left: 24px">
-            Required for dev mode. Uncheck for direct uploads in production.
-          </p>
-        </div>
-        <button id="upload-button" disabled>Upload Data</button>
-        <div id="upload-result"></div>
-      </div>
+			<!-- Upload Section -->
+			<div class="section">
+				<h2>Upload Data</h2>
+				<textarea id="upload-data" placeholder="Enter data to upload...">Hello, Swarm!</textarea>
+				<div style="margin-bottom: 15px">
+					<label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+						<input
+							type="checkbox"
+							id="encrypt-checkbox"
+							checked
+							style="width: auto; cursor: pointer"
+						/>
+						<span style="font-size: 14px; color: #333"> Enable encryption (recommended) </span>
+					</label>
+					<p style="font-size: 12px; color: #666; margin-top: 5px; margin-left: 24px">
+						When enabled, data is encrypted with unique keys. Reference will be 128 chars (64
+						bytes).
+					</p>
+				</div>
+				<div style="margin-bottom: 15px">
+					<label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+						<input type="checkbox" id="deferred-checkbox" style="width: auto; cursor: pointer" />
+						<span style="font-size: 14px; color: #333"> Deferred upload mode </span>
+					</label>
+					<p style="font-size: 12px; color: #666; margin-top: 5px; margin-left: 24px">
+						Required for dev mode. Uncheck for direct uploads in production.
+					</p>
+				</div>
+				<button id="upload-button" disabled>Upload Data</button>
+				<div id="upload-result"></div>
+			</div>
 
-      <!-- Download Section -->
-      <div class="section">
-        <h2>Download Data</h2>
-        <input
-          type="text"
-          id="reference"
-          placeholder="Reference (64 hex chars)"
-        />
-        <button id="download-button" disabled>Download Data</button>
-        <div id="download-result"></div>
-      </div>
+			<!-- Download Section -->
+			<div class="section">
+				<h2>Download Data</h2>
+				<input type="text" id="reference" placeholder="Reference (64 hex chars)" />
+				<button id="download-button" disabled>Download Data</button>
+				<div id="download-result"></div>
+			</div>
 
-      <!-- ACT Upload Section -->
-      <div class="section">
-        <h2>ACT Upload (Access Control)</h2>
-        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-          Upload content with Access Control Trie. Only grantees (and the publisher) can decrypt.
-        </p>
-        <textarea id="act-upload-data" placeholder="Enter secret data to upload...">Secret message for ACT test!</textarea>
-        <input
-          type="text"
-          id="act-grantees"
-          placeholder="Grantee public keys (comma-separated, 66 hex chars each)"
-        />
-        <p style="font-size: 12px; color: #888; margin-bottom: 10px;">
-          💡 Get Bee node's public key: <code>curl -s http://localhost:1633/addresses | jq -r '.publicKey'</code>
-        </p>
-        <div style="margin-bottom: 15px">
-          <label style="display: flex; align-items: center; gap: 6px; font-size: 13px; color: #666; margin: 6px 0 8px;">
-            <input type="checkbox" id="act-bee-compatible" checked style="width: auto; cursor: pointer;"/>
-            <span>Bee-compatible ACT (enable Bee node /bzz download with ACT headers)</span>
-            
-          </label>
-        </div>
-        <button id="act-upload-button" disabled>Upload with ACT</button>
-        <div id="act-upload-result"></div>
-      </div>
+			<!-- ACT Upload Section -->
+			<div class="section">
+				<h2>ACT Upload (Access Control)</h2>
+				<p style="font-size: 13px; color: #666; margin-bottom: 10px">
+					Upload content with Access Control Trie. Only grantees (and the publisher) can decrypt.
+				</p>
+				<textarea id="act-upload-data" placeholder="Enter secret data to upload...">
+Secret message for ACT test!</textarea
+				>
+				<input
+					type="text"
+					id="act-grantees"
+					placeholder="Grantee public keys (comma-separated, 66 hex chars each)"
+				/>
+				<p style="font-size: 12px; color: #888; margin-bottom: 10px">
+					💡 Get Bee node's public key:
+					<code>curl -s http://localhost:1633/addresses | jq -r '.publicKey'</code>
+				</p>
+				<div style="margin-bottom: 15px">
+					<label
+						style="
+							display: flex;
+							align-items: center;
+							gap: 6px;
+							font-size: 13px;
+							color: #666;
+							margin: 6px 0 8px;
+						"
+					>
+						<input
+							type="checkbox"
+							id="act-bee-compatible"
+							checked
+							style="width: auto; cursor: pointer"
+						/>
+						<span>Bee-compatible ACT (enable Bee node /bzz download with ACT headers)</span>
+					</label>
+				</div>
+				<button id="act-upload-button" disabled>Upload with ACT</button>
+				<div id="act-upload-result"></div>
+			</div>
 
-      <!-- ACT Download Section -->
-      <div class="section">
-        <h2>ACT Download (Self-Decrypt)</h2>
-        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-          Download and decrypt ACT content using the publisher's identity (via proxy).
-        </p>
-        <input
-          type="text"
-          id="act-download-encrypted-ref"
-          placeholder="Encrypted Reference (64 hex chars)"
-        />
-        <input
-          type="text"
-          id="act-download-history-ref"
-          placeholder="History Reference (64 hex chars)"
-        />
-        <input
-          type="text"
-          id="act-download-publisher"
-          placeholder="Publisher Public Key (66 hex chars)"
-        />
-        <button id="act-download-button" disabled>Download ACT Data</button>
-        <div id="act-download-result"></div>
-      </div>
+			<!-- ACT Download Section -->
+			<div class="section">
+				<h2>ACT Download (Self-Decrypt)</h2>
+				<p style="font-size: 13px; color: #666; margin-bottom: 10px">
+					Download and decrypt ACT content using the publisher's identity (via proxy).
+				</p>
+				<input
+					type="text"
+					id="act-download-encrypted-ref"
+					placeholder="Encrypted Reference (64 hex chars)"
+				/>
+				<input
+					type="text"
+					id="act-download-history-ref"
+					placeholder="History Reference (64 hex chars)"
+				/>
+				<input
+					type="text"
+					id="act-download-publisher"
+					placeholder="Publisher Public Key (66 hex chars)"
+				/>
+				<button id="act-download-button" disabled>Download ACT Data</button>
+				<div id="act-download-result"></div>
+			</div>
 
-      <!-- ACT Add Grantees Section -->
-      <div class="section">
-        <h2>ACT Add Grantees</h2>
-        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-          Add new grantees to an existing ACT. Use this to grant access after initial upload.
-        </p>
-        <input
-          type="text"
-          id="act-add-history-ref"
-          placeholder="Current History Reference (64 hex chars)"
-        />
-        <input
-          type="text"
-          id="act-add-grantees"
-          placeholder="New grantee public keys (comma-separated, 66 hex chars each)"
-        />
-        <button id="act-add-grantees-button" disabled>Add Grantees</button>
-        <div id="act-add-grantees-result"></div>
-      </div>
+			<!-- ACT Add Grantees Section -->
+			<div class="section">
+				<h2>ACT Add Grantees</h2>
+				<p style="font-size: 13px; color: #666; margin-bottom: 10px">
+					Add new grantees to an existing ACT. Use this to grant access after initial upload.
+				</p>
+				<input
+					type="text"
+					id="act-add-history-ref"
+					placeholder="Current History Reference (64 hex chars)"
+				/>
+				<input
+					type="text"
+					id="act-add-grantees"
+					placeholder="New grantee public keys (comma-separated, 66 hex chars each)"
+				/>
+				<button id="act-add-grantees-button" disabled>Add Grantees</button>
+				<div id="act-add-grantees-result"></div>
+			</div>
 
-      <!-- SOC Section -->
-      <div class="section">
-        <h2>SOC (Single Owner Chunk)</h2>
-        <p style="font-size: 13px; color: #666; margin-bottom: 10px;">
-          Upload and download Single Owner Chunks. Encrypted upload returns an encryption key required for download.
-        </p>
+			<!-- SOC Section -->
+			<div class="section">
+				<h2>SOC (Single Owner Chunk)</h2>
+				<p style="font-size: 13px; color: #666; margin-bottom: 10px">
+					Upload and download Single Owner Chunks. Encrypted upload returns an encryption key
+					required for download.
+				</p>
 
-        <h3 style="font-size: 16px; color: #333; margin-bottom: 8px;">Upload</h3>
-        <input
-          type="text"
-          id="soc-identifier"
-          placeholder="Identifier (64 hex chars)"
-          value="0000000000000000000000000000000000000000000000000000000000000000"
-        />
-        <textarea id="soc-upload-data" placeholder="Enter SOC payload...">Hello SOC!</textarea>
-        <div class="button-container">
-          <button id="soc-upload-button" disabled>Upload Encrypted SOC</button>
-          <button id="soc-raw-upload-button" disabled>Upload Raw SOC</button>
-        </div>
-        <div id="soc-upload-result"></div>
+				<h3 style="font-size: 16px; color: #333; margin-bottom: 8px">Upload</h3>
+				<input
+					type="text"
+					id="soc-identifier"
+					placeholder="Identifier (64 hex chars)"
+					value="0000000000000000000000000000000000000000000000000000000000000000"
+				/>
+				<textarea id="soc-upload-data" placeholder="Enter SOC payload...">Hello SOC!</textarea>
+				<div class="button-container">
+					<button id="soc-upload-button" disabled>Upload Encrypted SOC</button>
+					<button id="soc-raw-upload-button" disabled>Upload Raw SOC</button>
+				</div>
+				<div id="soc-upload-result"></div>
 
-        <h3 style="font-size: 16px; color: #333; margin: 16px 0 8px;">Download</h3>
-        <input
-          type="text"
-          id="soc-owner"
-          placeholder="Owner Address (40 hex chars)"
-        />
-        <input
-          type="text"
-          id="soc-download-identifier"
-          placeholder="Identifier (64 hex chars)"
-        />
-        <input
-          type="text"
-          id="soc-encryption-key"
-          placeholder="Encryption Key (64 hex chars, required for encrypted download)"
-        />
-        <div class="button-container">
-          <button id="soc-download-button" disabled>Download Encrypted SOC</button>
-          <button id="soc-raw-download-button" disabled>Download Raw SOC</button>
-        </div>
-        <div id="soc-download-result"></div>
-      </div>
+				<h3 style="font-size: 16px; color: #333; margin: 16px 0 8px">Download</h3>
+				<input type="text" id="soc-owner" placeholder="Owner Address (40 hex chars)" />
+				<input type="text" id="soc-download-identifier" placeholder="Identifier (64 hex chars)" />
+				<input
+					type="text"
+					id="soc-encryption-key"
+					placeholder="Encryption Key (64 hex chars, required for encrypted download)"
+				/>
+				<div class="button-container">
+					<button id="soc-download-button" disabled>Download Encrypted SOC</button>
+					<button id="soc-raw-download-button" disabled>Download Raw SOC</button>
+				</div>
+				<div id="soc-download-result"></div>
+			</div>
 
-      <!-- Log Section -->
-      <div class="section">
-        <h2>Console Log</h2>
-        <div id="log" class="log"></div>
-      </div>
-    </div>
+			<!-- Log Section -->
+			<div class="section">
+				<h2>Console Log</h2>
+				<div id="log" class="log"></div>
+			</div>
+		</div>
 
-    <script type="module">
-      import { SwarmIdClient, formatTTL } from "/lib/swarm-id.esm.js";
+		<script type="module">
+			import { SwarmIdClient, formatTTL } from '/lib/swarm-id.esm.js'
 
-      // Logging
-      const logContainer = document.getElementById("log");
-      function log(message, type = "info") {
-        const time = new Date().toLocaleTimeString();
-        const entry = document.createElement("div");
-        entry.className = `log-entry ${type}`;
-        entry.innerHTML = `<span class="time">[${time}]</span> <span class="type">[${type.toUpperCase()}]</span> ${message}`;
-        logContainer.appendChild(entry);
-        logContainer.scrollTop = logContainer.scrollHeight;
-        console.log(`[${type}]`, message);
-      }
+			// Logging
+			const logContainer = document.getElementById('log')
+			function log(message, type = 'info') {
+				const time = new Date().toLocaleTimeString()
+				const entry = document.createElement('div')
+				entry.className = `log-entry ${type}`
+				entry.innerHTML = `<span class="time">[${time}]</span> <span class="type">[${type.toUpperCase()}]</span> ${message}`
+				logContainer.appendChild(entry)
+				logContainer.scrollTop = logContainer.scrollHeight
+				console.log(`[${type}]`, message)
+			}
 
-      let socWriter = null
+			let socWriter = null
 
-      // Collapsible toggle
-      document.getElementById("stamp-toggle").addEventListener("click", () => {
-        const toggle = document.getElementById("stamp-toggle")
-        const content = document.getElementById("stamp-content")
-        toggle.classList.toggle("expanded")
-        content.classList.toggle("expanded")
-      })
+			// Collapsible toggle
+			document.getElementById('stamp-toggle').addEventListener('click', () => {
+				const toggle = document.getElementById('stamp-toggle')
+				const content = document.getElementById('stamp-content')
+				toggle.classList.toggle('expanded')
+				content.classList.toggle('expanded')
+			})
 
-      // Auto-detect local vs production environment
-      // Support ?idDomain= parameter for ngrok testing
-      const urlParams = new URLSearchParams(window.location.search);
-      const PROXY_ORIGIN = urlParams.get('idDomain') || window.__ID_DOMAIN__ || (
-        window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-          ? 'http://localhost:5174'
-          : 'https://swarm-id.snaha.net'
-      );
+			// Auto-detect local vs production environment
+			// Support ?idDomain= parameter for ngrok testing
+			const urlParams = new URLSearchParams(window.location.search)
+			const PROXY_ORIGIN =
+				urlParams.get('idDomain') ||
+				window.__ID_DOMAIN__ ||
+				(window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+					? 'http://localhost:5174'
+					: 'https://swarm-id.snaha.net')
 
-      // Use /proxy - this is a SvelteKit route that works in both dev and production
-      const PROXY_PATH = '/proxy'
+			// Use /proxy - this is a SvelteKit route that works in both dev and production
+			const PROXY_PATH = '/proxy'
 
-      // Initialize the Swarm ID client
-      log("Initializing Swarm ID client...", "info");
-      log(`PROXY_ORIGIN: ${PROXY_ORIGIN}`, "info");
-      log(`PROXY_PATH: ${PROXY_PATH}`, "info");
-      log(`Full Proxy URL: ${PROXY_ORIGIN}${PROXY_PATH}`, "info");
+			// Initialize the Swarm ID client
+			log('Initializing Swarm ID client...', 'info')
+			log(`PROXY_ORIGIN: ${PROXY_ORIGIN}`, 'info')
+			log(`PROXY_PATH: ${PROXY_PATH}`, 'info')
+			log(`Full Proxy URL: ${PROXY_ORIGIN}${PROXY_PATH}`, 'info')
 
-      // Simple bee SVG icon with white background
-      const beeIcon = 'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
+			// Simple bee SVG icon with white background
+			const beeIcon =
+				'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
 
-      const client = new SwarmIdClient({
-        iframeOrigin: PROXY_ORIGIN,
-        iframePath: PROXY_PATH,
-        timeout: 60000, // 60 seconds to account for Bee sync delays
-        onAuthChange: async (authenticated) => {
-          log(`Auth status changed: ${authenticated}`, "info");
-          await updateAuthStatus(authenticated);
-        },
-        metadata: {
-          name: "Swarm ID Demo",
-          description: "Demo application showcasing Swarm ID authentication and Bee API operations",
-          icon: beeIcon,
-        },
-        buttonConfig: {
-          connectText: "Connect to Swarm",
-          disconnectText: "Disconnect",
-          loadingText: "Loading...",
-          backgroundColor: "#667eea",
-          color: "white",
-          borderRadius: "6px",
-        },
-        containerId: "swarm-id-button",
-      });
+			const client = new SwarmIdClient({
+				iframeOrigin: PROXY_ORIGIN,
+				iframePath: PROXY_PATH,
+				timeout: 60000, // 60 seconds to account for Bee sync delays
+				onAuthChange: async (authenticated) => {
+					log(`Auth status changed: ${authenticated}`, 'info')
+					await updateAuthStatus(authenticated)
+				},
+				metadata: {
+					name: 'Swarm ID Demo',
+					description: 'Demo application showcasing Swarm ID authentication and Bee API operations',
+					icon: beeIcon,
+				},
+				buttonConfig: {
+					connectText: 'Connect to Swarm',
+					disconnectText: 'Disconnect',
+					loadingText: 'Loading...',
+					backgroundColor: '#667eea',
+					color: 'white',
+					borderRadius: '6px',
+				},
+				containerId: 'swarm-id-button',
+			})
 
-      // Initialize deferred checkbox based on Bee node mode
-      async function initializeDeferredDefault() {
-        try {
-          const nodeInfo = await client.getNodeInfo()
-          const deferredCheckbox = document.getElementById('deferred-checkbox')
+			// Initialize deferred checkbox based on Bee node mode
+			async function initializeDeferredDefault() {
+				try {
+					const nodeInfo = await client.getNodeInfo()
+					const deferredCheckbox = document.getElementById('deferred-checkbox')
 
-          // Dev mode requires deferred=true, production can use direct uploads
-          const isDevMode = nodeInfo.beeMode === 'dev'
-          deferredCheckbox.checked = isDevMode
+					// Dev mode requires deferred=true, production can use direct uploads
+					const isDevMode = nodeInfo.beeMode === 'dev'
+					deferredCheckbox.checked = isDevMode
 
-          log(`Bee mode: ${nodeInfo.beeMode}, deferred default: ${isDevMode}`, "info")
-        } catch (error) {
-          log(`Could not determine beeMode, keeping default: ${error.message}`, "warn")
-          // Keep current default (checked)
-        }
-      }
+					log(`Bee mode: ${nodeInfo.beeMode}, deferred default: ${isDevMode}`, 'info')
+				} catch (error) {
+					log(`Could not determine beeMode, keeping default: ${error.message}`, 'warn')
+					// Keep current default (checked)
+				}
+			}
 
-      async function updatePostageStampInfo() {
-        const section = document.getElementById("stamp-section")
-        const infoEl = document.getElementById("stamp-info")
+			async function updatePostageStampInfo() {
+				const section = document.getElementById('stamp-section')
+				const infoEl = document.getElementById('stamp-info')
 
-        try {
-          const batch = await client.getPostageBatch()
+				try {
+					const batch = await client.getPostageBatch()
 
-          if (batch) {
-            section.style.display = "block"
+					if (batch) {
+						section.style.display = 'block'
 
-            // Format TTL as human-readable time
-            const ttlText = formatTTL(batch.batchTTL)
+						// Format TTL as human-readable time
+						const ttlText = formatTTL(batch.batchTTL)
 
-            infoEl.innerHTML = `
+						infoEl.innerHTML = `
               <dt>Batch ID</dt>
               <dd>${batch.batchID}</dd>
               <dt>Utilization</dt>
               <dd>${batch.utilization.toFixed(2)}%</dd>
               <dt>Usable</dt>
-              <dd>${batch.usable ? "✓ Yes" : "✗ No"}</dd>
+              <dd>${batch.usable ? '✓ Yes' : '✗ No'}</dd>
               <dt>Depth</dt>
               <dd>${batch.depth}</dd>
               <dt>Bucket Depth</dt>
@@ -532,242 +536,247 @@ Hello, Swarm!</textarea
               <dt>Block Number</dt>
               <dd>${batch.blockNumber}</dd>
               <dt>Immutable</dt>
-              <dd>${batch.immutableFlag ? "Yes" : "No"}</dd>
+              <dd>${batch.immutableFlag ? 'Yes' : 'No'}</dd>
               <dt>TTL</dt>
               <dd>${ttlText}</dd>
             `
 
-            log(`Postage stamp loaded: ${batch.batchID.slice(0, 16)}...`, "info")
-          } else {
-            section.style.display = "none"
-            log("No postage stamp configured", "info")
-          }
-        } catch (error) {
-          section.style.display = "none"
-          log(`Failed to get postage stamp: ${error.message}`, "warn")
-        }
-      }
+						log(`Postage stamp loaded: ${batch.batchID.slice(0, 16)}...`, 'info')
+					} else {
+						section.style.display = 'none'
+						log('No postage stamp configured', 'info')
+					}
+				} catch (error) {
+					section.style.display = 'none'
+					log(`Failed to get postage stamp: ${error.message}`, 'warn')
+				}
+			}
 
-      try {
-        log("Starting client initialization...", "info");
-        await client.initialize();
-        socWriter = client.makeSOCWriter()
-        log("Client initialized successfully", "info");
+			try {
+				log('Starting client initialization...', 'info')
+				await client.initialize()
+				socWriter = client.makeSOCWriter()
+				log('Client initialized successfully', 'info')
 
-        // Set deferred checkbox default based on Bee node mode
-        await initializeDeferredDefault();
+				// Set deferred checkbox default based on Bee node mode
+				await initializeDeferredDefault()
 
-        // Check initial auth status
-        log("Checking auth status...", "info");
-        const status = await client.checkAuthStatus();
-        log(`Auth status: ${status.authenticated ? "authenticated" : "not authenticated"}`, "info");
-        await updateAuthStatus(status.authenticated);
-      } catch (error) {
-        log(`Initialization failed: ${error.message}`, "error");
-        alert(`Failed to initialize Swarm ID: ${error.message}\n\nPlease check the console for details.`);
-      }
+				// Check initial auth status
+				log('Checking auth status...', 'info')
+				const status = await client.checkAuthStatus()
+				log(`Auth status: ${status.authenticated ? 'authenticated' : 'not authenticated'}`, 'info')
+				await updateAuthStatus(status.authenticated)
+			} catch (error) {
+				log(`Initialization failed: ${error.message}`, 'error')
+				alert(
+					`Failed to initialize Swarm ID: ${error.message}\n\nPlease check the console for details.`,
+				)
+			}
 
-      async function updateAuthStatus(authenticated) {
-        const statusEl = document.getElementById("auth-status");
-        const uploadBtn = document.getElementById("upload-button");
-        const downloadBtn = document.getElementById("download-button");
-        const connectBtn = document.getElementById("connect-button");
-        const actUploadBtn = document.getElementById("act-upload-button");
-        const actDownloadBtn = document.getElementById("act-download-button");
-        const actAddGranteesBtn = document.getElementById("act-add-grantees-button");
-        const socUploadBtn = document.getElementById("soc-upload-button");
-        const socRawUploadBtn = document.getElementById("soc-raw-upload-button");
-        const socDownloadBtn = document.getElementById("soc-download-button");
-        const socRawDownloadBtn = document.getElementById("soc-raw-download-button");
+			async function updateAuthStatus(authenticated) {
+				const statusEl = document.getElementById('auth-status')
+				const uploadBtn = document.getElementById('upload-button')
+				const downloadBtn = document.getElementById('download-button')
+				const connectBtn = document.getElementById('connect-button')
+				const actUploadBtn = document.getElementById('act-upload-button')
+				const actDownloadBtn = document.getElementById('act-download-button')
+				const actAddGranteesBtn = document.getElementById('act-add-grantees-button')
+				const socUploadBtn = document.getElementById('soc-upload-button')
+				const socRawUploadBtn = document.getElementById('soc-raw-upload-button')
+				const socDownloadBtn = document.getElementById('soc-download-button')
+				const socRawDownloadBtn = document.getElementById('soc-raw-download-button')
 
-        if (authenticated) {
-          statusEl.className = "status authenticated";
-          statusEl.textContent = "✓ Status: Authenticated";
-          downloadBtn.disabled = false;
-          actDownloadBtn.disabled = false;
-          socDownloadBtn.disabled = false;
-          socRawDownloadBtn.disabled = false;
-          connectBtn.textContent = "Disconnect";
+				if (authenticated) {
+					statusEl.className = 'status authenticated'
+					statusEl.textContent = '✓ Status: Authenticated'
+					downloadBtn.disabled = false
+					actDownloadBtn.disabled = false
+					socDownloadBtn.disabled = false
+					socRawDownloadBtn.disabled = false
+					connectBtn.textContent = 'Disconnect'
 
-          // Check if upload is available (requires postage stamp)
-          try {
-            const connectionInfo = await client.getConnectionInfo();
-            log(`Connection info: canUpload=${connectionInfo.canUpload}, identity=${connectionInfo.identity}`, "info");
-            uploadBtn.disabled = !connectionInfo.canUpload;
-            actUploadBtn.disabled = !connectionInfo.canUpload;
-            actAddGranteesBtn.disabled = !connectionInfo.canUpload;
-            socUploadBtn.disabled = !connectionInfo.canUpload;
-            socRawUploadBtn.disabled = !connectionInfo.canUpload;
-            if (!connectionInfo.canUpload) {
-              log("Upload disabled: no postage stamp available", "warn");
-            }
-          } catch (error) {
-            log(`Failed to get connection info: ${error.message}`, "error");
-            uploadBtn.disabled = true;
-            actUploadBtn.disabled = true;
-            actAddGranteesBtn.disabled = true;
-            socUploadBtn.disabled = true;
-            socRawUploadBtn.disabled = true;
-          }
+					// Check if upload is available (requires postage stamp)
+					try {
+						const connectionInfo = await client.getConnectionInfo()
+						log(
+							`Connection info: canUpload=${connectionInfo.canUpload}, identity=${connectionInfo.identity}`,
+							'info',
+						)
+						uploadBtn.disabled = !connectionInfo.canUpload
+						actUploadBtn.disabled = !connectionInfo.canUpload
+						actAddGranteesBtn.disabled = !connectionInfo.canUpload
+						socUploadBtn.disabled = !connectionInfo.canUpload
+						socRawUploadBtn.disabled = !connectionInfo.canUpload
+						if (!connectionInfo.canUpload) {
+							log('Upload disabled: no postage stamp available', 'warn')
+						}
+					} catch (error) {
+						log(`Failed to get connection info: ${error.message}`, 'error')
+						uploadBtn.disabled = true
+						actUploadBtn.disabled = true
+						actAddGranteesBtn.disabled = true
+						socUploadBtn.disabled = true
+						socRawUploadBtn.disabled = true
+					}
 
-          // Fetch and display postage stamp info
-          await updatePostageStampInfo()
-        } else {
-          statusEl.className = "status unauthenticated";
-          statusEl.textContent = "✗ Status: Not authenticated";
-          uploadBtn.disabled = true;
-          downloadBtn.disabled = true;
-          actUploadBtn.disabled = true;
-          actDownloadBtn.disabled = true;
-          actAddGranteesBtn.disabled = true;
-          socUploadBtn.disabled = true;
-          socRawUploadBtn.disabled = true;
-          socDownloadBtn.disabled = true;
-          socRawDownloadBtn.disabled = true;
-          connectBtn.textContent = "Connect";
-          document.getElementById("stamp-section").style.display = "none"
-        }
-      }
+					// Fetch and display postage stamp info
+					await updatePostageStampInfo()
+				} else {
+					statusEl.className = 'status unauthenticated'
+					statusEl.textContent = '✗ Status: Not authenticated'
+					uploadBtn.disabled = true
+					downloadBtn.disabled = true
+					actUploadBtn.disabled = true
+					actDownloadBtn.disabled = true
+					actAddGranteesBtn.disabled = true
+					socUploadBtn.disabled = true
+					socRawUploadBtn.disabled = true
+					socDownloadBtn.disabled = true
+					socRawDownloadBtn.disabled = true
+					connectBtn.textContent = 'Connect'
+					document.getElementById('stamp-section').style.display = 'none'
+				}
+			}
 
-      // Upload handler
-      document
-        .getElementById("upload-button")
-        .addEventListener("click", async () => {
-          const data = document.getElementById("upload-data").value;
-          const resultEl = document.getElementById("upload-result");
-          const encryptCheckbox = document.getElementById("encrypt-checkbox");
-          const encrypt = encryptCheckbox.checked;
+			// Upload handler
+			document.getElementById('upload-button').addEventListener('click', async () => {
+				const data = document.getElementById('upload-data').value
+				const resultEl = document.getElementById('upload-result')
+				const encryptCheckbox = document.getElementById('encrypt-checkbox')
+				const encrypt = encryptCheckbox.checked
 
-          if (!data) {
-            log("No data to upload", "error");
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter data to upload</div>';
-            return;
-          }
+				if (!data) {
+					log('No data to upload', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Please enter data to upload</div>'
+					return
+				}
 
-          try {
-            log(`Uploading data (${data.length} bytes, encryption: ${encrypt ? "enabled" : "disabled"})...`, "info");
-            const encoder = new TextEncoder();
-            const uint8Data = encoder.encode(data);
+				try {
+					log(
+						`Uploading data (${data.length} bytes, encryption: ${encrypt ? 'enabled' : 'disabled'})...`,
+						'info',
+					)
+					const encoder = new TextEncoder()
+					const uint8Data = encoder.encode(data)
 
-            // Proxy will use stored batch ID from authentication
-            const deferred = document.getElementById("deferred-checkbox").checked
-            const result = await client.uploadData(uint8Data, {
-              pin: true,
-              encrypt: encrypt,
-              deferred: deferred,
-            });
-            log(`Upload successful! Reference: ${result.reference} (${result.reference.length} chars)`, "info");
-            resultEl.innerHTML = `<div class="result"><strong>Reference ${encrypt ? "(Encrypted)" : ""}:</strong><br/>${result.reference}<br/><small style="color: #666;">${result.reference.length} hex chars (${result.reference.length / 2} bytes)</small></div>`;
+					// Proxy will use stored batch ID from authentication
+					const deferred = document.getElementById('deferred-checkbox').checked
+					const result = await client.uploadData(uint8Data, {
+						pin: true,
+						encrypt: encrypt,
+						deferred: deferred,
+					})
+					log(
+						`Upload successful! Reference: ${result.reference} (${result.reference.length} chars)`,
+						'info',
+					)
+					resultEl.innerHTML = `<div class="result"><strong>Reference ${encrypt ? '(Encrypted)' : ''}:</strong><br/>${result.reference}<br/><small style="color: #666;">${result.reference.length} hex chars (${result.reference.length / 2} bytes)</small></div>`
 
-            // Auto-fill reference in download section
-            document.getElementById("reference").value = result.reference;
-          } catch (error) {
-            log(`Upload failed: ${error.message}`, "error");
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
-          }
-        });
+					// Auto-fill reference in download section
+					document.getElementById('reference').value = result.reference
+				} catch (error) {
+					log(`Upload failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      // Download handler
-      document
-        .getElementById("download-button")
-        .addEventListener("click", async () => {
-          const reference = document.getElementById("reference").value.trim();
-          const resultEl = document.getElementById("download-result");
+			// Download handler
+			document.getElementById('download-button').addEventListener('click', async () => {
+				const reference = document.getElementById('reference').value.trim()
+				const resultEl = document.getElementById('download-result')
 
-          if (!reference || (reference.length !== 64 && reference.length !== 128)) {
-            log("Invalid reference", "error");
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Invalid reference (must be 64 or 128 hex chars)</div>';
-            return;
-          }
+				if (!reference || (reference.length !== 64 && reference.length !== 128)) {
+					log('Invalid reference', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Invalid reference (must be 64 or 128 hex chars)</div>'
+					return
+				}
 
-          try {
-            log(`Downloading data from reference: ${reference}`, "info");
-            const data = await client.downloadData(reference);
-            const decoder = new TextDecoder();
-            const text = decoder.decode(data);
-            log(`Download successful! (${data.length} bytes)`, "info");
-            resultEl.innerHTML = `<div class="result"><strong>Downloaded Data:</strong><br/>${text}</div>`;
-          } catch (error) {
-            log(`Download failed: ${error.message}`, "error");
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
-          }
-        });
+				try {
+					log(`Downloading data from reference: ${reference}`, 'info')
+					const data = await client.downloadData(reference)
+					const decoder = new TextDecoder()
+					const text = decoder.decode(data)
+					log(`Download successful! (${data.length} bytes)`, 'info')
+					resultEl.innerHTML = `<div class="result"><strong>Downloaded Data:</strong><br/>${text}</div>`
+				} catch (error) {
+					log(`Download failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      document
-        .getElementById('connect-button')
-        .addEventListener("click", async () => {
-          const status = await client.checkAuthStatus();
-          if (status.authenticated) {
-            await client.disconnect();
-          } else {
-            client.connect();
-          }
-        })
+			document.getElementById('connect-button').addEventListener('click', async () => {
+				const status = await client.checkAuthStatus()
+				if (status.authenticated) {
+					await client.disconnect()
+				} else {
+					client.connect()
+				}
+			})
 
-      // ACT Upload handler
-      document
-        .getElementById("act-upload-button")
-        .addEventListener("click", async () => {
-          const data = document.getElementById("act-upload-data").value;
-          const granteesInput = document.getElementById("act-grantees").value;
-          const grantees = granteesInput
-            ? granteesInput.split(",").map(s => s.trim()).filter(Boolean)
-            : [];
-          const resultEl = document.getElementById("act-upload-result");
+			// ACT Upload handler
+			document.getElementById('act-upload-button').addEventListener('click', async () => {
+				const data = document.getElementById('act-upload-data').value
+				const granteesInput = document.getElementById('act-grantees').value
+				const grantees = granteesInput
+					? granteesInput
+							.split(',')
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: []
+				const resultEl = document.getElementById('act-upload-result')
 
-          if (!data) {
-            log("No data to upload", "error");
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter data to upload</div>';
-            return;
-          }
+				if (!data) {
+					log('No data to upload', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Please enter data to upload</div>'
+					return
+				}
 
-          // Validate grantee public keys (should be 66 hex chars - compressed public key)
-          const COMPRESSED_PUBKEY_LENGTH = 66;
-          for (const grantee of grantees) {
-            if (grantee.length !== COMPRESSED_PUBKEY_LENGTH || !/^[0-9a-fA-F]+$/.test(grantee)) {
-              log(`Invalid grantee public key: ${grantee}`, "error");
-              resultEl.innerHTML =
-                `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid grantee public key (must be ${COMPRESSED_PUBKEY_LENGTH} hex chars): ${grantee}</div>`;
-              return;
-            }
-          }
+				// Validate grantee public keys (should be 66 hex chars - compressed public key)
+				const COMPRESSED_PUBKEY_LENGTH = 66
+				for (const grantee of grantees) {
+					if (grantee.length !== COMPRESSED_PUBKEY_LENGTH || !/^[0-9a-fA-F]+$/.test(grantee)) {
+						log(`Invalid grantee public key: ${grantee}`, 'error')
+						resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid grantee public key (must be ${COMPRESSED_PUBKEY_LENGTH} hex chars): ${grantee}</div>`
+						return
+					}
+				}
 
-          try {
-            log(`Uploading with ACT (${grantees.length} grantees)...`, "info");
-            const encoder = new TextEncoder();
-            const uint8Data = encoder.encode(data);
+				try {
+					log(`Uploading with ACT (${grantees.length} grantees)...`, 'info')
+					const encoder = new TextEncoder()
+					const uint8Data = encoder.encode(data)
 
-            const deferred = document.getElementById("deferred-checkbox").checked
-            const beeCompatible = document.getElementById("act-bee-compatible").checked
-            const result = await client.actUploadData(uint8Data, grantees, {
-              deferred: deferred,
-              beeCompatible: beeCompatible,
-            });
+					const deferred = document.getElementById('deferred-checkbox').checked
+					const beeCompatible = document.getElementById('act-bee-compatible').checked
+					const result = await client.actUploadData(uint8Data, grantees, {
+						deferred: deferred,
+						beeCompatible: beeCompatible,
+					})
 
-            log(`ACT Upload successful!`, "info");
-            log(`Encrypted Reference: ${result.encryptedReference}`, "info");
-            log(`History Reference: ${result.historyReference}`, "info");
-            log(`Publisher Key: ${result.publisherPubKey}`, "info");
-            log(`ACT Reference: ${result.actReference}`, "info");
+					log(`ACT Upload successful!`, 'info')
+					log(`Encrypted Reference: ${result.encryptedReference}`, 'info')
+					log(`History Reference: ${result.historyReference}`, 'info')
+					log(`Publisher Key: ${result.publisherPubKey}`, 'info')
+					log(`ACT Reference: ${result.actReference}`, 'info')
 
-            // Auto-fill ACT download fields
-            document.getElementById("act-download-encrypted-ref").value = result.encryptedReference;
-            document.getElementById("act-download-history-ref").value = result.historyReference;
-            document.getElementById("act-download-publisher").value = result.publisherPubKey;
-            document.getElementById("act-add-history-ref").value = result.historyReference;
+					// Auto-fill ACT download fields
+					document.getElementById('act-download-encrypted-ref').value = result.encryptedReference
+					document.getElementById('act-download-history-ref').value = result.historyReference
+					document.getElementById('act-download-publisher').value = result.publisherPubKey
+					document.getElementById('act-add-history-ref').value = result.historyReference
 
-            const beeDownloadNote = beeCompatible
-              ? `<strong style="color: #28a745;">To download with Bee node (curl):</strong><br/>
+					const beeDownloadNote = beeCompatible
+						? `<strong style="color: #28a745;">To download with Bee node (curl):</strong><br/>
                 <pre style="background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; overflow-x: auto; white-space: pre-wrap; word-break: break-all;">curl "http://localhost:1633/bzz/${result.encryptedReference}/" \\
   -H "Swarm-Act: true" \\
   -H "Swarm-Act-Publisher: ${result.publisherPubKey}" \\
   -H "Swarm-Act-History-Address: ${result.historyReference}"</pre>`
-              : `<strong style="color: #b58100;">Bee node download disabled:</strong> use the ACT Download section (client-side decrypt).`
+						: `<strong style="color: #b58100;">Bee node download disabled:</strong> use the ACT Download section (client-side decrypt).`
 
-            resultEl.innerHTML = `
+					resultEl.innerHTML = `
               <div class="result">
                 <strong>ACT Upload Result:</strong><br/>
                 <strong>Encrypted Ref:</strong> ${result.encryptedReference}<br/>
@@ -778,127 +787,125 @@ Hello, Swarm!</textarea
                 <br/>
                 ${beeDownloadNote}
               </div>
-            `;
-          } catch (error) {
-            log(`ACT Upload failed: ${error.message}`, "error");
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
-          }
-        });
+            `
+				} catch (error) {
+					log(`ACT Upload failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      // ACT Download handler
-      document
-        .getElementById("act-download-button")
-        .addEventListener("click", async () => {
-          const encryptedRef = document.getElementById("act-download-encrypted-ref").value.trim();
-          const historyRef = document.getElementById("act-download-history-ref").value.trim();
-          const publisherPubKey = document.getElementById("act-download-publisher").value.trim();
-          const resultEl = document.getElementById("act-download-result");
+			// ACT Download handler
+			document.getElementById('act-download-button').addEventListener('click', async () => {
+				const encryptedRef = document.getElementById('act-download-encrypted-ref').value.trim()
+				const historyRef = document.getElementById('act-download-history-ref').value.trim()
+				const publisherPubKey = document.getElementById('act-download-publisher').value.trim()
+				const resultEl = document.getElementById('act-download-result')
 
-          const REFERENCE_LENGTH = 64;
-          const ENCRYPTED_REFERENCE_LENGTH = 128;
-          const COMPRESSED_PUBKEY_LENGTH = 66;
+				const REFERENCE_LENGTH = 64
+				const ENCRYPTED_REFERENCE_LENGTH = 128
+				const COMPRESSED_PUBKEY_LENGTH = 66
 
-          if (!encryptedRef || (encryptedRef.length !== REFERENCE_LENGTH && encryptedRef.length !== ENCRYPTED_REFERENCE_LENGTH)) {
-            log("Invalid encrypted reference", "error");
-            resultEl.innerHTML =
-              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid encrypted reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`;
-            return;
-          }
+				if (
+					!encryptedRef ||
+					(encryptedRef.length !== REFERENCE_LENGTH &&
+						encryptedRef.length !== ENCRYPTED_REFERENCE_LENGTH)
+				) {
+					log('Invalid encrypted reference', 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid encrypted reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`
+					return
+				}
 
-          if (
-            !historyRef ||
-            (historyRef.length !== REFERENCE_LENGTH &&
-              historyRef.length !== ENCRYPTED_REFERENCE_LENGTH)
-          ) {
-            log("Invalid history reference", "error");
-            resultEl.innerHTML =
-              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`;
-            return;
-          }
+				if (
+					!historyRef ||
+					(historyRef.length !== REFERENCE_LENGTH &&
+						historyRef.length !== ENCRYPTED_REFERENCE_LENGTH)
+				) {
+					log('Invalid history reference', 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`
+					return
+				}
 
-          if (!publisherPubKey || publisherPubKey.length !== COMPRESSED_PUBKEY_LENGTH) {
-            log("Invalid publisher public key", "error");
-            resultEl.innerHTML =
-              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid publisher public key (must be ${COMPRESSED_PUBKEY_LENGTH} hex chars)</div>`;
-            return;
-          }
+				if (!publisherPubKey || publisherPubKey.length !== COMPRESSED_PUBKEY_LENGTH) {
+					log('Invalid publisher public key', 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid publisher public key (must be ${COMPRESSED_PUBKEY_LENGTH} hex chars)</div>`
+					return
+				}
 
-          try {
-            log(`Downloading ACT data...`, "info");
-            log(`Encrypted Ref: ${encryptedRef}`, "info");
-            log(`History Ref: ${historyRef}`, "info");
-            log(`Publisher Key: ${publisherPubKey}`, "info");
+				try {
+					log(`Downloading ACT data...`, 'info')
+					log(`Encrypted Ref: ${encryptedRef}`, 'info')
+					log(`History Ref: ${historyRef}`, 'info')
+					log(`Publisher Key: ${publisherPubKey}`, 'info')
 
-            const data = await client.actDownloadData(encryptedRef, historyRef, publisherPubKey);
-            const decoder = new TextDecoder();
-            const text = decoder.decode(data);
+					const data = await client.actDownloadData(encryptedRef, historyRef, publisherPubKey)
+					const decoder = new TextDecoder()
+					const text = decoder.decode(data)
 
-            log(`ACT Download successful! (${data.length} bytes)`, "info");
-            resultEl.innerHTML = `<div class="result"><strong>Decrypted Data:</strong><br/>${text}</div>`;
-          } catch (error) {
-            log(`ACT Download failed: ${error.message}`, "error");
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
-          }
-        });
+					log(`ACT Download successful! (${data.length} bytes)`, 'info')
+					resultEl.innerHTML = `<div class="result"><strong>Decrypted Data:</strong><br/>${text}</div>`
+				} catch (error) {
+					log(`ACT Download failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      // ACT Add Grantees handler
-      document
-        .getElementById("act-add-grantees-button")
-        .addEventListener("click", async () => {
-          const historyRef = document.getElementById("act-add-history-ref").value.trim();
-          const granteesInput = document.getElementById("act-add-grantees").value;
-          const grantees = granteesInput
-            ? granteesInput.split(",").map(s => s.trim()).filter(Boolean)
-            : [];
-          const resultEl = document.getElementById("act-add-grantees-result");
+			// ACT Add Grantees handler
+			document.getElementById('act-add-grantees-button').addEventListener('click', async () => {
+				const historyRef = document.getElementById('act-add-history-ref').value.trim()
+				const granteesInput = document.getElementById('act-add-grantees').value
+				const grantees = granteesInput
+					? granteesInput
+							.split(',')
+							.map((s) => s.trim())
+							.filter(Boolean)
+					: []
+				const resultEl = document.getElementById('act-add-grantees-result')
 
-          const REFERENCE_LENGTH = 64;
-          const ENCRYPTED_REFERENCE_LENGTH = 128;
-          const COMPRESSED_PUBKEY_LENGTH = 66;
+				const REFERENCE_LENGTH = 64
+				const ENCRYPTED_REFERENCE_LENGTH = 128
+				const COMPRESSED_PUBKEY_LENGTH = 66
 
-          if (
-            !historyRef ||
-            (historyRef.length !== REFERENCE_LENGTH &&
-              historyRef.length !== ENCRYPTED_REFERENCE_LENGTH)
-          ) {
-            log("Invalid history reference", "error");
-            resultEl.innerHTML =
-              `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`;
-            return;
-          }
+				if (
+					!historyRef ||
+					(historyRef.length !== REFERENCE_LENGTH &&
+						historyRef.length !== ENCRYPTED_REFERENCE_LENGTH)
+				) {
+					log('Invalid history reference', 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid history reference (must be ${REFERENCE_LENGTH} or ${ENCRYPTED_REFERENCE_LENGTH} hex chars)</div>`
+					return
+				}
 
-          if (grantees.length === 0) {
-            log("No grantees specified", "error");
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter at least one grantee public key</div>';
-            return;
-          }
+				if (grantees.length === 0) {
+					log('No grantees specified', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Please enter at least one grantee public key</div>'
+					return
+				}
 
-          // Validate grantee public keys
-          for (const grantee of grantees) {
-            if (grantee.length !== COMPRESSED_PUBKEY_LENGTH || !/^[0-9a-fA-F]+$/.test(grantee)) {
-              log(`Invalid grantee public key: ${grantee}`, "error");
-              resultEl.innerHTML =
-                `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid grantee public key (must be ${COMPRESSED_PUBKEY_LENGTH} hex chars): ${grantee}</div>`;
-              return;
-            }
-          }
+				// Validate grantee public keys
+				for (const grantee of grantees) {
+					if (grantee.length !== COMPRESSED_PUBKEY_LENGTH || !/^[0-9a-fA-F]+$/.test(grantee)) {
+						log(`Invalid grantee public key: ${grantee}`, 'error')
+						resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Invalid grantee public key (must be ${COMPRESSED_PUBKEY_LENGTH} hex chars): ${grantee}</div>`
+						return
+					}
+				}
 
-          try {
-            log(`Adding ${grantees.length} grantee(s) to ACT...`, "info");
-            log(`Current History Ref: ${historyRef}`, "info");
+				try {
+					log(`Adding ${grantees.length} grantee(s) to ACT...`, 'info')
+					log(`Current History Ref: ${historyRef}`, 'info')
 
-            const result = await client.actAddGrantees(historyRef, grantees);
+					const result = await client.actAddGrantees(historyRef, grantees)
 
-            log(`Grantees added successfully!`, "info");
-            log(`New History Reference: ${result.historyReference}`, "info");
-            log(`New ACT Reference: ${result.actReference}`, "info");
+					log(`Grantees added successfully!`, 'info')
+					log(`New History Reference: ${result.historyReference}`, 'info')
+					log(`New ACT Reference: ${result.actReference}`, 'info')
 
-            // Update history reference fields with new reference
-            document.getElementById("act-download-history-ref").value = result.historyReference;
-            document.getElementById("act-add-history-ref").value = result.historyReference;
+					// Update history reference fields with new reference
+					document.getElementById('act-download-history-ref').value = result.historyReference
+					document.getElementById('act-add-history-ref').value = result.historyReference
 
-            resultEl.innerHTML = `
+					resultEl.innerHTML = `
               <div class="result">
                 <strong>Grantees Added Successfully!</strong><br/>
                 <strong>New History Ref:</strong> ${result.historyReference}<br/>
@@ -907,149 +914,143 @@ Hello, Swarm!</textarea
                 <br/>
                 <span style="color: #28a745;">✓ Use the new History Reference for future downloads/modifications</span>
               </div>
-            `;
-          } catch (error) {
-            log(`Add grantees failed: ${error.message}`, "error");
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`;
-          }
-        });
+            `
+				} catch (error) {
+					log(`Add grantees failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      // SOC Upload handlers
-      document
-        .getElementById("soc-upload-button")
-        .addEventListener("click", async () => {
-          if (!socWriter) {
-            log("SOC writer not initialized", "error")
-            return
-          }
-          const identifier = document.getElementById("soc-identifier").value.trim()
-          const data = document.getElementById("soc-upload-data").value
-          const resultEl = document.getElementById("soc-upload-result")
+			// SOC Upload handlers
+			document.getElementById('soc-upload-button').addEventListener('click', async () => {
+				if (!socWriter) {
+					log('SOC writer not initialized', 'error')
+					return
+				}
+				const identifier = document.getElementById('soc-identifier').value.trim()
+				const data = document.getElementById('soc-upload-data').value
+				const resultEl = document.getElementById('soc-upload-result')
 
-          if (!identifier || identifier.length !== 64) {
-            log("Invalid SOC identifier", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
-            return
-          }
+				if (!identifier || identifier.length !== 64) {
+					log('Invalid SOC identifier', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+					return
+				}
 
-          if (!data) {
-            log("No SOC data to upload", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter SOC payload</div>'
-            return
-          }
+				if (!data) {
+					log('No SOC data to upload', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Please enter SOC payload</div>'
+					return
+				}
 
-          try {
-            const uint8Data = new TextEncoder().encode(data)
-            log("Uploading encrypted SOC...", "info")
-            const result = await socWriter.upload(identifier, uint8Data)
+				try {
+					const uint8Data = new TextEncoder().encode(data)
+					log('Uploading encrypted SOC...', 'info')
+					const result = await socWriter.upload(identifier, uint8Data)
 
-            log(`SOC upload successful! Reference: ${result.reference}`, "info")
-            document.getElementById("soc-owner").value = result.owner
-            document.getElementById("soc-download-identifier").value = identifier
-            document.getElementById("soc-encryption-key").value = result.encryptionKey || ""
+					log(`SOC upload successful! Reference: ${result.reference}`, 'info')
+					document.getElementById('soc-owner').value = result.owner
+					document.getElementById('soc-download-identifier').value = identifier
+					document.getElementById('soc-encryption-key').value = result.encryptionKey || ''
 
-            resultEl.innerHTML = `
+					resultEl.innerHTML = `
               <div class="result">
                 <strong>Encrypted SOC Upload Result:</strong><br/>
                 <strong>Reference:</strong> ${result.reference}<br/>
                 <strong>Owner:</strong> ${result.owner}<br/>
-                <strong>Encryption Key:</strong> ${result.encryptionKey || "N/A"}<br/>
+                <strong>Encryption Key:</strong> ${result.encryptionKey || 'N/A'}<br/>
               </div>
             `
-          } catch (error) {
-            log(`SOC upload failed: ${error.message}`, "error")
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
-          }
-        })
+				} catch (error) {
+					log(`SOC upload failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      document
-        .getElementById("soc-raw-upload-button")
-        .addEventListener("click", async () => {
-          if (!socWriter) {
-            log("SOC writer not initialized", "error")
-            return
-          }
-          const identifier = document.getElementById("soc-identifier").value.trim()
-          const data = document.getElementById("soc-upload-data").value
-          const resultEl = document.getElementById("soc-upload-result")
-          document.getElementById("soc-encryption-key").value = ""
+			document.getElementById('soc-raw-upload-button').addEventListener('click', async () => {
+				if (!socWriter) {
+					log('SOC writer not initialized', 'error')
+					return
+				}
+				const identifier = document.getElementById('soc-identifier').value.trim()
+				const data = document.getElementById('soc-upload-data').value
+				const resultEl = document.getElementById('soc-upload-result')
+				document.getElementById('soc-encryption-key').value = ''
 
-          if (!identifier || identifier.length !== 64) {
-            log("Invalid SOC identifier", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
-            return
-          }
+				if (!identifier || identifier.length !== 64) {
+					log('Invalid SOC identifier', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+					return
+				}
 
-          if (!data) {
-            log("No SOC data to upload", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Please enter SOC payload</div>'
-            return
-          }
+				if (!data) {
+					log('No SOC data to upload', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Please enter SOC payload</div>'
+					return
+				}
 
-          try {
-            const uint8Data = new TextEncoder().encode(data)
-            log("Uploading raw SOC...", "info")
-            const result = await socWriter.rawUpload(identifier, uint8Data)
+				try {
+					const uint8Data = new TextEncoder().encode(data)
+					log('Uploading raw SOC...', 'info')
+					const result = await socWriter.rawUpload(identifier, uint8Data)
 
-            log(`SOC raw upload successful! Reference: ${result.reference}`, "info")
-            document.getElementById("soc-owner").value = result.owner
-            document.getElementById("soc-download-identifier").value = identifier
-            document.getElementById("soc-encryption-key").value = ""
+					log(`SOC raw upload successful! Reference: ${result.reference}`, 'info')
+					document.getElementById('soc-owner').value = result.owner
+					document.getElementById('soc-download-identifier').value = identifier
+					document.getElementById('soc-encryption-key').value = ''
 
-            resultEl.innerHTML = `
+					resultEl.innerHTML = `
               <div class="result">
                 <strong>Raw SOC Upload Result:</strong><br/>
                 <strong>Reference:</strong> ${result.reference}<br/>
                 <strong>Owner:</strong> ${result.owner}<br/>
               </div>
             `
-          } catch (error) {
-            log(`SOC raw upload failed: ${error.message}`, "error")
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
-          }
-        })
+				} catch (error) {
+					log(`SOC raw upload failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      // SOC Download handlers
-      document
-        .getElementById("soc-download-button")
-        .addEventListener("click", async () => {
-          const owner = document.getElementById("soc-owner").value.trim()
-          const identifier = document.getElementById("soc-download-identifier").value.trim()
-          const encryptionKey = document.getElementById("soc-encryption-key").value.trim()
-          const resultEl = document.getElementById("soc-download-result")
+			// SOC Download handlers
+			document.getElementById('soc-download-button').addEventListener('click', async () => {
+				const owner = document.getElementById('soc-owner').value.trim()
+				const identifier = document.getElementById('soc-download-identifier').value.trim()
+				const encryptionKey = document.getElementById('soc-encryption-key').value.trim()
+				const resultEl = document.getElementById('soc-download-result')
 
-          if (!owner || owner.length !== 40) {
-            log("Invalid SOC owner", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Owner must be 40 hex chars</div>'
-            return
-          }
+				if (!owner || owner.length !== 40) {
+					log('Invalid SOC owner', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Owner must be 40 hex chars</div>'
+					return
+				}
 
-          if (!identifier || identifier.length !== 64) {
-            log("Invalid SOC identifier", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
-            return
-          }
+				if (!identifier || identifier.length !== 64) {
+					log('Invalid SOC identifier', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+					return
+				}
 
-          if (!encryptionKey || encryptionKey.length !== 64) {
-            log("Missing encryption key", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Encryption key must be 64 hex chars</div>'
-            return
-          }
+				if (!encryptionKey || encryptionKey.length !== 64) {
+					log('Missing encryption key', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Encryption key must be 64 hex chars</div>'
+					return
+				}
 
-          try {
-            const reader = client.makeSOCReader(owner)
-            log("Downloading encrypted SOC...", "info")
-            const soc = await reader.download(identifier, encryptionKey)
-            const text = new TextDecoder().decode(soc.payload)
+				try {
+					const reader = client.makeSOCReader(owner)
+					log('Downloading encrypted SOC...', 'info')
+					const soc = await reader.download(identifier, encryptionKey)
+					const text = new TextDecoder().decode(soc.payload)
 
-            resultEl.innerHTML = `
+					resultEl.innerHTML = `
               <div class="result">
                 <strong>Encrypted SOC Download Result:</strong><br/>
                 <strong>Owner:</strong> ${soc.owner}<br/>
@@ -1057,40 +1058,38 @@ Hello, Swarm!</textarea
                 <strong>Payload:</strong> ${text}<br/>
               </div>
             `
-          } catch (error) {
-            log(`SOC download failed: ${error.message}`, "error")
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
-          }
-        })
+				} catch (error) {
+					log(`SOC download failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      document
-        .getElementById("soc-raw-download-button")
-        .addEventListener("click", async () => {
-          const owner = document.getElementById("soc-owner").value.trim()
-          const identifier = document.getElementById("soc-download-identifier").value.trim()
-          const resultEl = document.getElementById("soc-download-result")
+			document.getElementById('soc-raw-download-button').addEventListener('click', async () => {
+				const owner = document.getElementById('soc-owner').value.trim()
+				const identifier = document.getElementById('soc-download-identifier').value.trim()
+				const resultEl = document.getElementById('soc-download-result')
 
-          if (!owner || owner.length !== 40) {
-            log("Invalid SOC owner", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Owner must be 40 hex chars</div>'
-            return
-          }
+				if (!owner || owner.length !== 40) {
+					log('Invalid SOC owner', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Owner must be 40 hex chars</div>'
+					return
+				}
 
-          if (!identifier || identifier.length !== 64) {
-            log("Invalid SOC identifier", "error")
-            resultEl.innerHTML =
-              '<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
-            return
-          }
+				if (!identifier || identifier.length !== 64) {
+					log('Invalid SOC identifier', 'error')
+					resultEl.innerHTML =
+						'<div class="result" style="background: #f8d7da; color: #721c24;">Identifier must be 64 hex chars</div>'
+					return
+				}
 
-          try {
-            const reader = client.makeSOCReader(owner)
-            log("Downloading raw SOC...", "info")
-            const soc = await reader.rawDownload(identifier)
-            const text = new TextDecoder().decode(soc.payload)
+				try {
+					const reader = client.makeSOCReader(owner)
+					log('Downloading raw SOC...', 'info')
+					const soc = await reader.rawDownload(identifier)
+					const text = new TextDecoder().decode(soc.payload)
 
-            resultEl.innerHTML = `
+					resultEl.innerHTML = `
               <div class="result">
                 <strong>Raw SOC Download Result:</strong><br/>
                 <strong>Owner:</strong> ${soc.owner}<br/>
@@ -1098,18 +1097,18 @@ Hello, Swarm!</textarea
                 <strong>Payload:</strong> ${text}<br/>
               </div>
             `
-          } catch (error) {
-            log(`SOC raw download failed: ${error.message}`, "error")
-            resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
-          }
-        })
+				} catch (error) {
+					log(`SOC raw download failed: ${error.message}`, 'error')
+					resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;"><strong>Error:</strong> ${error.message}</div>`
+				}
+			})
 
-      log("Demo application ready", "info");
+			log('Demo application ready', 'info')
 
-      // Cleanup on page unload
-      window.addEventListener("beforeunload", () => {
-        client.destroy();
-      });
-    </script>
-  </body>
+			// Cleanup on page unload
+			window.addEventListener('beforeunload', () => {
+				client.destroy()
+			})
+		</script>
+	</body>
 </html>

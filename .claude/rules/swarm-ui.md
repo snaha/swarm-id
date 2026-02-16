@@ -1,6 +1,6 @@
 ---
 paths:
-  - "swarm-ui/**"
+  - 'swarm-ui/**'
 ---
 
 # swarm-ui Conventions
@@ -31,6 +31,7 @@ Use Svelte 5 runes for reactive state: `$state()`, `$derived()`, `$effect()`.
 - Style props passed directly: `<Divider --divider-color="black" />`
 
 Examples:
+
 ```svelte
 <Vertical --vertical-gap="var(--padding)" --vertical-align-items="start">
   <Typography>Content</Typography>
@@ -44,6 +45,7 @@ Examples:
 ## Component Properties Over CSS
 
 Always use component properties first, only resort to custom CSS if the property doesn't exist:
+
 ```svelte
 <!-- Good -->
 <Typography font="mono">code</Typography>
