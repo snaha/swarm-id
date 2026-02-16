@@ -72,11 +72,7 @@
 	}
 </script>
 
-<CreationLayout
-	title="Add postage stamp"
-	onClose={() =>
-		sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
->
+<CreationLayout title="Add postage stamp" onClose={navigateToConnectOrHome}>
 	{#snippet content()}
 		{#if !account}
 			<Typography>No account data found. Please start from the home page.</Typography>

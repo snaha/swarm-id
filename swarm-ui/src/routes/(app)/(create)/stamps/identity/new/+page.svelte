@@ -67,10 +67,7 @@
 	}
 </script>
 
-<CreationLayout
-	title="Add postage stamp (for identity)"
-	onClose={navigateToConnectOrHome}
->
+<CreationLayout title="Add postage stamp (for identity)" onClose={navigateToConnectOrHome}>
 	{#snippet content()}
 		{#if !account || !currentIdentityId}
 			<Typography>No account data found. Please start from the home page.</Typography>
