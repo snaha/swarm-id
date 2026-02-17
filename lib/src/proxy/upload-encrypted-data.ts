@@ -502,9 +502,13 @@ export async function uploadEncryptedSOC(
   options?: UploadOptions,
 ): Promise<UploadEncryptedSOCResult> {
   const startTime = performance.now()
+  const requestedKeyPrefix = encryptionKey
+    ? Binary.uint8ArrayToHex(encryptionKey).slice(0, 8)
+    : undefined
   console.log(`[UploadEncryptedSOC] Starting encrypted SOC upload`, {
     dataLength: data.length,
     identifier: identifier.toHex().substring(0, 16) + "...",
+    requestedKeyPrefix,
   })
 
   // Validate data size (1-4096 bytes)
@@ -521,6 +525,9 @@ export async function uploadEncryptedSOC(
       encryptedChunkAddress:
         encryptedChunk.address.toHex().substring(0, 16) + "...",
       encryptedChunkSize: encryptedChunk.data.length,
+      effectiveKeyPrefix: Binary.uint8ArrayToHex(
+        encryptedChunk.encryptionKey,
+      ).slice(0, 8),
     },
   )
 

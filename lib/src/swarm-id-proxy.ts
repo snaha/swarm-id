@@ -85,6 +85,7 @@ import {
   createAsyncEpochFinder,
   createEpochUpdater,
 } from "./proxy/feeds/epochs"
+import { EpochIndex } from "./proxy/feeds/epochs/epoch"
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
@@ -2168,6 +2169,12 @@ export class SwarmIdProxy {
       owner: owner ?? "proxy",
       at,
       hasEncryptionKey: !!encryptionKey,
+      encryptionKeyPrefix: encryptionKey
+        ? encryptionKey.slice(0, 8)
+        : undefined,
+      encryptionKeyIsAllZero: encryptionKey
+        ? /^0+$/.test(encryptionKey)
+        : undefined,
     })
 
     try {
@@ -2184,17 +2191,37 @@ export class SwarmIdProxy {
 
       const topicObj = new Topic(hexToUint8Array(topic))
       const ownerObj = new EthAddress(resolvedOwner)
-      const finder = createAsyncEpochFinder({
-        bee: this.bee,
-        topic: topicObj,
-        owner: ownerObj,
-        encryptionKey: encryptionKey ? hexToUint8Array(encryptionKey) : undefined,
-      })
-
       const atValue = this.parseFeedTimestamp(at)
       const afterValue =
         after !== undefined ? this.parseFeedTimestamp(after) : 0n
-      const reference = await finder.findAt(atValue, afterValue)
+      const epochKeyBytes = encryptionKey
+        ? hexToUint8Array(encryptionKey)
+        : undefined
+
+      console.log("[Proxy] Epoch debug lookup state", {
+        owner: resolvedOwner,
+        at: atValue.toString(),
+        withKey: undefined,
+        plain: undefined,
+      })
+
+      let reference: Uint8Array | undefined
+      if (epochKeyBytes) {
+        const encryptedFinder = createAsyncEpochFinder({
+          bee: this.bee,
+          topic: topicObj,
+          owner: ownerObj,
+          encryptionKey: epochKeyBytes,
+        })
+        reference = await encryptedFinder.findAt(atValue, afterValue)
+      } else {
+        const plainFinder = createAsyncEpochFinder({
+          bee: this.bee,
+          topic: topicObj,
+          owner: ownerObj,
+        })
+        reference = await plainFinder.findAt(atValue, afterValue)
+      }
       console.log("[Proxy] Epoch feed download reference result", {
         found: !!reference,
         length: reference ? reference.length : 0,
@@ -2235,6 +2262,12 @@ export class SwarmIdProxy {
       at,
       referenceLength: reference.length,
       hasEncryptionKey: !!encryptionKey,
+      encryptionKeyPrefix: encryptionKey
+        ? encryptionKey.slice(0, 8)
+        : undefined,
+      encryptionKeyIsAllZero: encryptionKey
+        ? /^0+$/.test(encryptionKey)
+        : undefined,
     })
 
     try {
@@ -2251,21 +2284,80 @@ export class SwarmIdProxy {
       const signerKey = signer ?? this.appSecret
       const signerKeyObj = new PrivateKey(signerKey)
       const topicObj = new Topic(hexToUint8Array(topic))
+      const ownerHex = signerKeyObj.publicKey().address().toHex()
+      const ownerAddress = new EthAddress(ownerHex)
       const updater = createEpochUpdater({
         bee: this.bee,
         topic: topicObj,
-        owner: signerKeyObj.publicKey().address(),
+        owner: ownerAddress,
         signer: signerKeyObj,
       })
-
       const atValue = this.parseFeedTimestamp(at)
+      const epochEncryptionKey = encryptionKey
+        ? hexToUint8Array(encryptionKey)
+        : undefined
+      // Keep epoch writes bounded and deterministic: write directly to level-0
+      // for this timestamp instead of reconstructing network state.
+      const previousState =
+        atValue > 0n
+          ? {
+              lastUpdate: atValue - 1n,
+              // Seed at the parent epoch of `at` so updater.next() deterministically
+              // descends to the level-0 epoch at exactly `at`.
+              lastEpoch: new EpochIndex(atValue & ~1n, 1),
+            }
+          : undefined
+      if (previousState) {
+        updater.setState(previousState)
+      }
+      console.log("[Proxy] Epoch upload previous state", {
+        owner: ownerHex,
+        at: atValue.toString(),
+        previousState: previousState
+          ? {
+              timestamp: previousState.lastUpdate.toString(),
+              epochStart: previousState.lastEpoch.start.toString(),
+              epochLevel: previousState.lastEpoch.level,
+            }
+          : undefined,
+        hasEncryptionKey: !!epochEncryptionKey,
+      })
+
       const referenceBytes = hexToUint8Array(reference)
       const socAddress = await updater.update(
         atValue,
         referenceBytes,
         this.stamper,
-        encryptionKey ? hexToUint8Array(encryptionKey) : undefined,
+        epochEncryptionKey,
       )
+      const nextState = updater.getState()
+      console.log("[Proxy] Epoch upload next state", {
+        socAddress: uint8ArrayToHex(socAddress),
+        state: {
+          lastUpdate: nextState.lastUpdate.toString(),
+          lastEpoch: nextState.lastEpoch
+            ? {
+                start: nextState.lastEpoch.start.toString(),
+                level: nextState.lastEpoch.level,
+              }
+            : undefined,
+        },
+      })
+
+      const readBackFinder = createAsyncEpochFinder({
+        bee: this.bee,
+        topic: topicObj,
+        owner: ownerAddress,
+        encryptionKey: epochEncryptionKey,
+      })
+      // Upload read-back should verify the exact timestamp write and avoid
+      // broad fallback scans over historical leaves on poisoned networks.
+      const readBack = await readBackFinder.findAt(atValue, atValue)
+      console.log("[Proxy] Epoch upload read-back", {
+        at: atValue.toString(),
+        found: !!readBack,
+        length: readBack ? readBack.length : 0,
+      })
 
       await this.saveStamperState()
 
@@ -2747,12 +2839,12 @@ export class SwarmIdProxy {
       if (index !== undefined) {
         resolvedIndex = this.parseFeedIndex(index)
       } else {
-          const latest = await this.findLatestSequentialIndex(
-            topicBytes,
-            ownerAddress,
-            requestOptions,
-            lookupTimeoutMs,
-          )
+        const latest = await this.findLatestSequentialIndex(
+          topicBytes,
+          ownerAddress,
+          requestOptions,
+          lookupTimeoutMs,
+        )
         resolvedIndex =
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }
@@ -2852,12 +2944,12 @@ export class SwarmIdProxy {
       if (index !== undefined) {
         resolvedIndex = this.parseFeedIndex(index)
       } else {
-          const latest = await this.findLatestSequentialIndex(
-            topicBytes,
-            ownerAddress,
-            requestOptions,
-            lookupTimeoutMs,
-          )
+        const latest = await this.findLatestSequentialIndex(
+          topicBytes,
+          ownerAddress,
+          requestOptions,
+          lookupTimeoutMs,
+        )
         resolvedIndex =
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }
@@ -2966,12 +3058,12 @@ export class SwarmIdProxy {
       if (index !== undefined) {
         resolvedIndex = this.parseFeedIndex(index)
       } else {
-          const latest = await this.findLatestSequentialIndex(
-            topicBytes,
-            ownerAddress,
-            requestOptions,
-            lookupTimeoutMs,
-          )
+        const latest = await this.findLatestSequentialIndex(
+          topicBytes,
+          ownerAddress,
+          requestOptions,
+          lookupTimeoutMs,
+        )
         resolvedIndex =
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }

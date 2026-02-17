@@ -6,11 +6,14 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { Bee } from "@ethersphere/bee-js"
+import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import type { EpochFinder } from "./types"
 import { downloadEncryptedSOC } from "../../download-data"
+
+const EPOCH_LOOKUP_TIMEOUT_MS = 2000
+const MAX_LEAF_BACKSCAN = 128n
 
 /**
  * Async concurrent finder for epoch-based feeds
@@ -36,10 +39,45 @@ export class AsyncEpochFinder implements EpochFinder {
    */
   async findAt(
     at: bigint,
-    _after: bigint = 0n,
+    after: bigint = 0n,
   ): Promise<Uint8Array | undefined> {
+    // Fast path: exact timestamp updates are written at level-0 and should be
+    // retrievable without traversing potentially poisoned ancestors.
+    const exactEpoch = new EpochIndex(at, 0)
+    try {
+      const exact = await this.getEpochChunk(at, exactEpoch)
+      if (exact) {
+        return exact
+      }
+    } catch {
+      // Ignore and fall back to tree traversal.
+    }
+
     // Start from top epoch and traverse down
-    return this.findAtEpoch(at, new EpochIndex(0n, MAX_LEVEL), undefined)
+    const traversed = await this.findAtEpoch(
+      at,
+      new EpochIndex(0n, MAX_LEVEL),
+      undefined,
+    )
+    if (traversed) {
+      return traversed
+    }
+
+    // Recovery fallback for poisoned-ancestor histories: only enable bounded
+    // leaf back-scan when root epoch exists but is invalid for `at`.
+    try {
+      const rootProbe = await this.getEpochChunk(
+        at,
+        new EpochIndex(0n, MAX_LEVEL),
+      )
+      if (rootProbe === undefined) {
+        return this.findPreviousLeaf(at, after)
+      }
+    } catch {
+      // Root missing - no evidence of poisoned ancestors.
+    }
+
+    return undefined
   }
 
   /**
@@ -55,13 +93,18 @@ export class AsyncEpochFinder implements EpochFinder {
     epoch: EpochIndex,
     currentBest: Uint8Array | undefined,
   ): Promise<Uint8Array | undefined> {
-    // Try to get chunk at this epoch
+    // Try to get chunk at this epoch.
+    // getEpochChunk throws when chunk is missing, returns undefined when
+    // chunk exists but timestamp is invalid for `at`.
     let chunk: Uint8Array | undefined
     try {
-      chunk = await this.getEpoch(at, epoch)
+      chunk = await this.getEpochChunk(at, epoch)
     } catch (error) {
-      // Chunk not found at this epoch
-      chunk = undefined
+      // Chunk missing at this epoch.
+      if (epoch.isLeft()) {
+        return currentBest
+      }
+      return this.findAtEpoch(epoch.start - 1n, epoch.left(), currentBest)
     }
 
     // If chunk found and valid
@@ -75,7 +118,16 @@ export class AsyncEpochFinder implements EpochFinder {
       return this.findAtEpoch(at, epoch.childAt(at), chunk)
     }
 
-    // Chunk not found or timestamp invalid
+    // Chunk exists but timestamp invalid.
+    // Keep descending towards the target epoch first, because finer epochs
+    // may still contain a valid update.
+    if (epoch.level > 0) {
+      const down = await this.findAtEpoch(at, epoch.childAt(at), currentBest)
+      if (down) {
+        return down
+      }
+    }
+
     if (epoch.isLeft()) {
       // Left child - return best we have so far
       return currentBest
@@ -84,27 +136,6 @@ export class AsyncEpochFinder implements EpochFinder {
     // Right child - need to search left sibling branch
     return this.findAtEpoch(epoch.start - 1n, epoch.left(), currentBest)
   }
-
-  /**
-   * Attempt to fetch chunk for an epoch
-   *
-   * @param at - Target timestamp (for validation)
-   * @param epoch - Epoch to fetch
-   * @returns Chunk data if found and valid, undefined otherwise
-   */
-  private async getEpoch(
-    at: bigint,
-    epoch: EpochIndex,
-  ): Promise<Uint8Array | undefined> {
-    try {
-      // getEpochChunk now validates timestamp internally
-      return await this.getEpochChunk(at, epoch)
-    } catch (error) {
-      // Chunk not found
-      return undefined
-    }
-  }
-
   /**
    * Fetch chunk for a specific epoch
    *
@@ -117,6 +148,9 @@ export class AsyncEpochFinder implements EpochFinder {
     at: bigint,
     epoch: EpochIndex,
   ): Promise<Uint8Array | undefined> {
+    const requestOptions: BeeRequestOptions = {
+      timeout: EPOCH_LOOKUP_TIMEOUT_MS,
+    }
     // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
     const epochHash = await epoch.marshalBinary()
     const identifier = Binary.keccak256(
@@ -130,6 +164,7 @@ export class AsyncEpochFinder implements EpochFinder {
         this.owner,
         identifier,
         this.encryptionKey,
+        requestOptions,
       )
       payload = soc.payload
     } else {
@@ -141,13 +176,17 @@ export class AsyncEpochFinder implements EpochFinder {
       )
 
       // Download chunk
-      const chunkData = await this.bee.downloadChunk(address.toHex())
+      const chunkData = await this.bee.downloadChunk(
+        address.toHex(),
+        undefined,
+        requestOptions,
+      )
 
-    // Extract payload from SOC (Single Owner Chunk)
-    // SOC structure: [identifier (32 bytes)][signature (65 bytes)][span (8 bytes)][payload]
-    const IDENTIFIER_SIZE = 32
-    const SIGNATURE_SIZE = 65
-    const SPAN_SIZE = 8
+      // Extract payload from SOC (Single Owner Chunk)
+      // SOC structure: [identifier (32 bytes)][signature (65 bytes)][span (8 bytes)][payload]
+      const IDENTIFIER_SIZE = 32
+      const SIGNATURE_SIZE = 65
+      const SPAN_SIZE = 8
       const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
 
       // Read span to get payload length
@@ -182,5 +221,39 @@ export class AsyncEpochFinder implements EpochFinder {
 
     // Return reference only (skip 8-byte timestamp prefix)
     return payload.slice(TIMESTAMP_SIZE)
+  }
+
+  private async findPreviousLeaf(
+    at: bigint,
+    after: bigint,
+  ): Promise<Uint8Array | undefined> {
+    if (at === 0n) {
+      return undefined
+    }
+
+    const minAt = after > 0n ? after : 0n
+    const lowerBound =
+      at > MAX_LEAF_BACKSCAN && at - MAX_LEAF_BACKSCAN > minAt
+        ? at - MAX_LEAF_BACKSCAN
+        : minAt
+
+    let probe = at - 1n
+    while (probe >= lowerBound) {
+      try {
+        const leaf = await this.getEpochChunk(at, new EpochIndex(probe, 0))
+        if (leaf) {
+          return leaf
+        }
+      } catch {
+        // Missing leaf at probe timestamp.
+      }
+
+      if (probe === 0n) {
+        break
+      }
+      probe--
+    }
+
+    return undefined
   }
 }

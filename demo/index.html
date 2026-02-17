@@ -1382,6 +1382,13 @@ Secret message for ACT test!</textarea
         return null
       }
 
+      const DEFAULT_EPOCH_ENCRYPTION_KEY = "0".repeat(64)
+
+      const resolveEpochEncryptionKey = (value) => {
+        const key = (value || "").trim()
+        return key || DEFAULT_EPOCH_ENCRYPTION_KEY
+      }
+
       // Feed Upload Payload
       document
         .getElementById("feed-upload-payload-button")
@@ -1416,11 +1423,24 @@ Secret message for ACT test!</textarea
               if (!atRaw) {
                 atRaw = Math.floor(Date.now() / 1000).toString()
               }
+              const epochEncryptionKey = resolveEpochEncryptionKey(uploadEncryptionKey)
+              if (epochEncryptionKey.length !== 64) {
+                log("Invalid upload encryption key", "error")
+                resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Upload encryption key must be 64 hex chars</div>`
+                uploadBtn.disabled = false
+                return
+              }
               const writer = client.makeEpochFeedWriter({ topic })
               const uploadResult = await writer.uploadPayload(payload, {
                 at: atRaw,
+                encryptionKey: epochEncryptionKey,
               })
-              setDownloadEncryptionKeyFromReference(uploadResult.reference)
+              log(
+                `Epoch upload key: ${epochEncryptionKey.slice(0, 8)}... (allZero=${/^0+$/.test(epochEncryptionKey)})`,
+                "info",
+              )
+              setDownloadEncryptionKey(epochEncryptionKey)
+              document.getElementById("feed-upload-encryption-key").value = epochEncryptionKey
               document.getElementById("feed-download-at").value = atRaw
               try {
                 document.getElementById("feed-owner").value =
@@ -1501,11 +1521,24 @@ Secret message for ACT test!</textarea
               if (!atRaw) {
                 atRaw = Math.floor(Date.now() / 1000).toString()
               }
+              const epochEncryptionKey = resolveEpochEncryptionKey(uploadEncryptionKey)
+              if (epochEncryptionKey.length !== 64) {
+                log("Invalid upload encryption key", "error")
+                resultEl.innerHTML = `<div class="result" style="background: #f8d7da; color: #721c24;">Upload encryption key must be 64 hex chars</div>`
+                uploadBtn.disabled = false
+                return
+              }
               const writer = client.makeEpochFeedWriter({ topic })
               const uploadResult = await writer.uploadReference(reference, {
                 at: atRaw,
+                encryptionKey: epochEncryptionKey,
               })
-              setDownloadEncryptionKeyFromReference(reference)
+              log(
+                `Epoch upload key: ${epochEncryptionKey.slice(0, 8)}... (allZero=${/^0+$/.test(epochEncryptionKey)})`,
+                "info",
+              )
+              setDownloadEncryptionKey(epochEncryptionKey)
+              document.getElementById("feed-upload-encryption-key").value = epochEncryptionKey
               document.getElementById("feed-download-at").value = atRaw
               try {
                 document.getElementById("feed-owner").value =
@@ -1593,47 +1626,18 @@ Secret message for ACT test!</textarea
 
           try {
             if (isEpochFeed()) {
+              encryptionKey = resolveEpochEncryptionKey(encryptionKey)
+              encryptionKeyInput.value = encryptionKey
+              log(
+                `Epoch download key: ${encryptionKey.slice(0, 8)}... (allZero=${/^0+$/.test(encryptionKey)})`,
+                "info",
+              )
               let atRaw = document.getElementById("feed-download-at").value.trim()
               if (!atRaw) {
-                const now = Math.floor(Date.now() / 1000).toString()
-                document.getElementById("feed-download-at").value = now
-                log(`Epoch feed download using current time: ${now}`, "info")
-              log(
-                `Epoch download payload start: at=${now} topic=${topic} owner=${owner || "proxy"}`,
-                "info",
-              )
-              const reader = client.makeEpochFeedReader({ topic, owner })
-              let result = await reader.downloadPayload({
-                at: now,
-                encryptionKey: encryptionKey || undefined,
-              })
-              if (!result.reference && owner) {
-                log("Epoch download retrying without owner", "info")
-                const fallbackReader = client.makeEpochFeedReader({ topic })
-                result = await fallbackReader.downloadPayload({
-                  at: now,
-                  encryptionKey: encryptionKey || undefined,
-                })
+                atRaw = Math.floor(Date.now() / 1000).toString()
+                document.getElementById("feed-download-at").value = atRaw
+                log(`Epoch feed download using current time: ${atRaw}`, "info")
               }
-              log(
-                `Epoch download payload result: reference=${result.reference || "none"} payloadBytes=${result.payload ? result.payload.length : 0}`,
-                "info",
-              )
-              if (!result.reference || !result.payload) {
-                resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Not found</div>`
-                if (result.reference) {
-                  resultEl.innerHTML += `<div class="result"><strong>Reference:</strong><br/>${result.reference}</div>`
-                }
-                log("Epoch feed download payload not found", "info")
-              } else {
-                const text = new TextDecoder().decode(result.payload)
-                const hex = bytesToHex(result.payload)
-                resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Payload: ${text}<br/>Reference: ${result.reference}</div>`
-                resultEl.innerHTML += `<div class="result"><strong>Payload (hex):</strong><br/>${hex}</div>`
-                log("Epoch feed download successful", "info")
-              }
-              return
-            }
               log(
                 `Epoch download payload start: at=${atRaw} topic=${topic} owner=${owner || "proxy"}`,
                 "info",
@@ -1641,14 +1645,14 @@ Secret message for ACT test!</textarea
               const reader = client.makeEpochFeedReader({ topic, owner })
               let result = await reader.downloadPayload({
                 at: atRaw,
-                encryptionKey: encryptionKey || undefined,
+                encryptionKey,
               })
               if (!result.reference && owner) {
                 log("Epoch download retrying without owner", "info")
                 const fallbackReader = client.makeEpochFeedReader({ topic })
                 result = await fallbackReader.downloadPayload({
                   at: atRaw,
-                  encryptionKey: encryptionKey || undefined,
+                  encryptionKey,
                 })
               }
               log(
@@ -1732,32 +1736,18 @@ Secret message for ACT test!</textarea
 
           try {
             if (isEpochFeed()) {
-              let atRaw = document.getElementById("feed-download-at").value.trim()
-              if (!atRaw) {
-                const now = Math.floor(Date.now() / 1000).toString()
-                document.getElementById("feed-download-at").value = now
-                log(`Epoch feed download using current time: ${now}`, "info")
+              encryptionKey = resolveEpochEncryptionKey(encryptionKey)
+              encryptionKeyInput.value = encryptionKey
               log(
-                `Epoch download reference start: at=${now} topic=${topic} owner=${owner || "proxy"}`,
+                `Epoch download key: ${encryptionKey.slice(0, 8)}... (allZero=${/^0+$/.test(encryptionKey)})`,
                 "info",
               )
-              const reader = client.makeEpochFeedReader({ topic, owner })
-              let result = await reader.downloadReference({
-                at: now,
-                encryptionKey: encryptionKey || undefined,
-              })
-              if (!result.reference && owner) {
-                log("Epoch download retrying without owner", "info")
-                const fallbackReader = client.makeEpochFeedReader({ topic })
-                result = await fallbackReader.downloadReference({
-                  at: now,
-                  encryptionKey: encryptionKey || undefined,
-                })
+              let atRaw = document.getElementById("feed-download-at").value.trim()
+              if (!atRaw) {
+                atRaw = Math.floor(Date.now() / 1000).toString()
+                document.getElementById("feed-download-at").value = atRaw
+                log(`Epoch feed download using current time: ${atRaw}`, "info")
               }
-              resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Reference:</strong><br/>${result.reference || "Not found"}</div>`
-              log("Epoch feed download reference successful", "info")
-              return
-            }
               log(
                 `Epoch download reference start: at=${atRaw} topic=${topic} owner=${owner || "proxy"}`,
                 "info",
@@ -1765,14 +1755,14 @@ Secret message for ACT test!</textarea
               const reader = client.makeEpochFeedReader({ topic, owner })
               let result = await reader.downloadReference({
                 at: atRaw,
-                encryptionKey: encryptionKey || undefined,
+                encryptionKey,
               })
               if (!result.reference && owner) {
                 log("Epoch download retrying without owner", "info")
                 const fallbackReader = client.makeEpochFeedReader({ topic })
                 result = await fallbackReader.downloadReference({
                   at: atRaw,
-                  encryptionKey: encryptionKey || undefined,
+                  encryptionKey,
                 })
               }
               resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Reference:</strong><br/>${result.reference || "Not found"}</div>`

@@ -237,4 +237,13 @@ describe("next", () => {
     expect(result.start).toBeLessThanOrEqual(200n)
     expect(result.level).toBeGreaterThanOrEqual(0)
   })
+
+  it("proxy-style seeded parent state should descend to exact level-0 epoch", () => {
+    for (let at = 1n; at < 128n; at++) {
+      const seededParent = new EpochIndex(at & ~1n, 1)
+      const result = next(seededParent, at - 1n, at)
+      expect(result.level).toBe(0)
+      expect(result.start).toBe(at)
+    }
+  })
 })

@@ -1689,9 +1689,17 @@ export class SwarmIdClient {
     ): Promise<EpochFeedDownloadPayloadResult> => {
       const result = await downloadReference(options)
       if (!result.reference) {
-        return { reference: undefined, payload: undefined, encryptionKey: undefined }
+        return {
+          reference: undefined,
+          payload: undefined,
+          encryptionKey: undefined,
+        }
       }
-      const payload = await this.downloadData(result.reference, undefined, requestOptions)
+      const payload = await this.downloadData(
+        result.reference,
+        undefined,
+        requestOptions,
+      )
       return {
         reference: result.reference,
         payload,
@@ -1789,9 +1797,17 @@ export class SwarmIdClient {
     ): Promise<EpochFeedDownloadPayloadResult> => {
       const result = await downloadReference(options)
       if (!result.reference) {
-        return { reference: undefined, payload: undefined, encryptionKey: undefined }
+        return {
+          reference: undefined,
+          payload: undefined,
+          encryptionKey: undefined,
+        }
       }
-      const payload = await this.downloadData(result.reference, undefined, requestOptions)
+      const payload = await this.downloadData(
+        result.reference,
+        undefined,
+        requestOptions,
+      )
       return {
         reference: result.reference,
         payload,
@@ -1811,7 +1827,8 @@ export class SwarmIdClient {
       const cleanRef = normalizedRef.startsWith("0x")
         ? normalizedRef.slice(2)
         : normalizedRef
-      const derivedKey = cleanRef.length === 128 ? cleanRef.slice(64) : undefined
+      const derivedKey =
+        cleanRef.length === 128 ? cleanRef.slice(64) : undefined
       const feedKey = options?.encryptionKey ?? derivedKey
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
