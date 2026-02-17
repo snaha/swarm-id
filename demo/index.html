@@ -1341,11 +1341,6 @@ Secret message for ACT test!</textarea
         if (indexRaw) {
           return options
         }
-        const lastIndex = indexInput.dataset.lastIndex
-        if (lastIndex) {
-          indexInput.value = lastIndex
-          options.index = lastIndex
-        }
         return options
       }
 
@@ -1440,9 +1435,7 @@ Secret message for ACT test!</textarea
               const indexInput = document.getElementById("feed-index")
               const indexRaw = indexInput.value.trim()
               if (!indexRaw) {
-                const nextIndex = indexInput.dataset.nextIndex || "0"
-                indexInput.value = nextIndex
-                options.index = nextIndex
+                // Let feed algorithm pick next index
               }
               if (uploadEncryptionKey && uploadEncryptionKey.length !== 64) {
                 log("Invalid upload encryption key", "error")
@@ -1454,16 +1447,14 @@ Secret message for ACT test!</textarea
               const result = uploadEncryptionKey
                 ? await writer.uploadRawPayload(payload, options, uploadEncryptionKey)
                 : await writer.uploadPayload(payload, options)
-              resultEl.innerHTML = `<div class="result"><strong>Sequential Payload Upload:</strong><br/>Reference: ${result.reference}<br/>Owner: ${result.owner}<br/>Encryption Key: ${result.encryptionKey || "N/A"}</div>`
-              setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || "")
+              const currentIndex = result.feedIndex ?? "N/A"
+              resultEl.innerHTML = `<div class="result"><strong>Sequential Payload Upload:</strong><br/>Index: ${currentIndex}<br/>Reference: ${result.reference}<br/>Owner: ${result.owner}<br/>Encryption Key: ${result.encryptionKey || "N/A"}</div>`
+              setDownloadEncryptionKey(
+                result.encryptionKey || uploadEncryptionKey || "",
+              )
               document.getElementById("feed-owner").value = result.owner || ""
-              const currentIndex = indexInput.value || "0"
-              indexInput.value = currentIndex
-              indexInput.dataset.lastIndex = currentIndex
               const atInput = document.getElementById("feed-at")
               atInput.value = ""
-              const nextIndex = (BigInt(currentIndex) + 1n).toString()
-              indexInput.dataset.nextIndex = nextIndex
               const payloadInput = document.getElementById("feed-upload-payload")
               payloadInput.value = incrementPayloadValue(payloadInput.value)
               log(`Sequential payload upload successful: ${result.reference}`, "info")
@@ -1529,9 +1520,7 @@ Secret message for ACT test!</textarea
               const indexInput = document.getElementById("feed-index")
               const indexRaw = indexInput.value.trim()
               if (!indexRaw) {
-                const nextIndex = indexInput.dataset.nextIndex || "0"
-                indexInput.value = nextIndex
-                options.index = nextIndex
+                // Let feed algorithm pick next index
               }
               if (uploadEncryptionKey && uploadEncryptionKey.length !== 64) {
                 log("Invalid upload encryption key", "error")
@@ -1547,16 +1536,14 @@ Secret message for ACT test!</textarea
                     uploadEncryptionKey,
                   )
                 : await writer.uploadReference(reference, options)
-              resultEl.innerHTML = `<div class="result"><strong>Sequential Reference Upload:</strong><br/>Reference: ${result.reference}<br/>Owner: ${result.owner}<br/>Encryption Key: ${result.encryptionKey || "N/A"}</div>`
-              setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || "")
+              const currentIndex = result.feedIndex ?? "N/A"
+              resultEl.innerHTML = `<div class="result"><strong>Sequential Reference Upload:</strong><br/>Index: ${currentIndex}<br/>Reference: ${result.reference}<br/>Owner: ${result.owner}<br/>Encryption Key: ${result.encryptionKey || "N/A"}</div>`
+              setDownloadEncryptionKey(
+                result.encryptionKey || uploadEncryptionKey || "",
+              )
               document.getElementById("feed-owner").value = result.owner || ""
-              const currentIndex = indexInput.value || "0"
-              indexInput.value = currentIndex
-              indexInput.dataset.lastIndex = currentIndex
               const atInput = document.getElementById("feed-at")
               atInput.value = ""
-              const nextIndex = (BigInt(currentIndex) + 1n).toString()
-              indexInput.dataset.nextIndex = nextIndex
               log(`Sequential reference upload successful: ${result.reference}`, "info")
             }
           } catch (error) {
@@ -1575,7 +1562,8 @@ Secret message for ACT test!</textarea
           const downloadOtherBtn = document.getElementById("feed-download-reference-button")
           const resultEl = document.getElementById("feed-download-result")
           const topic = document.getElementById("feed-topic").value.trim()
-          const encryptionKey = document.getElementById("feed-encryption-key").value.trim()
+          const encryptionKeyInput = document.getElementById("feed-encryption-key")
+          let encryptionKey = encryptionKeyInput.value.trim()
           const options = ensureDownloadIndex(getFeedDownloadOptions())
           const owner = getFeedOwner()
 
@@ -1615,14 +1603,27 @@ Secret message for ACT test!</textarea
                 "info",
               )
               const reader = client.makeEpochFeedReader({ topic, owner })
-              let result = await reader.downloadPayload({ at: now })
+              let result = await reader.downloadPayload({
+                at: now,
+                encryptionKey: encryptionKey || undefined,
+              })
               if (!result.reference && owner) {
                 log("Epoch download retrying without owner", "info")
                 const fallbackReader = client.makeEpochFeedReader({ topic })
-                result = await fallbackReader.downloadPayload({ at: now })
+                result = await fallbackReader.downloadPayload({
+                  at: now,
+                  encryptionKey: encryptionKey || undefined,
+                })
               }
+              log(
+                `Epoch download payload result: reference=${result.reference || "none"} payloadBytes=${result.payload ? result.payload.length : 0}`,
+                "info",
+              )
               if (!result.reference || !result.payload) {
                 resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Not found</div>`
+                if (result.reference) {
+                  resultEl.innerHTML += `<div class="result"><strong>Reference:</strong><br/>${result.reference}</div>`
+                }
                 log("Epoch feed download payload not found", "info")
               } else {
                 const text = new TextDecoder().decode(result.payload)
@@ -1638,14 +1639,27 @@ Secret message for ACT test!</textarea
                 "info",
               )
               const reader = client.makeEpochFeedReader({ topic, owner })
-              let result = await reader.downloadPayload({ at: atRaw })
+              let result = await reader.downloadPayload({
+                at: atRaw,
+                encryptionKey: encryptionKey || undefined,
+              })
               if (!result.reference && owner) {
                 log("Epoch download retrying without owner", "info")
                 const fallbackReader = client.makeEpochFeedReader({ topic })
-                result = await fallbackReader.downloadPayload({ at: atRaw })
+                result = await fallbackReader.downloadPayload({
+                  at: atRaw,
+                  encryptionKey: encryptionKey || undefined,
+                })
               }
+              log(
+                `Epoch download payload result: reference=${result.reference || "none"} payloadBytes=${result.payload ? result.payload.length : 0}`,
+                "info",
+              )
               if (!result.reference || !result.payload) {
                 resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Payload:</strong><br/>Not found</div>`
+                if (result.reference) {
+                  resultEl.innerHTML += `<div class="result"><strong>Reference:</strong><br/>${result.reference}</div>`
+                }
                 log("Epoch feed download payload not found", "info")
               } else {
                 const text = new TextDecoder().decode(result.payload)
@@ -1687,7 +1701,8 @@ Secret message for ACT test!</textarea
           const downloadOtherBtn = document.getElementById("feed-download-payload-button")
           const resultEl = document.getElementById("feed-download-result")
           const topic = document.getElementById("feed-topic").value.trim()
-          const encryptionKey = document.getElementById("feed-encryption-key").value.trim()
+          const encryptionKeyInput = document.getElementById("feed-encryption-key")
+          let encryptionKey = encryptionKeyInput.value.trim()
           const options = ensureDownloadIndex(getFeedDownloadOptions())
           const owner = getFeedOwner()
 
@@ -1727,11 +1742,17 @@ Secret message for ACT test!</textarea
                 "info",
               )
               const reader = client.makeEpochFeedReader({ topic, owner })
-              let result = await reader.downloadReference({ at: now })
+              let result = await reader.downloadReference({
+                at: now,
+                encryptionKey: encryptionKey || undefined,
+              })
               if (!result.reference && owner) {
                 log("Epoch download retrying without owner", "info")
                 const fallbackReader = client.makeEpochFeedReader({ topic })
-                result = await fallbackReader.downloadReference({ at: now })
+                result = await fallbackReader.downloadReference({
+                  at: now,
+                  encryptionKey: encryptionKey || undefined,
+                })
               }
               resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Reference:</strong><br/>${result.reference || "Not found"}</div>`
               log("Epoch feed download reference successful", "info")
@@ -1742,11 +1763,17 @@ Secret message for ACT test!</textarea
                 "info",
               )
               const reader = client.makeEpochFeedReader({ topic, owner })
-              let result = await reader.downloadReference({ at: atRaw })
+              let result = await reader.downloadReference({
+                at: atRaw,
+                encryptionKey: encryptionKey || undefined,
+              })
               if (!result.reference && owner) {
                 log("Epoch download retrying without owner", "info")
                 const fallbackReader = client.makeEpochFeedReader({ topic })
-                result = await fallbackReader.downloadReference({ at: atRaw })
+                result = await fallbackReader.downloadReference({
+                  at: atRaw,
+                  encryptionKey: encryptionKey || undefined,
+                })
               }
               resultEl.innerHTML = `<div class="result"><strong>Epoch Feed Reference:</strong><br/>${result.reference || "Not found"}</div>`
               log("Epoch feed download reference successful", "info")

@@ -1807,6 +1807,12 @@ export class SwarmIdClient {
         options?.at !== undefined
           ? options.at
           : BigInt(Math.floor(Date.now() / 1000))
+      const normalizedRef = this.normalizeReference(reference)
+      const cleanRef = normalizedRef.startsWith("0x")
+        ? normalizedRef.slice(2)
+        : normalizedRef
+      const derivedKey = cleanRef.length === 128 ? cleanRef.slice(64) : undefined
+      const feedKey = options?.encryptionKey ?? derivedKey
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
         EpochFeedUploadReferenceResponseMessage,
@@ -1817,20 +1823,13 @@ export class SwarmIdClient {
         topic,
         signer: signerKey,
         at: this.normalizeFeedTimestamp(atValue),
-        reference: this.normalizeReference(reference),
+        reference: normalizedRef,
         encryptionKey:
-          options?.encryptionKey !== undefined
-            ? this.normalizeSocKey(options.encryptionKey)
-            : undefined,
+          feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         requestOptions,
       })
       const socAddress = response.socAddress
-      const normalizedRef = this.normalizeReference(reference)
-      const cleanRef = normalizedRef.startsWith("0x")
-        ? normalizedRef.slice(2)
-        : normalizedRef
-      const encryptionKey =
-        cleanRef.length === 128 ? cleanRef.slice(64) : undefined
+      const encryptionKey = derivedKey
       return {
         socAddress,
         reference: normalizedRef,
@@ -1852,6 +1851,12 @@ export class SwarmIdClient {
         { ...options?.uploadOptions, encrypt },
         requestOptions,
       )
+      const cleanRef = uploadResult.reference.startsWith("0x")
+        ? uploadResult.reference.slice(2)
+        : uploadResult.reference
+      const derivedKey =
+        cleanRef.length === 128 ? cleanRef.slice(64) : undefined
+      const feedKey = options?.encryptionKey ?? derivedKey
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
         EpochFeedUploadReferenceResponseMessage,
@@ -1864,17 +1869,11 @@ export class SwarmIdClient {
         at: this.normalizeFeedTimestamp(atValue),
         reference: uploadResult.reference,
         encryptionKey:
-          options?.encryptionKey !== undefined
-            ? this.normalizeSocKey(options.encryptionKey)
-            : undefined,
+          feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         requestOptions,
       })
       const socAddress = response.socAddress
-      const cleanRef = uploadResult.reference.startsWith("0x")
-        ? uploadResult.reference.slice(2)
-        : uploadResult.reference
-      const encryptionKey =
-        cleanRef.length === 128 ? cleanRef.slice(64) : undefined
+      const encryptionKey = derivedKey
       return {
         socAddress,
         reference: uploadResult.reference,
@@ -1950,6 +1949,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: this.normalizeSocKey(encryptionKey),
         requestOptions,
       })
@@ -1986,6 +1986,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: encryptionKey
           ? this.normalizeSocKey(encryptionKey)
           : undefined,
@@ -2024,6 +2025,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: this.normalizeSocKey(encryptionKey),
         requestOptions,
       })
@@ -2216,6 +2218,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         options,
         requestOptions,
       })
@@ -2224,6 +2227,7 @@ export class SwarmIdClient {
 
       return {
         reference: response.reference,
+        feedIndex: response.feedIndex,
         owner: response.owner,
         encryptionKey: response.encryptionKey,
         tagUid: response.tagUid,
@@ -2256,6 +2260,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         encryptionKey: encryptionKey
           ? this.normalizeSocKey(encryptionKey)
           : undefined,
@@ -2267,6 +2272,7 @@ export class SwarmIdClient {
 
       return {
         reference: response.reference,
+        feedIndex: response.feedIndex,
         owner: response.owner,
         encryptionKey: response.encryptionKey,
         tagUid: response.tagUid,
@@ -2298,6 +2304,7 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
+        lookupTimeoutMs: options?.lookupTimeoutMs,
         options,
         requestOptions,
       })
@@ -2306,6 +2313,7 @@ export class SwarmIdClient {
 
       return {
         reference: response.reference,
+        feedIndex: response.feedIndex,
         owner: response.owner,
         encryptionKey: response.encryptionKey,
         tagUid: response.tagUid,

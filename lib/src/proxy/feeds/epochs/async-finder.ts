@@ -148,7 +148,6 @@ export class AsyncEpochFinder implements EpochFinder {
     const IDENTIFIER_SIZE = 32
     const SIGNATURE_SIZE = 65
     const SPAN_SIZE = 8
-      const TIMESTAMP_SIZE = 8
       const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
 
       // Read span to get payload length

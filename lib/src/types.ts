@@ -373,6 +373,8 @@ export interface SequentialFeedUpdateOptions {
   at?: Timestamp | bigint
   /** Whether payload is prefixed with timestamp (default true). */
   hasTimestamp?: boolean
+  /** Timeout (ms) for sequential index lookups (default 2000). */
+  lookupTimeoutMs?: number
 }
 
 /**
@@ -413,6 +415,8 @@ export interface SequentialFeedReferenceResult {
 export interface SequentialFeedUploadResult {
   /** SOC address of the feed update. */
   reference: string
+  /** Feed index used for the update (stringified uint64). */
+  feedIndex: string
   /** Owner address for the feed update. */
   owner: string
   /** Encryption key for decrypting payload (if encrypted). */
@@ -778,6 +782,7 @@ export const SequentialFeedDownloadPayloadMessageSchema = z.object({
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
+  lookupTimeoutMs: z.number().optional(),
   encryptionKey: PrivateKeySchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -790,6 +795,7 @@ export const SequentialFeedDownloadRawPayloadMessageSchema = z.object({
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
+  lookupTimeoutMs: z.number().optional(),
   encryptionKey: PrivateKeySchema.optional(),
   requestOptions: RequestOptionsSchema,
 })
@@ -802,6 +808,7 @@ export const SequentialFeedDownloadReferenceMessageSchema = z.object({
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
+  lookupTimeoutMs: z.number().optional(),
   encryptionKey: PrivateKeySchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -815,6 +822,7 @@ export const SequentialFeedUploadPayloadMessageSchema = z.object({
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
+  lookupTimeoutMs: z.number().optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -828,6 +836,7 @@ export const SequentialFeedUploadRawPayloadMessageSchema = z.object({
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
+  lookupTimeoutMs: z.number().optional(),
   encryptionKey: PrivateKeySchema.optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
@@ -842,6 +851,7 @@ export const SequentialFeedUploadReferenceMessageSchema = z.object({
   index: FeedIndexSchema.optional(),
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
+  lookupTimeoutMs: z.number().optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -1233,6 +1243,7 @@ export const SequentialFeedUploadPayloadResponseMessageSchema = z.object({
   type: z.literal("seqFeedUploadPayloadResponse"),
   requestId: z.string(),
   reference: ReferenceSchema,
+  feedIndex: z.string(),
   owner: AddressSchema,
   encryptionKey: z.string().optional(),
   tagUid: z.number().optional(),
@@ -1242,6 +1253,7 @@ export const SequentialFeedUploadRawPayloadResponseMessageSchema = z.object({
   type: z.literal("seqFeedUploadRawPayloadResponse"),
   requestId: z.string(),
   reference: ReferenceSchema,
+  feedIndex: z.string(),
   owner: AddressSchema,
   encryptionKey: z.string().optional(),
   tagUid: z.number().optional(),
@@ -1251,6 +1263,7 @@ export const SequentialFeedUploadReferenceResponseMessageSchema = z.object({
   type: z.literal("seqFeedUploadReferenceResponse"),
   requestId: z.string(),
   reference: ReferenceSchema,
+  feedIndex: z.string(),
   owner: AddressSchema,
   encryptionKey: z.string().optional(),
   tagUid: z.number().optional(),

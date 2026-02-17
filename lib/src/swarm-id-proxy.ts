@@ -85,6 +85,7 @@ import {
   createAsyncEpochFinder,
   createEpochUpdater,
 } from "./proxy/feeds/epochs"
+import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
@@ -100,6 +101,7 @@ import {
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
+const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -2095,70 +2097,23 @@ export class SwarmIdProxy {
     return Binary.keccak256(Binary.concatBytes(topic, indexBytes))
   }
 
-  private makeSequentialFeedAddress(
-    identifier: Uint8Array,
-    owner: EthAddress,
-  ): Uint8Array {
-    return Binary.keccak256(
-      Binary.concatBytes(identifier, owner.toUint8Array()),
-    )
-  }
-
-  private async sequentialIndexExists(
-    topic: Uint8Array,
-    owner: EthAddress,
-    index: bigint,
-    requestOptions?: BeeRequestOptions,
-  ): Promise<boolean> {
-    try {
-      const identifier = this.makeSequentialFeedIdentifier(topic, index)
-      const address = this.makeSequentialFeedAddress(identifier, owner)
-      await this.bee.downloadChunk(
-        uint8ArrayToHex(address),
-        undefined,
-        requestOptions,
-      )
-      return true
-    } catch {
-      return false
-    }
-  }
-
   private async findLatestSequentialIndex(
     topic: Uint8Array,
     owner: EthAddress,
     requestOptions?: BeeRequestOptions,
+    lookupTimeoutMs?: number,
   ): Promise<bigint | undefined> {
-    const max = (1n << 64n) - 1n
-
-    if (!(await this.sequentialIndexExists(topic, owner, 0n, requestOptions))) {
-      return undefined
+    const lookupOptions: BeeRequestOptions = {
+      ...requestOptions,
+      timeout: lookupTimeoutMs ?? SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS,
     }
-
-    let low = 0n
-    let high = 1n
-    while (
-      high <= max &&
-      (await this.sequentialIndexExists(topic, owner, high, requestOptions))
-    ) {
-      low = high
-      high = high * 2n
-      if (high > max) {
-        high = max + 1n
-        break
-      }
-    }
-
-    while (high - low > 1n) {
-      const mid = (low + high) / 2n
-      if (await this.sequentialIndexExists(topic, owner, mid, requestOptions)) {
-        low = mid
-      } else {
-        high = mid
-      }
-    }
-
-    return low
+    const finder = createAsyncSequentialFinder({
+      bee: this.bee,
+      topic: new Topic(topic),
+      owner,
+    })
+    const result = await finder.findAt(0n, 0n, lookupOptions)
+    return result.current
   }
 
   private sequentialNextIndex(index: bigint): bigint {
@@ -2416,6 +2371,7 @@ export class SwarmIdProxy {
     requestOptions?: BeeRequestOptions,
     encryptionKey?: string,
     raw: boolean = false,
+    lookupTimeoutMs?: number,
   ): Promise<bigint> {
     if (!raw && !encryptionKey) {
       throw new Error("Encryption key is required for encrypted feed lookup")
@@ -2428,6 +2384,7 @@ export class SwarmIdProxy {
       topicBytes,
       ownerAddress,
       requestOptions,
+      lookupTimeoutMs,
     )
     if (latest === undefined) {
       throw new Error("Sequential feed has no updates")
@@ -2483,7 +2440,8 @@ export class SwarmIdProxy {
       }
     }
 
-    throw new Error("Sequential feed update not found for given timestamp")
+    // If no update matches the timestamp, fall back to latest for sequential feeds.
+    return latest
   }
 
   private async handleSequentialFeedDownloadPayload(
@@ -2498,6 +2456,7 @@ export class SwarmIdProxy {
       at,
       hasTimestamp,
       encryptionKey,
+      lookupTimeoutMs,
       requestOptions,
     } = message
 
@@ -2521,6 +2480,7 @@ export class SwarmIdProxy {
         requestOptions,
         encryptionKey,
         false,
+        lookupTimeoutMs,
       )
 
       const identifierBytes = this.makeSequentialFeedIdentifier(
@@ -2577,6 +2537,7 @@ export class SwarmIdProxy {
       at,
       hasTimestamp,
       encryptionKey,
+      lookupTimeoutMs,
       requestOptions,
     } = message
 
@@ -2596,6 +2557,7 @@ export class SwarmIdProxy {
         requestOptions,
         encryptionKey,
         true,
+        lookupTimeoutMs,
       )
 
       const identifierBytes = this.makeSequentialFeedIdentifier(
@@ -2654,6 +2616,7 @@ export class SwarmIdProxy {
       at,
       hasTimestamp,
       encryptionKey,
+      lookupTimeoutMs,
       requestOptions,
     } = message
 
@@ -2677,6 +2640,7 @@ export class SwarmIdProxy {
         requestOptions,
         encryptionKey,
         false,
+        lookupTimeoutMs,
       )
 
       const identifierBytes = this.makeSequentialFeedIdentifier(
@@ -2693,6 +2657,11 @@ export class SwarmIdProxy {
       )
 
       const parsed = this.parseSequentialPayload(soc.payload, useTimestamp)
+      if (parsed.payload.length !== 32 && parsed.payload.length !== 64) {
+        throw new Error(
+          "Sequential feed update does not contain a reference; use downloadPayload",
+        )
+      }
       const referenceHex = uint8ArrayToHex(parsed.payload)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
@@ -2747,6 +2716,7 @@ export class SwarmIdProxy {
       index,
       at,
       hasTimestamp,
+      lookupTimeoutMs,
       options,
       requestOptions,
     } = message
@@ -2777,11 +2747,12 @@ export class SwarmIdProxy {
       if (index !== undefined) {
         resolvedIndex = this.parseFeedIndex(index)
       } else {
-        const latest = await this.findLatestSequentialIndex(
-          topicBytes,
-          ownerAddress,
-          requestOptions,
-        )
+          const latest = await this.findLatestSequentialIndex(
+            topicBytes,
+            ownerAddress,
+            requestOptions,
+            lookupTimeoutMs,
+          )
         resolvedIndex =
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }
@@ -2816,6 +2787,7 @@ export class SwarmIdProxy {
             type: "seqFeedUploadPayloadResponse",
             requestId,
             reference: uint8ArrayToHex(result.socAddress),
+            feedIndex: resolvedIndex.toString(),
             owner: ownerAddress.toHex(),
             encryptionKey: uint8ArrayToHex(result.encryptionKey),
             tagUid: result.tagUid,
@@ -2849,6 +2821,7 @@ export class SwarmIdProxy {
       at,
       hasTimestamp,
       encryptionKey,
+      lookupTimeoutMs,
       options,
       requestOptions,
     } = message
@@ -2879,11 +2852,12 @@ export class SwarmIdProxy {
       if (index !== undefined) {
         resolvedIndex = this.parseFeedIndex(index)
       } else {
-        const latest = await this.findLatestSequentialIndex(
-          topicBytes,
-          ownerAddress,
-          requestOptions,
-        )
+          const latest = await this.findLatestSequentialIndex(
+            topicBytes,
+            ownerAddress,
+            requestOptions,
+            lookupTimeoutMs,
+          )
         resolvedIndex =
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }
@@ -2928,6 +2902,7 @@ export class SwarmIdProxy {
             type: "seqFeedUploadRawPayloadResponse",
             requestId,
             reference: uint8ArrayToHex(result.socAddress),
+            feedIndex: resolvedIndex.toString(),
             owner: ownerAddress.toHex(),
             encryptionKey: encryptionKey ? encryptionKey : undefined,
             tagUid: result.tagUid,
@@ -2960,6 +2935,7 @@ export class SwarmIdProxy {
       index,
       at,
       hasTimestamp,
+      lookupTimeoutMs,
       options,
       requestOptions,
     } = message
@@ -2990,11 +2966,12 @@ export class SwarmIdProxy {
       if (index !== undefined) {
         resolvedIndex = this.parseFeedIndex(index)
       } else {
-        const latest = await this.findLatestSequentialIndex(
-          topicBytes,
-          ownerAddress,
-          requestOptions,
-        )
+          const latest = await this.findLatestSequentialIndex(
+            topicBytes,
+            ownerAddress,
+            requestOptions,
+            lookupTimeoutMs,
+          )
         resolvedIndex =
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }
@@ -3034,6 +3011,7 @@ export class SwarmIdProxy {
             type: "seqFeedUploadReferenceResponse",
             requestId,
             reference: uint8ArrayToHex(result.socAddress),
+            feedIndex: resolvedIndex.toString(),
             owner: ownerAddress.toHex(),
             encryptionKey: uint8ArrayToHex(result.encryptionKey),
             tagUid: result.tagUid,
