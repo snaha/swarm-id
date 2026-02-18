@@ -220,6 +220,11 @@ export declare class SwarmIdProxy {
     private handleActRevokeGrantees;
     private handleActGetGrantees;
     private handleGetPostageBatch;
+    /**
+     * Handle createFeedManifest request
+     * Creates a feed manifest for accessing feed content via URL
+     */
+    private handleCreateFeedManifest;
 }
 /**
  * Initialize the proxy (called from HTML page)

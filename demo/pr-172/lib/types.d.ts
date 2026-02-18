@@ -819,6 +819,24 @@ export declare const SequentialFeedUploadReferenceMessageSchema: z.ZodObject<{
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
+export declare const CreateFeedManifestMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"createFeedManifest">;
+    requestId: z.ZodString;
+    topic: z.ZodString;
+    owner: z.ZodOptional<z.ZodString>;
+    uploadOptions: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>;
 export declare const ActUploadDataMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"actUploadData">;
     requestId: z.ZodString;
@@ -1271,6 +1289,23 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"createFeedManifest">;
+    requestId: z.ZodString;
+    topic: z.ZodString;
+    owner: z.ZodOptional<z.ZodString>;
+    uploadOptions: z.ZodOptional<z.ZodObject<{
+        pin: z.ZodOptional<z.ZodBoolean>;
+        encrypt: z.ZodOptional<z.ZodBoolean>;
+        tag: z.ZodOptional<z.ZodNumber>;
+        deferred: z.ZodOptional<z.ZodBoolean>;
+        redundancyLevel: z.ZodOptional<z.ZodNumber>;
+    }, z.core.$strip>>;
+    requestOptions: z.ZodOptional<z.ZodObject<{
+        timeout: z.ZodOptional<z.ZodNumber>;
+        headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
+        endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
+    }, z.core.$strip>>;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"actUploadData">;
     requestId: z.ZodString;
     data: z.ZodCustom<Uint8Array<ArrayBuffer>, Uint8Array<ArrayBuffer>>;
@@ -1365,6 +1400,7 @@ export type SequentialFeedDownloadReferenceMessage = z.infer<typeof SequentialFe
 export type SequentialFeedUploadPayloadMessage = z.infer<typeof SequentialFeedUploadPayloadMessageSchema>;
 export type SequentialFeedUploadRawPayloadMessage = z.infer<typeof SequentialFeedUploadRawPayloadMessageSchema>;
 export type SequentialFeedUploadReferenceMessage = z.infer<typeof SequentialFeedUploadReferenceMessageSchema>;
+export type CreateFeedManifestMessage = z.infer<typeof CreateFeedManifestMessageSchema>;
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>;
 export type ActDownloadDataMessage = z.infer<typeof ActDownloadDataMessageSchema>;
 export type ActAddGranteesMessage = z.infer<typeof ActAddGranteesMessageSchema>;
@@ -1591,6 +1627,11 @@ export declare const SequentialFeedUploadReferenceResponseMessageSchema: z.ZodOb
     owner: z.ZodString;
     encryptionKey: z.ZodOptional<z.ZodString>;
     tagUid: z.ZodOptional<z.ZodNumber>;
+}, z.core.$strip>;
+export declare const CreateFeedManifestResponseMessageSchema: z.ZodObject<{
+    type: z.ZodLiteral<"createFeedManifestResponse">;
+    requestId: z.ZodString;
+    reference: z.ZodString;
 }, z.core.$strip>;
 export declare const ActUploadDataResponseMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"actUploadDataResponse">;
@@ -1832,6 +1873,10 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     encryptionKey: z.ZodOptional<z.ZodString>;
     tagUid: z.ZodOptional<z.ZodNumber>;
 }, z.core.$strip>, z.ZodObject<{
+    type: z.ZodLiteral<"createFeedManifestResponse">;
+    requestId: z.ZodString;
+    reference: z.ZodString;
+}, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"actUploadDataResponse">;
     requestId: z.ZodString;
     encryptedReference: z.ZodString;
@@ -1913,6 +1958,7 @@ export type SequentialFeedDownloadReferenceResponseMessage = z.infer<typeof Sequ
 export type SequentialFeedUploadPayloadResponseMessage = z.infer<typeof SequentialFeedUploadPayloadResponseMessageSchema>;
 export type SequentialFeedUploadRawPayloadResponseMessage = z.infer<typeof SequentialFeedUploadRawPayloadResponseMessageSchema>;
 export type SequentialFeedUploadReferenceResponseMessage = z.infer<typeof SequentialFeedUploadReferenceResponseMessageSchema>;
+export type CreateFeedManifestResponseMessage = z.infer<typeof CreateFeedManifestResponseMessageSchema>;
 export type ActUploadDataResponseMessage = z.infer<typeof ActUploadDataResponseMessageSchema>;
 export type ActDownloadDataResponseMessage = z.infer<typeof ActDownloadDataResponseMessageSchema>;
 export type ActAddGranteesResponseMessage = z.infer<typeof ActAddGranteesResponseMessageSchema>;
