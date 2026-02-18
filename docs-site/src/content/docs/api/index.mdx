@@ -385,6 +385,48 @@ if (info.canUpload) {
 
 ---
 
+### `getPostageBatch()`
+
+Gets the current postage batch for the authenticated identity.
+
+Returns information about the postage stamp associated with the connected identity, including batch ID, utilization, depth, and TTL.
+
+**Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `batchID` | `string` | The batch ID (64 hex characters) |
+| `utilization` | `number` | Current utilization percentage |
+| `usable` | `boolean` | Whether the batch is usable |
+| `label` | `string` | Human-readable label |
+| `depth` | `number` | Batch depth |
+| `amount` | `string` | Batch amount |
+| `bucketDepth` | `number` | Bucket depth |
+| `blockNumber` | `number` | Block number when created |
+| `immutableFlag` | `boolean` | Whether the batch is immutable |
+| `exists` | `boolean` | Whether the batch exists |
+| `batchTTL` | `number \| undefined` | Time-to-live in seconds |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const batch = await client.getPostageBatch()
+if (batch) {
+  console.log('Batch ID:', batch.batchID)
+  console.log('Utilization:', batch.utilization)
+  console.log('Depth:', batch.depth)
+  console.log('TTL:', batch.batchTTL)
+} else {
+  console.log('No postage batch configured')
+}
+```
+
+---
+
 ## Bee Connectivity Methods
 
 ### `isBeeConnected()`
@@ -403,6 +445,40 @@ if (connected) {
 	console.log('Bee node is online')
 } else {
 	console.log('Bee node is offline')
+}
+```
+
+---
+
+### `getNodeInfo()`
+
+Gets information about the Bee node configuration.
+
+This method retrieves the current Bee node's operating mode and feature flags. Use this to determine if deferred uploads are required (dev mode) or if direct uploads are available (production modes).
+
+**Returns:** `Promise<NodeInfo>` - The node info object
+
+| Property | Type | Description |
+|----------|------|-------------|
+| `beeMode` | `string` | The Bee node operating mode ("dev", "light", "full", "ultra-light") |
+| `chequebookEnabled` | `boolean` | Whether the chequebook is enabled |
+| `swapEnabled` | `boolean` | Whether SWAP is enabled |
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if the Bee node is not reachable
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const nodeInfo = await client.getNodeInfo()
+if (nodeInfo.beeMode === 'dev') {
+  // Dev mode requires deferred uploads
+  await client.uploadData(data, { deferred: true })
+} else {
+  // Production modes can use direct uploads
+  await client.uploadData(data, { deferred: false })
 }
 ```
 
@@ -812,7 +888,7 @@ Creates a feed reader bound to a topic and optional owner.
 |--------|------|----------|-------------|
 | `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); defaults to current time |
 | `after` | `number \| string \| bigint` | No | Hint for latest known update timestamp |
-| `encryptionKey` | `string` | No | Encryption key (hex) for encrypted feed updates |
+| `encryptionKey` | `Uint8Array \| string` | No | Encryption key for encrypted feed updates |
 
 **Returns (`downloadReference`):**
 
@@ -874,7 +950,7 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 | `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); defaults to current time |
 | `encrypt` | `boolean` | No | Whether payload uploads are encrypted (default `true`) |
 | `uploadOptions` | `UploadOptions` | No | Upload configuration (tag, pin, deferred, etc.) |
-| `encryptionKey` | `string` | No | Encryption key (hex) for encrypted feed updates |
+| `encryptionKey` | `Uint8Array \| string` | No | Encryption key for encrypted feed updates |
 
 **Returns (`uploadPayload` / `uploadReference`):**
 
@@ -928,6 +1004,7 @@ Creates a sequential feed reader bound to a topic and optional owner.
 | `index` | `number \| string \| bigint` | No | Feed index to read (0..2^64-1) |
 | `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); resolves nearest update at or before `at` |
 | `hasTimestamp` | `boolean` | No | Whether payloads include a timestamp prefix (default `true`) |
+| `lookupTimeoutMs` | `number` | No | Timeout (ms) for sequential index lookups (default 2000) |
 
 **Example:**
 
@@ -972,7 +1049,12 @@ Creates a sequential feed writer for updating and reading a topic. If `signer` i
 | `index` | `number \| string \| bigint` | No | Feed index to write (0..2^64-1); defaults to next index |
 | `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); used when `hasTimestamp` is true |
 | `hasTimestamp` | `boolean` | No | Whether payloads include a timestamp prefix (default `true`) |
-| `uploadOptions` | `UploadOptions` | No | Upload configuration (tag, pin, deferred, etc.) |
+| `lookupTimeoutMs` | `number` | No | Timeout (ms) for sequential index lookups (default 2000) |
+| `pin` | `boolean` | No | Whether to pin the data locally |
+| `encrypt` | `boolean` | No | Whether to encrypt the data |
+| `tag` | `number` | No | Tag ID for tracking upload progress |
+| `deferred` | `boolean` | No | Whether to use deferred upload |
+| `redundancyLevel` | `0-4` | No | Redundancy level for data availability |
 
 **Example:**
 
@@ -1068,16 +1150,18 @@ console.log('Message sent with reference:', result.reference)
 
 ```typescript
 import type {
-	ClientOptions,
-	AuthStatus,
-	ConnectionInfo,
-	UploadOptions,
-	DownloadOptions,
-	UploadResult,
-	FileData,
-	Reference,
-	AppMetadata,
-	ButtonConfig,
-	RequestOptions,
+  ClientOptions,
+  AuthStatus,
+  ConnectionInfo,
+  PostageBatch,
+  NodeInfo,
+  UploadOptions,
+  DownloadOptions,
+  UploadResult,
+  FileData,
+  Reference,
+  AppMetadata,
+  ButtonConfig,
+  RequestOptions,
 } from '@swarm-id/lib'
 ```
