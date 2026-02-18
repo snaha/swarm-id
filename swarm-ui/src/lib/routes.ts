@@ -5,7 +5,7 @@ const routes = {
 	PASSKEY_NEW: '/(app)/(create)/passkey/new' as const,
 	ETH_NEW: '/(app)/(create)/eth/new' as const,
 	IDENTITY_NEW: '/(app)/(create)/identity/new' as const,
-	STAMPS_NEW: '/(app)/(create)/stamps/new' as const,
+	STAMPS_ACCOUNT_NEW: '/(app)/(create)/stamps/account/new' as const,
 	STAMPS_IDENTITY_NEW: '/(app)/(create)/stamps/identity/new' as const,
 	IDENTITY: '/(app)/identity/[id]' as const,
 	IDENTITY_APPS: '/(app)/identity/[id]/apps' as const,

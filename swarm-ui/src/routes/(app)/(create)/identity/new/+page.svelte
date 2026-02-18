@@ -125,7 +125,7 @@
 
 		// Synced account without an account stamp → go to account stamp page first
 		if (!account.defaultPostageStampBatchID) {
-			goto(resolve(routes.STAMPS_NEW))
+			goto(resolve(routes.STAMPS_ACCOUNT_NEW))
 			return
 		}
 
