@@ -1066,6 +1066,56 @@ const payload = await writer.downloadPayload(upload.encryptionKey, { index: 0 })
 
 ---
 
+## Feed Manifest Methods
+
+### `createFeedManifest(topic, options?, requestOptions?)`
+
+Creates a feed manifest for accessing feed content via URL.
+
+A feed manifest enables accessing the latest feed content via a URL path (e.g., `/bzz/{manifest-reference}/`). The manifest stores metadata about the feed including owner, topic, and feed type.
+
+**Parameters:**
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `topic` | `string` | Yes | Feed topic (32-byte hex string) |
+| `options` | `object` | No | Configuration options |
+| `options.owner` | `string` | No | Feed owner address; if omitted, uses app signer |
+| `options.uploadOptions` | `UploadOptions` | No | Upload configuration (pin, deferred, etc.) |
+| `requestOptions` | `RequestOptions` | No | Request configuration |
+| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
+| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+
+**Returns:** `Promise<string>` - The feed manifest reference (64 hex characters)
+
+**Throws:**
+- `Error` if the client is not initialized
+- `Error` if no owner is provided and no app signer is available
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+// Create manifest for a feed (uses app signer as owner)
+const manifestRef = await client.createFeedManifest(topic)
+console.log('Feed accessible at /bzz/' + manifestRef)
+
+// Create manifest with explicit owner
+const manifestRef = await client.createFeedManifest(topic, {
+  owner: '0x1234...',
+  uploadOptions: { pin: true }
+})
+
+// Use with feed writer
+const writer = client.makeSequentialFeedWriter({ topic })
+const result = await writer.uploadPayload('Hello feed!')
+
+const manifestRef = await client.createFeedManifest(topic)
+// Now feed content accessible via /bzz/{manifestRef}/
+```
+
+---
+
 ## GSOC Methods
 
 GSOC (Global Single Owner Chunk) methods enable proximity-based message routing on the Swarm network. These methods allow you to mine a private key that produces a SOC address proximate to a target overlay, then send messages using that key.

@@ -856,6 +856,16 @@ export const SequentialFeedUploadReferenceMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+// Feed Manifest Message Schema
+export const CreateFeedManifestMessageSchema = z.object({
+  type: z.literal("createFeedManifest"),
+  requestId: z.string(),
+  topic: IdentifierSchema,
+  owner: AddressSchema.optional(),
+  uploadOptions: UploadOptionsSchema,
+  requestOptions: RequestOptionsSchema,
+})
+
 // ACT (Access Control Tries) Message Schemas
 export const ActUploadDataMessageSchema = z.object({
   type: z.literal("actUploadData"),
@@ -937,6 +947,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   SequentialFeedUploadPayloadMessageSchema,
   SequentialFeedUploadRawPayloadMessageSchema,
   SequentialFeedUploadReferenceMessageSchema,
+  CreateFeedManifestMessageSchema,
   ActUploadDataMessageSchema,
   ActDownloadDataMessageSchema,
   ActAddGranteesMessageSchema,
@@ -994,6 +1005,9 @@ export type SequentialFeedUploadRawPayloadMessage = z.infer<
 >
 export type SequentialFeedUploadReferenceMessage = z.infer<
   typeof SequentialFeedUploadReferenceMessageSchema
+>
+export type CreateFeedManifestMessage = z.infer<
+  typeof CreateFeedManifestMessageSchema
 >
 export type ActUploadDataMessage = z.infer<typeof ActUploadDataMessageSchema>
 export type ActDownloadDataMessage = z.infer<
@@ -1269,6 +1283,13 @@ export const SequentialFeedUploadReferenceResponseMessageSchema = z.object({
   tagUid: z.number().optional(),
 })
 
+// Feed Manifest Response Schema
+export const CreateFeedManifestResponseMessageSchema = z.object({
+  type: z.literal("createFeedManifestResponse"),
+  requestId: z.string(),
+  reference: ReferenceSchema,
+})
+
 // ACT Response Message Schemas
 export const ActUploadDataResponseMessageSchema = z.object({
   type: z.literal("actUploadDataResponse"),
@@ -1352,6 +1373,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   SequentialFeedUploadPayloadResponseMessageSchema,
   SequentialFeedUploadRawPayloadResponseMessageSchema,
   SequentialFeedUploadReferenceResponseMessageSchema,
+  CreateFeedManifestResponseMessageSchema,
   ActUploadDataResponseMessageSchema,
   ActDownloadDataResponseMessageSchema,
   ActAddGranteesResponseMessageSchema,
@@ -1451,6 +1473,9 @@ export type SequentialFeedUploadRawPayloadResponseMessage = z.infer<
 >
 export type SequentialFeedUploadReferenceResponseMessage = z.infer<
   typeof SequentialFeedUploadReferenceResponseMessageSchema
+>
+export type CreateFeedManifestResponseMessage = z.infer<
+  typeof CreateFeedManifestResponseMessageSchema
 >
 export type ActUploadDataResponseMessage = z.infer<
   typeof ActUploadDataResponseMessageSchema

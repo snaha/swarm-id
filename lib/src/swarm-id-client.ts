@@ -55,6 +55,8 @@ import type {
   SequentialFeedUploadRawPayloadResponseMessage,
   SequentialFeedUploadReferenceMessage,
   SequentialFeedUploadReferenceResponseMessage,
+  CreateFeedManifestMessage,
+  CreateFeedManifestResponseMessage,
   SocDownloadMessage,
   SocDownloadResponseMessage,
   SocRawDownloadMessage,
@@ -2346,6 +2348,67 @@ export class SwarmIdClient {
       uploadRawPayload,
       uploadReference,
     }
+  }
+
+  // ============================================================================
+  // Feed Manifest Methods
+  // ============================================================================
+
+  /**
+   * Creates a feed manifest for accessing feed content via URL.
+   *
+   * A feed manifest enables accessing the latest feed content via a URL path
+   * (e.g., `/bzz/{manifest-reference}/`). The manifest stores metadata about
+   * the feed including owner, topic, and type.
+   *
+   * @param topic - Feed topic (32-byte hex string)
+   * @param options - Optional configuration
+   * @param options.owner - Feed owner address; if omitted, uses app signer
+   * @param options.uploadOptions - Upload configuration (pin, deferred, etc.)
+   * @param requestOptions - Request configuration (timeout, headers)
+   * @returns Promise resolving to the manifest reference
+   * @throws {Error} If the client is not initialized
+   * @throws {Error} If no owner is provided and no app signer is available
+   * @throws {Error} If the request times out
+   *
+   * @example
+   * ```typescript
+   * // Create manifest for a feed (uses app signer as owner)
+   * const manifestRef = await client.createFeedManifest(topic)
+   * console.log('Feed accessible at /bzz/' + manifestRef)
+   *
+   * // Create manifest with explicit owner
+   * const manifestRef = await client.createFeedManifest(topic, {
+   *   owner: '0x1234...',
+   *   uploadOptions: { pin: true }
+   * })
+   * ```
+   */
+  async createFeedManifest(
+    topic: string,
+    options?: {
+      owner?: string
+      uploadOptions?: UploadOptions
+    },
+    requestOptions?: RequestOptions,
+  ): Promise<string> {
+    this.ensureReady()
+    const normalizedTopic = this.normalizeFeedTopic(topic)
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<
+      CreateFeedManifestResponseMessage,
+      CreateFeedManifestMessage
+    >({
+      type: "createFeedManifest",
+      requestId,
+      topic: normalizedTopic,
+      owner: options?.owner,
+      uploadOptions: options?.uploadOptions,
+      requestOptions,
+    })
+
+    return response.reference
   }
 
   // ============================================================================

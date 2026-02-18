@@ -36,6 +36,7 @@ import type {
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
   GetPostageBatchMessage,
+  CreateFeedManifestMessage,
   AppMetadata,
   PostageStamp,
   PostageBatch,
@@ -620,6 +621,10 @@ export class SwarmIdProxy {
 
       case "getPostageBatch":
         await this.handleGetPostageBatch(message, event)
+        break
+
+      case "createFeedManifest":
+        await this.handleCreateFeedManifest(message, event)
         break
 
       default:
@@ -3713,6 +3718,73 @@ export class SwarmIdProxy {
     }
 
     console.log("[Proxy] Postage batch returned:", postageBatch.batchID)
+  }
+
+  /**
+   * Handle createFeedManifest request
+   * Creates a feed manifest for accessing feed content via URL
+   */
+  private async handleCreateFeedManifest(
+    message: CreateFeedManifestMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    console.log("[Proxy] Create feed manifest request")
+
+    const { topic, owner, uploadOptions, requestOptions } = message
+
+    // Resolve owner - use provided or fall back to app signer
+    let resolvedOwner = owner
+    if (!resolvedOwner && this.appSecret) {
+      const signerKeyObj = new PrivateKey(this.appSecret)
+      resolvedOwner = signerKeyObj.publicKey().address().toHex()
+    }
+
+    if (!resolvedOwner) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        "No owner provided and no app signer available",
+      )
+      return
+    }
+
+    if (!this.postageBatchId) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        "No postage batch configured",
+      )
+      return
+    }
+
+    try {
+      const reference = await this.bee.createFeedManifest(
+        this.postageBatchId,
+        topic,
+        resolvedOwner,
+        uploadOptions,
+        requestOptions,
+      )
+
+      if (event.source) {
+        ;(event.source as WindowProxy).postMessage(
+          {
+            type: "createFeedManifestResponse",
+            requestId: message.requestId,
+            reference: reference.toHex(),
+          } satisfies IframeToParentMessage,
+          { targetOrigin: event.origin },
+        )
+      }
+
+      console.log("[Proxy] Feed manifest created:", reference.toHex())
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        error instanceof Error ? error.message : "Create feed manifest failed",
+      )
+    }
   }
 }
 
