@@ -37,7 +37,7 @@
 				"hooks": [
 					{
 						"type": "command",
-						"command": "FILE=$(jq -r '.tool_input.file_path // empty') && [ -n \"$FILE\" ] && echo \"$FILE\" | grep -qE '\\.(ts|js|svelte|json|css|html|md|mdx)$' && pnpx prettier --write \"$FILE\" 2>/dev/null || true"
+						"command": "FILE=$(jq -r '.tool_input.file_path // empty') && [ -n \"$FILE\" ] && echo \"$FILE\" | grep -qE '\\.(ts|js|svelte|json|css|html|md|mdx)$' && pnpm exec prettier --write \"$FILE\" 2>/dev/null || true"
 					}
 				]
 			}
