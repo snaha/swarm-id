@@ -2174,7 +2174,28 @@ Secret message for ACT test!</textarea
                 }
               } else {
                 const blob = await response.blob()
-                bodyPreview = `[Binary data: ${blob.size} bytes, type: ${contentType}]`
+                const arrayBuffer = await blob.arrayBuffer()
+                const bytes = new Uint8Array(arrayBuffer)
+
+                // Try to decode as UTF-8 text
+                const decoder = new TextDecoder('utf-8', { fatal: false })
+                const text = decoder.decode(bytes)
+
+                // Check if it looks like valid text (no replacement chars, mostly printable)
+                const hasReplacementChar = text.includes('\uFFFD')
+                const printableRatio = text.split('').filter(c =>
+                  c.charCodeAt(0) >= 32 || c === '\n' || c === '\r' || c === '\t'
+                ).length / text.length
+
+                if (!hasReplacementChar && printableRatio > 0.9 && text.length > 0) {
+                  bodyPreview = text.length > 500 ? text.substring(0, 500) + "..." : text
+                } else {
+                  // Show hex preview for first 32 bytes
+                  const hexPreview = Array.from(bytes.slice(0, 32))
+                    .map(b => b.toString(16).padStart(2, '0'))
+                    .join(' ')
+                  bodyPreview = `[Binary data: ${blob.size} bytes]\nHex: ${hexPreview}${bytes.length > 32 ? '...' : ''}`
+                }
               }
 
               log(`Response body: ${bodyPreview}`)
