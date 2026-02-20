@@ -428,13 +428,13 @@ export function createSyncAccount(
       console.log(
         `[SyncCoordinator ${timestamp()}] Updating epoch feed... (+${(performance.now() - startTime).toFixed(2)}ms)`,
       )
-      const socAddress = await updater.update(feedTimestamp, refBytes, stamper)
+      const updateResult = await updater.update(feedTimestamp, refBytes, stamper)
       console.log(
         `[SyncCoordinator ${timestamp()}] Epoch feed updated (+${(performance.now() - startTime).toFixed(2)}ms)`,
       )
 
       // Add SOC chunk to tracked addresses
-      allChunkAddresses.push(socAddress)
+      allChunkAddresses.push(updateResult.socAddress)
 
       console.log(
         `[SyncCoordinator ${timestamp()}] ✅ Sync completed: ${uploadResult.reference}`,

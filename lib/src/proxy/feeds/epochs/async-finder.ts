@@ -9,7 +9,7 @@ import { Binary } from "cafe-utility"
 import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
-import type { EpochFinder } from "./types"
+import type { EpochFinder, EpochLookupResult } from "./types"
 import { downloadEncryptedSOC } from "../../download-data"
 
 const EPOCH_LOOKUP_TIMEOUT_MS = 2000
@@ -221,6 +221,187 @@ export class AsyncEpochFinder implements EpochFinder {
 
     // Return reference only (skip 8-byte timestamp prefix)
     return payload.slice(TIMESTAMP_SIZE)
+  }
+
+  /**
+   * Find the feed update valid at time `at` with full metadata
+   * Used by updater to calculate next epoch when no hints provided
+   *
+   * @param at - Target unix timestamp (seconds)
+   * @returns EpochLookupResult with reference, epoch, and timestamp, or undefined if no update found
+   */
+  async findAtWithMetadata(
+    at: bigint,
+  ): Promise<EpochLookupResult | undefined> {
+    // Fast path: exact timestamp updates are written at level-0
+    const exactEpoch = new EpochIndex(at, 0)
+    try {
+      const exact = await this.getEpochChunkWithMetadata(at, exactEpoch)
+      if (exact) {
+        return {
+          reference: exact.reference,
+          epoch: exactEpoch,
+          timestamp: exact.timestamp,
+        }
+      }
+    } catch {
+      // Ignore and fall back to tree traversal
+    }
+
+    // Start from top epoch and traverse down, tracking found epoch
+    return this.findAtEpochWithMetadata(
+      at,
+      new EpochIndex(0n, MAX_LEVEL),
+      undefined,
+    )
+  }
+
+  /**
+   * Recursively find update at epoch with full metadata tracking
+   *
+   * @param at - Target timestamp
+   * @param epoch - Current epoch to check
+   * @param currentBest - Best result found so far
+   * @returns EpochLookupResult if found, undefined otherwise
+   */
+  private async findAtEpochWithMetadata(
+    at: bigint,
+    epoch: EpochIndex,
+    currentBest: EpochLookupResult | undefined,
+  ): Promise<EpochLookupResult | undefined> {
+    // Try to get chunk at this epoch
+    let chunkData: { reference: Uint8Array; timestamp: bigint } | undefined
+    try {
+      chunkData = await this.getEpochChunkWithMetadata(at, epoch)
+    } catch (error) {
+      // Chunk missing at this epoch
+      if (epoch.isLeft()) {
+        return currentBest
+      }
+      return this.findAtEpochWithMetadata(epoch.start - 1n, epoch.left(), currentBest)
+    }
+
+    // If chunk found and valid
+    if (chunkData) {
+      const result: EpochLookupResult = {
+        reference: chunkData.reference,
+        epoch,
+        timestamp: chunkData.timestamp,
+      }
+
+      // If at finest resolution, this is our answer
+      if (epoch.level === 0) {
+        return result
+      }
+
+      // Continue to finer resolution
+      return this.findAtEpochWithMetadata(at, epoch.childAt(at), result)
+    }
+
+    // Chunk exists but timestamp invalid
+    // Keep descending towards the target epoch first
+    if (epoch.level > 0) {
+      const down = await this.findAtEpochWithMetadata(at, epoch.childAt(at), currentBest)
+      if (down) {
+        return down
+      }
+    }
+
+    if (epoch.isLeft()) {
+      return currentBest
+    }
+
+    // Right child - need to search left sibling branch
+    return this.findAtEpochWithMetadata(epoch.start - 1n, epoch.left(), currentBest)
+  }
+
+  /**
+   * Fetch chunk for a specific epoch and return full metadata
+   *
+   * @param at - Target timestamp for validation
+   * @param epoch - Epoch to fetch
+   * @returns Object with reference and timestamp, or undefined if timestamp > at
+   * @throws Error if chunk not found
+   */
+  private async getEpochChunkWithMetadata(
+    at: bigint,
+    epoch: EpochIndex,
+  ): Promise<{ reference: Uint8Array; timestamp: bigint } | undefined> {
+    const requestOptions: BeeRequestOptions = {
+      timeout: EPOCH_LOOKUP_TIMEOUT_MS,
+    }
+    // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
+    const epochHash = await epoch.marshalBinary()
+    const identifier = Binary.keccak256(
+      Binary.concatBytes(this.topic.toUint8Array(), epochHash),
+    )
+
+    let payload: Uint8Array
+    if (this.encryptionKey) {
+      const soc = await downloadEncryptedSOC(
+        this.bee,
+        this.owner,
+        identifier,
+        this.encryptionKey,
+        requestOptions,
+      )
+      payload = soc.payload
+    } else {
+      // Calculate chunk address: Keccak256(identifier || owner)
+      const address = new Reference(
+        Binary.keccak256(
+          Binary.concatBytes(identifier, this.owner.toUint8Array()),
+        ),
+      )
+
+      // Download chunk
+      const chunkData = await this.bee.downloadChunk(
+        address.toHex(),
+        undefined,
+        requestOptions,
+      )
+
+      // Extract payload from SOC (Single Owner Chunk)
+      const IDENTIFIER_SIZE = 32
+      const SIGNATURE_SIZE = 65
+      const SPAN_SIZE = 8
+      const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
+
+      // Read span to get payload length
+      const spanStart = SOC_HEADER_SIZE
+      const span = chunkData.slice(spanStart, spanStart + SPAN_SIZE)
+      const spanView = new DataView(
+        span.buffer,
+        span.byteOffset,
+        span.byteLength,
+      )
+      const payloadLength = Number(spanView.getBigUint64(0, true)) // little-endian
+
+      // Extract full payload (timestamp + reference)
+      const payloadStart = spanStart + SPAN_SIZE
+      payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
+    }
+
+    // Read timestamp from payload (first 8 bytes, big-endian)
+    const TIMESTAMP_SIZE = 8
+    const timestampBytes = payload.slice(0, TIMESTAMP_SIZE)
+    const timestampView = new DataView(
+      timestampBytes.buffer,
+      timestampBytes.byteOffset,
+      timestampBytes.byteLength,
+    )
+    const timestamp = timestampView.getBigUint64(0, false) // big-endian
+
+    // Validate timestamp - update must be at or before target time
+    if (timestamp > at) {
+      return undefined
+    }
+
+    // Return reference and timestamp
+    return {
+      reference: payload.slice(TIMESTAMP_SIZE),
+      timestamp,
+    }
   }
 
   private async findPreviousLeaf(

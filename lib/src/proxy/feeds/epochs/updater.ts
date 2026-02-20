@@ -8,22 +8,26 @@
 import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
-import { EpochIndex, next } from "./epoch"
+import { EpochIndex, MAX_LEVEL } from "./epoch"
 import { uploadEncryptedSOC, uploadSOC } from "../../upload-encrypted-data"
-import type { EpochUpdater } from "./types"
+import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
+import { AsyncEpochFinder } from "./async-finder"
 
 /**
  * Basic updater for epoch-based feeds
  *
- * Maintains state of the last update and calculates the next epoch
- * for new updates.
+ * Implements Bee-compatible stateless epoch calculation.
+ * Each update uses hints from the previous update to calculate the next epoch,
+ * creating a proper epoch tree that Bee's finder can traverse.
+ *
+ * - First update (no hints): uses root epoch (level 32, start 0)
+ * - Subsequent updates: calculates next epoch using the standard algorithm:
+ *   - If new timestamp within previous epoch's range: dive to child
+ *   - Else: jump to LCA(newTimestamp, prevTimestamp) and dive to child
  *
  * Implements the EpochUpdater interface.
  */
 export class BasicEpochUpdater implements EpochUpdater {
-  private lastUpdate: bigint = 0n
-  private lastEpoch: EpochIndex | undefined = undefined
-
   constructor(
     private readonly bee: Bee,
     private readonly topic: Topic,
@@ -36,22 +40,33 @@ export class BasicEpochUpdater implements EpochUpdater {
    * @param at - Unix timestamp for this update (seconds)
    * @param reference - 32 or 64-byte Swarm reference to store
    * @param stamper - Stamper object for stamping
-   * @returns SOC chunk address for utilization tracking
+   * @param encryptionKey - Optional encryption key for the update
+   * @param hints - Optional hints from previous update for calculating epoch
+   * @returns Update result with SOC address and epoch info for next update
    */
   async update(
     at: bigint,
     reference: Uint8Array,
     stamper: Stamper,
     encryptionKey?: Uint8Array,
-  ): Promise<Uint8Array> {
+    hints?: EpochUpdateHints,
+  ): Promise<EpochUpdateResult> {
     if (reference.length !== 32 && reference.length !== 64) {
       throw new Error(
         `Reference must be 32 or 64 bytes, got ${reference.length}`,
       )
     }
 
-    // Calculate next epoch for this update
-    const epoch = next(this.lastEpoch, this.lastUpdate, at)
+    // Calculate epoch - auto-lookup if no hints provided
+    const epoch = await this.calculateEpoch(at, hints, encryptionKey)
+
+    console.log("[EpochUpdater] Calculated epoch", {
+      at: at.toString(),
+      epochStart: epoch.start.toString(),
+      epochLevel: epoch.level,
+      hasHints: !!hints?.lastEpoch,
+      autoLookup: !hints?.lastEpoch,
+    })
 
     // Upload the chunk with timestamp + reference
     const socAddress = await this.uploadEpochChunk(
@@ -62,11 +77,51 @@ export class BasicEpochUpdater implements EpochUpdater {
       encryptionKey,
     )
 
-    // Update state
-    this.lastUpdate = at
-    this.lastEpoch = epoch
+    // Return result with hints for next update
+    return {
+      socAddress,
+      epoch: { start: epoch.start, level: epoch.level },
+      timestamp: at,
+    }
+  }
 
-    return socAddress
+  /**
+   * Calculate the epoch for this update based on hints or auto-lookup
+   *
+   * When hints are provided, uses them for fast epoch calculation.
+   * When no hints are provided, looks up the current feed state to calculate
+   * the next epoch, preventing overwrites of previous updates.
+   *
+   * @param at - Timestamp for this update
+   * @param hints - Optional hints from previous update
+   * @param encryptionKey - Optional encryption key for looking up encrypted feeds
+   * @returns Epoch to use for this update
+   */
+  private async calculateEpoch(
+    at: bigint,
+    hints?: EpochUpdateHints,
+    encryptionKey?: Uint8Array,
+  ): Promise<EpochIndex> {
+    // Fast path: use provided hints
+    if (hints?.lastEpoch && hints.lastTimestamp !== undefined) {
+      const prevEpoch = new EpochIndex(hints.lastEpoch.start, hints.lastEpoch.level)
+      return prevEpoch.next(hints.lastTimestamp, at)
+    }
+
+    // Slow path: lookup current state
+    const owner = this.signer.publicKey().address()
+    const finder = new AsyncEpochFinder(this.bee, this.topic, owner, encryptionKey)
+
+    // Use findAtWithMetadata to get both reference AND epoch info
+    const current = await finder.findAtWithMetadata(at)
+
+    if (!current) {
+      // First update ever - use root epoch
+      return new EpochIndex(0n, MAX_LEVEL)
+    }
+
+    // Calculate next epoch based on found state
+    return current.epoch.next(current.timestamp, at)
   }
 
   /**
@@ -135,29 +190,4 @@ export class BasicEpochUpdater implements EpochUpdater {
     return result.socAddress
   }
 
-  /**
-   * Reset updater state (useful for testing or reinitialization)
-   */
-  reset(): void {
-    this.lastUpdate = 0n
-    this.lastEpoch = undefined
-  }
-
-  /**
-   * Get current state (for persistence/debugging)
-   */
-  getState(): { lastUpdate: bigint; lastEpoch: EpochIndex | undefined } {
-    return {
-      lastUpdate: this.lastUpdate,
-      lastEpoch: this.lastEpoch,
-    }
-  }
-
-  /**
-   * Restore state (from persistence)
-   */
-  setState(state: { lastUpdate: bigint; lastEpoch?: EpochIndex }): void {
-    this.lastUpdate = state.lastUpdate
-    this.lastEpoch = state.lastEpoch
-  }
 }

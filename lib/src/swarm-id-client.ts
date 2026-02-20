@@ -1898,6 +1898,7 @@ export class SwarmIdClient {
         reference: normalizedRef,
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
+        hints: options?.hints,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -1906,6 +1907,8 @@ export class SwarmIdClient {
         socAddress,
         reference: normalizedRef,
         encryptionKey,
+        epoch: response.epoch,
+        timestamp: response.timestamp,
       }
     }
 
@@ -1942,6 +1945,7 @@ export class SwarmIdClient {
         reference: uploadResult.reference,
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
+        hints: options?.hints,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -1950,6 +1954,8 @@ export class SwarmIdClient {
         socAddress,
         reference: uploadResult.reference,
         encryptionKey,
+        epoch: response.epoch,
+        timestamp: response.timestamp,
       }
     }
 
@@ -2025,6 +2031,7 @@ export class SwarmIdClient {
         at: this.normalizeFeedTimestamp(atValue),
         reference: normalizedRef,
         encryptionKey: undefined, // No encryption for raw upload
+        hints: options?.hints,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2032,6 +2039,8 @@ export class SwarmIdClient {
         socAddress,
         reference: normalizedRef,
         encryptionKey: undefined,
+        epoch: response.epoch,
+        timestamp: response.timestamp,
       }
     }
 
@@ -2061,6 +2070,7 @@ export class SwarmIdClient {
         at: this.normalizeFeedTimestamp(atValue),
         reference: uploadResult.reference,
         encryptionKey: undefined, // No encryption for raw upload
+        hints: options?.hints,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2068,6 +2078,8 @@ export class SwarmIdClient {
         socAddress,
         reference: uploadResult.reference,
         encryptionKey: undefined,
+        epoch: response.epoch,
+        timestamp: response.timestamp,
       }
     }
 

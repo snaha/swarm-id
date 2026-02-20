@@ -88,7 +88,6 @@ import {
   createAsyncEpochFinder,
   createEpochUpdater,
 } from "./proxy/feeds/epochs"
-import { EpochIndex } from "./proxy/feeds/epochs/epoch"
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
@@ -2273,7 +2272,7 @@ export class SwarmIdProxy {
     message: EpochFeedUploadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, signer, at, reference, encryptionKey } = message
+    const { requestId, topic, signer, at, reference, encryptionKey, hints } = message
 
     console.log("[Proxy] Epoch feed upload reference request", {
       topic,
@@ -2287,6 +2286,7 @@ export class SwarmIdProxy {
       encryptionKeyIsAllZero: encryptionKey
         ? /^0+$/.test(encryptionKey)
         : undefined,
+      hasHints: !!hints?.lastEpoch,
     })
 
     try {
@@ -2315,52 +2315,39 @@ export class SwarmIdProxy {
       const epochEncryptionKey = encryptionKey
         ? hexToUint8Array(encryptionKey)
         : undefined
-      // Keep epoch writes bounded and deterministic: write directly to level-0
-      // for this timestamp instead of reconstructing network state.
-      const previousState =
-        atValue > 0n
-          ? {
-              lastUpdate: atValue - 1n,
-              // Seed at the parent epoch of `at` so updater.next() deterministically
-              // descends to the level-0 epoch at exactly `at`.
-              lastEpoch: new EpochIndex(atValue & ~1n, 1),
-            }
-          : undefined
-      if (previousState) {
-        updater.setState(previousState)
-      }
-      console.log("[Proxy] Epoch upload previous state", {
+
+      // Convert hints from message format to updater format
+      const epochHints = hints?.lastEpoch
+        ? {
+            lastEpoch: {
+              start: BigInt(hints.lastEpoch.start),
+              level: hints.lastEpoch.level,
+            },
+            lastTimestamp: hints.lastTimestamp
+              ? BigInt(hints.lastTimestamp)
+              : undefined,
+          }
+        : undefined
+
+      console.log("[Proxy] Epoch upload", {
         owner: ownerHex,
         at: atValue.toString(),
-        previousState: previousState
-          ? {
-              timestamp: previousState.lastUpdate.toString(),
-              epochStart: previousState.lastEpoch.start.toString(),
-              epochLevel: previousState.lastEpoch.level,
-            }
-          : undefined,
         hasEncryptionKey: !!epochEncryptionKey,
+        hasHints: !!epochHints,
       })
 
       const referenceBytes = hexToUint8Array(reference)
-      const socAddress = await updater.update(
+      const updateResult = await updater.update(
         atValue,
         referenceBytes,
         this.stamper,
         epochEncryptionKey,
+        epochHints,
       )
-      const nextState = updater.getState()
-      console.log("[Proxy] Epoch upload next state", {
-        socAddress: uint8ArrayToHex(socAddress),
-        state: {
-          lastUpdate: nextState.lastUpdate.toString(),
-          lastEpoch: nextState.lastEpoch
-            ? {
-                start: nextState.lastEpoch.start.toString(),
-                level: nextState.lastEpoch.level,
-              }
-            : undefined,
-        },
+      console.log("[Proxy] Epoch upload complete", {
+        socAddress: uint8ArrayToHex(updateResult.socAddress),
+        epochStart: updateResult.epoch.start.toString(),
+        epochLevel: updateResult.epoch.level,
       })
 
       const readBackFinder = createAsyncEpochFinder({
@@ -2385,8 +2372,13 @@ export class SwarmIdProxy {
           {
             type: "epochFeedUploadReferenceResponse",
             requestId,
-            socAddress: uint8ArrayToHex(socAddress),
+            socAddress: uint8ArrayToHex(updateResult.socAddress),
             encryptionKey: encryptionKey ? encryptionKey : undefined,
+            epoch: {
+              start: updateResult.epoch.start.toString(),
+              level: updateResult.epoch.level,
+            },
+            timestamp: updateResult.timestamp.toString(),
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )

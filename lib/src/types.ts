@@ -280,6 +280,11 @@ export interface EpochFeedUploadOptions {
   encrypt?: boolean
   /** Optional encryption key for encrypted feed updates. */
   encryptionKey?: Uint8Array | string
+  /** Optional hints from previous update for stateless epoch calculation. */
+  hints?: {
+    lastEpoch?: { start: string; level: number }
+    lastTimestamp?: string
+  }
 }
 
 export interface EpochFeedDownloadPayloadResult {
@@ -305,6 +310,10 @@ export interface EpochFeedUploadResult {
   reference: Reference
   /** Encryption key (hex) if the reference is encrypted. */
   encryptionKey?: string
+  /** Epoch used for this update (for caller to store as hint) */
+  epoch: { start: string; level: number }
+  /** Timestamp used (stringified bigint) */
+  timestamp: string
 }
 
 /**
@@ -771,6 +780,19 @@ export const EpochFeedDownloadReferenceMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+// Schema for epoch hints (used for stateless epoch calculation)
+export const EpochHintsSchema = z
+  .object({
+    lastEpoch: z
+      .object({
+        start: z.string(), // Stringified bigint
+        level: z.number(),
+      })
+      .optional(),
+    lastTimestamp: z.string().optional(), // Stringified bigint
+  })
+  .optional()
+
 export const EpochFeedUploadReferenceMessageSchema = z.object({
   type: z.literal("epochFeedUploadReference"),
   requestId: z.string(),
@@ -779,6 +801,7 @@ export const EpochFeedUploadReferenceMessageSchema = z.object({
   at: TimestampSchema,
   reference: ReferenceSchema,
   encryptionKey: PrivateKeySchema.optional(),
+  hints: EpochHintsSchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1232,6 +1255,12 @@ export const EpochFeedUploadReferenceResponseMessageSchema = z.object({
   requestId: z.string(),
   socAddress: ReferenceSchema,
   encryptionKey: PrivateKeySchema.optional(),
+  // Epoch info for next update (stateless hints)
+  epoch: z.object({
+    start: z.string(), // Stringified bigint
+    level: z.number(),
+  }),
+  timestamp: z.string(), // Stringified bigint
 })
 
 export const FeedGetOwnerResponseMessageSchema = z.object({

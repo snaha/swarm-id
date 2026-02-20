@@ -1546,13 +1546,10 @@ Secret message for ACT test!</textarea
                   atRaw = Math.floor(Date.now() / 1000).toString()
                 }
                 const writer = client.makeEpochFeedWriter({ topic })
-                // Build v1 format payload: timestamp(8) + reference(32) = 40 bytes
-                // This creates a 48-byte CAC which is valid v1 format for /bzz/
-                const timestamp = parseInt(atRaw, 10)
-                const v1Payload = buildV1Payload(manifestReference, timestamp)
-                const feedResult = await writer.uploadRawPayload(v1Payload, {
+                // Pass manifest reference directly - EpochUpdater builds v1 payload internally
+                // This stores timestamp(8) + reference(32) = 40 bytes directly in the SOC
+                const feedResult = await writer.uploadRawReference(manifestReference, {
                   at: atRaw,
-                  uploadOptions: { pin: false, deferred: deferred }
                 })
 
                 document.getElementById("feed-download-at").value = atRaw

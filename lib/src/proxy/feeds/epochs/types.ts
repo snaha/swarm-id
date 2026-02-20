@@ -51,6 +51,29 @@ export interface EpochLookupResult {
 }
 
 /**
+ * Hints for calculating the next epoch in a stateless manner.
+ * Callers should store these after each update and pass them to subsequent updates.
+ */
+export interface EpochUpdateHints {
+  /** Previous epoch (for calculating next) */
+  lastEpoch?: { start: bigint; level: number }
+  /** Timestamp of last update */
+  lastTimestamp?: bigint
+}
+
+/**
+ * Result from an epoch feed update, including epoch info for subsequent updates.
+ */
+export interface EpochUpdateResult {
+  /** SOC address of the uploaded chunk */
+  socAddress: Uint8Array
+  /** Epoch used for this update (for caller to store as hint) */
+  epoch: { start: bigint; level: number }
+  /** Timestamp used (for caller to store as hint) */
+  timestamp: bigint
+}
+
+/**
  * Interface for epoch feed finders (readers)
  *
  * Implementations: SyncEpochFinder, AsyncEpochFinder
@@ -70,40 +93,36 @@ export interface EpochFinder {
  * Interface for epoch feed updaters (writers)
  *
  * Implementation: BasicEpochUpdater
+ *
+ * Implements Bee-compatible stateless epoch calculation.
+ * Each update uses hints from the previous update to calculate the next epoch,
+ * creating a proper epoch tree that Bee's finder can traverse.
  */
 export interface EpochUpdater {
   /**
    * Update feed with a reference at given timestamp
    *
+   * Calculates the appropriate epoch based on hints:
+   * - First update (no hints): uses root epoch (level 32, start 0)
+   * - Subsequent updates: calculates next epoch using LCA-based algorithm
+   *
    * @param at - Unix timestamp for this update (seconds)
    * @param reference - 32 or 64-byte Swarm reference to store
    * @param stamper - Stamper object for stamping
-   * @returns SOC chunk address for utilization tracking
+   * @param encryptionKey - Optional encryption key for the update
+   * @param hints - Optional hints from previous update for calculating epoch
+   * @returns Update result with SOC address and epoch info for next update
    */
   update(
     at: bigint,
     reference: Uint8Array,
     stamper: Stamper,
     encryptionKey?: Uint8Array,
-  ): Promise<Uint8Array>
+    hints?: EpochUpdateHints,
+  ): Promise<EpochUpdateResult>
 
   /**
    * Get the owner address (derived from signer)
    */
   getOwner(): EthAddress
-
-  /**
-   * Get current state (for persistence/debugging)
-   */
-  getState(): { lastUpdate: bigint; lastEpoch: EpochIndex | undefined }
-
-  /**
-   * Restore state (from persistence)
-   */
-  setState(state: { lastUpdate: bigint; lastEpoch?: EpochIndex }): void
-
-  /**
-   * Reset updater state (useful for testing or reinitialization)
-   */
-  reset(): void
 }

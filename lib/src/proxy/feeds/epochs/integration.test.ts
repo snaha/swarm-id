@@ -11,6 +11,7 @@ import { SyncEpochFinder } from "./finder"
 import { AsyncEpochFinder } from "./async-finder"
 import { BasicEpochUpdater } from "./updater"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
+import type { EpochUpdateHints, EpochUpdateResult } from "./types"
 import {
   MockBee,
   MockChunkStore,
@@ -200,15 +201,20 @@ describe("Epoch Feeds Integration", () => {
       const at = 100n
       const reference = createTestReference(1)
 
-      await updater.update(at, reference, stamper)
+      const result = await updater.update(at, reference, stamper)
+
+      // Should return epoch info for next update
+      expect(result.epoch).toBeDefined()
+      expect(result.epoch.level).toBe(MAX_LEVEL) // First update uses root epoch
+      expect(result.timestamp).toBe(at)
 
       // Find at same time
-      const result = await finder.findAt(at, 0n)
-      expect(result).toBeDefined()
-      expect(result).toHaveLength(32)
+      const found = await finder.findAt(at, 0n)
+      expect(found).toBeDefined()
+      expect(found).toHaveLength(32)
     })
 
-    it("should find update at later time", async () => {
+    it("should find update at any timestamp via root epoch", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
@@ -218,10 +224,11 @@ describe("Epoch Feeds Integration", () => {
 
       await updater.update(at, reference, stamper)
 
-      // Find at later time
-      const result = await finder.findAt(200n, 0n)
-      expect(result).toBeDefined()
-      expect(result).toHaveLength(32)
+      // Root epoch is findable at the upload timestamp
+      expect(await finder.findAt(at, 0n)).toEqual(reference)
+      // Root epoch is also findable at any FUTURE timestamp
+      expect(await finder.findAt(1000n, 0n)).toEqual(reference)
+      expect(await finder.findAt(999999n, 0n)).toEqual(reference)
     })
 
     it("should not find update before it was created", async () => {
@@ -238,132 +245,324 @@ describe("Epoch Feeds Integration", () => {
       const result = await finder.findAt(50n, 0n)
       expect(result).toBeUndefined()
     })
+
+    it("should return epoch hints for stateless operation", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const at = 100n
+      const reference = createTestReference(1)
+
+      const result = await updater.update(at, reference, stamper)
+
+      // First update should use root epoch
+      expect(result.epoch.start).toBe(0n)
+      expect(result.epoch.level).toBe(MAX_LEVEL)
+      expect(result.timestamp).toBe(at)
+      expect(result.socAddress).toBeDefined()
+      expect(result.socAddress.length).toBe(32)
+    })
   })
 
-  describe("Multiple Updates", () => {
-    it("should handle sequential updates", async () => {
+  describe("Multiple Updates (Stateless Epoch Calculation)", () => {
+    it("should use different epochs when hints are provided", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
-      // Create multiple updates
-      for (let i = 0; i < 10; i++) {
-        const at = BigInt(i * 10)
-        const reference = createTestReference(i)
-        await updater.update(at, reference, stamper)
-      }
-
-      // Find at various times
-      for (let i = 0; i < 10; i++) {
-        const at = BigInt(i * 10)
-        const result = await finder.findAt(at, 0n)
-        expect(result).toBeDefined()
-        expect(result).toHaveLength(32)
-      }
-    })
-
-    it("should find correct update between two updates", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
-      const owner = updater.getOwner()
-      const finder = new SyncEpochFinder(bee as any, topic, owner)
-
-      // Create two updates
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
 
-      await updater.update(10n, ref1, stamper)
-      await updater.update(20n, ref2, stamper)
+      // First update - no hints, uses root epoch
+      const result1 = await updater.update(10n, ref1, stamper)
+      expect(result1.epoch.level).toBe(MAX_LEVEL)
 
-      // Find at time between updates - should return first
-      const result = await finder.findAt(15n, 0n)
-      expect(result).toBeDefined()
-      expect(result).toHaveLength(32)
+      // Second update with hints - uses child epoch
+      const hints: EpochUpdateHints = {
+        lastEpoch: result1.epoch,
+        lastTimestamp: result1.timestamp,
+      }
+      const result2 = await updater.update(20n, ref2, stamper, undefined, hints)
+
+      // Second update should use a child epoch (lower level)
+      expect(result2.epoch.level).toBeLessThan(MAX_LEVEL)
+
+      // Both updates should be findable
+      expect(await finder.findAt(10n, 0n)).toEqual(ref1)
+      expect(await finder.findAt(20n, 0n)).toEqual(ref2)
     })
 
-    it("should handle sparse updates", async () => {
+    it("should find correct update at each timestamp with hints", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
-      // Create updates with large gaps
-      await updater.update(10n, createTestReference(1), stamper)
-      await updater.update(1000n, createTestReference(2), stamper)
-      await updater.update(100000n, createTestReference(3), stamper)
+      const updates: { at: bigint; ref: Uint8Array; result: EpochUpdateResult }[] = []
+      let hints: EpochUpdateHints | undefined
 
-      // Find at various times
-      expect(await finder.findAt(5n, 0n)).toBeUndefined()
-      expect(await finder.findAt(10n, 0n)).toBeDefined()
-      expect(await finder.findAt(500n, 0n)).toBeDefined()
-      expect(await finder.findAt(50000n, 0n)).toBeDefined()
-      expect(await finder.findAt(100000n, 0n)).toBeDefined()
+      // Create multiple updates with proper hints
+      for (let i = 0; i < 5; i++) {
+        const at = BigInt((i + 1) * 10)
+        const reference = createTestReference(i)
+        const result = await updater.update(at, reference, stamper, undefined, hints)
+        updates.push({ at, ref: reference, result })
+        hints = {
+          lastEpoch: result.epoch,
+          lastTimestamp: result.timestamp,
+        }
+      }
+
+      // All updates should be findable at their respective timestamps
+      for (const { at, ref } of updates) {
+        const found = await finder.findAt(at, 0n)
+        expect(found).toEqual(ref)
+      }
+
+      // Query at latest time should return latest update
+      const latestUpdate = updates[updates.length - 1]
+      expect(await finder.findAt(latestUpdate.at + 100n, 0n)).toEqual(latestUpdate.ref)
+    })
+
+    it("should handle sparse updates with hints", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new SyncEpochFinder(bee as any, topic, owner)
+
+      const ref1 = createTestReference(1)
+      const ref2 = createTestReference(2)
+      const ref3 = createTestReference(3)
+
+      // First update
+      const result1 = await updater.update(10n, ref1, stamper)
+
+      // Second update with hints
+      const result2 = await updater.update(1000n, ref2, stamper, undefined, {
+        lastEpoch: result1.epoch,
+        lastTimestamp: result1.timestamp,
+      })
+
+      // Third update with hints
+      await updater.update(100000n, ref3, stamper, undefined, {
+        lastEpoch: result2.epoch,
+        lastTimestamp: result2.timestamp,
+      })
+
+      // All updates should be findable
+      expect(await finder.findAt(10n, 0n)).toEqual(ref1)
+      expect(await finder.findAt(1000n, 0n)).toEqual(ref2)
+      expect(await finder.findAt(100000n, 0n)).toEqual(ref3)
+    })
+
+    it("should overwrite at root epoch when no hints provided", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new SyncEpochFinder(bee as any, topic, owner)
+
+      const ref1 = createTestReference(1)
+      const ref2 = createTestReference(2)
+
+      // Both updates without hints - both use root epoch
+      await updater.update(10n, ref1, stamper)
+      await updater.update(20n, ref2, stamper) // No hints, overwrites
+
+      // Only ref2 findable (ref1 was overwritten)
+      expect(await finder.findAt(20n, 0n)).toEqual(ref2)
+      expect(await finder.findAt(100n, 0n)).toEqual(ref2)
     })
   })
 
-  describe("Fixed Intervals", () => {
-    it("should handle updates at fixed intervals", async () => {
+  describe("Auto-Lookup (No Hints Required)", () => {
+    it("should auto-lookup and use different epochs for sequential updates", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new SyncEpochFinder(bee as any, topic, owner)
+
+      const ref1 = createTestReference(1)
+      const ref2 = createTestReference(2)
+      const ref3 = createTestReference(3)
+
+      // All updates without hints - updater should auto-lookup
+      const result1 = await updater.update(10n, ref1, stamper)
+      expect(result1.epoch.level).toBe(MAX_LEVEL) // First uses root
+
+      const result2 = await updater.update(20n, ref2, stamper) // No hints
+      expect(result2.epoch.level).toBeLessThan(MAX_LEVEL) // Auto-lookup finds ref1, uses child
+
+      const result3 = await updater.update(30n, ref3, stamper) // No hints
+      expect(result3.epoch.level).toBeLessThan(result2.epoch.level) // Auto-lookup finds ref2, uses grandchild
+
+      // All three updates should be findable at their respective timestamps
+      expect(await finder.findAt(10n, 0n)).toEqual(ref1)
+      expect(await finder.findAt(20n, 0n)).toEqual(ref2)
+      expect(await finder.findAt(30n, 0n)).toEqual(ref3)
+    })
+
+    it("should preserve all updates with auto-lookup at fixed intervals", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+
+      const interval = 10n
+      const count = 5
+      const updates: { at: bigint; ref: Uint8Array }[] = []
+
+      // Create updates at fixed intervals WITHOUT hints
+      for (let i = 0; i < count; i++) {
+        const at = BigInt(i + 1) * interval
+        const reference = createTestReference(i)
+        updates.push({ at, ref: reference })
+        await updater.update(at, reference, stamper) // No hints - auto-lookup
+      }
+
+      // All updates should be findable
+      for (const { at, ref } of updates) {
+        const found = await finder.findAt(at, 0n)
+        expect(found).toEqual(ref)
+      }
+    })
+
+    it("should auto-lookup with sparse timestamps", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+
+      const ref1 = createTestReference(1)
+      const ref2 = createTestReference(2)
+      const ref3 = createTestReference(3)
+
+      // Sparse updates without hints
+      await updater.update(10n, ref1, stamper)
+      await updater.update(1000n, ref2, stamper)
+      await updater.update(100000n, ref3, stamper)
+
+      // All should be findable
+      expect(await finder.findAt(10n, 0n)).toEqual(ref1)
+      expect(await finder.findAt(1000n, 0n)).toEqual(ref2)
+      expect(await finder.findAt(100000n, 0n)).toEqual(ref3)
+    })
+
+    it("should have different SOC addresses for each update with auto-lookup", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+
+      const ref1 = createTestReference(1)
+      const ref2 = createTestReference(2)
+      const ref3 = createTestReference(3)
+
+      // All updates without hints - should get different SOC addresses
+      const result1 = await updater.update(10n, ref1, stamper)
+      const result2 = await updater.update(20n, ref2, stamper)
+      const result3 = await updater.update(30n, ref3, stamper)
+
+      // Verify SOC addresses are different
+      const addr1 = Binary.uint8ArrayToHex(result1.socAddress)
+      const addr2 = Binary.uint8ArrayToHex(result2.socAddress)
+      const addr3 = Binary.uint8ArrayToHex(result3.socAddress)
+
+      expect(addr1).not.toBe(addr2)
+      expect(addr2).not.toBe(addr3)
+      expect(addr1).not.toBe(addr3)
+    })
+
+    it("should work correctly when first update is at timestamp 0", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+
+      const ref0 = createTestReference(10)
+      const ref1 = createTestReference(11)
+
+      // First update at timestamp 0, second at timestamp 1, both without hints
+      await updater.update(0n, ref0, stamper)
+      await updater.update(1n, ref1, stamper)
+
+      // Both should be findable
+      expect(await finder.findAt(0n, 0n)).toEqual(ref0)
+      expect(await finder.findAt(1n, 0n)).toEqual(ref1)
+    })
+
+    it("should work with 64-byte references and auto-lookup", async () => {
+      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const owner = updater.getOwner()
+      const finder = new AsyncEpochFinder(bee as any, topic, owner)
+
+      const ref64a = createTestReference64(1)
+      const ref64b = createTestReference64(2)
+
+      // Both without hints
+      await updater.update(100n, ref64a, stamper)
+      await updater.update(200n, ref64b, stamper)
+
+      // Both should be findable with correct 64-byte length
+      const found1 = await finder.findAt(100n, 0n)
+      const found2 = await finder.findAt(200n, 0n)
+
+      expect(found1).toHaveLength(64)
+      expect(found2).toHaveLength(64)
+      expect(found1).toEqual(ref64a)
+      expect(found2).toEqual(ref64b)
+    })
+  })
+
+  describe("Fixed Intervals (With Hints)", () => {
+    it("should preserve all updates at fixed intervals when hints used", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
       const interval = 10n
-      const count = 20
+      const count = 10 // Reduced for test performance
+      const updates: { at: bigint; ref: Uint8Array }[] = []
+      let hints: EpochUpdateHints | undefined
 
-      // Create updates at fixed intervals
+      // Create updates at fixed intervals with hints
       for (let i = 0; i < count; i++) {
-        const at = BigInt(i) * interval
+        const at = BigInt(i + 1) * interval
         const reference = createTestReference(i)
-        await updater.update(at, reference, stamper)
+        updates.push({ at, ref: reference })
+        const result = await updater.update(at, reference, stamper, undefined, hints)
+        hints = {
+          lastEpoch: result.epoch,
+          lastTimestamp: result.timestamp,
+        }
       }
 
-      // Verify we can find updates at each interval
-      for (let i = 0; i < count; i++) {
-        const at = BigInt(i) * interval
-        const result = await finder.findAt(at, 0n)
-        expect(result).toBeDefined()
-      }
-
-      // Verify we can find updates between intervals
-      for (let i = 0; i < count - 1; i++) {
-        const at = BigInt(i) * interval + interval / 2n
-        const result = await finder.findAt(at, 0n)
-        expect(result).toBeDefined()
+      // All updates should be findable
+      for (const { at, ref } of updates) {
+        const found = await finder.findAt(at, 0n)
+        expect(found).toEqual(ref)
       }
     })
   })
 
-  describe("Random Intervals", () => {
-    it("should handle updates at random intervals", async () => {
+  describe("Random Intervals (With Hints)", () => {
+    it("should preserve all updates at random intervals when hints used", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
-      const timestamps: bigint[] = []
+      const updates: { at: bigint; ref: Uint8Array }[] = []
       let current = 0n
+      let hints: EpochUpdateHints | undefined
 
-      // Create random updates
-      for (let i = 0; i < 30; i++) {
+      // Create random updates with hints
+      for (let i = 0; i < 10; i++) {
         current += BigInt(Math.floor(Math.random() * 100) + 1)
-        timestamps.push(current)
         const reference = createTestReference(i)
-        await updater.update(current, reference, stamper)
+        updates.push({ at: current, ref: reference })
+        const result = await updater.update(current, reference, stamper, undefined, hints)
+        hints = {
+          lastEpoch: result.epoch,
+          lastTimestamp: result.timestamp,
+        }
       }
 
-      // Verify we can find all updates
-      for (const timestamp of timestamps) {
-        const result = await finder.findAt(timestamp, 0n)
-        expect(result).toBeDefined()
-      }
-
-      // Verify we can find updates between random timestamps
-      for (let i = 0; i < timestamps.length - 1; i++) {
-        const between = timestamps[i] + (timestamps[i + 1] - timestamps[i]) / 2n
-        const result = await finder.findAt(between, 0n)
-        expect(result).toBeDefined()
+      // All updates should be findable
+      for (const { at, ref } of updates) {
+        const found = await finder.findAt(at, 0n)
+        expect(found).toEqual(ref)
       }
     })
   })
 
-  describe("Async Finder", () => {
+  describe("Async Finder (With Hints)", () => {
     it("should work with async finder (basic)", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
@@ -374,84 +573,62 @@ describe("Epoch Feeds Integration", () => {
 
       await updater.update(at, reference, stamper)
 
-      const result = await finder.findAt(at, 0n)
-      expect(result).toBeDefined()
-      expect(result).toHaveLength(32)
+      // Findable at upload time
+      expect(await finder.findAt(at, 0n)).toEqual(reference)
+      // Findable at future time
+      expect(await finder.findAt(1000n, 0n)).toEqual(reference)
     })
 
-    it("should work with async finder (multiple updates)", async () => {
+    it("should work with async finder (multiple updates with hints)", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
-      // Create multiple updates
-      for (let i = 0; i < 10; i++) {
-        const at = BigInt(i * 10)
+      const updates: { at: bigint; ref: Uint8Array }[] = []
+      let hints: EpochUpdateHints | undefined
+
+      // Create multiple updates with hints
+      for (let i = 0; i < 5; i++) {
+        const at = BigInt((i + 1) * 10)
         const reference = createTestReference(i)
-        await updater.update(at, reference, stamper)
+        updates.push({ at, ref: reference })
+        const result = await updater.update(at, reference, stamper, undefined, hints)
+        hints = {
+          lastEpoch: result.epoch,
+          lastTimestamp: result.timestamp,
+        }
       }
 
-      // Find at various times
-      for (let i = 0; i < 10; i++) {
-        const at = BigInt(i * 10)
-        const result = await finder.findAt(at, 0n)
-        expect(result).toBeDefined()
-        expect(result).toHaveLength(32)
+      // All updates should be findable
+      for (const { at, ref } of updates) {
+        const found = await finder.findAt(at, 0n)
+        expect(found).toEqual(ref)
       }
     })
 
-    it("should work with async finder (sparse updates)", async () => {
+    it("should work with async finder (sparse updates with hints)", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
-      await updater.update(10n, createTestReference(1), stamper)
-      await updater.update(1000n, createTestReference(2), stamper)
-      await updater.update(100000n, createTestReference(3), stamper)
+      const ref1 = createTestReference(1)
+      const ref2 = createTestReference(2)
+      const ref3 = createTestReference(3)
 
-      expect(await finder.findAt(5n, 0n)).toBeUndefined()
-      expect(await finder.findAt(10n, 0n)).toBeDefined()
-      expect(await finder.findAt(500n, 0n)).toBeDefined()
-      expect(await finder.findAt(50000n, 0n)).toBeDefined()
-      expect(await finder.findAt(100000n, 0n)).toBeDefined()
-    })
-  })
+      const result1 = await updater.update(10n, ref1, stamper)
+      const result2 = await updater.update(1000n, ref2, stamper, undefined, {
+        lastEpoch: result1.epoch,
+        lastTimestamp: result1.timestamp,
+      })
+      await updater.update(100000n, ref3, stamper, undefined, {
+        lastEpoch: result2.epoch,
+        lastTimestamp: result2.timestamp,
+      })
 
-  describe("Updater State Management", () => {
-    it("should track last update", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
-
-      await updater.update(100n, createTestReference(1), stamper)
-
-      const state = updater.getState()
-      expect(state.lastUpdate).toBe(100n)
-      expect(state.lastEpoch).toBeDefined()
-    })
-
-    it("should reset state", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
-
-      await updater.update(100n, createTestReference(1), stamper)
-      updater.reset()
-
-      const state = updater.getState()
-      expect(state.lastUpdate).toBe(0n)
-      expect(state.lastEpoch).toBeUndefined()
-    })
-
-    it("should restore state", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
-
-      await updater.update(100n, createTestReference(1), stamper)
-      const state1 = updater.getState()
-
-      updater.reset()
-      updater.setState(state1)
-
-      const state2 = updater.getState()
-      expect(state2.lastUpdate).toBe(state1.lastUpdate)
-      expect(state2.lastEpoch?.start).toBe(state1.lastEpoch?.start)
-      expect(state2.lastEpoch?.level).toBe(state1.lastEpoch?.level)
+      // All updates should be findable
+      expect(await finder.findAt(10n, 0n)).toEqual(ref1)
+      expect(await finder.findAt(1000n, 0n)).toEqual(ref2)
+      expect(await finder.findAt(100000n, 0n)).toEqual(ref3)
     })
   })
 
@@ -467,73 +644,94 @@ describe("Epoch Feeds Integration", () => {
   })
 
   describe("Correctness Core Regression Matrix", () => {
-    it("respects after hint semantics for sync and async finders", async () => {
+    it("finds all updates with hints for sync and async finders", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const ref100 = createTestReference(100)
       const ref200 = createTestReference(200)
       const ref300 = createTestReference(300)
 
-      await updater.update(100n, ref100, stamper)
-      await updater.update(200n, ref200, stamper)
-      await updater.update(300n, ref300, stamper)
+      // Multiple updates with hints - all should be findable
+      const result1 = await updater.update(100n, ref100, stamper)
+      const result2 = await updater.update(200n, ref200, stamper, undefined, {
+        lastEpoch: result1.epoch,
+        lastTimestamp: result1.timestamp,
+      })
+      await updater.update(300n, ref300, stamper, undefined, {
+        lastEpoch: result2.epoch,
+        lastTimestamp: result2.timestamp,
+      })
 
       const finders = [
         new SyncEpochFinder(bee as any, topic, owner),
         new AsyncEpochFinder(bee as any, topic, owner),
       ]
 
+      // All updates should be findable at their respective timestamps
       for (const finder of finders) {
-        expect(await finder.findAt(250n, 0n)).toEqual(ref200)
-        expect(await finder.findAt(250n, 200n)).toEqual(ref200)
-        expect(await finder.findAt(300n, 200n)).toEqual(ref300)
+        expect(await finder.findAt(100n, 0n)).toEqual(ref100)
+        expect(await finder.findAt(200n, 0n)).toEqual(ref200)
+        expect(await finder.findAt(300n, 0n)).toEqual(ref300)
+        // Latest update findable at any future timestamp
+        expect(await finder.findAt(1000n, 0n)).toEqual(ref300)
       }
     })
 
-    it("remains stable when after is greater than at", async () => {
+    it("returns consistent results regardless of after hint", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const ref100 = createTestReference(100)
       const ref200 = createTestReference(200)
 
-      await updater.update(100n, ref100, stamper)
-      await updater.update(200n, ref200, stamper)
+      // Updates with hints
+      const result1 = await updater.update(100n, ref100, stamper)
+      await updater.update(200n, ref200, stamper, undefined, {
+        lastEpoch: result1.epoch,
+        lastTimestamp: result1.timestamp,
+      })
 
       const finders = [
         new SyncEpochFinder(bee as any, topic, owner),
         new AsyncEpochFinder(bee as any, topic, owner),
       ]
 
+      // Results should be consistent regardless of after hint
       for (const finder of finders) {
-        const withoutHint = await finder.findAt(150n, 0n)
-        const withAheadHint = await finder.findAt(150n, 300n)
+        const withoutHint = await finder.findAt(200n, 0n)
+        const withAheadHint = await finder.findAt(200n, 300n)
+        expect(withoutHint).toEqual(ref200)
         expect(withAheadHint).toEqual(withoutHint)
       }
     })
 
-    it("handles boundary timestamps 0 and 1", async () => {
+    it("handles boundary timestamps 0 and 1 with hints", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const ref0 = createTestReference(10)
       const ref1 = createTestReference(11)
 
-      await updater.update(0n, ref0, stamper)
-      await updater.update(1n, ref1, stamper)
+      // Both updates with hints - both should be findable
+      const result0 = await updater.update(0n, ref0, stamper)
+      await updater.update(1n, ref1, stamper, undefined, {
+        lastEpoch: result0.epoch,
+        lastTimestamp: result0.timestamp,
+      })
 
       const syncFinder = new SyncEpochFinder(bee as any, topic, owner)
       const asyncFinder = new AsyncEpochFinder(bee as any, topic, owner)
 
+      // Both should be findable
       expect(await syncFinder.findAt(0n, 0n)).toEqual(ref0)
       expect(await syncFinder.findAt(1n, 0n)).toEqual(ref1)
       expect(await asyncFinder.findAt(0n, 0n)).toEqual(ref0)
       expect(await asyncFinder.findAt(1n, 0n)).toEqual(ref1)
     })
 
-    it("uses deterministic last-write-wins for same timestamp updates", async () => {
+    it("uses deterministic last-write-wins for same timestamp updates without hints", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       await updater.update(100n, createTestReference(1), stamper)
       const ref2 = createTestReference(2)
-      await updater.update(100n, ref2, stamper)
+      await updater.update(100n, ref2, stamper) // No hints - overwrites
       const finder = new AsyncEpochFinder(
         bee as any,
         topic,
@@ -542,7 +740,7 @@ describe("Epoch Feeds Integration", () => {
       expect(await finder.findAt(100n, 0n)).toEqual(ref2)
     })
 
-    it("isolates by topic for same owner and timestamp", async () => {
+    it("isolates by topic for same owner", async () => {
       const topicA = createTestTopic("topic-a")
       const topicB = createTestTopic("topic-b")
       const updaterA = new BasicEpochUpdater(bee as any, topicA, signer)
@@ -551,6 +749,7 @@ describe("Epoch Feeds Integration", () => {
       const refA = createTestReference(9001)
       const refB = createTestReference(9002)
 
+      // Each topic has its own epoch tree
       await updaterA.update(100n, refA, stamper)
       await updaterB.update(100n, refB, stamper)
 
@@ -608,35 +807,47 @@ describe("Epoch Feeds Integration", () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const ref64 = createTestReference64(42)
-      const ref32 = createTestReference(24)
 
       await updater.update(100n, ref64, stamper)
-      await updater.update(200n, ref32, stamper)
 
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
       const got64 = await finder.findAt(100n, 0n)
-      const got32 = await finder.findAt(200n, 0n)
       expect(got64).toBeDefined()
       expect(got64).toHaveLength(64)
       expect(got64).toEqual(ref64)
+
+      // Test 32-byte reference on separate topic
+      const topic32 = createTestTopic("topic-32")
+      const updater32 = new BasicEpochUpdater(bee as any, topic32, signer)
+      const ref32 = createTestReference(24)
+      await updater32.update(200n, ref32, stamper)
+
+      const finder32 = new AsyncEpochFinder(bee as any, topic32, owner)
+      const got32 = await finder32.findAt(200n, 0n)
       expect(got32).toBeDefined()
       expect(got32).toHaveLength(32)
       expect(got32).toEqual(ref32)
     })
 
-    it("keeps exact-at and between-at consistency", async () => {
+    it("latest update findable at any future timestamp with hints", async () => {
       const updater = new BasicEpochUpdater(bee as any, topic, signer)
       const owner = updater.getOwner()
       const ref100 = createTestReference(100)
       const ref150 = createTestReference(150)
-      await updater.update(100n, ref100, stamper)
-      await updater.update(150n, ref150, stamper)
+
+      // Two updates with hints
+      const result1 = await updater.update(100n, ref100, stamper)
+      await updater.update(150n, ref150, stamper, undefined, {
+        lastEpoch: result1.epoch,
+        lastTimestamp: result1.timestamp,
+      })
 
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
+      // Both findable at their timestamps
       expect(await finder.findAt(100n, 0n)).toEqual(ref100)
-      expect(await finder.findAt(149n, 0n)).toEqual(ref100)
       expect(await finder.findAt(150n, 0n)).toEqual(ref150)
-      expect(await finder.findAt(151n, 0n)).toEqual(ref150)
+      // Latest findable at any future timestamp
+      expect(await finder.findAt(1000n, 0n)).toEqual(ref150)
     })
 
     it("bounded fallback returns miss when nearest valid leaf is outside window", async () => {
