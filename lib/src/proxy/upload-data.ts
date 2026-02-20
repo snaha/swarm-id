@@ -169,7 +169,7 @@ export async function uploadDataWithSigning(
  * Upload a single chunk with optional signing
  * Returns UploadResult with Bee's actual stored reference for verification
  */
-async function uploadSingleChunk(
+export async function uploadSingleChunk(
   bee: Bee,
   stamper: Stamper | undefined,
   chunk: BeeChunk,

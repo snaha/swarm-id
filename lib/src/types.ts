@@ -321,6 +321,14 @@ export interface FeedReader {
   downloadPayload: (
     options?: EpochFeedDownloadOptions,
   ) => Promise<EpochFeedDownloadPayloadResult>
+  /** Download unencrypted reference (for /bzz access). */
+  downloadRawReference: (
+    options?: Omit<EpochFeedDownloadOptions, "encryptionKey">,
+  ) => Promise<EpochFeedDownloadReferenceResult>
+  /** Download unencrypted payload (for /bzz access). */
+  downloadRawPayload: (
+    options?: Omit<EpochFeedDownloadOptions, "encryptionKey">,
+  ) => Promise<EpochFeedDownloadPayloadResult>
 }
 
 /**
@@ -336,6 +344,16 @@ export interface FeedWriter extends FeedReader {
   uploadReference: (
     reference: Uint8Array | string,
     options?: EpochFeedUploadOptions,
+  ) => Promise<EpochFeedUploadResult>
+  /** Upload unencrypted payload (for /bzz access). */
+  uploadRawPayload: (
+    data: Uint8Array | string,
+    options?: Omit<EpochFeedUploadOptions, "encryptionKey" | "encrypt">,
+  ) => Promise<EpochFeedUploadResult>
+  /** Upload unencrypted reference (for /bzz access). */
+  uploadRawReference: (
+    reference: Uint8Array | string,
+    options?: Omit<EpochFeedUploadOptions, "encryptionKey">,
   ) => Promise<EpochFeedUploadResult>
 }
 
@@ -862,6 +880,7 @@ export const CreateFeedManifestMessageSchema = z.object({
   requestId: z.string(),
   topic: IdentifierSchema,
   owner: AddressSchema.optional(),
+  feedType: z.enum(["Sequence", "Epoch"]).optional(),
   uploadOptions: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })

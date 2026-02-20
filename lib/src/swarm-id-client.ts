@@ -1709,10 +1709,63 @@ export class SwarmIdClient {
       }
     }
 
+    const downloadRawReference = async (
+      options?: Omit<EpochFeedDownloadOptions, "encryptionKey">,
+    ): Promise<EpochFeedDownloadReferenceResult> => {
+      const atValue =
+        options?.at !== undefined
+          ? options.at
+          : BigInt(Math.floor(Date.now() / 1000))
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        EpochFeedDownloadReferenceResponseMessage,
+        EpochFeedDownloadReferenceMessage
+      >({
+        type: "epochFeedDownloadReference",
+        requestId,
+        topic,
+        owner,
+        at: this.normalizeFeedTimestamp(atValue),
+        after:
+          options?.after !== undefined
+            ? this.normalizeFeedTimestamp(options.after)
+            : undefined,
+        encryptionKey: undefined, // No encryption for raw download
+        requestOptions,
+      })
+      const reference = response.reference
+      return { reference, encryptionKey: undefined }
+    }
+
+    const downloadRawPayload = async (
+      options?: Omit<EpochFeedDownloadOptions, "encryptionKey">,
+    ): Promise<EpochFeedDownloadPayloadResult> => {
+      const result = await downloadRawReference(options)
+      if (!result.reference) {
+        return {
+          reference: undefined,
+          payload: undefined,
+          encryptionKey: undefined,
+        }
+      }
+      const payload = await this.downloadData(
+        result.reference,
+        undefined,
+        requestOptions,
+      )
+      return {
+        reference: result.reference,
+        payload,
+        encryptionKey: undefined,
+      }
+    }
+
     return {
       getOwner: resolveOwner,
       downloadReference,
       downloadPayload,
+      downloadRawReference,
+      downloadRawPayload,
     }
   }
 
@@ -1900,12 +1953,134 @@ export class SwarmIdClient {
       }
     }
 
+    const downloadRawReference = async (
+      options?: Omit<EpochFeedDownloadOptions, "encryptionKey">,
+    ): Promise<EpochFeedDownloadReferenceResult> => {
+      const atValue =
+        options?.at !== undefined
+          ? options.at
+          : BigInt(Math.floor(Date.now() / 1000))
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        EpochFeedDownloadReferenceResponseMessage,
+        EpochFeedDownloadReferenceMessage
+      >({
+        type: "epochFeedDownloadReference",
+        requestId,
+        topic,
+        owner,
+        at: this.normalizeFeedTimestamp(atValue),
+        after:
+          options?.after !== undefined
+            ? this.normalizeFeedTimestamp(options.after)
+            : undefined,
+        encryptionKey: undefined, // No encryption for raw download
+        requestOptions,
+      })
+      const reference = response.reference
+      return { reference, encryptionKey: undefined }
+    }
+
+    const downloadRawPayload = async (
+      options?: Omit<EpochFeedDownloadOptions, "encryptionKey">,
+    ): Promise<EpochFeedDownloadPayloadResult> => {
+      const result = await downloadRawReference(options)
+      if (!result.reference) {
+        return {
+          reference: undefined,
+          payload: undefined,
+          encryptionKey: undefined,
+        }
+      }
+      const payload = await this.downloadData(
+        result.reference,
+        undefined,
+        requestOptions,
+      )
+      return {
+        reference: result.reference,
+        payload,
+        encryptionKey: undefined,
+      }
+    }
+
+    const uploadRawReference = async (
+      reference: Uint8Array | string,
+      options?: Omit<EpochFeedUploadOptions, "encryptionKey">,
+    ): Promise<EpochFeedUploadResult> => {
+      const atValue =
+        options?.at !== undefined
+          ? options.at
+          : BigInt(Math.floor(Date.now() / 1000))
+      const normalizedRef = this.normalizeReference(reference)
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        EpochFeedUploadReferenceResponseMessage,
+        EpochFeedUploadReferenceMessage
+      >({
+        type: "epochFeedUploadReference",
+        requestId,
+        topic,
+        signer: signerKey,
+        at: this.normalizeFeedTimestamp(atValue),
+        reference: normalizedRef,
+        encryptionKey: undefined, // No encryption for raw upload
+        requestOptions,
+      })
+      const socAddress = response.socAddress
+      return {
+        socAddress,
+        reference: normalizedRef,
+        encryptionKey: undefined,
+      }
+    }
+
+    const uploadRawPayload = async (
+      data: Uint8Array | string,
+      options?: Omit<EpochFeedUploadOptions, "encryptionKey" | "encrypt">,
+    ): Promise<EpochFeedUploadResult> => {
+      const atValue =
+        options?.at !== undefined
+          ? options.at
+          : BigInt(Math.floor(Date.now() / 1000))
+      // Upload with encrypt: false for raw payload
+      const uploadResult = await this.uploadData(
+        this.normalizePayload(data),
+        { ...options?.uploadOptions, encrypt: false },
+        requestOptions,
+      )
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<
+        EpochFeedUploadReferenceResponseMessage,
+        EpochFeedUploadReferenceMessage
+      >({
+        type: "epochFeedUploadReference",
+        requestId,
+        topic,
+        signer: signerKey,
+        at: this.normalizeFeedTimestamp(atValue),
+        reference: uploadResult.reference,
+        encryptionKey: undefined, // No encryption for raw upload
+        requestOptions,
+      })
+      const socAddress = response.socAddress
+      return {
+        socAddress,
+        reference: uploadResult.reference,
+        encryptionKey: undefined,
+      }
+    }
+
     return {
       getOwner: resolveOwner,
       downloadReference,
       downloadPayload,
+      downloadRawReference,
+      downloadRawPayload,
       uploadReference,
       uploadPayload,
+      uploadRawReference,
+      uploadRawPayload,
     }
   }
 
@@ -2388,6 +2563,8 @@ export class SwarmIdClient {
     topic: string,
     options?: {
       owner?: string
+      /** Feed type: "Sequence" for sequential feeds, "Epoch" for epoch feeds. Default: "Sequence" */
+      feedType?: "Sequence" | "Epoch"
       uploadOptions?: UploadOptions
     },
     requestOptions?: RequestOptions,
@@ -2404,6 +2581,7 @@ export class SwarmIdClient {
       requestId,
       topic: normalizedTopic,
       owner: options?.owner,
+      feedType: options?.feedType,
       uploadOptions: options?.uploadOptions,
       requestOptions,
     })

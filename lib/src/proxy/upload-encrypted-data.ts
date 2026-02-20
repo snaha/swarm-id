@@ -258,7 +258,7 @@ export async function uploadEncryptedDataWithSigning(
 /**
  * Upload a single encrypted chunk with optional signing
  */
-async function uploadSingleEncryptedChunk(
+export async function uploadSingleEncryptedChunk(
   bee: Bee,
   stamper: Stamper,
   encryptedChunk: EncryptedChunk,
@@ -669,6 +669,138 @@ export async function uploadSOC(
 
   console.log(
     `[UploadSOC] ✅ Upload complete (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
+  )
+
+  return {
+    socAddress: socAddress.toUint8Array(),
+    tagUid: tag,
+  }
+}
+
+/**
+ * Upload SOC via the /soc/{owner}/{id} endpoint.
+ *
+ * Use this for small SOCs (< 4104 bytes) that need to preserve exact CAC size,
+ * such as v1 format feeds for /bzz/ compatibility.
+ *
+ * The /soc endpoint explicitly handles SOC uploads without size-based detection,
+ * avoiding "stamp signature is invalid" errors for small SOCs that would be
+ * misidentified as CAC by the /chunks endpoint.
+ *
+ * Key differences from uploadSOC:
+ * - Uses /soc/{owner}/{id}?sig=... endpoint (explicit SOC handling)
+ * - Does NOT pad CAC data (preserves exact payload size for v1 format)
+ * - Stamps using CAC address (what /soc endpoint expects)
+ */
+export async function uploadSOCViaSocEndpoint(
+  bee: Bee,
+  stamper: Stamper,
+  signer: PrivateKey,
+  identifier: Identifier,
+  data: Uint8Array,
+  options?: UploadOptions,
+): Promise<UploadSOCResult> {
+  const startTime = performance.now()
+  console.log(`[UploadSOCViaSoc] Starting SOC upload via /soc endpoint`, {
+    dataLength: data.length,
+    identifier: identifier.toHex().substring(0, 16) + "...",
+  })
+
+  if (data.length < 1 || data.length > 4096) {
+    throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
+  }
+
+  // Build CAC data (span + payload) - NO PADDING
+  // This preserves the exact size needed for v1 format (/bzz/ compatibility)
+  const cac = makeContentAddressedChunk(data)
+  const cacData = cac.data // span(8) + payload - NOT padded
+
+  const owner = signer.publicKey().address()
+
+  // Sign: hash(identifier + cac.address)
+  const toSign = Binary.concatBytes(
+    identifier.toUint8Array(),
+    cac.address.toUint8Array(),
+  )
+  const signature = signer.sign(toSign)
+
+  // Calculate SOC address (for return value)
+  const socAddress = makeSOCAddress(identifier, owner.toUint8Array())
+
+  // Debug logging for v1 format verification
+  console.log(`[UploadSOCViaSoc] CAC details:`, {
+    cacDataLength: cacData.length,
+    isValidV1Length: cacData.length === 48 || cacData.length === 80,
+    cacAddress: cac.address.toHex().substring(0, 16) + "...",
+  })
+
+  // Create tag
+  let tag: number | undefined = options?.tag
+  if (!tag) {
+    console.log(`[UploadSOCViaSoc] Creating tag...`)
+    const tagResponse = await bee.createTag()
+    tag = tagResponse.uid
+    console.log(`[UploadSOCViaSoc] Tag created: ${tag}`)
+  }
+
+  // Stamp using SOC address (what Bee validates for /soc endpoint)
+  const envelope = stamper.stamp({
+    hash: () => socAddress.toUint8Array(),
+    build: () => cacData,
+    span: 0n,
+    writer: undefined as any,
+  })
+
+  // Marshal the envelope to hex for the HTTP header
+  // Order: batchId (32) + index (8) + timestamp (8) + signature (65) = 113 bytes
+  const marshaledStamp = Binary.concatBytes(
+    envelope.batchId.toUint8Array(),
+    envelope.index,
+    envelope.timestamp,
+    envelope.signature,
+  )
+  const stampHex = Binary.uint8ArrayToHex(marshaledStamp)
+
+  // Build URL with signature query parameter
+  const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
+
+  console.log(
+    `[UploadSOCViaSoc] Uploading to /soc endpoint... (+${(performance.now() - startTime).toFixed(2)}ms)`,
+  )
+
+  // Prepare HTTP headers (matching uploadChunkWithFetch pattern)
+  const headers: Record<string, string> = {
+    "content-type": "application/octet-stream",
+    "swarm-postage-stamp": stampHex,
+  }
+
+  // Add optional headers only if defined (let Bee use defaults otherwise)
+  if (tag) headers["swarm-tag"] = tag.toString()
+  if (options?.deferred !== undefined) {
+    headers["swarm-deferred-upload"] = options.deferred.toString()
+  }
+  if (options?.pin !== undefined) {
+    headers["swarm-pin"] = options.pin.toString()
+  }
+
+  console.log(`[UploadSOCViaSoc] Headers being sent:`, headers)
+
+  // Upload via /soc endpoint
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: cacData, // Raw CAC data (NOT full SOC structure)
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(
+      `SOC upload failed: ${response.status} ${response.statusText} - ${errorText}`,
+    )
+  }
+
+  console.log(
+    `[UploadSOCViaSoc] ✅ Upload complete (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
   )
 
   return {

@@ -60,6 +60,7 @@ import {
   uploadEncryptedDataWithSigning,
   uploadEncryptedSOC,
   uploadSOC,
+  uploadSOCViaSocEndpoint,
 } from "./proxy/upload-encrypted-data"
 import {
   downloadDataWithChunkAPI,
@@ -72,6 +73,7 @@ import {
   saveMantarayTreeRecursively,
 } from "./proxy/mantaray"
 import { saveMantarayTreeRecursivelyEncrypted } from "./proxy/mantaray-encrypted"
+import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import {
@@ -2085,12 +2087,24 @@ export class SwarmIdProxy {
     if (typeof value === "number") {
       return BigInt(Math.floor(value))
     }
+    // Validate string is a valid integer representation
+    if (!/^-?\d+$/.test(value)) {
+      throw new Error(
+        `Invalid timestamp format: "${value}" (expected decimal integer)`,
+      )
+    }
     return BigInt(value)
   }
 
   private parseFeedIndex(value: string | number): bigint {
     if (typeof value === "number") {
       return BigInt(Math.floor(value))
+    }
+    // Validate string is a valid integer representation
+    if (!/^-?\d+$/.test(value)) {
+      throw new Error(
+        `Invalid index format: "${value}" (expected decimal integer)`,
+      )
     }
     return BigInt(value)
   }
@@ -2972,24 +2986,58 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      const result = encryptionKey
-        ? await uploadEncryptedSOC(
-            this.bee,
-            this.stamper,
-            signerKeyObj,
-            identifier,
-            payload,
-            hexToUint8Array(encryptionKey),
-            options,
-          )
-        : await uploadSOC(
-            this.bee,
-            this.stamper,
-            signerKeyObj,
-            identifier,
-            payload,
-            options,
-          )
+      // Debug: log the values used for SOC address computation
+      console.log("[Proxy] Sequential feed upload details:", {
+        topic: uint8ArrayToHex(topicBytes),
+        owner: ownerAddress.toHex(),
+        index: resolvedIndex.toString(),
+        identifier: uint8ArrayToHex(identifierBytes),
+      })
+
+      // DEBUG: Log payload details for /bzz/ compatibility analysis
+      console.log("[Proxy] DEBUG - Payload for /bzz/ analysis:", {
+        inputDataLength: data.length,
+        inputDataHex:
+          uint8ArrayToHex(data).substring(0, 128) +
+          (data.length > 64 ? "..." : ""),
+        hasTimestamp: useTimestamp,
+        timestamp: atValue.toString(),
+        finalPayloadLength: payload.length,
+        finalPayloadHex:
+          uint8ArrayToHex(payload).substring(0, 128) +
+          (payload.length > 64 ? "..." : ""),
+        expectedWrappedLength: payload.length + 8, // span(8) + payload
+        isValidV1Length: payload.length + 8 === 48 || payload.length + 8 === 80,
+        note: "For /bzz/, wrapped chunk must be 48 bytes (unenc) or 80 bytes (enc)",
+      })
+
+      // Upload SOC - use encryption if key provided, otherwise use /soc endpoint
+      // The /soc endpoint is needed for non-encrypted uploads because:
+      // - Small SOCs (< 4104 bytes) are misidentified as CAC by /chunks endpoint
+      // - /soc endpoint explicitly handles SOC without size-based detection
+      // - Preserves v1 format (48-byte CAC) required for /bzz/ compatibility
+      let result
+      if (encryptionKey) {
+        result = await uploadEncryptedSOC(
+          this.bee,
+          this.stamper,
+          signerKeyObj,
+          identifier,
+          payload,
+          hexToUint8Array(encryptionKey),
+          options,
+        )
+      } else {
+        // Use /soc endpoint for non-encrypted uploads (v1 format for /bzz/ compat)
+        result = await uploadSOCViaSocEndpoint(
+          this.bee,
+          this.stamper,
+          signerKeyObj,
+          identifier,
+          payload,
+          options,
+        )
+      }
 
       await this.saveStamperState()
 
@@ -3090,7 +3138,9 @@ export class SwarmIdProxy {
         resolvedIndex,
       )
       const identifier = new Identifier(identifierBytes)
-      const result = await uploadEncryptedSOC(
+
+      // uploadReference always uses encryption
+      const encResult = await uploadEncryptedSOC(
         this.bee,
         this.stamper,
         signerKeyObj,
@@ -3099,6 +3149,8 @@ export class SwarmIdProxy {
         undefined,
         options,
       )
+      const result = encResult
+      const encryptionKeyResult = uint8ArrayToHex(encResult.encryptionKey)
 
       await this.saveStamperState()
 
@@ -3110,7 +3162,7 @@ export class SwarmIdProxy {
             reference: uint8ArrayToHex(result.socAddress),
             feedIndex: resolvedIndex.toString(),
             owner: ownerAddress.toHex(),
-            encryptionKey: uint8ArrayToHex(result.encryptionKey),
+            encryptionKey: encryptionKeyResult,
             tagUid: result.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
@@ -3730,7 +3782,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     console.log("[Proxy] Create feed manifest request")
 
-    const { topic, owner, uploadOptions, requestOptions } = message
+    const { topic, owner, feedType, uploadOptions, requestOptions } = message
 
     // Resolve owner - use provided or fall back to app signer
     let resolvedOwner = owner
@@ -3757,11 +3809,37 @@ export class SwarmIdProxy {
       return
     }
 
+    if (!this.stamper) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        "Stamper not initialized. Please login first.",
+      )
+      return
+    }
+
     try {
-      const reference = await this.bee.createFeedManifest(
-        this.postageBatchId,
+      // DEBUG: Log manifest creation details for /bzz/ compatibility analysis
+      console.log("[Proxy] DEBUG - Feed manifest creation:", {
+        topic,
+        providedOwner: owner,
+        resolvedOwner,
+        feedType: feedType || "Sequence",
+        encrypt: uploadOptions?.encrypt !== false,
+        note: "resolvedOwner MUST match the owner used for feed upload",
+      })
+
+      // Use createFeedManifestDirect to build and upload the manifest locally
+      // instead of calling bee.createFeedManifest (which uses /feeds endpoint)
+      const result = await createFeedManifestDirect(
+        this.bee,
+        this.stamper,
         topic,
         resolvedOwner,
+        {
+          encrypt: uploadOptions?.encrypt !== false, // Default encrypted
+          feedType: feedType, // "Sequence" or "Epoch"
+        },
         uploadOptions,
         requestOptions,
       )
@@ -3771,13 +3849,13 @@ export class SwarmIdProxy {
           {
             type: "createFeedManifestResponse",
             requestId: message.requestId,
-            reference: reference.toHex(),
+            reference: result.reference,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
       }
 
-      console.log("[Proxy] Feed manifest created:", reference.toHex())
+      console.log("[Proxy] Feed manifest created:", result.reference)
     } catch (error) {
       this.sendErrorToParent(
         event,

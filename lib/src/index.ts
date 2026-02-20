@@ -319,6 +319,31 @@ export { SWARM_SECRET_PREFIX } from "./types"
 // URL building utilities
 export { buildAuthUrl } from "./utils/url"
 
+// Manifest builder utilities for /bzz/ feed compatibility
+export {
+  buildBzzCompatibleManifest,
+  buildBzzManifestNode,
+  buildMinimalManifest,
+  extractReferenceFromManifest,
+  extractEntryFromManifest,
+  extractContentFromFlatManifest,
+  padPayloadForSOCDetection,
+  MAX_PADDED_PAYLOAD_SIZE,
+} from "./proxy/manifest-builder"
+
+export type {
+  BzzCompatibleManifestResult,
+  BzzManifestNodeResult,
+} from "./proxy/manifest-builder"
+
+// Mantaray tree utilities for recursive upload/download
+export {
+  saveMantarayTreeRecursively,
+  loadMantarayTreeWithChunkAPI,
+} from "./proxy/mantaray"
+
+export type { UploadCallback } from "./proxy/mantaray"
+
 // Time and session constants
 export {
   SECOND,
