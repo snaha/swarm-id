@@ -199,7 +199,7 @@ Options:
 - `initialize()` - Initialize the client and embed iframe
 - `getAuthIframe()` - Get the auth iframe element
 - `checkAuthStatus()` - Check authentication status
-- `connect()` - Open authentication popup programmatically
+- `connect()` - Open authentication popup programmatically (see [Safari limitations](#safari-and-custom-connect-button))
 - `disconnect()` - Disconnect and clear authentication data
 - `getConnectionInfo()` - Get connection info including upload capability
 
@@ -295,6 +295,42 @@ The library uses postMessage for secure cross-origin communication with Zod sche
 - **Partitioned Storage** - Secrets isolated per (iframe-origin, parent-origin) pair
 - **Master Key Protection** - Master key never leaves first-party context
 - **Type-safe Messages** - Zod schema validation on all messages
+
+## Safari and Custom Connect Button
+
+There are two ways to trigger authentication:
+
+1. **Iframe button** - User clicks the button rendered inside the iframe (`getAuthIframe()`)
+2. **Custom button** - App calls `client.connect()` from its own button
+
+### Storage Access API Limitation
+
+Safari partitions iframe storage by default, meaning the iframe cannot access shared localStorage. The [Storage Access API](https://developer.mozilla.org/en-US/docs/Web/API/Storage_Access_API) allows iframes to request access to unpartitioned storage, but it **requires a user gesture inside the iframe**.
+
+| Method | User gesture location | Storage Access API | Persistence |
+|--------|----------------------|-------------------|-------------|
+| Iframe button | Inside iframe | Can request | Full (shared storage) |
+| Custom button (`connect()`) | In parent app | Cannot request | Limited (partitioned storage) |
+
+### Implications
+
+**Iframe button (recommended for Safari):**
+- User clicks inside the iframe → iframe can request Storage Access
+- If granted, iframe accesses shared storage
+- Authentication persists across browser sessions (until explicitly disconnected or expired)
+
+**Custom button:**
+- User clicks in the parent app → iframe has no user gesture
+- Iframe cannot request Storage Access API
+- Falls back to partitioned storage (isolated per parent origin)
+- Authentication persists across page refreshes within the same session
+- If the user clears site data or the partitioned storage expires, re-authentication is required
+
+### Recommendation
+
+For the best user experience on Safari:
+- Use the **iframe button** for primary authentication
+- If using a custom button, inform users that they may need to re-authenticate more frequently on Safari
 
 ## Development
 

@@ -208,6 +208,23 @@
 			DEFAULT_SESSION_DURATION,
 		)
 
+		const postageStamp = getIdentityPostageStamp(selectedIdentity)
+
+		// Always include postageBatchId/signerKey/networkSettings in the message.
+		// The proxy iframe decides whether to use this data or read from shared storage:
+		// - If Storage Access API is granted: reads from shared storage
+		// - If storage is partitioned: uses this message data as fallback
+		const message: SetSecretMessage = {
+			type: 'setSecret',
+			appOrigin: sessionStore.data.appOrigin,
+			data: {
+				secret: appSecret,
+				postageBatchId: postageStamp?.batchID.toHex(),
+				signerKey: postageStamp?.signerKey.toHex(),
+				networkSettings: { ...networkSettingsStore.settings },
+			},
+		}
+
 		if (proxyMode) {
 			// PROXY MODE: Send setSecret via postMessage to the opener (the proxy iframe)
 			if (!window.opener || (window.opener as Window).closed) {
@@ -223,28 +240,15 @@
 				return
 			}
 
-			const postageStamp = getIdentityPostageStamp(selectedIdentity)
-
-			// Always include postageBatchId/signerKey/networkSettings in the message.
-			// The proxy iframe decides whether to use this data or read from shared storage:
-			// - If Storage Access API is granted: reads from shared storage
-			// - If storage is partitioned: uses this message data as fallback
-			const message: SetSecretMessage = {
-				type: 'setSecret',
-				appOrigin: sessionStore.data.appOrigin,
-				data: {
-					secret: appSecret,
-					postageBatchId: postageStamp?.batchID.toHex(),
-					signerKey: postageStamp?.signerKey.toHex(),
-					networkSettings: { ...networkSettingsStore.settings },
-				},
-			}
-
 			;(window.opener as Window).postMessage(message, window.location.origin)
+		} else {
+			// DIRECT MODE: Send postMessage to the opener (the app) with the app's origin.
+			// This works cross-origin on Safari where storage events don't work.
+			if (window.opener && !(window.opener as Window).closed) {
+				;(window.opener as Window).postMessage(message, sessionStore.data.appOrigin)
+			}
+			// Also rely on localStorage write above for same-origin scenarios
 		}
-		// DIRECT MODE: No postMessage needed - the localStorage write above
-		// triggers a storage event that the proxy detects
-		// Note: This doesn't work in Safari due to storage partitioning - use the iframe button instead
 	}
 
 	async function tryGetMasterKeyFromAccount(account: Account) {

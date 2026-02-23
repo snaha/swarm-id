@@ -34,6 +34,7 @@ import {
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
   AppMetadataSchema,
+  SetSecretMessageSchema,
 } from "./types"
 import { buildAuthUrl } from "./utils/url"
 import { EthAddress, Identifier, PrivateKey } from "@ethersphere/bee-js"
@@ -291,9 +292,6 @@ export class SwarmIdClient {
    */
   private setupMessageListener(): void {
     this.messageListener = (event: MessageEvent) => {
-      // Debug: Log all incoming messages
-      console.log("[SwarmIdClient] Message received:", event.data?.type, "from:", event.origin)
-
       // Handle proxyInitialized BEFORE any validation to avoid race condition
       // This message is sent immediately when iframe loads and uses wildcard origin
       if (event.data?.type === "proxyInitialized") {
@@ -318,10 +316,20 @@ export class SwarmIdClient {
         console.warn(
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
-          "expected:",
-          expectedOrigin,
         )
         return
+      }
+
+      // Handle setSecret from popup (direct mode) - forward to iframe
+      if (event.data?.type === "setSecret") {
+        const result = SetSecretMessageSchema.safeParse(event.data)
+        if (result.success) {
+          // Forward the setSecret message to the iframe
+          if (this.iframe?.contentWindow) {
+            this.iframe.contentWindow.postMessage(result.data, this.iframeOrigin)
+          }
+          return
+        }
       }
 
       // Parse and validate message
@@ -382,13 +390,11 @@ export class SwarmIdClient {
         break
 
       case "authSuccess":
-        console.log("[SwarmIdClient] Received authSuccess message")
         // Keep iframe visible - it will now show disconnect button
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
         if (this.onAuthChange) {
-          console.log("[SwarmIdClient] Calling onAuthChange(true)")
           this.onAuthChange(true)
         }
         break
@@ -704,6 +710,14 @@ export class SwarmIdClient {
    * proxy and opens it in a new browser window. The user can authenticate
    * with their Swarm ID, and the resulting authentication will be available
    * to the client when they return.
+   *
+   * **Safari Limitation:** This method opens the popup directly from the parent
+   * app, bypassing the iframe. Because the user gesture occurs in the parent
+   * (not the iframe), the iframe cannot request Storage Access API permission.
+   * As a result, on Safari:
+   * - Authentication uses partitioned storage (isolated per parent origin)
+   * - Auth persists across page refreshes but may not persist across browser sessions
+   * - For full persistence on Safari, use the iframe button ({@link getAuthIframe}) instead
    *
    * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
    * @returns The URL that was opened (useful for testing or reference)
