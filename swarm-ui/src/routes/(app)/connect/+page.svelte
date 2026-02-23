@@ -58,9 +58,12 @@
 		// Check if we're in proxy mode (opened from the proxy iframe)
 		proxyMode = hashParams.get('proxyMode') === 'true'
 
+		console.log('[Connect] Page loaded, proxyMode:', proxyMode, 'opener:', !!window.opener)
+
 		if (proxyMode) {
 			// PROXY MODE: Require same-origin opener for postMessage communication
 			if (!window.opener) {
+				console.warn('[Connect] No opener window in proxy mode')
 				error = 'No opener window found. This page must be opened by Swarm ID iframe.'
 				return
 			}
@@ -68,11 +71,13 @@
 			// Check opener origin - must be same-origin for proxy mode
 			try {
 				const openerOrigin = (window.opener as Window).location.origin
+				console.log('[Connect] Opener origin:', openerOrigin)
 				if (openerOrigin !== window.location.origin) {
 					error = `Opener origin (${openerOrigin}) does not match expected origin`
 					return
 				}
-			} catch {
+			} catch (e) {
+				console.warn('[Connect] Cannot access opener origin:', e)
 				error = 'Cannot verify opener origin - cross-origin access denied'
 				return
 			}
@@ -188,10 +193,33 @@
 			return
 		}
 
+		// ALWAYS write to localStorage first, regardless of mode.
+		// This ensures the storage event fallback can work if storage isn't partitioned,
+		// and the data is persisted for future sessions.
+		connectedAppsStore.addOrUpdateApp(
+			{
+				appUrl: sessionStore.data.appOrigin,
+				appName: sessionStore.data.appData.appName,
+				identityId: selectedIdentity.id,
+				appIcon: sessionStore.data.appData.appIcon,
+				appDescription: sessionStore.data.appData.appDescription,
+				appSecret,
+			},
+			DEFAULT_SESSION_DURATION,
+		)
+
 		if (proxyMode) {
 			// PROXY MODE: Send setSecret via postMessage to the opener (the proxy iframe)
 			if (!window.opener || (window.opener as Window).closed) {
-				error = 'Opener window not available'
+				// On mobile Safari, window.opener can become null when:
+				// - The browser backgrounded the opener tab
+				// - Navigation occurred in the authentication flow
+				// - iOS memory management cleared the reference
+				// We've already written to localStorage above, so the fallback may still work
+				// if storage isn't partitioned. Show user-friendly guidance.
+				console.warn('[Connect] window.opener not available in proxy mode')
+				error =
+					'Connection may not have completed. Please close this window and try connecting again from the app.'
 				return
 			}
 
@@ -214,23 +242,9 @@
 
 			;(window.opener as Window).postMessage(message, window.location.origin)
 		}
-		// DIRECT MODE: No postMessage needed - the localStorage write below
+		// DIRECT MODE: No postMessage needed - the localStorage write above
 		// triggers a storage event that the proxy detects
 		// Note: This doesn't work in Safari due to storage partitioning - use the iframe button instead
-
-		// Track this app connection with appSecret in shared storage
-		// This happens in BOTH modes - in direct mode, this triggers the storage event
-		connectedAppsStore.addOrUpdateApp(
-			{
-				appUrl: sessionStore.data.appOrigin,
-				appName: sessionStore.data.appData.appName,
-				identityId: selectedIdentity.id,
-				appIcon: sessionStore.data.appData.appIcon,
-				appDescription: sessionStore.data.appData.appDescription,
-				appSecret,
-			},
-			DEFAULT_SESSION_DURATION,
-		)
 	}
 
 	async function tryGetMasterKeyFromAccount(account: Account) {

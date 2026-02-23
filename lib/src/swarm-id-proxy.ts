@@ -1344,11 +1344,39 @@ export class SwarmIdProxy {
     )
 
     // Open as popup or full window based on popupMode
+    let popup: Window | null = null
     if (this.popupMode === "popup") {
-      window.open(authUrl, "_blank", "width=500,height=600")
+      popup = window.open(authUrl, "_blank", "width=500,height=600")
     } else {
-      window.open(authUrl, "_blank")
+      popup = window.open(authUrl, "_blank")
     }
+
+    // Check if popup was blocked (common on mobile Safari)
+    if (!popup) {
+      console.warn("[Proxy] Popup was blocked or failed to open")
+      this.isConnecting = false
+      this.showAuthButton()
+      return false
+    }
+
+    // Monitor popup closure to reset button state if auth didn't complete
+    // This handles the case where user closes popup without completing auth
+    const checkPopupClosed = setInterval(() => {
+      if (popup?.closed) {
+        clearInterval(checkPopupClosed)
+        // Only reset if we're still in connecting state (auth didn't complete)
+        if (this.isConnecting && !this.authenticated) {
+          console.log("[Proxy] Popup closed without completing auth")
+          this.isConnecting = false
+          this.showAuthButton()
+        }
+      }
+    }, 500)
+
+    // Clear interval after 5 minutes to prevent memory leak
+    setTimeout(() => {
+      clearInterval(checkPopupClosed)
+    }, 300000)
 
     return true
   }
@@ -1372,13 +1400,21 @@ export class SwarmIdProxy {
       document.head.appendChild(style)
     }
 
-    // Request storage access (must be done during user gesture)
-    // This allows the iframe to access unpartitioned localStorage
-    if (!this.hasStorageAccess && this.isInIframe()) {
-      await this.requestStorageAccess()
-    }
-
+    // IMPORTANT: Open popup FIRST, before any async operations.
+    // iOS Safari requires window.open() to be called synchronously within
+    // the user gesture. Calling await before window.open() breaks the
+    // user gesture chain and causes the popup to be blocked.
     this.openAuthPopup()
+
+    // Request storage access AFTER opening the popup.
+    // This is non-blocking - we don't need to wait for it before the popup opens.
+    // If storage access is granted, handleSetSecret will be able to read from
+    // shared storage. If not, it will use the data sent via postMessage.
+    if (!this.hasStorageAccess && this.isInIframe()) {
+      this.requestStorageAccess().catch((error) => {
+        console.log("[Proxy] Storage access request failed:", error)
+      })
+    }
   }
 
   /**
