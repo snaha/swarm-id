@@ -235,8 +235,15 @@ export class SyncEpochFinder implements EpochFinder {
     const payloadStart = spanStart + SPAN_SIZE
     const payload = chunkData.slice(payloadStart, payloadStart + payloadLength)
 
-    // Read timestamp from payload (first 8 bytes, big-endian)
-    const timestampBytes = payload.slice(0, TIMESTAMP_SIZE)
+    // Detect payload format based on length:
+    // - 40 bytes: timestamp(8) + reference(32) - from /soc endpoint
+    // - 48 bytes: span(8) + timestamp(8) + reference(32) - from /chunks with v1 format
+    // - 72 bytes: timestamp(8) + encrypted_reference(64) - from /soc endpoint
+    // - 80 bytes: span(8) + timestamp(8) + encrypted_reference(64) - from /chunks with v1 format
+    const hasSpanPrefix = payload.length === 48 || payload.length === 80
+
+    const timestampOffset = hasSpanPrefix ? 8 : 0
+    const timestampBytes = payload.slice(timestampOffset, timestampOffset + TIMESTAMP_SIZE)
     const timestampView = new DataView(
       timestampBytes.buffer,
       timestampBytes.byteOffset,
@@ -249,8 +256,8 @@ export class SyncEpochFinder implements EpochFinder {
       return undefined
     }
 
-    // Return reference only (skip 8-byte timestamp prefix)
-    return payload.slice(TIMESTAMP_SIZE)
+    // Return reference only (skip timestamp and optional span prefix)
+    return payload.slice(timestampOffset + TIMESTAMP_SIZE)
   }
 
   private async findPreviousLeaf(

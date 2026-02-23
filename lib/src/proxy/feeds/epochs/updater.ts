@@ -155,12 +155,19 @@ export class BasicEpochUpdater implements EpochUpdater {
       ),
     )
 
-    // Payload: 8-byte timestamp (big-endian) + reference
-    const timestamp = new Uint8Array(8)
-    const view = new DataView(timestamp.buffer)
-    view.setBigUint64(0, at, false) // big-endian
+    // Span: 8-byte little-endian reference length (for Bee /bzz/ compatibility)
+    // Bee's legacy payload parser expects: span(8) + timestamp(8) + reference(32|64) = 48|80 bytes
+    const span = new Uint8Array(8)
+    const spanView = new DataView(span.buffer)
+    spanView.setBigUint64(0, BigInt(reference.length), true) // little-endian
 
-    const payload = Binary.concatBytes(timestamp, reference)
+    // Timestamp: 8-byte big-endian
+    const timestamp = new Uint8Array(8)
+    const tsView = new DataView(timestamp.buffer)
+    tsView.setBigUint64(0, at, false) // big-endian
+
+    // Payload: span + timestamp + reference = 48 or 80 bytes
+    const payload = Binary.concatBytes(span, timestamp, reference)
 
     console.log("[EpochUpdater] Uploading epoch update", {
       at: at.toString(),

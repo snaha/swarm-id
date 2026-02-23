@@ -99,9 +99,16 @@ function payloadWithTimestamp(
   timestamp: bigint,
   reference: Uint8Array,
 ): Uint8Array {
+  // v1 format: span(8) + timestamp(8) + reference(32)
+  // Span (8 bytes, little-endian) - required for Bee /bzz/ compatibility
+  const span = new Uint8Array(8)
+  new DataView(span.buffer).setBigUint64(0, BigInt(reference.length), true)
+
+  // Timestamp (8 bytes, big-endian)
   const ts = new Uint8Array(8)
   new DataView(ts.buffer).setBigUint64(0, timestamp, false)
-  return Binary.concatBytes(ts, reference)
+
+  return Binary.concatBytes(span, ts, reference)
 }
 
 /**
@@ -770,22 +777,8 @@ describe("Epoch Feeds Integration", () => {
 
       // Write top-level epoch chunks directly for each owner to avoid mockFetch
       // owner coupling and assert true owner isolation.
-      const payloadA = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, at, false)
-          return ts
-        })(),
-        refA,
-      )
-      const payloadB = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, at, false)
-          return ts
-        })(),
-        refB,
-      )
+      const payloadA = payloadWithTimestamp(at, refA)
+      const payloadB = payloadWithTimestamp(at, refB)
       await putEpochSoc(store, signerA, topic, new EpochIndex(0n, 32), payloadA)
       await putEpochSoc(store, signerB, topic, new EpochIndex(0n, 32), payloadB)
 
@@ -857,14 +850,7 @@ describe("Epoch Feeds Integration", () => {
       const farAt = 1500n
       const farRef = createTestReference(3333)
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, poisonTimestamp, false)
-          return ts
-        })(),
-        createTestReference(4444),
-      )
+      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(4444))
 
       await putEpochSoc(
         store,
@@ -885,14 +871,7 @@ describe("Epoch Feeds Integration", () => {
         signer,
         topic,
         new EpochIndex(farAt, 0),
-        Binary.concatBytes(
-          (() => {
-            const ts = new Uint8Array(8)
-            new DataView(ts.buffer).setBigUint64(0, farAt, false)
-            return ts
-          })(),
-          farRef,
-        ),
+        payloadWithTimestamp(farAt, farRef),
       )
 
       const finder = new AsyncEpochFinder(failingBee as any, topic, owner)
@@ -1125,14 +1104,7 @@ describe("Epoch Feeds Integration", () => {
 
       // Poison ancestors with far-future timestamps to force descent.
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, poisonTimestamp, false)
-          return ts
-        })(),
-        createTestReference(111),
-      )
+      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(111))
       await putEpochSoc(
         store,
         signer,
@@ -1149,14 +1121,7 @@ describe("Epoch Feeds Integration", () => {
       )
 
       // Write the expected leaf update at the exact timestamp.
-      const leafPayload = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, at, false)
-          return ts
-        })(),
-        reference,
-      )
+      const leafPayload = payloadWithTimestamp(at, reference)
       await putEpochSoc(
         store,
         signer,
@@ -1180,14 +1145,7 @@ describe("Epoch Feeds Integration", () => {
       const reference = createTestReference(321)
 
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, poisonTimestamp, false)
-          return ts
-        })(),
-        createTestReference(777),
-      )
+      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(777))
       await putEpochSoc(
         store,
         signer,
@@ -1203,14 +1161,7 @@ describe("Epoch Feeds Integration", () => {
         poisonPayload,
       )
 
-      const leafPayload = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, at, false)
-          return ts
-        })(),
-        reference,
-      )
+      const leafPayload = payloadWithTimestamp(at, reference)
       await putEpochSoc(
         store,
         signer,
@@ -1237,14 +1188,7 @@ describe("Epoch Feeds Integration", () => {
       const secondRef = createTestReference(1002)
 
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, poisonTimestamp, false)
-          return ts
-        })(),
-        createTestReference(888),
-      )
+      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(888))
       await putEpochSoc(
         store,
         signer,
@@ -1260,22 +1204,8 @@ describe("Epoch Feeds Integration", () => {
         poisonPayload,
       )
 
-      const firstLeaf = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, firstAt, false)
-          return ts
-        })(),
-        firstRef,
-      )
-      const secondLeaf = Binary.concatBytes(
-        (() => {
-          const ts = new Uint8Array(8)
-          new DataView(ts.buffer).setBigUint64(0, secondAt, false)
-          return ts
-        })(),
-        secondRef,
-      )
+      const firstLeaf = payloadWithTimestamp(firstAt, firstRef)
+      const secondLeaf = payloadWithTimestamp(secondAt, secondRef)
       await putEpochSoc(
         store,
         signer,
