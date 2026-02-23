@@ -120,6 +120,8 @@ export class SwarmIdProxy {
   private unsubscribeConnectedApps: (() => void) | undefined
   private isConnecting: boolean = false
   private hasStorageAccess: boolean = false
+  private parentWindow: WindowProxy | undefined
+  private authViaSetSecret: boolean = false // Flag to prevent storage events from overriding setSecret auth
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -182,14 +184,22 @@ export class SwarmIdProxy {
       "[Proxy] Connected apps storage changed, checking connection for:",
       this.parentOrigin,
     )
+    console.log(
+      "[Proxy] Connected apps in storage:",
+      connectedApps.map((app) => ({ appUrl: app.appUrl, hasSecret: !!app.appSecret, connectedUntil: app.connectedUntil })),
+    )
 
     // Look for a valid connection for this parent origin
     const connectedApp = connectedApps.find(
       (app) => app.appUrl === this.parentOrigin,
     )
 
+    console.log("[Proxy] Found connectedApp:", !!connectedApp, connectedApp ? { appUrl: connectedApp.appUrl, hasSecret: !!connectedApp.appSecret } : undefined)
+
     const hasValidConnection =
       connectedApp && this.isConnectionValid(connectedApp)
+
+    console.log("[Proxy] hasValidConnection:", hasValidConnection, "already authenticated:", this.authenticated)
 
     if (hasValidConnection && !this.authenticated) {
       // New connection detected
@@ -202,6 +212,7 @@ export class SwarmIdProxy {
       this.appSecret = connectedApp.appSecret
       this.authenticated = true
       this.authLoading = false
+      this.isConnecting = false // Stop popup closure detection from resetting
 
       // Look up postage stamp from shared storage
       const stamp = this.lookupPostageStampForApp()
@@ -230,6 +241,15 @@ export class SwarmIdProxy {
       )
     } else if (!hasValidConnection && this.authenticated) {
       // Connection removed or invalidated - disconnect
+      // BUT: Don't disconnect if auth was just set via setSecret (Safari storage partitioning issue)
+      if (this.authViaSetSecret) {
+        console.log(
+          "[Proxy] Ignoring storage event disconnect - auth was set via setSecret for:",
+          this.parentOrigin,
+        )
+        return
+      }
+
       console.log(
         "[Proxy] Connection removed or expired via storage event for:",
         this.parentOrigin,
@@ -477,6 +497,10 @@ export class SwarmIdProxy {
     // Trust event.origin - this is browser-enforced and cannot be spoofed
     this.parentOrigin = event.origin
     this.parentIdentified = true
+    // Store reference to parent window for later postMessage calls
+    if (event.source) {
+      this.parentWindow = event.source as WindowProxy
+    }
 
     console.log("[Proxy] Parent identified via postMessage:", this.parentOrigin)
     console.log("[Proxy] Parent locked in - cannot be changed")
@@ -1014,6 +1038,7 @@ export class SwarmIdProxy {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
+    this.authViaSetSecret = false
 
     // Show login button
     this.showAuthButton()
@@ -1043,12 +1068,15 @@ export class SwarmIdProxy {
    * Send message to parent
    */
   private sendToParent(message: IframeToParentMessage): void {
-    if (!this.parentOrigin || !window.parent || window.parent === window.self) {
-      console.warn("[Proxy] Cannot send message to parent - no parent window")
+    if (!this.parentOrigin || !this.parentWindow) {
+      console.warn("[Proxy] Cannot send message to parent - no parent window reference")
       return
     }
 
-    window.parent.postMessage(message, this.parentOrigin)
+    console.log("[Proxy] Sending message to parent:", message.type, "targetOrigin:", this.parentOrigin)
+    console.log("[Proxy] Using stored parentWindow reference")
+    this.parentWindow.postMessage(message, this.parentOrigin)
+    console.log("[Proxy] Message posted to parent")
   }
 
   // ============================================================================
@@ -1232,6 +1260,8 @@ export class SwarmIdProxy {
    * Show authentication button in the UI
    */
   private showAuthButton(): void {
+    console.log("[Proxy] showAuthButton called, isConnecting:", this.isConnecting, "authenticated:", this.authenticated, "authLoading:", this.authLoading)
+
     if (!this.authButtonContainer) {
       console.log("[Proxy] No auth button container set yet")
       return
@@ -1361,22 +1391,26 @@ export class SwarmIdProxy {
 
     // Monitor popup closure to reset button state if auth didn't complete
     // This handles the case where user closes popup without completing auth
-    const checkPopupClosed = setInterval(() => {
-      if (popup?.closed) {
-        clearInterval(checkPopupClosed)
-        // Only reset if we're still in connecting state (auth didn't complete)
-        if (this.isConnecting && !this.authenticated) {
-          console.log("[Proxy] Popup closed without completing auth")
-          this.isConnecting = false
-          this.showAuthButton()
-        }
-      }
-    }, 500)
-
-    // Clear interval after 5 minutes to prevent memory leak
+    // Note: We delay the start of monitoring because on Safari, popup.closed can
+    // return true immediately for new tabs before they're fully initialized
     setTimeout(() => {
-      clearInterval(checkPopupClosed)
-    }, 300000)
+      const checkPopupClosed = setInterval(() => {
+        if (popup?.closed) {
+          clearInterval(checkPopupClosed)
+          // Only reset if we're still in connecting state (auth didn't complete)
+          if (this.isConnecting && !this.authenticated) {
+            console.log("[Proxy] Popup closed without completing auth")
+            this.isConnecting = false
+            this.showAuthButton()
+          }
+        }
+      }, 500)
+
+      // Clear interval after 5 minutes to prevent memory leak
+      setTimeout(() => {
+        clearInterval(checkPopupClosed)
+      }, 300000)
+    }, 2000) // Wait 2 seconds before starting to monitor
 
     return true
   }
@@ -1494,7 +1528,10 @@ export class SwarmIdProxy {
       }
     }
 
+    console.log("[Proxy] Calling updateAuthStatus(true), isConnecting:", this.isConnecting)
     this.updateAuthStatus(true)
+    this.authViaSetSecret = true // Prevent storage events from overriding this auth
+    console.log("[Proxy] After updateAuthStatus, isConnecting:", this.isConnecting, "authenticated:", this.authenticated)
 
     // Initialize stamper if we have signer key
     if (this.signerKey && this.postageBatchId) {

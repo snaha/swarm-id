@@ -291,6 +291,9 @@ export class SwarmIdClient {
    */
   private setupMessageListener(): void {
     this.messageListener = (event: MessageEvent) => {
+      // Debug: Log all incoming messages
+      console.log("[SwarmIdClient] Message received:", event.data?.type, "from:", event.origin)
+
       // Handle proxyInitialized BEFORE any validation to avoid race condition
       // This message is sent immediately when iframe loads and uses wildcard origin
       if (event.data?.type === "proxyInitialized") {
@@ -315,6 +318,8 @@ export class SwarmIdClient {
         console.warn(
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
+          "expected:",
+          expectedOrigin,
         )
         return
       }
@@ -377,11 +382,13 @@ export class SwarmIdClient {
         break
 
       case "authSuccess":
+        console.log("[SwarmIdClient] Received authSuccess message")
         // Keep iframe visible - it will now show disconnect button
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
         if (this.onAuthChange) {
+          console.log("[SwarmIdClient] Calling onAuthChange(true)")
           this.onAuthChange(true)
         }
         break
