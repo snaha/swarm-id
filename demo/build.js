@@ -50,7 +50,8 @@ const configScript = `
 demoHtml = demoHtml.replace('</head>', configScript + '</head>')
 
 // Convert absolute lib path to relative for subdirectory deployment
-demoHtml = demoHtml.replace('from "/lib/', 'from "./lib/')
+// Handle both single and double quotes
+demoHtml = demoHtml.replace(/from ['"]\/lib\//g, 'from \'./lib/')
 
 writeFileSync(join(buildDir, 'index.html'), demoHtml)
 console.log('✓ index.html processed')
