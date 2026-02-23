@@ -303,34 +303,26 @@ There are two ways to trigger authentication:
 1. **Iframe button** - User clicks the button rendered inside the iframe (`getAuthIframe()`)
 2. **Custom button** - App calls `client.connect()` from its own button
 
-### Storage Access API Limitation
+### Storage Access API Requirement
 
 Safari partitions iframe storage by default, meaning the iframe cannot access shared localStorage. The [Storage Access API](https://developer.mozilla.org/en-US/docs/Web/API/Storage_Access_API) allows iframes to request access to unpartitioned storage, but it **requires a user gesture inside the iframe**.
 
-| Method | User gesture location | Storage Access API | Persistence |
-|--------|----------------------|-------------------|-------------|
-| Iframe button | Inside iframe | Can request | Full (shared storage) |
-| Custom button (`connect()`) | In parent app | Cannot request | Limited (partitioned storage) |
+| Method | User gesture location | Storage Access API | Works on Safari |
+|--------|----------------------|-------------------|-----------------|
+| Iframe button | Inside iframe | Can request | Yes |
+| Custom button (`connect()`) | In parent app | Cannot request | No |
 
-### Implications
+### Why Custom Button Fails on Safari
 
-**Iframe button (recommended for Safari):**
-- User clicks inside the iframe → iframe can request Storage Access
-- If granted, iframe accesses shared storage
-- Authentication persists across browser sessions (until explicitly disconnected or expired)
+The custom button (`client.connect()`) opens the auth popup directly from the parent app. Because the user gesture occurs in the parent (not the iframe), the iframe cannot request Storage Access API permission. Without shared storage access:
 
-**Custom button:**
-- User clicks in the parent app → iframe has no user gesture
-- Iframe cannot request Storage Access API
-- Falls back to partitioned storage (isolated per parent origin)
-- Authentication persists across page refreshes within the same session
-- If the user clears site data or the partitioned storage expires, re-authentication is required
+- The iframe cannot read accounts, identities, or postage stamps
+- Authentication data cannot be synced between the trusted domain and the iframe
+- **Authentication is rejected** to prevent stale data issues
 
 ### Recommendation
 
-For the best user experience on Safari:
-- Use the **iframe button** for primary authentication
-- If using a custom button, inform users that they may need to re-authenticate more frequently on Safari
+**On Safari, always use the iframe button** (`getAuthIframe()`). The custom button is only supported on browsers that don't partition iframe storage (Chrome, Firefox, Edge on desktop).
 
 ## Development
 

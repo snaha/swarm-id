@@ -1,11 +1,9 @@
 import type {
   ParentToIframeMessage,
   IframeToParentMessage,
-  PopupToIframeMessage,
   ButtonStyles,
   ButtonConfig,
   RequestAuthMessage,
-  SetSecretMessage,
   UploadDataMessage,
   DownloadDataMessage,
   UploadFileMessage,
@@ -33,10 +31,7 @@ import type {
   PostageBatch,
   ConnectedApp,
 } from "./types"
-import {
-  ParentToIframeMessageSchema,
-  PopupToIframeMessageSchema,
-} from "./types"
+import { ParentToIframeMessageSchema } from "./types"
 import {
   Bee,
   makeContentAddressedChunk,
@@ -121,10 +116,6 @@ export class SwarmIdProxy {
   private isConnecting: boolean = false
   private hasStorageAccess: boolean = false
   private parentWindow: WindowProxy | undefined
-  // Flag to track if auth came from setSecret (vs storage).
-  // When true, ignore storage events that would disconnect (Safari partitioning workaround).
-  // Reset when storage confirms our connection exists.
-  private authViaSetSecret: boolean = false
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -193,10 +184,6 @@ export class SwarmIdProxy {
       connectedApp && this.isConnectionValid(connectedApp)
 
     if (hasValidConnection) {
-      // Storage shows a valid connection for this app
-      // This confirms storage is in sync - can trust future disconnect events
-      this.authViaSetSecret = false
-
       if (!this.authenticated) {
         // New connection
         await this.authenticateFromStorage(connectedApp)
@@ -206,14 +193,7 @@ export class SwarmIdProxy {
       }
       // If already authenticated with same secret, nothing to do
     } else if (this.authenticated) {
-      // No valid connection in storage, but we're authenticated
-      if (this.authViaSetSecret) {
-        // Auth came from setSecret - this might be Safari's partitioned storage
-        // showing stale/empty data. Ignore until storage confirms our connection.
-        return
-      }
-
-      // Storage was previously in sync, so this is a real disconnect
+      // No valid connection in storage, but we're authenticated - disconnect
       console.log("[Proxy] Connection removed via storage event")
       this.clearAuthData()
       this.sendToParent({
@@ -381,12 +361,17 @@ export class SwarmIdProxy {
         return
       }
 
-      // Validate origin
-      const isPopup = event.origin === window.location.origin
-      const isParent = event.origin === this.parentOrigin
+      // Validate origin - only accept messages from parent
+      if (event.origin !== this.parentOrigin) {
+        console.warn(
+          "[Proxy] Rejected message from unauthorized origin:",
+          event.origin,
+        )
+        return
+      }
 
       // Handle setButtonStyles message (UI-only, not in schema)
-      if (type === "setButtonStyles" && isParent) {
+      if (type === "setButtonStyles") {
         this.currentStyles = event.data.styles
         console.log("[Proxy] Button styles updated")
         // Re-render button if not authenticated
@@ -396,77 +381,21 @@ export class SwarmIdProxy {
         return
       }
 
-      if (!isPopup && !isParent) {
-        console.warn(
-          "[Proxy] Rejected message from unauthorized origin:",
-          event.origin,
-        )
+      let message: ParentToIframeMessage
+      try {
+        message = ParentToIframeMessageSchema.parse(event.data)
+      } catch (error) {
+        console.warn("[Proxy] Invalid parent message:", error)
         return
       }
 
       try {
-        // Try to parse as parent message first
-        if (isParent) {
-          // Handle setSecret forwarded from client (direct mode on Safari)
-          // In direct mode, the popup sends setSecret to the parent app, which forwards it to the iframe
-          if (type === "setSecret") {
-            try {
-              const message = PopupToIframeMessageSchema.parse(event.data)
-              await this.handlePopupMessage(message, event)
-              return
-            } catch (error) {
-              console.warn("[Proxy] Invalid forwarded setSecret message:", error)
-              return
-            }
-          }
-
-          let message: ParentToIframeMessage
-          try {
-            message = ParentToIframeMessageSchema.parse(event.data)
-          } catch (error) {
-            console.warn("[Proxy] Invalid parent message:", error)
-            return
-          }
-
-          try {
-            await this.handleParentMessage(message, event)
-          } catch (error) {
-            console.error("[Proxy] Error handling parent message:", error)
-            this.sendErrorToParent(
-              event,
-              (message as { requestId?: string }).requestId,
-              error instanceof Error ? error.message : "Unknown error",
-            )
-          }
-          return
-        }
-
-        // Try to parse as popup message
-        if (isPopup) {
-          try {
-            const message = PopupToIframeMessageSchema.parse(event.data)
-            await this.handlePopupMessage(message, event)
-            return
-          } catch (error) {
-            // Avoid excessive logging with Metamask
-            if (event.data.target !== "metamask-inpage") {
-              console.warn("[Proxy] Invalid popup message:", error, event.data)
-            }
-          }
-        }
-
-        // Unknown message type
-        console.warn("[Proxy] Unknown message type:", type)
-        this.sendErrorToParent(
-          event,
-          event.data.requestId,
-          `Unknown message type: ${type}`,
-        )
+        await this.handleParentMessage(message, event)
       } catch (error) {
-        console.error("[Proxy] Error handling message:", error)
+        console.error("[Proxy] Error handling parent message:", error)
         this.sendErrorToParent(
           event,
-          event.data.requestId,
+          (message as { requestId?: string }).requestId,
           error instanceof Error ? error.message : "Unknown error",
         )
       }
@@ -656,20 +585,6 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Handle messages from popup window
-   */
-  private async handlePopupMessage(
-    message: PopupToIframeMessage,
-    event: MessageEvent,
-  ): Promise<void> {
-    switch (message.type) {
-      case "setSecret":
-        await this.handleSetSecret(message, event)
-        break
-    }
-  }
-
-  /**
    * Check if Storage Access API is available
    */
   private hasStorageAccessAPI(): boolean {
@@ -721,86 +636,6 @@ export class SwarmIdProxy {
     return this.hasStorageAccess || !this.isInIframe()
   }
 
-  /**
-   * Key for partitioned storage (Safari fallback)
-   */
-  private getPartitionedStorageKey(): string {
-    return `swarm-id-partitioned-${this.parentOrigin}`
-  }
-
-  /**
-   * Save auth data to partitioned storage (Safari fallback).
-   * This allows auth to persist across page refreshes even when
-   * the iframe's storage is partitioned and can't access shared storage.
-   */
-  private saveToPartitionedStorage(): void {
-    if (!this.parentOrigin || !this.appSecret) {
-      return
-    }
-
-    const data = {
-      appSecret: this.appSecret,
-      postageBatchId: this.postageBatchId,
-      signerKey: this.signerKey,
-      beeApiUrl: this.beeApiUrl,
-      stamperDepth: this.stamperDepth,
-    }
-
-    try {
-      localStorage.setItem(this.getPartitionedStorageKey(), JSON.stringify(data))
-      console.log("[Proxy] Saved auth data to partitioned storage")
-    } catch (error) {
-      console.warn("[Proxy] Failed to save to partitioned storage:", error)
-    }
-  }
-
-  /**
-   * Load auth data from partitioned storage (Safari fallback).
-   */
-  private loadFromPartitionedStorage(): {
-    appSecret: string
-    postageBatchId?: string
-    signerKey?: string
-    beeApiUrl?: string
-    stamperDepth?: number
-  } | undefined {
-    if (!this.parentOrigin) {
-      return undefined
-    }
-
-    try {
-      const stored = localStorage.getItem(this.getPartitionedStorageKey())
-      if (!stored) {
-        return undefined
-      }
-
-      const data = JSON.parse(stored)
-      if (data && typeof data.appSecret === "string") {
-        console.log("[Proxy] Loaded auth data from partitioned storage")
-        return data
-      }
-    } catch (error) {
-      console.warn("[Proxy] Failed to load from partitioned storage:", error)
-    }
-
-    return undefined
-  }
-
-  /**
-   * Clear auth data from partitioned storage.
-   */
-  private clearPartitionedStorage(): void {
-    if (!this.parentOrigin) {
-      return
-    }
-
-    try {
-      localStorage.removeItem(this.getPartitionedStorageKey())
-      console.log("[Proxy] Cleared partitioned storage")
-    } catch (error) {
-      console.warn("[Proxy] Failed to clear partitioned storage:", error)
-    }
-  }
 
   /**
    * Check if running inside an iframe
@@ -841,39 +676,13 @@ export class SwarmIdProxy {
     }
 
     if (!this.canUseSharedStorage()) {
-      // Storage is partitioned - we can't read shared storage.
-      // First, try to restore from partitioned storage (Safari fallback)
-      const partitionedData = this.loadFromPartitionedStorage()
-      if (partitionedData) {
-        console.log(
-          "[Proxy] Restoring auth from partitioned storage for:",
-          this.parentOrigin,
-        )
-        this.appSecret = partitionedData.appSecret
-        this.postageBatchId = partitionedData.postageBatchId
-        this.signerKey = partitionedData.signerKey
-        this.stamperDepth = partitionedData.stamperDepth ?? 23
-        if (partitionedData.beeApiUrl) {
-          this.beeApiUrl = partitionedData.beeApiUrl
-          this.bee = new Bee(this.beeApiUrl)
-        }
-        this.authenticated = true
-        this.authLoading = false
-        this.showAuthButton()
-
-        // Initialize stamper if we have signer key
-        if (this.signerKey && this.postageBatchId) {
-          await this.initializeStamper()
-        }
-      } else {
-        // No partitioned data - user must authenticate
-        console.log(
-          "[Proxy] Storage partitioned - no cached auth, requires auth for:",
-          this.parentOrigin,
-        )
-        this.authLoading = false
-        this.showAuthButton()
-      }
+      // Storage is partitioned - user must use iframe button to request Storage Access
+      console.log(
+        "[Proxy] Storage partitioned - use iframe button for auth:",
+        this.parentOrigin,
+      )
+      this.authLoading = false
+      this.showAuthButton()
     } else {
       // We have access to shared storage (not in iframe, or Storage Access granted)
       const sharedData = this.lookupAppSecretFromSharedStorage()
@@ -1105,17 +914,6 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Update authentication status and update button accordingly
-   */
-  private updateAuthStatus(authenticated: boolean): void {
-    this.authenticated = authenticated
-    this.authLoading = false
-    this.isConnecting = false
-    // Always show button - it will display as login or disconnect based on auth status
-    this.showAuthButton()
-  }
-
-  /**
    * Clear authentication data
    */
   private clearAuthData(): void {
@@ -1130,9 +928,6 @@ export class SwarmIdProxy {
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
     localStorage.removeItem(stamperKey)
 
-    // Clear partitioned storage (Safari fallback)
-    this.clearPartitionedStorage()
-
     // Reset auth state
     this.authenticated = false
     this.authLoading = false
@@ -1140,7 +935,6 @@ export class SwarmIdProxy {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
-    this.authViaSetSecret = false
 
     // Show login button
     this.showAuthButton()
@@ -1571,85 +1365,6 @@ export class SwarmIdProxy {
     // Show button now that container is available
     // (loadAuthData may have already run and set authenticated status)
     this.showAuthButton()
-  }
-
-  private async handleSetSecret(
-    message: SetSecretMessage,
-    event: MessageEvent,
-  ): Promise<void> {
-    const { appOrigin, data } = message
-
-    console.log("[Proxy] Received auth data for app:", appOrigin, data)
-
-    // Validate that appOrigin matches parent origin
-    if (appOrigin !== this.parentOrigin) {
-      console.warn(
-        "[Proxy] App origin mismatch:",
-        appOrigin,
-        "vs",
-        this.parentOrigin,
-      )
-    }
-
-    if (!this.canUseSharedStorage()) {
-      // Storage is partitioned - we receive stamps and settings in the message
-      console.log("[Proxy] Using auth data from message (partitioned storage)")
-      this.appSecret = data.secret
-      this.postageBatchId = data.postageBatchId
-      this.signerKey = data.signerKey
-
-      // Use network settings from message if provided
-      if (data.networkSettings) {
-        this.beeApiUrl = data.networkSettings.beeNodeUrl
-        this.bee = new Bee(this.beeApiUrl)
-        console.log("[Proxy] Using Bee API URL from message:", this.beeApiUrl)
-      }
-    } else {
-      // We have access to shared storage - data is already there (set by auth popup)
-      // Just update local state
-      console.log(
-        "[Proxy] Auth data stored in shared storage, updating local state",
-      )
-      this.appSecret = data.secret
-
-      // Look up postage stamp from shared storage
-      const stamp = this.lookupPostageStampForApp()
-      if (stamp) {
-        this.postageBatchId = stamp.batchID.toHex()
-        this.signerKey = stamp.signerKey.toHex()
-        this.stamperDepth = stamp.depth
-      }
-    }
-
-    this.updateAuthStatus(true)
-    this.authViaSetSecret = true // Don't trust storage disconnect events until storage confirms
-
-    // Save to partitioned storage for Safari refresh persistence
-    this.saveToPartitionedStorage()
-
-    // Initialize stamper if we have signer key
-    if (this.signerKey && this.postageBatchId) {
-      await this.initializeStamper()
-    }
-
-    // Notify parent dApp
-    this.sendToParent({
-      type: "authSuccess",
-      origin: appOrigin,
-    })
-
-    console.log("[Proxy] Notified parent of successful authentication")
-
-    // Respond to popup (if still open)
-    if (event.source && !(event.source as Window).closed) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "secretReceived",
-          success: true,
-        },
-        { targetOrigin: event.origin },
-      )
-    }
   }
 
   private async handleUploadData(

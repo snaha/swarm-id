@@ -34,7 +34,6 @@ import {
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
   AppMetadataSchema,
-  SetSecretMessageSchema,
 } from "./types"
 import { buildAuthUrl } from "./utils/url"
 import { EthAddress, Identifier, PrivateKey } from "@ethersphere/bee-js"
@@ -318,18 +317,6 @@ export class SwarmIdClient {
           event.origin,
         )
         return
-      }
-
-      // Handle setSecret from popup (direct mode) - forward to iframe
-      if (event.data?.type === "setSecret") {
-        const result = SetSecretMessageSchema.safeParse(event.data)
-        if (result.success) {
-          // Forward the setSecret message to the iframe
-          if (this.iframe?.contentWindow) {
-            this.iframe.contentWindow.postMessage(result.data, this.iframeOrigin)
-          }
-          return
-        }
       }
 
       // Parse and validate message
@@ -714,10 +701,8 @@ export class SwarmIdClient {
    * **Safari Limitation:** This method opens the popup directly from the parent
    * app, bypassing the iframe. Because the user gesture occurs in the parent
    * (not the iframe), the iframe cannot request Storage Access API permission.
-   * As a result, on Safari:
-   * - Authentication uses partitioned storage (isolated per parent origin)
-   * - Auth persists across page refreshes but may not persist across browser sessions
-   * - For full persistence on Safari, use the iframe button ({@link getAuthIframe}) instead
+   * **Authentication will be rejected on Safari** because the iframe cannot
+   * access shared storage. Use the iframe button ({@link getAuthIframe}) instead.
    *
    * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
    * @returns The URL that was opened (useful for testing or reference)

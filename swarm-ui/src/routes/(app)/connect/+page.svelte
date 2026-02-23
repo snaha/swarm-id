@@ -22,15 +22,11 @@
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
-	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-	import type { PostageStamp, SetSecretMessage } from '@swarm-id/lib'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let authenticated = $state(false)
 	let selectedAccountId = $state<EthAddress | undefined>(undefined)
-	let proxyMode = $state(false)
 	const selectedAccount = $derived(
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
@@ -52,37 +48,8 @@
 	}
 
 	onMount(() => {
-		// Get parameters from URL hash (e.g., #origin=foo&appName=bar&proxyMode=true)
+		// Get parameters from URL hash (e.g., #origin=foo&appName=bar)
 		const hashParams = getHashParams()
-
-		// Check if we're in proxy mode (opened from the proxy iframe)
-		proxyMode = hashParams.get('proxyMode') === 'true'
-
-		console.log('[Connect] Page loaded, proxyMode:', proxyMode, 'opener:', !!window.opener)
-
-		if (proxyMode) {
-			// PROXY MODE: Require same-origin opener for postMessage communication
-			if (!window.opener) {
-				console.warn('[Connect] No opener window in proxy mode')
-				error = 'No opener window found. This page must be opened by Swarm ID iframe.'
-				return
-			}
-
-			// Check opener origin - must be same-origin for proxy mode
-			try {
-				const openerOrigin = (window.opener as Window).location.origin
-				console.log('[Connect] Opener origin:', openerOrigin)
-				if (openerOrigin !== window.location.origin) {
-					error = `Opener origin (${openerOrigin}) does not match expected origin`
-					return
-				}
-			} catch (e) {
-				console.warn('[Connect] Cannot access opener origin:', e)
-				error = 'Cannot verify opener origin - cross-origin access denied'
-				return
-			}
-		}
-		// DIRECT MODE: No opener validation needed - relies on storage events
 
 		if (!sessionStore.data.appOrigin) {
 			const appOrigin = hashParams.get('origin')
@@ -171,15 +138,6 @@
 		}
 	}
 
-	function getIdentityPostageStamp(identity: Identity): PostageStamp | undefined {
-		const accountId = identity.accountId.toHex()
-		const postageStamp = postageStampsStore.stamps.find((stamp) => stamp.accountId === accountId)
-		if (!postageStamp) {
-			return
-		}
-		return postageStamp
-	}
-
 	function updateSelectedIdentity(appSecret: string) {
 		if (!selectedIdentity) {
 			return
@@ -193,9 +151,8 @@
 			return
 		}
 
-		// ALWAYS write to localStorage first, regardless of mode.
-		// This ensures the storage event fallback can work if storage isn't partitioned,
-		// and the data is persisted for future sessions.
+		// Write to localStorage - this triggers storage events in the iframe
+		// which will detect the new connection and authenticate
 		connectedAppsStore.addOrUpdateApp(
 			{
 				appUrl: sessionStore.data.appOrigin,
@@ -207,48 +164,6 @@
 			},
 			DEFAULT_SESSION_DURATION,
 		)
-
-		const postageStamp = getIdentityPostageStamp(selectedIdentity)
-
-		// Always include postageBatchId/signerKey/networkSettings in the message.
-		// The proxy iframe decides whether to use this data or read from shared storage:
-		// - If Storage Access API is granted: reads from shared storage
-		// - If storage is partitioned: uses this message data as fallback
-		const message: SetSecretMessage = {
-			type: 'setSecret',
-			appOrigin: sessionStore.data.appOrigin,
-			data: {
-				secret: appSecret,
-				postageBatchId: postageStamp?.batchID.toHex(),
-				signerKey: postageStamp?.signerKey.toHex(),
-				networkSettings: { ...networkSettingsStore.settings },
-			},
-		}
-
-		if (proxyMode) {
-			// PROXY MODE: Send setSecret via postMessage to the opener (the proxy iframe)
-			if (!window.opener || (window.opener as Window).closed) {
-				// On mobile Safari, window.opener can become null when:
-				// - The browser backgrounded the opener tab
-				// - Navigation occurred in the authentication flow
-				// - iOS memory management cleared the reference
-				// We've already written to localStorage above, so the fallback may still work
-				// if storage isn't partitioned. Show user-friendly guidance.
-				console.warn('[Connect] window.opener not available in proxy mode')
-				error =
-					'Connection may not have completed. Please close this window and try connecting again from the app.'
-				return
-			}
-
-			;(window.opener as Window).postMessage(message, window.location.origin)
-		} else {
-			// DIRECT MODE: Send postMessage to the opener (the app) with the app's origin.
-			// This works cross-origin on Safari where storage events don't work.
-			if (window.opener && !(window.opener as Window).closed) {
-				;(window.opener as Window).postMessage(message, sessionStore.data.appOrigin)
-			}
-			// Also rely on localStorage write above for same-origin scenarios
-		}
 	}
 
 	async function tryGetMasterKeyFromAccount(account: Account) {
