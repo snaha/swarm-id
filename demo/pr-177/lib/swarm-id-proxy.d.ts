@@ -29,6 +29,8 @@ export declare class SwarmIdProxy {
     private unsubscribeConnectedApps;
     private isConnecting;
     private hasStorageAccess;
+    private parentWindow;
+    private authViaSetSecret;
     constructor();
     /**
      * Subscribe to connected apps storage changes for direct mode authentication.
@@ -44,10 +46,18 @@ export declare class SwarmIdProxy {
      */
     private setupConnectedAppsListener;
     /**
-     * Handle changes to connected apps storage (triggered by storage events from other windows)
-     * Handles both new connections and disconnections.
+     * Handle changes to connected apps storage (triggered by storage events from other windows).
+     * Handles new connections, identity changes, and disconnections.
+     *
+     * Safari partitioning workaround: After auth via setSecret, we ignore disconnect events
+     * from storage until storage confirms our connection exists. This prevents Safari's
+     * partitioned storage from causing spurious disconnects.
      */
     private handleConnectedAppsChange;
+    /**
+     * Authenticate using data from connected apps storage
+     */
+    private authenticateFromStorage;
     /**
      * Clean up resources when the proxy is destroyed.
      * Call this method when the proxy iframe is being unloaded.
@@ -107,6 +117,24 @@ export declare class SwarmIdProxy {
      * Check if we should use shared storage (either not in iframe, have storage access, or dev mode)
      */
     private canUseSharedStorage;
+    /**
+     * Key for partitioned storage (Safari fallback)
+     */
+    private getPartitionedStorageKey;
+    /**
+     * Save auth data to partitioned storage (Safari fallback).
+     * This allows auth to persist across page refreshes even when
+     * the iframe's storage is partitioned and can't access shared storage.
+     */
+    private saveToPartitionedStorage;
+    /**
+     * Load auth data from partitioned storage (Safari fallback).
+     */
+    private loadFromPartitionedStorage;
+    /**
+     * Clear auth data from partitioned storage.
+     */
+    private clearPartitionedStorage;
     /**
      * Check if running inside an iframe
      */

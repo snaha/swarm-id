@@ -217,6 +217,14 @@ export declare class SwarmIdClient {
      * with their Swarm ID, and the resulting authentication will be available
      * to the client when they return.
      *
+     * **Safari Limitation:** This method opens the popup directly from the parent
+     * app, bypassing the iframe. Because the user gesture occurs in the parent
+     * (not the iframe), the iframe cannot request Storage Access API permission.
+     * As a result, on Safari:
+     * - Authentication uses partitioned storage (isolated per parent origin)
+     * - Auth persists across page refreshes but may not persist across browser sessions
+     * - For full persistence on Safari, use the iframe button ({@link getAuthIframe}) instead
+     *
      * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
      * @returns The URL that was opened (useful for testing or reference)
      * @throws {Error} If the client is not initialized
