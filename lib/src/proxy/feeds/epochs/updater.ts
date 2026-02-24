@@ -9,7 +9,7 @@ import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
-import { uploadEncryptedSOC, uploadSOC } from "../../upload-encrypted-data"
+import { uploadEncryptedSOC, uploadSOCViaSocEndpoint } from "../../upload-encrypted-data"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
 
@@ -155,19 +155,15 @@ export class BasicEpochUpdater implements EpochUpdater {
       ),
     )
 
-    // Span: 8-byte little-endian reference length (for Bee /bzz/ compatibility)
-    // Bee's legacy payload parser expects: span(8) + timestamp(8) + reference(32|64) = 48|80 bytes
-    const span = new Uint8Array(8)
-    const spanView = new DataView(span.buffer)
-    spanView.setBigUint64(0, BigInt(reference.length), true) // little-endian
-
     // Timestamp: 8-byte big-endian
     const timestamp = new Uint8Array(8)
     const tsView = new DataView(timestamp.buffer)
     tsView.setBigUint64(0, at, false) // big-endian
 
-    // Payload: span + timestamp + reference = 48 or 80 bytes
-    const payload = Binary.concatBytes(span, timestamp, reference)
+    // Payload: timestamp + reference = 40 or 72 bytes
+    // The upload function will wrap this in a CAC (adding span) to get 48 or 80 bytes
+    // which is the v1 format Bee expects for /bzz/ compatibility
+    const payload = Binary.concatBytes(timestamp, reference)
 
     console.log("[EpochUpdater] Uploading epoch update", {
       at: at.toString(),
@@ -183,15 +179,15 @@ export class BasicEpochUpdater implements EpochUpdater {
           identifier,
           payload,
           encryptionKey,
-          { deferred: false }, // Fast upload mode
+          { deferred: false }, // deferred setting is NOT the cause of /bzz/ timeout
         )
-      : await uploadSOC(
+      : await uploadSOCViaSocEndpoint(
           this.bee,
           stamper,
           this.signer,
           identifier,
           payload,
-          { deferred: false }, // Fast upload mode
+          { deferred: false }, // deferred setting is NOT the cause of /bzz/ timeout
         )
 
     return result.socAddress
