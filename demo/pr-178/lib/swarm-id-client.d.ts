@@ -218,12 +218,13 @@ export declare class SwarmIdClient {
      * to the client when they return.
      *
      * **Browser Compatibility:**
-     * - Safari (localhost): Does not work - Storage Access API unavailable
-     * - Safari (production): Does not work - use iframe button instead
-     * - Other browsers (localhost): Works after iframe button grants Storage Access
-     * - Other browsers (production): Works (storage not partitioned)
+     * - Production (all browsers): Works immediately
+     * - Localhost (Chrome/Firefox): Works after iframe button grants Storage Access
+     * - Localhost (Safari): Does not work - Storage Access API unavailable on localhost
+     * - Safari private mode: Does not work - strict storage partitioning
      *
-     * For reliable cross-browser support, use the iframe button ({@link getAuthIframe}).
+     * For localhost development with Chrome/Firefox, click the iframe button first
+     * to grant Storage Access.
      *
      * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
      * @returns The URL that was opened (useful for testing or reference)
