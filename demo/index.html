@@ -433,6 +433,53 @@ Secret message for ACT test!</textarea
 				console.log(`[${type}]`, message)
 			}
 
+			// Safari + HTTP detection
+			// Safari's Storage Access API doesn't grant access to first-party localStorage on localhost
+			const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+			const isHTTP = window.location.protocol === 'http:'
+
+			if (isSafari && isHTTP) {
+				log('Safari detected on HTTP - authentication not supported', 'error')
+
+				// Show warning banner
+				const container = document.querySelector('.container')
+				const warningBanner = document.createElement('div')
+				warningBanner.style.cssText = `
+					background: linear-gradient(135deg, #fff3cd 0%, #ffeeba 100%);
+					border: 2px solid #ffc107;
+					border-radius: 8px;
+					padding: 20px;
+					margin-bottom: 30px;
+					color: #856404;
+				`
+				warningBanner.innerHTML = `
+					<h2 style="margin: 0 0 10px 0; color: #856404;">⚠️ Safari + HTTP Not Supported</h2>
+					<p style="margin: 0 0 15px 0; line-height: 1.5;">
+						Safari's storage partitioning prevents authentication from working on localhost (HTTP).
+						The Storage Access API grants permission but doesn't actually provide access to first-party storage.
+					</p>
+					<p style="margin: 0 0 10px 0; font-weight: 600;">Options:</p>
+					<ul style="margin: 0; padding-left: 20px; line-height: 1.8;">
+						<li><strong>Use Chrome or Firefox</strong> for local development</li>
+						<li><strong>Use HTTPS with mkcert</strong> - Safari works correctly over HTTPS:
+							<pre style="background: #2d2d2d; color: #f8f8f8; padding: 10px; border-radius: 4px; margin-top: 8px; font-size: 12px; overflow-x: auto;">mkcert -install
+mkcert localhost 127.0.0.1 ::1
+# Then configure your dev server to use the generated certificates</pre>
+						</li>
+						<li><strong>Test on production</strong> - The deployed version at <a href="https://swarm-demo.snaha.net" style="color: #0066cc;">swarm-demo.snaha.net</a> works in Safari</li>
+					</ul>
+				`
+				container.insertBefore(warningBanner, container.children[2]) // After title and subtitle
+
+				// Hide auth section or disable it
+				const authSection = document.querySelector('.section')
+				authSection.style.opacity = '0.5'
+				authSection.style.pointerEvents = 'none'
+
+				// Don't initialize the client
+				throw new Error('Safari + HTTP not supported')
+			}
+
 			let socWriter = null
 
 			// Collapsible toggle
@@ -456,6 +503,24 @@ Secret message for ACT test!</textarea
 			// Use /proxy - this is a SvelteKit route that works in both dev and production
 			const PROXY_PATH = '/proxy'
 
+			// Storage verification flag - persisted after successful auth via iframe button
+			const STORAGE_VERIFIED_KEY = 'swarm-demo-storage-verified'
+			const storageVerified = localStorage.getItem(STORAGE_VERIFIED_KEY) === 'true'
+
+			// On HTTP, custom button starts disabled unless storage was previously verified
+			const connectBtn = document.getElementById('connect-button')
+			if (isHTTP && !storageVerified) {
+				connectBtn.disabled = true
+				connectBtn.title = 'Use iframe button for first authentication'
+				// Add hint next to the custom button
+				const customBtnContainer = connectBtn.parentElement
+				const hint = document.createElement('span')
+				hint.id = 'storage-hint'
+				hint.style.cssText = 'color: #856404; font-size: 12px; margin-left: 8px;'
+				hint.textContent = '(use iframe button first)'
+				customBtnContainer.appendChild(hint)
+			}
+
 			// Initialize the Swarm ID client
 			log('Initializing Swarm ID client...', 'info')
 			log(`PROXY_ORIGIN: ${PROXY_ORIGIN}`, 'info')
@@ -473,6 +538,18 @@ Secret message for ACT test!</textarea
 				timeout: 60000, // 60 seconds to account for Bee sync delays
 				onAuthChange: async (authenticated) => {
 					log(`Auth status changed: ${authenticated}`, 'info')
+
+					// On successful auth, remember that storage works (for custom button on next load)
+					if (authenticated) {
+						localStorage.setItem(STORAGE_VERIFIED_KEY, 'true')
+						// Enable custom button now that we know storage works
+						connectBtn.disabled = false
+						connectBtn.title = ''
+						// Remove hint if present
+						const hint = document.getElementById('storage-hint')
+						if (hint) hint.remove()
+					}
+
 					await updateAuthStatus(authenticated)
 				},
 				metadata: {
@@ -569,9 +646,6 @@ Secret message for ACT test!</textarea
 				await updateAuthStatus(status.authenticated)
 			} catch (error) {
 				log(`Initialization failed: ${error.message}`, 'error')
-				alert(
-					`Failed to initialize Swarm ID: ${error.message}\n\nPlease check the console for details.`,
-				)
 			}
 
 			async function updateAuthStatus(authenticated) {

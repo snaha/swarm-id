@@ -114,7 +114,6 @@ export class SwarmIdProxy {
   private bee: Bee
   private unsubscribeConnectedApps: (() => void) | undefined
   private isConnecting: boolean = false
-  private hasStorageAccess: boolean = false
   private parentWindow: WindowProxy | undefined
 
   constructor() {
@@ -585,73 +584,7 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Check if Storage Access API is available
-   */
-  private hasStorageAccessAPI(): boolean {
-    return (
-      typeof document.hasStorageAccess === "function" &&
-      typeof document.requestStorageAccess === "function"
-    )
-  }
-
-  /**
-   * Request unpartitioned storage access using the Storage Access API.
-   * This allows the iframe to access the same localStorage as the top-level context.
-   * Must be called from a user gesture (click handler).
-   * @returns true if access was granted, false otherwise
-   */
-  private async requestStorageAccess(): Promise<boolean> {
-    if (!this.hasStorageAccessAPI()) {
-      console.log("[Proxy] Storage Access API not available")
-      return false
-    }
-
-    try {
-      // Check if we already have access
-      const hasAccess = await document.hasStorageAccess()
-      if (hasAccess) {
-        console.log("[Proxy] Already have storage access")
-        this.hasStorageAccess = true
-        return true
-      }
-
-      // Request access - must be called from user gesture
-      console.log("[Proxy] Requesting storage access...")
-      await document.requestStorageAccess()
-      console.log("[Proxy] Storage access granted!")
-      this.hasStorageAccess = true
-
-      return true
-    } catch (error) {
-      console.log("[Proxy] Storage access denied or failed:", error)
-      this.hasStorageAccess = false
-      return false
-    }
-  }
-
-  /**
-   * Check if we should use shared storage (either not in iframe, have storage access, or dev mode)
-   */
-  private canUseSharedStorage(): boolean {
-    return this.hasStorageAccess || !this.isInIframe()
-  }
-
-  /**
-   * Check if running inside an iframe
-   */
-  private isInIframe(): boolean {
-    try {
-      return window.self !== window.top
-    } catch {
-      // Cross-origin iframes throw an error
-      return true
-    }
-  }
-
-  /**
-   * Load authentication data.
-   * - If shared storage is accessible: reads from shared storage (ConnectedApp records)
-   * - If partitioned (iframe without Storage Access): uses in-memory values (set by handleSetSecret)
+   * Load authentication data from shared storage (ConnectedApp records).
    */
   private async loadAuthData(): Promise<void> {
     if (!this.parentOrigin) {
@@ -660,62 +593,37 @@ export class SwarmIdProxy {
       return
     }
 
-    // Try to restore Storage Access permission if in iframe
-    // This allows auth to persist across page reloads
-    if (this.isInIframe() && this.hasStorageAccessAPI()) {
-      try {
-        const hasAccess = await document.hasStorageAccess()
-        if (hasAccess) {
-          this.hasStorageAccess = true
-          console.log("[Proxy] Storage access restored from previous grant")
-        }
-      } catch {
-        // Ignore - will fall back to showing login button
-      }
-    }
+    const sharedData = this.lookupAppSecretFromSharedStorage()
 
-    if (!this.canUseSharedStorage()) {
-      // Storage is partitioned - user must use iframe button to request Storage Access
+    if (sharedData) {
       console.log(
-        "[Proxy] Storage partitioned - use iframe button for auth:",
+        "[Proxy] Auth data loaded from shared storage for:",
+        this.parentOrigin,
+      )
+      this.appSecret = sharedData.secret
+      this.authenticated = true
+      this.authLoading = false
+      this.showAuthButton()
+
+      // Look up postage stamp from shared storage based on connected identity
+      const stamp = this.lookupPostageStampForApp()
+      if (stamp) {
+        this.postageBatchId = stamp.batchID.toHex()
+        this.signerKey = stamp.signerKey.toHex()
+        this.stamperDepth = stamp.depth
+        await this.initializeStamper()
+      } else {
+        console.log("[Proxy] No postage stamp found for connected identity")
+        this.postageBatchId = undefined
+        this.signerKey = undefined
+      }
+    } else {
+      console.log(
+        "[Proxy] No valid auth data found in shared storage for:",
         this.parentOrigin,
       )
       this.authLoading = false
       this.showAuthButton()
-    } else {
-      // We have access to shared storage (not in iframe, or Storage Access granted)
-      const sharedData = this.lookupAppSecretFromSharedStorage()
-
-      if (sharedData) {
-        console.log(
-          "[Proxy] Auth data loaded from shared storage for:",
-          this.parentOrigin,
-        )
-        this.appSecret = sharedData.secret
-        this.authenticated = true
-        this.authLoading = false
-        this.showAuthButton()
-
-        // Look up postage stamp from shared storage based on connected identity
-        const stamp = this.lookupPostageStampForApp()
-        if (stamp) {
-          this.postageBatchId = stamp.batchID.toHex()
-          this.signerKey = stamp.signerKey.toHex()
-          this.stamperDepth = stamp.depth
-          await this.initializeStamper()
-        } else {
-          console.log("[Proxy] No postage stamp found for connected identity")
-          this.postageBatchId = undefined
-          this.signerKey = undefined
-        }
-      } else {
-        console.log(
-          "[Proxy] No valid auth data found in shared storage for:",
-          this.parentOrigin,
-        )
-        this.authLoading = false
-        this.showAuthButton()
-      }
     }
   }
 
@@ -1275,28 +1183,31 @@ export class SwarmIdProxy {
       return false
     }
 
-    // Monitor popup closure to reset button state if auth didn't complete
-    // This handles the case where user closes popup without completing auth
+    // Monitor popup closure to handle user closing without completing auth
     // Note: We delay the start of monitoring because on Safari, popup.closed can
     // return true immediately for new tabs before they're fully initialized
+    const POPUP_MONITOR_START_DELAY_MS = 2000
+    const POPUP_CLOSE_CHECK_INTERVAL_MS = 500
+    const POPUP_MONITOR_TIMEOUT_MS = 300000 // 5 minutes
+
     setTimeout(() => {
       const checkPopupClosed = setInterval(() => {
         if (popup?.closed) {
           clearInterval(checkPopupClosed)
-          // Only reset if we're still in connecting state (auth didn't complete)
+          // Only process if we're still in connecting state (auth didn't complete via storage event)
           if (this.isConnecting && !this.authenticated) {
             console.log("[Proxy] Popup closed without completing auth")
             this.isConnecting = false
             this.showAuthButton()
           }
         }
-      }, 500)
+      }, POPUP_CLOSE_CHECK_INTERVAL_MS)
 
-      // Clear interval after 5 minutes to prevent memory leak
+      // Clear interval to prevent memory leak
       setTimeout(() => {
         clearInterval(checkPopupClosed)
-      }, 300000)
-    }, 2000) // Wait 2 seconds before starting to monitor
+      }, POPUP_MONITOR_TIMEOUT_MS)
+    }, POPUP_MONITOR_START_DELAY_MS)
 
     return true
   }
@@ -1304,7 +1215,7 @@ export class SwarmIdProxy {
   /**
    * Handle login button click
    */
-  private async handleLoginClick(button: HTMLButtonElement): Promise<void> {
+  private handleLoginClick(button: HTMLButtonElement): void {
     this.isConnecting = true
     // Disable button and show spinner
     button.disabled = true
@@ -1320,21 +1231,8 @@ export class SwarmIdProxy {
       document.head.appendChild(style)
     }
 
-    // IMPORTANT: Open popup FIRST, before any async operations.
-    // iOS Safari requires window.open() to be called synchronously within
-    // the user gesture. Calling await before window.open() breaks the
-    // user gesture chain and causes the popup to be blocked.
+    // Open auth popup
     this.openAuthPopup()
-
-    // Request storage access AFTER opening the popup.
-    // This is non-blocking - we don't need to wait for it before the popup opens.
-    // If storage access is granted, handleSetSecret will be able to read from
-    // shared storage. If not, it will use the data sent via postMessage.
-    if (!this.hasStorageAccess && this.isInIframe()) {
-      this.requestStorageAccess().catch((error) => {
-        console.log("[Proxy] Storage access request failed:", error)
-      })
-    }
   }
 
   /**
