@@ -140,6 +140,7 @@
 	}
 
 	async function selectIdentityForConnection(identity: Identity) {
+		error = undefined
 		selectedIdentity = identity
 
 		// Check if there's a valid existing connection
@@ -151,6 +152,7 @@
 			if (validConnection?.appSecret) {
 				// Reuse the existing connection
 				updateSelectedIdentity(validConnection.appSecret)
+				authenticated = true
 				closeWindowWithSessionCleanup()
 				return
 			}
