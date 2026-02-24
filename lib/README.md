@@ -309,11 +309,11 @@ The iframe needs access to shared localStorage to read accounts, identities, and
 
 ### Environment Compatibility
 
-| Environment | Iframe button | Custom button | Notes |
-|-------------|---------------|---------------|-------|
-| **Production (all browsers)** | Yes | Yes | Secure context, storage not partitioned |
-| **Localhost (Chrome, Firefox, etc.)** | Yes | After iframe button | Iframe button requests Storage Access first |
-| **Localhost (Safari)** | No | No | Storage Access API doesn't work on localhost |
+| Environment                           | Iframe button | Custom button       | Notes                                        |
+| ------------------------------------- | ------------- | ------------------- | -------------------------------------------- |
+| **Production (all browsers)**         | Yes           | Yes                 | Secure context, storage not partitioned      |
+| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first  |
+| **Localhost (Safari)**                | No            | No                  | Storage Access API doesn't work on localhost |
 
 ### How It Works
 
