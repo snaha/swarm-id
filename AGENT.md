@@ -77,6 +77,7 @@ All cross-origin communication via `postMessage` with Zod validation:
 
 ## Code Style
 
+- **Format after editing**: Run `pnpm exec prettier --write <file>` on files you modify
 - **No semicolons**
 - **Never use `null`** — use `undefined` (exception: external library APIs)
 - **Never use `any`** — use proper types, generics, `unknown`

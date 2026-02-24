@@ -36,18 +36,5 @@
 			"mcp__figma-desktop__get_metadata"
 		],
 		"deny": []
-	},
-	"hooks": {
-		"PostToolUse": [
-			{
-				"matcher": "Edit|Write|NotebookEdit",
-				"hooks": [
-					{
-						"type": "command",
-						"command": "FILE=$(jq -r '.tool_input.file_path // empty') && [ -n \"$FILE\" ] && echo \"$FILE\" | grep -qE '\\.(ts|js|svelte|json|css|html|md|mdx)$' && pnpm exec prettier --write \"$FILE\" 2>/dev/null || true"
-					}
-				]
-			}
-		]
 	}
 }
