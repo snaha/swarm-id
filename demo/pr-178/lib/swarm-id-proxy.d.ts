@@ -46,10 +46,6 @@ export declare class SwarmIdProxy {
     /**
      * Handle changes to connected apps storage (triggered by storage events from other windows).
      * Handles new connections, identity changes, and disconnections.
-     *
-     * Safari partitioning workaround: After auth via setSecret, we ignore disconnect events
-     * from storage until storage confirms our connection exists. This prevents Safari's
-     * partitioned storage from causing spurious disconnects.
      */
     private handleConnectedAppsChange;
     /**
