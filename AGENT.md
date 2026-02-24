@@ -2,7 +2,7 @@
 
 Web-based identity and key management for decentralized applications on the Swarm network.
 
-**Key Innovation**: Popup-based authentication flow using shared localStorage. In production (secure context), storage works immediately. On localhost, browsers that support Storage Access API can request shared storage access.
+**Key Innovation**: Popup-based authentication flow using shared localStorage. In production (secure context), storage works immediately for all browsers. On localhost, Chrome/Firefox can request shared storage access via Storage Access API (requires clicking iframe button first). Safari localhost and Safari private mode are not supported.
 
 ## Architecture
 

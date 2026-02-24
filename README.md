@@ -104,7 +104,7 @@ Open http://localhost:3000 - that's it!
 - Identity UI runs on port 5174
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** Safari is not supported for local development due to strict storage partitioning.
+**Note:** Safari is not supported for local development due to strict storage partitioning. Safari private mode is also not supported.
 
 ### Development Mode (with hot reload)
 
@@ -396,7 +396,8 @@ paths:
 ### Safari not working
 
 - Safari is not supported for local development due to strict storage partitioning
-- Use Chrome or Firefox instead
+- Safari private mode is not supported (strict storage partitioning)
+- Use Chrome or Firefox for local development
 
 ## License
 

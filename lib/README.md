@@ -309,23 +309,26 @@ The iframe needs access to shared localStorage to read accounts, identities, and
 
 ### Environment Compatibility
 
-| Environment                           | Iframe button | Custom button       | Notes                                        |
-| ------------------------------------- | ------------- | ------------------- | -------------------------------------------- |
-| **Production (all browsers)**         | Yes           | Yes                 | Secure context, storage not partitioned      |
-| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first  |
-| **Localhost (Safari)**                | No            | No                  | Storage Access API doesn't work on localhost |
+| Environment                           | Iframe button | Custom button       | Notes                                           |
+| ------------------------------------- | ------------- | ------------------- | ----------------------------------------------- |
+| **Production (all browsers)**         | Yes           | Yes                 | Secure context, storage not partitioned         |
+| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first     |
+| **Localhost (Safari)**                | No            | No                  | Storage Access API doesn't work on localhost    |
+| **Safari private mode**               | No            | No                  | Strict storage partitioning                     |
 
 ### How It Works
 
-**Production**: In a secure context (HTTPS), browsers don't partition iframe storage, so both authentication methods work immediately.
+**Production**: In a secure context (HTTPS), browsers don't partition iframe storage, so both authentication methods work immediately (all browsers including Safari).
 
-**Localhost (non-Safari)**: Browsers partition iframe storage, requiring the [Storage Access API](https://developer.mozilla.org/en-US/docs/Web/API/Storage_Access_API). The iframe button triggers a user gesture inside the iframe, allowing it to request Storage Access. Once granted, the custom button also works.
+**Localhost (Chrome/Firefox)**: Browsers partition iframe storage, requiring the [Storage Access API](https://developer.mozilla.org/en-US/docs/Web/API/Storage_Access_API). The iframe button triggers a user gesture inside the iframe, allowing it to request Storage Access. Once granted, the custom button also works.
 
-**Localhost (Safari)**: The Storage Access API doesn't work on localhost, so authentication is not possible. Use a different browser for local development.
+**Localhost (Safari)**: The Storage Access API doesn't work on localhost, so authentication is not possible. Use Chrome or Firefox for local development.
+
+**Safari private mode**: Private browsing mode enforces strict storage partitioning, so authentication is not possible.
 
 ### Recommendation
 
-- **Production**: Either button works
+- **Production**: Either button works (all browsers)
 - **Development**: Use Chrome/Firefox with iframe button first, then custom button works
 
 ## Development
