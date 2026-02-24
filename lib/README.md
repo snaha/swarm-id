@@ -199,7 +199,7 @@ Options:
 - `initialize()` - Initialize the client and embed iframe
 - `getAuthIframe()` - Get the auth iframe element
 - `checkAuthStatus()` - Check authentication status
-- `connect()` - Open authentication popup programmatically (see [Safari limitations](#safari-and-custom-connect-button))
+- `connect()` - Open authentication popup programmatically (see [Browser Compatibility](#browser-compatibility-and-storage-access))
 - `disconnect()` - Disconnect and clear authentication data
 - `getConnectionInfo()` - Get connection info including upload capability
 
