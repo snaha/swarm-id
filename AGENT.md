@@ -2,15 +2,15 @@
 
 Web-based identity and key management for decentralized applications on the Swarm network.
 
-**Key Innovation**: Popup-based authentication flow that works across all browsers without Storage Access API or extensions. Browser-enforced storage partitioning provides cross-app isolation.
+**Key Innovation**: Popup-based authentication flow using shared localStorage. In production (secure context), storage works immediately. On localhost, browsers that support Storage Access API can request shared storage access.
 
 ## Architecture
 
 1. **Trusted Domain Model**: A trusted domain (e.g., `id.ethswarm.org`) hosts keystore UI and management
 2. **OAuth-style Popup Flow**: dApps trigger authentication popups that derive app-specific secrets from a master key
-3. **Iframe Proxy**: Hidden iframe handles secure communication and proxies Bee API calls with partitioned storage
+3. **Iframe Proxy**: Hidden iframe handles secure communication and proxies Bee API calls
 
-**Security**: Master key in first-party context only, HMAC-SHA256 key derivation, browser-enforced storage partitioning per `(iframe-origin, parent-origin)`, all postMessage validated with Zod schemas.
+**Security**: Master key in first-party context only, HMAC-SHA256 key derivation, all postMessage validated with Zod schemas.
 
 ### Authentication
 
@@ -65,7 +65,7 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 ## Library Core (`lib/`)
 
 - **SwarmIdClient** (`swarm-id-client.ts`) — dApp-side: embeds hidden iframe, creates auth buttons, proxies Bee API calls
-- **SwarmIdProxy** (`swarm-id-proxy.ts`) — iframe-side: receives secrets from popup, stores in partitioned localStorage, signs operations
+- **SwarmIdProxy** (`swarm-id-proxy.ts`) — iframe-side: reads auth from shared localStorage (via storage events), signs operations
 
 ### Message Protocol
 
@@ -73,7 +73,8 @@ All cross-origin communication via `postMessage` with Zod validation:
 
 - **Parent → Iframe**: `parentIdentify`, `checkAuth`, `requestAuth`, `uploadData`, `downloadData`
 - **Iframe → Parent**: `proxyReady`, `authStatusResponse`, `authSuccess`, `uploadDataResponse`, `error`
-- **Popup → Iframe**: `setSecret`
+
+Authentication uses storage events: popup writes to localStorage → storage event fires in iframe → iframe authenticates.
 
 ## Code Style
 

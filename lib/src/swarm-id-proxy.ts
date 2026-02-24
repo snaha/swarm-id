@@ -636,7 +636,6 @@ export class SwarmIdProxy {
     return this.hasStorageAccess || !this.isInIframe()
   }
 
-
   /**
    * Check if running inside an iframe
    */
