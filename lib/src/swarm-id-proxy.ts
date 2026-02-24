@@ -2272,7 +2272,8 @@ export class SwarmIdProxy {
     message: EpochFeedUploadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, signer, at, reference, encryptionKey, hints } = message
+    const { requestId, topic, signer, at, reference, encryptionKey, hints } =
+      message
 
     console.log("[Proxy] Epoch feed upload reference request", {
       topic,

@@ -9,7 +9,10 @@ import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
-import { uploadEncryptedSOC, uploadSOCViaSocEndpoint } from "../../upload-encrypted-data"
+import {
+  uploadEncryptedSOC,
+  uploadSOCViaSocEndpoint,
+} from "../../upload-encrypted-data"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
 
@@ -104,13 +107,21 @@ export class BasicEpochUpdater implements EpochUpdater {
   ): Promise<EpochIndex> {
     // Fast path: use provided hints
     if (hints?.lastEpoch && hints.lastTimestamp !== undefined) {
-      const prevEpoch = new EpochIndex(hints.lastEpoch.start, hints.lastEpoch.level)
+      const prevEpoch = new EpochIndex(
+        hints.lastEpoch.start,
+        hints.lastEpoch.level,
+      )
       return prevEpoch.next(hints.lastTimestamp, at)
     }
 
     // Slow path: lookup current state
     const owner = this.signer.publicKey().address()
-    const finder = new AsyncEpochFinder(this.bee, this.topic, owner, encryptionKey)
+    const finder = new AsyncEpochFinder(
+      this.bee,
+      this.topic,
+      owner,
+      encryptionKey,
+    )
 
     // Use findAtWithMetadata to get both reference AND epoch info
     const current = await finder.findAtWithMetadata(at)
@@ -192,5 +203,4 @@ export class BasicEpochUpdater implements EpochUpdater {
 
     return result.socAddress
   }
-
 }

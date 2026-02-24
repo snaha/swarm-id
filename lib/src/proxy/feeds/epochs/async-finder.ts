@@ -213,7 +213,10 @@ export class AsyncEpochFinder implements EpochFinder {
     const hasSpanPrefix = payload.length === 48 || payload.length === 80
 
     const timestampOffset = hasSpanPrefix ? 8 : 0
-    const timestampBytes = payload.slice(timestampOffset, timestampOffset + TIMESTAMP_SIZE)
+    const timestampBytes = payload.slice(
+      timestampOffset,
+      timestampOffset + TIMESTAMP_SIZE,
+    )
     const timestampView = new DataView(
       timestampBytes.buffer,
       timestampBytes.byteOffset,
@@ -237,9 +240,7 @@ export class AsyncEpochFinder implements EpochFinder {
    * @param at - Target unix timestamp (seconds)
    * @returns EpochLookupResult with reference, epoch, and timestamp, or undefined if no update found
    */
-  async findAtWithMetadata(
-    at: bigint,
-  ): Promise<EpochLookupResult | undefined> {
+  async findAtWithMetadata(at: bigint): Promise<EpochLookupResult | undefined> {
     // Fast path: exact timestamp updates are written at level-0
     const exactEpoch = new EpochIndex(at, 0)
     try {
@@ -285,7 +286,11 @@ export class AsyncEpochFinder implements EpochFinder {
       if (epoch.isLeft()) {
         return currentBest
       }
-      return this.findAtEpochWithMetadata(epoch.start - 1n, epoch.left(), currentBest)
+      return this.findAtEpochWithMetadata(
+        epoch.start - 1n,
+        epoch.left(),
+        currentBest,
+      )
     }
 
     // If chunk found and valid
@@ -308,7 +313,11 @@ export class AsyncEpochFinder implements EpochFinder {
     // Chunk exists but timestamp invalid
     // Keep descending towards the target epoch first
     if (epoch.level > 0) {
-      const down = await this.findAtEpochWithMetadata(at, epoch.childAt(at), currentBest)
+      const down = await this.findAtEpochWithMetadata(
+        at,
+        epoch.childAt(at),
+        currentBest,
+      )
       if (down) {
         return down
       }
@@ -319,7 +328,11 @@ export class AsyncEpochFinder implements EpochFinder {
     }
 
     // Right child - need to search left sibling branch
-    return this.findAtEpochWithMetadata(epoch.start - 1n, epoch.left(), currentBest)
+    return this.findAtEpochWithMetadata(
+      epoch.start - 1n,
+      epoch.left(),
+      currentBest,
+    )
   }
 
   /**
@@ -398,7 +411,10 @@ export class AsyncEpochFinder implements EpochFinder {
     const hasSpanPrefix = payload.length === 48 || payload.length === 80
 
     const timestampOffset = hasSpanPrefix ? 8 : 0
-    const timestampBytes = payload.slice(timestampOffset, timestampOffset + TIMESTAMP_SIZE)
+    const timestampBytes = payload.slice(
+      timestampOffset,
+      timestampOffset + TIMESTAMP_SIZE,
+    )
     const timestampView = new DataView(
       timestampBytes.buffer,
       timestampBytes.byteOffset,

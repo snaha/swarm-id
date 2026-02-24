@@ -243,7 +243,10 @@ export class SyncEpochFinder implements EpochFinder {
     const hasSpanPrefix = payload.length === 48 || payload.length === 80
 
     const timestampOffset = hasSpanPrefix ? 8 : 0
-    const timestampBytes = payload.slice(timestampOffset, timestampOffset + TIMESTAMP_SIZE)
+    const timestampBytes = payload.slice(
+      timestampOffset,
+      timestampOffset + TIMESTAMP_SIZE,
+    )
     const timestampView = new DataView(
       timestampBytes.buffer,
       timestampBytes.byteOffset,

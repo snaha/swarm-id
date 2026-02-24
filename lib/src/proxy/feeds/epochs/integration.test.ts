@@ -302,14 +302,24 @@ describe("Epoch Feeds Integration", () => {
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
-      const updates: { at: bigint; ref: Uint8Array; result: EpochUpdateResult }[] = []
+      const updates: {
+        at: bigint
+        ref: Uint8Array
+        result: EpochUpdateResult
+      }[] = []
       let hints: EpochUpdateHints | undefined
 
       // Create multiple updates with proper hints
       for (let i = 0; i < 5; i++) {
         const at = BigInt((i + 1) * 10)
         const reference = createTestReference(i)
-        const result = await updater.update(at, reference, stamper, undefined, hints)
+        const result = await updater.update(
+          at,
+          reference,
+          stamper,
+          undefined,
+          hints,
+        )
         updates.push({ at, ref: reference, result })
         hints = {
           lastEpoch: result.epoch,
@@ -325,7 +335,9 @@ describe("Epoch Feeds Integration", () => {
 
       // Query at latest time should return latest update
       const latestUpdate = updates[updates.length - 1]
-      expect(await finder.findAt(latestUpdate.at + 100n, 0n)).toEqual(latestUpdate.ref)
+      expect(await finder.findAt(latestUpdate.at + 100n, 0n)).toEqual(
+        latestUpdate.ref,
+      )
     })
 
     it("should handle sparse updates with hints", async () => {
@@ -524,7 +536,13 @@ describe("Epoch Feeds Integration", () => {
         const at = BigInt(i + 1) * interval
         const reference = createTestReference(i)
         updates.push({ at, ref: reference })
-        const result = await updater.update(at, reference, stamper, undefined, hints)
+        const result = await updater.update(
+          at,
+          reference,
+          stamper,
+          undefined,
+          hints,
+        )
         hints = {
           lastEpoch: result.epoch,
           lastTimestamp: result.timestamp,
@@ -554,7 +572,13 @@ describe("Epoch Feeds Integration", () => {
         current += BigInt(Math.floor(Math.random() * 100) + 1)
         const reference = createTestReference(i)
         updates.push({ at: current, ref: reference })
-        const result = await updater.update(current, reference, stamper, undefined, hints)
+        const result = await updater.update(
+          current,
+          reference,
+          stamper,
+          undefined,
+          hints,
+        )
         hints = {
           lastEpoch: result.epoch,
           lastTimestamp: result.timestamp,
@@ -599,7 +623,13 @@ describe("Epoch Feeds Integration", () => {
         const at = BigInt((i + 1) * 10)
         const reference = createTestReference(i)
         updates.push({ at, ref: reference })
-        const result = await updater.update(at, reference, stamper, undefined, hints)
+        const result = await updater.update(
+          at,
+          reference,
+          stamper,
+          undefined,
+          hints,
+        )
         hints = {
           lastEpoch: result.epoch,
           lastTimestamp: result.timestamp,
@@ -850,7 +880,10 @@ describe("Epoch Feeds Integration", () => {
       const farAt = 1500n
       const farRef = createTestReference(3333)
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(4444))
+      const poisonPayload = payloadWithTimestamp(
+        poisonTimestamp,
+        createTestReference(4444),
+      )
 
       await putEpochSoc(
         store,
@@ -1104,7 +1137,10 @@ describe("Epoch Feeds Integration", () => {
 
       // Poison ancestors with far-future timestamps to force descent.
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(111))
+      const poisonPayload = payloadWithTimestamp(
+        poisonTimestamp,
+        createTestReference(111),
+      )
       await putEpochSoc(
         store,
         signer,
@@ -1145,7 +1181,10 @@ describe("Epoch Feeds Integration", () => {
       const reference = createTestReference(321)
 
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(777))
+      const poisonPayload = payloadWithTimestamp(
+        poisonTimestamp,
+        createTestReference(777),
+      )
       await putEpochSoc(
         store,
         signer,
@@ -1188,7 +1227,10 @@ describe("Epoch Feeds Integration", () => {
       const secondRef = createTestReference(1002)
 
       const poisonTimestamp = 2n ** 63n
-      const poisonPayload = payloadWithTimestamp(poisonTimestamp, createTestReference(888))
+      const poisonPayload = payloadWithTimestamp(
+        poisonTimestamp,
+        createTestReference(888),
+      )
       await putEpochSoc(
         store,
         signer,

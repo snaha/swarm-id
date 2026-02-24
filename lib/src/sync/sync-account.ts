@@ -428,7 +428,11 @@ export function createSyncAccount(
       console.log(
         `[SyncCoordinator ${timestamp()}] Updating epoch feed... (+${(performance.now() - startTime).toFixed(2)}ms)`,
       )
-      const updateResult = await updater.update(feedTimestamp, refBytes, stamper)
+      const updateResult = await updater.update(
+        feedTimestamp,
+        refBytes,
+        stamper,
+      )
       console.log(
         `[SyncCoordinator ${timestamp()}] Epoch feed updated (+${(performance.now() - startTime).toFixed(2)}ms)`,
       )

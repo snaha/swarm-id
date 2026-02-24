@@ -1399,6 +1399,32 @@ Secret message for ACT test!</textarea
         }
       })
 
+      // Handle epoch feed toggle - disable manifest compat when epoch is selected
+      document.getElementById("feed-epoch-toggle").addEventListener("change", (e) => {
+        const manifestCompatCheckbox = document.getElementById("feed-manifest-compat-checkbox")
+        const manifestCompatLabel = manifestCompatCheckbox.parentElement
+        const createManifestBtn = document.getElementById("feed-create-manifest-button")
+
+        if (e.target.checked) {
+          // Epoch feeds: disable manifest compatibility (doesn't work with /bzz)
+          manifestCompatCheckbox.checked = false
+          manifestCompatCheckbox.disabled = true
+          manifestCompatLabel.style.opacity = "0.5"
+          manifestCompatLabel.title = "Feed manifest compatibility is not supported with epoch feeds"
+          createManifestBtn.disabled = true
+          createManifestBtn.title = "Feed manifests don't work with epoch feeds (/bzz endpoint doesn't support them)"
+          // Trigger change event to update UI
+          manifestCompatCheckbox.dispatchEvent(new Event("change"))
+        } else {
+          // Sequential feeds: enable manifest compatibility option
+          manifestCompatCheckbox.disabled = false
+          manifestCompatLabel.style.opacity = "1"
+          manifestCompatLabel.title = ""
+          createManifestBtn.disabled = false
+          createManifestBtn.title = ""
+        }
+      })
+
       const getFeedDownloadOptions = () => {
         const indexRaw = document.getElementById("feed-index").value.trim()
         const atRaw = document.getElementById("feed-download-at").value.trim()
