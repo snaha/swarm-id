@@ -18,6 +18,7 @@
 			"Bash(pnpm --filter @swarm-id/lib format:*)",
 			"Bash(pnpm --filter swarm-identity build)",
 			"Bash(pnpm --filter swarm-identity lint)",
+			"Bash(pnpm --filter swarm-identity test)",
 			"Bash(pnpm --filter swarm-identity check:*)",
 			"Bash(pnpm --filter swarm-identity knip:*)",
 			"Bash(pnpm --filter swarm-identity format:*)",
