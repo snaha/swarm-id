@@ -393,21 +393,22 @@ Returns information about the postage stamp associated with the connected identi
 
 **Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `batchID` | `string` | The batch ID (64 hex characters) |
-| `utilization` | `number` | Current utilization percentage |
-| `usable` | `boolean` | Whether the batch is usable |
-| `label` | `string` | Human-readable label |
-| `depth` | `number` | Batch depth |
-| `amount` | `string` | Batch amount |
-| `bucketDepth` | `number` | Bucket depth |
-| `blockNumber` | `number` | Block number when created |
-| `immutableFlag` | `boolean` | Whether the batch is immutable |
-| `exists` | `boolean` | Whether the batch exists |
-| `batchTTL` | `number \| undefined` | Time-to-live in seconds |
+| Property        | Type                  | Description                      |
+| --------------- | --------------------- | -------------------------------- |
+| `batchID`       | `string`              | The batch ID (64 hex characters) |
+| `utilization`   | `number`              | Current utilization percentage   |
+| `usable`        | `boolean`             | Whether the batch is usable      |
+| `label`         | `string`              | Human-readable label             |
+| `depth`         | `number`              | Batch depth                      |
+| `amount`        | `string`              | Batch amount                     |
+| `bucketDepth`   | `number`              | Bucket depth                     |
+| `blockNumber`   | `number`              | Block number when created        |
+| `immutableFlag` | `boolean`             | Whether the batch is immutable   |
+| `exists`        | `boolean`             | Whether the batch exists         |
+| `batchTTL`      | `number \| undefined` | Time-to-live in seconds          |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the request times out
 
@@ -416,12 +417,12 @@ Returns information about the postage stamp associated with the connected identi
 ```typescript
 const batch = await client.getPostageBatch()
 if (batch) {
-  console.log('Batch ID:', batch.batchID)
-  console.log('Utilization:', batch.utilization)
-  console.log('Depth:', batch.depth)
-  console.log('TTL:', batch.batchTTL)
+	console.log('Batch ID:', batch.batchID)
+	console.log('Utilization:', batch.utilization)
+	console.log('Depth:', batch.depth)
+	console.log('TTL:', batch.batchTTL)
 } else {
-  console.log('No postage batch configured')
+	console.log('No postage batch configured')
 }
 ```
 
@@ -458,13 +459,14 @@ This method retrieves the current Bee node's operating mode and feature flags. U
 
 **Returns:** `Promise<NodeInfo>` - The node info object
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `beeMode` | `string` | The Bee node operating mode ("dev", "light", "full", "ultra-light") |
-| `chequebookEnabled` | `boolean` | Whether the chequebook is enabled |
-| `swapEnabled` | `boolean` | Whether SWAP is enabled |
+| Property            | Type      | Description                                                         |
+| ------------------- | --------- | ------------------------------------------------------------------- |
+| `beeMode`           | `string`  | The Bee node operating mode ("dev", "light", "full", "ultra-light") |
+| `chequebookEnabled` | `boolean` | Whether the chequebook is enabled                                   |
+| `swapEnabled`       | `boolean` | Whether SWAP is enabled                                             |
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if the Bee node is not reachable
 - `Error` if the request times out
@@ -474,11 +476,11 @@ This method retrieves the current Bee node's operating mode and feature flags. U
 ```typescript
 const nodeInfo = await client.getNodeInfo()
 if (nodeInfo.beeMode === 'dev') {
-  // Dev mode requires deferred uploads
-  await client.uploadData(data, { deferred: true })
+	// Dev mode requires deferred uploads
+	await client.uploadData(data, { deferred: true })
 } else {
-  // Production modes can use direct uploads
-  await client.uploadData(data, { deferred: false })
+	// Production modes can use direct uploads
+	await client.uploadData(data, { deferred: false })
 }
 ```
 
@@ -863,47 +865,49 @@ Creates a feed reader bound to a topic and optional owner.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `options.topic` | `string` | Yes | Feed topic (32-byte hex string) |
-| `options.owner` | `string` | No | Feed owner address; if omitted, resolved via proxy |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                        |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------- |
+| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)                    |
+| `options.owner`                 | `string`                 | No       | Feed owner address; if omitted, resolved via proxy |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                              |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                    |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                     |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                         |
 
 **Returns:** `FeedReader`
 
 #### FeedReader
 
-| Method | Description |
-|--------|-------------|
-| `getOwner()` | Resolves the feed owner address |
-| `downloadReference(options?)` | Returns the reference for timestamp `options.at` |
-| `downloadPayload(options?)` | Downloads payload data for timestamp `options.at` |
+| Method                           | Description                                                                  |
+| -------------------------------- | ---------------------------------------------------------------------------- |
+| `getOwner()`                     | Resolves the feed owner address                                              |
+| `downloadReference(options?)`    | Returns the reference for timestamp `options.at` (requires encryption key)   |
+| `downloadPayload(options?)`      | Downloads payload data for timestamp `options.at` (requires encryption key)  |
+| `downloadRawReference(options?)` | Returns unencrypted reference for timestamp `options.at` (for `/bzz` access) |
+| `downloadRawPayload(options?)`   | Downloads unencrypted payload for timestamp `options.at` (for `/bzz` access) |
 
 **Epoch download options (`options`):**
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); defaults to current time |
-| `after` | `number \| string \| bigint` | No | Hint for latest known update timestamp |
-| `encryptionKey` | `Uint8Array \| string` | No | Encryption key for encrypted feed updates |
+| Option          | Type                         | Required | Description                                        |
+| --------------- | ---------------------------- | -------- | -------------------------------------------------- |
+| `at`            | `number \| string \| bigint` | No       | Unix timestamp (seconds); defaults to current time |
+| `after`         | `number \| string \| bigint` | No       | Hint for latest known update timestamp             |
+| `encryptionKey` | `Uint8Array \| string`       | No       | Encryption key for encrypted feed updates          |
 
 **Returns (`downloadReference`):**
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `reference` | `string \| undefined` | Swarm reference (hex) if found |
+| Property        | Type                  | Description                                    |
+| --------------- | --------------------- | ---------------------------------------------- |
+| `reference`     | `string \| undefined` | Swarm reference (hex) if found                 |
 | `encryptionKey` | `string \| undefined` | Encryption key (hex) if reference is encrypted |
 
 **Returns (`downloadPayload`):**
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `payload` | `Uint8Array \| undefined` | Payload bytes if found |
-| `reference` | `string \| undefined` | Swarm reference (hex) if found |
-| `encryptionKey` | `string \| undefined` | Encryption key (hex) if reference is encrypted |
+| Property        | Type                      | Description                                    |
+| --------------- | ------------------------- | ---------------------------------------------- |
+| `payload`       | `Uint8Array \| undefined` | Payload bytes if found                         |
+| `reference`     | `string \| undefined`     | Swarm reference (hex) if found                 |
+| `encryptionKey` | `string \| undefined`     | Encryption key (hex) if reference is encrypted |
 
 **Example:**
 
@@ -922,43 +926,49 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `options.topic` | `string` | Yes | Feed topic (32-byte hex string) |
-| `options.signer` | `string` | No | Private key hex string for the feed signer |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
-| `requestOptions.endlesslyRetry` | `boolean` | No | Whether to retry endlessly |
+| Parameter                       | Type                     | Required | Description                                |
+| ------------------------------- | ------------------------ | -------- | ------------------------------------------ |
+| `options.topic`                 | `string`                 | Yes      | Feed topic (32-byte hex string)            |
+| `options.signer`                | `string`                 | No       | Private key hex string for the feed signer |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                      |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds            |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                             |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                 |
 
 **Returns:** `FeedWriter`
 
 #### FeedWriter
 
-| Method | Description |
-|--------|-------------|
-| `getOwner()` | Resolves the feed owner address |
-| `downloadReference(options?)` | Returns the reference for timestamp `options.at` |
-| `downloadPayload(options?)` | Downloads payload data for timestamp `options.at` |
-| `uploadPayload(data, options?)` | Uploads payload data and updates the feed |
-| `uploadReference(reference, options?)` | Updates the feed with a reference |
+| Method                                    | Description                                                                  |
+| ----------------------------------------- | ---------------------------------------------------------------------------- |
+| `getOwner()`                              | Resolves the feed owner address                                              |
+| `downloadReference(options?)`             | Returns the reference for timestamp `options.at` (requires encryption key)   |
+| `downloadPayload(options?)`               | Downloads payload data for timestamp `options.at` (requires encryption key)  |
+| `downloadRawReference(options?)`          | Returns unencrypted reference for timestamp `options.at` (for `/bzz` access) |
+| `downloadRawPayload(options?)`            | Downloads unencrypted payload for timestamp `options.at` (for `/bzz` access) |
+| `uploadPayload(data, options?)`           | Uploads encrypted payload data and updates the feed                          |
+| `uploadReference(reference, options?)`    | Updates the feed with an encrypted reference                                 |
+| `uploadRawPayload(data, options?)`        | Uploads unencrypted payload (for `/bzz` access)                              |
+| `uploadRawReference(reference, options?)` | Updates the feed with an unencrypted reference (for `/bzz` access)           |
 
 **Epoch upload options (`options`):**
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); defaults to current time |
-| `encrypt` | `boolean` | No | Whether payload uploads are encrypted (default `true`) |
-| `uploadOptions` | `UploadOptions` | No | Upload configuration (tag, pin, deferred, etc.) |
-| `encryptionKey` | `Uint8Array \| string` | No | Encryption key for encrypted feed updates |
+| Option          | Type                         | Required | Description                                            |
+| --------------- | ---------------------------- | -------- | ------------------------------------------------------ |
+| `at`            | `number \| string \| bigint` | No       | Unix timestamp (seconds); defaults to current time     |
+| `encrypt`       | `boolean`                    | No       | Whether payload uploads are encrypted (default `true`) |
+| `uploadOptions` | `UploadOptions`              | No       | Upload configuration (tag, pin, deferred, etc.)        |
+| `encryptionKey` | `Uint8Array \| string`       | No       | Encryption key for encrypted feed updates              |
 
-**Returns (`uploadPayload` / `uploadReference`):**
+**Returns (`uploadPayload` / `uploadReference` / `uploadRawPayload` / `uploadRawReference`):**
 
-| Property | Type | Description |
-|----------|------|-------------|
-| `socAddress` | `string` | SOC address for the feed update |
-| `reference` | `string` | Swarm reference stored in the feed |
-| `encryptionKey` | `string \| undefined` | Encryption key (hex) if reference is encrypted |
+| Property        | Type                               | Description                                    |
+| --------------- | ---------------------------------- | ---------------------------------------------- |
+| `socAddress`    | `string`                           | SOC address for the feed update                |
+| `reference`     | `string`                           | Swarm reference stored in the feed             |
+| `encryptionKey` | `string \| undefined`              | Encryption key (hex) if reference is encrypted |
+| `epoch`         | `{ start: string; level: number }` | The epoch where the update was stored          |
+| `timestamp`     | `string`                           | The timestamp used (stringified bigint)        |
 
 **Example:**
 
@@ -980,31 +990,31 @@ Creates a sequential feed reader bound to a topic and optional owner.
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `options.topic` | `string` | Yes | Feed topic (32-byte hex string) |
-| `options.owner` | `string` | No | Feed owner address; if omitted, resolved via proxy |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
+| Parameter        | Type             | Required | Description                                        |
+| ---------------- | ---------------- | -------- | -------------------------------------------------- |
+| `options.topic`  | `string`         | Yes      | Feed topic (32-byte hex string)                    |
+| `options.owner`  | `string`         | No       | Feed owner address; if omitted, resolved via proxy |
+| `requestOptions` | `RequestOptions` | No       | Request configuration                              |
 
 **Returns:** `SequentialFeedReader`
 
 #### FeedReader
 
-| Method | Description |
-|--------|-------------|
-| `getOwner()` | Resolves the feed owner address |
-| `downloadPayload(encryptionKey, options?)` | Downloads payload data for the given index or timestamp (requires encryption key) |
-| `downloadRawPayload(options?, encryptionKey?)` | Downloads raw payload data (encryption key optional) |
-| `downloadReference(encryptionKey, options?)` | Downloads reference for the given index or timestamp (requires encryption key) |
+| Method                                         | Description                                                                       |
+| ---------------------------------------------- | --------------------------------------------------------------------------------- |
+| `getOwner()`                                   | Resolves the feed owner address                                                   |
+| `downloadPayload(encryptionKey, options?)`     | Downloads payload data for the given index or timestamp (requires encryption key) |
+| `downloadRawPayload(options?, encryptionKey?)` | Downloads raw payload data (encryption key optional)                              |
+| `downloadReference(encryptionKey, options?)`   | Downloads reference for the given index or timestamp (requires encryption key)    |
 
 **Sequential download options (`options`):**
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `index` | `number \| string \| bigint` | No | Feed index to read (0..2^64-1) |
-| `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); resolves nearest update at or before `at` |
-| `hasTimestamp` | `boolean` | No | Whether payloads include a timestamp prefix (default `true`) |
-| `lookupTimeoutMs` | `number` | No | Timeout (ms) for sequential index lookups (default 2000) |
+| Option            | Type                         | Required | Description                                                         |
+| ----------------- | ---------------------------- | -------- | ------------------------------------------------------------------- |
+| `index`           | `number \| string \| bigint` | No       | Feed index to read (0..2^64-1)                                      |
+| `at`              | `number \| string \| bigint` | No       | Unix timestamp (seconds); resolves nearest update at or before `at` |
+| `hasTimestamp`    | `boolean`                    | No       | Whether payloads include a timestamp prefix (default `true`)        |
+| `lookupTimeoutMs` | `number`                     | No       | Timeout (ms) for sequential index lookups (default 2000)            |
 
 **Example:**
 
@@ -1022,39 +1032,39 @@ Creates a sequential feed writer for updating and reading a topic. If `signer` i
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `options.topic` | `string` | Yes | Feed topic (32-byte hex string) |
-| `options.signer` | `string` | No | Private key hex string for the feed signer |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
+| Parameter        | Type             | Required | Description                                |
+| ---------------- | ---------------- | -------- | ------------------------------------------ |
+| `options.topic`  | `string`         | Yes      | Feed topic (32-byte hex string)            |
+| `options.signer` | `string`         | No       | Private key hex string for the feed signer |
+| `requestOptions` | `RequestOptions` | No       | Request configuration                      |
 
 **Returns:** `SequentialFeedWriter`
 
 #### FeedWriter
 
-| Method | Description |
-|--------|-------------|
-| `getOwner()` | Resolves the feed owner address |
-| `downloadPayload(encryptionKey, options?)` | Downloads payload data for the given index or timestamp (requires encryption key) |
-| `downloadRawPayload(options?, encryptionKey?)` | Downloads raw payload data (encryption key optional) |
-| `downloadReference(encryptionKey, options?)` | Downloads reference for the given index or timestamp (requires encryption key) |
-| `uploadPayload(data, options?)` | Uploads payload data (encrypted) and updates the feed |
-| `uploadRawPayload(data, options?, encryptionKey?)` | Uploads raw payload data (encryption optional) and updates the feed |
-| `uploadReference(reference, options?)` | Uploads a reference (encrypted) and updates the feed |
+| Method                                             | Description                                                                       |
+| -------------------------------------------------- | --------------------------------------------------------------------------------- |
+| `getOwner()`                                       | Resolves the feed owner address                                                   |
+| `downloadPayload(encryptionKey, options?)`         | Downloads payload data for the given index or timestamp (requires encryption key) |
+| `downloadRawPayload(options?, encryptionKey?)`     | Downloads raw payload data (encryption key optional)                              |
+| `downloadReference(encryptionKey, options?)`       | Downloads reference for the given index or timestamp (requires encryption key)    |
+| `uploadPayload(data, options?)`                    | Uploads payload data (encrypted) and updates the feed                             |
+| `uploadRawPayload(data, options?, encryptionKey?)` | Uploads raw payload data (encryption optional) and updates the feed               |
+| `uploadReference(reference, options?)`             | Uploads a reference (encrypted) and updates the feed                              |
 
 **Sequential upload options (`options`):**
 
-| Option | Type | Required | Description |
-|--------|------|----------|-------------|
-| `index` | `number \| string \| bigint` | No | Feed index to write (0..2^64-1); defaults to next index |
-| `at` | `number \| string \| bigint` | No | Unix timestamp (seconds); used when `hasTimestamp` is true |
-| `hasTimestamp` | `boolean` | No | Whether payloads include a timestamp prefix (default `true`) |
-| `lookupTimeoutMs` | `number` | No | Timeout (ms) for sequential index lookups (default 2000) |
-| `pin` | `boolean` | No | Whether to pin the data locally |
-| `encrypt` | `boolean` | No | Whether to encrypt the data |
-| `tag` | `number` | No | Tag ID for tracking upload progress |
-| `deferred` | `boolean` | No | Whether to use deferred upload |
-| `redundancyLevel` | `0-4` | No | Redundancy level for data availability |
+| Option            | Type                         | Required | Description                                                  |
+| ----------------- | ---------------------------- | -------- | ------------------------------------------------------------ |
+| `index`           | `number \| string \| bigint` | No       | Feed index to write (0..2^64-1); defaults to next index      |
+| `at`              | `number \| string \| bigint` | No       | Unix timestamp (seconds); used when `hasTimestamp` is true   |
+| `hasTimestamp`    | `boolean`                    | No       | Whether payloads include a timestamp prefix (default `true`) |
+| `lookupTimeoutMs` | `number`                     | No       | Timeout (ms) for sequential index lookups (default 2000)     |
+| `pin`             | `boolean`                    | No       | Whether to pin the data locally                              |
+| `encrypt`         | `boolean`                    | No       | Whether to encrypt the data                                  |
+| `tag`             | `number`                     | No       | Tag ID for tracking upload progress                          |
+| `deferred`        | `boolean`                    | No       | Whether to use deferred upload                               |
+| `redundancyLevel` | `0-4`                        | No       | Redundancy level for data availability                       |
 
 **Example:**
 
@@ -1076,19 +1086,25 @@ A feed manifest enables accessing the latest feed content via a URL path (e.g., 
 
 **Parameters:**
 
-| Parameter | Type | Required | Description |
-|-----------|------|----------|-------------|
-| `topic` | `string` | Yes | Feed topic (32-byte hex string) |
-| `options` | `object` | No | Configuration options |
-| `options.owner` | `string` | No | Feed owner address; if omitted, uses app signer |
-| `options.uploadOptions` | `UploadOptions` | No | Upload configuration (pin, deferred, etc.) |
-| `requestOptions` | `RequestOptions` | No | Request configuration |
-| `requestOptions.timeout` | `number` | No | Request timeout in milliseconds |
-| `requestOptions.headers` | `Record<string, string>` | No | Custom headers |
+| Parameter                | Type                     | Required | Description                                     |
+| ------------------------ | ------------------------ | -------- | ----------------------------------------------- |
+| `topic`                  | `string`                 | Yes      | Feed topic (32-byte hex string)                 |
+| `options`                | `object`                 | No       | Configuration options                           |
+| `options.owner`          | `string`                 | No       | Feed owner address; if omitted, uses app signer |
+| `options.feedType`       | `"Sequence" \| "Epoch"`  | No       | Feed type (defaults to `"Sequence"`)            |
+| `options.uploadOptions`  | `UploadOptions`          | No       | Upload configuration (pin, deferred, etc.)      |
+| `requestOptions`         | `RequestOptions`         | No       | Request configuration                           |
+| `requestOptions.timeout` | `number`                 | No       | Request timeout in milliseconds                 |
+| `requestOptions.headers` | `Record<string, string>` | No       | Custom headers                                  |
+
+:::caution
+Epoch feed manifests cannot be resolved via the `/bzz` endpoint. Only use `"Sequence"` type for feed manifests you want accessible via URL.
+:::
 
 **Returns:** `Promise<string>` - The feed manifest reference (64 hex characters)
 
 **Throws:**
+
 - `Error` if the client is not initialized
 - `Error` if no owner is provided and no app signer is available
 - `Error` if the request times out
@@ -1102,8 +1118,8 @@ console.log('Feed accessible at /bzz/' + manifestRef)
 
 // Create manifest with explicit owner
 const manifestRef = await client.createFeedManifest(topic, {
-  owner: '0x1234...',
-  uploadOptions: { pin: true }
+	owner: '0x1234...',
+	uploadOptions: { pin: true },
 })
 
 // Use with feed writer
@@ -1196,22 +1212,279 @@ console.log('Message sent with reference:', result.reference)
 
 ---
 
+## ACT Methods
+
+ACT (Access Control Tries) methods enable encrypted data sharing with specific grantees. Data is encrypted and only users with the appropriate public key can decrypt it.
+
+### `actUploadData(data, grantees, options?, requestOptions?)`
+
+Uploads encrypted data to the Swarm network with access control for specific grantees.
+
+The data is encrypted using ACT (Access Control Tries) and can only be downloaded by users who have one of the grantee public keys.
+
+**Parameters:**
+
+| Parameter                       | Type                     | Required | Description                                           |
+| ------------------------------- | ------------------------ | -------- | ----------------------------------------------------- |
+| `data`                          | `Uint8Array`             | Yes      | The binary data to upload                             |
+| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys (66 hex chars each)   |
+| `options`                       | `ActUploadOptions`       | No       | Upload configuration                                  |
+| `options.pin`                   | `boolean`                | No       | Whether to pin the data locally (defaults to `false`) |
+| `options.tag`                   | `number`                 | No       | Tag ID for tracking upload progress                   |
+| `options.deferred`              | `boolean`                | No       | Whether to use deferred upload (defaults to `false`)  |
+| `options.redundancyLevel`       | `0-4`                    | No       | Redundancy level for data availability                |
+| `options.onProgress`            | `(progress) => void`     | No       | Callback for tracking upload progress                 |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                 |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                       |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                        |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                            |
+
+**Returns:** `Promise<ActUploadResult>`
+
+| Property               | Type                  | Description                                                 |
+| ---------------------- | --------------------- | ----------------------------------------------------------- |
+| `encryptedReference`   | `string`              | The encrypted Swarm reference (pass to actDownloadData)     |
+| `historyReference`     | `string`              | The history reference (pass to add/revoke grantees)         |
+| `granteeListReference` | `string`              | Reference to the grantee list                               |
+| `publisherPubKey`      | `string`              | Publisher's compressed public key (pass to actDownloadData) |
+| `actReference`         | `string`              | The ACT reference                                           |
+| `tagUid`               | `number \| undefined` | The tag UID if a tag was created                            |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated or cannot upload
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const data = new TextEncoder().encode('Secret message')
+
+// Grantees are compressed public keys (33 bytes = 66 hex chars)
+const grantees = [
+	'02abc123...', // Alice's public key
+	'03def456...', // Bob's public key
+]
+
+const result = await client.actUploadData(data, grantees, {
+	onProgress: (progress) => {
+		console.log(`Progress: ${progress.processed}/${progress.total}`)
+	},
+})
+
+console.log('History Reference:', result.historyReference)
+console.log('Encrypted Reference:', result.encryptedReference)
+console.log('Publisher Public Key:', result.publisherPubKey)
+
+// Save these for later download:
+// - encryptedReference, historyReference, publisherPubKey
+```
+
+---
+
+### `actDownloadData(encryptedReference, historyReference, publisherPubKey, timestamp?, requestOptions?)`
+
+Downloads and decrypts ACT-protected data from the Swarm network.
+
+The user must have access (their public key must be in the grantee list) to decrypt the data.
+
+**Parameters:**
+
+| Parameter                       | Type                     | Required | Description                                          |
+| ------------------------------- | ------------------------ | -------- | ---------------------------------------------------- |
+| `encryptedReference`            | `string`                 | Yes      | The encrypted reference from actUploadData           |
+| `historyReference`              | `string`                 | Yes      | The history reference from actUploadData             |
+| `publisherPubKey`               | `string`                 | Yes      | Publisher's compressed public key from actUploadData |
+| `timestamp`                     | `number`                 | No       | Unix timestamp for historical access (optional)      |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                      |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                       |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                           |
+
+**Returns:** `Promise<Uint8Array>` - The decrypted data
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the user does not have access (not in grantee list)
+- `Error` if the reference is not found
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+// Using the references from actUploadData
+const data = await client.actDownloadData(encryptedReference, historyReference, publisherPubKey)
+const text = new TextDecoder().decode(data)
+console.log('Decrypted:', text)
+```
+
+---
+
+### `actAddGrantees(historyReference, grantees, requestOptions?)`
+
+Adds new grantees to an existing ACT.
+
+This method adds new public keys to the ACT's access list. The encrypted reference remains the same, but a new history reference is returned that should be used for future operations.
+
+**Parameters:**
+
+| Parameter                       | Type                     | Required | Description                                                         |
+| ------------------------------- | ------------------------ | -------- | ------------------------------------------------------------------- |
+| `historyReference`              | `string`                 | Yes      | The history reference from actUploadData or previous actAddGrantees |
+| `grantees`                      | `string[]`               | Yes      | Array of compressed public keys to add (66 hex chars each)          |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                               |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                                     |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                                      |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                                          |
+
+**Returns:** `Promise<ActAddGranteesResult>`
+
+| Property               | Type     | Description                                |
+| ---------------------- | -------- | ------------------------------------------ |
+| `historyReference`     | `string` | New history reference (use for future ops) |
+| `granteeListReference` | `string` | Reference to the updated grantee list      |
+| `actReference`         | `string` | The ACT reference                          |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const newGrantees = [
+	'02xyz789...', // Charlie's public key
+]
+
+const result = await client.actAddGrantees(historyReference, newGrantees)
+console.log('New History Reference:', result.historyReference)
+// The encrypted reference remains the same
+// Use the new historyReference for future operations
+```
+
+---
+
+### `actRevokeGrantees(historyReference, encryptedReference, revokeGrantees, requestOptions?)`
+
+Revokes access from grantees by removing them from the ACT.
+
+:::caution
+Revoking grantees performs **key rotation**. This means all references change — you must use the new `encryptedReference` and `historyReference` returned by this method for future operations. Previously revoked users may still have cached copies of old data.
+:::
+
+**Parameters:**
+
+| Parameter                       | Type                     | Required | Description                                              |
+| ------------------------------- | ------------------------ | -------- | -------------------------------------------------------- |
+| `historyReference`              | `string`                 | Yes      | The current history reference                            |
+| `encryptedReference`            | `string`                 | Yes      | The current encrypted reference                          |
+| `revokeGrantees`                | `string[]`               | Yes      | Array of compressed public keys to revoke (66 hex chars) |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration                                    |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds                          |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                                           |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly                               |
+
+**Returns:** `Promise<ActRevokeGranteesResult>`
+
+| Property               | Type     | Description                                   |
+| ---------------------- | -------- | --------------------------------------------- |
+| `encryptedReference`   | `string` | **New** encrypted reference (due to rotation) |
+| `historyReference`     | `string` | **New** history reference                     |
+| `granteeListReference` | `string` | Reference to the updated grantee list         |
+| `actReference`         | `string` | The ACT reference                             |
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the user is not authenticated
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const revokeKeys = [
+	'02abc123...', // Alice's public key (revoke access)
+]
+
+const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
+console.log('New History Reference:', result.historyReference)
+console.log('New Encrypted Reference:', result.encryptedReference)
+// All references are new due to key rotation
+// Update your stored references!
+```
+
+---
+
+### `actGetGrantees(historyReference, requestOptions?)`
+
+Retrieves the list of current grantees for an ACT.
+
+**Parameters:**
+
+| Parameter                       | Type                     | Required | Description                      |
+| ------------------------------- | ------------------------ | -------- | -------------------------------- |
+| `historyReference`              | `string`                 | Yes      | The history reference of the ACT |
+| `requestOptions`                | `RequestOptions`         | No       | Request configuration            |
+| `requestOptions.timeout`        | `number`                 | No       | Request timeout in milliseconds  |
+| `requestOptions.headers`        | `Record<string, string>` | No       | Custom headers                   |
+| `requestOptions.endlesslyRetry` | `boolean`                | No       | Whether to retry endlessly       |
+
+**Returns:** `Promise<string[]>` - Array of compressed public keys (66 hex chars each)
+
+**Throws:**
+
+- `Error` if the client is not initialized
+- `Error` if the history reference is not found
+- `Error` if the request times out
+
+**Example:**
+
+```typescript
+const grantees = await client.actGetGrantees(historyReference)
+console.log('Current grantees:', grantees.length)
+grantees.forEach((pubKey) => console.log('  -', pubKey))
+```
+
+---
+
 ## Types
 
 ```typescript
 import type {
-  ClientOptions,
-  AuthStatus,
-  ConnectionInfo,
-  PostageBatch,
-  NodeInfo,
-  UploadOptions,
-  DownloadOptions,
-  UploadResult,
-  FileData,
-  Reference,
-  AppMetadata,
-  ButtonConfig,
-  RequestOptions,
+	// Client configuration
+	ClientOptions,
+	AuthStatus,
+	ConnectionInfo,
+	PostageBatch,
+	NodeInfo,
+	AppMetadata,
+	ButtonConfig,
+	RequestOptions,
+
+	// Upload/Download
+	UploadOptions,
+	DownloadOptions,
+	UploadResult,
+	FileData,
+	Reference,
+
+	// SOC
+	SingleOwnerChunk,
+
+	// Feed types
+	FeedReader,
+	FeedWriter,
+	SequentialFeedReader,
+	SequentialFeedWriter,
+	EpochFeedUploadResult,
+	EpochFeedDownloadReferenceResult,
+	EpochFeedDownloadPayloadResult,
+
+	// ACT types
+	ActUploadOptions,
 } from '@swarm-id/lib'
 ```
