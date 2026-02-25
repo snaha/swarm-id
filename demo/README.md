@@ -57,7 +57,7 @@ Then open http://localhost:3000
 
 No HTTPS or certificates required - `localhost` is a secure context.
 
-**Note:** Safari is not supported for local development.
+**Note:** Safari requires disabling cross-site tracking prevention. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 
 ## How It Works
 

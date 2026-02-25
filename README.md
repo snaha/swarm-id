@@ -12,7 +12,7 @@ This monorepo implements a cross-browser compatible authentication and identity 
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow that works across all browsers (Chrome, Firefox, Safari) using the Storage Access API.
+The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; Safari requires disabling cross-site tracking prevention.
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
@@ -104,7 +104,7 @@ Open http://localhost:3000 - that's it!
 - Identity UI runs on port 5174
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** Safari is not supported for local development due to strict storage partitioning. Safari private mode is also not supported.
+**Note:** Safari requires disabling cross-site tracking prevention (Settings → Privacy → uncheck "Prevent cross-site tracking"). See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 
 ### Development Mode (with hot reload)
 
@@ -395,9 +395,13 @@ paths:
 
 ### Safari not working
 
-- Safari is not supported for local development due to strict storage partitioning
-- Safari private mode is not supported (strict storage partitioning)
-- Use Chrome or Firefox for local development
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, which breaks the authentication flow. To use Safari:
+
+- **macOS:** Safari Settings (⌘,) → Privacy → uncheck "Prevent cross-site tracking"
+- **iOS:** Settings → Apps → Safari → toggle off "Prevent Cross-Site Tracking"
+- **Safari private mode** works with ITP disabled, but sessions are ephemeral (lost when the private window closes)
+
+See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 
 ## License
 

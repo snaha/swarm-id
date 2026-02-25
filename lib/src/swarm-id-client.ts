@@ -699,13 +699,12 @@ export class SwarmIdClient {
    * to the client when they return.
    *
    * **Browser Compatibility:**
-   * - Production (all browsers): Works immediately
+   * - Production (Chrome/Firefox): Works immediately
    * - Localhost (Chrome/Firefox): Works after iframe button grants Storage Access
-   * - Localhost (Safari): Does not work - Storage Access API unavailable on localhost
-   * - Safari private mode: Does not work - strict storage partitioning
+   * - Safari (any, including private mode): Requires disabling cross-site tracking prevention in settings. Private mode sessions are ephemeral (lost when the private window closes).
    *
    * For localhost development with Chrome/Firefox, click the iframe button first
-   * to grant Storage Access.
+   * to grant Storage Access. For Safari, see https://github.com/snaha/swarm-id/issues/167
    *
    * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
    * @returns The URL that was opened (useful for testing or reference)
