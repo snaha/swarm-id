@@ -433,15 +433,18 @@ Secret message for ACT test!</textarea
 				console.log(`[${type}]`, message)
 			}
 
-			// Safari detection
-			// Safari's ITP partitions localStorage for third-party iframes, which breaks
+			// ITP detection — matches Safari on macOS and all iOS browsers (they all use WebKit)
+			// ITP partitions localStorage for third-party iframes, which breaks
 			// the storage event flow between the auth popup and the proxy iframe.
 			// This affects both HTTP (localhost) and HTTPS (production) contexts.
-			const isSafari = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
+			const hasITPRestriction = /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 			const isHTTP = window.location.protocol === 'http:'
 
-			if (isSafari) {
-				log('Safari detected - cross-site tracking prevention may block authentication', 'warn')
+			if (hasITPRestriction) {
+				log(
+					'ITP restriction detected — cross-site tracking prevention may block authentication',
+					'warn',
+				)
 
 				const container = document.querySelector('.container')
 				const safariWarning = document.createElement('div')
@@ -457,7 +460,7 @@ Secret message for ACT test!</textarea
 					/iPad|iPhone|iPod/.test(navigator.userAgent) ||
 					(navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
 				safariWarning.innerHTML = `
-					<h2 style="margin: 0 0 10px 0; color: #856404;">⚠️ Safari: Additional Setup Required</h2>
+					<h2 style="margin: 0 0 10px 0; color: #856404;">⚠️ Additional Setup Required</h2>
 					<p style="margin: 0 0 15px 0; line-height: 1.5;">
 						Safari's cross-site tracking prevention partitions storage between windows, which prevents
 						the authentication popup from communicating with this page. To use this demo in Safari,
@@ -479,9 +482,17 @@ Secret message for ACT test!</textarea
 								<li>Reload this page</li>
 							</ul>`
 					}
-					<p style="margin: 15px 0 0 0; font-size: 13px; line-height: 1.5;">
-						Alternatively, use <strong>Chrome</strong> or <strong>Firefox</strong> which do not have this limitation.
-					</p>
+					${
+						isIOS
+							? `<p style="margin: 15px 0 0 0; font-size: 13px; line-height: 1.5;">
+								On iOS, all browsers use WebKit, so this setting must be disabled regardless of which browser you use.
+								Remember to re-enable <strong>"Prevent Cross-Site Tracking"</strong> when you're done.
+							</p>`
+							: `<p style="margin: 15px 0 0 0; font-size: 13px; line-height: 1.5;">
+								Alternatively, use <strong>Chrome</strong> or <strong>Firefox</strong> which do not have this limitation.
+								If you prefer Safari, remember to re-enable <strong>"Prevent cross-site tracking"</strong> when you're done.
+							</p>`
+					}
 				`
 				container.insertBefore(safariWarning, container.children[2]) // After title and subtitle
 			}
@@ -516,7 +527,7 @@ Secret message for ACT test!</textarea
 			// On HTTP (non-Safari), custom button starts disabled unless storage was previously verified
 			// Safari is handled separately with the ITP warning above
 			const connectBtn = document.getElementById('connect-button')
-			if (isHTTP && !isSafari && !storageVerified) {
+			if (isHTTP && !hasITPRestriction && !storageVerified) {
 				connectBtn.disabled = true
 				connectBtn.title = 'Use iframe button for first authentication'
 				// Add hint next to the custom button

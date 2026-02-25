@@ -316,7 +316,7 @@ The iframe needs access to shared localStorage to read accounts, identities, and
 | **Safari (any)**                      | Yes\*         | Yes\*               | Requires disabling cross-site tracking prevention |
 | **Safari private mode**               | Yes\*         | Yes\*               | Works with ITP disabled; sessions are ephemeral   |
 
-\* Safari requires disabling cross-site tracking prevention: macOS: Settings → Privacy → uncheck "Prevent cross-site tracking". iOS: Settings → Apps → Safari → toggle off "Prevent Cross-Site Tracking". See [#167](https://github.com/snaha/swarm-id/issues/167).
+\* Safari requires disabling cross-site tracking prevention: macOS: Settings → Privacy → uncheck "Prevent cross-site tracking". iOS: Settings → Apps → Safari → toggle off "Prevent Cross-Site Tracking" (this affects all iOS browsers since they all use WebKit). See [#167](https://github.com/snaha/swarm-id/issues/167).
 
 ### How It Works
 
