@@ -411,6 +411,22 @@ export interface SequentialFeedUploadOptions
   extends UploadOptions, SequentialFeedUpdateOptions {}
 
 /**
+ * Options for sequential feed raw download (encryptionKey in options).
+ */
+export interface SequentialFeedDownloadRawOptions extends SequentialFeedUpdateOptions {
+  /** Optional encryption key for decrypting encrypted feed updates. */
+  encryptionKey?: Uint8Array | string
+}
+
+/**
+ * Options for sequential feed raw upload (encryptionKey in options).
+ */
+export interface SequentialFeedUploadRawOptions extends SequentialFeedUploadOptions {
+  /** Optional encryption key for encrypting the payload. */
+  encryptionKey?: Uint8Array | string
+}
+
+/**
  * Result from sequential payload download.
  */
 export interface SequentialFeedPayloadResult {
@@ -467,11 +483,10 @@ export interface SequentialFeedReader {
     options?: SequentialFeedUpdateOptions,
   ) => Promise<SequentialFeedPayloadResult>
   /**
-   * Download raw payload or decrypt if encryptionKey is provided.
+   * Download raw payload or decrypt if encryptionKey is provided in options.
    */
   downloadRawPayload: (
-    options?: SequentialFeedUpdateOptions,
-    encryptionKey?: Uint8Array | string,
+    options?: SequentialFeedDownloadRawOptions,
   ) => Promise<SequentialFeedPayloadResult>
   /**
    * Download and decrypt reference (requires encryption key).
@@ -495,12 +510,11 @@ export interface SequentialFeedWriter extends SequentialFeedReader {
     options?: SequentialFeedUploadOptions,
   ) => Promise<SequentialFeedUploadResult>
   /**
-   * Upload raw payload (or encrypted if encryptionKey provided).
+   * Upload raw payload (or encrypted if encryptionKey provided in options).
    */
   uploadRawPayload: (
     data: Uint8Array | string,
-    options?: SequentialFeedUploadOptions,
-    encryptionKey?: Uint8Array | string,
+    options?: SequentialFeedUploadRawOptions,
   ) => Promise<SequentialFeedUploadResult>
   /**
    * Upload a reference payload (encrypted by default).

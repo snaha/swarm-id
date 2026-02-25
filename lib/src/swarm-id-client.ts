@@ -36,6 +36,8 @@ import type {
   SequentialFeedWriterOptions,
   SequentialFeedUpdateOptions,
   SequentialFeedUploadOptions,
+  SequentialFeedDownloadRawOptions,
+  SequentialFeedUploadRawOptions,
   SequentialFeedPayloadResult,
   SequentialFeedReferenceResult,
   SequentialFeedUploadResult,
@@ -2169,8 +2171,7 @@ export class SwarmIdClient {
     }
 
     const downloadRawPayload = async (
-      options?: SequentialFeedUpdateOptions,
-      encryptionKey?: Uint8Array | string,
+      options?: SequentialFeedDownloadRawOptions,
     ): Promise<SequentialFeedPayloadResult> => {
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
@@ -2193,8 +2194,8 @@ export class SwarmIdClient {
             : undefined,
         hasTimestamp: options?.hasTimestamp,
         lookupTimeoutMs: options?.lookupTimeoutMs,
-        encryptionKey: encryptionKey
-          ? this.normalizeSocKey(encryptionKey)
+        encryptionKey: options?.encryptionKey
+          ? this.normalizeSocKey(options.encryptionKey)
           : undefined,
         requestOptions,
       })
@@ -2327,8 +2328,7 @@ export class SwarmIdClient {
     }
 
     const downloadRawPayload = async (
-      options?: SequentialFeedUpdateOptions,
-      encryptionKey?: Uint8Array | string,
+      options?: SequentialFeedDownloadRawOptions,
     ): Promise<SequentialFeedPayloadResult> => {
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
@@ -2350,8 +2350,8 @@ export class SwarmIdClient {
               )
             : undefined,
         hasTimestamp: options?.hasTimestamp,
-        encryptionKey: encryptionKey
-          ? this.normalizeSocKey(encryptionKey)
+        encryptionKey: options?.encryptionKey
+          ? this.normalizeSocKey(options.encryptionKey)
           : undefined,
         requestOptions,
       })
@@ -2442,8 +2442,7 @@ export class SwarmIdClient {
 
     const uploadRawPayload = async (
       data: Uint8Array | string,
-      options?: SequentialFeedUploadOptions,
-      encryptionKey?: Uint8Array | string,
+      options?: SequentialFeedUploadRawOptions,
     ): Promise<SequentialFeedUploadResult> => {
       const requestId = this.generateRequestId()
       const response = await this.sendRequest<
@@ -2467,8 +2466,8 @@ export class SwarmIdClient {
             : undefined,
         hasTimestamp: options?.hasTimestamp,
         lookupTimeoutMs: options?.lookupTimeoutMs,
-        encryptionKey: encryptionKey
-          ? this.normalizeSocKey(encryptionKey)
+        encryptionKey: options?.encryptionKey
+          ? this.normalizeSocKey(options.encryptionKey)
           : undefined,
         options,
         requestOptions,

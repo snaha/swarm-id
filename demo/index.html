@@ -1733,7 +1733,7 @@ Secret message for ACT test!</textarea
 							return
 						}
 						result = uploadEncryptionKey
-							? await writer.uploadRawPayload(payload, options, uploadEncryptionKey)
+							? await writer.uploadRawPayload(payload, { ...options, encryptionKey: uploadEncryptionKey })
 							: await writer.uploadPayload(payload, options)
 						setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || '')
 						const currentIndex = result.feedIndex ?? 'N/A'
@@ -1826,7 +1826,7 @@ Secret message for ACT test!</textarea
 								return
 							}
 							const result = uploadEncryptionKey
-								? await writer.uploadRawPayload(hexToBytes(reference), options, uploadEncryptionKey)
+								? await writer.uploadRawPayload(hexToBytes(reference), { ...options, encryptionKey: uploadEncryptionKey })
 								: await writer.uploadReference(reference, options)
 							setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || '')
 							const currentIndex = result.feedIndex ?? 'N/A'
