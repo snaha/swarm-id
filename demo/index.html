@@ -1733,7 +1733,10 @@ Secret message for ACT test!</textarea
 							return
 						}
 						result = uploadEncryptionKey
-							? await writer.uploadRawPayload(payload, { ...options, encryptionKey: uploadEncryptionKey })
+							? await writer.uploadRawPayload(payload, {
+									...options,
+									encryptionKey: uploadEncryptionKey,
+								})
 							: await writer.uploadPayload(payload, options)
 						setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || '')
 						const currentIndex = result.feedIndex ?? 'N/A'
@@ -1826,7 +1829,10 @@ Secret message for ACT test!</textarea
 								return
 							}
 							const result = uploadEncryptionKey
-								? await writer.uploadRawPayload(hexToBytes(reference), { ...options, encryptionKey: uploadEncryptionKey })
+								? await writer.uploadRawPayload(hexToBytes(reference), {
+										...options,
+										encryptionKey: uploadEncryptionKey,
+									})
 								: await writer.uploadReference(reference, options)
 							setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || '')
 							const currentIndex = result.feedIndex ?? 'N/A'
@@ -2379,17 +2385,17 @@ Secret message for ACT test!</textarea
 
 						// Try to read the feed using our epoch finder via the client
 						const reader = client.makeEpochFeedReader({ topic, owner })
-						const result = await reader.download({ at: BigInt(at) })
+						const result = await reader.downloadPayload({ at: BigInt(at) })
 
-						if (result) {
-							const text = new TextDecoder().decode(result)
-							log(`✓ Epoch feed data verified! Content length: ${result.length} bytes`)
+						if (result.payload) {
+							const text = new TextDecoder().decode(result.payload)
+							log(`✓ Epoch feed data verified! Content length: ${result.payload.length} bytes`)
 							log(`Content preview: ${text.substring(0, 100)}${text.length > 100 ? '...' : ''}`)
 							resultEl.innerHTML = `
                   <div class="result" style="background: #d4edda; color: #155724;">
                     <strong>✓ Epoch Feed Data Verified!</strong><br/><br/>
                     The SOC at root epoch exists and contains valid data.<br/>
-                    Content length: ${result.length} bytes<br/>
+                    Content length: ${result.payload.length} bytes<br/>
                     <pre style="margin-top: 8px; max-height: 150px; overflow: auto; background: #f5f5f5; padding: 8px; font-size: 12px;">${text}</pre>
                     <br/><em style="font-size: 11px;">This confirms your feed is correctly stored, even though Bee's /bzz/ endpoint times out.</em>
                   </div>
