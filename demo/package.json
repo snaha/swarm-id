@@ -6,10 +6,12 @@
 	"description": "Swarm ID demo application",
 	"scripts": {
 		"build": "node build.js",
-		"clean": "rm -rf build"
+		"clean": "rm -rf build",
+		"format": "prettier --write index.html"
 	},
 	"devDependencies": {
-		"esbuild": "0.27.0"
+		"esbuild": "0.27.0",
+		"prettier": "3.7.3"
 	},
 	"engines": {
 		"node": ">=22",
