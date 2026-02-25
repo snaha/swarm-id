@@ -225,6 +225,9 @@
 			<div class="section">
 				<h2>Authentication</h2>
 				<div id="auth-status" class="status unauthenticated">Status: Not authenticated</div>
+				<div id="identity-info" class="status" style="display: none">
+					Identity: <span id="identity-name"></span> (<span id="identity-address"></span>)
+				</div>
 
 				<div class="button-container">
 					Custom button:
@@ -550,6 +553,9 @@ Secret message for ACT test!</textarea
 			const beeIcon =
 				'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
 
+			let currentIdentityId = undefined
+			let currentIdentityName = undefined
+
 			const client = new SwarmIdClient({
 				iframeOrigin: PROXY_ORIGIN,
 				iframePath: PROXY_PATH,
@@ -668,6 +674,9 @@ Secret message for ACT test!</textarea
 
 			async function updateAuthStatus(authenticated) {
 				const statusEl = document.getElementById('auth-status')
+				const identityInfoEl = document.getElementById('identity-info')
+				const identityNameEl = document.getElementById('identity-name')
+				const identityAddressEl = document.getElementById('identity-address')
 				const uploadBtn = document.getElementById('upload-button')
 				const downloadBtn = document.getElementById('download-button')
 				const connectBtn = document.getElementById('connect-button')
@@ -692,7 +701,7 @@ Secret message for ACT test!</textarea
 					try {
 						const connectionInfo = await client.getConnectionInfo()
 						log(
-							`Connection info: canUpload=${connectionInfo.canUpload}, identity=${connectionInfo.identity}`,
+							`Connection info: canUpload=${connectionInfo.canUpload}, identity=${JSON.stringify(connectionInfo.identity)}`,
 							'info',
 						)
 						uploadBtn.disabled = !connectionInfo.canUpload
@@ -702,6 +711,22 @@ Secret message for ACT test!</textarea
 						socRawUploadBtn.disabled = !connectionInfo.canUpload
 						if (!connectionInfo.canUpload) {
 							log('Upload disabled: no postage stamp available', 'warn')
+						}
+
+						// Display identity info
+						if (connectionInfo.identity) {
+							const { id, name, address } = connectionInfo.identity
+							const truncatedAddress = address.slice(0, 8) + '...' + address.slice(-6)
+							identityNameEl.textContent = name
+							identityAddressEl.textContent = truncatedAddress
+							identityInfoEl.style.display = ''
+
+							// Detect identity switch
+							if (currentIdentityId && currentIdentityId !== id) {
+								log(`Identity switched from "${currentIdentityName}" to "${name}"`, 'info')
+							}
+							currentIdentityId = id
+							currentIdentityName = name
 						}
 					} catch (error) {
 						log(`Failed to get connection info: ${error.message}`, 'error')
@@ -728,6 +753,16 @@ Secret message for ACT test!</textarea
 					socRawDownloadBtn.disabled = true
 					connectBtn.textContent = 'Connect'
 					document.getElementById('stamp-section').style.display = 'none'
+
+					// Log disconnection and clear identity display
+					if (currentIdentityId) {
+						log(`Disconnected from identity "${currentIdentityName}"`, 'info')
+						currentIdentityId = undefined
+						currentIdentityName = undefined
+					}
+					identityInfoEl.style.display = 'none'
+					identityNameEl.textContent = ''
+					identityAddressEl.textContent = ''
 				}
 			}
 

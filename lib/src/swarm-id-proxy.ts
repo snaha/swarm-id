@@ -172,13 +172,9 @@ export class SwarmIdProxy {
       return
     }
 
-    const connectedApp = connectedApps.find(
-      (app) => app.appUrl === this.parentOrigin,
-    )
-    const hasValidConnection =
-      connectedApp && this.isConnectionValid(connectedApp)
+    const connectedApp = this.findMostRecentConnection(connectedApps)
 
-    if (hasValidConnection) {
+    if (connectedApp) {
       if (!this.authenticated) {
         // New connection
         await this.authenticateFromStorage(connectedApp)
@@ -636,9 +632,7 @@ export class SwarmIdProxy {
       // Load connected apps to find which identity is connected to this app
       const connectedAppsManager = createConnectedAppsStorageManager()
       const connectedApps = connectedAppsManager.load()
-      const connectedApp = connectedApps.find(
-        (app) => app.appUrl === this.parentOrigin,
-      )
+      const connectedApp = this.findMostRecentConnection(connectedApps)
 
       if (!connectedApp) {
         console.log("[Proxy] No connected app found for:", this.parentOrigin)
@@ -702,9 +696,7 @@ export class SwarmIdProxy {
       // Load connected apps to find which identity is connected to this app
       const connectedAppsManager = createConnectedAppsStorageManager()
       const connectedApps = connectedAppsManager.load()
-      const connectedApp = connectedApps.find(
-        (app) => app.appUrl === this.parentOrigin,
-      )
+      const connectedApp = this.findMostRecentConnection(connectedApps)
 
       if (!connectedApp) {
         console.log("[Proxy] No connected app found for:", this.parentOrigin)
@@ -755,6 +747,22 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Find the most recently connected valid entry for the current parent origin.
+   * Resolves ambiguity when multiple identities are connected to the same app
+   * by sorting by lastConnectedAt descending and returning the first valid one.
+   */
+  private findMostRecentConnection(
+    connectedApps: ConnectedApp[],
+  ): ConnectedApp | undefined {
+    return connectedApps
+      .filter(
+        (app) =>
+          app.appUrl === this.parentOrigin && this.isConnectionValid(app),
+      )
+      .sort((a, b) => b.lastConnectedAt - a.lastConnectedAt)[0]
+  }
+
+  /**
    * Look up the app secret from shared storage for the current parent origin.
    * Returns the secret and identityId if found and connection is valid.
    */
@@ -768,25 +776,12 @@ export class SwarmIdProxy {
     try {
       const connectedAppsManager = createConnectedAppsStorageManager()
       const connectedApps = connectedAppsManager.load()
-      const connectedApp = connectedApps.find(
-        (app) => app.appUrl === this.parentOrigin,
-      )
+      const connectedApp = this.findMostRecentConnection(connectedApps)
 
       if (!connectedApp) {
         console.log(
           "[Proxy] No connected app found in shared storage for:",
           this.parentOrigin,
-        )
-        return undefined
-      }
-
-      // Check if connection is still valid
-      if (!this.isConnectionValid(connectedApp)) {
-        console.log(
-          "[Proxy] Connection expired for:",
-          this.parentOrigin,
-          "connectedUntil:",
-          connectedApp.connectedUntil,
         )
         return undefined
       }
@@ -916,9 +911,7 @@ export class SwarmIdProxy {
       try {
         const connectedAppsManager = createConnectedAppsStorageManager()
         const connectedApps = connectedAppsManager.load()
-        const connectedApp = connectedApps.find(
-          (app) => app.appUrl === this.parentOrigin,
-        )
+        const connectedApp = this.findMostRecentConnection(connectedApps)
 
         if (connectedApp) {
           const identitiesManager = createIdentitiesStorageManager()
