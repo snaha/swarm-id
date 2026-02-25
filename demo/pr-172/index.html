@@ -659,7 +659,7 @@ Secret message for ACT test!</textarea
 				container.insertBefore(safariWarning, container.children[2]) // After title and subtitle
 			}
 
-			let socWriter = null
+			let socWriter = undefined
 
 			// Collapsible toggle
 			document.getElementById('stamp-toggle').addEventListener('click', () => {
@@ -1528,7 +1528,7 @@ Secret message for ACT test!</textarea
 				if (!value || value.length !== length) {
 					return `${label} must be ${length} hex chars`
 				}
-				return null
+				return undefined
 			}
 
 			const DEFAULT_EPOCH_ENCRYPTION_KEY = '0'.repeat(64)
@@ -1739,7 +1739,7 @@ Secret message for ACT test!</textarea
 							return
 						}
 						result = uploadEncryptionKey
-							? await writer.uploadRawPayload(payload, options, uploadEncryptionKey)
+							? await writer.uploadRawPayload(payload, { ...options, encryptionKey: uploadEncryptionKey })
 							: await writer.uploadPayload(payload, options)
 						setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || '')
 						const currentIndex = result.feedIndex ?? 'N/A'
@@ -1832,7 +1832,7 @@ Secret message for ACT test!</textarea
 								return
 							}
 							const result = uploadEncryptionKey
-								? await writer.uploadRawPayload(hexToBytes(reference), options, uploadEncryptionKey)
+								? await writer.uploadRawPayload(hexToBytes(reference), { ...options, encryptionKey: uploadEncryptionKey })
 								: await writer.uploadReference(reference, options)
 							setDownloadEncryptionKey(result.encryptionKey || uploadEncryptionKey || '')
 							const currentIndex = result.feedIndex ?? 'N/A'
@@ -2155,10 +2155,10 @@ Secret message for ACT test!</textarea
 				})
 
 			// Feed Create Manifest
-			let lastFeedManifestReference = null
-			let lastFeedManifestTopic = null
-			let lastFeedManifestOwner = null
-			let lastFeedManifestType = null
+			let lastFeedManifestReference = undefined
+			let lastFeedManifestTopic = undefined
+			let lastFeedManifestOwner = undefined
+			let lastFeedManifestType = undefined
 
 			document.getElementById('feed-create-manifest-button').addEventListener('click', async () => {
 				const resultEl = document.getElementById('feed-manifest-result')
