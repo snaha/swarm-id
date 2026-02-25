@@ -1478,15 +1478,6 @@ Secret message for ACT test!</textarea
 				return ownerRaw.startsWith('0x') ? ownerRaw.slice(2) : ownerRaw
 			}
 
-			const ensureDownloadIndex = (options) => {
-				const indexInput = document.getElementById('feed-index')
-				const indexRaw = indexInput.value.trim()
-				if (indexRaw) {
-					return options
-				}
-				return options
-			}
-
 			const incrementPayloadValue = (value) => {
 				const match = value.match(/^(.*?)(\d+)\s*$/)
 				if (!match) {
@@ -1861,7 +1852,7 @@ Secret message for ACT test!</textarea
 					const topic = document.getElementById('feed-topic').value.trim()
 					const encryptionKeyInput = document.getElementById('feed-encryption-key')
 					let encryptionKey = encryptionKeyInput.value.trim()
-					const options = ensureDownloadIndex(getFeedDownloadOptions())
+					const options = getFeedDownloadOptions()
 					const owner = getFeedOwner()
 
 					if (downloadBtn.disabled) return
@@ -2072,7 +2063,7 @@ Secret message for ACT test!</textarea
 					const topic = document.getElementById('feed-topic').value.trim()
 					const encryptionKeyInput = document.getElementById('feed-encryption-key')
 					let encryptionKey = encryptionKeyInput.value.trim()
-					const options = ensureDownloadIndex(getFeedDownloadOptions())
+					const options = getFeedDownloadOptions()
 					const owner = getFeedOwner()
 
 					if (downloadBtn.disabled) return
