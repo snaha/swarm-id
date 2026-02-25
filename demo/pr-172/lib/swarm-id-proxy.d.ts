@@ -28,7 +28,7 @@ export declare class SwarmIdProxy {
     private bee;
     private unsubscribeConnectedApps;
     private isConnecting;
-    private hasStorageAccess;
+    private parentWindow;
     constructor();
     /**
      * Subscribe to connected apps storage changes for direct mode authentication.
@@ -44,10 +44,14 @@ export declare class SwarmIdProxy {
      */
     private setupConnectedAppsListener;
     /**
-     * Handle changes to connected apps storage (triggered by storage events from other windows)
-     * Handles both new connections and disconnections.
+     * Handle changes to connected apps storage (triggered by storage events from other windows).
+     * Handles new connections, identity changes, and disconnections.
      */
     private handleConnectedAppsChange;
+    /**
+     * Authenticate using data from connected apps storage
+     */
+    private authenticateFromStorage;
     /**
      * Clean up resources when the proxy is destroyed.
      * Call this method when the proxy iframe is being unloaded.
@@ -89,32 +93,7 @@ export declare class SwarmIdProxy {
      */
     private handleParentMessage;
     /**
-     * Handle messages from popup window
-     */
-    private handlePopupMessage;
-    /**
-     * Check if Storage Access API is available
-     */
-    private hasStorageAccessAPI;
-    /**
-     * Request unpartitioned storage access using the Storage Access API.
-     * This allows the iframe to access the same localStorage as the top-level context.
-     * Must be called from a user gesture (click handler).
-     * @returns true if access was granted, false otherwise
-     */
-    private requestStorageAccess;
-    /**
-     * Check if we should use shared storage (either not in iframe, have storage access, or dev mode)
-     */
-    private canUseSharedStorage;
-    /**
-     * Check if running inside an iframe
-     */
-    private isInIframe;
-    /**
-     * Load authentication data.
-     * - If shared storage is accessible: reads from shared storage (ConnectedApp records)
-     * - If partitioned (iframe without Storage Access): uses in-memory values (set by handleSetSecret)
+     * Load authentication data from shared storage (ConnectedApp records).
      */
     private loadAuthData;
     /**
@@ -138,10 +117,6 @@ export declare class SwarmIdProxy {
      * Returns the secret and identityId if found and connection is valid.
      */
     private lookupAppSecretFromSharedStorage;
-    /**
-     * Update authentication status and update button accordingly
-     */
-    private updateAuthStatus;
     /**
      * Clear authentication data
      */
@@ -181,7 +156,6 @@ export declare class SwarmIdProxy {
      * Set container element for auth button
      */
     setAuthButtonContainer(container: HTMLElement): void;
-    private handleSetSecret;
     private handleUploadData;
     private handleDownloadData;
     private handleUploadFile;

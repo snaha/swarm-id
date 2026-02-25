@@ -6,7 +6,7 @@
  */
 import type { Bee } from "@ethersphere/bee-js";
 import { EthAddress, Topic } from "@ethersphere/bee-js";
-import type { EpochFinder } from "./types";
+import type { EpochFinder, EpochLookupResult } from "./types";
 /**
  * Async concurrent finder for epoch-based feeds
  *
@@ -46,6 +46,32 @@ export declare class AsyncEpochFinder implements EpochFinder {
      * @throws Error if chunk not found
      */
     private getEpochChunk;
+    /**
+     * Find the feed update valid at time `at` with full metadata
+     * Used by updater to calculate next epoch when no hints provided
+     *
+     * @param at - Target unix timestamp (seconds)
+     * @returns EpochLookupResult with reference, epoch, and timestamp, or undefined if no update found
+     */
+    findAtWithMetadata(at: bigint): Promise<EpochLookupResult | undefined>;
+    /**
+     * Recursively find update at epoch with full metadata tracking
+     *
+     * @param at - Target timestamp
+     * @param epoch - Current epoch to check
+     * @param currentBest - Best result found so far
+     * @returns EpochLookupResult if found, undefined otherwise
+     */
+    private findAtEpochWithMetadata;
+    /**
+     * Fetch chunk for a specific epoch and return full metadata
+     *
+     * @param at - Target timestamp for validation
+     * @param epoch - Epoch to fetch
+     * @returns Object with reference and timestamp, or undefined if timestamp > at
+     * @throws Error if chunk not found
+     */
+    private getEpochChunkWithMetadata;
     private findPreviousLeaf;
 }
 //# sourceMappingURL=async-finder.d.ts.map

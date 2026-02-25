@@ -202,6 +202,14 @@ export interface EpochFeedUploadOptions {
     encrypt?: boolean;
     /** Optional encryption key for encrypted feed updates. */
     encryptionKey?: Uint8Array | string;
+    /** Optional hints from previous update for stateless epoch calculation. */
+    hints?: {
+        lastEpoch?: {
+            start: string;
+            level: number;
+        };
+        lastTimestamp?: string;
+    };
 }
 export interface EpochFeedDownloadPayloadResult {
     /** Downloaded payload, if available. */
@@ -224,6 +232,13 @@ export interface EpochFeedUploadResult {
     reference: Reference;
     /** Encryption key (hex) if the reference is encrypted. */
     encryptionKey?: string;
+    /** Epoch used for this update (for caller to store as hint) */
+    epoch: {
+        start: string;
+        level: number;
+    };
+    /** Timestamp used (stringified bigint) */
+    timestamp: string;
 }
 /**
  * Epoch feed reader interface.
@@ -235,6 +250,10 @@ export interface FeedReader {
     downloadReference: (options?: EpochFeedDownloadOptions) => Promise<EpochFeedDownloadReferenceResult>;
     /** Download the payload for the given timestamp. */
     downloadPayload: (options?: EpochFeedDownloadOptions) => Promise<EpochFeedDownloadPayloadResult>;
+    /** Download unencrypted reference (for /bzz access). */
+    downloadRawReference: (options?: Omit<EpochFeedDownloadOptions, "encryptionKey">) => Promise<EpochFeedDownloadReferenceResult>;
+    /** Download unencrypted payload (for /bzz access). */
+    downloadRawPayload: (options?: Omit<EpochFeedDownloadOptions, "encryptionKey">) => Promise<EpochFeedDownloadPayloadResult>;
 }
 /**
  * Epoch feed writer interface.
@@ -244,6 +263,10 @@ export interface FeedWriter extends FeedReader {
     uploadPayload: (data: Uint8Array | string, options?: EpochFeedUploadOptions) => Promise<EpochFeedUploadResult>;
     /** Update the feed with a reference. */
     uploadReference: (reference: Uint8Array | string, options?: EpochFeedUploadOptions) => Promise<EpochFeedUploadResult>;
+    /** Upload unencrypted payload (for /bzz access). */
+    uploadRawPayload: (data: Uint8Array | string, options?: Omit<EpochFeedUploadOptions, "encryptionKey" | "encrypt">) => Promise<EpochFeedUploadResult>;
+    /** Upload unencrypted reference (for /bzz access). */
+    uploadRawReference: (reference: Uint8Array | string, options?: Omit<EpochFeedUploadOptions, "encryptionKey">) => Promise<EpochFeedUploadResult>;
 }
 /**
  * Options for sequential feed reader creation.
@@ -679,6 +702,13 @@ export declare const EpochFeedDownloadReferenceMessageSchema: z.ZodObject<{
         endlesslyRetry: z.ZodOptional<z.ZodBoolean>;
     }, z.core.$strip>>;
 }, z.core.$strip>;
+export declare const EpochHintsSchema: z.ZodOptional<z.ZodObject<{
+    lastEpoch: z.ZodOptional<z.ZodObject<{
+        start: z.ZodString;
+        level: z.ZodNumber;
+    }, z.core.$strip>>;
+    lastTimestamp: z.ZodOptional<z.ZodString>;
+}, z.core.$strip>>;
 export declare const EpochFeedUploadReferenceMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"epochFeedUploadReference">;
     requestId: z.ZodString;
@@ -687,6 +717,13 @@ export declare const EpochFeedUploadReferenceMessageSchema: z.ZodObject<{
     at: z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>;
     reference: z.ZodString;
     encryptionKey: z.ZodOptional<z.ZodString>;
+    hints: z.ZodOptional<z.ZodObject<{
+        lastEpoch: z.ZodOptional<z.ZodObject<{
+            start: z.ZodString;
+            level: z.ZodNumber;
+        }, z.core.$strip>>;
+        lastTimestamp: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
     requestOptions: z.ZodOptional<z.ZodObject<{
         timeout: z.ZodOptional<z.ZodNumber>;
         headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
@@ -824,6 +861,10 @@ export declare const CreateFeedManifestMessageSchema: z.ZodObject<{
     requestId: z.ZodString;
     topic: z.ZodString;
     owner: z.ZodOptional<z.ZodString>;
+    feedType: z.ZodOptional<z.ZodEnum<{
+        Sequence: "Sequence";
+        Epoch: "Epoch";
+    }>>;
     uploadOptions: z.ZodOptional<z.ZodObject<{
         pin: z.ZodOptional<z.ZodBoolean>;
         encrypt: z.ZodOptional<z.ZodBoolean>;
@@ -1165,6 +1206,13 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     at: z.ZodUnion<readonly [z.ZodNumber, z.ZodString]>;
     reference: z.ZodString;
     encryptionKey: z.ZodOptional<z.ZodString>;
+    hints: z.ZodOptional<z.ZodObject<{
+        lastEpoch: z.ZodOptional<z.ZodObject<{
+            start: z.ZodString;
+            level: z.ZodNumber;
+        }, z.core.$strip>>;
+        lastTimestamp: z.ZodOptional<z.ZodString>;
+    }, z.core.$strip>>;
     requestOptions: z.ZodOptional<z.ZodObject<{
         timeout: z.ZodOptional<z.ZodNumber>;
         headers: z.ZodOptional<z.ZodRecord<z.ZodString, z.ZodString>>;
@@ -1293,6 +1341,10 @@ export declare const ParentToIframeMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     requestId: z.ZodString;
     topic: z.ZodString;
     owner: z.ZodOptional<z.ZodString>;
+    feedType: z.ZodOptional<z.ZodEnum<{
+        Sequence: "Sequence";
+        Epoch: "Epoch";
+    }>>;
     uploadOptions: z.ZodOptional<z.ZodObject<{
         pin: z.ZodOptional<z.ZodBoolean>;
         encrypt: z.ZodOptional<z.ZodBoolean>;
@@ -1567,6 +1619,11 @@ export declare const EpochFeedUploadReferenceResponseMessageSchema: z.ZodObject<
     requestId: z.ZodString;
     socAddress: z.ZodString;
     encryptionKey: z.ZodOptional<z.ZodString>;
+    epoch: z.ZodObject<{
+        start: z.ZodString;
+        level: z.ZodNumber;
+    }, z.core.$strip>;
+    timestamp: z.ZodString;
 }, z.core.$strip>;
 export declare const FeedGetOwnerResponseMessageSchema: z.ZodObject<{
     type: z.ZodLiteral<"feedGetOwnerResponse">;
@@ -1820,6 +1877,11 @@ export declare const IframeToParentMessageSchema: z.ZodDiscriminatedUnion<[z.Zod
     requestId: z.ZodString;
     socAddress: z.ZodString;
     encryptionKey: z.ZodOptional<z.ZodString>;
+    epoch: z.ZodObject<{
+        start: z.ZodString;
+        level: z.ZodNumber;
+    }, z.core.$strip>;
+    timestamp: z.ZodString;
 }, z.core.$strip>, z.ZodObject<{
     type: z.ZodLiteral<"feedGetOwnerResponse">;
     requestId: z.ZodString;

@@ -1,5 +1,5 @@
 import { PrivateKey, Identifier } from "@ethersphere/bee-js";
-import type { Bee, BeeRequestOptions, Stamper, UploadOptions } from "@ethersphere/bee-js";
+import type { Bee, BeeRequestOptions, Stamper, EncryptedChunk, UploadOptions } from "@ethersphere/bee-js";
 import type { UploadContext, UploadProgress } from "./types";
 /**
  * Result of uploading encrypted data
@@ -20,6 +20,10 @@ export interface UploadEncryptedDataResult {
  * @param onProgress - Progress callback
  */
 export declare function uploadEncryptedDataWithSigning(context: UploadContext, data: Uint8Array, encryptionKey?: Uint8Array, options?: UploadOptions, onProgress?: (progress: UploadProgress) => void, requestOptions?: BeeRequestOptions): Promise<UploadEncryptedDataResult>;
+/**
+ * Upload a single encrypted chunk with optional signing
+ */
+export declare function uploadSingleEncryptedChunk(bee: Bee, stamper: Stamper, encryptedChunk: EncryptedChunk, options?: UploadOptions, requestOptions?: BeeRequestOptions): Promise<void>;
 /**
  * Upload a single encrypted chunk with optional signing
  *
@@ -79,4 +83,20 @@ export declare function uploadEncryptedSOC(bee: Bee, stamper: Stamper, signer: P
  * This constructs an unencrypted SOC and uploads it via /chunks to avoid /soc size limits.
  */
 export declare function uploadSOC(bee: Bee, stamper: Stamper, signer: PrivateKey, identifier: Identifier, data: Uint8Array, options?: UploadOptions): Promise<UploadSOCResult>;
+/**
+ * Upload SOC via the /soc/{owner}/{id} endpoint.
+ *
+ * Use this for small SOCs (< 4104 bytes) that need to preserve exact CAC size,
+ * such as v1 format feeds for /bzz/ compatibility.
+ *
+ * The /soc endpoint explicitly handles SOC uploads without size-based detection,
+ * avoiding "stamp signature is invalid" errors for small SOCs that would be
+ * misidentified as CAC by the /chunks endpoint.
+ *
+ * Key differences from uploadSOC:
+ * - Uses /soc/{owner}/{id}?sig=... endpoint (explicit SOC handling)
+ * - Does NOT pad CAC data (preserves exact payload size for v1 format)
+ * - Stamps using CAC address (what /soc endpoint expects)
+ */
+export declare function uploadSOCViaSocEndpoint(bee: Bee, stamper: Stamper, signer: PrivateKey, identifier: Identifier, data: Uint8Array, options?: UploadOptions): Promise<UploadSOCResult>;
 //# sourceMappingURL=upload-encrypted-data.d.ts.map

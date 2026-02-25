@@ -29,6 +29,10 @@ export { createActForContent, decryptActReference, addGranteesToAct, revokeGrant
 export type { ActEntry } from "./proxy/act";
 export { SWARM_SECRET_PREFIX } from "./types";
 export { buildAuthUrl } from "./utils/url";
+export { buildBzzCompatibleManifest, buildBzzManifestNode, buildMinimalManifest, extractReferenceFromManifest, extractEntryFromManifest, extractContentFromFlatManifest, padPayloadForSOCDetection, MAX_PADDED_PAYLOAD_SIZE, } from "./proxy/manifest-builder";
+export type { BzzCompatibleManifestResult, BzzManifestNodeResult, } from "./proxy/manifest-builder";
+export { saveMantarayTreeRecursively, loadMantarayTreeWithChunkAPI, } from "./proxy/mantaray";
+export type { UploadCallback } from "./proxy/mantaray";
 export { SECOND, MINUTE, HOUR, DAY, DEFAULT_SESSION_DURATION, } from "./utils/constants";
 export { calculateTTLSeconds, formatTTL, getBlockTimestamp, calculateExpiryTimestamp, fetchSwarmPrice, SWARMSCAN_STATS_URL, GNOSIS_BLOCK_TIME, } from "./utils/ttl";
 //# sourceMappingURL=index.d.ts.map
