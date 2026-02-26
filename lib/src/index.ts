@@ -227,6 +227,7 @@ export type {
   Account,
   PasskeyAccount,
   EthereumAccount,
+  AgentAccount,
   Identity,
   ConnectedApp,
   PostageStamp,

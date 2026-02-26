@@ -85,11 +85,26 @@ export const EthereumAccountSchemaV1 = z.object({
 })
 
 /**
+ * Agent Account Schema V1
+ * For automated testing and programmatic use with BIP39 seed phrases
+ * Seed phrase is NOT stored - must be re-entered on each authentication (like passkey)
+ */
+export const AgentAccountSchemaV1 = z.object({
+  id: StoredEthAddress,
+  name: z.string(),
+  createdAt: z.number(),
+  type: z.literal("agent"),
+  swarmEncryptionKey: z.string().length(64), // derived encryption key for Swarm data (64-char hex)
+  defaultPostageStampBatchID: StoredBatchId.optional(),
+})
+
+/**
  * Account Schema V1 (discriminated union)
  */
 export const AccountSchemaV1 = z.discriminatedUnion("type", [
   PasskeyAccountSchemaV1,
   EthereumAccountSchemaV1,
+  AgentAccountSchemaV1,
 ])
 
 // ============================================================================
@@ -186,6 +201,7 @@ export const AccountStateSnapshotSchemaV1 = z.object({
 
 export type PasskeyAccount = z.infer<typeof PasskeyAccountSchemaV1>
 export type EthereumAccount = z.infer<typeof EthereumAccountSchemaV1>
+export type AgentAccount = z.infer<typeof AgentAccountSchemaV1>
 export type Account = z.infer<typeof AccountSchemaV1>
 export type Identity = z.infer<typeof IdentitySchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>

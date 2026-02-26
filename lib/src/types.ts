@@ -1612,6 +1612,7 @@ export interface AuthOptions {
 export type {
   PasskeyAccount,
   EthereumAccount,
+  AgentAccount,
   Account,
   Identity,
   ConnectedApp,

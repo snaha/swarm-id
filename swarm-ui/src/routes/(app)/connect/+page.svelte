@@ -20,8 +20,13 @@
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import { ArrowRight } from 'carbon-icons-svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
-	import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
+	import {
+		getMasterKeyFromAccount,
+		SeedPhraseRequiredError,
+		getMasterKeyFromAgentAccount,
+	} from '$lib/utils/account-auth'
 	import Confirmation from '$lib/components/confirmation.svelte'
+	import EnterSeedModal from '$lib/components/enter-seed-modal.svelte'
 
 	let selectedIdentity = $state<Identity | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
@@ -31,6 +36,8 @@
 		selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
 	)
 	let isAuthenticating = $state(false)
+	let showSeedModal = $state(false)
+	let pendingAgentAccount = $state<Account | undefined>(undefined)
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived.by(() => {
@@ -176,9 +183,43 @@
 		try {
 			isAuthenticating = true
 			return await getMasterKeyFromAccount(account)
+		} catch (err) {
+			if (err instanceof SeedPhraseRequiredError) {
+				// Agent accounts need seed phrase - show modal
+				pendingAgentAccount = account
+				showSeedModal = true
+				isAuthenticating = false
+				return undefined
+			}
+			throw err
 		} finally {
-			isAuthenticating = false
+			if (!showSeedModal) {
+				isAuthenticating = false
+			}
 		}
+	}
+
+	function handleSeedPhraseProvided(seedPhrase: string) {
+		if (!pendingAgentAccount) return
+
+		try {
+			const masterKey = getMasterKeyFromAgentAccount(pendingAgentAccount, seedPhrase)
+			sessionStore.setTemporaryMasterKey(masterKey)
+			pendingAgentAccount = undefined
+
+			// Re-trigger the authentication flow
+			if (selectedIdentity) {
+				handleAuthenticate()
+			}
+		} catch (err) {
+			error = err instanceof Error ? err.message : 'Invalid seed phrase'
+			pendingAgentAccount = undefined
+		}
+	}
+
+	function handleSeedModalCancel() {
+		pendingAgentAccount = undefined
+		isAuthenticating = false
 	}
 
 	async function handleAuthenticate() {
@@ -201,6 +242,11 @@
 		try {
 			// Retrieve masterKey based on account type
 			const masterKey = await tryGetMasterKeyFromAccount(account)
+
+			// If masterKey is undefined, we're waiting for seed phrase input
+			if (!masterKey) {
+				return
+			}
 
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
@@ -279,3 +325,9 @@
 		<CreateNewAccount header={connectedAppHeader} />
 	{/if}
 {/if}
+
+<EnterSeedModal
+	bind:open={showSeedModal}
+	onUnlock={handleSeedPhraseProvided}
+	onCancel={handleSeedModalCancel}
+/>

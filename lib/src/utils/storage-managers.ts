@@ -107,6 +107,16 @@ export function serializeAccount(account: Account): Record<string, unknown> {
       defaultPostageStampBatchID:
         account.defaultPostageStampBatchID?.toString(),
     }
+  } else if (account.type === "agent") {
+    return {
+      id: account.id.toString(),
+      name: account.name,
+      createdAt: account.createdAt,
+      type: account.type,
+      swarmEncryptionKey: account.swarmEncryptionKey,
+      defaultPostageStampBatchID:
+        account.defaultPostageStampBatchID?.toString(),
+    }
   } else {
     return {
       id: account.id.toString(),
