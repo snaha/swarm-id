@@ -54,7 +54,7 @@ describe("SwarmIdClient connect()", () => {
   it("should open popup window when popupMode is 'popup'", () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
 
-    client.connect("popup")
+    client.connect({ popupMode: "popup" })
 
     expect(window.open).toHaveBeenCalledWith(
       expect.stringContaining("connect#"),
@@ -66,12 +66,32 @@ describe("SwarmIdClient connect()", () => {
   it("should open full window when popupMode is 'window'", () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
 
-    client.connect("window")
+    client.connect({ popupMode: "window" })
 
     expect(window.open).toHaveBeenCalledWith(
       expect.stringContaining("connect#"),
       "_blank",
     )
+  })
+
+  it("should include agent parameter when agent option is true", () => {
+    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+
+    const openedUrl = client.connect({ agent: true })
+
+    expect(openedUrl).toContain("agent=")
+    expect(window.open).toHaveBeenCalledWith(
+      expect.stringContaining("agent="),
+      "_blank",
+    )
+  })
+
+  it("should not include agent parameter when agent option is false or not set", () => {
+    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+
+    const openedUrl = client.connect()
+
+    expect(openedUrl).not.toContain("agent")
   })
 
   it("should work with minimal metadata", () => {

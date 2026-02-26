@@ -78,4 +78,49 @@ describe("buildAuthUrl", () => {
       "https://swarm-id.example.com/connect#origin=https%3A%2F%2Fmyapp.example.com&appName=Test+App",
     )
   })
+
+  it("should include proxyMode when option is true", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { proxyMode: true },
+    )
+
+    expect(url).toContain("proxyMode=true")
+  })
+
+  it("should include agent parameter when option is true", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { agent: true },
+    )
+
+    expect(url).toContain("agent=")
+  })
+
+  it("should not include agent parameter when option is false", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { agent: false },
+    )
+
+    expect(url).not.toContain("agent")
+  })
+
+  it("should include both proxyMode and agent when both options are true", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { proxyMode: true, agent: true },
+    )
+
+    expect(url).toContain("proxyMode=true")
+    expect(url).toContain("agent=")
+  })
 })

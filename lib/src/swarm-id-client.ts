@@ -1,5 +1,6 @@
 import type {
   ClientOptions,
+  ConnectOptions,
   AuthStatus,
   ConnectionInfo,
   UploadResult,
@@ -797,7 +798,9 @@ export class SwarmIdClient {
    * For localhost development with Chrome/Firefox, click the iframe button first
    * to grant Storage Access. For Safari, see https://github.com/snaha/swarm-id/issues/167
    *
-   * @param popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
+   * @param options - Configuration options for the connect flow
+   * @param options.popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
+   * @param options.agent - When true, shows the agent sign-up option on the connect page
    * @returns The URL that was opened (useful for testing or reference)
    * @throws {Error} If the client is not initialized
    *
@@ -811,16 +814,22 @@ export class SwarmIdClient {
    * console.log('Authentication opened at:', url)
    *
    * // Open as popup window
-   * client.connect("popup")
+   * client.connect({ popupMode: "popup" })
+   *
+   * // Open with agent sign-up option visible
+   * client.connect({ agent: true })
    * ```
    */
-  connect(popupMode: "window" | "popup" = "window"): string {
+  connect(options: ConnectOptions = {}): string {
     this.ensureReady()
+
+    const { popupMode = "window", agent } = options
 
     const authUrl = buildAuthUrl(
       this.iframeOrigin,
       window.location.origin,
       this.metadata,
+      { agent },
     )
 
     // Open as popup or full window based on popupMode

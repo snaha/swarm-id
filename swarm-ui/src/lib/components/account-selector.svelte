@@ -6,6 +6,7 @@
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Add from 'carbon-icons-svelte/lib/Add.svelte'
+	import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { EthAddress } from '@ethersphere/bee-js'
@@ -28,7 +29,8 @@
 		accounts.map((account) => ({
 			value: toPrefixedHex(account.id),
 			label: account.name,
-			icon: account.type === 'passkey' ? PasskeyLogo : EthereumLogo,
+			icon:
+				account.type === 'passkey' ? PasskeyLogo : account.type === 'agent' ? Bot : EthereumLogo,
 		})),
 	)
 

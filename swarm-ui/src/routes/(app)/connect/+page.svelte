@@ -38,6 +38,7 @@
 	let isAuthenticating = $state(false)
 	let showSeedModal = $state(false)
 	let pendingAgentAccount = $state<Account | undefined>(undefined)
+	let showAgentSignup = $state(false)
 
 	const allIdentities = $derived(identitiesStore.identities)
 	const identities = $derived.by(() => {
@@ -57,6 +58,7 @@
 	onMount(() => {
 		// Get parameters from URL hash (e.g., #origin=foo&appName=bar)
 		const hashParams = getHashParams()
+		showAgentSignup = hashParams.has('agent')
 
 		if (!sessionStore.data.appOrigin) {
 			const appOrigin = hashParams.get('origin')
@@ -322,7 +324,7 @@
 		</Vertical>
 	{:else}
 		<!-- No accounts, show create form -->
-		<CreateNewAccount header={connectedAppHeader} />
+		<CreateNewAccount header={connectedAppHeader} {showAgentSignup} />
 	{/if}
 {/if}
 

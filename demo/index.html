@@ -237,6 +237,12 @@
 					Iframe button:
 					<div id="swarm-id-button" style="width: 200px; height: 40px"></div>
 				</div>
+				<div class="button-container">
+					<label style="display: flex; align-items: center; gap: 8px; cursor: pointer">
+						<input type="checkbox" id="agent-signup-checkbox" style="width: auto; cursor: pointer" />
+						Show agent sign-up option
+					</label>
+				</div>
 			</div>
 
 			<!-- Postage Stamp Section (Collapsible) -->
@@ -1018,7 +1024,8 @@ Secret message for ACT test!</textarea
 				if (status.authenticated) {
 					await client.disconnect()
 				} else {
-					client.connect()
+					const agentCheckbox = document.getElementById('agent-signup-checkbox')
+					client.connect({ agent: agentCheckbox.checked })
 				}
 			})
 

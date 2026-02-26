@@ -34,6 +34,7 @@
 	import CopyButton from './copy-button.svelte'
 	import Tooltip from './ui/tooltip.svelte'
 	import ViewGenerationDetailsModal from './view-generation-details-modal.svelte'
+	import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
 
 	type Props = {
 		drawerOpen: boolean
@@ -93,7 +94,11 @@
 					style="padding: var(--padding)"
 				>
 					<Horizontal --horizontal-gap="var(--half-padding)">
-						{account.type === 'ethereum' ? 'Ethereum' : 'Passkey'}
+						{account.type === 'ethereum'
+							? 'Ethereum'
+							: account.type === 'agent'
+								? 'Agent'
+								: 'Passkey'}
 						<Badge>Local</Badge>
 					</Horizontal>
 					<Button variant="ghost" dimension="compact" onclick={() => (drawerOpen = false)}
@@ -215,6 +220,8 @@
 							>
 								{#if acc.type === 'ethereum'}
 									<EthereumLogo size={20} />
+								{:else if acc.type === 'agent'}
+									<Bot size={20} />
 								{:else}
 									<PasskeyLogo size={20} />
 								{/if}
@@ -283,6 +290,8 @@
 						<Horizontal --horizontal-gap="var(--quarter-padding)">
 							{#if account.type === 'ethereum'}
 								<EthereumLogo size={20} />Ethereum
+							{:else if account.type === 'agent'}
+								<Bot size={20} />Agent
 							{:else}
 								<PasskeyLogo size={20} />Passkey
 							{/if}

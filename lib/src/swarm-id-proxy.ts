@@ -1209,7 +1209,7 @@ export class SwarmIdProxy {
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      true, // proxyMode - enables same-origin validation and setSecret message
+      { proxyMode: true }, // proxyMode - enables same-origin validation and setSecret message
     )
 
     // Open as popup or full window based on popupMode

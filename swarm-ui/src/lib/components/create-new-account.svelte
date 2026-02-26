@@ -6,7 +6,6 @@
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
-	import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
@@ -16,9 +15,10 @@
 
 	interface Props {
 		header?: Snippet
+		showAgentSignup?: boolean
 	}
 
-	let { header }: Props = $props()
+	let { header, showAgentSignup = false }: Props = $props()
 
 	function handlePasskeyClick() {
 		goto(resolve(routes.PASSKEY_NEW))
@@ -26,10 +26,6 @@
 
 	function handleEthClick() {
 		goto(resolve(routes.ETH_NEW))
-	}
-
-	function handleAgentClick() {
-		goto(resolve(routes.AGENT_NEW))
 	}
 
 	function handleSignInClick(e: Event) {
@@ -64,16 +60,6 @@
 						<PasskeyLogo fill="var(--colors-ultra-high)" width={48} height={48} />
 					{/snippet}
 				</AuthCard>
-				<AuthCard
-					title="Use Agent"
-					description="Create an automated testing account using a BIP39 seed phrase"
-					buttonText="Sign up as Agent"
-					onclick={handleAgentClick}
-				>
-					{#snippet icon()}
-						<div class="bot-icon-mobile"><Bot size={32} /></div>
-					{/snippet}
-				</AuthCard>
 				<SignInCard
 					text="Already have a Swarm ID account?"
 					buttonText="Sign in"
@@ -105,18 +91,6 @@
 							{/snippet}
 						</AuthCard>
 					</div>
-					<div class="card-wrapper">
-						<AuthCard
-							title="Sign up as Agent"
-							description="Create an automated testing account using BIP39 seed phrase"
-							buttonText="Create Agent account"
-							onclick={handleAgentClick}
-						>
-							{#snippet icon()}
-								<div class="bot-icon-desktop"><Bot size={32} /></div>
-							{/snippet}
-						</AuthCard>
-					</div>
 				</Horizontal>
 				<SignInCard
 					text="Already have a Swarm ID account?"
@@ -128,10 +102,15 @@
 	</Vertical>
 	<div class="footer-text">
 		<!-- eslint-disable svelte/no-navigation-without-resolve -- full URL, not a route -->
-		<Typography variant="small"
-			>Visit <a href={window.location.origin}>{window.location.host}</a> for info about Swarm ID</Typography
-		>
+		<Typography variant="small">
+			Visit <a href={window.location.origin}>{window.location.host}</a> for info about Swarm ID
+		</Typography>
 		<!-- eslint-enable svelte/no-navigation-without-resolve -->
+		{#if showAgentSignup}
+			<Typography variant="small">
+				<a href={resolve(routes.AGENT_NEW)}>Sign up as agent</a>
+			</Typography>
+		{/if}
 	</div>
 </Vertical>
 
@@ -146,14 +125,6 @@
 
 	.card-wrapper + .card-wrapper {
 		border-left: 1px solid var(--colors-low);
-	}
-
-	.bot-icon-mobile {
-		transform: scale(1.5);
-	}
-
-	.bot-icon-desktop {
-		transform: scale(2);
 	}
 
 	.footer-text {

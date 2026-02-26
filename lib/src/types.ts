@@ -1605,6 +1605,22 @@ export interface AuthOptions {
   masterKeyStorageKey?: string
 }
 
+/**
+ * Configuration options for the connect() method.
+ */
+export interface ConnectOptions {
+  /**
+   * Whether to open as a popup window ("popup") or full window ("window").
+   * @default "window"
+   */
+  popupMode?: "popup" | "window"
+  /**
+   * When true, shows the agent sign-up option on the connect page.
+   * Agents are automated services that can perform operations on behalf of users.
+   */
+  agent?: boolean
+}
+
 // ============================================================================
 // Entity Types (derived from Zod schemas for type safety)
 // ============================================================================
