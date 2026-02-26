@@ -257,7 +257,7 @@ export async function authenticateWithPasskey(
 		publicKeyOptions.allowCredentials = options.allowCredentialIds.map((id) => ({
 			id: base64urlToBuffer(id),
 			type: 'public-key' as const,
-			transports: ['internal', 'hybrid'] as AuthenticatorTransport[],
+			transports: ['internal', 'hybrid', 'usb'] as AuthenticatorTransport[],
 		}))
 	}
 
