@@ -32,14 +32,9 @@
 		return seedPhraseValidation.error
 	})
 
-	const isFormValid = $derived(seedPhrase.trim() && seedPhraseValidation?.valid)
+	const isFormValid = $derived(seedPhraseValidation?.valid)
 
 	function handleUnlock() {
-		if (!seedPhrase.trim()) {
-			error = 'Please enter your seed phrase'
-			return
-		}
-
 		const validation = validateSeedPhrase(seedPhrase)
 		if (!validation.valid) {
 			error = validation.error
@@ -47,7 +42,7 @@
 		}
 
 		error = undefined
-		onUnlock?.(seedPhrase.trim().toLowerCase())
+		onUnlock?.(validation.phrase)
 		seedPhrase = ''
 		open = false
 	}

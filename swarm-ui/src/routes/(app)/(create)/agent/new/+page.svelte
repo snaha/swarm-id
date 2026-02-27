@@ -61,8 +61,8 @@
 	)
 
 	async function handleConfirm() {
-		if (!accountName.trim() || !seedPhrase.trim()) {
-			error = 'Please fill in all fields'
+		if (!accountName.trim()) {
+			error = 'Please enter an account name'
 			return
 		}
 
@@ -77,10 +77,10 @@
 			error = undefined
 			console.log('Creating agent account...')
 
-			// Create agent account from seed phrase
+			// Create agent account from seed phrase using validated/normalized phrase
 			const { account, masterKey } = createAgentAccount({
 				name: accountName.trim(),
-				seedPhrase: seedPhrase.trim(),
+				seedPhrase: validation.phrase,
 			})
 
 			console.log('Agent account created with address:', account.id.toString())

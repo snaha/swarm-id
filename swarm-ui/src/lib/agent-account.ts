@@ -22,12 +22,22 @@ export interface CreateAgentAccountResult {
 	masterKey: Bytes
 }
 
+export type SeedPhraseValidation = { valid: true; phrase: string } | { valid: false; error: string }
+
 /**
  * Validates a BIP39 mnemonic seed phrase
  * Accepts 12 or 24 word phrases
+ * Returns the normalized (trimmed, lowercased) phrase when valid
  */
-export function validateSeedPhrase(phrase: string): { valid: boolean; error?: string } {
-	const words = phrase.trim().toLowerCase().split(/\s+/)
+export function validateSeedPhrase(phrase: string): SeedPhraseValidation {
+	const trimmed = phrase.trim()
+
+	if (!trimmed) {
+		return { valid: false, error: 'Please enter your seed phrase' }
+	}
+
+	const normalized = trimmed.toLowerCase()
+	const words = normalized.split(/\s+/)
 
 	// Check word count
 	if (words.length !== 12 && words.length !== 24) {
@@ -39,8 +49,8 @@ export function validateSeedPhrase(phrase: string): { valid: boolean; error?: st
 
 	// Validate using ethers.js Mnemonic
 	try {
-		Mnemonic.fromPhrase(phrase.trim().toLowerCase())
-		return { valid: true }
+		Mnemonic.fromPhrase(normalized)
+		return { valid: true, phrase: normalized }
 	} catch {
 		return {
 			valid: false,
@@ -53,16 +63,14 @@ export function validateSeedPhrase(phrase: string): { valid: boolean; error?: st
  * Derives Ethereum address and master key from a BIP39 seed phrase
  */
 export function deriveFromSeedPhrase(seedPhrase: string): AgentAccountResult {
-	const normalizedPhrase = seedPhrase.trim().toLowerCase()
-
-	// Validate the phrase first
-	const validation = validateSeedPhrase(normalizedPhrase)
+	// Validate the phrase first (returns normalized phrase when valid)
+	const validation = validateSeedPhrase(seedPhrase)
 	if (!validation.valid) {
 		throw new Error(validation.error)
 	}
 
-	// Derive HD wallet from mnemonic
-	const wallet = HDNodeWallet.fromPhrase(normalizedPhrase)
+	// Derive HD wallet from mnemonic using validated/normalized phrase
+	const wallet = HDNodeWallet.fromPhrase(validation.phrase)
 
 	// Use the private key as the master key (32 bytes)
 	// Remove '0x' prefix from private key

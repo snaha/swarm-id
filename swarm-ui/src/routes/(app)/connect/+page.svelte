@@ -142,7 +142,8 @@
 		await handleAuthenticate()
 
 		// If this was an existing identity (not from creation flow), close automatically
-		if (!error && !sessionStore.data.currentIdentityId) {
+		// But don't close if we're waiting for seed phrase input (agent accounts)
+		if (!error && !sessionStore.data.currentIdentityId && !showSeedModal) {
 			closeWindowWithSessionCleanup()
 		}
 	}
@@ -201,7 +202,7 @@
 		}
 	}
 
-	function handleSeedPhraseProvided(seedPhrase: string) {
+	async function handleSeedPhraseProvided(seedPhrase: string) {
 		if (!pendingAgentAccount) return
 
 		try {
@@ -211,7 +212,7 @@
 
 			// Re-trigger the authentication flow
 			if (selectedIdentity) {
-				handleAuthenticate()
+				await handleAuthenticate()
 			}
 		} catch (err) {
 			error = err instanceof Error ? err.message : 'Invalid seed phrase'

@@ -14,6 +14,18 @@
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
+	import type { Component } from 'svelte'
+
+	function getAccountIcon(type: string): Component<{ width?: number; height?: number }> {
+		switch (type) {
+			case 'passkey':
+				return PasskeyLogo
+			case 'agent':
+				return Bot
+			default:
+				return EthereumLogo
+		}
+	}
 
 	interface Props {
 		selectedAccount: EthAddress | undefined
@@ -29,8 +41,7 @@
 		accounts.map((account) => ({
 			value: toPrefixedHex(account.id),
 			label: account.name,
-			icon:
-				account.type === 'passkey' ? PasskeyLogo : account.type === 'agent' ? Bot : EthereumLogo,
+			icon: getAccountIcon(account.type),
 		})),
 	)
 
