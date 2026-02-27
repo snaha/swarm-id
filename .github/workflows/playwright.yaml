@@ -24,6 +24,7 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
+          submodules: 'recursive'
 
       - name: Check for component changes
         id: changes
@@ -57,7 +58,7 @@ jobs:
           if git cat-file -e $BASE_SHA 2>/dev/null; then
             CHANGED_FILES=$(git diff --name-only $BASE_SHA ${{ github.sha }})
           else
-            echo "⚠️ Base SHA not available, using origin/main as fallback"
+            echo "Base SHA not available, using origin/main as fallback"
             git fetch origin main:refs/remotes/origin/main || true
             CHANGED_FILES=$(git diff --name-only origin/main ${{ github.sha }} || echo "")
           fi
@@ -65,12 +66,12 @@ jobs:
           echo "Changed files:"
           echo "$CHANGED_FILES"
 
-          if echo "$CHANGED_FILES" | grep -E "(src/lib/components/|playwright-ct\.config\.ts|\.ct\.spec\.ts)" > /dev/null; then
+          if echo "$CHANGED_FILES" | grep -E "(swarm-ui/src/lib/components/|swarm-ui/playwright-ct\.config\.ts|\.ct\.spec\.ts)" > /dev/null; then
             echo "run_component_tests=true" >> $GITHUB_OUTPUT
-            echo "✅ Component changes detected - will run component tests"
+            echo "Component changes detected - will run component tests"
           else
             echo "run_component_tests=false" >> $GITHUB_OUTPUT
-            echo "⏭️ No component changes detected - skipping component tests"
+            echo "No component changes detected - skipping component tests"
           fi
 
       - uses: pnpm/action-setup@v4
@@ -96,24 +97,36 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile --dangerously-allow-all-builds
 
+      - name: Build bee-js dependency
+        working-directory: ./bee-js
+        run: pnpm build
+
+      - name: Build lib dependency
+        working-directory: ./lib
+        run: pnpm build
+
       - name: Generate SvelteKit files
+        working-directory: ./swarm-ui
         run: pnpm exec svelte-kit sync
 
       - name: Run Unit Tests
+        working-directory: ./swarm-ui
         run: pnpm test:unit run
 
       - name: Run Component Tests
         if: steps.changes.outputs.run_component_tests == 'true'
+        working-directory: ./swarm-ui
         run: |
-          echo "🧩 Running component tests..."
+          echo "Running component tests..."
           pnpm test:ct
         env:
           CI: true
           HOME: /root
 
       - name: Run Integration Tests
+        working-directory: ./swarm-ui
         run: |
-          echo "🔄 Running integration tests..."
+          echo "Running integration tests..."
           pnpm test:integration
         env:
           CI: true
@@ -124,6 +137,6 @@ jobs:
         with:
           name: playwright-test-reports
           path: |
-            playwright-report/
-            test-results/
+            swarm-ui/playwright-report/
+            swarm-ui/test-results/
           retention-days: 30
