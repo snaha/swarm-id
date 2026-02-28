@@ -11,7 +11,7 @@
 		"dev:bee:stop": "fdp-play stop",
 		"dev:bee:logs": "fdp-play logs queen --follow",
 		"dev:bee:fresh": "fdp-play start -w 1 --fresh --pull",
-		"dev:demo": "serve demo -l 3000",
+		"dev:demo": "pnpm --filter @swarm-id/demo dev",
 		"dev:lib": "pnpm --filter @swarm-id/lib build:watch",
 		"dev:swarm-ui": "pnpm --filter swarm-identity dev",
 		"dev:docs": "pnpm --filter @swarm-id/docs dev",
@@ -26,7 +26,7 @@
 		"preview:docs": "pnpm --filter @swarm-id/docs preview",
 		"clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
 		"install:all": "pnpm install",
-		"check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all",
+		"check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all && pnpm --filter @swarm-id/demo check:all",
 		"format:all": "pnpm --filter @swarm-id/lib format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format"
 	},
 	"devDependencies": {
