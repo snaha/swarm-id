@@ -77,9 +77,9 @@
 
 <Card>
 	<CardHeader>
-		<CardTitle>ACT Download (Self-Decrypt)</CardTitle>
+		<CardTitle>Decrypt & Download</CardTitle>
 		<CardDescription>
-			Download and decrypt ACT content using the publisher's identity (via proxy).
+			Decryption is handled by the identity proxy — your keys are never exposed to this app.
 		</CardDescription>
 	</CardHeader>
 	<CardContent class="space-y-4">

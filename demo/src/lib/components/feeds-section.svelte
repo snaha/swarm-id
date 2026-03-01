@@ -37,9 +37,10 @@
 
 <Card>
 	<CardHeader>
-		<CardTitle>Feeds</CardTitle>
+		<CardTitle>Write & Read</CardTitle>
 		<CardDescription>
-			Test sequential feeds (chunk API, encrypted by default) or epoch feeds.
+			Sequential feeds store ordered updates (encrypted by default). Epoch feeds use timestamps for
+			lookups.
 		</CardDescription>
 	</CardHeader>
 	<CardContent class="space-y-4">

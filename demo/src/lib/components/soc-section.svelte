@@ -183,10 +183,9 @@
 
 <Card>
 	<CardHeader>
-		<CardTitle>SOC (Single Owner Chunk)</CardTitle>
+		<CardTitle>Upload & Download</CardTitle>
 		<CardDescription>
-			Upload and download Single Owner Chunks. Encrypted upload returns an encryption key required
-			for download.
+			Encrypted upload returns an encryption key required for download.
 		</CardDescription>
 	</CardHeader>
 	<CardContent class="space-y-4">

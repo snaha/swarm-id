@@ -1,89 +1,56 @@
 <script lang="ts">
-	import { onMount, onDestroy } from 'svelte'
-	import { clientStore } from '$lib/stores/client.svelte'
-	import { logStore } from '$lib/stores/log.svelte'
-	import SafariWarning from '$lib/components/safari-warning.svelte'
-	import AuthSection from '$lib/components/auth-section.svelte'
-	import PostageStampInfo from '$lib/components/postage-stamp-info.svelte'
-	import UploadSection from '$lib/components/upload-section.svelte'
-	import DownloadSection from '$lib/components/download-section.svelte'
-	import ActUploadSection from '$lib/components/act-upload-section.svelte'
-	import ActDownloadSection from '$lib/components/act-download-section.svelte'
-	import ActGranteesSection from '$lib/components/act-grantees-section.svelte'
-	import SocSection from '$lib/components/soc-section.svelte'
-	import FeedsSection from '$lib/components/feeds-section.svelte'
-	import ConsoleLog from '$lib/components/console-log.svelte'
+	import { base } from '$app/paths'
+	import { Card, CardHeader, CardTitle, CardDescription } from '$lib/components/ui/card'
 
-	const hasITP =
-		typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
-
-	let downloadReference = $state('')
-
-	let actEncryptedRef = $state('')
-	let actHistoryRef = $state('')
-	let actPublisherPubKey = $state('')
-	let actAddHistoryRef = $state('')
-
-	function handleUploadResult(reference: string) {
-		downloadReference = reference
-	}
-
-	function handleActUploadResult(result: {
-		encryptedReference: string
-		historyReference: string
-		publisherPubKey: string
-	}) {
-		actEncryptedRef = result.encryptedReference
-		actHistoryRef = result.historyReference
-		actPublisherPubKey = result.publisherPubKey
-		actAddHistoryRef = result.historyReference
-	}
-
-	function handleActHistoryUpdate(newHistoryRef: string) {
-		actHistoryRef = newHistoryRef
-		actAddHistoryRef = newHistoryRef
-	}
-
-	onMount(() => {
-		logStore.log('Demo application starting...')
-		clientStore.initialize()
-	})
-
-	onDestroy(() => {
-		clientStore.destroy()
-	})
+	const features = [
+		{
+			href: '/storage',
+			title: 'Storage',
+			description:
+				'The basic building block — upload data to the Swarm network and retrieve it by its content-addressed reference. Try with optional encryption.',
+		},
+		{
+			href: '/access-control',
+			title: 'Access Control',
+			description:
+				'Control who can read your data. Access Control Trie (ACT) lets you encrypt content and grant or revoke access to specific public keys.',
+		},
+		{
+			href: '/soc',
+			title: 'Single Owner Chunks',
+			description:
+				'A signed chunk tied to an owner and identifier. SOCs let you write to a deterministic address that others can look up by your public key.',
+		},
+		{
+			href: '/feeds',
+			title: 'Feeds',
+			description:
+				'Mutable pointers on an immutable network. Feeds let you publish updates to a fixed topic — readers always get the latest version.',
+		},
+	]
 </script>
 
-<div class="min-h-screen p-6 md:p-10">
-	<div class="mx-auto max-w-[800px] space-y-6">
-		<div class="text-white mb-8">
-			<h1 class="text-3xl font-bold mb-2">Swarm ID Demo</h1>
-			<p class="text-white/80 leading-relaxed">
-				This demo application shows how to use the Swarm ID library for authentication and Bee API
-				operations.
-			</p>
-		</div>
+<div class="space-y-8">
+	<div class="text-foreground">
+		<h1 class="text-3xl font-bold mb-2">Swarm ID Demo</h1>
+		<p class="text-muted-foreground leading-relaxed">
+			This demo shows how dApps integrate with Swarm ID for decentralized identity and data
+			management. Your identity lives on a trusted domain and is never shared directly — apps
+			receive derived keys scoped to their origin. Connect in the sidebar to try it out.
+		</p>
+	</div>
 
-		{#if hasITP}
-			<SafariWarning />
-		{/if}
-
-		<AuthSection />
-		<PostageStampInfo />
-		<UploadSection onUploadResult={handleUploadResult} />
-		<DownloadSection bind:reference={downloadReference} />
-		<ActUploadSection onUploadResult={handleActUploadResult} />
-		<ActDownloadSection
-			bind:encryptedRef={actEncryptedRef}
-			bind:historyRef={actHistoryRef}
-			bind:publisherPubKey={actPublisherPubKey}
-		/>
-		<ActGranteesSection
-			bind:historyRef={actAddHistoryRef}
-			onHistoryUpdate={handleActHistoryUpdate}
-		/>
-		<SocSection />
-		<FeedsSection />
-		<ConsoleLog />
+	<div class="grid gap-4 md:grid-cols-2">
+		<!-- eslint-disable svelte/no-navigation-without-resolve -- static routes with base path -->
+		{#each features as feature (feature.href)}
+			<a href="{base}{feature.href}" class="group block">
+				<Card class="h-full transition-shadow group-hover:shadow-md">
+					<CardHeader>
+						<CardTitle>{feature.title}</CardTitle>
+						<CardDescription>{feature.description}</CardDescription>
+					</CardHeader>
+				</Card>
+			</a>
+		{/each}
 	</div>
 </div>

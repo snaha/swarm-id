@@ -86,9 +86,9 @@
 
 <Card>
 	<CardHeader>
-		<CardTitle>ACT Add Grantees</CardTitle>
+		<CardTitle>Manage Grantees</CardTitle>
 		<CardDescription>
-			Add new grantees to an existing ACT. Use this to grant access after initial upload.
+			Grant access to additional identities after the initial upload.
 		</CardDescription>
 	</CardHeader>
 	<CardContent class="space-y-4">

@@ -103,9 +103,9 @@
 
 <Card>
 	<CardHeader>
-		<CardTitle>ACT Upload (Access Control)</CardTitle>
+		<CardTitle>Upload Encrypted</CardTitle>
 		<CardDescription>
-			Upload content with Access Control Trie. Only grantees (and the publisher) can decrypt.
+			Only grantees (and the publisher) can decrypt the uploaded content.
 		</CardDescription>
 	</CardHeader>
 	<CardContent class="space-y-4">
