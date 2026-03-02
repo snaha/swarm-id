@@ -7,7 +7,7 @@ domains:
     type: PRIMARY
 
 # Static site for swarm-demo.snaha.net
-# Serves demo pages with bundled library
+# Serves SvelteKit demo app
 static_sites:
   - name: demo-app
     # GitHub auto-deploy configuration
@@ -22,6 +22,9 @@ static_sites:
 
     # Build using monorepo scripts
     build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-demo
+
+    # SPA routing - all routes go to index.html
+    catchall_document: index.html
 
     # CORS headers for cross-origin communication with swarm-id
     cors:
@@ -43,6 +46,9 @@ envs:
 
   - key: NODE_ENV
     value: production
+
+  - key: ORIGIN
+    value: https://swarm-demo.snaha.net
 
   - key: APP_DOMAIN
     value: https://swarm-demo.snaha.net
