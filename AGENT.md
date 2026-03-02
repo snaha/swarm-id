@@ -99,4 +99,3 @@ Authentication uses storage events: popup writes to localStorage → storage eve
 
 - **Demo**: https://swarm-demo.snaha.net
 - **Identity UI**: https://swarm-id.snaha.net
-- Details: @docs/DEPLOYMENT.md

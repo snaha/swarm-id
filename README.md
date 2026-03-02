@@ -29,17 +29,13 @@ Both apps are deployed to Digital Ocean App Platform as separate static sites:
 
 **swarm-demo.snaha.net** (`demo/build/`)
 
-- Simple HTML demos with SwarmIdClient library
-- Library files served from `/lib/` directory
-- Standard ES6 module imports
+- SvelteKit demo app showcasing SwarmIdClient integration
+- Built with `@sveltejs/adapter-static`
 
 **swarm-id.snaha.net** (`swarm-id-build/`)
 
 - SvelteKit identity management UI
 - Proxy/auth pages for iframe communication
-- Library files served from `/lib/` directory
-
-See [`docs/DEPLOYMENT.md`](./docs/DEPLOYMENT.md) for detailed deployment configuration.
 
 ## Quick Start
 
@@ -69,12 +65,8 @@ pnpm build:swarm-id      # Builds lib + identity UI
 
 ```
 demo/build/
-├── index.html          # Demo app
-└── lib/                # Library files (~8MB with source maps)
-    ├── swarm-id-client.js
-    ├── swarm-id-proxy.js
-    ├── swarm-id-auth.js
-    └── ... (types, maps, etc.)
+├── index.html          # SvelteKit static output (SPA fallback)
+└── _app/               # Vite-bundled assets (JS, CSS)
 ```
 
 **swarm-id-build/** (Identity UI)
@@ -82,10 +74,8 @@ demo/build/
 ```
 swarm-id-build/
 ├── [SvelteKit app files including prerendered routes: /proxy, /connect]
-└── lib/                # Library files (~8MB with source maps)
+└── _app/               # Vite-bundled assets (JS, CSS)
 ```
-
-**Note:** Library files use standard ES6 module imports, not inline bundling.
 
 See [lib/README.md](./lib/README.md) for detailed library documentation.
 
@@ -236,7 +226,6 @@ The `?idDomain=` parameter tells the demo which identity service to use. This al
 
 **Important:**
 
-- Demo HTML files import from `/lib/` which automatically maps to `lib/dist/`
 - If you change library code, rebuild it: `cd lib && pnpm build`
 - Use `cd lib && pnpm build:watch` for automatic rebuilds during development
 
@@ -248,9 +237,10 @@ The `?idDomain=` parameter tells the demo which identity service to use. This al
 │   ├── src/              # Library source code
 │   ├── dist/             # Built library files (ES6 modules)
 │   └── README.md         # Library documentation
-├── demo/                 # Demo app package
-│   ├── index.html        # Library demo HTML
-│   ├── build.js          # Build script (copies lib, injects config)
+├── demo/                 # Demo app (SvelteKit)
+│   ├── src/              # SvelteKit source code
+│   │   ├── routes/       # SvelteKit routes (/, /feeds, /soc, etc.)
+│   │   └── lib/          # Stores, components, utilities
 │   └── build/            # Build output (deployed to swarm-demo.snaha.net)
 ├── swarm-ui/             # SvelteKit identity management UI
 │   ├── src/              # SvelteKit source code
@@ -274,16 +264,14 @@ The `?idDomain=` parameter tells the demo which identity service to use. This al
 
 **Demo App Build** (`demo/build/`)
 
-- Copies library files to `lib/`
-- Injects environment config into HTML
-- No inline bundling - uses module imports
+- SvelteKit static build via `@sveltejs/adapter-static`
+- Vite bundles all dependencies (library included via workspace link)
 - Deployed to swarm-demo.snaha.net
 
 **Identity UI Build** (`swarm-id-build/`)
 
 - Full SvelteKit production build
-- Copies library files to `lib/`
-- Proxy/auth HTML pages in `demo/`
+- Prerendered routes for `/proxy` and `/connect`
 - Deployed to swarm-id.snaha.net
 
 ## Documentation
@@ -314,7 +302,7 @@ pnpm preview:docs
 ┌─────────────────────────────────────────────────────────┐
 │  Browser: http://localhost:3000 (Demo App)              │
 │  ┌────────────────────────────────────────────────┐     │
-│  │ Demo HTML                                      │     │
+│  │ Demo App (SvelteKit)                            │     │
 │  │                                                │     │
 │  │  ┌─────────────────────────────────────────┐   │     │
 │  │  │ <iframe src="http://localhost:5174">    │   │     │

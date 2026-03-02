@@ -8,15 +8,18 @@ This demo shows how to integrate the Swarm ID library into a dApp for authentica
 
 ## Files
 
-- **index.html** - Demo dApp that uses `SwarmIdClient` from the library
-- **build.js** - Build script that bundles the demo with the library
+- **src/routes/** - SvelteKit pages (main demo, feeds, SOC, storage, access control)
+- **src/lib/stores/** - Svelte 5 stores (client, log, sidebar)
+- **src/lib/components/** - Shared UI components
+- **svelte.config.js** - SvelteKit config with `@sveltejs/adapter-static`
+- **vite.config.ts** - Vite configuration
 
 ## Using the Library
 
-The demo imports from the built library:
+The demo imports from the library via workspace link:
 
-```javascript
-import { SwarmIdClient } from '../lib/dist/swarm-id-client.js'
+```typescript
+import { SwarmIdClient } from '@swarm-id/lib'
 ```
 
 The library handles all the complex authentication, message passing, validation, and type safety internally. The demo HTML only needs to:
@@ -35,10 +38,9 @@ pnpm build:swarm-demo
 
 This will:
 
-1. Build the Bee.js fork
-2. Build the Swarm ID library
-3. Bundle the demo with environment configuration
-4. Output to `demo/build/index.html`
+1. Build the Swarm ID library
+2. Build the SvelteKit demo app with Vite
+3. Output static files to `demo/build/`
 
 ## Deployment
 
@@ -61,16 +63,24 @@ No HTTPS or certificates required - `localhost` is a secure context.
 
 ## How It Works
 
-The demo creates a `SwarmIdClient` instance:
+The client is configured in `src/lib/stores/client.svelte.ts` using Svelte 5 runes:
 
-```javascript
+```typescript
+import { SwarmIdClient } from '@swarm-id/lib'
+
 const client = new SwarmIdClient({
-	iframeOrigin: window.__ID_DOMAIN__ || 'https://swarm-id.snaha.net',
-	beeApiUrl: 'http://localhost:1633',
-	timeout: 30000,
-	onAuthChange: (authenticated) => {
+	iframeOrigin: proxyOrigin,
+	iframePath: '/proxy',
+	timeout: 60000,
+	onAuthChange: async (auth: boolean) => {
 		// Handle auth status changes
 	},
+	metadata: {
+		name: 'Swarm ID Demo',
+		description: 'Demo application showcasing Swarm ID authentication',
+		icon: BEE_ICON,
+	},
+	containerId: 'swarm-id-button',
 })
 
 await client.initialize()
