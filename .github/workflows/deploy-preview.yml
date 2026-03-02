@@ -124,6 +124,7 @@ jobs:
 
       - name: Build demo
         env:
+          BASE_PATH: /demo/pr-${{ github.event.number }}
           PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
         run: pnpm --filter @swarm-id/demo build
 

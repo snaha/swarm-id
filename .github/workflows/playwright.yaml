@@ -95,7 +95,7 @@ jobs:
             ${{ runner.os }}-pnpm-store-
 
       - name: Install dependencies
-        run: pnpm install --frozen-lockfile --dangerously-allow-all-builds
+        run: pnpm install --frozen-lockfile
 
       - name: Build bee-js dependency
         working-directory: ./bee-js

@@ -7,6 +7,9 @@ const config = {
 
 	kit: {
 		adapter: staticAdapter({ fallback: 'index.html' }),
+		paths: {
+			base: process.env.BASE_PATH || '',
+		},
 		alias: {
 			$lib: './src/lib',
 			'$lib/*': './src/lib/*',
