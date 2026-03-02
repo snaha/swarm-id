@@ -7,3 +7,7 @@ node_modules
 !.env
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
+test-results
+.claude/settings.local.json
+playwright-report
+playwright/.cache

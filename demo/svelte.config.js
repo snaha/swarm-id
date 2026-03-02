@@ -10,9 +10,8 @@ const config = {
 		paths: {
 			base: process.env.BASE_PATH || '',
 		},
-		alias: {
-			$lib: './src/lib',
-			'$lib/*': './src/lib/*',
+		prerender: {
+			handleUnseenRoutes: 'warn',
 		},
 	},
 }

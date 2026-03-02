@@ -36,6 +36,16 @@ export default typescriptEslint.config(
 		},
 	},
 	{
-		ignores: ['**/.svelte-kit', '**/build', '**/dist', '**/node_modules', '**/.cache'],
+		ignores: [
+			'**/.svelte-kit',
+			'**/build',
+			'**/dist',
+			'**/node_modules',
+			'**/package',
+			'.claude/settings.local.json',
+			'**/.cache',
+			'**/playwright-report',
+			'**/test-results',
+		],
 	},
 )
