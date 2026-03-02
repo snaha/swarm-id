@@ -5,6 +5,7 @@
 	import { Checkbox } from '$lib/components/ui/checkbox'
 	import { Label } from '$lib/components/ui/label'
 	import ResultDisplay from './result-display.svelte'
+	import type { ResultData } from './result-types'
 	import { clientStore } from '$lib/stores/client.svelte'
 	import { logStore } from '$lib/stores/log.svelte'
 
@@ -16,7 +17,7 @@
 
 	let data = $state('Hello, Swarm!')
 	let encrypt = $state(true)
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 
 	async function handleUpload() {
@@ -44,7 +45,11 @@
 			logStore.log(
 				`Upload successful! Reference: ${uploadResult.reference} (${uploadResult.reference.length} chars)`,
 			)
-			result = `<strong>Reference ${encrypt ? '(Encrypted)' : ''}:</strong><br/>${uploadResult.reference}<br/><small class="text-muted-foreground">${uploadResult.reference.length} hex chars (${uploadResult.reference.length / 2} bytes)</small>`
+			result = {
+				title: `Reference ${encrypt ? '(Encrypted)' : ''}:`,
+				entries: [{ value: uploadResult.reference }],
+				footnote: `${uploadResult.reference.length} hex chars (${uploadResult.reference.length / 2} bytes)`,
+			}
 			onUploadResult?.(uploadResult.reference)
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)

@@ -23,6 +23,12 @@ export function buildV1Payload(referenceHex: string, timestamp: number): Uint8Ar
 	view.setBigUint64(0, BigInt(timestamp), false)
 
 	const referenceBytes = hexToBytes(referenceHex)
+	const EXPECTED_REFERENCE_BYTES = 32
+	if (referenceBytes.length !== EXPECTED_REFERENCE_BYTES) {
+		throw new Error(
+			`Reference must be exactly ${EXPECTED_REFERENCE_BYTES} bytes (64 hex chars), got ${referenceBytes.length} bytes. Encrypted references (128 hex chars) are not supported in V1 feed payloads.`,
+		)
+	}
 
 	const payload = new Uint8Array(V1_PAYLOAD_SIZE)
 	payload.set(timestampBytes, 0)

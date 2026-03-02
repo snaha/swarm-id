@@ -6,6 +6,7 @@
 	import ResultDisplay from './result-display.svelte'
 	import { clientStore } from '$lib/stores/client.svelte'
 	import { logStore } from '$lib/stores/log.svelte'
+	import type { ResultData } from './result-types'
 	import { validateHex } from '$lib/utils/validation'
 
 	interface Props {
@@ -18,7 +19,7 @@
 	let { topic, isEpoch, feedOwner, feedAt }: Props = $props()
 
 	let encryptManifest = $state(false)
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 
 	let lastManifestReference: string | undefined
@@ -62,10 +63,17 @@
 			lastManifestType = feedType
 			showTestButtons = true
 
-			result = `<strong>Feed Manifest Created:</strong><br/>
-Reference: ${reference}<br/>
-Feed Type: ${feedType}<br/>
-Length: ${reference.length} chars (${reference.length / 2} bytes)`
+			result = {
+				title: 'Feed Manifest Created:',
+				entries: [
+					{ label: 'Reference', value: reference },
+					{ label: 'Feed Type', value: feedType },
+					{
+						label: 'Length',
+						value: `${reference.length} chars (${reference.length / 2} bytes)`,
+					},
+				],
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`Create feed manifest error: ${msg}`, 'error')
@@ -153,11 +161,18 @@ Length: ${reference.length} chars (${reference.length / 2} bytes)`
 				}
 
 				logStore.log(`Response body: ${bodyPreview}`)
-				result = `<strong>Test Successful:</strong><br/>
-Status: ${status} ${statusText}<br/>
-Content-Type: ${contentType}<br/>
-Swarm-Feed-Index: ${response.headers.get('swarm-feed-index') || 'N/A'}<br/>
-<pre class="mt-2 max-h-[200px] overflow-auto bg-muted p-2 text-xs rounded">${bodyPreview}</pre>`
+				result = {
+					title: 'Test Successful:',
+					entries: [
+						{ label: 'Status', value: `${status} ${statusText}` },
+						{ label: 'Content-Type', value: contentType },
+						{
+							label: 'Swarm-Feed-Index',
+							value: response.headers.get('swarm-feed-index') || 'N/A',
+						},
+					],
+					code: bodyPreview,
+				}
 			} else {
 				const errorBody = await response.text()
 				logStore.log(`Test failed: ${status} ${statusText} - ${errorBody}`, 'error')
@@ -170,13 +185,25 @@ Swarm-Feed-Index: ${response.headers.get('swarm-feed-index') || 'N/A'}<br/>
 						`Test timed out after ${timeoutMs / 1000}s - this is a known issue with Bee's epoch finder`,
 						'error',
 					)
-					result = `<strong class="text-warning">Epoch Feed /bzz/ Timeout (Known Issue)</strong><br/><br/>
-Bee's internal epoch finder has a timeout issue when resolving epoch-based feed manifests via /bzz/.<br/><br/>
-<strong>Your feed data IS correctly stored!</strong><br/><br/>
-<strong>Workarounds:</strong><br/>
-- Use the "Verify Feed Data" button below to confirm your SOC exists<br/>
-- Use Sequence feeds instead for /bzz/ compatibility<br/>
-- Use direct feed access via our AsyncEpochFinder (works correctly)`
+					result = {
+						title: 'Epoch Feed /bzz/ Timeout (Known Issue)',
+						titleVariant: 'warning',
+						entries: [
+							{
+								value:
+									"Bee's internal epoch finder has a timeout issue when resolving epoch-based feed manifests via /bzz/.",
+							},
+							{ value: 'Your feed data IS correctly stored!' },
+							{ value: 'Workarounds:' },
+							{
+								value: '- Use the "Verify Feed Data" button below to confirm your SOC exists',
+							},
+							{ value: '- Use Sequence feeds instead for /bzz/ compatibility' },
+							{
+								value: '- Use direct feed access via our AsyncEpochFinder (works correctly)',
+							},
+						],
+					}
 				} else {
 					logStore.log(`Test timed out after ${timeoutMs / 1000}s`, 'error')
 					error = 'Request timed out'
@@ -216,14 +243,27 @@ Bee's internal epoch finder has a timeout issue when resolving epoch-based feed 
 					logStore.log(
 						`Epoch feed data verified! Content length: ${feedResult.payload.length} bytes`,
 					)
-					result = `<strong class="text-success">Epoch Feed Data Verified!</strong><br/><br/>
-The SOC at root epoch exists and contains valid data.<br/>
-Content length: ${feedResult.payload.length} bytes<br/>
-<pre class="mt-2 max-h-[150px] overflow-auto bg-muted p-2 text-xs rounded">${text}</pre>
-<br/><em class="text-xs">This confirms your feed is correctly stored, even though Bee's /bzz/ endpoint times out.</em>`
+					result = {
+						title: 'Epoch Feed Data Verified!',
+						titleVariant: 'success',
+						entries: [
+							{ value: 'The SOC at root epoch exists and contains valid data.' },
+							{ label: 'Content length', value: `${feedResult.payload.length} bytes` },
+						],
+						code: text,
+						footnote:
+							"This confirms your feed is correctly stored, even though Bee's /bzz/ endpoint times out.",
+					}
 				} else {
-					result = `<strong class="text-warning">No Feed Data Found</strong><br/>
-No update found at timestamp ${at}. Make sure you've uploaded feed data first.`
+					result = {
+						title: 'No Feed Data Found',
+						titleVariant: 'warning',
+						entries: [
+							{
+								value: `No update found at timestamp ${at}. Make sure you've uploaded feed data first.`,
+							},
+						],
+					}
 				}
 			} else {
 				const reader = clientStore.client!.makeSequentialFeedReader({
@@ -235,13 +275,25 @@ No update found at timestamp ${at}. Make sure you've uploaded feed data first.`
 				if (feedResult?.payload) {
 					const text = new TextDecoder().decode(feedResult.payload)
 					logStore.log(`Sequence feed data verified! Index: ${feedResult.feedIndex}`)
-					result = `<strong class="text-success">Sequence Feed Data Verified!</strong><br/>
-Feed Index: ${feedResult.feedIndex}<br/>
-Content length: ${feedResult.payload.length} bytes<br/>
-<pre class="mt-2 max-h-[150px] overflow-auto bg-muted p-2 text-xs rounded">${text}</pre>`
+					result = {
+						title: 'Sequence Feed Data Verified!',
+						titleVariant: 'success',
+						entries: [
+							{ label: 'Feed Index', value: String(feedResult.feedIndex) },
+							{ label: 'Content length', value: `${feedResult.payload.length} bytes` },
+						],
+						code: text,
+					}
 				} else {
-					result = `<strong class="text-warning">No Feed Data Found</strong><br/>
-No sequence feed updates found. Make sure you've uploaded feed data first.`
+					result = {
+						title: 'No Feed Data Found',
+						titleVariant: 'warning',
+						entries: [
+							{
+								value: "No sequence feed updates found. Make sure you've uploaded feed data first.",
+							},
+						],
+					}
 				}
 			}
 		} catch (err) {
@@ -273,7 +325,7 @@ No sequence feed updates found. Make sure you've uploaded feed data first.`
 		Create Feed Manifest
 	</Button>
 
-	{#if isEpoch && !clientStore.canUpload}
+	{#if isEpoch}
 		<p class="text-xs text-muted-foreground">
 			Feed manifests don't work with epoch feeds (/bzz endpoint doesn't support them)
 		</p>

@@ -7,6 +7,7 @@
 	import { bytesToHex } from '$lib/utils/hex'
 	import { validateHex } from '$lib/utils/validation'
 	import { extractContentFromFlatManifest, extractEntryFromManifest } from '@swarm-id/lib'
+	import type { ResultData } from './result-types'
 
 	interface Props {
 		topic: string
@@ -32,7 +33,7 @@
 		onEncryptionKeyUpdate,
 	}: Props = $props()
 
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let downloading = $state(false)
 
@@ -143,13 +144,18 @@
 				const contentData = await clientStore.client!.downloadData(contentReference)
 				const text = new TextDecoder().decode(contentData)
 
-				result = `<strong>Feed Content Download (Hierarchical Manifest):</strong><br/>
-<strong>Root Manifest:</strong> ${manifestReference}<br/>
-<strong>Child Node:</strong> ${childNodeRef}<br/>
-<strong>Content Reference:</strong> ${contentReference}<br/>
-<strong>Content:</strong> ${text}<br/>
-<strong>Size:</strong> ${contentData.length} bytes<br/>
-<span class="text-success">Four-step download complete (hierarchical manifest)</span>`
+				result = {
+					title: 'Feed Content Download (Hierarchical Manifest):',
+					entries: [
+						{ label: 'Root Manifest', value: manifestReference },
+						{ label: 'Child Node', value: childNodeRef },
+						{ label: 'Content Reference', value: contentReference },
+						{ label: 'Content', value: text },
+						{ label: 'Size', value: `${contentData.length} bytes` },
+					],
+					status: 'Four-step download complete (hierarchical manifest)',
+					statusVariant: 'success',
+				}
 				logStore.log(`Hierarchical manifest download successful: ${contentData.length} bytes`)
 			} else if (isEpoch) {
 				let atRaw = downloadAt || Math.floor(Date.now() / 1000).toString()
@@ -174,15 +180,27 @@
 					`Epoch download payload result: reference=${feedResult.reference || 'none'} payloadBytes=${feedResult.payload ? feedResult.payload.length : 0}`,
 				)
 				if (!feedResult.reference || !feedResult.payload) {
-					result = `<strong>Epoch Feed Payload:</strong><br/>Not found`
-					if (feedResult.reference) {
-						result += `<br/><strong>Reference:</strong> ${feedResult.reference}`
+					result = {
+						title: 'Epoch Feed Payload:',
+						entries: [
+							{ value: 'Not found' },
+							...(feedResult.reference
+								? [{ label: 'Reference', value: feedResult.reference }]
+								: []),
+						],
 					}
 					logStore.log('Epoch feed download payload not found')
 				} else {
 					const text = new TextDecoder().decode(feedResult.payload)
 					const hex = bytesToHex(feedResult.payload)
-					result = `<strong>Epoch Feed Payload:</strong><br/>Payload: ${text}<br/>Reference: ${feedResult.reference}<br/><br/><strong>Payload (hex):</strong><br/>${hex}`
+					result = {
+						title: 'Epoch Feed Payload:',
+						entries: [
+							{ label: 'Payload', value: text },
+							{ label: 'Reference', value: feedResult.reference },
+							{ label: 'Payload (hex)', value: hex },
+						],
+					}
 					logStore.log('Epoch feed download successful')
 				}
 			} else {
@@ -196,7 +214,16 @@
 				const feedResult = await reader.downloadPayload(encryptionKey, getDownloadOptions())
 				const text = new TextDecoder().decode(feedResult.payload)
 				const hex = bytesToHex(feedResult.payload)
-				result = `<strong>Sequential Payload:</strong><br/>Payload: ${text}<br/>Timestamp: ${feedResult.timestamp ?? 'N/A'}<br/>Index: ${feedResult.feedIndex}<br/>Next: ${feedResult.feedIndexNext}<br/><br/><strong>Payload (hex):</strong><br/>${hex}`
+				result = {
+					title: 'Sequential Payload:',
+					entries: [
+						{ label: 'Payload', value: text },
+						{ label: 'Timestamp', value: String(feedResult.timestamp ?? 'N/A') },
+						{ label: 'Index', value: String(feedResult.feedIndex) },
+						{ label: 'Next', value: String(feedResult.feedIndexNext) },
+						{ label: 'Payload (hex)', value: hex },
+					],
+				}
 				logStore.log('Sequential feed download payload successful')
 			}
 		} catch (err) {
@@ -255,7 +282,10 @@
 						encryptionKey: key,
 					})
 				}
-				result = `<strong>Epoch Feed Reference:</strong><br/>${feedResult.reference || 'Not found'}`
+				result = {
+					title: 'Epoch Feed Reference:',
+					entries: [{ value: feedResult.reference || 'Not found' }],
+				}
 				logStore.log('Epoch feed download reference successful')
 			} else {
 				const reader = clientStore.client!.makeSequentialFeedReader({ topic, owner })
@@ -266,7 +296,14 @@
 					return
 				}
 				const feedResult = await reader.downloadReference(encryptionKey, getDownloadOptions())
-				result = `<strong>Sequential Reference:</strong><br/>Reference: ${feedResult.reference}<br/>Index: ${feedResult.feedIndex}<br/>Next: ${feedResult.feedIndexNext}`
+				result = {
+					title: 'Sequential Reference:',
+					entries: [
+						{ label: 'Reference', value: feedResult.reference },
+						{ label: 'Index', value: String(feedResult.feedIndex) },
+						{ label: 'Next', value: String(feedResult.feedIndexNext) },
+					],
+				}
 				logStore.log('Sequential feed download reference successful')
 			}
 		} catch (err) {

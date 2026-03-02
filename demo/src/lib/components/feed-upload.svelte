@@ -8,6 +8,7 @@
 	import { buildV1Payload, hexToBytes } from '$lib/utils/hex'
 	import { validateHex } from '$lib/utils/validation'
 	import { buildBzzManifestNode, saveMantarayTreeRecursively } from '@swarm-id/lib'
+	import type { ResultData } from './result-types'
 
 	interface Props {
 		topic: string
@@ -39,7 +40,7 @@
 
 	let payload = $state('Hello feed!')
 	let uploadReference = $state('0000000000000000000000000000000000000000000000000000000000000000')
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 	let uploading = $state(false)
 
@@ -139,11 +140,16 @@
 						/* ignore */
 					}
 
-					result = `<strong>Epoch Feed Upload (Manifest Compat):</strong><br/>
-<strong>Content Reference:</strong> ${contentReference}<br/>
-<strong>Manifest Reference:</strong> ${manifestReference}<br/>
-<strong>SOC Address:</strong> ${feedResult.socAddress}<br/>
-<span class="text-success">v1 format upload complete - accessible via /bzz/{'{'}feed-manifest{'}'}/</span>`
+					result = {
+						title: 'Epoch Feed Upload (Manifest Compat):',
+						entries: [
+							{ label: 'Content Reference', value: contentReference },
+							{ label: 'Manifest Reference', value: manifestReference },
+							{ label: 'SOC Address', value: feedResult.socAddress },
+						],
+						status: 'v1 format upload complete - accessible via /bzz/{feed-manifest}/',
+						statusVariant: 'success',
+					}
 					logStore.log(`Epoch feed upload (v1 compat) successful: soc=${feedResult.socAddress}`)
 				} else {
 					const writer = clientStore.client!.makeSequentialFeedWriter({ topic })
@@ -164,13 +170,18 @@
 					const currentIndex = feedResult.feedIndex ?? 'N/A'
 					logStore.log(`Feed upload result - index: ${currentIndex}, owner: ${feedResult.owner}`)
 
-					result = `<strong>Sequential Feed Upload (Manifest Compat):</strong><br/>
-<strong>Content Reference:</strong> ${contentReference}<br/>
-<strong>Manifest Reference:</strong> ${manifestReference}<br/>
-<strong>Feed Index:</strong> ${currentIndex}<br/>
-<strong>Owner:</strong> ${feedResult.owner}<br/>
-<strong>SOC Reference:</strong> ${feedResult.reference}<br/>
-<span class="text-success">v1 format upload complete - accessible via /bzz/{'{'}feed-manifest{'}'}/</span>`
+					result = {
+						title: 'Sequential Feed Upload (Manifest Compat):',
+						entries: [
+							{ label: 'Content Reference', value: contentReference },
+							{ label: 'Manifest Reference', value: manifestReference },
+							{ label: 'Feed Index', value: String(currentIndex) },
+							{ label: 'Owner', value: feedResult.owner },
+							{ label: 'SOC Reference', value: feedResult.reference },
+						],
+						status: 'v1 format upload complete - accessible via /bzz/{feed-manifest}/',
+						statusVariant: 'success',
+					}
 					logStore.log(`Sequential feed upload (v1 compat) successful: index=${currentIndex}`)
 				}
 			} else {
@@ -199,7 +210,13 @@
 					} catch {
 						/* ignore */
 					}
-					result = `<strong>Epoch Feed Upload Result:</strong><br/>SOC: ${uploadResult.socAddress}<br/>Reference: ${uploadResult.reference || 'N/A'}`
+					result = {
+						title: 'Epoch Feed Upload Result:',
+						entries: [
+							{ label: 'SOC', value: uploadResult.socAddress },
+							{ label: 'Reference', value: uploadResult.reference || 'N/A' },
+						],
+					}
 					logStore.log(
 						`Epoch feed upload successful: soc=${uploadResult.socAddress} at=${atRaw} topic=${topic}`,
 					)
@@ -219,7 +236,15 @@
 						: await writer.uploadPayload(payload, options)
 					onEncryptionKeyUpdate?.(uploadResult.encryptionKey || uploadEncryptionKey || '')
 					const currentIndex = uploadResult.feedIndex ?? 'N/A'
-					result = `<strong>Sequential Payload Upload:</strong><br/>Index: ${currentIndex}<br/>Reference: ${uploadResult.reference}<br/>Owner: ${uploadResult.owner}<br/>Encryption Key: ${uploadResult.encryptionKey || 'N/A'}`
+					result = {
+						title: 'Sequential Payload Upload:',
+						entries: [
+							{ label: 'Index', value: String(currentIndex) },
+							{ label: 'Reference', value: uploadResult.reference },
+							{ label: 'Owner', value: uploadResult.owner },
+							{ label: 'Encryption Key', value: uploadResult.encryptionKey || 'N/A' },
+						],
+					}
 					onOwnerUpdate?.(uploadResult.owner || '')
 					onDownloadAtUpdate?.('')
 					onFeedAtClear?.()
@@ -285,7 +310,13 @@
 				} catch {
 					/* ignore */
 				}
-				result = `<strong>Epoch Feed Upload Result:</strong><br/>SOC: ${uploadResult.socAddress}<br/>Reference: ${uploadResult.reference || 'N/A'}`
+				result = {
+					title: 'Epoch Feed Upload Result:',
+					entries: [
+						{ label: 'SOC', value: uploadResult.socAddress },
+						{ label: 'Reference', value: uploadResult.reference || 'N/A' },
+					],
+				}
 				logStore.log(
 					`Epoch feed upload successful: soc=${uploadResult.socAddress} at=${atRaw} topic=${topic}`,
 				)
@@ -305,7 +336,15 @@
 					: await writer.uploadReference(ref, options)
 				onEncryptionKeyUpdate?.(uploadResult.encryptionKey || uploadEncryptionKey || '')
 				const currentIndex = uploadResult.feedIndex ?? 'N/A'
-				result = `<strong>Sequential Reference Upload:</strong><br/>Index: ${currentIndex}<br/>Reference: ${uploadResult.reference}<br/>Owner: ${uploadResult.owner}<br/>Encryption Key: ${uploadResult.encryptionKey || 'N/A'}`
+				result = {
+					title: 'Sequential Reference Upload:',
+					entries: [
+						{ label: 'Index', value: String(currentIndex) },
+						{ label: 'Reference', value: uploadResult.reference },
+						{ label: 'Owner', value: uploadResult.owner },
+						{ label: 'Encryption Key', value: uploadResult.encryptionKey || 'N/A' },
+					],
+				}
 				onOwnerUpdate?.(uploadResult.owner || '')
 				onDownloadAtUpdate?.('')
 				onFeedAtClear?.()

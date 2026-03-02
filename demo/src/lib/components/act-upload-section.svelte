@@ -11,6 +11,7 @@
 	import { Button } from '$lib/components/ui/button'
 	import { Checkbox } from '$lib/components/ui/checkbox'
 	import { Label } from '$lib/components/ui/label'
+	import type { ResultData } from './result-types'
 	import ResultDisplay from './result-display.svelte'
 	import { clientStore } from '$lib/stores/client.svelte'
 	import { logStore } from '$lib/stores/log.svelte'
@@ -28,7 +29,7 @@
 	let data = $state('Secret message for ACT test!')
 	let granteesInput = $state('')
 	let beeCompatible = $state(true)
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 
 	const COMPRESSED_PUBKEY_LENGTH = 66
@@ -80,19 +81,31 @@
 				publisherPubKey: actResult.publisherPubKey,
 			})
 
-			const beeNote = beeCompatible
-				? `<br/><br/><strong class="text-success">To download with Bee node (curl):</strong><br/><pre class="mt-1 p-2 rounded bg-[#2d2d2d] text-gray-200 text-xs overflow-x-auto whitespace-pre-wrap break-all">curl "http://localhost:1633/bzz/${actResult.encryptedReference}/" \\
+			result = {
+				title: 'ACT Upload Result:',
+				entries: [
+					{ label: 'Encrypted Ref', value: actResult.encryptedReference },
+					{ label: 'History Ref', value: actResult.historyReference },
+					{ label: 'Publisher Key', value: actResult.publisherPubKey },
+					{ label: 'ACT Ref', value: actResult.actReference },
+					{ label: 'Grantee List Ref', value: actResult.granteeListReference },
+				],
+				...(beeCompatible
+					? {
+							code: `curl "http://localhost:1633/bzz/${actResult.encryptedReference}/" \\
   -H "Swarm-Act: true" \\
   -H "Swarm-Act-Publisher: ${actResult.publisherPubKey}" \\
-  -H "Swarm-Act-History-Address: ${actResult.historyReference}"</pre>`
-				: `<br/><br/><strong class="text-warning">Bee node download disabled:</strong> use the ACT Download section (client-side decrypt).`
-
-			result = `<strong>ACT Upload Result:</strong><br/>
-<strong>Encrypted Ref:</strong> ${actResult.encryptedReference}<br/>
-<strong>History Ref:</strong> ${actResult.historyReference}<br/>
-<strong>Publisher Key:</strong> ${actResult.publisherPubKey}<br/>
-<strong>ACT Ref:</strong> ${actResult.actReference}<br/>
-<strong>Grantee List Ref:</strong> ${actResult.granteeListReference}${beeNote}`
+  -H "Swarm-Act-History-Address: ${actResult.historyReference}"`,
+							codeDark: true,
+							status: 'To download with Bee node (curl):',
+							statusVariant: 'success' as const,
+						}
+					: {
+							status:
+								'Bee node download disabled: use the ACT Download section (client-side decrypt).',
+							statusVariant: 'warning' as const,
+						}),
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`ACT Upload failed: ${msg}`, 'error')

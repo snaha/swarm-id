@@ -9,6 +9,7 @@
 	import { Input } from '$lib/components/ui/input'
 	import { Button } from '$lib/components/ui/button'
 	import ResultDisplay from './result-display.svelte'
+	import type { ResultData } from './result-types'
 	import { clientStore } from '$lib/stores/client.svelte'
 	import { logStore } from '$lib/stores/log.svelte'
 
@@ -20,7 +21,7 @@
 	let { historyRef = $bindable(''), onHistoryUpdate }: Props = $props()
 
 	let granteesInput = $state('')
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 
 	const REFERENCE_LENGTH = 64
@@ -71,11 +72,16 @@
 
 			onHistoryUpdate?.(addResult.historyReference)
 
-			result = `<strong>Grantees Added Successfully!</strong><br/>
-<strong>New History Ref:</strong> ${addResult.historyReference}<br/>
-<strong>New ACT Ref:</strong> ${addResult.actReference}<br/>
-<strong>Grantee List Ref:</strong> ${addResult.granteeListReference}<br/>
-<br/><span class="text-success">Use the new History Reference for future downloads/modifications</span>`
+			result = {
+				title: 'Grantees Added Successfully!',
+				entries: [
+					{ label: 'New History Ref', value: addResult.historyReference },
+					{ label: 'New ACT Ref', value: addResult.actReference },
+					{ label: 'Grantee List Ref', value: addResult.granteeListReference },
+				],
+				status: 'Use the new History Reference for future downloads/modifications',
+				statusVariant: 'success',
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`Add grantees failed: ${msg}`, 'error')

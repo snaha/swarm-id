@@ -3,6 +3,7 @@
 	import { Input } from '$lib/components/ui/input'
 	import { Button } from '$lib/components/ui/button'
 	import ResultDisplay from './result-display.svelte'
+	import type { ResultData } from './result-types'
 	import { clientStore } from '$lib/stores/client.svelte'
 	import { logStore } from '$lib/stores/log.svelte'
 
@@ -12,7 +13,7 @@
 
 	let { reference = $bindable('') }: Props = $props()
 
-	let result = $state<string | undefined>(undefined)
+	let result = $state<ResultData | undefined>(undefined)
 	let error = $state<string | undefined>(undefined)
 
 	const REFERENCE_LENGTH = 64
@@ -34,7 +35,7 @@
 			const data = await clientStore.client!.downloadData(ref)
 			const text = new TextDecoder().decode(data)
 			logStore.log(`Download successful! (${data.length} bytes)`)
-			result = `<strong>Downloaded Data:</strong><br/>${text}`
+			result = { title: 'Downloaded Data:', entries: [{ value: text }] }
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`Download failed: ${msg}`, 'error')

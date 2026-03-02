@@ -11,6 +11,7 @@
 	import { Button } from '$lib/components/ui/button'
 	import { Separator } from '$lib/components/ui/separator'
 	import ResultDisplay from './result-display.svelte'
+	import type { ResultData } from './result-types'
 	import { clientStore } from '$lib/stores/client.svelte'
 	import { logStore } from '$lib/stores/log.svelte'
 
@@ -21,13 +22,13 @@
 
 	let identifier = $state(DEFAULT_IDENTIFIER)
 	let uploadData = $state('Hello SOC!')
-	let uploadResult = $state<string | undefined>(undefined)
+	let uploadResult = $state<ResultData | undefined>(undefined)
 	let uploadError = $state<string | undefined>(undefined)
 
 	let owner = $state('')
 	let downloadIdentifier = $state('')
 	let encryptionKey = $state('')
-	let downloadResult = $state<string | undefined>(undefined)
+	let downloadResult = $state<ResultData | undefined>(undefined)
 	let downloadError = $state<string | undefined>(undefined)
 
 	async function handleEncryptedUpload() {
@@ -60,10 +61,14 @@
 			downloadIdentifier = identifier
 			encryptionKey = result.encryptionKey || ''
 
-			uploadResult = `<strong>Encrypted SOC Upload Result:</strong><br/>
-<strong>Reference:</strong> ${result.reference}<br/>
-<strong>Owner:</strong> ${result.owner}<br/>
-<strong>Encryption Key:</strong> ${result.encryptionKey || 'N/A'}`
+			uploadResult = {
+				title: 'Encrypted SOC Upload Result:',
+				entries: [
+					{ label: 'Reference', value: result.reference },
+					{ label: 'Owner', value: result.owner },
+					{ label: 'Encryption Key', value: result.encryptionKey || 'N/A' },
+				],
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`SOC upload failed: ${msg}`, 'error')
@@ -101,9 +106,13 @@
 			owner = result.owner
 			downloadIdentifier = identifier
 
-			uploadResult = `<strong>Raw SOC Upload Result:</strong><br/>
-<strong>Reference:</strong> ${result.reference}<br/>
-<strong>Owner:</strong> ${result.owner}`
+			uploadResult = {
+				title: 'Raw SOC Upload Result:',
+				entries: [
+					{ label: 'Reference', value: result.reference },
+					{ label: 'Owner', value: result.owner },
+				],
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`SOC raw upload failed: ${msg}`, 'error')
@@ -137,10 +146,14 @@
 			const soc = await reader.download(downloadIdentifier, encryptionKey)
 			const text = new TextDecoder().decode(soc.payload)
 
-			downloadResult = `<strong>Encrypted SOC Download Result:</strong><br/>
-<strong>Owner:</strong> ${soc.owner}<br/>
-<strong>Address:</strong> ${soc.address}<br/>
-<strong>Payload:</strong> ${text}`
+			downloadResult = {
+				title: 'Encrypted SOC Download Result:',
+				entries: [
+					{ label: 'Owner', value: soc.owner },
+					{ label: 'Address', value: soc.address },
+					{ label: 'Payload', value: text },
+				],
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`SOC download failed: ${msg}`, 'error')
@@ -169,10 +182,14 @@
 			const soc = await reader.rawDownload(downloadIdentifier)
 			const text = new TextDecoder().decode(soc.payload)
 
-			downloadResult = `<strong>Raw SOC Download Result:</strong><br/>
-<strong>Owner:</strong> ${soc.owner}<br/>
-<strong>Address:</strong> ${soc.address}<br/>
-<strong>Payload:</strong> ${text}`
+			downloadResult = {
+				title: 'Raw SOC Download Result:',
+				entries: [
+					{ label: 'Owner', value: soc.owner },
+					{ label: 'Address', value: soc.address },
+					{ label: 'Payload', value: text },
+				],
+			}
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err)
 			logStore.log(`SOC raw download failed: ${msg}`, 'error')
