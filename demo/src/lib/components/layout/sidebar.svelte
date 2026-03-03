@@ -16,7 +16,7 @@
 
 <aside
 	class={cn(
-		'fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col border-r border-border bg-muted/50 transition-transform duration-200',
+		'fixed inset-y-0 left-0 z-50 flex w-[260px] flex-col border-r border-border bg-muted transition-transform duration-200',
 		'md:relative md:translate-x-0',
 		sidebarStore.mobileOpen ? 'translate-x-0' : '-translate-x-full',
 	)}
