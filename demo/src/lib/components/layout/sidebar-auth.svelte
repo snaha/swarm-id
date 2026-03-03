@@ -4,6 +4,7 @@
 	import { Label } from '$lib/components/ui/label'
 	import { Separator } from '$lib/components/ui/separator'
 	import { Popover } from '$lib/components/ui/popover'
+	import InfoButton from '$lib/components/ui/tooltip/info-button.svelte'
 	import { clientStore } from '$lib/stores/client.svelte'
 
 	const isHTTP = $derived(typeof window !== 'undefined' && window.location.protocol === 'http:')
@@ -27,6 +28,30 @@
 			popoverOpen = false
 		}
 	})
+
+	const libraryDescription = $derived(
+		clientStore.authenticated
+			? 'Clears your session via the library.'
+			: 'Opens a popup to authenticate with the identity provider.',
+	)
+
+	const libraryTooltip = $derived(
+		clientStore.authenticated
+			? 'Calls client.disconnect() to clear your session and remove the app-specific keys from memory.'
+			: 'Calls client.connect() which opens a popup to the identity provider. The popup writes your session to localStorage, which the embedded iframe (same origin) picks up via a storage event.',
+	)
+
+	const iframeDescription = $derived(
+		clientStore.authenticated
+			? 'Button rendered by the identity provider in an iframe.'
+			: 'Grants cross-site storage access via the Storage Access API.',
+	)
+
+	const iframeTooltip = $derived(
+		clientStore.authenticated
+			? 'This button is rendered by the identity provider inside a hidden iframe. It can also be used to disconnect your session.'
+			: 'This button is rendered by the identity provider inside a hidden iframe. Clicking it prompts the browser to grant cross-site storage access via the Storage Access API, needed when the browser blocks it by default (e.g. HTTP on Chrome).',
+	)
 </script>
 
 <Popover bind:open={popoverOpen}>
@@ -71,14 +96,17 @@
 	<div class="space-y-3">
 		<!-- Library API section -->
 		<div>
-			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider"
-				>Library API</span
-			>
-			<p class="text-xs text-muted-foreground mt-1">
-				Calls <code class="text-foreground">client.connect()</code> from the Swarm ID library. Opens a
-				popup window to the identity provider where you authenticate. The popup writes your session to
-				localStorage, which the embedded iframe (same origin) picks up via a storage event.
-			</p>
+			<div class="flex items-start gap-1.5">
+				<div class="min-w-0 flex-1">
+					<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+						>Library API</span
+					>
+					<p class="text-xs text-muted-foreground mt-1">
+						{libraryDescription}
+					</p>
+				</div>
+				<InfoButton text={libraryTooltip} />
+			</div>
 			<Button
 				onclick={() => {
 					clientStore.connect({ agent: agentSignup })
@@ -102,14 +130,17 @@
 
 		<!-- Iframe button section -->
 		<div>
-			<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider"
-				>Iframe button</span
-			>
-			<p class="text-xs text-muted-foreground mt-1">
-				This button is rendered by the Swarm ID app inside a hidden iframe. Clicking it prompts the
-				browser to grant cross-site storage access via the Storage Access API, which is needed when
-				the browser blocks it by default (e.g. HTTP on Chrome).
-			</p>
+			<div class="flex items-start gap-1.5">
+				<div class="min-w-0 flex-1">
+					<span class="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+						>Iframe button</span
+					>
+					<p class="text-xs text-muted-foreground mt-1">
+						{iframeDescription}
+					</p>
+				</div>
+				<InfoButton text={iframeTooltip} />
+			</div>
 			<div id="swarm-id-button" class="w-full h-[36px] mt-2"></div>
 		</div>
 
