@@ -94,6 +94,8 @@
 			onEncryptionKeyUpdate={(key) => (encryptionKey = key)}
 		/>
 
-		<FeedManifest {topic} {isEpoch} {feedOwner} {feedAt} />
+		{#if isManifestCompat}
+			<FeedManifest {topic} {isEpoch} {feedOwner} {feedAt} />
+		{/if}
 	</CardContent>
 </Card>
