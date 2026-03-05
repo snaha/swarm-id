@@ -27,7 +27,7 @@
 		"clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
 		"install:all": "pnpm install",
 		"check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all && pnpm --filter @swarm-id/demo check:all",
-		"format:all": "pnpm --filter @swarm-id/lib format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format"
+		"format:all": "pnpm --filter @swarm-id/lib format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format"
 	},
 	"devDependencies": {
 		"@fairdatasociety/fdp-play": "^3.3.0",

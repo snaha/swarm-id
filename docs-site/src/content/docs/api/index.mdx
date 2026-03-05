@@ -244,11 +244,14 @@ await client.initialize()
 In addition to the iframe-based authentication (via `getAuthIframe()`), you can manually trigger the authentication flow by calling `connect()`. This opens the same authentication URL in a new window:
 
 ```typescript
-// Open authentication manually (opens in new window)
-const url = client.connect('popup')
+// Open authentication page (default: new window)
+const url = client.connect()
 
-// Or open as full window
-const url = client.connect('window')
+// Open as popup window
+client.connect({ popupMode: 'popup' })
+
+// Open with agent sign-up option visible
+client.connect({ agent: true })
 ```
 
 **When to use `connect()`:**
@@ -294,7 +297,7 @@ if (status.authenticated) {
 
 ---
 
-### `connect(popupMode?)`
+### `connect(options?)`
 
 Opens Swarm ID authentication page in a new window.
 
@@ -302,9 +305,20 @@ This method creates the same authentication URL as used by the iframe proxy and 
 
 **Parameters:**
 
-| Parameter   | Type                  | Required | Description                                                                    |
-| ----------- | --------------------- | -------- | ------------------------------------------------------------------------------ |
-| `popupMode` | `"window" \| "popup"` | No       | Whether to open as a popup window ("popup") or full window ("window", default) |
+| Parameter           | Type                  | Required | Description                                                                    |
+| ------------------- | --------------------- | -------- | ------------------------------------------------------------------------------ |
+| `options`           | `ConnectOptions`      | No       | Configuration options for the authentication window                            |
+| `options.popupMode` | `"window" \| "popup"` | No       | Whether to open as a popup window ("popup") or full window ("window", default) |
+| `options.agent`     | `boolean`             | No       | Whether to show the agent sign-up option on the authentication page            |
+
+**ConnectOptions Interface:**
+
+```typescript
+interface ConnectOptions {
+	popupMode?: 'popup' | 'window' // Default: "window"
+	agent?: boolean // Shows agent sign-up option
+}
+```
 
 **Returns:** `string` - The URL that was opened (useful for testing or reference)
 
@@ -318,12 +332,15 @@ This method creates the same authentication URL as used by the iframe proxy and 
 const client = new SwarmIdClient({ ... })
 await client.initialize()
 
-// Open authentication page
+// Open authentication page (default: new window)
 const url = client.connect()
 console.log('Authentication opened at:', url)
 
 // Open as popup window
-client.connect("popup")
+client.connect({ popupMode: 'popup' })
+
+// Open with agent sign-up option visible
+client.connect({ agent: true })
 ```
 
 ---
@@ -974,7 +991,9 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 
 ```typescript
 const writer = client.makeEpochFeedWriter({ topic })
-const upload = await writer.uploadPayload('Hello feed', { at: BigInt(Math.floor(Date.now() / 1000)) })
+const upload = await writer.uploadPayload('Hello feed', {
+	at: BigInt(Math.floor(Date.now() / 1000)),
+})
 const latest = await writer.downloadReference({ at: BigInt(Math.floor(Date.now() / 1000)) })
 ```
 
