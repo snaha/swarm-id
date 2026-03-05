@@ -59,6 +59,7 @@ export type FeedIndex = z.infer<typeof FeedIndexSchema>
 const UploadOptionsObjectSchema = z.object({
   pin: z.boolean().optional(),
   encrypt: z.boolean().optional(),
+  encryptManifest: z.boolean().optional(),
   tag: z.number().optional(),
   deferred: z.boolean().optional(),
   redundancyLevel: z.number().min(0).max(4).optional(),
@@ -99,6 +100,7 @@ export interface UploadProgress {
 export interface UploadOptions {
   pin?: boolean
   encrypt?: boolean
+  encryptManifest?: boolean
   tag?: number
   deferred?: boolean
   redundancyLevel?: number

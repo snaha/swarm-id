@@ -1,11 +1,18 @@
 <script lang="ts">
 	import UploadSection from '$lib/components/upload-section.svelte'
 	import DownloadSection from '$lib/components/download-section.svelte'
+	import FileUploadSection from '$lib/components/file-upload-section.svelte'
+	import FileDownloadSection from '$lib/components/file-download-section.svelte'
 
 	let downloadReference = $state('')
+	let fileDownloadReference = $state('')
 
 	function handleUploadResult(reference: string) {
 		downloadReference = reference
+	}
+
+	function handleFileUploadResult(reference: string) {
+		fileDownloadReference = reference
 	}
 </script>
 
@@ -20,4 +27,7 @@
 
 	<UploadSection onUploadResult={handleUploadResult} />
 	<DownloadSection bind:reference={downloadReference} />
+
+	<FileUploadSection onUploadResult={handleFileUploadResult} />
+	<FileDownloadSection bind:reference={fileDownloadReference} />
 </div>

@@ -1456,10 +1456,11 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, data, name, options, requestOptions } = message
+    const fileName = name || "index.bin"
 
     console.log(
       "[Proxy] Upload file request, name:",
-      name,
+      fileName,
       "size:",
       data ? data.length : 0,
     )
@@ -1469,18 +1470,16 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
-      // Check if only signer is available (no batch ID)
-      if (this.signerKey && !this.postageBatchId) {
-        throw new Error(
-          "Signed uploads for files not yet implemented. Please use uploadChunk for signed uploads, or provide a postage batch ID for automatic chunking.",
-        )
-      }
-
       if (!this.postageBatchId) {
         throw new Error(
           "No postage batch ID available. Please authenticate with a valid batch ID.",
         )
       }
+
+      if (!this.stamper) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
+
       console.log(
         "[Proxy] Uploading file to Bee at:",
         this.beeApiUrl,
@@ -1488,33 +1487,139 @@ export class SwarmIdProxy {
         this.postageBatchId,
       )
 
-      // Upload file using bee-js
-      const uploadResult = await this.bee.uploadFile(
-        this.postageBatchId,
-        data,
-        name,
-        options,
-        requestOptions,
-      )
+      // Prepare upload context
+      const context: UploadContext = {
+        bee: this.bee,
+        stamper: this.stamper,
+      }
 
-      console.log(
-        "[Proxy] File upload successful, reference:",
-        uploadResult.reference.toHex(),
-      )
+      // Step 1: Upload file data (encrypted by default, unless encrypt=false)
+      const shouldEncryptContent = options?.encrypt !== false
+      let contentUpload: { reference: string; tagUid?: number }
 
+      if (shouldEncryptContent) {
+        contentUpload = await uploadEncryptedDataWithSigning(
+          context,
+          data,
+          undefined, // generate random encryption key
+          options,
+          undefined, // no progress callback for now
+          requestOptions,
+        )
+        console.log(
+          "[Proxy] Encrypted content uploaded, reference:",
+          contentUpload.reference.substring(0, 32) + "...",
+        )
+      } else {
+        contentUpload = await uploadDataWithSigning(
+          context,
+          data,
+          options,
+          undefined, // no progress callback for now
+          requestOptions,
+        )
+        console.log(
+          "[Proxy] Content uploaded (unencrypted), reference:",
+          contentUpload.reference,
+        )
+      }
+
+      // Step 2: Create Mantaray manifest wrapping the content
+      const manifest = new MantarayNode()
+      const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
+
+      // Add file fork with metadata
+      manifest.addFork(fileName, contentReferenceBytes, {
+        "Content-Type": "application/octet-stream",
+        Filename: fileName,
+      })
+
+      // Add "/" fork with website-index-document pointing to the file
+      manifest.addFork("/", NULL_ADDRESS, {
+        "website-index-document": fileName,
+      })
+
+      // Step 3: Upload manifest (encrypted only if encryptManifest=true)
+      let manifestTag = options?.tag
+      if (!manifestTag) {
+        const tagResponse = await context.bee.createTag()
+        manifestTag = tagResponse.uid
+      }
+
+      const shouldEncryptManifest = options?.encryptManifest === true
+      let manifestResult: { rootReference: string; tagUid?: number }
+
+      if (shouldEncryptManifest) {
+        manifestResult = await saveMantarayTreeRecursivelyEncrypted(
+          manifest,
+          async (encryptedData, address, isRoot) => {
+            const envelope = context.stamper.stamp({
+              hash: () => address,
+              build: () => encryptedData,
+              span: 0n,
+              writer: undefined as any,
+            })
+            await context.bee.uploadChunk(
+              envelope,
+              encryptedData,
+              { ...options, tag: manifestTag, deferred: false },
+              requestOptions,
+            )
+            return {
+              tagUid: isRoot ? manifestTag : undefined,
+            }
+          },
+        )
+        console.log(
+          "[Proxy] Encrypted manifest uploaded, reference:",
+          manifestResult.rootReference.substring(0, 32) + "...",
+        )
+      } else {
+        manifestResult = await saveMantarayTreeRecursively(
+          manifest,
+          async (data, isRoot) => {
+            const chunk = makeContentAddressedChunk(data)
+            const envelope = context.stamper.stamp({
+              hash: () => chunk.address.toUint8Array(),
+              build: () => chunk.data,
+              span: chunk.span.toBigInt(),
+              writer: undefined as any,
+            })
+            const result = await context.bee.uploadChunk(
+              envelope,
+              chunk.data,
+              { ...options, tag: manifestTag, deferred: false },
+              requestOptions,
+            )
+            return {
+              reference: result.reference.toHex(),
+              tagUid: isRoot ? manifestTag : undefined,
+            }
+          },
+        )
+        console.log(
+          "[Proxy] Manifest uploaded (unencrypted), reference:",
+          manifestResult.rootReference,
+        )
+      }
+
+      // Save stamper state after successful upload
+      await this.saveStamperState()
+
+      // Return 128-char encrypted manifest reference (accessible via /bzz/)
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "uploadFileResponse",
             requestId,
-            reference: uploadResult.reference.toHex(),
-            tagUid: uploadResult.tagUid,
+            reference: manifestResult.rootReference,
+            tagUid: manifestResult.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )
       }
 
-      console.log("[Proxy] File uploaded:", uploadResult.reference.toHex())
+      console.log("[Proxy] File uploaded:", manifestResult.rootReference)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1543,29 +1648,64 @@ export class SwarmIdProxy {
     try {
       console.log("[Proxy] Downloading file from Bee at:", this.beeApiUrl)
 
-      // Download file using bee-js
-      const fileData = await this.bee.downloadFile(
+      // Always load the manifest first - file uploads create manifests
+      const manifest = await loadMantarayTreeWithChunkAPI(
+        this.bee,
         reference,
-        path,
-        options,
         requestOptions,
       )
 
-      console.log(
-        "[Proxy] File download successful, data size:",
-        fileData.data.toUint8Array().length,
+      let targetPath: string
+      if (path) {
+        // Use provided path
+        targetPath = path
+      } else {
+        // No path: get index document from manifest metadata
+        const { indexDocument } = manifest.getDocsMetadata()
+        if (!indexDocument) {
+          throw new Error(
+            "Manifest does not contain an index document reference",
+          )
+        }
+        targetPath = indexDocument
+      }
+
+      // Find the content node at the target path
+      const contentNode = manifest.find(targetPath)
+      if (!contentNode) {
+        throw new Error(`Path not found in manifest: ${targetPath}`)
+      }
+      if (!contentNode.targetAddress) {
+        throw new Error(`Path "${targetPath}" does not have a target address`)
+      }
+
+      // Get filename from metadata or use the path
+      const name =
+        contentNode.metadata?.["Filename"] ||
+        targetPath.split("/").pop() ||
+        "file"
+
+      // Download actual content from the target address
+      const targetRef = uint8ArrayToHex(contentNode.targetAddress)
+      console.log("[Proxy] Resolved content reference:", targetRef)
+
+      const data = await downloadDataWithChunkAPI(
+        this.bee,
+        targetRef,
+        options,
+        undefined,
+        requestOptions,
       )
 
-      // Convert Bytes to Uint8Array for postMessage
-      const data = fileData.data.toUint8Array()
+      console.log("[Proxy] File download successful, data size:", data.length)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
             type: "downloadFileResponse",
             requestId,
-            name: fileData.name || "file",
-            data: data as Uint8Array,
+            name,
+            data,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
         )

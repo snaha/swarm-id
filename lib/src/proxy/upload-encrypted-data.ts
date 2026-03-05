@@ -155,6 +155,12 @@ export async function uploadEncryptedDataWithSigning(
       span: BigInt(payload.length),
     })
 
+    // DEBUG: Trace encryption key storage
+    console.log(
+      "[UploadEncryptedData] encryptionKey stored:",
+      encryptedChunk.encryptionKey?.length,
+    )
+
     // Upload chunk with signing
     await uploadSingleEncryptedChunk(
       bee,
@@ -179,6 +185,15 @@ export async function uploadEncryptedDataWithSigning(
     const ref = new Uint8Array(64)
     ref.set(encryptedChunkRefs[0].address, 0)
     ref.set(encryptedChunkRefs[0].key, 32)
+
+    // DEBUG: Trace 64-byte reference construction
+    console.log("[UploadEncryptedData] Building 64-byte ref:")
+    console.log("  address length:", encryptedChunkRefs[0].address.length)
+    console.log("  key length:", encryptedChunkRefs[0].key?.length)
+    console.log("  ref total length:", ref.length)
+    console.log("  ref content (first 32):", Array.from(ref.slice(0, 32)))
+    console.log("  ref content (last 32):", Array.from(ref.slice(32)))
+
     rootReference = new Reference(ref)
     console.log(
       "[UploadEncryptedData] Single chunk upload, reference:",
