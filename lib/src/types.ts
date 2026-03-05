@@ -38,10 +38,17 @@ export const ReferenceSchema = z
 export const BatchIdSchema = hexString(64) // 32 bytes
 export const AddressSchema = hexString(40) // 20 bytes
 export const PrivateKeySchema = hexString(64) // 32 bytes
+export const EncryptionKeySchema = hexString(64) // 32 bytes symmetric key
 export const IdentifierSchema = hexString(64) // 32 bytes
 export const SignatureSchema = hexString(130) // 65 bytes
-export const TimestampSchema = z.union([z.number(), z.string()])
-export const FeedIndexSchema = z.union([z.number(), z.string()])
+export const TimestampSchema = z.preprocess(
+  (val) => (typeof val === "bigint" ? val.toString() : val),
+  z.union([z.number(), z.string()]),
+)
+export const FeedIndexSchema = z.preprocess(
+  (val) => (typeof val === "bigint" ? val.toString() : val),
+  z.union([z.number(), z.string()]),
+)
 
 export type Reference = z.infer<typeof ReferenceSchema>
 export type BatchId = z.infer<typeof BatchIdSchema>
@@ -765,7 +772,7 @@ export const SocDownloadMessageSchema = z.object({
   requestId: z.string(),
   owner: AddressSchema.optional(),
   identifier: IdentifierSchema,
-  encryptionKey: PrivateKeySchema,
+  encryptionKey: EncryptionKeySchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -774,7 +781,7 @@ export const SocRawDownloadMessageSchema = z.object({
   requestId: z.string(),
   owner: AddressSchema.optional(),
   identifier: IdentifierSchema,
-  encryptionKey: PrivateKeySchema.optional(),
+  encryptionKey: EncryptionKeySchema.optional(),
   requestOptions: RequestOptionsSchema,
 })
 
@@ -790,7 +797,7 @@ export const EpochFeedDownloadReferenceMessageSchema = z.object({
   owner: AddressSchema.optional(),
   at: TimestampSchema,
   after: TimestampSchema.optional(),
-  encryptionKey: PrivateKeySchema.optional(),
+  encryptionKey: EncryptionKeySchema.optional(),
   requestOptions: RequestOptionsSchema,
 })
 
@@ -814,7 +821,7 @@ export const EpochFeedUploadReferenceMessageSchema = z.object({
   signer: PrivateKeySchema.optional(),
   at: TimestampSchema,
   reference: ReferenceSchema,
-  encryptionKey: PrivateKeySchema.optional(),
+  encryptionKey: EncryptionKeySchema.optional(),
   hints: EpochHintsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -838,7 +845,7 @@ export const SequentialFeedDownloadPayloadMessageSchema = z.object({
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
   lookupTimeoutMs: z.number().optional(),
-  encryptionKey: PrivateKeySchema,
+  encryptionKey: EncryptionKeySchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -851,7 +858,7 @@ export const SequentialFeedDownloadRawPayloadMessageSchema = z.object({
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
   lookupTimeoutMs: z.number().optional(),
-  encryptionKey: PrivateKeySchema.optional(),
+  encryptionKey: EncryptionKeySchema.optional(),
   requestOptions: RequestOptionsSchema,
 })
 
@@ -864,7 +871,7 @@ export const SequentialFeedDownloadReferenceMessageSchema = z.object({
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
   lookupTimeoutMs: z.number().optional(),
-  encryptionKey: PrivateKeySchema,
+  encryptionKey: EncryptionKeySchema,
   requestOptions: RequestOptionsSchema,
 })
 
@@ -892,7 +899,7 @@ export const SequentialFeedUploadRawPayloadMessageSchema = z.object({
   at: TimestampSchema.optional(),
   hasTimestamp: z.boolean().optional(),
   lookupTimeoutMs: z.number().optional(),
-  encryptionKey: PrivateKeySchema.optional(),
+  encryptionKey: EncryptionKeySchema.optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
 })
@@ -1268,7 +1275,7 @@ export const EpochFeedUploadReferenceResponseMessageSchema = z.object({
   type: z.literal("epochFeedUploadReferenceResponse"),
   requestId: z.string(),
   socAddress: ReferenceSchema,
-  encryptionKey: PrivateKeySchema.optional(),
+  encryptionKey: EncryptionKeySchema.optional(),
   // Epoch info for next update (stateless hints)
   epoch: z.object({
     start: z.string(), // Stringified bigint

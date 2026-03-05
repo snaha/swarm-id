@@ -10,9 +10,9 @@ import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
 import { EthAddress, Reference, Topic } from "@ethersphere/bee-js"
 import { EpochIndex, lca, MAX_LEVEL } from "./epoch"
 import type { EpochFinder } from "./types"
+import { findPreviousLeaf } from "./utils"
 
 const EPOCH_LOOKUP_TIMEOUT_MS = 2000
-const MAX_LEAF_BACKSCAN = 128n
 
 /**
  * Synchronous recursive finder for epoch-based feeds
@@ -240,6 +240,14 @@ export class SyncEpochFinder implements EpochFinder {
     // - 48 bytes: span(8) + timestamp(8) + reference(32) - from /chunks with v1 format
     // - 72 bytes: timestamp(8) + encrypted_reference(64) - from /soc endpoint
     // - 80 bytes: span(8) + timestamp(8) + encrypted_reference(64) - from /chunks with v1 format
+    const VALID_PAYLOAD_LENGTHS = [40, 48, 72, 80]
+    if (!VALID_PAYLOAD_LENGTHS.includes(payload.length)) {
+      console.warn(
+        `Unexpected feed payload length: ${payload.length}. Expected 40, 48, 72, or 80 bytes.`,
+      )
+      return undefined
+    }
+
     const hasSpanPrefix = payload.length === 48 || payload.length === 80
 
     const timestampOffset = hasSpanPrefix ? 8 : 0
@@ -263,37 +271,12 @@ export class SyncEpochFinder implements EpochFinder {
     return payload.slice(timestampOffset + TIMESTAMP_SIZE)
   }
 
-  private async findPreviousLeaf(
+  private findPreviousLeaf(
     at: bigint,
     after: bigint,
   ): Promise<Uint8Array | undefined> {
-    if (at === 0n) {
-      return undefined
-    }
-
-    const minAt = after > 0n ? after : 0n
-    const lowerBound =
-      at > MAX_LEAF_BACKSCAN && at - MAX_LEAF_BACKSCAN > minAt
-        ? at - MAX_LEAF_BACKSCAN
-        : minAt
-
-    let probe = at - 1n
-    while (probe >= lowerBound) {
-      try {
-        const leaf = await this.getEpochChunk(at, new EpochIndex(probe, 0))
-        if (leaf) {
-          return leaf
-        }
-      } catch {
-        // Missing leaf at probe timestamp.
-      }
-
-      if (probe === 0n) {
-        break
-      }
-      probe--
-    }
-
-    return undefined
+    return findPreviousLeaf(at, after, (targetAt, epoch) =>
+      this.getEpochChunk(targetAt, epoch),
+    )
   }
 }

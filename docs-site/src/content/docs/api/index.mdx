@@ -914,8 +914,8 @@ Creates a feed reader bound to a topic and optional owner.
 ```typescript
 const reader = client.makeEpochFeedReader({ topic })
 const owner = await reader.getOwner()
-const reference = await reader.downloadReference({ at: BigInt(Date.now() / 1000) })
-const payload = await reader.downloadPayload({ at: BigInt(Date.now() / 1000) })
+const reference = await reader.downloadReference({ at: BigInt(Math.floor(Date.now() / 1000)) })
+const payload = await reader.downloadPayload({ at: BigInt(Math.floor(Date.now() / 1000)) })
 ```
 
 ---
@@ -974,8 +974,8 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 
 ```typescript
 const writer = client.makeEpochFeedWriter({ topic })
-const upload = await writer.uploadPayload('Hello feed', { at: BigInt(Date.now() / 1000) })
-const latest = await writer.downloadReference({ at: BigInt(Date.now() / 1000) })
+const upload = await writer.uploadPayload('Hello feed', { at: BigInt(Math.floor(Date.now() / 1000)) })
+const latest = await writer.downloadReference({ at: BigInt(Math.floor(Date.now() / 1000)) })
 ```
 
 ---
