@@ -1,0 +1,1 @@
+import{a as e,i as c,b as s,p as n}from"./ByXW8AJg.js";function r(t){e.addAccount(t.account);for(const o of t.identities)c.addIdentity(o);for(const o of t.connectedApps)s.addOrUpdateApp(o,0);for(const o of t.postageStamps)try{n.addStamp(o)}catch{}return t.account}export{r};
