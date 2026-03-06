@@ -43,7 +43,6 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       account.swarmEncryptionKey,
     )
 
-    expect(encrypted.encrypted).toBe(true)
     expect(encrypted.accountType).toBe("passkey")
     expect(encrypted.credentialId).toBe("credential-abc-123")
     expect(typeof encrypted.ciphertext).toBe("string")
@@ -82,7 +81,6 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       account.swarmEncryptionKey,
     )
 
-    expect(encrypted.encrypted).toBe(true)
     expect(encrypted.accountType).toBe("ethereum")
     expect(encrypted.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
     expect(encrypted.encryptedMasterKey).toEqual([1, 2, 3, 4])
@@ -116,7 +114,6 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       account.swarmEncryptionKey,
     )
 
-    expect(encrypted.encrypted).toBe(true)
     expect(encrypted.accountType).toBe("agent")
 
     const result = await decryptEncryptedExport(
@@ -243,9 +240,7 @@ describe("buildBackupHeader", () => {
     const header = buildBackupHeader(createPasskeyAccount())
 
     expect(header.version).toBe(1)
-    expect(header.encrypted).toBe(true)
     expect(header.accountType).toBe("passkey")
-    expect(header.accountId).toBe(TEST_ETH_ADDRESS_HEX)
     expect(header.accountName).toBe("Test Passkey Account")
     expect(header.credentialId).toBe("credential-abc-123")
     expect(typeof header.exportedAt).toBe("number")
@@ -324,9 +319,7 @@ describe("schema validation", () => {
   it("should reject missing ciphertext", () => {
     const result = EncryptedSwarmIdExportSchemaV1.safeParse({
       version: 1,
-      encrypted: true,
       accountType: "passkey",
-      accountId: TEST_ETH_ADDRESS_HEX,
       accountName: "Test",
       credentialId: "cred-123",
       exportedAt: Date.now(),
@@ -338,9 +331,7 @@ describe("schema validation", () => {
   it("should reject invalid accountType", () => {
     const result = EncryptedSwarmIdExportSchemaV1.safeParse({
       version: 1,
-      encrypted: true,
       accountType: "invalid",
-      accountId: TEST_ETH_ADDRESS_HEX,
       accountName: "Test",
       exportedAt: Date.now(),
       ciphertext: "abc",
@@ -351,23 +342,7 @@ describe("schema validation", () => {
   it("should reject wrong version number", () => {
     const result = EncryptedSwarmIdExportSchemaV1.safeParse({
       version: 2,
-      encrypted: true,
       accountType: "passkey",
-      accountId: TEST_ETH_ADDRESS_HEX,
-      accountName: "Test",
-      credentialId: "cred",
-      exportedAt: Date.now(),
-      ciphertext: "abc",
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it("should reject encrypted: false", () => {
-    const result = EncryptedSwarmIdExportSchemaV1.safeParse({
-      version: 1,
-      encrypted: false,
-      accountType: "passkey",
-      accountId: TEST_ETH_ADDRESS_HEX,
       accountName: "Test",
       credentialId: "cred",
       exportedAt: Date.now(),

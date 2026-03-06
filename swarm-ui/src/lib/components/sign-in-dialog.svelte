@@ -6,7 +6,6 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
-	import ErrorOverlay from '$lib/components/error-overlay.svelte'
 	import CloseLarge from 'carbon-icons-svelte/lib/CloseLarge.svelte'
 	import Upload from 'carbon-icons-svelte/lib/Upload.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
@@ -14,7 +13,6 @@
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 	import { layoutStore } from '$lib/stores/layout.svelte'
-	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { parseEncryptedExportHeader } from '@swarm-id/lib'
 
@@ -25,26 +23,14 @@
 
 	let { open = $bindable(), onclose }: Props = $props()
 
-	let failedAuthMethod = $state<'import-exists' | undefined>(undefined)
 	let isProcessing = $state(false)
 	let fileError = $state<string | undefined>(undefined)
 	let isDragging = $state(false)
 	let fileInputRef = $state<HTMLInputElement | undefined>(undefined)
 
-	const errorTitle = 'Account already exists'
-
-	const errorDescription =
-		'This account is already on this device. You can sign in directly using your Passkey or Ethereum wallet.'
-
 	function close() {
-		failedAuthMethod = undefined
 		isProcessing = false
 		onclose()
-	}
-
-	function handleTryAgain() {
-		failedAuthMethod = undefined
-		isProcessing = false
 	}
 
 	function handlePasskeyClick() {
@@ -71,14 +57,6 @@
 
 			if (!result.success) {
 				fileError = 'Invalid .swarmid file'
-				return
-			}
-
-			const existingAccount = accountsStore.accounts.find(
-				(a) => a.id.toHex() === result.header.accountId,
-			)
-			if (existingAccount) {
-				failedAuthMethod = 'import-exists'
 				return
 			}
 
@@ -135,9 +113,7 @@
 	onchange={handleFileSelected}
 />
 
-{#if failedAuthMethod}
-	<ErrorOverlay title={errorTitle} description={errorDescription} onTryAgain={handleTryAgain} />
-{:else if layoutStore.mobile}
+{#if layoutStore.mobile}
 	{#if open}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
 		<div

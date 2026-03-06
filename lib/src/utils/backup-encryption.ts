@@ -32,8 +32,6 @@ const IV_LENGTH_BYTES = 12
 
 const BackupHeaderBaseSchemaV1 = z.object({
   version: z.literal(BACKUP_VERSION),
-  encrypted: z.literal(true),
-  accountId: z.string(),
   accountName: z.string(),
   exportedAt: z.number(),
   ciphertext: z.string(),
@@ -160,31 +158,9 @@ export async function decryptBackupPayload(
  * Build the plaintext header fields for an encrypted backup,
  * based on the account type.
  *
- * TODO: Minimize the plaintext header to only what the import flow needs
- * before decryption. The following fields are currently exposed in cleartext
- * but serve no purpose there:
- *
- * - `accountName`: Not used during import. Can contain personal info that
- *   leaks to anyone who obtains the file.
- * - `accountId`: Not needed before decryption — the importer does not look
- *   up existing accounts by ID. Exposing it lets an observer correlate
- *   backup files to specific accounts.
- * - `exportedAt`: Not used during import. Reveals when the backup was
- *   created, which is operational metadata that should stay private.
- * - `encrypted`: Redundant — the presence of the `ciphertext` field already
- *   implies encryption. Adds no information.
- *
- * All four should be moved inside the encrypted payload so only someone
- * who can derive the decryption key (i.e. the account owner) can read them.
- *
- * Fields that DO belong in the plaintext header:
- * - `version`: Needed to select the correct decryption/parsing logic.
- * - `accountType`: Needed to determine which auth flow to present (passkey
- *   challenge, Ethereum signature, etc.) before decryption is possible.
- * - `credentialId` (passkey): Needed to locate the correct passkey for
- *   the WebAuthn challenge that re-derives the master key.
- * - `ethereumAddress` / `encryptedMasterKey` / `encryptionSalt` (ethereum):
- *   Needed to identify the wallet and decrypt the master key.
+ * `accountName` and `exportedAt` are deliberately kept in the plaintext
+ * header: accountName helps the user identify which credential to use,
+ * and exportedAt lets them assess backup recency.
  */
 export type BackupHeaderWithoutCiphertext =
   | Omit<PasskeyBackupHeader, "ciphertext">
@@ -196,8 +172,6 @@ export function buildBackupHeader(
 ): BackupHeaderWithoutCiphertext {
   const base = {
     version: BACKUP_VERSION as typeof BACKUP_VERSION,
-    encrypted: true as const,
-    accountId: account.id.toHex(),
     accountName: account.name,
     exportedAt: Date.now(),
   }
