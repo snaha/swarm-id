@@ -16,19 +16,9 @@
 	import { layoutStore } from '$lib/stores/layout.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
-	import { authenticateWithPasskey } from '$lib/passkey'
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
-	import {
-		parseEncryptedExportHeader,
-		deriveAccountSwarmEncryptionKey,
-		restoreAccountFromSwarm,
-	} from '@swarm-id/lib'
-	import { Bee, BatchId } from '@ethersphere/bee-js'
-	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+	import { parseEncryptedExportHeader } from '@swarm-id/lib'
 
 	interface Props {
 		open: boolean
@@ -37,7 +27,7 @@
 
 	let { open = $bindable(), onclose }: Props = $props()
 
-	let failedAuthMethod = $state<'ethereum' | 'passkey' | 'import-exists' | undefined>(undefined)
+	let failedAuthMethod = $state<'ethereum' | 'import-exists' | undefined>(undefined)
 	let isProcessing = $state(false)
 	let fileError = $state<string | undefined>(undefined)
 	let isDragging = $state(false)
@@ -51,8 +41,6 @@
 		switch (failedAuthMethod) {
 			case 'ethereum':
 				return "Make sure you're using the correct wallet and secret seed combination used during account creation."
-			case 'passkey':
-				return "Make sure you're using the same Passkey used during account creation."
 			case 'import-exists':
 				return 'This account is already on this device. You can sign in directly using your Passkey or Ethereum wallet.'
 			default:
@@ -71,77 +59,9 @@
 		isProcessing = false
 	}
 
-	async function handlePasskeyClick() {
-		try {
-			isProcessing = true
-			failedAuthMethod = undefined
-
-			const passkeyAccount = await authenticateWithPasskey()
-
-			let account = accountsStore.accounts.find(
-				(a) => a.type === 'passkey' && a.credentialId === passkeyAccount.credentialId,
-			)
-
-			if (!account) {
-				// No local account — attempt to restore from Swarm
-				const bee = new Bee(networkSettingsStore.beeNodeUrl)
-				const result = await restoreAccountFromSwarm(
-					bee,
-					passkeyAccount.masterKey,
-					passkeyAccount.ethereumAddress,
-					passkeyAccount.credentialId,
-				)
-
-				if (!result) {
-					failedAuthMethod = 'passkey'
-					return
-				}
-
-				// Restore account to local stores
-				const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
-					passkeyAccount.masterKey.toHex(),
-				)
-
-				account = accountsStore.addAccount({
-					id: passkeyAccount.ethereumAddress,
-					createdAt: result.snapshot.metadata.createdAt,
-					name: result.snapshot.metadata.accountName ?? 'Passkey',
-					type: 'passkey',
-					credentialId: passkeyAccount.credentialId,
-					swarmEncryptionKey,
-					defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
-						? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
-						: undefined,
-				})
-
-				// Restore identities
-				for (const identity of result.snapshot.identities) {
-					identitiesStore.addIdentity(identity)
-				}
-
-				// Restore connected apps
-				for (const app of result.snapshot.connectedApps) {
-					connectedAppsStore.addOrUpdateApp(app, 0)
-				}
-
-				// Restore postage stamps
-				for (const stamp of result.snapshot.postageStamps) {
-					try {
-						postageStampsStore.addStamp(stamp)
-					} catch {
-						// Stamp may already exist, skip
-					}
-				}
-
-				console.log('[SignIn] Account restored from Swarm successfully')
-			}
-
-			sessionStore.setAccount(account)
-			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
-			goto(resolve(routes.HOME))
-		} catch {
-			failedAuthMethod = 'passkey'
-		}
+	function handlePasskeyClick() {
+		close()
+		goto(resolve(routes.SIGNIN_PASSKEY))
 	}
 
 	async function handleEthereumClick() {
