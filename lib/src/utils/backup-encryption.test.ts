@@ -1,0 +1,539 @@
+import { describe, it, expect } from "vitest"
+import { EthAddress, BatchId, PrivateKey, Bytes } from "@ethersphere/bee-js"
+import {
+  deriveBackupEncryptionKey,
+  encryptBackupPayload,
+  decryptBackupPayload,
+  buildBackupHeader,
+  createEncryptedExport,
+  decryptEncryptedExport,
+  parseEncryptedExportHeader,
+  EncryptedSwarmIdExportSchemaV1,
+} from "./backup-encryption"
+import type {
+  PasskeyAccount,
+  EthereumAccount,
+  AgentAccount,
+  Identity,
+  ConnectedApp,
+  PostageStamp,
+} from "../schemas"
+
+// ============================================================================
+// Test Fixtures
+// ============================================================================
+
+const TEST_ETH_ADDRESS_HEX = "a".repeat(40)
+const TEST_ETH_ADDRESS_2_HEX = "b".repeat(40)
+const TEST_BATCH_ID_HEX = "c".repeat(64)
+const TEST_PRIVATE_KEY_HEX = "d".repeat(64)
+const TEST_ENCRYPTION_KEY_HEX = "f".repeat(64)
+const DIFFERENT_ENCRYPTION_KEY_HEX = "1".repeat(64)
+
+function createPasskeyAccount(
+  overrides?: Partial<PasskeyAccount>,
+): PasskeyAccount {
+  return {
+    id: new EthAddress(TEST_ETH_ADDRESS_HEX),
+    name: "Test Passkey Account",
+    createdAt: 1700000000000,
+    type: "passkey" as const,
+    credentialId: "credential-abc-123",
+    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    ...overrides,
+  }
+}
+
+function createEthereumAccount(
+  overrides?: Partial<EthereumAccount>,
+): EthereumAccount {
+  return {
+    id: new EthAddress(TEST_ETH_ADDRESS_HEX),
+    name: "Test Ethereum Account",
+    createdAt: 1700000000000,
+    type: "ethereum" as const,
+    ethereumAddress: new EthAddress(TEST_ETH_ADDRESS_2_HEX),
+    encryptedMasterKey: new Bytes(new Uint8Array([1, 2, 3, 4])),
+    encryptionSalt: new Bytes(new Uint8Array([5, 6, 7, 8])),
+    encryptedSecretSeed: new Bytes(new Uint8Array([9, 10, 11, 12])),
+    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    ...overrides,
+  }
+}
+
+function createAgentAccount(overrides?: Partial<AgentAccount>): AgentAccount {
+  return {
+    id: new EthAddress(TEST_ETH_ADDRESS_HEX),
+    name: "Test Agent Account",
+    createdAt: 1700000000000,
+    type: "agent" as const,
+    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    ...overrides,
+  }
+}
+
+function createIdentity(overrides?: Partial<Identity>): Identity {
+  return {
+    id: "identity-1",
+    accountId: new EthAddress(TEST_ETH_ADDRESS_HEX),
+    name: "Default Identity",
+    createdAt: 1700000000000,
+    ...overrides,
+  }
+}
+
+function createConnectedApp(overrides?: Partial<ConnectedApp>): ConnectedApp {
+  return {
+    appUrl: "https://app.example.com",
+    appName: "Test App",
+    lastConnectedAt: 1700000000000,
+    identityId: "identity-1",
+    appSecret: "secret-should-be-stripped",
+    ...overrides,
+  }
+}
+
+function createPostageStamp(overrides?: Partial<PostageStamp>): PostageStamp {
+  return {
+    accountId: TEST_ETH_ADDRESS_HEX,
+    batchID: new BatchId(TEST_BATCH_ID_HEX),
+    signerKey: new PrivateKey(TEST_PRIVATE_KEY_HEX),
+    utilization: 0,
+    usable: true,
+    depth: 20,
+    amount: 100000000,
+    bucketDepth: 16,
+    blockNumber: 12345678,
+    immutableFlag: false,
+    exists: true,
+    createdAt: 1700000000000,
+    ...overrides,
+  }
+}
+
+// ============================================================================
+// Round-trip Tests
+// ============================================================================
+
+describe("round-trip: encrypt → decrypt for each account type", () => {
+  it("should round-trip a passkey account", async () => {
+    const account = createPasskeyAccount()
+    const identities = [createIdentity()]
+    const connectedApps = [createConnectedApp()]
+    const postageStamps = [createPostageStamp()]
+
+    const encrypted = await createEncryptedExport(
+      account,
+      identities,
+      connectedApps,
+      postageStamps,
+      account.swarmEncryptionKey,
+    )
+
+    expect(encrypted.encrypted).toBe(true)
+    expect(encrypted.accountType).toBe("passkey")
+    expect(encrypted.credentialId).toBe("credential-abc-123")
+    expect(typeof encrypted.ciphertext).toBe("string")
+    // No plaintext account data in the outer object
+    expect(encrypted).not.toHaveProperty("account")
+    expect(encrypted).not.toHaveProperty("identities")
+    expect(encrypted).not.toHaveProperty("postageStamps")
+
+    const result = await decryptEncryptedExport(
+      encrypted,
+      account.swarmEncryptionKey,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect(result.data.account.type).toBe("passkey")
+    expect(result.data.account.id).toBeInstanceOf(EthAddress)
+    expect(result.data.account.id.toHex()).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(result.data.identities).toHaveLength(1)
+    expect(result.data.connectedApps).toHaveLength(1)
+    expect(result.data.postageStamps).toHaveLength(1)
+    expect(result.data.postageStamps[0].batchID).toBeInstanceOf(BatchId)
+    expect(result.data.postageStamps[0].signerKey).toBeInstanceOf(PrivateKey)
+  })
+
+  it("should round-trip an ethereum account", async () => {
+    const account = createEthereumAccount()
+    const identities = [createIdentity()]
+
+    const encrypted = await createEncryptedExport(
+      account,
+      identities,
+      [],
+      [],
+      account.swarmEncryptionKey,
+    )
+
+    expect(encrypted.encrypted).toBe(true)
+    expect(encrypted.accountType).toBe("ethereum")
+    expect(encrypted.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
+    expect(encrypted.encryptedMasterKey).toEqual([1, 2, 3, 4])
+    expect(encrypted.encryptionSalt).toEqual([5, 6, 7, 8])
+
+    const result = await decryptEncryptedExport(
+      encrypted,
+      account.swarmEncryptionKey,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    const ethAccount = result.data.account as EthereumAccount
+    expect(ethAccount.type).toBe("ethereum")
+    expect(ethAccount.ethereumAddress).toBeInstanceOf(EthAddress)
+    expect(ethAccount.encryptedMasterKey).toBeInstanceOf(Bytes)
+    expect(ethAccount.encryptionSalt).toBeInstanceOf(Bytes)
+    expect(ethAccount.encryptedSecretSeed).toBeInstanceOf(Bytes)
+  })
+
+  it("should round-trip an agent account", async () => {
+    const account = createAgentAccount()
+    const identities = [createIdentity()]
+
+    const encrypted = await createEncryptedExport(
+      account,
+      identities,
+      [],
+      [],
+      account.swarmEncryptionKey,
+    )
+
+    expect(encrypted.encrypted).toBe(true)
+    expect(encrypted.accountType).toBe("agent")
+
+    const result = await decryptEncryptedExport(
+      encrypted,
+      account.swarmEncryptionKey,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect(result.data.account.type).toBe("agent")
+    expect(result.data.account.name).toBe("Test Agent Account")
+  })
+
+  it("should survive JSON serialization (file I/O simulation)", async () => {
+    const account = createPasskeyAccount({
+      defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+    })
+    const identities = [
+      createIdentity({ settings: { appSessionDuration: 3600 } }),
+    ]
+    const connectedApps = [createConnectedApp()]
+    const postageStamps = [createPostageStamp({ batchTTL: 86400 })]
+
+    const encrypted = await createEncryptedExport(
+      account,
+      identities,
+      connectedApps,
+      postageStamps,
+      account.swarmEncryptionKey,
+    )
+
+    // Simulate file write + read
+    const fileContent = JSON.stringify(encrypted, undefined, 2)
+    const fileData = JSON.parse(fileContent)
+
+    const result = await decryptEncryptedExport(
+      fileData,
+      account.swarmEncryptionKey,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect(result.data.account.defaultPostageStampBatchID).toBeInstanceOf(
+      BatchId,
+    )
+    expect(result.data.identities[0].settings?.appSessionDuration).toBe(3600)
+    expect(result.data.postageStamps[0].batchTTL).toBe(86400)
+  })
+})
+
+// ============================================================================
+// Key Derivation Tests
+// ============================================================================
+
+describe("key derivation determinism", () => {
+  it("should derive the same CryptoKey from the same swarmEncryptionKey", async () => {
+    const key1 = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const key2 = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+
+    // Verify determinism: encrypt with key1, decrypt with key2
+    const plaintext = '{"determinism":"test"}'
+    const ciphertext = await encryptBackupPayload(plaintext, key1)
+    const decrypted = await decryptBackupPayload(ciphertext, key2)
+
+    expect(decrypted).toBe(plaintext)
+  })
+
+  it("should derive different keys from different swarmEncryptionKeys", async () => {
+    const key1 = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const key2 = await deriveBackupEncryptionKey(DIFFERENT_ENCRYPTION_KEY_HEX)
+
+    // Encrypt with key1, should fail to decrypt with key2
+    const ciphertext = await encryptBackupPayload('{"test":true}', key1)
+    await expect(decryptBackupPayload(ciphertext, key2)).rejects.toThrow()
+  })
+})
+
+// ============================================================================
+// Wrong Key Rejection
+// ============================================================================
+
+describe("wrong key rejection", () => {
+  it("should fail to decrypt with a different swarmEncryptionKey", async () => {
+    const account = createPasskeyAccount()
+
+    const encrypted = await createEncryptedExport(
+      account,
+      [createIdentity()],
+      [],
+      [],
+      account.swarmEncryptionKey,
+    )
+
+    const result = await decryptEncryptedExport(
+      encrypted,
+      DIFFERENT_ENCRYPTION_KEY_HEX,
+    )
+
+    expect(result.success).toBe(false)
+    if (result.success) return
+    expect(result.error.issues[0].message).toContain("Decryption failed")
+  })
+
+  it("should fail at the payload level with wrong key", async () => {
+    const correctKey = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const wrongKey = await deriveBackupEncryptionKey(
+      DIFFERENT_ENCRYPTION_KEY_HEX,
+    )
+
+    const ciphertext = await encryptBackupPayload('{"test": true}', correctKey)
+
+    await expect(decryptBackupPayload(ciphertext, wrongKey)).rejects.toThrow()
+  })
+})
+
+// ============================================================================
+// Header Construction Tests
+// ============================================================================
+
+describe("buildBackupHeader", () => {
+  it("should include credentialId for passkey accounts", () => {
+    const header = buildBackupHeader(createPasskeyAccount())
+
+    expect(header.version).toBe(1)
+    expect(header.encrypted).toBe(true)
+    expect(header.accountType).toBe("passkey")
+    expect(header.accountId).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(header.accountName).toBe("Test Passkey Account")
+    expect(header.credentialId).toBe("credential-abc-123")
+    expect(typeof header.exportedAt).toBe("number")
+    // No ethereum-specific fields
+    expect(header).not.toHaveProperty("ethereumAddress")
+    expect(header).not.toHaveProperty("encryptedMasterKey")
+    expect(header).not.toHaveProperty("encryptionSalt")
+  })
+
+  it("should include ethereum-specific fields for ethereum accounts", () => {
+    const header = buildBackupHeader(createEthereumAccount())
+
+    expect(header.accountType).toBe("ethereum")
+    expect(header.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
+    expect(header.encryptedMasterKey).toEqual([1, 2, 3, 4])
+    expect(header.encryptionSalt).toEqual([5, 6, 7, 8])
+    // No passkey-specific fields
+    expect(header).not.toHaveProperty("credentialId")
+  })
+
+  it("should have no extra fields for agent accounts", () => {
+    const header = buildBackupHeader(createAgentAccount())
+
+    expect(header.accountType).toBe("agent")
+    expect(header).not.toHaveProperty("credentialId")
+    expect(header).not.toHaveProperty("ethereumAddress")
+    expect(header).not.toHaveProperty("encryptedMasterKey")
+    expect(header).not.toHaveProperty("encryptionSalt")
+  })
+})
+
+// ============================================================================
+// Schema Validation Tests
+// ============================================================================
+
+describe("schema validation", () => {
+  it("should accept a valid passkey encrypted export", async () => {
+    const encrypted = await createEncryptedExport(
+      createPasskeyAccount(),
+      [],
+      [],
+      [],
+      TEST_ENCRYPTION_KEY_HEX,
+    )
+
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
+    expect(result.success).toBe(true)
+  })
+
+  it("should accept a valid ethereum encrypted export", async () => {
+    const encrypted = await createEncryptedExport(
+      createEthereumAccount(),
+      [],
+      [],
+      [],
+      TEST_ENCRYPTION_KEY_HEX,
+    )
+
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
+    expect(result.success).toBe(true)
+  })
+
+  it("should accept a valid agent encrypted export", async () => {
+    const encrypted = await createEncryptedExport(
+      createAgentAccount(),
+      [],
+      [],
+      [],
+      TEST_ENCRYPTION_KEY_HEX,
+    )
+
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
+    expect(result.success).toBe(true)
+  })
+
+  it("should reject missing ciphertext", () => {
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse({
+      version: 1,
+      encrypted: true,
+      accountType: "passkey",
+      accountId: TEST_ETH_ADDRESS_HEX,
+      accountName: "Test",
+      credentialId: "cred-123",
+      exportedAt: Date.now(),
+      // missing ciphertext
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject invalid accountType", () => {
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse({
+      version: 1,
+      encrypted: true,
+      accountType: "invalid",
+      accountId: TEST_ETH_ADDRESS_HEX,
+      accountName: "Test",
+      exportedAt: Date.now(),
+      ciphertext: "abc",
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject wrong version number", () => {
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse({
+      version: 2,
+      encrypted: true,
+      accountType: "passkey",
+      accountId: TEST_ETH_ADDRESS_HEX,
+      accountName: "Test",
+      credentialId: "cred",
+      exportedAt: Date.now(),
+      ciphertext: "abc",
+    })
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject encrypted: false", () => {
+    const result = EncryptedSwarmIdExportSchemaV1.safeParse({
+      version: 1,
+      encrypted: false,
+      accountType: "passkey",
+      accountId: TEST_ETH_ADDRESS_HEX,
+      accountName: "Test",
+      credentialId: "cred",
+      exportedAt: Date.now(),
+      ciphertext: "abc",
+    })
+    expect(result.success).toBe(false)
+  })
+})
+
+// ============================================================================
+// parseEncryptedExportHeader Tests
+// ============================================================================
+
+describe("parseEncryptedExportHeader", () => {
+  it("should parse a valid passkey header", async () => {
+    const encrypted = await createEncryptedExport(
+      createPasskeyAccount(),
+      [],
+      [],
+      [],
+      TEST_ENCRYPTION_KEY_HEX,
+    )
+
+    const result = parseEncryptedExportHeader(encrypted)
+    expect(result.success).toBe(true)
+    if (!result.success) return
+    expect(result.header.accountType).toBe("passkey")
+  })
+
+  it("should reject non-object input (string)", () => {
+    const result = parseEncryptedExportHeader("not-an-object")
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject non-object input (number)", () => {
+    const result = parseEncryptedExportHeader(42)
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject non-object input (undefined)", () => {
+    const result = parseEncryptedExportHeader(undefined)
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject null input", () => {
+    const result = parseEncryptedExportHeader(null)
+    expect(result.success).toBe(false)
+  })
+
+  it("should reject empty object", () => {
+    const result = parseEncryptedExportHeader({})
+    expect(result.success).toBe(false)
+  })
+})
+
+// ============================================================================
+// Encrypt/Decrypt Payload Directly
+// ============================================================================
+
+describe("encryptBackupPayload / decryptBackupPayload", () => {
+  it("should encrypt and decrypt a payload", async () => {
+    const key = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const plaintext = '{"hello":"world"}'
+
+    const ciphertext = await encryptBackupPayload(plaintext, key)
+    expect(typeof ciphertext).toBe("string")
+    expect(ciphertext).not.toBe(plaintext)
+
+    const decrypted = await decryptBackupPayload(ciphertext, key)
+    expect(decrypted).toBe(plaintext)
+  })
+
+  it("should produce different ciphertext for same input (random IV)", async () => {
+    const key = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const plaintext = '{"test":true}'
+
+    const ct1 = await encryptBackupPayload(plaintext, key)
+    const ct2 = await encryptBackupPayload(plaintext, key)
+
+    expect(ct1).not.toBe(ct2)
+  })
+})

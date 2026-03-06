@@ -105,6 +105,29 @@ export type {
   SwarmIdImportResult,
 } from "./utils/swarm-id-export"
 
+// Encrypted backup (.swarmid) support
+export {
+  deriveBackupEncryptionKey,
+  encryptBackupPayload,
+  decryptBackupPayload,
+  buildBackupHeader,
+  createEncryptedExport,
+  decryptEncryptedExport,
+  parseEncryptedExportHeader,
+  PasskeyBackupHeaderSchemaV1,
+  EthereumBackupHeaderSchemaV1,
+  AgentBackupHeaderSchemaV1,
+  EncryptedSwarmIdExportSchemaV1,
+} from "./utils/backup-encryption"
+
+export type {
+  PasskeyBackupHeader,
+  EthereumBackupHeader,
+  AgentBackupHeader,
+  EncryptedSwarmIdExport,
+  ParseHeaderResult,
+} from "./utils/backup-encryption"
+
 // Epoch-based feeds - implementations
 export {
   EpochIndex,

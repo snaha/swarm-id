@@ -27,7 +27,7 @@
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Badge from '$lib/components/ui/badge.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
-	import { serializeSwarmIdExport } from '@swarm-id/lib'
+	import { createEncryptedExport } from '@swarm-id/lib'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import type { Account, Identity } from '$lib/types'
@@ -87,19 +87,22 @@
 		accountsStore.setAccountName(account.id, accountName)
 	}
 
-	function handleExportAccount() {
+	let showPasskeyExportWarning = $state(false)
+
+	async function handleExportAccount() {
 		const accountIdentities = identitiesStore.getIdentitiesByAccount(account.id)
 		const connectedApps = accountIdentities.flatMap((identity) =>
 			connectedAppsStore.getAppsByIdentityId(identity.id),
 		)
 		const postageStamps = postageStampsStore.getStampsByAccount(account.id.toHex())
-		const exportData = serializeSwarmIdExport(
+		const encrypted = await createEncryptedExport(
 			account,
 			accountIdentities,
 			connectedApps,
 			postageStamps,
+			account.swarmEncryptionKey,
 		)
-		const json = JSON.stringify(exportData, undefined, 2)
+		const json = JSON.stringify(encrypted, undefined, 2)
 		const blob = new Blob([json], { type: 'application/json' })
 		const url = URL.createObjectURL(blob)
 		const now = new Date()
@@ -118,6 +121,10 @@
 		a.download = `${account.name}_${date}-${time}.swarmid`
 		a.click()
 		URL.revokeObjectURL(url)
+
+		if (account.type === 'passkey') {
+			showPasskeyExportWarning = true
+		}
 	}
 </script>
 
@@ -455,7 +462,13 @@
 								<Information size={16} />
 							</Button>
 							{#snippet helperText()}
-								Save a backup of your Swarm ID account as a .swarmid file
+								{#if showPasskeyExportWarning}
+									Backup exported. Note: passkey-encrypted backups can only be imported on devices
+									where this passkey is available (synced via iCloud/Google, or the same hardware
+									key).
+								{:else}
+									Save an encrypted backup of your Swarm ID account as a .swarmid file
+								{/if}
 							{/snippet}
 						</Tooltip>
 					</Horizontal>
