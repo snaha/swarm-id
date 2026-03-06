@@ -6,7 +6,7 @@
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
-	import SwarmLogo from '$lib/components/swarm-logo.svelte'
+	import ErrorOverlay from '$lib/components/error-overlay.svelte'
 	import CloseLarge from 'carbon-icons-svelte/lib/CloseLarge.svelte'
 	import Upload from 'carbon-icons-svelte/lib/Upload.svelte'
 	import ErrorMessage from '$lib/components/ui/error-message.svelte'
@@ -171,20 +171,7 @@
 />
 
 {#if failedAuthMethod}
-	<div class="error-overlay">
-		<div class="error-logo">
-			<SwarmLogo fill="var(--colors-ultra-high)" height={30} />
-		</div>
-		<div class="error-content">
-			<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
-				<Vertical --vertical-gap="var(--half-padding)">
-					<Typography variant="h4" center>‼️ {errorTitle}</Typography>
-					<Typography center>{errorDescription}</Typography>
-				</Vertical>
-				<Button variant="strong" onclick={handleTryAgain}>Try again</Button>
-			</Vertical>
-		</div>
-	</div>
+	<ErrorOverlay title={errorTitle} description={errorDescription} onTryAgain={handleTryAgain} />
 {:else if layoutStore.mobile}
 	{#if open}
 		<!-- svelte-ignore a11y_no_static_element_interactions -->
@@ -283,23 +270,6 @@
 		outline-offset: -4px;
 	}
 
-	.error-overlay {
-		position: fixed;
-		inset: 0;
-		background: var(--colors-ultra-low);
-		z-index: 100;
-		display: flex;
-		flex-direction: column;
-		padding: var(--double-padding);
-	}
-
-	.error-content {
-		flex: 1;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-	}
-
 	.mobile-overlay {
 		position: fixed;
 		inset: 0;
@@ -326,11 +296,5 @@
 
 	:global(.mobile-buttons) {
 		padding-bottom: var(--padding);
-	}
-
-	@media screen and (max-width: 640px) {
-		.error-overlay {
-			padding: var(--padding);
-		}
 	}
 </style>

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { EthAddress, BatchId, PrivateKey } from "@ethersphere/bee-js"
+import { EthAddress, BatchId } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
 import { deserializeAccountState } from "./serialization"
 import type {
@@ -8,89 +8,40 @@ import type {
   ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
 } from "./store-interfaces"
-import type { Account, Identity, PostageStamp, ConnectedApp } from "../schemas"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
-
-// ============================================================================
-// Test Constants
-// ============================================================================
-
-const TEST_ACCOUNT_ID_HEX = "a".repeat(40)
-const TEST_ENCRYPTION_KEY_HEX = "f".repeat(64)
-const TEST_BATCH_ID_HEX = "c".repeat(64)
-const TEST_SIGNER_KEY_HEX = "d".repeat(64)
-
-// ============================================================================
-// Test Fixtures
-// ============================================================================
-
-function createTestAccount(): Account {
-  return {
-    id: new EthAddress(TEST_ACCOUNT_ID_HEX),
-    name: "Test Account",
-    createdAt: 1700000000000,
-    type: "passkey" as const,
-    credentialId: "test-credential",
-    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
-    defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
-  }
-}
-
-function createTestIdentity(): Identity {
-  return {
-    id: "identity-1",
-    accountId: new EthAddress(TEST_ACCOUNT_ID_HEX),
-    name: "Default Identity",
-    createdAt: 1700000000000,
-  }
-}
-
-function createTestConnectedApp(): ConnectedApp {
-  return {
-    appUrl: "https://app.example.com",
-    appName: "Test App",
-    lastConnectedAt: 1700000000000,
-    identityId: "identity-1",
-  }
-}
-
-function createTestStamp(): PostageStamp {
-  return {
-    accountId: TEST_ACCOUNT_ID_HEX,
-    batchID: new BatchId(TEST_BATCH_ID_HEX),
-    signerKey: new PrivateKey(TEST_SIGNER_KEY_HEX),
-    utilization: 0,
-    usable: true,
-    depth: 20,
-    amount: 100000000,
-    bucketDepth: 16,
-    blockNumber: 12345678,
-    immutableFlag: false,
-    exists: true,
-    createdAt: 1700000000000,
-  }
-}
+import {
+  TEST_ETH_ADDRESS_HEX,
+  TEST_BATCH_ID_HEX,
+  createPasskeyAccount,
+  createIdentity,
+  createConnectedApp,
+  createPostageStamp,
+} from "../test-fixtures"
 
 // ============================================================================
 // Mock Factories
 // ============================================================================
 
 function createMockStores() {
-  const account = createTestAccount()
-  const identity = createTestIdentity()
-  const connectedApp = createTestConnectedApp()
-  const stamp = createTestStamp()
+  const account = createPasskeyAccount({
+    credentialId: "test-credential",
+    name: "Test Account",
+    defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+  })
+  const identity = createIdentity()
+  const connectedApp = createConnectedApp({ appSecret: undefined })
+  const stamp = createPostageStamp()
 
   const accountsStore: AccountsStoreInterface = {
     getAccount: vi.fn((id: EthAddress) =>
-      id.toHex() === TEST_ACCOUNT_ID_HEX ? account : undefined,
+      id.toHex() === TEST_ETH_ADDRESS_HEX ? account : undefined,
     ),
   }
 
   const identitiesStore: IdentitiesStoreInterface = {
     getIdentitiesByAccount: vi.fn((accountId: EthAddress) =>
-      accountId.toHex() === TEST_ACCOUNT_ID_HEX ? [identity] : [],
+      accountId.toHex() === TEST_ETH_ADDRESS_HEX ? [identity] : [],
     ),
   }
 
@@ -115,7 +66,7 @@ function createMockStores() {
       batchID.toHex() === TEST_BATCH_ID_HEX ? stamp : undefined,
     ),
     getStampsByAccount: vi.fn((accountId: string) =>
-      accountId === TEST_ACCOUNT_ID_HEX ? [stamp] : [],
+      accountId === TEST_ETH_ADDRESS_HEX ? [stamp] : [],
     ),
     getStamper: vi.fn().mockResolvedValue(mockStamper),
     updateStampUtilization: vi.fn(),
@@ -222,7 +173,7 @@ describe("createSyncAccount", () => {
       } as unknown as DebouncedUtilizationUploader,
     })
 
-    const result = await syncAccount(TEST_ACCOUNT_ID_HEX)
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
 
     expect(result).toBeDefined()
     expect(result!.status).toBe("success")
@@ -254,14 +205,14 @@ describe("createSyncAccount", () => {
       } as unknown as DebouncedUtilizationUploader,
     })
 
-    await syncAccount(TEST_ACCOUNT_ID_HEX)
+    await syncAccount(TEST_ETH_ADDRESS_HEX)
 
     // Deserialize the captured upload data to verify contents
     expect(capturedUploadData).toBeDefined()
     const deserialized = deserializeAccountState(capturedUploadData!)
 
     expect(deserialized.version).toBe(1)
-    expect(deserialized.accountId).toBe(TEST_ACCOUNT_ID_HEX)
+    expect(deserialized.accountId).toBe(TEST_ETH_ADDRESS_HEX)
     expect(deserialized.metadata.accountName).toBe("Test Account")
     expect(deserialized.metadata.defaultPostageStampBatchID).toBe(
       TEST_BATCH_ID_HEX,
@@ -290,14 +241,16 @@ describe("createSyncAccount", () => {
       } as unknown as DebouncedUtilizationUploader,
     })
 
-    const result = await syncAccount(TEST_ACCOUNT_ID_HEX)
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeUndefined()
     expect(uploadCallCount).toBe(0)
   })
 
   it("should return undefined when no default stamp available", async () => {
     const stores = createMockStores()
-    const account = createTestAccount()
+    const account = createPasskeyAccount({
+      defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+    })
     ;(
       stores.accountsStore.getAccount as ReturnType<typeof vi.fn>
     ).mockReturnValue({
@@ -307,7 +260,7 @@ describe("createSyncAccount", () => {
     ;(
       stores.identitiesStore.getIdentitiesByAccount as ReturnType<typeof vi.fn>
     ).mockReturnValue([
-      { ...createTestIdentity(), defaultPostageStampBatchID: undefined },
+      { ...createIdentity(), defaultPostageStampBatchID: undefined },
     ])
 
     const syncAccount = createSyncAccount({
@@ -319,7 +272,7 @@ describe("createSyncAccount", () => {
       } as unknown as DebouncedUtilizationUploader,
     })
 
-    const result = await syncAccount(TEST_ACCOUNT_ID_HEX)
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeUndefined()
     expect(uploadCallCount).toBe(0)
   })
@@ -336,7 +289,7 @@ describe("createSyncAccount", () => {
       } as unknown as DebouncedUtilizationUploader,
     })
 
-    const result = await syncAccount(TEST_ACCOUNT_ID_HEX)
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeDefined()
     expect(result!.status).toBe("success")
     if (result!.status !== "success") return

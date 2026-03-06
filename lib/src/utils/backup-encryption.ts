@@ -295,7 +295,21 @@ export async function decryptEncryptedExport(
     }
   }
 
-  const innerData: unknown = JSON.parse(plaintextJson)
+  let innerData: unknown
+  try {
+    innerData = JSON.parse(plaintextJson)
+  } catch {
+    return {
+      success: false,
+      error: new z.ZodError([
+        {
+          code: "custom",
+          message: "Decrypted data is not valid JSON",
+          path: ["ciphertext"],
+        },
+      ]),
+    }
+  }
   return deserializeSwarmIdExport(innerData)
 }
 
