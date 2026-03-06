@@ -10,6 +10,7 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import routes from '$lib/routes'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
@@ -77,7 +78,7 @@
 			sessionStore.setTemporaryMasterKey(masterKey)
 			sessionStore.clearImportData()
 
-			goto(resolve(routes.HOME))
+			navigateToConnectOrHome()
 		} catch {
 			error =
 				'Authentication failed. Make sure you used the same Ethereum wallet used during account creation.'

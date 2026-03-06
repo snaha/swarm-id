@@ -16,6 +16,7 @@
 	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import WarningAlt from 'carbon-icons-svelte/lib/WarningAlt.svelte'
 	import routes from '$lib/routes'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { sessionStore } from '$lib/stores/session.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
@@ -117,8 +118,7 @@
 <CreationLayout
 	title="Sign up as Agent"
 	description="Create an automated testing or programmatic account using a BIP39 seed phrase"
-	onClose={() =>
-		sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
+	onClose={navigateToConnectOrHome}
 >
 	{#snippet content()}
 		<Vertical --vertical-gap="var(--padding)">

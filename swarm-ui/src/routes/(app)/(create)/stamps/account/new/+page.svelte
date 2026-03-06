@@ -8,6 +8,7 @@
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
@@ -22,15 +23,6 @@
 	let blockNumber = $state(0)
 	let submitError = $state<string | undefined>(undefined)
 	let isFormDisabled = $state(true)
-
-	function navigateToConnectOrHome() {
-		if (sessionStore.data.appOrigin) {
-			goto(resolve(routes.CONNECT))
-		} else {
-			sessionStore.clearTemporaryMasterKey()
-			goto(resolve(routes.HOME))
-		}
-	}
 
 	function handleSkip() {
 		navigateToConnectOrHome()

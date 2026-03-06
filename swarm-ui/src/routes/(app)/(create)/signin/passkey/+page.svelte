@@ -9,6 +9,7 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import routes from '$lib/routes'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 	import { authenticateWithPasskey } from '$lib/passkey'
@@ -76,7 +77,7 @@
 
 			sessionStore.setAccount(restoredAccount)
 			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
-			goto(resolve(routes.HOME))
+			navigateToConnectOrHome()
 		} catch {
 			error =
 				'Sign in failed. Make sure you are using the same Passkey used during account creation.'

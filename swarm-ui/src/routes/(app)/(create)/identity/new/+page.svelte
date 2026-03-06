@@ -7,6 +7,7 @@
 	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import ChevronDown from 'carbon-icons-svelte/lib/ChevronDown.svelte'
 	import routes from '$lib/routes'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import Hashicon from '$lib/components/hashicon.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Tooltip from '$lib/components/ui/tooltip.svelte'
@@ -71,15 +72,6 @@
 			createdAt,
 		}
 		return identity
-	}
-
-	function navigateToConnectOrHome() {
-		if (sessionStore.data.appOrigin) {
-			goto(resolve(routes.CONNECT))
-		} else {
-			sessionStore.clearTemporaryMasterKey()
-			goto(resolve(routes.HOME))
-		}
 	}
 
 	async function handleCreateIdentity() {

@@ -8,6 +8,7 @@
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import routes from '$lib/routes'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { resolve } from '$app/paths'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
@@ -147,8 +148,7 @@
 	<CreationLayout
 		title="Sign up with Ethereum"
 		description="Create a Swarm ID account using your Ethereum wallet"
-		onClose={() =>
-			sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
+		onClose={navigateToConnectOrHome}
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">

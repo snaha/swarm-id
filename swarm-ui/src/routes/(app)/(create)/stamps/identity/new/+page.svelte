@@ -5,9 +5,7 @@
 	import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import PostageStampForm from '$lib/components/postage-stamp-form.svelte'
-	import { goto } from '$app/navigation'
-	import { resolve } from '$app/paths'
-	import routes from '$lib/routes'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
@@ -23,15 +21,6 @@
 	let blockNumber = $state(0)
 	let submitError = $state<string | undefined>(undefined)
 	let isFormDisabled = $state(true)
-
-	function navigateToConnectOrHome() {
-		if (sessionStore.data.appOrigin) {
-			goto(resolve(routes.CONNECT))
-		} else {
-			sessionStore.clearTemporaryMasterKey()
-			goto(resolve(routes.HOME))
-		}
-	}
 
 	function handleUseAccountStamp() {
 		navigateToConnectOrHome()

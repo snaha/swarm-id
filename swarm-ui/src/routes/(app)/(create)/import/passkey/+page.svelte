@@ -10,6 +10,7 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import routes from '$lib/routes'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { authenticateWithPasskey } from '$lib/passkey'
 	import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
@@ -72,7 +73,7 @@
 			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
 			sessionStore.clearImportData()
 
-			goto(resolve(routes.HOME))
+			navigateToConnectOrHome()
 		} catch {
 			error =
 				'Authentication failed. Make sure you used the same Passkey used during account creation.'

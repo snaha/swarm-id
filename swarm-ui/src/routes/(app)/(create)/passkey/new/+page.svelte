@@ -10,6 +10,7 @@
 	import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
 	import Information from 'carbon-icons-svelte/lib/Information.svelte'
 	import routes from '$lib/routes'
+	import { navigateToConnectOrHome } from '$lib/utils/navigation'
 	import { resolve } from '$app/paths'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
@@ -105,8 +106,7 @@
 	<CreationLayout
 		title="Sign up with Passkey"
 		description="Create a Swarm ID account on this device using a passkey"
-		onClose={() =>
-			sessionStore.data.appOrigin ? goto(resolve(routes.CONNECT)) : goto(resolve(routes.HOME))}
+		onClose={navigateToConnectOrHome}
 	>
 		{#snippet content()}
 			<Vertical --vertical-gap="var(--padding)">
