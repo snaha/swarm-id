@@ -16,70 +16,76 @@
 	import { Bee, BatchId } from '@ethersphere/bee-js'
 	import { restoreAccountToStores } from '$lib/utils/restore-account'
 
-	let failed = $state(false)
+	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
 
 	async function handleConfirmPasskey() {
 		try {
 			isProcessing = true
-			failed = false
+			error = undefined
 
 			const passkeyAccount = await authenticateWithPasskey()
 
-			let account = accountsStore.accounts.find(
+			const account = accountsStore.accounts.find(
 				(a) => a.type === 'passkey' && a.credentialId === passkeyAccount.credentialId,
 			)
 
-			if (!account) {
-				// No local account — attempt to restore from Swarm
-				const bee = new Bee(networkSettingsStore.beeNodeUrl)
-				const result = await restoreAccountFromSwarm(
-					bee,
-					passkeyAccount.masterKey,
-					passkeyAccount.ethereumAddress,
-					passkeyAccount.credentialId,
-				)
-
-				if (!result) {
-					failed = true
-					isProcessing = false
-					return
-				}
-
-				// Restore account to local stores
-				const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
-					passkeyAccount.masterKey.toHex(),
-				)
-
-				account = restoreAccountToStores({
-					account: {
-						id: passkeyAccount.ethereumAddress,
-						createdAt: result.snapshot.metadata.createdAt,
-						name: result.snapshot.metadata.accountName ?? 'Passkey',
-						type: 'passkey',
-						credentialId: passkeyAccount.credentialId,
-						swarmEncryptionKey,
-						defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
-							? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
-							: undefined,
-					},
-					identities: result.snapshot.identities,
-					connectedApps: result.snapshot.connectedApps,
-					postageStamps: result.snapshot.postageStamps,
-				})
+			if (account) {
+				error = 'Account already exists on this device. Go back to the home screen to select it.'
+				isProcessing = false
+				return
 			}
 
-			sessionStore.setAccount(account)
+			// No local account — attempt to restore from Swarm
+			const bee = new Bee(networkSettingsStore.beeNodeUrl)
+			const result = await restoreAccountFromSwarm(
+				bee,
+				passkeyAccount.masterKey,
+				passkeyAccount.ethereumAddress,
+				passkeyAccount.credentialId,
+			)
+
+			if (!result) {
+				error =
+					'Sign in failed. Make sure you are using the same Passkey used during account creation.'
+				isProcessing = false
+				return
+			}
+
+			// Restore account to local stores
+			const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
+				passkeyAccount.masterKey.toHex(),
+			)
+
+			const restoredAccount = restoreAccountToStores({
+				account: {
+					id: passkeyAccount.ethereumAddress,
+					createdAt: result.snapshot.metadata.createdAt,
+					name: result.snapshot.metadata.accountName ?? 'Passkey',
+					type: 'passkey',
+					credentialId: passkeyAccount.credentialId,
+					swarmEncryptionKey,
+					defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
+						? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
+						: undefined,
+				},
+				identities: result.snapshot.identities,
+				connectedApps: result.snapshot.connectedApps,
+				postageStamps: result.snapshot.postageStamps,
+			})
+
+			sessionStore.setAccount(restoredAccount)
 			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
 			goto(resolve(routes.HOME))
 		} catch {
-			failed = true
+			error =
+				'Sign in failed. Make sure you are using the same Passkey used during account creation.'
 			isProcessing = false
 		}
 	}
 
 	function handleTryAgain() {
-		failed = false
+		error = undefined
 		isProcessing = false
 	}
 
@@ -88,12 +94,8 @@
 	}
 </script>
 
-{#if failed}
-	<ErrorOverlay
-		title="Sign in failed"
-		description="Make sure you're using the same Passkey used during account creation."
-		onTryAgain={handleTryAgain}
-	/>
+{#if error}
+	<ErrorOverlay title="Sign in failed" description={error} onTryAgain={handleTryAgain} />
 {:else if isProcessing}
 	<Confirmation authenticationType="passkey" />
 {:else}

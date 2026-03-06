@@ -16,8 +16,6 @@
 	import { layoutStore } from '$lib/stores/layout.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { sessionStore } from '$lib/stores/session.svelte'
-	import { connectAndSign } from '$lib/ethereum'
-	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 	import { parseEncryptedExportHeader } from '@swarm-id/lib'
 
 	interface Props {
@@ -27,26 +25,16 @@
 
 	let { open = $bindable(), onclose }: Props = $props()
 
-	let failedAuthMethod = $state<'ethereum' | 'import-exists' | undefined>(undefined)
+	let failedAuthMethod = $state<'import-exists' | undefined>(undefined)
 	let isProcessing = $state(false)
 	let fileError = $state<string | undefined>(undefined)
 	let isDragging = $state(false)
 	let fileInputRef = $state<HTMLInputElement | undefined>(undefined)
 
-	const errorTitle = $derived(
-		failedAuthMethod === 'import-exists' ? 'Account already exists' : 'Sign in failed',
-	)
+	const errorTitle = 'Account already exists'
 
-	const errorDescription = $derived.by(() => {
-		switch (failedAuthMethod) {
-			case 'ethereum':
-				return "Make sure you're using the correct wallet and secret seed combination used during account creation."
-			case 'import-exists':
-				return 'This account is already on this device. You can sign in directly using your Passkey or Ethereum wallet.'
-			default:
-				return ''
-		}
-	})
+	const errorDescription =
+		'This account is already on this device. You can sign in directly using your Passkey or Ethereum wallet.'
 
 	function close() {
 		failedAuthMethod = undefined
@@ -64,32 +52,9 @@
 		goto(resolve(routes.SIGNIN_PASSKEY))
 	}
 
-	async function handleEthereumClick() {
-		try {
-			isProcessing = true
-			failedAuthMethod = undefined
-
-			const signed = await connectAndSign()
-
-			const account = accountsStore.accounts.find(
-				(a) =>
-					a.type === 'ethereum' && a.ethereumAddress.toString() === signed.address.toLowerCase(),
-			)
-
-			if (!account || account.type !== 'ethereum') {
-				failedAuthMethod = 'ethereum'
-				return
-			}
-
-			const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
-			const masterKey = await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
-
-			sessionStore.setAccount(account)
-			sessionStore.setTemporaryMasterKey(masterKey)
-			goto(resolve(routes.HOME))
-		} catch {
-			failedAuthMethod = 'ethereum'
-		}
+	function handleEthereumClick() {
+		close()
+		goto(resolve(routes.SIGNIN_ETHEREUM))
 	}
 
 	function handleLocalAccountClick() {

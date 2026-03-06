@@ -10,6 +10,7 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import routes from '$lib/routes'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 	import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
@@ -41,6 +42,15 @@
 			if (signedAddressHex !== header.ethereumAddress.toLowerCase()) {
 				error =
 					'Wrong wallet. Make sure to use the same Ethereum wallet you used to create your Swarm ID account.'
+				isProcessing = false
+				return
+			}
+
+			const existingAccount = accountsStore.accounts.find(
+				(a) => a.type === 'ethereum' && a.ethereumAddress.toString() === signedAddressHex,
+			)
+			if (existingAccount) {
+				error = 'Account already exists on this device. Go back to the home screen to select it.'
 				isProcessing = false
 				return
 			}

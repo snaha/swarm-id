@@ -10,6 +10,7 @@
 	import Confirmation from '$lib/components/confirmation.svelte'
 	import routes from '$lib/routes'
 	import { sessionStore } from '$lib/stores/session.svelte'
+	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { authenticateWithPasskey } from '$lib/passkey'
 	import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
 	import { restoreAccountToStores } from '$lib/utils/restore-account'
@@ -40,6 +41,15 @@
 			if (passkeyAccount.credentialId !== header.credentialId) {
 				error =
 					'Wrong Passkey. Make sure to use the same Passkey that was used to create this account.'
+				isProcessing = false
+				return
+			}
+
+			const existingAccount = accountsStore.accounts.find(
+				(a) => a.type === 'passkey' && a.credentialId === passkeyAccount.credentialId,
+			)
+			if (existingAccount) {
+				error = 'Account already exists on this device. Go back to the home screen to select it.'
 				isProcessing = false
 				return
 			}

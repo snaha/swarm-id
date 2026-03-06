@@ -14,6 +14,7 @@ const routes = {
 	IDENTITY_STAMPS_NEW: '/(app)/identity/[id]/stamps/new' as const,
 	IDENTITY_SETTINGS: '/(app)/identity/[id]/settings' as const,
 	SIGNIN_PASSKEY: '/(app)/(create)/signin/passkey' as const,
+	SIGNIN_ETHEREUM: '/(app)/(create)/signin/ethereum' as const,
 	IMPORT_PASSKEY: '/(app)/(create)/import/passkey' as const,
 	IMPORT_ETHEREUM: '/(app)/(create)/import/ethereum' as const,
 }
