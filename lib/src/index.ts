@@ -154,6 +154,8 @@ export {
   // Sync account
   createSyncAccount,
   ACCOUNT_SYNC_TOPIC_PREFIX,
+  // Restore account from Swarm
+  restoreAccountFromSwarm,
 } from "./sync"
 
 // State sync types
@@ -171,6 +173,8 @@ export type {
   PostageStampsStoreInterface,
   StamperOptions,
   FlushableStamper,
+  // Restore account types
+  RestoreAccountResult,
 } from "./sync"
 
 // Type exports
@@ -334,6 +338,9 @@ export {
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
 } from "./types"
+
+// Download data utility
+export { downloadDataWithChunkAPI } from "./proxy/download-data"
 
 // ACT (Access Control Tries) exports
 export {
