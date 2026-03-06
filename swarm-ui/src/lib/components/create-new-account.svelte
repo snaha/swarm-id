@@ -3,6 +3,7 @@
 	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
 	import AuthCard from '$lib/components/auth-card.svelte'
 	import SignInCard from '$lib/components/sign-in-card.svelte'
+	import SignInDialog from '$lib/components/sign-in-dialog.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
@@ -10,7 +11,6 @@
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
 	import { layoutStore } from '$lib/stores/layout.svelte'
-	import { notImplemented } from '$lib/utils/not-implemented'
 	import type { Snippet } from 'svelte'
 
 	interface Props {
@@ -20,6 +20,8 @@
 
 	let { header, showAgentSignup = false }: Props = $props()
 
+	let showSignIn = $state(false)
+
 	function handlePasskeyClick() {
 		goto(resolve(routes.PASSKEY_NEW))
 	}
@@ -28,8 +30,8 @@
 		goto(resolve(routes.ETH_NEW))
 	}
 
-	function handleSignInClick(e: Event) {
-		notImplemented(e)
+	function handleSignInClick() {
+		showSignIn = true
 	}
 </script>
 
@@ -113,6 +115,8 @@
 		{/if}
 	</div>
 </Vertical>
+
+<SignInDialog bind:open={showSignIn} onclose={() => (showSignIn = false)} />
 
 <style>
 	.container {

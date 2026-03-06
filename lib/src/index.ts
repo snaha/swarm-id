@@ -92,6 +92,19 @@ export {
 // Storage manager types
 export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
+// Swarm ID export/import (.swarmid format)
+export {
+  serializeSwarmIdExport,
+  deserializeSwarmIdExport,
+  SwarmIdExportSchemaV1,
+} from "./utils/swarm-id-export"
+
+export type {
+  SwarmIdExport,
+  ExportedConnectedApp,
+  SwarmIdImportResult,
+} from "./utils/swarm-id-export"
+
 // Epoch-based feeds - implementations
 export {
   EpochIndex,
