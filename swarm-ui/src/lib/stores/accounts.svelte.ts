@@ -1,6 +1,7 @@
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { createAccountsStorageManager, type Account } from '@swarm-id/lib'
+import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
 // Storage Manager
@@ -46,6 +47,7 @@ export const accountsStore = {
 	setAccountName(id: EthAddress, name: string) {
 		accounts = accounts.map((account) => (account.id.equals(id) ? { ...account, name } : account))
 		saveAccounts(accounts)
+		triggerSync(id.toHex())
 	},
 
 	setDefaultStamp(id: EthAddress, batchID: BatchId | undefined) {
@@ -58,6 +60,7 @@ export const accountsStore = {
 				: account,
 		)
 		saveAccounts(accounts)
+		triggerSync(id.toHex())
 	},
 
 	clear() {

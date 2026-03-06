@@ -304,6 +304,7 @@ export function createSyncAccount(
       timestamp: Date.now(),
       accountId,
       metadata: {
+        accountName: account.name,
         defaultPostageStampBatchID: defaultStampBatchID.toHex(),
         createdAt: account.createdAt,
         lastModified: Date.now(),

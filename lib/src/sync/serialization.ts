@@ -18,6 +18,7 @@ export function serializeAccountState(state: AccountStateSnapshot): Uint8Array {
     timestamp: state.timestamp,
     accountId: state.accountId,
     metadata: {
+      accountName: state.metadata.accountName,
       defaultPostageStampBatchID: state.metadata.defaultPostageStampBatchID,
       createdAt: state.metadata.createdAt,
       lastModified: state.metadata.lastModified,

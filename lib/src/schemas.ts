@@ -176,6 +176,7 @@ export const PostageStampSchemaV1 = z.object({
  * Account Metadata Schema V1
  */
 export const AccountMetadataSchemaV1 = z.object({
+  accountName: z.string().optional(),
   defaultPostageStampBatchID: z.string().length(64).optional(), // BatchId hex string
   createdAt: z.number(),
   lastModified: z.number(),
