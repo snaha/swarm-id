@@ -134,7 +134,9 @@
 		const a = document.createElement('a')
 		a.href = url
 		a.download = `${account.name}_${date}-${time}.swarmid`
+		document.body.appendChild(a)
 		a.click()
+		document.body.removeChild(a)
 		URL.revokeObjectURL(url)
 
 		if (account.type === 'passkey') {

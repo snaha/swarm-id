@@ -186,23 +186,34 @@ export async function decryptBackupPayload(
  * - `ethereumAddress` / `encryptedMasterKey` / `encryptionSalt` (ethereum):
  *   Needed to identify the wallet and decrypt the master key.
  */
-export function buildBackupHeader(account: Account): Record<string, unknown> {
+export type BackupHeaderWithoutCiphertext =
+  | Omit<PasskeyBackupHeader, "ciphertext">
+  | Omit<EthereumBackupHeader, "ciphertext">
+  | Omit<AgentBackupHeader, "ciphertext">
+
+export function buildBackupHeader(
+  account: Account,
+): BackupHeaderWithoutCiphertext {
   const base = {
-    version: BACKUP_VERSION,
-    encrypted: true,
-    accountType: account.type,
+    version: BACKUP_VERSION as typeof BACKUP_VERSION,
+    encrypted: true as const,
     accountId: account.id.toHex(),
     accountName: account.name,
     exportedAt: Date.now(),
   }
 
   if (account.type === "passkey") {
-    return { ...base, credentialId: account.credentialId }
+    return {
+      ...base,
+      accountType: "passkey" as const,
+      credentialId: account.credentialId,
+    }
   }
 
   if (account.type === "ethereum") {
     return {
       ...base,
+      accountType: "ethereum" as const,
       ethereumAddress: account.ethereumAddress.toHex(),
       encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
       encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
@@ -210,7 +221,7 @@ export function buildBackupHeader(account: Account): Record<string, unknown> {
   }
 
   // agent — no extra fields
-  return base
+  return { ...base, accountType: "agent" as const }
 }
 
 // ============================================================================
@@ -231,7 +242,7 @@ export async function createEncryptedExport(
   connectedApps: ConnectedApp[],
   postageStamps: PostageStamp[],
   swarmEncryptionKeyHex: string,
-): Promise<Record<string, unknown>> {
+): Promise<EncryptedSwarmIdExport> {
   const exportData = serializeSwarmIdExport(
     account,
     identities,
@@ -245,7 +256,7 @@ export async function createEncryptedExport(
   return {
     ...buildBackupHeader(account),
     ciphertext,
-  }
+  } as EncryptedSwarmIdExport
 }
 
 /**

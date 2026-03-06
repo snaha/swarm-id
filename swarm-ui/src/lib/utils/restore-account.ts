@@ -18,15 +18,16 @@ export function restoreAccountToStores(data: RestoreData): Account {
 		identitiesStore.addIdentity(identity)
 	}
 
+	const NO_AUTO_EXPIRY = 0
 	for (const app of data.connectedApps) {
-		connectedAppsStore.addOrUpdateApp(app, 0)
+		connectedAppsStore.addOrUpdateApp(app, NO_AUTO_EXPIRY)
 	}
 
 	for (const stamp of data.postageStamps) {
 		try {
 			postageStampsStore.addStamp(stamp)
-		} catch {
-			// Skip duplicate stamps
+		} catch (err) {
+			console.warn('Skipping duplicate stamp:', err)
 		}
 	}
 

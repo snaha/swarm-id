@@ -125,6 +125,7 @@ export type {
   EthereumBackupHeader,
   AgentBackupHeader,
   EncryptedSwarmIdExport,
+  BackupHeaderWithoutCiphertext,
   ParseHeaderResult,
 } from "./utils/backup-encryption"
 

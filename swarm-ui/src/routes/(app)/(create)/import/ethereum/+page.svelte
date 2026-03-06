@@ -79,7 +79,8 @@
 			sessionStore.clearImportData()
 
 			navigateToConnectOrHome()
-		} catch {
+		} catch (err) {
+			console.error('🔑 Ethereum import failed:', err)
 			error =
 				'Authentication failed. Make sure you used the same Ethereum wallet used during account creation.'
 			isProcessing = false
@@ -122,12 +123,3 @@
 		{/snippet}
 	</CreationLayout>
 {/if}
-
-<style>
-	@media screen and (max-width: 640px) {
-		:global(.mobile-full-width) {
-			width: 100%;
-			justify-content: center;
-		}
-	}
-</style>

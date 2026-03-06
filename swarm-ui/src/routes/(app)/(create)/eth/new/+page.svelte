@@ -341,10 +341,5 @@
 		.mobile-only {
 			display: inline-flex;
 		}
-
-		:global(.mobile-full-width) {
-			width: 100%;
-			justify-content: center;
-		}
 	}
 </style>

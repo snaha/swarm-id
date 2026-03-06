@@ -82,9 +82,8 @@ export function serializeSwarmIdExport(
     account: serializeAccount(account),
     identities: identities.map(serializeIdentity),
     connectedApps: connectedApps.map((app) => {
-      const serialized = serializeConnectedApp(app)
-      delete serialized.appSecret
-      return serialized
+      const { appSecret: _, ...rest } = serializeConnectedApp(app)
+      return rest
     }),
     postageStamps: postageStamps.map(serializePostageStamp),
   }

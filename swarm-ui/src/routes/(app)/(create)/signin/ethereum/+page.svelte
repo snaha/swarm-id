@@ -49,7 +49,7 @@
 			let account = accountsStore.accounts.find(
 				(a) =>
 					a.type === 'ethereum' &&
-					a.ethereumAddress.toString() === signed.address.toLowerCase().replace('0x', ''),
+					a.ethereumAddress.toHex() === signed.address.toLowerCase().replace('0x', ''),
 			)
 
 			if (account) {
@@ -105,7 +105,8 @@
 			sessionStore.setAccount(account)
 			sessionStore.setTemporaryMasterKey(masterKey)
 			navigateToConnectOrHome()
-		} catch {
+		} catch (err) {
+			console.error('🔑 Ethereum sign-in failed:', err)
 			error =
 				'Sign in failed. Make sure you are using the correct wallet and secret seed combination used during account creation.'
 			isProcessing = false
@@ -218,12 +219,5 @@
 	.seed-input {
 		flex: 1;
 		min-width: 0;
-	}
-
-	@media screen and (max-width: 640px) {
-		:global(.mobile-full-width) {
-			width: 100%;
-			justify-content: center;
-		}
 	}
 </style>

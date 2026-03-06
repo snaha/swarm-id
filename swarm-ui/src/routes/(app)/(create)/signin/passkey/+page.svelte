@@ -78,7 +78,8 @@
 			sessionStore.setAccount(restoredAccount)
 			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
 			navigateToConnectOrHome()
-		} catch {
+		} catch (err) {
+			console.error('🔑 Passkey sign-in failed:', err)
 			error =
 				'Sign in failed. Make sure you are using the same Passkey used during account creation.'
 			isProcessing = false
@@ -115,12 +116,3 @@
 		{/snippet}
 	</CreationLayout>
 {/if}
-
-<style>
-	@media screen and (max-width: 640px) {
-		:global(.mobile-full-width) {
-			width: 100%;
-			justify-content: center;
-		}
-	}
-</style>

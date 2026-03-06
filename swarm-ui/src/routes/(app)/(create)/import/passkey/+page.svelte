@@ -74,7 +74,8 @@
 			sessionStore.clearImportData()
 
 			navigateToConnectOrHome()
-		} catch {
+		} catch (err) {
+			console.error('🔑 Passkey import failed:', err)
 			error =
 				'Authentication failed. Make sure you used the same Passkey used during account creation.'
 			isProcessing = false
@@ -105,19 +106,15 @@
 		{/snippet}
 
 		{#snippet buttonContent()}
-			<Button dimension="compact" onclick={handleConfirmPasskey} class="mobile-full-width">
+			<Button
+				variant="strong"
+				dimension="compact"
+				onclick={handleConfirmPasskey}
+				class="mobile-full-width"
+			>
 				Confirm with Passkey
 				<ArrowRight size={20} />
 			</Button>
 		{/snippet}
 	</CreationLayout>
 {/if}
-
-<style>
-	@media screen and (max-width: 640px) {
-		:global(.mobile-full-width) {
-			width: 100%;
-			justify-content: center;
-		}
-	}
-</style>
