@@ -9,6 +9,7 @@
 	import SwarmLogo from '$lib/components/swarm-logo.svelte'
 	import CloseLarge from 'carbon-icons-svelte/lib/CloseLarge.svelte'
 	import Upload from 'carbon-icons-svelte/lib/Upload.svelte'
+	import ErrorMessage from '$lib/components/ui/error-message.svelte'
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import routes from '$lib/routes'
@@ -18,7 +19,7 @@
 	import { authenticateWithPasskey } from '$lib/passkey'
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
-	import { notImplemented } from '$lib/utils/not-implemented'
+	import { parseEncryptedExportHeader } from '@swarm-id/lib'
 
 	interface Props {
 		open: boolean
@@ -27,14 +28,28 @@
 
 	let { open = $bindable(), onclose }: Props = $props()
 
-	let failedAuthMethod = $state<'ethereum' | 'passkey' | undefined>(undefined)
+	let failedAuthMethod = $state<'ethereum' | 'passkey' | 'import-exists' | undefined>(undefined)
 	let isProcessing = $state(false)
+	let fileError = $state<string | undefined>(undefined)
+	let isDragging = $state(false)
+	let fileInputRef = $state<HTMLInputElement | undefined>(undefined)
 
-	const errorDescription = $derived(
-		failedAuthMethod === 'ethereum'
-			? "Make sure you're using the correct wallet and secret seed combination used during account creation."
-			: "Make sure you're using the same Passkey used during account creation.",
+	const errorTitle = $derived(
+		failedAuthMethod === 'import-exists' ? 'Account already exists' : 'Sign in failed',
 	)
+
+	const errorDescription = $derived.by(() => {
+		switch (failedAuthMethod) {
+			case 'ethereum':
+				return "Make sure you're using the correct wallet and secret seed combination used during account creation."
+			case 'passkey':
+				return "Make sure you're using the same Passkey used during account creation."
+			case 'import-exists':
+				return 'This account is already on this device. You can sign in directly using your Passkey or Ethereum wallet.'
+			default:
+				return ''
+		}
+	})
 
 	function close() {
 		failedAuthMethod = undefined
@@ -99,10 +114,83 @@
 		}
 	}
 
-	function handleLocalAccountClick(e: Event) {
-		notImplemented(e)
+	function handleLocalAccountClick() {
+		fileError = undefined
+		fileInputRef?.click()
+	}
+
+	async function processImportFile(file: File) {
+		try {
+			fileError = undefined
+			const text = await file.text()
+			const fileData: unknown = JSON.parse(text)
+			const result = parseEncryptedExportHeader(fileData)
+
+			if (!result.success) {
+				fileError = 'Invalid .swarmid file'
+				return
+			}
+
+			const existingAccount = accountsStore.accounts.find(
+				(a) => a.id.toHex() === result.header.accountId,
+			)
+			if (existingAccount) {
+				failedAuthMethod = 'import-exists'
+				return
+			}
+
+			sessionStore.setImportData(fileData, result.header)
+
+			if (result.header.accountType === 'passkey') {
+				close()
+				goto(resolve(routes.IMPORT_PASSKEY))
+			} else if (result.header.accountType === 'ethereum') {
+				close()
+				goto(resolve(routes.IMPORT_ETHEREUM))
+			} else {
+				fileError = `Import for ${result.header.accountType} accounts is not yet supported`
+			}
+		} catch {
+			fileError = 'Could not read file. Make sure it is a valid .swarmid file.'
+		}
+	}
+
+	function handleFileSelected(event: Event) {
+		const input = event.target as HTMLInputElement
+		const file = input.files?.[0]
+		if (file) {
+			processImportFile(file)
+		}
+		// Reset input so the same file can be selected again
+		input.value = ''
+	}
+
+	function handleDragOver(event: DragEvent) {
+		event.preventDefault()
+		isDragging = true
+	}
+
+	function handleDragLeave() {
+		isDragging = false
+	}
+
+	function handleDrop(event: DragEvent) {
+		event.preventDefault()
+		isDragging = false
+		const file = event.dataTransfer?.files[0]
+		if (file) {
+			processImportFile(file)
+		}
 	}
 </script>
+
+<input
+	type="file"
+	accept=".swarmid"
+	class="hidden-file-input"
+	bind:this={fileInputRef}
+	onchange={handleFileSelected}
+/>
 
 {#if failedAuthMethod}
 	<div class="error-overlay">
@@ -112,7 +200,7 @@
 		<div class="error-content">
 			<Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
 				<Vertical --vertical-gap="var(--half-padding)">
-					<Typography variant="h4" center>‼️ Sign in failed</Typography>
+					<Typography variant="h4" center>‼️ {errorTitle}</Typography>
 					<Typography center>{errorDescription}</Typography>
 				</Vertical>
 				<Button variant="strong" onclick={handleTryAgain}>Try again</Button>
@@ -121,7 +209,14 @@
 	</div>
 {:else if layoutStore.mobile}
 	{#if open}
-		<div class="mobile-overlay">
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="mobile-overlay"
+			class:dragging={isDragging}
+			ondragover={handleDragOver}
+			ondragleave={handleDragLeave}
+			ondrop={handleDrop}
+		>
 			<div class="mobile-header">
 				<Typography variant="h4">Sign in</Typography>
 				<Button variant="ghost" dimension="compact" onclick={close} disabled={isProcessing}>
@@ -129,9 +224,14 @@
 				</Button>
 			</div>
 			<div class="mobile-content">
-				<Typography>
-					Select your synced account type below to sign in, or import a local account from a file.
-				</Typography>
+				<Vertical --vertical-gap="var(--half-padding)">
+					<Typography>
+						Select your synced account type below to sign in, or import a local account from a file.
+					</Typography>
+					{#if fileError}
+						<ErrorMessage>{fileError}</ErrorMessage>
+					{/if}
+				</Vertical>
 			</div>
 			<Vertical class="mobile-buttons" --vertical-gap="var(--half-padding)">
 				<Button variant="strong" onclick={handleEthereumClick} disabled={isProcessing} flexGrow>
@@ -151,37 +251,60 @@
 	{/if}
 {:else}
 	<Modal bind:open oncancel={close}>
-		<Vertical --vertical-gap="var(--padding)" style="padding: var(--double-padding)">
-			<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
-				<Typography variant="h4">Sign in</Typography>
-				<Button variant="ghost" dimension="compact" onclick={close} disabled={isProcessing}>
-					<CloseLarge size={20} />
-				</Button>
-			</Horizontal>
-			<Typography>
-				Select your synced account type below to sign in, or import a local account from a file.
-			</Typography>
-			<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
-				<Horizontal --horizontal-gap="var(--half-padding)">
-					<Button variant="strong" onclick={handleEthereumClick} disabled={isProcessing}>
-						<EthereumLogo width={20} height={20} />
-						Ethereum
-					</Button>
-					<Button variant="strong" onclick={handlePasskeyClick} disabled={isProcessing}>
-						<PasskeyLogo width={20} height={20} />
-						Passkey
+		<!-- svelte-ignore a11y_no_static_element_interactions -->
+		<div
+			class="modal-drop-zone"
+			class:dragging={isDragging}
+			ondragover={handleDragOver}
+			ondragleave={handleDragLeave}
+			ondrop={handleDrop}
+		>
+			<Vertical --vertical-gap="var(--padding)" style="padding: var(--double-padding)">
+				<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+					<Typography variant="h4">Sign in</Typography>
+					<Button variant="ghost" dimension="compact" onclick={close} disabled={isProcessing}>
+						<CloseLarge size={20} />
 					</Button>
 				</Horizontal>
-				<Button variant="ghost" onclick={handleLocalAccountClick} disabled={isProcessing}>
-					<Upload size={20} />
-					Local account
-				</Button>
-			</Horizontal>
-		</Vertical>
+				<Vertical --vertical-gap="var(--half-padding)">
+					<Typography>
+						Select your synced account type below to sign in, or import a local account from a file.
+					</Typography>
+					{#if fileError}
+						<ErrorMessage>{fileError}</ErrorMessage>
+					{/if}
+				</Vertical>
+				<Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
+					<Horizontal --horizontal-gap="var(--half-padding)">
+						<Button variant="strong" onclick={handleEthereumClick} disabled={isProcessing}>
+							<EthereumLogo width={20} height={20} />
+							Ethereum
+						</Button>
+						<Button variant="strong" onclick={handlePasskeyClick} disabled={isProcessing}>
+							<PasskeyLogo width={20} height={20} />
+							Passkey
+						</Button>
+					</Horizontal>
+					<Button variant="ghost" onclick={handleLocalAccountClick} disabled={isProcessing}>
+						<Upload size={20} />
+						Local account
+					</Button>
+				</Horizontal>
+			</Vertical>
+		</div>
 	</Modal>
 {/if}
 
 <style>
+	.hidden-file-input {
+		display: none;
+	}
+
+	.dragging {
+		outline: 2px dashed var(--colors-ultra-high-50);
+		outline-offset: -4px;
+	}
+
 	.error-overlay {
 		position: fixed;
 		inset: 0;

@@ -97,6 +97,7 @@
 	title="Are you sure you want to revoke the app?"
 	text=""
 	buttonTitle="Revoke"
+	cancelTitle="Cancel"
 	bind:open={showConfirmRevokeApp}
 	oncancel={() => (showConfirmRevokeApp = false)}
 />

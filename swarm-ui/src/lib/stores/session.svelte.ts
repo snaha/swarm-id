@@ -1,6 +1,7 @@
 // Session store for tracking current account/identity creation flow
 
 import type { Account, AppData } from '$lib/types'
+import type { EncryptedSwarmIdExport } from '@swarm-id/lib'
 import { Bytes } from '@ethersphere/bee-js'
 
 export type SessionData = {
@@ -24,6 +25,10 @@ export type SessionData = {
 	// App data
 	appData?: AppData
 	appOrigin?: string
+
+	// Import flow
+	importFileData?: unknown
+	importHeader?: EncryptedSwarmIdExport
 }
 
 // Reactive state using Svelte 5 runes
@@ -76,6 +81,14 @@ export const sessionStore = {
 
 	clearAppData() {
 		session = { ...session, appData: undefined }
+	},
+
+	setImportData(fileData: unknown, header: EncryptedSwarmIdExport) {
+		session = { ...session, importFileData: fileData, importHeader: header }
+	},
+
+	clearImportData() {
+		session = { ...session, importFileData: undefined, importHeader: undefined }
 	},
 
 	setSyncedCreation(synced: boolean) {

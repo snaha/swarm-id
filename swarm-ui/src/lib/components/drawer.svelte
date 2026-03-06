@@ -38,6 +38,7 @@
 	import CopyButton from './copy-button.svelte'
 	import Tooltip from './ui/tooltip.svelte'
 	import ViewGenerationDetailsModal from './view-generation-details-modal.svelte'
+	import DeleteModal from './delete-modal.svelte'
 	import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
 
 	type Props = {
@@ -56,6 +57,7 @@
 	let showExportTooltip = $state(false)
 	let networkSettingsModalOpen = $state(false)
 	let showGenerationDetailsModal = $state(false)
+	let showDeleteModal = $state(false)
 
 	$effect(() => {
 		accountName = account.name
@@ -85,6 +87,19 @@
 
 	function onAccountNameChange() {
 		accountsStore.setAccountName(account.id, accountName)
+	}
+
+	function handleDeleteAccount() {
+		const accountId = account.id
+		const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
+		for (const identity of accountIdentities) {
+			connectedAppsStore.removeAppsByIdentityId(identity.id)
+			identitiesStore.removeIdentity(identity.id)
+		}
+		postageStampsStore.removeStampsByAccount(accountId.toHex())
+		accountsStore.removeAccount(accountId)
+		drawerOpen = false
+		goto(resolve(routes.HOME))
 	}
 
 	let showPasskeyExportWarning = $state(false)
@@ -476,7 +491,13 @@
 						<Unlink size={20} />
 						Disconnect
 					</Button>
-					<Button variant="ghost" dimension="compact" danger leftAlign onclick={notImplemented}>
+					<Button
+						variant="ghost"
+						dimension="compact"
+						danger
+						leftAlign
+						onclick={() => (showDeleteModal = true)}
+					>
 						<TrashCan size={20} />
 						Delete account
 					</Button>
@@ -495,6 +516,15 @@
 {/if}
 
 <NetworkSettingsModal bind:open={networkSettingsModalOpen} />
+
+<DeleteModal
+	bind:open={showDeleteModal}
+	title="Delete account?"
+	text="This will permanently delete your account and all associated data. This action cannot be undone."
+	buttonTitle="Delete account"
+	confirm={handleDeleteAccount}
+	oncancel={() => (showDeleteModal = false)}
+/>
 
 <style>
 	.drawer {

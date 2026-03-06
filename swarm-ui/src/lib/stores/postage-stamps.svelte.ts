@@ -75,6 +75,11 @@ export const postageStampsStore = {
 		savePostageStamps(postageStamps, false, accountId)
 	},
 
+	removeStampsByAccount(accountId: string) {
+		postageStamps = postageStamps.filter((s) => s.accountId !== accountId)
+		savePostageStamps(postageStamps)
+	},
+
 	getStamp(batchID: BatchId): PostageStamp | undefined {
 		return postageStamps.find((s) => s.batchID.equals(batchID))
 	},

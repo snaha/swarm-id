@@ -119,6 +119,11 @@ export const connectedAppsStore = {
 		return connectedApps.filter((app) => app.identityId === identityId)
 	},
 
+	removeAppsByIdentityId(identityId: string) {
+		connectedApps = connectedApps.filter((app) => app.identityId !== identityId)
+		saveConnectedApps(connectedApps)
+	},
+
 	removeApp(appUrl: string, identityId: string) {
 		connectedApps = connectedApps.filter(
 			(app) => !(app.appUrl === appUrl && app.identityId === identityId),

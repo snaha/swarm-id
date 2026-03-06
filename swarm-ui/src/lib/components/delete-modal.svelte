@@ -2,7 +2,7 @@
 	import Button from './ui/button.svelte'
 	import Modal, { type ModalProps } from './ui/modal.svelte'
 	import Typography from './ui/typography.svelte'
-	import { Close } from 'carbon-icons-svelte'
+	import Close from 'carbon-icons-svelte/lib/Close.svelte'
 	import LoaderButton from './loader-button.svelte'
 
 	type Props = {
@@ -10,6 +10,7 @@
 		title: string
 		text: string
 		buttonTitle: string
+		cancelTitle?: string
 	}
 	let {
 		oncancel,
@@ -18,6 +19,7 @@
 		title,
 		text,
 		buttonTitle,
+		cancelTitle = "Don't delete",
 		...restProps
 	}: ModalProps & Props = $props()
 </script>
@@ -30,12 +32,14 @@
 			<Button variant="ghost" dimension="compact" onclick={oncancel}><Close size={24} /></Button>
 		</header>
 
-		<Typography>{text}</Typography>
+		{#if text}
+			<Typography>{text}</Typography>
+		{/if}
 		<section class="buttons">
-			<LoaderButton variant="strong" dimension="compact" onclick={confirm}
+			<LoaderButton variant="strong" dimension="compact" onclick={confirm} class="danger-button"
 				>{buttonTitle}</LoaderButton
 			>
-			<Button variant="secondary" dimension="compact" onclick={oncancel}>Cancel</Button>
+			<Button variant="ghost" dimension="compact" onclick={oncancel}>{cancelTitle}</Button>
 			<div class="grower"></div>
 		</section>
 	</section>
@@ -46,9 +50,9 @@
 		display: flex;
 		flex-direction: column;
 		justify-content: center;
-		gap: var(--padding);
+		gap: var(--one-and-half-padding);
 		background-color: var(--colors-ultra-low);
-		padding: var(--padding);
+		padding: var(--one-and-half-padding);
 		height: 100%;
 	}
 	.horizontal {
@@ -62,6 +66,11 @@
 		flex-direction: row;
 		align-items: center;
 		gap: var(--half-padding);
+	}
+	:global(.danger-button button) {
+		background: var(--colors-red) !important;
+		border-color: transparent !important;
+		color: var(--colors-base) !important;
 	}
 	@media screen and (max-width: 624px) {
 		.buttons {
