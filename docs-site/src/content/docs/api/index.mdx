@@ -1505,5 +1505,183 @@ import type {
 
 	// ACT types
 	ActUploadOptions,
+
+	// Backup & Recovery types
+	EncryptedSwarmIdExport,
+	ParseHeaderResult,
+	AccountStateSnapshot,
+	RestoreAccountResult,
 } from '@swarm-id/lib'
+```
+
+---
+
+## Backup Encryption
+
+Functions for creating and reading encrypted `.swarmid` backup files. Exported from `@swarm-id/lib`.
+
+### `createEncryptedExport(account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex)`
+
+Create a fully encrypted `.swarmid` export object. Serializes account data, derives an AES-GCM-256 key from the stored `swarmEncryptionKey`, encrypts the payload, and builds a header with account metadata.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `account` | `Account` | The account to export |
+| `identities` | `Identity[]` | Account identities |
+| `connectedApps` | `ConnectedApp[]` | Connected applications (`appSecret` is stripped) |
+| `postageStamps` | `PostageStamp[]` | Postage stamps |
+| `swarmEncryptionKeyHex` | `string` | Hex-encoded swarm encryption key (persisted on account) |
+
+**Returns:** `Promise<EncryptedSwarmIdExport>`
+
+```typescript
+const exported = await createEncryptedExport(
+	account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex,
+)
+// Save as .swarmid file
+const blob = new Blob([JSON.stringify(exported)], { type: 'application/json' })
+```
+
+### `decryptEncryptedExport(encryptedData, swarmEncryptionKeyHex)`
+
+Decrypt an encrypted `.swarmid` export and return the parsed account state snapshot.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `encryptedData` | `unknown` | The parsed JSON from a `.swarmid` file |
+| `swarmEncryptionKeyHex` | `string` | Hex-encoded swarm encryption key |
+
+**Returns:** `Promise<AccountStateSnapshotResult>` — `{ success: true, data: AccountStateSnapshot }` or `{ success: false, error: ZodError }`
+
+```typescript
+const result = await decryptEncryptedExport(fileData, swarmEncryptionKeyHex)
+if (result.success) {
+	const { identities, connectedApps, postageStamps } = result.data
+}
+```
+
+### `parseEncryptedExportHeader(data)`
+
+Parse and validate just the encrypted export header without decrypting. Useful for reading account metadata (name, type, export date) before attempting decryption.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `data` | `unknown` | The parsed JSON from a `.swarmid` file |
+
+**Returns:** `ParseHeaderResult` — `{ success: true, header: EncryptedSwarmIdExport }` or `{ success: false, error: string }`
+
+### `deriveBackupEncryptionKey(swarmEncryptionKeyHex)`
+
+Derive an AES-GCM-256 `CryptoKey` for backup encryption from the stored `swarmEncryptionKey`. Uses HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `swarmEncryptionKeyHex` | `string` | Hex-encoded swarm encryption key |
+
+**Returns:** `Promise<CryptoKey>`
+
+### Types
+
+```typescript
+// Discriminated union of backup headers (passkey | ethereum | agent)
+type EncryptedSwarmIdExport = PasskeyBackupHeader | EthereumBackupHeader | AgentBackupHeader
+
+// Common fields in all headers
+interface BackupHeaderBase {
+	version: 1
+	accountName: string
+	exportedAt: number      // Unix timestamp
+	ciphertext: string      // Base64-encoded encrypted payload
+}
+
+// Result of parseEncryptedExportHeader()
+type ParseHeaderResult =
+	| { success: true; header: EncryptedSwarmIdExport }
+	| { success: false; error: string }
+```
+
+---
+
+## Account State Snapshots
+
+Shared serialization for account state used by both file export and Swarm sync.
+
+### `serializeAccountStateSnapshot(input)`
+
+Serialize account data into a plain object suitable for JSON encoding. Strips `appSecret` from connected apps.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `input.accountId` | `string` | Account ID (hex) |
+| `input.metadata` | `AccountMetadata` | Account metadata |
+| `input.identities` | `Identity[]` | Account identities |
+| `input.connectedApps` | `ConnectedApp[]` | Connected apps (`appSecret` stripped) |
+| `input.postageStamps` | `PostageStamp[]` | Postage stamps |
+| `input.timestamp` | `number` | Snapshot timestamp |
+
+**Returns:** `Record<string, unknown>`
+
+### `deserializeAccountStateSnapshot(data)`
+
+Deserialize and validate an account state snapshot. Any `appSecret` injected in the raw data is stripped by the Zod schema.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `data` | `unknown` | Raw data to parse |
+
+**Returns:** `AccountStateSnapshotResult` — `{ success: true, data: AccountStateSnapshot }` or `{ success: false, error: ZodError }`
+
+### Types
+
+```typescript
+interface AccountStateSnapshot {
+	version: 1
+	timestamp: number
+	accountId: string
+	metadata: AccountMetadata
+	identities: SerializedIdentity[]
+	connectedApps: ExportedConnectedApp[]  // no appSecret
+	postageStamps: SerializedPostageStamp[]
+}
+```
+
+---
+
+## Account Restoration
+
+### `restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)`
+
+Restore account state from Swarm using passkey authentication result. Derives keys, looks up the epoch feed, downloads and decrypts the latest snapshot.
+
+**Parameters:**
+
+| Parameter | Type | Description |
+| --- | --- | --- |
+| `bee` | `Bee` | Bee client instance |
+| `masterKey` | `Bytes` | Master key from passkey authentication |
+| `ethereumAddress` | `EthAddress` | Account ID from passkey authentication |
+| `credentialId` | `string` | Credential ID from passkey authentication |
+
+**Returns:** `Promise<RestoreAccountResult | undefined>` — `undefined` if no backup found in Swarm
+
+### Types
+
+```typescript
+interface RestoreAccountResult {
+	snapshot: AccountStateSnapshot
+	swarmEncryptionKey: string
+	credentialId: string
+}
 ```

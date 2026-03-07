@@ -66,9 +66,22 @@ Runs in the authentication popup window. It:
 - Sends secrets to the iframe via postMessage
 - Provides the authentication UI
 
-## Key Derivation
+## Key Hierarchy
 
-App-specific secrets are derived deterministically from the master key:
+All cryptographic keys are derived from a single master key produced during Passkey or SIWE authentication:
+
+```
+Master Key (from Passkey/SIWE challenge)
+├─> App-Specific Secret (HMAC-SHA256 with app origin)
+│       ├─> Low-stakes keys (feed, session) → shared with apps
+│       └─> High-stakes keys (stamps, ACT) → never shared
+├─> swarmEncryptionKey (HMAC-SHA256, persisted in account)
+│       ├─> backupKey (HMAC-SHA256 with "swarm-id-backup-encryption-v1")
+│       │       └─> AES-GCM-256 CryptoKey (for .swarmid encryption)
+│       └─> backup private key (for Swarm epoch feed owner)
+```
+
+### App Secret Derivation
 
 ```typescript
 // Pseudocode for key derivation
@@ -120,6 +133,57 @@ All cross-origin communication uses postMessage with Zod validation:
 | Message     | Purpose                          |
 | ----------- | -------------------------------- |
 | `setSecret` | Send derived app-specific secret |
+
+## Backup & Recovery
+
+Swarm ID supports account backup via encrypted `.swarmid` files and automatic Swarm-based sync.
+
+### .swarmid File Format
+
+Each `.swarmid` file is a JSON object with two parts:
+
+1. **Plaintext header** — account metadata visible without decryption (account name, export timestamp, account type, and type-specific fields)
+2. **Encrypted payload** — AES-GCM-256 encrypted `AccountStateSnapshot` containing identities, connected apps, and postage stamps
+
+Header fields vary by account type:
+
+| Account Type | Extra Header Fields |
+| --- | --- |
+| **Passkey** | `credentialId` |
+| **Ethereum** | `ethereumAddress`, `encryptedMasterKey`, `encryptionSalt`, `encryptedSecretSeed` |
+| **Agent** | _(none)_ |
+
+### Export Flow
+
+Export requires **no re-authentication** — the `swarmEncryptionKey` is already persisted in the account. The flow:
+
+1. Serialize account state via `serializeAccountStateSnapshot()` (strips `appSecret`)
+2. Derive AES-GCM-256 key: `swarmEncryptionKey` → HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`
+3. Encrypt with random 12-byte IV
+4. Build header with account metadata + ciphertext
+
+### Import Flow
+
+Import **requires authentication** to re-derive the encryption key:
+
+1. Parse the plaintext header to identify account type and metadata
+2. User authenticates (passkey or wallet) to obtain `masterKey`
+3. Derive `swarmEncryptionKey` → `backupKey` → AES-GCM-256 key
+4. Decrypt and validate the payload via `deserializeAccountStateSnapshot()`
+
+### Swarm Restore Flow
+
+When a passkey auth succeeds on a new device with no local account:
+
+1. Derive `swarmEncryptionKey` from `masterKey`
+2. Derive `backupKey` → epoch feed owner private key
+3. Build feed topic from account ID
+4. Look up latest epoch feed entry in Swarm
+5. Download and decrypt the account snapshot
+
+### Security: appSecret Exclusion
+
+The `appSecret` field is structurally excluded from `ExportedConnectedAppSchemaV1`. Even if raw data contains an `appSecret`, Zod strips it during parsing. App secrets are re-derived on-demand from the master key — they are never stored in backups.
 
 ## Security Considerations
 

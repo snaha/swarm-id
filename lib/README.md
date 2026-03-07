@@ -71,7 +71,11 @@ lib/
 ├── swarm-id-proxy.ts          # Proxy logic for iframe
 ├── swarm-id-auth.ts           # Auth popup logic
 ├── utils/
-│   └── key-derivation.ts      # Cryptographic utilities
+│   ├── key-derivation.ts      # Cryptographic utilities
+│   ├── backup-encryption.ts   # AES-GCM-256 encryption for .swarmid files
+│   └── account-state-snapshot.ts # Shared serialization for export & sync
+├── sync/
+│   └── restore-account.ts     # Swarm-based account restoration
 └── tsconfig.json              # TypeScript configuration
 
 dist/                           # Built output (generated)
@@ -287,6 +291,53 @@ The library uses postMessage for secure cross-origin communication with Zod sche
 
 - `setSecret` - Send derived secret to iframe
 
+## Import & Export
+
+Accounts can be exported to encrypted `.swarmid` backup files and restored via import or from Swarm.
+
+### .swarmid File Format
+
+Each file contains a plaintext JSON header (account metadata, type-specific fields) plus an AES-GCM-256 encrypted payload containing the account state snapshot.
+
+```typescript
+import {
+  createEncryptedExport,
+  decryptEncryptedExport,
+  parseEncryptedExportHeader,
+} from "@swarm-id/lib"
+
+// Export (no re-auth needed — uses stored swarmEncryptionKey)
+const exported = await createEncryptedExport(
+  account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex,
+)
+
+// Read header metadata without decrypting
+const header = parseEncryptedExportHeader(fileData)
+
+// Import (requires auth to re-derive key)
+const result = await decryptEncryptedExport(fileData, swarmEncryptionKeyHex)
+if (result.success) {
+  console.log(result.data) // AccountStateSnapshot
+}
+```
+
+### Account State Snapshots
+
+The `serializeAccountStateSnapshot()` and `deserializeAccountStateSnapshot()` functions provide shared serialization used by both file export and Swarm sync. The `appSecret` field is structurally excluded from `ExportedConnectedAppSchemaV1`, so Zod strips it during parsing.
+
+### Swarm Sync & Restore
+
+When a passkey auth succeeds on a new device with no local account, `restoreAccountFromSwarm()` derives the necessary keys, finds the epoch feed in Swarm, downloads and decrypts the latest account snapshot.
+
+```typescript
+import { restoreAccountFromSwarm } from "@swarm-id/lib"
+
+const result = await restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)
+if (result) {
+  console.log(result.snapshot) // AccountStateSnapshot
+}
+```
+
 ## Security Features
 
 - **Origin Validation** - All postMessage calls validate sender origin
@@ -295,6 +346,8 @@ The library uses postMessage for secure cross-origin communication with Zod sche
 - **Partitioned Storage** - Secrets isolated per (iframe-origin, parent-origin) pair
 - **Master Key Protection** - Master key never leaves first-party context
 - **Type-safe Messages** - Zod schema validation on all messages
+- **Backup Encryption** - AES-GCM-256 with random IV for .swarmid files
+- **appSecret Exclusion** - App secrets are never included in exports or sync snapshots
 
 ## Browser Compatibility and Storage Access
 
