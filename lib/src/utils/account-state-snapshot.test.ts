@@ -1,18 +1,16 @@
 import { describe, it, expect } from "vitest"
-import { EthAddress, BatchId, PrivateKey, Bytes } from "@ethersphere/bee-js"
+import { EthAddress, BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
-  serializeSwarmIdExport,
-  deserializeSwarmIdExport,
-  SwarmIdExportSchemaV1,
-} from "./swarm-id-export"
-import type { ConnectedApp, PostageStamp, EthereumAccount } from "../schemas"
+  serializeAccountStateSnapshot,
+  deserializeAccountStateSnapshot,
+  AccountStateSnapshotSchemaV1,
+} from "./account-state-snapshot"
+import type { Account, ConnectedApp, PostageStamp } from "../schemas"
 import {
   TEST_ETH_ADDRESS_HEX,
-  TEST_ETH_ADDRESS_2_HEX,
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
-  TEST_ENCRYPTION_KEY_HEX,
   createPasskeyAccount,
   createEthereumAccount,
   createAgentAccount,
@@ -20,6 +18,34 @@ import {
   createConnectedApp,
   createPostageStamp,
 } from "../test-fixtures"
+
+/**
+ * Helper: extract metadata from an Account and serialize via the snapshot function.
+ */
+function serializeFromAccount(
+  account: Account,
+  identities: Parameters<typeof serializeAccountStateSnapshot>[0]["identities"],
+  connectedApps: Parameters<
+    typeof serializeAccountStateSnapshot
+  >[0]["connectedApps"],
+  postageStamps: Parameters<
+    typeof serializeAccountStateSnapshot
+  >[0]["postageStamps"],
+) {
+  return serializeAccountStateSnapshot({
+    accountId: account.id.toHex(),
+    metadata: {
+      accountName: account.name,
+      defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
+      createdAt: account.createdAt,
+      lastModified: Date.now(),
+    },
+    identities,
+    connectedApps,
+    postageStamps,
+    timestamp: Date.now(),
+  })
+}
 
 // ============================================================================
 // Round-trip Tests
@@ -32,7 +58,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     const connectedApps = [createConnectedApp()]
     const postageStamps = [createPostageStamp()]
 
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       account,
       identities,
       connectedApps,
@@ -40,15 +66,13 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     )
     const json = JSON.stringify(serialized)
     const parsed = JSON.parse(json)
-    const result = deserializeSwarmIdExport(parsed)
+    const result = deserializeAccountStateSnapshot(parsed)
 
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.type).toBe("passkey")
-    expect(result.data.account.id).toBeInstanceOf(EthAddress)
-    expect(result.data.account.id.toHex()).toBe(TEST_ETH_ADDRESS_HEX)
-    expect(result.data.account.name).toBe("Test Passkey Account")
+    expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(result.data.metadata.accountName).toBe("Test Passkey Account")
     expect(result.data.identities).toHaveLength(1)
     expect(result.data.identities[0].accountId).toBeInstanceOf(EthAddress)
     expect(result.data.connectedApps).toHaveLength(1)
@@ -58,13 +82,13 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     expect(result.data.postageStamps[0].signerKey).toBeInstanceOf(PrivateKey)
   })
 
-  it("should round-trip an ethereum account with Bytes fields", () => {
+  it("should round-trip an ethereum account with metadata", () => {
     const account = createEthereumAccount()
     const identities = [createIdentity()]
     const connectedApps: ConnectedApp[] = []
     const postageStamps: PostageStamp[] = []
 
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       account,
       identities,
       connectedApps,
@@ -72,26 +96,14 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     )
     const json = JSON.stringify(serialized)
     const parsed = JSON.parse(json)
-    const result = deserializeSwarmIdExport(parsed)
+    const result = deserializeAccountStateSnapshot(parsed)
 
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    const ethAccount = result.data.account as EthereumAccount
-    expect(ethAccount.type).toBe("ethereum")
-    expect(ethAccount.ethereumAddress).toBeInstanceOf(EthAddress)
-    expect(ethAccount.encryptedMasterKey).toBeInstanceOf(Bytes)
-    expect(ethAccount.encryptionSalt).toBeInstanceOf(Bytes)
-    expect(ethAccount.encryptedSecretSeed).toBeInstanceOf(Bytes)
-    expect(Array.from(ethAccount.encryptedMasterKey.toUint8Array())).toEqual([
-      1, 2, 3, 4,
-    ])
-    expect(Array.from(ethAccount.encryptionSalt.toUint8Array())).toEqual([
-      5, 6, 7, 8,
-    ])
-    expect(Array.from(ethAccount.encryptedSecretSeed.toUint8Array())).toEqual([
-      9, 10, 11, 12,
-    ])
+    expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(result.data.metadata.accountName).toBe("Test Ethereum Account")
+    expect(result.data.metadata.createdAt).toBe(1700000000000)
   })
 
   it("should round-trip an agent account", () => {
@@ -100,7 +112,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     const connectedApps: ConnectedApp[] = []
     const postageStamps: PostageStamp[] = []
 
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       account,
       identities,
       connectedApps,
@@ -108,13 +120,12 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     )
     const json = JSON.stringify(serialized)
     const parsed = JSON.parse(json)
-    const result = deserializeSwarmIdExport(parsed)
+    const result = deserializeAccountStateSnapshot(parsed)
 
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.type).toBe("agent")
-    expect(result.data.account.name).toBe("Test Agent Account")
+    expect(result.data.metadata.accountName).toBe("Test Agent Account")
   })
 
   it("should produce valid JSON for actual file I/O simulation", () => {
@@ -133,7 +144,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     ]
     const postageStamps = [createPostageStamp({ batchTTL: 86400 })]
 
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       account,
       identities,
       connectedApps,
@@ -143,13 +154,13 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     // Simulate file write + read
     const fileContent = JSON.stringify(serialized, undefined, 2)
     const fileData = JSON.parse(fileContent)
-    const result = deserializeSwarmIdExport(fileData)
+    const result = deserializeAccountStateSnapshot(fileData)
 
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.defaultPostageStampBatchID).toBeInstanceOf(
-      BatchId,
+    expect(result.data.metadata.defaultPostageStampBatchID).toBe(
+      TEST_BATCH_ID_HEX,
     )
     expect(result.data.identities[0].settings?.appSessionDuration).toBe(3600)
     expect(result.data.connectedApps[0].appIcon).toBe(
@@ -168,7 +179,7 @@ describe("appSecret security", () => {
     const account = createPasskeyAccount()
     const connectedApps = [createConnectedApp({ appSecret: "my-secret-value" })]
 
-    const serialized = serializeSwarmIdExport(account, [], connectedApps, [])
+    const serialized = serializeFromAccount(account, [], connectedApps, [])
 
     // Verify appSecret is not in the serialized output
     const apps = serialized.connectedApps as Record<string, unknown>[]
@@ -177,7 +188,7 @@ describe("appSecret security", () => {
 
   it("should strip injected appSecret during import", () => {
     const account = createPasskeyAccount()
-    const serialized = serializeSwarmIdExport(account, [], [], [])
+    const serialized = serializeFromAccount(account, [], [], [])
 
     // Maliciously inject appSecret into raw data
     const raw = JSON.parse(JSON.stringify(serialized))
@@ -191,7 +202,7 @@ describe("appSecret security", () => {
       },
     ]
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -209,8 +220,8 @@ describe("appSecret security", () => {
 describe("edge cases", () => {
   it("should handle empty arrays for identities, connectedApps, and postageStamps", () => {
     const account = createPasskeyAccount()
-    const serialized = serializeSwarmIdExport(account, [], [], [])
-    const result = deserializeSwarmIdExport(
+    const serialized = serializeFromAccount(account, [], [], [])
+    const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -227,13 +238,13 @@ describe("edge cases", () => {
       settings: undefined,
       defaultPostageStampBatchID: undefined,
     })
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       createPasskeyAccount(),
       [identity],
       [],
       [],
     )
-    const result = deserializeSwarmIdExport(
+    const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -251,13 +262,13 @@ describe("edge cases", () => {
       connectedUntil: undefined,
       appSecret: undefined,
     })
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       createPasskeyAccount(),
       [],
       [app],
       [],
     )
-    const result = deserializeSwarmIdExport(
+    const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -271,13 +282,13 @@ describe("edge cases", () => {
 
   it("should handle optional fields absent on postage stamp", () => {
     const stamp = createPostageStamp({ batchTTL: undefined })
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       createPasskeyAccount(),
       [],
       [],
       [stamp],
     )
-    const result = deserializeSwarmIdExport(
+    const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -287,19 +298,19 @@ describe("edge cases", () => {
     expect(result.data.postageStamps[0].batchTTL).toBeUndefined()
   })
 
-  it("should handle optional defaultPostageStampBatchID absent on account", () => {
+  it("should handle optional defaultPostageStampBatchID absent on account metadata", () => {
     const account = createPasskeyAccount({
       defaultPostageStampBatchID: undefined,
     })
-    const serialized = serializeSwarmIdExport(account, [], [], [])
-    const result = deserializeSwarmIdExport(
+    const serialized = serializeFromAccount(account, [], [], [])
+    const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
 
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.defaultPostageStampBatchID).toBeUndefined()
+    expect(result.data.metadata.defaultPostageStampBatchID).toBeUndefined()
   })
 
   it("should handle multiple entities of each type", () => {
@@ -324,13 +335,13 @@ describe("edge cases", () => {
       createPostageStamp({ batchID: new BatchId(TEST_BATCH_ID_2_HEX) }),
     ]
 
-    const serialized = serializeSwarmIdExport(
+    const serialized = serializeFromAccount(
       account,
       identities,
       connectedApps,
       postageStamps,
     )
-    const result = deserializeSwarmIdExport(
+    const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -349,85 +360,59 @@ describe("edge cases", () => {
 
 describe("invalid data rejection", () => {
   it("should reject wrong version number", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.version = 2
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject missing version", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.version
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
-  it("should reject missing account", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+  it("should reject missing accountId", () => {
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
-    delete raw.account
+    delete raw.accountId
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
-  it("should reject invalid account type", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+  it("should reject missing metadata", () => {
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
-    raw.account.type = "invalid"
+    delete raw.metadata
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
-  it("should reject invalid EthAddress hex length", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+  it("should reject invalid accountId hex length", () => {
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
-    raw.account.id = "abc" // too short
+    raw.accountId = "abc" // too short
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject invalid BatchId hex length", () => {
     const raw = {
       version: 1,
-      account: {
-        id: TEST_ETH_ADDRESS_HEX,
-        name: "Test",
+      timestamp: Date.now(),
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test",
         createdAt: 1700000000000,
-        type: "passkey",
-        credentialId: "cred",
-        swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+        lastModified: Date.now(),
       },
       identities: [],
       connectedApps: [],
@@ -449,20 +434,19 @@ describe("invalid data rejection", () => {
       ],
     }
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject invalid PrivateKey hex length", () => {
     const raw = {
       version: 1,
-      account: {
-        id: TEST_ETH_ADDRESS_HEX,
-        name: "Test",
+      timestamp: Date.now(),
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test",
         createdAt: 1700000000000,
-        type: "passkey",
-        credentialId: "cred",
-        swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+        lastModified: Date.now(),
       },
       identities: [],
       connectedApps: [],
@@ -484,50 +468,40 @@ describe("invalid data rejection", () => {
       ],
     }
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject number where string is expected", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
-    raw.account.name = 12345
+    raw.metadata.accountName = 12345
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject string where array is expected", () => {
-    const serialized = serializeSwarmIdExport(
-      createPasskeyAccount(),
-      [],
-      [],
-      [],
-    )
+    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.identities = "not-an-array"
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
   })
 
   it("should reject non-object input (string)", () => {
-    const result = deserializeSwarmIdExport("not-an-object")
+    const result = deserializeAccountStateSnapshot("not-an-object")
     expect(result.success).toBe(false)
   })
 
   it("should reject non-object input (number)", () => {
-    const result = deserializeSwarmIdExport(42)
+    const result = deserializeAccountStateSnapshot(42)
     expect(result.success).toBe(false)
   })
 
   it("should reject non-object input (undefined)", () => {
-    const result = deserializeSwarmIdExport(undefined)
+    const result = deserializeAccountStateSnapshot(undefined)
     expect(result.success).toBe(false)
   })
 })
@@ -537,16 +511,15 @@ describe("invalid data rejection", () => {
 // ============================================================================
 
 describe("bee-js type conversions", () => {
-  it("should convert hex strings to EthAddress instances", () => {
+  it("should convert hex strings to EthAddress instances in identities", () => {
     const raw = {
       version: 1,
-      account: {
-        id: TEST_ETH_ADDRESS_HEX,
-        name: "Test",
+      timestamp: Date.now(),
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test",
         createdAt: 1700000000000,
-        type: "passkey",
-        credentialId: "cred",
-        swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+        lastModified: Date.now(),
       },
       identities: [
         {
@@ -560,26 +533,23 @@ describe("bee-js type conversions", () => {
       postageStamps: [],
     }
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
 
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.id).toBeInstanceOf(EthAddress)
-    expect(result.data.account.id.toHex()).toBe(TEST_ETH_ADDRESS_HEX)
     expect(result.data.identities[0].accountId).toBeInstanceOf(EthAddress)
   })
 
   it("should convert hex strings to BatchId and PrivateKey instances", () => {
     const raw = {
       version: 1,
-      account: {
-        id: TEST_ETH_ADDRESS_HEX,
-        name: "Test",
+      timestamp: Date.now(),
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test",
         createdAt: 1700000000000,
-        type: "passkey",
-        credentialId: "cred",
-        swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+        lastModified: Date.now(),
       },
       identities: [],
       connectedApps: [],
@@ -601,7 +571,7 @@ describe("bee-js type conversions", () => {
       ],
     }
 
-    const result = deserializeSwarmIdExport(raw)
+    const result = deserializeAccountStateSnapshot(raw)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -613,54 +583,15 @@ describe("bee-js type conversions", () => {
       TEST_PRIVATE_KEY_HEX,
     )
   })
-
-  it("should convert number arrays to Bytes instances for Ethereum accounts", () => {
-    const raw = {
-      version: 1,
-      account: {
-        id: TEST_ETH_ADDRESS_HEX,
-        name: "Test Eth",
-        createdAt: 1700000000000,
-        type: "ethereum",
-        ethereumAddress: TEST_ETH_ADDRESS_2_HEX,
-        encryptedMasterKey: [10, 20, 30],
-        encryptionSalt: [40, 50, 60],
-        encryptedSecretSeed: [70, 80, 90],
-        swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
-      },
-      identities: [],
-      connectedApps: [],
-      postageStamps: [],
-    }
-
-    const result = deserializeSwarmIdExport(raw)
-
-    expect(result.success).toBe(true)
-    if (!result.success) return
-
-    const ethAccount = result.data.account as EthereumAccount
-    expect(ethAccount.encryptedMasterKey).toBeInstanceOf(Bytes)
-    expect(ethAccount.encryptionSalt).toBeInstanceOf(Bytes)
-    expect(ethAccount.encryptedSecretSeed).toBeInstanceOf(Bytes)
-    expect(Array.from(ethAccount.encryptedMasterKey.toUint8Array())).toEqual([
-      10, 20, 30,
-    ])
-    expect(Array.from(ethAccount.encryptionSalt.toUint8Array())).toEqual([
-      40, 50, 60,
-    ])
-    expect(Array.from(ethAccount.encryptedSecretSeed.toUint8Array())).toEqual([
-      70, 80, 90,
-    ])
-  })
 })
 
 // ============================================================================
 // Schema Export
 // ============================================================================
 
-describe("SwarmIdExportSchemaV1", () => {
+describe("AccountStateSnapshotSchemaV1", () => {
   it("should be exported and usable for direct validation", () => {
-    expect(SwarmIdExportSchemaV1).toBeDefined()
-    expect(typeof SwarmIdExportSchemaV1.safeParse).toBe("function")
+    expect(AccountStateSnapshotSchemaV1).toBeDefined()
+    expect(typeof AccountStateSnapshotSchemaV1.safeParse).toBe("function")
   })
 })

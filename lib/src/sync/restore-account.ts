@@ -20,7 +20,7 @@ import { ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
 import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { deserializeAccountState } from "./serialization"
-import type { AccountStateSnapshot } from "./types"
+import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 
 /**
  * Result of a successful account restore from Swarm

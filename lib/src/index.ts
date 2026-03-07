@@ -92,18 +92,19 @@ export {
 // Storage manager types
 export type { NetworkSettingsStorageManager } from "./utils/storage-managers"
 
-// Swarm ID export/import (.swarmid format)
+// Account state snapshot (shared by file export and Swarm sync)
 export {
-  serializeSwarmIdExport,
-  deserializeSwarmIdExport,
-  SwarmIdExportSchemaV1,
-} from "./utils/swarm-id-export"
+  serializeAccountStateSnapshot,
+  deserializeAccountStateSnapshot,
+  AccountStateSnapshotSchemaV1,
+  ExportedConnectedAppSchemaV1,
+} from "./utils/account-state-snapshot"
 
 export type {
-  SwarmIdExport,
+  AccountStateSnapshot,
   ExportedConnectedApp,
-  SwarmIdImportResult,
-} from "./utils/swarm-id-export"
+  AccountStateSnapshotResult,
+} from "./utils/account-state-snapshot"
 
 // Encrypted backup (.swarmid) support
 export {
@@ -161,8 +162,6 @@ export {
 
 // State sync types
 export type {
-  AccountStateSnapshot,
-  AccountMetadata,
   SyncResult,
   // Sync account types
   SyncAccountOptions,
@@ -272,6 +271,7 @@ export type {
   Identity,
   ConnectedApp,
   PostageStamp,
+  AccountMetadata,
   NetworkSettings,
 } from "./schemas"
 

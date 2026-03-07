@@ -14,6 +14,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { authenticateWithPasskey } from '$lib/passkey'
 	import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import { BatchId } from '@ethersphere/bee-js'
 	import { restoreAccountToStores } from '$lib/utils/restore-account'
 
 	let error = $state<string | undefined>(undefined)
@@ -67,7 +68,22 @@
 				return
 			}
 
-			const account = restoreAccountToStores(result.data)
+			const account = restoreAccountToStores({
+				account: {
+					id: passkeyAccount.ethereumAddress,
+					createdAt: result.data.metadata.createdAt,
+					name: result.data.metadata.accountName,
+					type: 'passkey',
+					credentialId: passkeyAccount.credentialId,
+					swarmEncryptionKey,
+					defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
+						? new BatchId(result.data.metadata.defaultPostageStampBatchID)
+						: undefined,
+				},
+				identities: result.data.identities,
+				connectedApps: result.data.connectedApps,
+				postageStamps: result.data.postageStamps,
+			})
 
 			sessionStore.setAccount(account)
 			sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)

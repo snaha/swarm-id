@@ -15,7 +15,7 @@
 	import { connectAndSign } from '$lib/ethereum'
 	import { decryptMasterKey, deriveEncryptionKey } from '$lib/utils/encryption'
 	import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
-	import { Bytes } from '@ethersphere/bee-js'
+	import { Bytes, EthAddress, BatchId } from '@ethersphere/bee-js'
 	import { restoreAccountToStores } from '$lib/utils/restore-account'
 
 	let error = $state<string | undefined>(undefined)
@@ -72,7 +72,25 @@
 				return
 			}
 
-			const account = restoreAccountToStores(result.data)
+			const account = restoreAccountToStores({
+				account: {
+					id: new EthAddress(result.data.accountId),
+					createdAt: result.data.metadata.createdAt,
+					name: result.data.metadata.accountName,
+					type: 'ethereum',
+					ethereumAddress: new EthAddress(signed.address),
+					encryptedMasterKey,
+					encryptionSalt,
+					encryptedSecretSeed: new Bytes(new Uint8Array(header.encryptedSecretSeed)),
+					swarmEncryptionKey,
+					defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
+						? new BatchId(result.data.metadata.defaultPostageStampBatchID)
+						: undefined,
+				},
+				identities: result.data.identities,
+				connectedApps: result.data.connectedApps,
+				postageStamps: result.data.postageStamps,
+			})
 
 			sessionStore.setAccount(account)
 			sessionStore.setTemporaryMasterKey(masterKey)

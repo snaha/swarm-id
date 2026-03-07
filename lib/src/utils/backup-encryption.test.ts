@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest"
-import { EthAddress, BatchId, PrivateKey, Bytes } from "@ethersphere/bee-js"
+import { BatchId } from "@ethersphere/bee-js"
 import {
   deriveBackupEncryptionKey,
   encryptBackupPayload,
@@ -10,7 +10,6 @@ import {
   parseEncryptedExportHeader,
   EncryptedSwarmIdExportSchemaV1,
 } from "./backup-encryption"
-import type { EthereumAccount } from "../schemas"
 import {
   TEST_ETH_ADDRESS_HEX,
   TEST_ETH_ADDRESS_2_HEX,
@@ -59,14 +58,12 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.type).toBe("passkey")
-    expect(result.data.account.id).toBeInstanceOf(EthAddress)
-    expect(result.data.account.id.toHex()).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(result.data.metadata.accountName).toBe("Test Passkey Account")
     expect(result.data.identities).toHaveLength(1)
     expect(result.data.connectedApps).toHaveLength(1)
     expect(result.data.postageStamps).toHaveLength(1)
     expect(result.data.postageStamps[0].batchID).toBeInstanceOf(BatchId)
-    expect(result.data.postageStamps[0].signerKey).toBeInstanceOf(PrivateKey)
   })
 
   it("should round-trip an ethereum account", async () => {
@@ -85,6 +82,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     expect(encrypted.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
     expect(encrypted.encryptedMasterKey).toEqual([1, 2, 3, 4])
     expect(encrypted.encryptionSalt).toEqual([5, 6, 7, 8])
+    expect(encrypted.encryptedSecretSeed).toEqual([9, 10, 11, 12])
 
     const result = await decryptEncryptedExport(
       encrypted,
@@ -94,12 +92,8 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    const ethAccount = result.data.account as EthereumAccount
-    expect(ethAccount.type).toBe("ethereum")
-    expect(ethAccount.ethereumAddress).toBeInstanceOf(EthAddress)
-    expect(ethAccount.encryptedMasterKey).toBeInstanceOf(Bytes)
-    expect(ethAccount.encryptionSalt).toBeInstanceOf(Bytes)
-    expect(ethAccount.encryptedSecretSeed).toBeInstanceOf(Bytes)
+    expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(result.data.metadata.accountName).toBe("Test Ethereum Account")
   })
 
   it("should round-trip an agent account", async () => {
@@ -124,8 +118,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.type).toBe("agent")
-    expect(result.data.account.name).toBe("Test Agent Account")
+    expect(result.data.metadata.accountName).toBe("Test Agent Account")
   })
 
   it("should survive JSON serialization (file I/O simulation)", async () => {
@@ -158,11 +151,39 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.account.defaultPostageStampBatchID).toBeInstanceOf(
-      BatchId,
-    )
+    expect(result.data.metadata.defaultPostageStampBatchID).toBe("c".repeat(64))
     expect(result.data.identities[0].settings?.appSessionDuration).toBe(3600)
     expect(result.data.postageStamps[0].batchTTL).toBe(86400)
+  })
+})
+
+// ============================================================================
+// appSecret Security Tests
+// ============================================================================
+
+describe("appSecret stripping in encrypted export", () => {
+  it("should strip appSecret from connected apps in encrypted export", async () => {
+    const account = createPasskeyAccount()
+    const connectedApps = [createConnectedApp({ appSecret: "my-secret-value" })]
+
+    const encrypted = await createEncryptedExport(
+      account,
+      [],
+      connectedApps,
+      [],
+      account.swarmEncryptionKey,
+    )
+
+    const result = await decryptEncryptedExport(
+      encrypted,
+      account.swarmEncryptionKey,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    const importedApp = result.data.connectedApps[0] as Record<string, unknown>
+    expect(importedApp).not.toHaveProperty("appSecret")
   })
 })
 
@@ -257,6 +278,7 @@ describe("buildBackupHeader", () => {
     expect(header.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
     expect(header.encryptedMasterKey).toEqual([1, 2, 3, 4])
     expect(header.encryptionSalt).toEqual([5, 6, 7, 8])
+    expect(header.encryptedSecretSeed).toEqual([9, 10, 11, 12])
     // No passkey-specific fields
     expect(header).not.toHaveProperty("credentialId")
   })

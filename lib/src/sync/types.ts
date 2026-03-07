@@ -1,8 +1,3 @@
-import type { AccountStateSnapshot, AccountMetadata } from "../schemas"
-
-// Re-export snapshot types
-export type { AccountStateSnapshot, AccountMetadata }
-
 /**
  * Result of a sync operation
  */

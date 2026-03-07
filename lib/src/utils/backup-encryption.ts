@@ -12,10 +12,10 @@
 import { z } from "zod"
 import { deriveSecret, hexToUint8Array } from "./key-derivation"
 import {
-  serializeSwarmIdExport,
-  deserializeSwarmIdExport,
-} from "./swarm-id-export"
-import type { SwarmIdImportResult } from "./swarm-id-export"
+  serializeAccountStateSnapshot,
+  deserializeAccountStateSnapshot,
+} from "./account-state-snapshot"
+import type { AccountStateSnapshotResult } from "./account-state-snapshot"
 import type { Account, Identity, ConnectedApp, PostageStamp } from "../schemas"
 
 // ============================================================================
@@ -42,11 +42,27 @@ export const PasskeyBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
   credentialId: z.string(),
 })
 
+/**
+ * Ethereum backup header fields (plaintext, not encrypted):
+ *
+ * - `ethereumAddress` — validates the user is connecting the correct wallet
+ *   before attempting decryption.
+ * - `encryptedMasterKey` + `encryptionSalt` — needed to recover `masterKey` →
+ *   `swarmEncryptionKey` → decrypt the backup payload. The encryption key is
+ *   derived via HKDF from the wallet's `publicKey` + `encryptionSalt`.
+ * - `encryptedSecretSeed` — stored on the restored account for the "view
+ *   generation details" feature. Must be in the plaintext header (not the
+ *   encrypted payload) because the file import flow doesn't have the plaintext
+ *   secret seed — unlike Swarm restore where the user types it and it gets
+ *   re-encrypted fresh. This keeps the encrypted payload
+ *   (`AccountStateSnapshot`) identical between file export and Swarm sync.
+ */
 export const EthereumBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
   accountType: z.literal("ethereum"),
   ethereumAddress: z.string(),
   encryptedMasterKey: z.array(z.number()),
   encryptionSalt: z.array(z.number()),
+  encryptedSecretSeed: z.array(z.number()),
 })
 
 export const AgentBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
@@ -191,6 +207,9 @@ export function buildBackupHeader(
       ethereumAddress: account.ethereumAddress.toHex(),
       encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
       encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
+      encryptedSecretSeed: Array.from(
+        account.encryptedSecretSeed.toUint8Array(),
+      ),
     }
   }
 
@@ -205,7 +224,7 @@ export function buildBackupHeader(
 /**
  * Create a fully encrypted .swarmid export object.
  *
- * 1. Serializes account data to plaintext JSON via serializeSwarmIdExport
+ * 1. Serializes account data to plaintext JSON via serializeAccountStateSnapshot
  * 2. Derives an AES-GCM-256 key from swarmEncryptionKey
  * 3. Encrypts the JSON payload
  * 4. Builds a header with account metadata + ciphertext
@@ -217,12 +236,20 @@ export async function createEncryptedExport(
   postageStamps: PostageStamp[],
   swarmEncryptionKeyHex: string,
 ): Promise<EncryptedSwarmIdExport> {
-  const exportData = serializeSwarmIdExport(
-    account,
+  const now = Date.now()
+  const exportData = serializeAccountStateSnapshot({
+    accountId: account.id.toHex(),
+    metadata: {
+      accountName: account.name,
+      defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
+      createdAt: account.createdAt,
+      lastModified: now,
+    },
     identities,
     connectedApps,
     postageStamps,
-  )
+    timestamp: now,
+  })
   const plaintextJson = JSON.stringify(exportData)
   const key = await deriveBackupEncryptionKey(swarmEncryptionKeyHex)
   const ciphertext = await encryptBackupPayload(plaintextJson, key)
@@ -239,12 +266,12 @@ export async function createEncryptedExport(
  * 1. Validates the encrypted header with Zod
  * 2. Derives the AES-GCM-256 key from swarmEncryptionKey
  * 3. Decrypts the ciphertext
- * 4. Parses the inner plaintext via deserializeSwarmIdExport
+ * 4. Parses the inner plaintext via deserializeAccountStateSnapshot
  */
 export async function decryptEncryptedExport(
   encryptedData: unknown,
   swarmEncryptionKeyHex: string,
-): Promise<SwarmIdImportResult> {
+): Promise<AccountStateSnapshotResult> {
   const headerResult = parseEncryptedExportHeader(encryptedData)
   if (!headerResult.success) {
     return {
@@ -295,7 +322,7 @@ export async function decryptEncryptedExport(
       ]),
     }
   }
-  return deserializeSwarmIdExport(innerData)
+  return deserializeAccountStateSnapshot(innerData)
 }
 
 /**

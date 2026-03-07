@@ -183,16 +183,26 @@ export const AccountMetadataSchemaV1 = z.object({
 })
 
 /**
- * Account State Snapshot Schema V1
- * Replaces identity-level sync with account-level sync
+ * Connected app schema for export — omits appSecret (derivable via HMAC-SHA256).
+ * Zod v4 strips unknown keys by default, so any appSecret in input is silently dropped.
+ */
+export const ExportedConnectedAppSchemaV1 = ConnectedAppSchemaV1.omit({
+  appSecret: true,
+})
+
+const ACCOUNT_STATE_SNAPSHOT_VERSION = 1
+
+/**
+ * Unified account state snapshot schema used by both file export and Swarm sync.
+ * Contains minimal metadata instead of the full Account object.
  */
 export const AccountStateSnapshotSchemaV1 = z.object({
-  version: z.literal(1),
+  version: z.literal(ACCOUNT_STATE_SNAPSHOT_VERSION),
   timestamp: z.number(),
-  accountId: z.string().length(40), // EthAddress hex string
+  accountId: z.string().length(40),
   metadata: AccountMetadataSchemaV1,
   identities: z.array(IdentitySchemaV1),
-  connectedApps: z.array(ConnectedAppSchemaV1),
+  connectedApps: z.array(ExportedConnectedAppSchemaV1),
   postageStamps: z.array(PostageStampSchemaV1),
 })
 
@@ -208,6 +218,7 @@ export type Identity = z.infer<typeof IdentitySchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
+export type ExportedConnectedApp = z.infer<typeof ExportedConnectedAppSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
 
 // ============================================================================

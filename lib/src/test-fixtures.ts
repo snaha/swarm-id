@@ -1,5 +1,5 @@
 /**
- * Shared test fixtures for backup-encryption, swarm-id-export, and sync tests.
+ * Shared test fixtures for backup-encryption, account-state-snapshot, and sync tests.
  */
 import { EthAddress, BatchId, PrivateKey, Bytes } from "@ethersphere/bee-js"
 import type {

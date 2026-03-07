@@ -1,46 +1,39 @@
 import {
-  serializeIdentity,
-  serializeConnectedApp,
-  serializePostageStamp,
-} from "../utils/storage-managers"
-import { AccountStateSnapshotSchemaV1 } from "../schemas"
-import type { AccountStateSnapshot } from "./types"
+  serializeAccountStateSnapshot,
+  deserializeAccountStateSnapshot,
+} from "../utils/account-state-snapshot"
+import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 
 /**
- * Serialize account state snapshot to JSON bytes
+ * Serialize account state to JSON bytes
  *
- * @param state - Account state snapshot to serialize
+ * @param state - Account payload to serialize
  * @returns JSON encoded as Uint8Array
  */
 export function serializeAccountState(state: AccountStateSnapshot): Uint8Array {
-  const json = JSON.stringify({
-    version: state.version,
-    timestamp: state.timestamp,
-    accountId: state.accountId,
-    metadata: {
-      accountName: state.metadata.accountName,
-      defaultPostageStampBatchID: state.metadata.defaultPostageStampBatchID,
-      createdAt: state.metadata.createdAt,
-      lastModified: state.metadata.lastModified,
-    },
-    identities: state.identities.map(serializeIdentity),
-    connectedApps: state.connectedApps.map(serializeConnectedApp),
-    postageStamps: state.postageStamps.map(serializePostageStamp),
-  })
+  const json = JSON.stringify(serializeAccountStateSnapshot(state))
 
   return new TextEncoder().encode(json)
 }
 
 /**
- * Deserialize JSON bytes to account state snapshot
+ * Deserialize JSON bytes to account payload
  *
  * @param data - JSON bytes to deserialize
- * @returns Account state snapshot
+ * @returns Account payload
  */
 export function deserializeAccountState(
   data: Uint8Array,
 ): AccountStateSnapshot {
   const json = new TextDecoder().decode(data)
   const parsed = JSON.parse(json)
-  return AccountStateSnapshotSchemaV1.parse(parsed)
+  const result = deserializeAccountStateSnapshot(parsed)
+
+  if (!result.success) {
+    throw new Error(
+      `Failed to deserialize account state: ${result.error.message}`,
+    )
+  }
+
+  return result.data
 }

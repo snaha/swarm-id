@@ -25,4 +25,4 @@ export type {
   FlushableStamper,
 } from "./store-interfaces"
 
-export type { AccountStateSnapshot, AccountMetadata, SyncResult } from "./types"
+export type { SyncResult } from "./types"
