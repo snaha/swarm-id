@@ -308,7 +308,11 @@ import {
 
 // Export (no re-auth needed — uses stored swarmEncryptionKey)
 const exported = await createEncryptedExport(
-  account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex,
+  account,
+  identities,
+  connectedApps,
+  postageStamps,
+  swarmEncryptionKeyHex,
 )
 
 // Read header metadata without decrypting
@@ -332,7 +336,12 @@ When a passkey auth succeeds on a new device with no local account, `restoreAcco
 ```typescript
 import { restoreAccountFromSwarm } from "@swarm-id/lib"
 
-const result = await restoreAccountFromSwarm(bee, masterKey, ethereumAddress, credentialId)
+const result = await restoreAccountFromSwarm(
+  bee,
+  masterKey,
+  ethereumAddress,
+  credentialId,
+)
 if (result) {
   console.log(result.snapshot) // AccountStateSnapshot
 }
