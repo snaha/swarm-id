@@ -56,8 +56,9 @@
 	// Initialize selected account from session or first available
 	$effect(() => {
 		if (!selectedAccount) {
-			if (sessionStore.data.account?.id) {
-				selectedAccount = sessionStore.data.account.id
+			const sessionAccount = sessionStore.data.account
+			if (sessionAccount?.id && accountsStore.getAccount(sessionAccount.id)) {
+				selectedAccount = sessionAccount.id
 			} else if (accounts.length > 0) {
 				selectedAccount = accounts[0].id
 				sessionStore.setAccount(accounts[0])

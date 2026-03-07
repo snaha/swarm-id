@@ -27,6 +27,7 @@
 	import Divider from '$lib/components/ui/divider.svelte'
 	import Badge from '$lib/components/ui/badge.svelte'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
+	import { sessionStore } from '$lib/stores/session.svelte'
 	import { createEncryptedExport } from '@swarm-id/lib'
 	import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
 	import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
@@ -89,7 +90,7 @@
 		accountsStore.setAccountName(account.id, accountName)
 	}
 
-	function handleDeleteAccount() {
+	async function handleDeleteAccount() {
 		const accountId = account.id
 		const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
 		for (const identity of accountIdentities) {
@@ -98,8 +99,9 @@
 		}
 		postageStampsStore.removeStampsByAccount(accountId.toHex())
 		accountsStore.removeAccount(accountId)
+		sessionStore.clearAccount()
 		drawerOpen = false
-		goto(resolve(routes.HOME))
+		await goto(resolve(routes.HOME))
 	}
 
 	let showPasskeyExportWarning = $state(false)
