@@ -254,10 +254,8 @@ export async function createEncryptedExport(
   const key = await deriveBackupEncryptionKey(swarmEncryptionKeyHex)
   const ciphertext = await encryptBackupPayload(plaintextJson, key)
 
-  return {
-    ...buildBackupHeader(account),
-    ciphertext,
-  } as EncryptedSwarmIdExport
+  const header = buildBackupHeader(account)
+  return EncryptedSwarmIdExportSchemaV1.parse({ ...header, ciphertext })
 }
 
 /**

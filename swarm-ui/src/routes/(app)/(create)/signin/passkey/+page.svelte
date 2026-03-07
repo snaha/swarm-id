@@ -39,12 +39,20 @@
 
 			// No local account — attempt to restore from Swarm
 			const bee = new Bee(networkSettingsStore.beeNodeUrl)
-			const result = await restoreAccountFromSwarm(
-				bee,
-				passkeyAccount.masterKey,
-				passkeyAccount.ethereumAddress,
-				passkeyAccount.credentialId,
-			)
+			let result: Awaited<ReturnType<typeof restoreAccountFromSwarm>>
+			try {
+				result = await restoreAccountFromSwarm(
+					bee,
+					passkeyAccount.masterKey,
+					passkeyAccount.ethereumAddress,
+					passkeyAccount.credentialId,
+				)
+			} catch (err) {
+				console.error('🔑 Swarm restore failed:', err)
+				error = 'Could not reach the Swarm network. Please check your connection and try again.'
+				isProcessing = false
+				return
+			}
 
 			if (!result) {
 				error =
@@ -62,7 +70,7 @@
 				account: {
 					id: passkeyAccount.ethereumAddress,
 					createdAt: result.snapshot.metadata.createdAt,
-					name: result.snapshot.metadata.accountName ?? 'Passkey',
+					name: result.snapshot.metadata.accountName,
 					type: 'passkey',
 					credentialId: passkeyAccount.credentialId,
 					swarmEncryptionKey,

@@ -47,9 +47,6 @@ export async function restoreAccountFromSwarm(
   credentialId: string,
 ): Promise<RestoreAccountResult | undefined> {
   const accountId = ethereumAddress.toHex()
-  console.log(
-    `[RestoreAccount] Attempting to restore account ${accountId} from Swarm`,
-  )
 
   // 1. Derive the swarm encryption key from the master key
   const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
@@ -70,22 +67,11 @@ export async function restoreAccountFromSwarm(
   const finder = new AsyncEpochFinder(bee, topic, owner)
   const now = BigInt(Math.floor(Date.now() / 1000))
 
-  let refBytes: Uint8Array | undefined
-  try {
-    refBytes = await finder.findAt(now)
-  } catch (error) {
-    console.warn("[RestoreAccount] Feed lookup failed:", error)
-    return undefined
-  }
+  const refBytes = await finder.findAt(now)
 
   if (!refBytes) {
-    console.log("[RestoreAccount] No backup found in Swarm")
     return undefined
   }
-
-  console.log(
-    `[RestoreAccount] Found backup reference (${refBytes.length} bytes)`,
-  )
 
   // 5. Download and decrypt the account snapshot
   const reference = new Reference(refBytes)
@@ -93,9 +79,6 @@ export async function restoreAccountFromSwarm(
 
   // 6. Deserialize the snapshot
   const snapshot = deserializeAccountState(data)
-  console.log(
-    `[RestoreAccount] Restored: ${snapshot.identities.length} identities, ${snapshot.connectedApps.length} apps, ${snapshot.postageStamps.length} stamps`,
-  )
 
   return {
     snapshot,
