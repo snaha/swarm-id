@@ -328,7 +328,7 @@ export async function decryptEncryptedExport(
  * Useful for reading account metadata before attempting decryption.
  */
 export function parseEncryptedExportHeader(data: unknown): ParseHeaderResult {
-  if (typeof data !== "object" || data === undefined || data === null) {
+  if (typeof data !== "object" || data === null) {
     return { success: false, error: "Input must be a non-null object" }
   }
 

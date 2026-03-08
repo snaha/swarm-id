@@ -107,42 +107,50 @@
 	let showPasskeyExportWarning = $state(false)
 
 	async function handleExportAccount() {
-		const accountIdentities = identitiesStore.getIdentitiesByAccount(account.id)
-		const connectedApps = accountIdentities.flatMap((identity) =>
-			connectedAppsStore.getAppsByIdentityId(identity.id),
-		)
-		const postageStamps = postageStampsStore.getStampsByAccount(account.id.toHex())
-		const encrypted = await createEncryptedExport(
-			account,
-			accountIdentities,
-			connectedApps,
-			postageStamps,
-			account.swarmEncryptionKey,
-		)
-		const json = JSON.stringify(encrypted, undefined, 2)
-		const blob = new Blob([json], { type: 'application/json' })
-		const url = URL.createObjectURL(blob)
-		const now = new Date()
-		const date = [
-			now.getFullYear(),
-			String(now.getMonth() + 1).padStart(2, '0'),
-			String(now.getDate()).padStart(2, '0'),
-		].join('-')
-		const time = [
-			String(now.getHours()).padStart(2, '0'),
-			String(now.getMinutes()).padStart(2, '0'),
-			String(now.getSeconds()).padStart(2, '0'),
-		].join('')
-		const a = document.createElement('a')
-		a.href = url
-		a.download = `${account.name}_${date}-${time}.swarmid`
-		document.body.appendChild(a)
-		a.click()
-		document.body.removeChild(a)
-		URL.revokeObjectURL(url)
+		let url: string | undefined
+		try {
+			const accountIdentities = identitiesStore.getIdentitiesByAccount(account.id)
+			const connectedApps = accountIdentities.flatMap((identity) =>
+				connectedAppsStore.getAppsByIdentityId(identity.id),
+			)
+			const postageStamps = postageStampsStore.getStampsByAccount(account.id.toHex())
+			const encrypted = await createEncryptedExport(
+				account,
+				accountIdentities,
+				connectedApps,
+				postageStamps,
+				account.swarmEncryptionKey,
+			)
+			const json = JSON.stringify(encrypted, undefined, 2)
+			const blob = new Blob([json], { type: 'application/json' })
+			url = URL.createObjectURL(blob)
+			const now = new Date()
+			const date = [
+				now.getFullYear(),
+				String(now.getMonth() + 1).padStart(2, '0'),
+				String(now.getDate()).padStart(2, '0'),
+			].join('-')
+			const time = [
+				String(now.getHours()).padStart(2, '0'),
+				String(now.getMinutes()).padStart(2, '0'),
+				String(now.getSeconds()).padStart(2, '0'),
+			].join('')
+			const a = document.createElement('a')
+			a.href = url
+			a.download = `${account.name}_${date}-${time}.swarmid`
+			document.body.appendChild(a)
+			a.click()
+			document.body.removeChild(a)
 
-		if (account.type === 'passkey') {
-			showPasskeyExportWarning = true
+			if (account.type === 'passkey') {
+				showPasskeyExportWarning = true
+			}
+		} catch (err) {
+			console.error('Export account failed:', err)
+		} finally {
+			if (url) {
+				URL.revokeObjectURL(url)
+			}
 		}
 	}
 </script>

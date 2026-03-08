@@ -13,7 +13,7 @@
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 	import { authenticateWithPasskey } from '$lib/passkey'
-	import { restoreAccountFromSwarm, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+	import { restoreAccountFromSwarm } from '@swarm-id/lib'
 	import { Bee, BatchId } from '@ethersphere/bee-js'
 	import { restoreAccountToStores } from '$lib/utils/restore-account'
 
@@ -62,10 +62,6 @@
 			}
 
 			// Restore account to local stores
-			const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
-				passkeyAccount.masterKey.toHex(),
-			)
-
 			const restoredAccount = restoreAccountToStores({
 				account: {
 					id: passkeyAccount.ethereumAddress,
@@ -73,7 +69,7 @@
 					name: result.snapshot.metadata.accountName,
 					type: 'passkey',
 					credentialId: passkeyAccount.credentialId,
-					swarmEncryptionKey,
+					swarmEncryptionKey: result.swarmEncryptionKey,
 					defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
 						? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
 						: undefined,
