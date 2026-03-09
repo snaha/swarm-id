@@ -30,20 +30,6 @@ This helps us:
 
 For trivial changes (typos, small doc fixes), you may skip the issue step.
 
-## Getting Started
-
-### Prerequisites
-
-- Node.js 18+
-- pnpm
-
-### Setup
-
-```bash
-pnpm install    # Install dependencies
-pnpm dev        # Start development servers
-```
-
 ## Code Style
 
 We enforce consistent code style. Before committing:
