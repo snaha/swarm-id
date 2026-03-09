@@ -171,7 +171,7 @@
 							: account.type === 'agent'
 								? 'Agent'
 								: 'Passkey'}
-						<Badge>Local</Badge>
+						<Badge>{account.defaultPostageStampBatchID ? 'Synced' : 'Local'}</Badge>
 					</Horizontal>
 					<Button variant="ghost" dimension="compact" onclick={() => (drawerOpen = false)}
 						><CloseLarge size={20} /></Button
@@ -388,11 +388,13 @@
 					<Input
 						variant="outline"
 						dimension="compact"
-						value="Local"
+						value={account.defaultPostageStampBatchID ? 'Synced' : 'Local'}
 						class="grower"
 						label="Account type"
 						disabled
-						helperText="Limited to viewing only. Upgrade to synced account to upload content and sync across devices."
+						helperText={account.defaultPostageStampBatchID
+							? 'Account is synced and can upload content.'
+							: 'Limited to viewing only. Upgrade to synced account to upload content and sync across devices.'}
 					/>
 				</Vertical>
 
