@@ -158,8 +158,8 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 // appSecret Security Tests
 // ============================================================================
 
-describe("appSecret stripping in encrypted export", () => {
-  it("should strip appSecret from connected apps in encrypted export", async () => {
+describe("appSecret preservation in encrypted export", () => {
+  it("should preserve appSecret in connected apps through encrypted export", async () => {
     const account = createPasskeyAccount()
     const connectedApps = [createConnectedApp({ appSecret: "my-secret-value" })]
 
@@ -179,8 +179,7 @@ describe("appSecret stripping in encrypted export", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    const importedApp = result.data.connectedApps[0] as Record<string, unknown>
-    expect(importedApp).not.toHaveProperty("appSecret")
+    expect(result.data.connectedApps[0].appSecret).toBe("my-secret-value")
   })
 })
 

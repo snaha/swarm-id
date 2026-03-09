@@ -19,7 +19,10 @@ export function restoreAccountToStores(data: RestoreData): Account {
 	}
 
 	for (const app of data.connectedApps) {
-		connectedAppsStore.addOrUpdateApp(app, undefined)
+		// Reset connectedUntil — the session has logically expired by the time
+		// a backup is restored, so apps appear as "previously connected" but
+		// require the user to reconnect (which re-establishes the session timer).
+		connectedAppsStore.addOrUpdateApp({ ...app, connectedUntil: undefined }, undefined)
 	}
 
 	for (const stamp of data.postageStamps) {

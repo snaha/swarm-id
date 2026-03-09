@@ -4,8 +4,9 @@
  * Shared serialization for account state snapshots used by both
  * file export (.swarmid) and Swarm sync flows.
  *
- * Security: appSecret is structurally excluded from ExportedConnectedAppSchemaV1
- * so Zod strips it during parsing, preventing injection.
+ * appSecret is included in snapshots so that backups preserve app connections.
+ * Since the backup is encrypted with the master key (and appSecret is
+ * deterministically derivable from it), this doesn't change the threat model.
  */
 
 import type { z } from "zod"
@@ -24,11 +25,8 @@ import {
 } from "./storage-managers"
 
 // Re-export schema and types for consumers
-export {
-  AccountStateSnapshotSchemaV1,
-  ExportedConnectedAppSchemaV1,
-} from "../schemas"
-export type { ExportedConnectedApp, AccountStateSnapshot } from "../schemas"
+export { AccountStateSnapshotSchemaV1 } from "../schemas"
+export type { AccountStateSnapshot } from "../schemas"
 
 // ============================================================================
 // Constants
@@ -50,7 +48,6 @@ export type AccountStateSnapshotResult =
 
 /**
  * Serialize account data into a plain object suitable for JSON encoding.
- * Strips appSecret from connected apps.
  */
 export function serializeAccountStateSnapshot(input: {
   accountId: string
@@ -71,10 +68,7 @@ export function serializeAccountStateSnapshot(input: {
       lastModified: input.metadata.lastModified,
     },
     identities: input.identities.map(serializeIdentity),
-    connectedApps: input.connectedApps.map((app) => {
-      const { appSecret: _, ...rest } = serializeConnectedApp(app)
-      return rest
-    }),
+    connectedApps: input.connectedApps.map(serializeConnectedApp),
     postageStamps: input.postageStamps.map(serializePostageStamp),
   }
 }
@@ -86,7 +80,6 @@ export function serializeAccountStateSnapshot(input: {
 /**
  * Deserialize and validate an account state snapshot.
  * Returns a discriminated union: success with parsed data, or failure with Zod error.
- * Any appSecret injected in the raw data is stripped by the schema.
  */
 export function deserializeAccountStateSnapshot(
   data: unknown,

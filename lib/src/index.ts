@@ -98,12 +98,10 @@ export {
   serializeAccountStateSnapshot,
   deserializeAccountStateSnapshot,
   AccountStateSnapshotSchemaV1,
-  ExportedConnectedAppSchemaV1,
 } from "./utils/account-state-snapshot"
 
 export type {
   AccountStateSnapshot,
-  ExportedConnectedApp,
   AccountStateSnapshotResult,
 } from "./utils/account-state-snapshot"
 

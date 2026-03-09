@@ -171,34 +171,32 @@ describe("round-trip: serialize → JSON → deserialize", () => {
 })
 
 // ============================================================================
-// appSecret Security Tests
+// appSecret Persistence Tests
 // ============================================================================
 
-describe("appSecret security", () => {
-  it("should strip appSecret from serialized export even when present on input", () => {
+describe("appSecret in snapshots", () => {
+  it("should include appSecret in serialized export when present on input", () => {
     const account = createPasskeyAccount()
     const connectedApps = [createConnectedApp({ appSecret: "my-secret-value" })]
 
     const serialized = serializeFromAccount(account, [], connectedApps, [])
 
-    // Verify appSecret is not in the serialized output
     const apps = serialized.connectedApps as Record<string, unknown>[]
-    expect(apps[0]).not.toHaveProperty("appSecret")
+    expect(apps[0]).toHaveProperty("appSecret", "my-secret-value")
   })
 
-  it("should strip injected appSecret during import", () => {
+  it("should preserve appSecret through round-trip", () => {
     const account = createPasskeyAccount()
     const serialized = serializeFromAccount(account, [], [], [])
 
-    // Maliciously inject appSecret into raw data
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.connectedApps = [
       {
-        appUrl: "https://evil.example.com",
-        appName: "Evil App",
+        appUrl: "https://example.com",
+        appName: "Test App",
         lastConnectedAt: 1700000000000,
         identityId: "identity-1",
-        appSecret: "injected-secret",
+        appSecret: "preserved-secret",
       },
     ]
 
@@ -207,9 +205,7 @@ describe("appSecret security", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    // The imported app should not have appSecret
-    const importedApp = result.data.connectedApps[0] as Record<string, unknown>
-    expect(importedApp).not.toHaveProperty("appSecret")
+    expect(result.data.connectedApps[0].appSecret).toBe("preserved-secret")
   })
 })
 

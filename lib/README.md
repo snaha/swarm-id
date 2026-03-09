@@ -327,7 +327,7 @@ if (result.success) {
 
 ### Account State Snapshots
 
-The `serializeAccountStateSnapshot()` and `deserializeAccountStateSnapshot()` functions provide shared serialization used by both file export and Swarm sync. The `appSecret` field is structurally excluded from `ExportedConnectedAppSchemaV1`, so Zod strips it during parsing.
+The `serializeAccountStateSnapshot()` and `deserializeAccountStateSnapshot()` functions provide shared serialization used by both file export and Swarm sync. Connected app secrets are included in snapshots so that backups preserve app connections without requiring re-authentication.
 
 ### Swarm Sync & Restore
 
