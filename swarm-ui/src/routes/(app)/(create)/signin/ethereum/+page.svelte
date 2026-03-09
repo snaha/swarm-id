@@ -2,14 +2,10 @@
 	import { goto } from '$app/navigation'
 	import { resolve } from '$app/paths'
 	import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
-	import Information from 'carbon-icons-svelte/lib/Information.svelte'
-	import View from 'carbon-icons-svelte/lib/View.svelte'
-	import ViewOff from 'carbon-icons-svelte/lib/ViewOff.svelte'
 	import Button from '$lib/components/ui/button.svelte'
-	import Input from '$lib/components/ui/input/input.svelte'
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
-	import Tooltip from '$lib/components/ui/tooltip.svelte'
+	import SecretSeedInput from '$lib/components/secret-seed-input.svelte'
 	import ErrorOverlay from '$lib/components/error-overlay.svelte'
 	import CreationLayout from '$lib/components/creation-layout.svelte'
 	import Confirmation from '$lib/components/confirmation.svelte'
@@ -33,9 +29,6 @@
 	let error = $state<string | undefined>(undefined)
 	let isProcessing = $state(false)
 	let secretSeed = $state('')
-	let showPassword = $state(false)
-	let showSeedTooltip = $state(false)
-
 	let isConfirmDisabled = $derived(!secretSeed.trim())
 
 	async function handleConfirm() {
@@ -143,55 +136,7 @@
 
 				<Vertical --vertical-gap="var(--quarter-padding)">
 					<Typography>Secret seed</Typography>
-					<div class="seed-input-row">
-						<div class="seed-input">
-							<Input
-								variant="outline"
-								dimension="compact"
-								name="secret-seed"
-								type={showPassword ? 'text' : 'password'}
-								bind:value={secretSeed}
-							/>
-						</div>
-						{#if secretSeed}
-							<Button
-								dimension="compact"
-								variant="ghost"
-								onclick={() => (showPassword = !showPassword)}
-							>
-								{#if showPassword}
-									<ViewOff size={20} />
-								{:else}
-									<View size={20} />
-								{/if}
-							</Button>
-						{:else}
-							<Tooltip
-								show={showSeedTooltip}
-								position="bottom"
-								variant="small"
-								color="dark"
-								maxWidth="279px"
-							>
-								<Button
-									dimension="compact"
-									variant="ghost"
-									onmouseenter={() => (showSeedTooltip = true)}
-									onmouseleave={() => (showSeedTooltip = false)}
-									onclick={(e: MouseEvent) => {
-										e.stopPropagation()
-										showSeedTooltip = !showSeedTooltip
-									}}
-								>
-									<Information size={20} />
-								</Button>
-								{#snippet helperText()}
-									The secret seed you set when creating your account. You were prompted to save this
-									in a password manager or secure location.
-								{/snippet}
-							</Tooltip>
-						{/if}
-					</div>
+					<SecretSeedInput bind:value={secretSeed} />
 				</Vertical>
 			</Vertical>
 		{/snippet}
@@ -216,16 +161,3 @@
 		{/snippet}
 	</CreationLayout>
 {/if}
-
-<style>
-	.seed-input-row {
-		display: flex;
-		gap: var(--half-padding);
-		align-items: center;
-	}
-
-	.seed-input {
-		flex: 1;
-		min-width: 0;
-	}
-</style>

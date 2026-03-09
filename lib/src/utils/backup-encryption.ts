@@ -47,22 +47,14 @@ export const PasskeyBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
  *
  * - `ethereumAddress` — validates the user is connecting the correct wallet
  *   before attempting decryption.
- * - `encryptedMasterKey` + `encryptionSalt` — needed to recover `masterKey` →
- *   `swarmEncryptionKey` → decrypt the backup payload. The encryption key is
- *   derived via HKDF from the wallet's `publicKey` + `encryptionSalt`.
- * - `encryptedSecretSeed` — stored on the restored account for the "view
- *   generation details" feature. Must be in the plaintext header (not the
- *   encrypted payload) because the file import flow doesn't have the plaintext
- *   secret seed — unlike Swarm restore where the user types it and it gets
- *   re-encrypted fresh. This keeps the encrypted payload
- *   (`AccountStateSnapshot`) identical between file export and Swarm sync.
+ *
+ * Key material is NOT stored in the export header. During import the user
+ * must enter their secret seed, and the master key is re-derived from
+ * `secretSeed + publicKey` via `deriveMasterKey()`.
  */
 export const EthereumBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
   accountType: z.literal("ethereum"),
   ethereumAddress: z.string(),
-  encryptedMasterKey: z.array(z.number()),
-  encryptionSalt: z.array(z.number()),
-  encryptedSecretSeed: z.array(z.number()),
 })
 
 export const AgentBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
@@ -205,11 +197,6 @@ export function buildBackupHeader(
       ...base,
       accountType: "ethereum" as const,
       ethereumAddress: account.ethereumAddress.toHex(),
-      encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
-      encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
-      encryptedSecretSeed: Array.from(
-        account.encryptedSecretSeed.toUint8Array(),
-      ),
     }
   }
 

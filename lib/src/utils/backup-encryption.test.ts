@@ -80,9 +80,6 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
     expect(encrypted.accountType).toBe("ethereum")
     expect(encrypted.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
-    expect(encrypted.encryptedMasterKey).toEqual([1, 2, 3, 4])
-    expect(encrypted.encryptionSalt).toEqual([5, 6, 7, 8])
-    expect(encrypted.encryptedSecretSeed).toEqual([9, 10, 11, 12])
 
     const result = await decryptEncryptedExport(
       encrypted,
@@ -276,9 +273,6 @@ describe("buildBackupHeader", () => {
 
     expect(header.accountType).toBe("ethereum")
     expect(header.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
-    expect(header.encryptedMasterKey).toEqual([1, 2, 3, 4])
-    expect(header.encryptionSalt).toEqual([5, 6, 7, 8])
-    expect(header.encryptedSecretSeed).toEqual([9, 10, 11, 12])
     // No passkey-specific fields
     expect(header).not.toHaveProperty("credentialId")
   })
