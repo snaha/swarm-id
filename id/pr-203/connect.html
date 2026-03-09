@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="utf-8" />
+		<meta
+			name="description"
+			content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+		/>
+		<meta name="viewport" content="width=device-width, initial-scale=1" />
+		<meta name="apple-mobile-web-app-capable" content="yes" />
+		<meta name="apple-mobile-web-app-status-bar-style" content="black" />
+		<meta name="apple-mobile-web-app-title" content="Swarm Identity" />
+		<link rel="icon" href="./favicon.png" type="image/png" />
+		<link rel="manifest" href="./manifest.json" />
+		<meta property="og:type" content="website" />
+		<meta property="og:title" content="Swarm ID - Decentralized Identity" />
+		<meta
+			property="og:description"
+			content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+		/>
+		<meta property="og:image" content="https://swarm-id.snaha.net/og-image.png" />
+		<meta property="og:url" content="https://swarm-id.snaha.net" />
+		<meta name="twitter:card" content="summary_large_image" />
+		<meta name="twitter:title" content="Swarm ID - Decentralized Identity" />
+		<meta
+			name="twitter:description"
+			content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+		/>
+		<meta name="twitter:image" content="https://swarm-id.snaha.net/og-image.png" />
+		<meta
+			name="viewport"
+			content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover"
+		/>
+		<script>
+			;(function () {
+				var pref = localStorage.getItem('swarm-id-theme') || 'auto'
+				var dark =
+					pref === 'dark' || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches)
+				document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+				document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+			})()
+		</script>
+		
+		<link rel="modulepreload" href="./_app/immutable/entry/start.DfrfUuEr.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DgyBS1-m.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/z8oAzrJL.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/Cd7aDHGG.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/BUApaBEI.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/C-v3y0is.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/D6Qlqoen.js">
+		<link rel="modulepreload" href="./_app/immutable/entry/app.DB1--r1O.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/PPVm8Dsz.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/COH6D_7B.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/Bk6Vng9M.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/CoU8yqlD.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/CiPRoGd-.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DpzCWbxa.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DvXSxdcD.js">
+		<link rel="modulepreload" href="./_app/immutable/chunks/DY8kJU5Y.js">
+	</head>
+	<body data-sveltekit-preload-data="hover">
+		<div style="display: contents">
+			<script>
+				{
+					__sveltekit_3bwq3c = {
+						base: new URL(".", location).pathname.slice(0, -1),
+						assets: "/id/pr-203"
+					};
+
+					const element = document.currentScript.parentElement;
+
+					Promise.all([
+						import("./_app/immutable/entry/start.DfrfUuEr.js"),
+						import("./_app/immutable/entry/app.DB1--r1O.js")
+					]).then(([kit, app]) => {
+						kit.start(app, element);
+					});
+				}
+			</script>
+		</div>
+	</body>
+</html>
