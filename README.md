@@ -391,6 +391,10 @@ Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-part
 
 See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 
+## Contribute
+
+We have a separate [guide document](CONTRIBUTING.md) if you want to contribute to the project.
+
 ## License
 
 [Apache 2.0](LICENSE)
