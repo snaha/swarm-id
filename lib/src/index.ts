@@ -14,6 +14,7 @@ export { SwarmIdProxy, initProxy } from "./swarm-id-proxy"
 // Key derivation utilities
 export {
   deriveSecret,
+  deriveIdentityKey,
   generateMasterKey,
   hexToUint8Array,
   uint8ArrayToHex,

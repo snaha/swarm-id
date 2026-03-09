@@ -4,7 +4,7 @@ export {
   deriveAccountBackupKey,
   deriveAccountSwarmEncryptionKey,
   backupKeyToPrivateKey,
-} from "./key-derivation"
+} from "../utils/key-derivation"
 export { serializeAccountState, deserializeAccountState } from "./serialization"
 
 // Sync account

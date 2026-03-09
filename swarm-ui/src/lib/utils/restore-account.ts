@@ -18,9 +18,8 @@ export function restoreAccountToStores(data: RestoreData): Account {
 		identitiesStore.addIdentity(identity)
 	}
 
-	const NO_AUTO_EXPIRY = 0
 	for (const app of data.connectedApps) {
-		connectedAppsStore.addOrUpdateApp(app, NO_AUTO_EXPIRY)
+		connectedAppsStore.addOrUpdateApp(app, undefined)
 	}
 
 	for (const stamp of data.postageStamps) {

@@ -9,7 +9,7 @@
 	import Typography from '$lib/components/ui/typography.svelte'
 	import Vertical from '$lib/components/ui/vertical.svelte'
 	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import { deriveIdentityKey, deriveSecret } from '$lib/utils/key-derivation'
+	import { deriveIdentityKey, deriveSecret } from '@swarm-id/lib'
 	import { identitiesStore } from '$lib/stores/identities.svelte'
 	import { accountsStore } from '$lib/stores/accounts.svelte'
 	import { EthAddress } from '@ethersphere/bee-js'
@@ -253,7 +253,7 @@
 
 			// Hierarchical key derivation: Account → Identity → App
 			// Step 1: Derive identity-specific master key
-			const identityMasterKey = await deriveIdentityKey(masterKey, selectedIdentity.id)
+			const identityMasterKey = await deriveIdentityKey(masterKey.toHex(), selectedIdentity.id)
 
 			// Step 2: Derive app-specific secret from identity master key
 			const appSecret = await deriveSecret(identityMasterKey, sessionStore.data.appOrigin)

@@ -46,7 +46,7 @@ export const connectedAppsStore = {
 			appDescription?: string
 			appSecret?: string
 		},
-		defaultConnectionTime: number,
+		defaultConnectionTime: number | undefined,
 	): ConnectedApp {
 		const existingApp = connectedApps.find(
 			(app) => app.appUrl === appData.appUrl && app.identityId === appData.identityId,
@@ -62,7 +62,8 @@ export const connectedAppsStore = {
 				appDescription: appData.appDescription ?? existingApp.appDescription,
 				appSecret: appData.appSecret ?? existingApp.appSecret,
 				lastConnectedAt: now,
-				connectedUntil: now + defaultConnectionTime,
+				connectedUntil:
+					defaultConnectionTime !== undefined ? now + defaultConnectionTime : undefined,
 			}
 			connectedApps = connectedApps.map((app) =>
 				app.appUrl === existingApp.appUrl && app.identityId === existingApp.identityId
@@ -81,7 +82,8 @@ export const connectedAppsStore = {
 				appDescription: appData.appDescription,
 				appSecret: appData.appSecret,
 				lastConnectedAt: now,
-				connectedUntil: now + defaultConnectionTime,
+				connectedUntil:
+					defaultConnectionTime !== undefined ? now + defaultConnectionTime : undefined,
 			}
 			connectedApps = [...connectedApps, newApp]
 			saveConnectedApps(connectedApps)

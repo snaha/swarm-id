@@ -14,8 +14,10 @@ import {
   Reference,
   type Bytes,
 } from "@ethersphere/bee-js"
-import { deriveAccountSwarmEncryptionKey } from "./key-derivation"
-import { deriveSecret } from "../utils/key-derivation"
+import {
+  deriveAccountSwarmEncryptionKey,
+  deriveSecret,
+} from "../utils/key-derivation"
 import { ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
 import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"

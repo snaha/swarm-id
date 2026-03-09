@@ -5,6 +5,8 @@
  * from a master identity key.
  */
 
+import { PrivateKey } from "@ethersphere/bee-js"
+
 /**
  * Derive an app-specific secret from a master key and app origin
  *
@@ -122,6 +124,88 @@ export async function verifySecret(
 ): Promise<boolean> {
   const derived = await deriveSecret(masterKey, appOrigin)
   return derived === expectedSecret
+}
+
+/**
+ * Derive an identity-specific master key from account master key and identity ID
+ *
+ * Uses HMAC-SHA256 to create a deterministic, unique key for each identity.
+ * This enables hierarchical key derivation: Account → Identity → App.
+ * The same account master key + identity ID will always produce the same identity key.
+ *
+ * @param accountMasterKey - The account's master key (hex string)
+ * @param identityId - The identity's unique identifier
+ * @returns The derived identity master key as a hex string
+ */
+export async function deriveIdentityKey(
+  accountMasterKey: string,
+  identityId: string,
+): Promise<string> {
+  console.log("[KeyDerivation] Deriving identity key for:", identityId)
+
+  const encoder = new TextEncoder()
+
+  // Convert account master key to Uint8Array
+  const keyData = hexToUint8Array(accountMasterKey)
+  const message = encoder.encode(identityId)
+
+  // Import the account master key for HMAC
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    keyData,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+
+  // Sign the identity ID with the account master key
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
+
+  // Convert to hex string
+  const identityKeyHex = uint8ArrayToHex(new Uint8Array(signature))
+  console.log(
+    "[KeyDerivation] Identity key derived:",
+    identityKeyHex.substring(0, 16) + "...",
+  )
+
+  return identityKeyHex
+}
+
+/**
+ * Derive account backup key from account master key
+ *
+ * Used for signing account feed updates
+ *
+ * @param accountMasterKey - Account master key (hex string)
+ * @param accountId - Account ID (EthAddress hex string)
+ * @returns 32-byte account backup key (as hex string)
+ */
+export async function deriveAccountBackupKey(
+  accountMasterKey: string,
+  accountId: string,
+): Promise<string> {
+  return deriveSecret(accountMasterKey, `account:${accountId}`)
+}
+
+/**
+ * Derive account Swarm encryption key from account master key
+ *
+ * Used for encrypting account snapshot data before upload to Swarm
+ *
+ * @param accountMasterKey - Account master key (hex string)
+ * @returns 32-byte encryption key (as hex string)
+ */
+export async function deriveAccountSwarmEncryptionKey(
+  accountMasterKey: string,
+): Promise<string> {
+  return deriveSecret(accountMasterKey, `swarm-encryption`)
+}
+
+/**
+ * Convert backup key to PrivateKey for feed signing
+ */
+export function backupKeyToPrivateKey(backupKeyHex: string): PrivateKey {
+  return new PrivateKey(backupKeyHex)
 }
 
 // Export utility functions for testing

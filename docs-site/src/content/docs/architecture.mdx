@@ -147,11 +147,13 @@ Each `.swarmid` file is a JSON object with two parts:
 
 Header fields vary by account type:
 
-| Account Type | Extra Header Fields                                                              |
-| ------------ | -------------------------------------------------------------------------------- |
-| **Passkey**  | `credentialId`                                                                   |
-| **Ethereum** | `ethereumAddress`, `encryptedMasterKey`, `encryptionSalt`, `encryptedSecretSeed` |
-| **Agent**    | _(none)_                                                                         |
+| Account Type | Extra Header Fields |
+| ------------ | ------------------- |
+| **Passkey**  | `credentialId`      |
+| **Ethereum** | `ethereumAddress`   |
+| **Agent**    | _(none)_            |
+
+During Ethereum account import, the user must re-enter their secret seed. The master key is re-derived from `secretSeed + publicKey` — key material is never stored in the backup header.
 
 ### Export Flow
 
