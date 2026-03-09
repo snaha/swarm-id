@@ -5,6 +5,7 @@ Thank you for your interest in contributing to Swarm ID! This document outlines 
 ## Types of Contributions
 
 We welcome:
+
 - Bug reports and fixes
 - Feature requests and implementations
 - Documentation improvements
@@ -14,6 +15,7 @@ We welcome:
 **Please open a GitHub issue before starting work on any non-trivial change.**
 
 This helps us:
+
 - Avoid duplicate efforts
 - Ensure your contribution aligns with the project direction
 - Provide guidance before you invest significant time
