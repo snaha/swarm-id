@@ -231,7 +231,8 @@
 
 
 
-<table><thead><tr><th>Account Type</th><th>Extra Header Fields</th></tr></thead><tbody><tr><td><strong>Passkey</strong></td><td><code dir="auto">credentialId</code></td></tr><tr><td><strong>Ethereum</strong></td><td><code dir="auto">ethereumAddress</code>, <code dir="auto">encryptedMasterKey</code>, <code dir="auto">encryptionSalt</code>, <code dir="auto">encryptedSecretSeed</code></td></tr><tr><td><strong>Agent</strong></td><td><em>(none)</em></td></tr></tbody></table>
+<table><thead><tr><th>Account Type</th><th>Extra Header Fields</th></tr></thead><tbody><tr><td><strong>Passkey</strong></td><td><code dir="auto">credentialId</code></td></tr><tr><td><strong>Ethereum</strong></td><td><code dir="auto">ethereumAddress</code></td></tr><tr><td><strong>Agent</strong></td><td><em>(none)</em></td></tr></tbody></table>
+<p>During Ethereum account import, the user must re-enter their secret seed. The master key is re-derived from <code dir="auto">secretSeed + publicKey</code> — key material is never stored in the backup header.</p>
 <h3 id="export-flow">Export Flow</h3>
 <p>Export requires <strong>no re-authentication</strong> — the <code dir="auto">swarmEncryptionKey</code> is already persisted in the account. The flow:</p>
 <ol>
