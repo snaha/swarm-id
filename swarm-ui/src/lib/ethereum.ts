@@ -30,7 +30,7 @@ const appMetadata = {
 	],
 }
 
-const onboard = Onboard({
+export const onboard = Onboard({
 	wallets,
 	chains,
 	appMetadata,

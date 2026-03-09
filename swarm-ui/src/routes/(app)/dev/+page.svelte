@@ -18,15 +18,18 @@
 	import routes from '$lib/routes'
 	import { BatchId, EthAddress } from '@ethersphere/bee-js'
 	import { SvelteMap } from 'svelte/reactivity'
+	import { BrowserProvider } from 'ethers'
+	import { onboard } from '$lib/ethereum'
 
 	// Tab state
-	type Tab = 'overview' | 'stamps' | 'sync'
+	type Tab = 'overview' | 'stamps' | 'sync' | 'eip712'
 	let activeTab = $state<Tab>('overview')
 
 	const tabs = [
 		{ value: 'overview', label: 'Overview' },
 		{ value: 'stamps', label: 'Stamps' },
 		{ value: 'sync', label: 'Sync' },
+		{ value: 'eip712', label: 'EIP-712' },
 	] as const
 
 	// Demo app URL for connect flow testing
@@ -34,6 +37,29 @@
 
 	// Sync state
 	let syncMessage = $state('')
+
+	// EIP-712 signTypedData experiment state
+	let signingTypedData = $state(false)
+	let typedDataResult = $state<string | undefined>(undefined)
+	let typedDataError = $state('')
+
+	const TYPED_DATA_DOMAIN = {
+		name: 'Swarm ID Test',
+		version: '1',
+		chainId: 1,
+	} as const
+
+	const TYPED_DATA_TYPES = {
+		Test: [
+			{ name: 'message', type: 'string' },
+			{ name: 'nonce', type: 'uint256' },
+		],
+	}
+
+	const TYPED_DATA_VALUE = {
+		message: 'Determinism test',
+		nonce: 12345n,
+	} as const
 
 	// Stamp buying state
 	let beeUrl = $state('http://localhost:1633')
@@ -309,6 +335,43 @@ Check console logs for details:
 			assignMessage = `✅ Set identity stamp for ${selectedIdentityId.slice(0, 8)}…`
 		} catch (error) {
 			assignError = error instanceof Error ? error.message : String(error)
+		}
+	}
+
+	async function testSignTypedData() {
+		signingTypedData = true
+		typedDataError = ''
+		typedDataResult = undefined
+
+		try {
+			const wallets = await onboard.connectWallet()
+			if (wallets.length === 0) {
+				throw new Error('No wallet connected')
+			}
+
+			const provider = new BrowserProvider(wallets[0].provider, 'any')
+			const signer = await provider.getSigner()
+
+			const signature = await signer.signTypedData(
+				TYPED_DATA_DOMAIN,
+				TYPED_DATA_TYPES,
+				TYPED_DATA_VALUE,
+			)
+
+			typedDataResult = signature
+			console.log('signTypedData result:', {
+				wallet: wallets[0].label,
+				address: signer.address,
+				signature,
+				domain: TYPED_DATA_DOMAIN,
+				types: TYPED_DATA_TYPES,
+				value: TYPED_DATA_VALUE,
+			})
+		} catch (e) {
+			typedDataError = e instanceof Error ? e.message : String(e)
+			console.error('signTypedData error:', e)
+		} finally {
+			signingTypedData = false
 		}
 	}
 </script>
@@ -603,6 +666,60 @@ Check console logs for details:
 					• Open browser console to see detailed logs
 				</Typography>
 			</Vertical>
+		</Vertical>
+	{/if}
+
+	<!-- EIP-712 Tab -->
+	{#if activeTab === 'eip712'}
+		<Vertical --vertical-gap="var(--padding)">
+			<Typography variant="h3">EIP-712 signTypedData Test</Typography>
+			<Typography variant="small">
+				Test if signTypedData produces deterministic signatures across different wallets.
+			</Typography>
+
+			<Vertical
+				--vertical-gap="var(--half-padding)"
+				style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+			>
+				<Typography variant="small" style="color: var(--colors-medium);"
+					>Typed Data (fixed)</Typography
+				>
+				<Typography font="mono" variant="small">
+					Domain: {JSON.stringify(TYPED_DATA_DOMAIN)}
+				</Typography>
+				<Typography font="mono" variant="small">
+					Value: {JSON.stringify(TYPED_DATA_VALUE, (_, v) =>
+						typeof v === 'bigint' ? v.toString() : v,
+					)}
+				</Typography>
+			</Vertical>
+
+			<Button onclick={testSignTypedData} busy={signingTypedData}>
+				{signingTypedData ? 'Signing...' : 'Sign Typed Data'}
+			</Button>
+
+			{#if typedDataResult}
+				<Vertical
+					--vertical-gap="var(--half-padding)"
+					style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+				>
+					<Typography variant="small" style="color: var(--colors-medium);">Signature</Typography>
+					<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+						<Typography font="mono" variant="small" style="word-break: break-all;"
+							>{typedDataResult}</Typography
+						>
+						<CopyButton text={typedDataResult} />
+					</Horizontal>
+				</Vertical>
+			{/if}
+
+			{#if typedDataError}
+				<Typography font="mono" style="color: var(--colors-error);">❌ {typedDataError}</Typography>
+			{/if}
+
+			<Typography variant="small" style="color: var(--colors-medium);">
+				Check browser console for detailed output including wallet name and address.
+			</Typography>
 		</Vertical>
 	{/if}
 </Vertical>
