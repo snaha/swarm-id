@@ -82,6 +82,7 @@ import {
   createPostageStampsStorageManager,
   createNetworkSettingsStorageManager,
   createAccountsStorageManager,
+  disconnectApp,
 } from "./utils/storage-managers"
 import { hexToUint8Array, uint8ArrayToHex } from "./utils/key-derivation"
 import {
@@ -881,6 +882,16 @@ export class SwarmIdProxy {
     // Clear stamper state from localStorage
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
     localStorage.removeItem(stamperKey)
+
+    // Invalidate connected app entries in shared storage so reconnect doesn't happen on refresh
+    try {
+      disconnectApp(this.parentOrigin)
+    } catch (error) {
+      console.error(
+        "[Proxy] Error invalidating connected app in shared storage:",
+        error,
+      )
+    }
 
     // Reset auth state
     this.authenticated = false

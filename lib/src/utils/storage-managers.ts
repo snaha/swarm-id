@@ -241,6 +241,22 @@ export function createConnectedAppsStorageManager(): VersionedStorageManager<Con
 }
 
 /**
+ * Invalidate all connected app entries for a given app URL.
+ * Sets lastConnectedAt to 0 and connectedUntil to undefined so
+ * isConnectionValid() returns false and reconnect won't happen on refresh.
+ */
+export function disconnectApp(appUrl: string): void {
+  const manager = createConnectedAppsStorageManager()
+  const apps = manager.load()
+  const updated = apps.map((app) =>
+    app.appUrl === appUrl
+      ? { ...app, lastConnectedAt: 0, connectedUntil: undefined }
+      : app,
+  )
+  manager.save(updated)
+}
+
+/**
  * Create storage manager for postage stamps
  */
 export function createPostageStampsStorageManager(): VersionedStorageManager<PostageStamp> {
