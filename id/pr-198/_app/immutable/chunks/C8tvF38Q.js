@@ -1,1 +1,0 @@
-import{f as m,a as p}from"./CaIuzMhZ.js";import{c as e,s as d,r as i}from"./C1dVow2C.js";import{s as l}from"./qGV9C-U4.js";import{W as v}from"./DpzuDlHF.js";var f=m('<div class="error-message svelte-15q4eiz"><!> <span><!></span></div>');function E(o,t){var r=f(),s=e(r);v(s,{width:20,height:20});var a=d(s,2),n=e(a);l(n,()=>t.children),i(a),i(r),p(o,r)}export{E};
