@@ -1,58 +1,58 @@
 {
-	"name": "swarm-id-explorations",
-	"version": "1.0.0",
-	"private": true,
-	"description": "Swarm Identity Management - Monorepo",
-	"type": "module",
-	"scripts": {
-		"dev": "concurrently -n ui,demo -c blue,green \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
-		"dev:bee": "fdp-play start -w 1",
-		"dev:bee:detach": "fdp-play start -w 1 --detach",
-		"dev:bee:stop": "fdp-play stop",
-		"dev:bee:logs": "fdp-play logs queen --follow",
-		"dev:bee:fresh": "fdp-play start -w 1 --fresh --pull",
-		"dev:demo": "pnpm --filter @swarm-id/demo dev",
-		"dev:lib": "pnpm --filter @swarm-id/lib build:watch",
-		"dev:swarm-ui": "pnpm --filter swarm-identity dev",
-		"dev:docs": "pnpm --filter @swarm-id/docs dev",
-		"build": "pnpm -r --workspace-concurrency=1 build",
-		"build:bee-js": "pnpm --filter @ethersphere/bee-js build",
-		"build:lib": "pnpm build:bee-js && pnpm --filter @swarm-id/lib build",
-		"build:demo": "pnpm --filter @swarm-id/demo build",
-		"build:swarm-ui": "pnpm --filter swarm-identity build",
-		"build:swarm-demo": "pnpm build:lib && pnpm build:demo",
-		"build:swarm-id": "pnpm build:lib && pnpm build:swarm-ui && rm -rf swarm-id-build && cp -r swarm-ui/build swarm-id-build && cp -r lib/dist swarm-id-build/lib",
-		"build:docs": "pnpm --filter @swarm-id/docs build",
-		"preview:docs": "pnpm --filter @swarm-id/docs preview",
-		"clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
-		"install:all": "pnpm install",
-		"check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all && pnpm --filter @swarm-id/demo check:all",
-		"format:all": "pnpm --filter @swarm-id/lib format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format"
-	},
-	"devDependencies": {
-		"@fairdatasociety/fdp-play": "^3.3.0",
-		"concurrently": "^9.1.2",
-		"prettier": "^3.8.1",
-		"serve": "^14.2.4"
-	},
-	"keywords": [
-		"swarm",
-		"identity",
-		"authentication",
-		"web3",
-		"monorepo"
-	],
-	"author": "",
-	"license": "ISC",
-	"engines": {
-		"node": "22.x",
-		"pnpm": "10.x"
-	},
-	"pnpm": {
-		"onlyBuiltDependencies": [
-			"@tailwindcss/oxide",
-			"esbuild",
-			"sharp"
-		]
-	}
+  "name": "swarm-id-explorations",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Swarm Identity Management - Monorepo",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -n ui,demo -c blue,green \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
+    "dev:bee": "fdp-play start -w 1",
+    "dev:bee:detach": "fdp-play start -w 1 --detach",
+    "dev:bee:stop": "fdp-play stop",
+    "dev:bee:logs": "fdp-play logs queen --follow",
+    "dev:bee:fresh": "fdp-play start -w 1 --fresh --pull",
+    "dev:demo": "pnpm --filter @swarm-id/demo dev",
+    "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
+    "dev:swarm-ui": "pnpm --filter swarm-identity dev",
+    "dev:docs": "pnpm --filter @swarm-id/docs dev",
+    "build": "pnpm -r --workspace-concurrency=1 build",
+    "build:bee-js": "pnpm --filter @ethersphere/bee-js build",
+    "build:lib": "pnpm build:bee-js && pnpm --filter @swarm-id/lib build",
+    "build:demo": "pnpm --filter @swarm-id/demo build",
+    "build:swarm-ui": "pnpm --filter swarm-identity build",
+    "build:swarm-demo": "pnpm build:lib && pnpm build:demo",
+    "build:swarm-id": "pnpm build:lib && pnpm build:swarm-ui && rm -rf swarm-id-build && cp -r swarm-ui/build swarm-id-build && cp -r lib/dist swarm-id-build/lib",
+    "build:docs": "pnpm --filter @swarm-id/docs build",
+    "preview:docs": "pnpm --filter @swarm-id/docs preview",
+    "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
+    "install:all": "pnpm install",
+    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all && pnpm --filter @swarm-id/demo check:all",
+    "format:all": "pnpm --filter @swarm-id/lib format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format"
+  },
+  "devDependencies": {
+    "@fairdatasociety/fdp-play": "^3.3.0",
+    "concurrently": "^9.1.2",
+    "prettier": "^3.8.1",
+    "serve": "^14.2.4"
+  },
+  "keywords": [
+    "swarm",
+    "identity",
+    "authentication",
+    "web3",
+    "monorepo"
+  ],
+  "author": "",
+  "license": "ISC",
+  "engines": {
+    "node": "22.x",
+    "pnpm": "10.x"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@tailwindcss/oxide",
+      "esbuild",
+      "sharp"
+    ]
+  }
 }

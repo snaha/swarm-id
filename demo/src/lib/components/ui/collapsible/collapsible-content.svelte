@@ -1,19 +1,19 @@
 <script lang="ts">
-	import type { Snippet } from 'svelte'
+  import type { Snippet } from 'svelte'
 
-	interface Props {
-		open?: boolean
-		class?: string
-		children?: Snippet
-	}
+  interface Props {
+    open?: boolean
+    class?: string
+    children?: Snippet
+  }
 
-	let { open = false, class: className, children }: Props = $props()
+  let { open = false, class: className, children }: Props = $props()
 </script>
 
 {#if open}
-	<div class={className}>
-		{#if children}
-			{@render children()}
-		{/if}
-	</div>
+  <div class={className}>
+    {#if children}
+      {@render children()}
+    {/if}
+  </div>
 {/if}

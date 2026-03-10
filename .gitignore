@@ -15,6 +15,9 @@ popup/pnpm-lock.yaml
 # Local settings
 settings.local.json
 
+# Claude Code
+.claude/worktrees/
+
 # OS files
 .DS_Store
 Thumbs.db

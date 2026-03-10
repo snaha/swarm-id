@@ -1,49 +1,49 @@
 {
-	"name": "@swarm-id/demo",
-	"version": "1.0.0",
-	"private": true,
-	"type": "module",
-	"description": "Swarm ID demo application",
-	"scripts": {
-		"dev": "vite dev --port 3000",
-		"build": "vite build",
-		"preview": "vite preview",
-		"check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-		"check:all": "pnpm lint && pnpm check && pnpm knip",
-		"lint": "prettier --check . && eslint .",
-		"format": "prettier --write .",
-		"knip": "knip",
-		"clean": "rm -rf build .svelte-kit"
-	},
-	"dependencies": {
-		"@ethersphere/bee-js": "link:../bee-js",
-		"@swarm-id/lib": "workspace:*"
-	},
-	"devDependencies": {
-		"@eslint/js": "9.39.1",
-		"@sveltejs/adapter-static": "3.0.10",
-		"@sveltejs/kit": "2.50.1",
-		"@sveltejs/vite-plugin-svelte": "6.2.1",
-		"@tailwindcss/vite": "4.1.8",
-		"clsx": "2.1.1",
-		"eslint": "9.39.1",
-		"eslint-config-prettier": "10.1.8",
-		"eslint-plugin-svelte": "3.14.0",
-		"globals": "16.5.0",
-		"knip": "5.71.0",
-		"prettier": "3.7.3",
-		"prettier-plugin-svelte": "3.4.0",
-		"svelte": "5.48.2",
-		"svelte-check": "4.3.4",
-		"svelte-eslint-parser": "1.4.0",
-		"tailwind-merge": "3.0.2",
-		"tailwindcss": "4.1.8",
-		"typescript": "5.8.3",
-		"typescript-eslint": "8.48.1",
-		"vite": "7.2.6"
-	},
-	"engines": {
-		"node": ">=22",
-		"pnpm": "10.x"
-	}
+  "name": "@swarm-id/demo",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Swarm ID demo application",
+  "scripts": {
+    "dev": "vite dev --port 3000",
+    "build": "vite build",
+    "preview": "vite preview",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:all": "pnpm lint && pnpm check && pnpm knip",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write .",
+    "knip": "knip",
+    "clean": "rm -rf build .svelte-kit"
+  },
+  "dependencies": {
+    "@ethersphere/bee-js": "link:../bee-js",
+    "@swarm-id/lib": "workspace:*"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/kit": "2.50.1",
+    "@sveltejs/vite-plugin-svelte": "6.2.1",
+    "@tailwindcss/vite": "4.1.8",
+    "clsx": "2.1.1",
+    "eslint": "9.39.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-svelte": "3.14.0",
+    "globals": "16.5.0",
+    "knip": "5.71.0",
+    "prettier": "3.7.3",
+    "prettier-plugin-svelte": "3.4.0",
+    "svelte": "5.48.2",
+    "svelte-check": "4.3.4",
+    "svelte-eslint-parser": "1.4.0",
+    "tailwind-merge": "3.0.2",
+    "tailwindcss": "4.1.8",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.48.1",
+    "vite": "7.2.6"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": "10.x"
+  }
 }

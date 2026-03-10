@@ -45,9 +45,9 @@ docs-site/
 
 ```json
 {
-	"docs:dev": "pnpm --filter @swarm-id/docs dev",
-	"docs:build": "pnpm --filter @swarm-id/docs build",
-	"docs:preview": "pnpm --filter @swarm-id/docs preview"
+  "docs:dev": "pnpm --filter @swarm-id/docs dev",
+  "docs:build": "pnpm --filter @swarm-id/docs build",
+  "docs:preview": "pnpm --filter @swarm-id/docs preview"
 }
 ```
 
@@ -105,9 +105,9 @@ docs-site/
 
 ```json
 {
-	"@astrojs/starlight": "^0.31.1",
-	"astro": "^5.1.5",
-	"sharp": "^0.33.5"
+  "@astrojs/starlight": "^0.31.1",
+  "astro": "^5.1.5",
+  "sharp": "^0.33.5"
 }
 ```
 

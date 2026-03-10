@@ -1,12 +1,12 @@
 <script lang="ts">
-	import '../app.pcss'
-	import { themeStore } from '$lib/stores/theme.svelte'
-	import { sessionStore } from '$lib/stores/session.svelte'
+  import '../app.pcss'
+  import { themeStore } from '$lib/stores/theme.svelte'
+  import { sessionStore } from '$lib/stores/session.svelte'
 
-	let { children } = $props()
+  let { children } = $props()
 
-	void themeStore.preference
-	void sessionStore.data
+  void themeStore.preference
+  void sessionStore.data
 </script>
 
 {@render children()}

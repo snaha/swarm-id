@@ -13,9 +13,9 @@ import { Bytes } from '@ethersphere/bee-js'
  * Used as salt for HKDF key derivation
  */
 export function generateEncryptionSalt(): Bytes {
-	const salt = new Uint8Array(32)
-	crypto.getRandomValues(salt)
-	return new Bytes(salt)
+  const salt = new Uint8Array(32)
+  crypto.getRandomValues(salt)
+  return new Bytes(salt)
 }
 
 /**
@@ -32,35 +32,35 @@ export function generateEncryptionSalt(): Bytes {
  * @returns CryptoKey for AES-GCM encryption/decryption
  */
 export async function deriveEncryptionKey(
-	publicKey: string,
-	salt: Bytes | string,
+  publicKey: string,
+  salt: Bytes | string,
 ): Promise<CryptoKey> {
-	const publicKeyBytes = new Bytes(publicKey).toUint8Array()
-	const saltBytes = salt instanceof Bytes ? salt.toUint8Array() : new Bytes(salt).toUint8Array()
+  const publicKeyBytes = new Bytes(publicKey).toUint8Array()
+  const saltBytes = salt instanceof Bytes ? salt.toUint8Array() : new Bytes(salt).toUint8Array()
 
-	// Step 1: Import public key as raw key material for HKDF
-	const keyMaterial = await crypto.subtle.importKey('raw', publicKeyBytes, 'HKDF', false, [
-		'deriveKey',
-	])
+  // Step 1: Import public key as raw key material for HKDF
+  const keyMaterial = await crypto.subtle.importKey('raw', publicKeyBytes, 'HKDF', false, [
+    'deriveKey',
+  ])
 
-	// Step 2: Derive AES-GCM key using HKDF
-	const encryptionKey = await crypto.subtle.deriveKey(
-		{
-			name: 'HKDF',
-			salt: saltBytes,
-			hash: 'SHA-256',
-			info: new TextEncoder().encode('swarm-id-masterkey-encryption-v1'),
-		},
-		keyMaterial,
-		{
-			name: 'AES-GCM',
-			length: 256, // 256-bit key
-		},
-		false, // non-extractable
-		['encrypt', 'decrypt'],
-	)
+  // Step 2: Derive AES-GCM key using HKDF
+  const encryptionKey = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt: saltBytes,
+      hash: 'SHA-256',
+      info: new TextEncoder().encode('swarm-id-masterkey-encryption-v1'),
+    },
+    keyMaterial,
+    {
+      name: 'AES-GCM',
+      length: 256, // 256-bit key
+    },
+    false, // non-extractable
+    ['encrypt', 'decrypt'],
+  )
 
-	return encryptionKey
+  return encryptionKey
 }
 
 /**
@@ -71,33 +71,33 @@ export async function deriveEncryptionKey(
  * @returns Encrypted data (includes IV + ciphertext + auth tag)
  */
 export async function encryptMasterKey(
-	masterKey: Bytes | string,
-	encryptionKey: CryptoKey,
+  masterKey: Bytes | string,
+  encryptionKey: CryptoKey,
 ): Promise<Bytes> {
-	// Generate random IV (96 bits = 12 bytes, recommended for AES-GCM)
-	const iv = new Uint8Array(12)
-	crypto.getRandomValues(iv)
+  // Generate random IV (96 bits = 12 bytes, recommended for AES-GCM)
+  const iv = new Uint8Array(12)
+  crypto.getRandomValues(iv)
 
-	const masterKeyBytes =
-		masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
+  const masterKeyBytes =
+    masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
 
-	// Encrypt using AES-GCM (includes authentication tag automatically)
-	const encryptedData = await crypto.subtle.encrypt(
-		{
-			name: 'AES-GCM',
-			iv: iv,
-		},
-		encryptionKey,
-		masterKeyBytes,
-	)
+  // Encrypt using AES-GCM (includes authentication tag automatically)
+  const encryptedData = await crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv: iv,
+    },
+    encryptionKey,
+    masterKeyBytes,
+  )
 
-	// Combine IV + encrypted data for storage
-	// Format: [IV (12 bytes)][Ciphertext + Auth Tag]
-	const combined = new Uint8Array(iv.length + encryptedData.byteLength)
-	combined.set(iv, 0)
-	combined.set(new Uint8Array(encryptedData), iv.length)
+  // Combine IV + encrypted data for storage
+  // Format: [IV (12 bytes)][Ciphertext + Auth Tag]
+  const combined = new Uint8Array(iv.length + encryptedData.byteLength)
+  combined.set(iv, 0)
+  combined.set(new Uint8Array(encryptedData), iv.length)
 
-	return new Bytes(combined)
+  return new Bytes(combined)
 }
 
 /**
@@ -108,29 +108,29 @@ export async function encryptMasterKey(
  * @returns Decrypted masterKey
  */
 export async function decryptMasterKey(
-	encryptedMasterKey: Bytes | string,
-	encryptionKey: CryptoKey,
+  encryptedMasterKey: Bytes | string,
+  encryptionKey: CryptoKey,
 ): Promise<Bytes> {
-	const encryptedBytes =
-		encryptedMasterKey instanceof Bytes
-			? encryptedMasterKey.toUint8Array()
-			: new Bytes(encryptedMasterKey).toUint8Array()
+  const encryptedBytes =
+    encryptedMasterKey instanceof Bytes
+      ? encryptedMasterKey.toUint8Array()
+      : new Bytes(encryptedMasterKey).toUint8Array()
 
-	// Extract IV (first 12 bytes) and ciphertext (remaining bytes)
-	const iv = encryptedBytes.slice(0, 12)
-	const ciphertext = encryptedBytes.slice(12)
+  // Extract IV (first 12 bytes) and ciphertext (remaining bytes)
+  const iv = encryptedBytes.slice(0, 12)
+  const ciphertext = encryptedBytes.slice(12)
 
-	// Decrypt using AES-GCM (verifies authentication tag automatically)
-	const decryptedData = await crypto.subtle.decrypt(
-		{
-			name: 'AES-GCM',
-			iv: iv,
-		},
-		encryptionKey,
-		ciphertext,
-	)
+  // Decrypt using AES-GCM (verifies authentication tag automatically)
+  const decryptedData = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: iv,
+    },
+    encryptionKey,
+    ciphertext,
+  )
 
-	return new Bytes(new Uint8Array(decryptedData))
+  return new Bytes(new Uint8Array(decryptedData))
 }
 
 // ============================================================================
@@ -142,8 +142,8 @@ export async function decryptMasterKey(
  * Used with HKDF to derive a deterministic key from masterKey
  */
 const SECRET_SEED_ENCRYPTION_SALT = new Uint8Array([
-	0x73, 0x77, 0x61, 0x72, 0x6d, 0x2d, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x2d, 0x73, 0x65, 0x65,
-	0x64, 0x2d, 0x73, 0x61, 0x6c, 0x74, 0x2d, 0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+  0x73, 0x77, 0x61, 0x72, 0x6d, 0x2d, 0x73, 0x65, 0x63, 0x72, 0x65, 0x74, 0x2d, 0x73, 0x65, 0x65,
+  0x64, 0x2d, 0x73, 0x61, 0x6c, 0x74, 0x2d, 0x76, 0x31, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 ]) // "swarm-secret-seed-salt-v1" padded to 32 bytes
 
 /**
@@ -159,32 +159,32 @@ const SECRET_SEED_ENCRYPTION_SALT = new Uint8Array([
  * @returns CryptoKey for AES-GCM encryption/decryption of secretSeed
  */
 export async function deriveSecretSeedEncryptionKey(masterKey: Bytes | string): Promise<CryptoKey> {
-	const masterKeyBytes =
-		masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
+  const masterKeyBytes =
+    masterKey instanceof Bytes ? masterKey.toUint8Array() : new Bytes(masterKey).toUint8Array()
 
-	// Step 1: Import masterKey as raw key material for HKDF
-	const keyMaterial = await crypto.subtle.importKey('raw', masterKeyBytes, 'HKDF', false, [
-		'deriveKey',
-	])
+  // Step 1: Import masterKey as raw key material for HKDF
+  const keyMaterial = await crypto.subtle.importKey('raw', masterKeyBytes, 'HKDF', false, [
+    'deriveKey',
+  ])
 
-	// Step 2: Derive AES-GCM key using HKDF
-	const encryptionKey = await crypto.subtle.deriveKey(
-		{
-			name: 'HKDF',
-			salt: SECRET_SEED_ENCRYPTION_SALT,
-			hash: 'SHA-256',
-			info: new TextEncoder().encode('swarm-id-secretseed-encryption-v1'),
-		},
-		keyMaterial,
-		{
-			name: 'AES-GCM',
-			length: 256, // 256-bit key
-		},
-		false, // non-extractable
-		['encrypt', 'decrypt'],
-	)
+  // Step 2: Derive AES-GCM key using HKDF
+  const encryptionKey = await crypto.subtle.deriveKey(
+    {
+      name: 'HKDF',
+      salt: SECRET_SEED_ENCRYPTION_SALT,
+      hash: 'SHA-256',
+      info: new TextEncoder().encode('swarm-id-secretseed-encryption-v1'),
+    },
+    keyMaterial,
+    {
+      name: 'AES-GCM',
+      length: 256, // 256-bit key
+    },
+    false, // non-extractable
+    ['encrypt', 'decrypt'],
+  )
 
-	return encryptionKey
+  return encryptionKey
 }
 
 /**
@@ -195,32 +195,32 @@ export async function deriveSecretSeedEncryptionKey(masterKey: Bytes | string): 
  * @returns Encrypted data (includes IV + ciphertext + auth tag)
  */
 export async function encryptSecretSeed(
-	secretSeed: string,
-	encryptionKey: CryptoKey,
+  secretSeed: string,
+  encryptionKey: CryptoKey,
 ): Promise<Bytes> {
-	// Generate random IV (96 bits = 12 bytes, recommended for AES-GCM)
-	const iv = new Uint8Array(12)
-	crypto.getRandomValues(iv)
+  // Generate random IV (96 bits = 12 bytes, recommended for AES-GCM)
+  const iv = new Uint8Array(12)
+  crypto.getRandomValues(iv)
 
-	const secretSeedBytes = new TextEncoder().encode(secretSeed)
+  const secretSeedBytes = new TextEncoder().encode(secretSeed)
 
-	// Encrypt using AES-GCM (includes authentication tag automatically)
-	const encryptedData = await crypto.subtle.encrypt(
-		{
-			name: 'AES-GCM',
-			iv: iv,
-		},
-		encryptionKey,
-		secretSeedBytes,
-	)
+  // Encrypt using AES-GCM (includes authentication tag automatically)
+  const encryptedData = await crypto.subtle.encrypt(
+    {
+      name: 'AES-GCM',
+      iv: iv,
+    },
+    encryptionKey,
+    secretSeedBytes,
+  )
 
-	// Combine IV + encrypted data for storage
-	// Format: [IV (12 bytes)][Ciphertext + Auth Tag]
-	const combined = new Uint8Array(iv.length + encryptedData.byteLength)
-	combined.set(iv, 0)
-	combined.set(new Uint8Array(encryptedData), iv.length)
+  // Combine IV + encrypted data for storage
+  // Format: [IV (12 bytes)][Ciphertext + Auth Tag]
+  const combined = new Uint8Array(iv.length + encryptedData.byteLength)
+  combined.set(iv, 0)
+  combined.set(new Uint8Array(encryptedData), iv.length)
 
-	return new Bytes(combined)
+  return new Bytes(combined)
 }
 
 /**
@@ -231,27 +231,27 @@ export async function encryptSecretSeed(
  * @returns Decrypted secretSeed string
  */
 export async function decryptSecretSeed(
-	encryptedSecretSeed: Bytes | string,
-	encryptionKey: CryptoKey,
+  encryptedSecretSeed: Bytes | string,
+  encryptionKey: CryptoKey,
 ): Promise<string> {
-	const encryptedBytes =
-		encryptedSecretSeed instanceof Bytes
-			? encryptedSecretSeed.toUint8Array()
-			: new Bytes(encryptedSecretSeed).toUint8Array()
+  const encryptedBytes =
+    encryptedSecretSeed instanceof Bytes
+      ? encryptedSecretSeed.toUint8Array()
+      : new Bytes(encryptedSecretSeed).toUint8Array()
 
-	// Extract IV (first 12 bytes) and ciphertext (remaining bytes)
-	const iv = encryptedBytes.slice(0, 12)
-	const ciphertext = encryptedBytes.slice(12)
+  // Extract IV (first 12 bytes) and ciphertext (remaining bytes)
+  const iv = encryptedBytes.slice(0, 12)
+  const ciphertext = encryptedBytes.slice(12)
 
-	// Decrypt using AES-GCM (verifies authentication tag automatically)
-	const decryptedData = await crypto.subtle.decrypt(
-		{
-			name: 'AES-GCM',
-			iv: iv,
-		},
-		encryptionKey,
-		ciphertext,
-	)
+  // Decrypt using AES-GCM (verifies authentication tag automatically)
+  const decryptedData = await crypto.subtle.decrypt(
+    {
+      name: 'AES-GCM',
+      iv: iv,
+    },
+    encryptionKey,
+    ciphertext,
+  )
 
-	return new TextDecoder().decode(decryptedData)
+  return new TextDecoder().decode(decryptedData)
 }

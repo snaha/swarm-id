@@ -1,105 +1,105 @@
 <script lang="ts">
-	import Horizontal from '$lib/components/ui/horizontal.svelte'
-	import Select from '$lib/components/ui/select/select.svelte'
-	import Option from '$lib/components/ui/select/option.svelte'
-	import PasskeyLogo from '$lib/components/passkey-logo.svelte'
-	import EthereumLogo from '$lib/components/ethereum-logo.svelte'
-	import Typography from '$lib/components/ui/typography.svelte'
-	import Add from 'carbon-icons-svelte/lib/Add.svelte'
-	import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
-	import { accountsStore } from '$lib/stores/accounts.svelte'
-	import { sessionStore } from '$lib/stores/session.svelte'
-	import { EthAddress } from '@ethersphere/bee-js'
-	import { toPrefixedHex } from '$lib/utils/hex'
-	import { goto } from '$app/navigation'
-	import { resolve } from '$app/paths'
-	import routes from '$lib/routes'
-	import type { Component } from 'svelte'
+  import Horizontal from '$lib/components/ui/horizontal.svelte'
+  import Select from '$lib/components/ui/select/select.svelte'
+  import Option from '$lib/components/ui/select/option.svelte'
+  import PasskeyLogo from '$lib/components/passkey-logo.svelte'
+  import EthereumLogo from '$lib/components/ethereum-logo.svelte'
+  import Typography from '$lib/components/ui/typography.svelte'
+  import Add from 'carbon-icons-svelte/lib/Add.svelte'
+  import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { sessionStore } from '$lib/stores/session.svelte'
+  import { EthAddress } from '@ethersphere/bee-js'
+  import { toPrefixedHex } from '$lib/utils/hex'
+  import { goto } from '$app/navigation'
+  import { resolve } from '$app/paths'
+  import routes from '$lib/routes'
+  import type { Component } from 'svelte'
 
-	function getAccountIcon(type: string): Component<{ width?: number; height?: number }> {
-		switch (type) {
-			case 'passkey':
-				return PasskeyLogo
-			case 'agent':
-				return Bot
-			default:
-				return EthereumLogo
-		}
-	}
+  function getAccountIcon(type: string): Component<{ width?: number; height?: number }> {
+    switch (type) {
+      case 'passkey':
+        return PasskeyLogo
+      case 'agent':
+        return Bot
+      default:
+        return EthereumLogo
+    }
+  }
 
-	interface Props {
-		selectedAccount: EthAddress | undefined
-	}
+  interface Props {
+    selectedAccount: EthAddress | undefined
+  }
 
-	let { selectedAccount = $bindable() }: Props = $props()
+  let { selectedAccount = $bindable() }: Props = $props()
 
-	const accounts = $derived(accountsStore.accounts)
+  const accounts = $derived(accountsStore.accounts)
 
-	const selectedAccountHex = $derived(selectedAccount ? toPrefixedHex(selectedAccount) : undefined)
+  const selectedAccountHex = $derived(selectedAccount ? toPrefixedHex(selectedAccount) : undefined)
 
-	const accountItems = $derived(
-		accounts.map((account) => ({
-			value: toPrefixedHex(account.id),
-			label: account.name,
-			icon: getAccountIcon(account.type),
-		})),
-	)
+  const accountItems = $derived(
+    accounts.map((account) => ({
+      value: toPrefixedHex(account.id),
+      label: account.name,
+      icon: getAccountIcon(account.type),
+    })),
+  )
 
-	function handleAccountChange(hex: string) {
-		const account = accountsStore.getAccount(new EthAddress(hex))
-		if (account) {
-			selectedAccount = account.id
-			sessionStore.setAccount(account)
-		}
-	}
+  function handleAccountChange(hex: string) {
+    const account = accountsStore.getAccount(new EthAddress(hex))
+    if (account) {
+      selectedAccount = account.id
+      sessionStore.setAccount(account)
+    }
+  }
 
-	// Initialize selected account from session or first available
-	$effect(() => {
-		if (!selectedAccount) {
-			const sessionAccount = sessionStore.data.account
-			if (sessionAccount?.id && accountsStore.getAccount(sessionAccount.id)) {
-				selectedAccount = sessionAccount.id
-			} else if (accounts.length > 0) {
-				selectedAccount = accounts[0].id
-				sessionStore.setAccount(accounts[0])
-			}
-		}
-	})
+  // Initialize selected account from session or first available
+  $effect(() => {
+    if (!selectedAccount) {
+      const sessionAccount = sessionStore.data.account
+      if (sessionAccount?.id && accountsStore.getAccount(sessionAccount.id)) {
+        selectedAccount = sessionAccount.id
+      } else if (accounts.length > 0) {
+        selectedAccount = accounts[0].id
+        sessionStore.setAccount(accounts[0])
+      }
+    }
+  })
 </script>
 
 <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
-	<Typography>Account</Typography>
-	<Select
-		items={accountItems}
-		value={selectedAccountHex}
-		onchange={(e) => handleAccountChange(e.currentTarget.value)}
-		dimension="compact"
-		variant="solid"
-	>
-		{#snippet dropdownFooter({ close, store })}
-			<Option
-				value=""
-				{store}
-				onclick={(e: MouseEvent) => {
-					e.preventDefault()
-					e.stopPropagation()
-					close()
-					goto(resolve(routes.ACCOUNT_NEW))
-				}}
-			>
-				<span class="option-content">
-					<Add size={16} />
-					Add account...
-				</span>
-			</Option>
-		{/snippet}
-	</Select>
+  <Typography>Account</Typography>
+  <Select
+    items={accountItems}
+    value={selectedAccountHex}
+    onchange={(e) => handleAccountChange(e.currentTarget.value)}
+    dimension="compact"
+    variant="solid"
+  >
+    {#snippet dropdownFooter({ close, store })}
+      <Option
+        value=""
+        {store}
+        onclick={(e: MouseEvent) => {
+          e.preventDefault()
+          e.stopPropagation()
+          close()
+          goto(resolve(routes.ACCOUNT_NEW))
+        }}
+      >
+        <span class="option-content">
+          <Add size={16} />
+          Add account...
+        </span>
+      </Option>
+    {/snippet}
+  </Select>
 </Horizontal>
 
 <style>
-	.option-content {
-		display: inline-flex;
-		align-items: center;
-		gap: 0.5rem;
-	}
+  .option-content {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
 </style>

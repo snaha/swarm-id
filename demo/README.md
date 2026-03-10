@@ -69,18 +69,18 @@ The client is configured in `src/lib/stores/client.svelte.ts` using Svelte 5 run
 import { SwarmIdClient } from '@swarm-id/lib'
 
 const client = new SwarmIdClient({
-	iframeOrigin: proxyOrigin,
-	iframePath: '/proxy',
-	timeout: 60000,
-	onAuthChange: async (auth: boolean) => {
-		// Handle auth status changes
-	},
-	metadata: {
-		name: 'Swarm ID Demo',
-		description: 'Demo application showcasing Swarm ID authentication',
-		icon: BEE_ICON,
-	},
-	containerId: 'swarm-id-button',
+  iframeOrigin: proxyOrigin,
+  iframePath: '/proxy',
+  timeout: 60000,
+  onAuthChange: async (auth: boolean) => {
+    // Handle auth status changes
+  },
+  metadata: {
+    name: 'Swarm ID Demo',
+    description: 'Demo application showcasing Swarm ID authentication',
+    icon: BEE_ICON,
+  },
+  containerId: 'swarm-id-button',
 })
 
 await client.initialize()
@@ -118,7 +118,7 @@ console.log('Downloaded:', text)
 ```javascript
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
-	console.log('User is authenticated')
+  console.log('User is authenticated')
 }
 ```
 

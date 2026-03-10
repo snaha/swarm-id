@@ -18,10 +18,10 @@ export type AccountSyncType = 'local' | 'synced'
 const UrlSchema = z.string().url()
 
 export const AppDataSchema = z.object({
-	appUrl: UrlSchema,
-	appName: z.string().min(1).max(100),
-	appIcon: z.string().max(10000).optional(),
-	appDescription: z.string().max(500).optional(),
+  appUrl: UrlSchema,
+  appName: z.string().min(1).max(100),
+  appIcon: z.string().max(10000).optional(),
+  appDescription: z.string().max(500).optional(),
 })
 
 export type AppData = z.infer<typeof AppDataSchema>

@@ -185,8 +185,8 @@ For sitemap generation and canonical URLs, add to `astro.config.mjs`:
 
 ```javascript
 export default defineConfig({
-	site: 'https://docs.swarm-id.snaha.net',
-	// ...
+  site: 'https://docs.swarm-id.snaha.net',
+  // ...
 })
 ```
 

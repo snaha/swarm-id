@@ -4,5 +4,5 @@ import type { PageLoad } from './$types'
 import routes from '$lib/routes'
 
 export const load: PageLoad = ({ params }) => {
-	redirect(302, resolve(routes.IDENTITY_APPS, { id: params.id }))
+  redirect(302, resolve(routes.IDENTITY_APPS, { id: params.id }))
 }

@@ -12,10 +12,10 @@ import { Bytes } from '@ethersphere/bee-js'
  * getMasterKeyFromAgentAccount with the collected phrase.
  */
 export class SeedPhraseRequiredError extends Error {
-	constructor(public readonly accountId: string) {
-		super('Seed phrase required for agent account authentication')
-		this.name = 'SeedPhraseRequiredError'
-	}
+  constructor(public readonly accountId: string) {
+    super('Seed phrase required for agent account authentication')
+    this.name = 'SeedPhraseRequiredError'
+  }
 }
 
 /**
@@ -23,11 +23,11 @@ export class SeedPhraseRequiredError extends Error {
  * Use this after catching SeedPhraseRequiredError and collecting the seed phrase from the user.
  */
 export function getMasterKeyFromAgentAccount(account: Account, seedPhrase: string): Bytes {
-	if (account.type !== 'agent') {
-		throw new Error('getMasterKeyFromAgentAccount can only be used with agent accounts')
-	}
-	const result = authenticateAgentAccount(seedPhrase, account.id)
-	return result.masterKey
+  if (account.type !== 'agent') {
+    throw new Error('getMasterKeyFromAgentAccount can only be used with agent accounts')
+  }
+  const result = authenticateAgentAccount(seedPhrase, account.id)
+  return result.masterKey
 }
 
 /**
@@ -38,21 +38,21 @@ export function getMasterKeyFromAgentAccount(account: Account, seedPhrase: strin
  *                     and use getMasterKeyFromAgentAccount
  */
 export async function getMasterKeyFromAccount(account: Account): Promise<Bytes> {
-	if (account.type === 'passkey') {
-		const swarmIdDomain = window.location.hostname
-		const challenge = new Bytes(keccak256(new TextEncoder().encode(swarmIdDomain))).toUint8Array()
-		const passkeyAccount = await authenticateWithPasskey({
-			rpId: swarmIdDomain,
-			challenge,
-			allowCredentialIds: [account.credentialId],
-		})
-		return passkeyAccount.masterKey
-	} else if (account.type === 'agent') {
-		// Agent accounts require the caller to collect the seed phrase via UI
-		throw new SeedPhraseRequiredError(account.id.toString())
-	} else {
-		const signed = await connectAndSign()
-		const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
-		return await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
-	}
+  if (account.type === 'passkey') {
+    const swarmIdDomain = window.location.hostname
+    const challenge = new Bytes(keccak256(new TextEncoder().encode(swarmIdDomain))).toUint8Array()
+    const passkeyAccount = await authenticateWithPasskey({
+      rpId: swarmIdDomain,
+      challenge,
+      allowCredentialIds: [account.credentialId],
+    })
+    return passkeyAccount.masterKey
+  } else if (account.type === 'agent') {
+    // Agent accounts require the caller to collect the seed phrase via UI
+    throw new SeedPhraseRequiredError(account.id.toString())
+  } else {
+    const signed = await connectAndSign()
+    const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
+    return await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
+  }
 }

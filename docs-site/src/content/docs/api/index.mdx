@@ -17,14 +17,14 @@ pnpm add @swarm-id/lib
 import { SwarmIdClient } from '@swarm-id/lib'
 
 const client = new SwarmIdClient({
-	iframeOrigin: 'https://swarm-id.example.com',
-	metadata: {
-		name: 'My App',
-		description: 'A decentralized application',
-	},
-	onAuthChange: (authenticated) => {
-		console.log('Auth status changed:', authenticated)
-	},
+  iframeOrigin: 'https://swarm-id.example.com',
+  metadata: {
+    name: 'My App',
+    description: 'A decentralized application',
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status changed:', authenticated)
+  },
 })
 
 await client.initialize()
@@ -36,8 +36,8 @@ console.log('Authentication opened at:', authUrl)
 // Option 2: Check authentication status and upload if authenticated
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
-	const result = await client.uploadData(new Uint8Array([1, 2, 3]))
-	console.log('Uploaded with reference:', result.reference)
+  const result = await client.uploadData(new Uint8Array([1, 2, 3]))
+  console.log('Uploaded with reference:', result.reference)
 }
 ```
 
@@ -70,16 +70,16 @@ Creates a new SwarmIdClient instance.
 
 ```typescript
 const client = new SwarmIdClient({
-	iframeOrigin: 'https://id.swarm.example.com',
-	timeout: 60000,
-	metadata: {
-		name: 'My dApp',
-		description: 'A decentralized application built on Swarm',
-		icon: 'data:image/svg+xml;base64,...',
-	},
-	onAuthChange: (authenticated) => {
-		updateUI(authenticated)
-	},
+  iframeOrigin: 'https://id.swarm.example.com',
+  timeout: 60000,
+  metadata: {
+    name: 'My dApp',
+    description: 'A decentralized application built on Swarm',
+    icon: 'data:image/svg+xml;base64,...',
+  },
+  onAuthChange: (authenticated) => {
+    updateUI(authenticated)
+  },
 })
 ```
 
@@ -184,12 +184,12 @@ The authentication button in the iframe can be customized using the `buttonConfi
 
 ```typescript
 interface ButtonConfig {
-	connectText?: string
-	disconnectText?: string
-	loadingText?: string
-	backgroundColor?: string
-	color?: string
-	borderRadius?: string
+  connectText?: string
+  disconnectText?: string
+  loadingText?: string
+  backgroundColor?: string
+  color?: string
+  borderRadius?: string
 }
 ```
 
@@ -197,22 +197,22 @@ interface ButtonConfig {
 
 ```typescript
 const client = new SwarmIdClient({
-	iframeOrigin: 'https://swarm-id.example.com',
-	metadata: {
-		name: 'My App',
-		description: 'A decentralized application',
-	},
-	buttonConfig: {
-		connectText: 'Connect with Swarm',
-		disconnectText: 'Disconnect',
-		loadingText: 'Loading...',
-		backgroundColor: '#4CAF50',
-		color: 'white',
-		borderRadius: '8px',
-	},
-	onAuthChange: (authenticated) => {
-		console.log('Auth status changed:', authenticated)
-	},
+  iframeOrigin: 'https://swarm-id.example.com',
+  metadata: {
+    name: 'My App',
+    description: 'A decentralized application',
+  },
+  buttonConfig: {
+    connectText: 'Connect with Swarm',
+    disconnectText: 'Disconnect',
+    loadingText: 'Loading...',
+    backgroundColor: '#4CAF50',
+    color: 'white',
+    borderRadius: '8px',
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status changed:', authenticated)
+  },
 })
 
 await client.initialize()
@@ -291,7 +291,7 @@ Checks the current authentication status with the Swarm ID proxy.
 ```typescript
 const status = await client.checkAuthStatus()
 if (status.authenticated) {
-	console.log('Authenticated from:', status.origin)
+  console.log('Authenticated from:', status.origin)
 }
 ```
 
@@ -315,8 +315,8 @@ This method creates the same authentication URL as used by the iframe proxy and 
 
 ```typescript
 interface ConnectOptions {
-	popupMode?: 'popup' | 'window' // Default: "window"
-	agent?: boolean // Shows agent sign-up option
+  popupMode?: 'popup' | 'window' // Default: "window"
+  agent?: boolean // Shows agent sign-up option
 }
 ```
 
@@ -394,9 +394,9 @@ Use this method to check if the user can upload data and to get information abou
 ```typescript
 const info = await client.getConnectionInfo()
 if (info.canUpload) {
-	console.log('Ready to upload as:', info.identity?.name)
+  console.log('Ready to upload as:', info.identity?.name)
 } else {
-	console.log('No postage stamp available')
+  console.log('No postage stamp available')
 }
 ```
 
@@ -434,12 +434,12 @@ Returns information about the postage stamp associated with the connected identi
 ```typescript
 const batch = await client.getPostageBatch()
 if (batch) {
-	console.log('Batch ID:', batch.batchID)
-	console.log('Utilization:', batch.utilization)
-	console.log('Depth:', batch.depth)
-	console.log('TTL:', batch.batchTTL)
+  console.log('Batch ID:', batch.batchID)
+  console.log('Utilization:', batch.utilization)
+  console.log('Depth:', batch.depth)
+  console.log('TTL:', batch.batchTTL)
 } else {
-	console.log('No postage batch configured')
+  console.log('No postage batch configured')
 }
 ```
 
@@ -460,9 +460,9 @@ This method never throws an exception. If the client is not initialized, the req
 ```typescript
 const connected = await client.isBeeConnected()
 if (connected) {
-	console.log('Bee node is online')
+  console.log('Bee node is online')
 } else {
-	console.log('Bee node is offline')
+  console.log('Bee node is offline')
 }
 ```
 
@@ -493,11 +493,11 @@ This method retrieves the current Bee node's operating mode and feature flags. U
 ```typescript
 const nodeInfo = await client.getNodeInfo()
 if (nodeInfo.beeMode === 'dev') {
-	// Dev mode requires deferred uploads
-	await client.uploadData(data, { deferred: true })
+  // Dev mode requires deferred uploads
+  await client.uploadData(data, { deferred: true })
 } else {
-	// Production modes can use direct uploads
-	await client.uploadData(data, { deferred: false })
+  // Production modes can use direct uploads
+  await client.uploadData(data, { deferred: false })
 }
 ```
 
@@ -546,10 +546,10 @@ The data is uploaded using the authenticated user's postage stamp. Progress can 
 ```typescript
 const data = new TextEncoder().encode('Hello, Swarm!')
 const result = await client.uploadData(data, {
-	encrypt: true,
-	onProgress: (progress) => {
-		console.log(`Progress: ${progress.processed}/${progress.total}`)
-	},
+  encrypt: true,
+  onProgress: (progress) => {
+    console.log(`Progress: ${progress.processed}/${progress.total}`)
+  },
 })
 console.log('Reference:', result.reference)
 ```
@@ -992,7 +992,7 @@ Creates a feed writer for updating and reading a topic. If `signer` is omitted, 
 ```typescript
 const writer = client.makeEpochFeedWriter({ topic })
 const upload = await writer.uploadPayload('Hello feed', {
-	at: BigInt(Math.floor(Date.now() / 1000)),
+  at: BigInt(Math.floor(Date.now() / 1000)),
 })
 const latest = await writer.downloadReference({ at: BigInt(Math.floor(Date.now() / 1000)) })
 ```
@@ -1137,8 +1137,8 @@ console.log('Feed accessible at /bzz/' + manifestRef)
 
 // Create manifest with explicit owner
 const manifestRef = await client.createFeedManifest(topic, {
-	owner: '0x1234...',
-	uploadOptions: { pin: true },
+  owner: '0x1234...',
+  uploadOptions: { pin: true },
 })
 
 // Use with feed writer
@@ -1282,14 +1282,14 @@ const data = new TextEncoder().encode('Secret message')
 
 // Grantees are compressed public keys (33 bytes = 66 hex chars)
 const grantees = [
-	'02abc123...', // Alice's public key
-	'03def456...', // Bob's public key
+  '02abc123...', // Alice's public key
+  '03def456...', // Bob's public key
 ]
 
 const result = await client.actUploadData(data, grantees, {
-	onProgress: (progress) => {
-		console.log(`Progress: ${progress.processed}/${progress.total}`)
-	},
+  onProgress: (progress) => {
+    console.log(`Progress: ${progress.processed}/${progress.total}`)
+  },
 })
 
 console.log('History Reference:', result.historyReference)
@@ -1376,7 +1376,7 @@ This method adds new public keys to the ACT's access list. The encrypted referen
 
 ```typescript
 const newGrantees = [
-	'02xyz789...', // Charlie's public key
+  '02xyz789...', // Charlie's public key
 ]
 
 const result = await client.actAddGrantees(historyReference, newGrantees)
@@ -1426,7 +1426,7 @@ Revoking grantees performs **key rotation**. This means all references change â€
 
 ```typescript
 const revokeKeys = [
-	'02abc123...', // Alice's public key (revoke access)
+  '02abc123...', // Alice's public key (revoke access)
 ]
 
 const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
@@ -1474,43 +1474,43 @@ grantees.forEach((pubKey) => console.log('  -', pubKey))
 
 ```typescript
 import type {
-	// Client configuration
-	ClientOptions,
-	AuthStatus,
-	ConnectionInfo,
-	PostageBatch,
-	NodeInfo,
-	AppMetadata,
-	ButtonConfig,
-	RequestOptions,
+  // Client configuration
+  ClientOptions,
+  AuthStatus,
+  ConnectionInfo,
+  PostageBatch,
+  NodeInfo,
+  AppMetadata,
+  ButtonConfig,
+  RequestOptions,
 
-	// Upload/Download
-	UploadOptions,
-	DownloadOptions,
-	UploadResult,
-	FileData,
-	Reference,
+  // Upload/Download
+  UploadOptions,
+  DownloadOptions,
+  UploadResult,
+  FileData,
+  Reference,
 
-	// SOC
-	SingleOwnerChunk,
+  // SOC
+  SingleOwnerChunk,
 
-	// Feed types
-	FeedReader,
-	FeedWriter,
-	SequentialFeedReader,
-	SequentialFeedWriter,
-	EpochFeedUploadResult,
-	EpochFeedDownloadReferenceResult,
-	EpochFeedDownloadPayloadResult,
+  // Feed types
+  FeedReader,
+  FeedWriter,
+  SequentialFeedReader,
+  SequentialFeedWriter,
+  EpochFeedUploadResult,
+  EpochFeedDownloadReferenceResult,
+  EpochFeedDownloadPayloadResult,
 
-	// ACT types
-	ActUploadOptions,
+  // ACT types
+  ActUploadOptions,
 
-	// Backup & Recovery types
-	EncryptedSwarmIdExport,
-	ParseHeaderResult,
-	AccountStateSnapshot,
-	RestoreAccountResult,
+  // Backup & Recovery types
+  EncryptedSwarmIdExport,
+  ParseHeaderResult,
+  AccountStateSnapshot,
+  RestoreAccountResult,
 } from '@swarm-id/lib'
 ```
 
@@ -1538,11 +1538,11 @@ Create a fully encrypted `.swarmid` export object. Serializes account data, deri
 
 ```typescript
 const exported = await createEncryptedExport(
-	account,
-	identities,
-	connectedApps,
-	postageStamps,
-	swarmEncryptionKeyHex,
+  account,
+  identities,
+  connectedApps,
+  postageStamps,
+  swarmEncryptionKeyHex,
 )
 // Save as .swarmid file
 const blob = new Blob([JSON.stringify(exported)], { type: 'application/json' })
@@ -1564,7 +1564,7 @@ Decrypt an encrypted `.swarmid` export and return the parsed account state snaps
 ```typescript
 const result = await decryptEncryptedExport(fileData, swarmEncryptionKeyHex)
 if (result.success) {
-	const { identities, connectedApps, postageStamps } = result.data
+  const { identities, connectedApps, postageStamps } = result.data
 }
 ```
 
@@ -1600,16 +1600,16 @@ type EncryptedSwarmIdExport = PasskeyBackupHeader | EthereumBackupHeader | Agent
 
 // Common fields in all headers
 interface BackupHeaderBase {
-	version: 1
-	accountName: string
-	exportedAt: number // Unix timestamp
-	ciphertext: string // Base64-encoded encrypted payload
+  version: 1
+  accountName: string
+  exportedAt: number // Unix timestamp
+  ciphertext: string // Base64-encoded encrypted payload
 }
 
 // Result of parseEncryptedExportHeader()
 type ParseHeaderResult =
-	| { success: true; header: EncryptedSwarmIdExport }
-	| { success: false; error: string }
+  | { success: true; header: EncryptedSwarmIdExport }
+  | { success: false; error: string }
 ```
 
 ---
@@ -1651,13 +1651,13 @@ Deserialize and validate an account state snapshot. Any `appSecret` injected in 
 
 ```typescript
 interface AccountStateSnapshot {
-	version: 1
-	timestamp: number
-	accountId: string
-	metadata: AccountMetadata
-	identities: SerializedIdentity[]
-	connectedApps: ExportedConnectedApp[] // no appSecret
-	postageStamps: SerializedPostageStamp[]
+  version: 1
+  timestamp: number
+  accountId: string
+  metadata: AccountMetadata
+  identities: SerializedIdentity[]
+  connectedApps: ExportedConnectedApp[] // no appSecret
+  postageStamps: SerializedPostageStamp[]
 }
 ```
 
@@ -1684,8 +1684,8 @@ Restore account state from Swarm using passkey authentication result. Derives ke
 
 ```typescript
 interface RestoreAccountResult {
-	snapshot: AccountStateSnapshot
-	swarmEncryptionKey: string
-	credentialId: string
+  snapshot: AccountStateSnapshot
+  swarmEncryptionKey: string
+  credentialId: string
 }
 ```

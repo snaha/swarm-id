@@ -18,8 +18,8 @@ When you create a passkey:
 ```javascript
 // During registration, we enable PRF:
 extensions: {
-	prf: {
-	}
+  prf: {
+  }
 }
 ```
 
@@ -34,11 +34,11 @@ When you authenticate:
 ```javascript
 // During authentication, we evaluate PRF with our salt:
 extensions: {
-	prf: {
-		eval: {
-			first: salt // ArrayBuffer of our deterministic salt
-		}
-	}
+  prf: {
+    eval: {
+      first: salt // ArrayBuffer of our deterministic salt
+    }
+  }
 }
 ```
 

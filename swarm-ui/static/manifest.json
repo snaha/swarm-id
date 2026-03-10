@@ -1,16 +1,16 @@
 {
-	"name": "Swarm Identity",
-	"short_name": "Swarm ID",
-	"description": "Identity management for Swarm dApps",
-	"start_url": "/",
-	"display": "standalone",
-	"background_color": "#ffffff",
-	"theme_color": "#ff6600",
-	"icons": [
-		{
-			"src": "/favicon.png",
-			"type": "image/png",
-			"sizes": "any"
-		}
-	]
+  "name": "Swarm Identity",
+  "short_name": "Swarm ID",
+  "description": "Identity management for Swarm dApps",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#ff6600",
+  "icons": [
+    {
+      "src": "/favicon.png",
+      "type": "image/png",
+      "sizes": "any"
+    }
+  ]
 }

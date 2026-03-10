@@ -1,48 +1,48 @@
 <!doctype html>
 <html lang="en">
-	<head>
-		<meta charset="utf-8" />
-		<meta
-			name="description"
-			content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
-		/>
-		<meta name="viewport" content="width=device-width, initial-scale=1" />
-		<meta name="apple-mobile-web-app-capable" content="yes" />
-		<meta name="apple-mobile-web-app-status-bar-style" content="black" />
-		<meta name="apple-mobile-web-app-title" content="Swarm Identity" />
-		<link rel="icon" href="%sveltekit.assets%/favicon.png" type="image/png" />
-		<link rel="manifest" href="%sveltekit.assets%/manifest.json" />
-		<meta property="og:type" content="website" />
-		<meta property="og:title" content="Swarm ID - Decentralized Identity" />
-		<meta
-			property="og:description"
-			content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
-		/>
-		<meta property="og:image" content="https://swarm-id.snaha.net/og-image.png" />
-		<meta property="og:url" content="https://swarm-id.snaha.net" />
-		<meta name="twitter:card" content="summary_large_image" />
-		<meta name="twitter:title" content="Swarm ID - Decentralized Identity" />
-		<meta
-			name="twitter:description"
-			content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
-		/>
-		<meta name="twitter:image" content="https://swarm-id.snaha.net/og-image.png" />
-		<meta
-			name="viewport"
-			content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover"
-		/>
-		<script>
-			;(function () {
-				var pref = localStorage.getItem('swarm-id-theme') || 'auto'
-				var dark =
-					pref === 'dark' || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches)
-				document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
-				document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
-			})()
-		</script>
-		%sveltekit.head%
-	</head>
-	<body data-sveltekit-preload-data="hover">
-		<div style="display: contents">%sveltekit.body%</div>
-	</body>
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="description"
+      content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Swarm Identity" />
+    <link rel="icon" href="%sveltekit.assets%/favicon.png" type="image/png" />
+    <link rel="manifest" href="%sveltekit.assets%/manifest.json" />
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Swarm ID - Decentralized Identity" />
+    <meta
+      property="og:description"
+      content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+    />
+    <meta property="og:image" content="https://swarm-id.snaha.net/og-image.png" />
+    <meta property="og:url" content="https://swarm-id.snaha.net" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="Swarm ID - Decentralized Identity" />
+    <meta
+      name="twitter:description"
+      content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+    />
+    <meta name="twitter:image" content="https://swarm-id.snaha.net/og-image.png" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0, viewport-fit=cover"
+    />
+    <script>
+      ;(function () {
+        var pref = localStorage.getItem('swarm-id-theme') || 'auto'
+        var dark =
+          pref === 'dark' || (pref === 'auto' && matchMedia('(prefers-color-scheme: dark)').matches)
+        document.documentElement.setAttribute('data-theme', dark ? 'dark' : 'light')
+        document.documentElement.style.colorScheme = dark ? 'dark' : 'light'
+      })()
+    </script>
+    %sveltekit.head%
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">%sveltekit.body%</div>
+  </body>
 </html>

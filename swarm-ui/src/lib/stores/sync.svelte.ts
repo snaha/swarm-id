@@ -1,8 +1,8 @@
 import {
-	createSyncAccount,
-	type SyncAccountFunction,
-	UtilizationStoreDB,
-	DebouncedUtilizationUploader,
+  createSyncAccount,
+  type SyncAccountFunction,
+  UtilizationStoreDB,
+  DebouncedUtilizationUploader,
 } from '@swarm-id/lib'
 import { identitiesStore } from './identities.svelte'
 import { connectedAppsStore } from './connected-apps.svelte'
@@ -20,65 +20,65 @@ import { browser } from '$app/environment'
 let bee: Bee | undefined
 
 const getBeeClient = () => {
-	if (!browser) return undefined
+  if (!browser) return undefined
 
-	if (!bee) {
-		const beeApiUrl = networkSettingsStore.beeNodeUrl
-		console.log(`[StateSync] Creating Bee client with URL: ${beeApiUrl}`)
-		bee = new Bee(beeApiUrl)
-	}
+  if (!bee) {
+    const beeApiUrl = networkSettingsStore.beeNodeUrl
+    console.log(`[StateSync] Creating Bee client with URL: ${beeApiUrl}`)
+    bee = new Bee(beeApiUrl)
+  }
 
-	return bee
+  return bee
 }
 
 // Lazy utilization store initialization
 let utilizationStore: UtilizationStoreDB | undefined
 
 const getUtilizationStore = () => {
-	if (!browser) return undefined
+  if (!browser) return undefined
 
-	if (!utilizationStore) {
-		utilizationStore = new UtilizationStoreDB()
-	}
+  if (!utilizationStore) {
+    utilizationStore = new UtilizationStoreDB()
+  }
 
-	return utilizationStore
+  return utilizationStore
 }
 
 // Lazy debounced uploader initialization
 let utilizationUploader: DebouncedUtilizationUploader | undefined
 
 const getUtilizationUploader = () => {
-	if (!browser) return undefined
+  if (!browser) return undefined
 
-	if (!utilizationUploader) {
-		utilizationUploader = new DebouncedUtilizationUploader()
-	}
+  if (!utilizationUploader) {
+    utilizationUploader = new DebouncedUtilizationUploader()
+  }
 
-	return utilizationUploader
+  return utilizationUploader
 }
 
 // Lazy sync account function initialization
 let syncAccountFn: SyncAccountFunction | undefined
 
 const getSyncAccount = () => {
-	if (!browser) return undefined
+  if (!browser) return undefined
 
-	const beeClient = getBeeClient()
-	if (!beeClient) return undefined
+  const beeClient = getBeeClient()
+  if (!beeClient) return undefined
 
-	if (!syncAccountFn) {
-		syncAccountFn = createSyncAccount({
-			bee: beeClient,
-			accountsStore,
-			identitiesStore,
-			connectedAppsStore,
-			postageStampsStore,
-			utilizationStore: getUtilizationStore()!,
-			utilizationUploader: getUtilizationUploader()!,
-		})
-	}
+  if (!syncAccountFn) {
+    syncAccountFn = createSyncAccount({
+      bee: beeClient,
+      accountsStore,
+      identitiesStore,
+      connectedAppsStore,
+      postageStampsStore,
+      utilizationStore: getUtilizationStore()!,
+      utilizationUploader: getUtilizationUploader()!,
+    })
+  }
 
-	return syncAccountFn
+  return syncAccountFn
 }
 
 // ============================================================================
@@ -86,22 +86,22 @@ const getSyncAccount = () => {
 // ============================================================================
 
 export const syncStore = {
-	/**
-	 * Trigger sync for an account
-	 * Called by store hooks when state changes
-	 */
-	async syncAccount(accountId: string): Promise<void> {
-		if (!browser) {
-			console.warn('[StateSync] Sync disabled - not in browser')
-			return
-		}
+  /**
+   * Trigger sync for an account
+   * Called by store hooks when state changes
+   */
+  async syncAccount(accountId: string): Promise<void> {
+    if (!browser) {
+      console.warn('[StateSync] Sync disabled - not in browser')
+      return
+    }
 
-		const syncAccount = getSyncAccount()
-		if (!syncAccount) {
-			console.warn('[StateSync] Sync function not available')
-			return
-		}
+    const syncAccount = getSyncAccount()
+    if (!syncAccount) {
+      console.warn('[StateSync] Sync function not available')
+      return
+    }
 
-		await syncAccount(accountId)
-	},
+    await syncAccount(accountId)
+  },
 }

@@ -25,14 +25,14 @@ import { SwarmIdClient } from '@swarm-id/lib'
 
 // 1. Create the client
 const client = new SwarmIdClient({
-	iframeOrigin: 'https://swarm-id.snaha.net',
-	metadata: {
-		name: 'My dApp',
-		description: 'A demo Swarm application',
-	},
-	onAuthChange: (authenticated) => {
-		console.log('Auth status:', authenticated)
-	},
+  iframeOrigin: 'https://swarm-id.snaha.net',
+  metadata: {
+    name: 'My dApp',
+    description: 'A demo Swarm application',
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status:', authenticated)
+  },
 })
 
 // 2. Initialize (creates hidden iframe)
@@ -51,8 +51,8 @@ const status = await client.checkAuthStatus()
 
 // 5. Upload data (after authentication)
 if (status.authenticated) {
-	const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
-	console.log('Uploaded:', result.reference)
+  const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
+  console.log('Uploaded:', result.reference)
 }
 
 // 6. Cleanup when done
@@ -86,7 +86,7 @@ const result = await client.uploadData(data, { encrypt: true })
 
 // Upload with progress tracking
 const result = await client.uploadData(data, {}, (progress) => {
-	console.log(`${progress.percent}% uploaded`)
+  console.log(`${progress.percent}% uploaded`)
 })
 ```
 
