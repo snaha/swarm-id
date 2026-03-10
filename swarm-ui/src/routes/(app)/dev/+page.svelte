@@ -16,7 +16,7 @@
 	import StatusDot from './status-dot.svelte'
 	import Divider from '$lib/components/ui/divider.svelte'
 	import routes from '$lib/routes'
-	import { BatchId, EthAddress } from '@ethersphere/bee-js'
+	import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 	import { SvelteMap } from 'svelte/reactivity'
 
 	// Tab state
@@ -285,6 +285,28 @@ Check console logs for details:
 		try {
 			const batchId = new BatchId(selectedStampId)
 			const accountId = new EthAddress(selectedAccountId)
+
+			if (!postageStampsStore.getStamp(batchId)) {
+				const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
+				if (!beeStamp) {
+					assignError = 'Stamp data not found. Reload stamps first.'
+					return
+				}
+				postageStampsStore.addStamp({
+					accountId: selectedAccountId,
+					batchID: batchId,
+					signerKey: new PrivateKey(selectedSigner),
+					utilization: beeStamp.utilization,
+					usable: beeStamp.usable,
+					depth: beeStamp.depth,
+					amount: Number(beeStamp.amount),
+					bucketDepth: beeStamp.bucketDepth,
+					blockNumber: beeStamp.blockNumber,
+					immutableFlag: beeStamp.immutableFlag,
+					exists: beeStamp.exists,
+				})
+			}
+
 			accountsStore.setDefaultStamp(accountId, batchId)
 			assignMessage = `✅ Set account stamp for ${accountId.toHex().slice(0, 8)}…`
 		} catch (error) {
@@ -299,12 +321,34 @@ Check console logs for details:
 			assignError = 'Account must have a default stamp before assigning identity stamp.'
 			return
 		}
-		if (!selectedStampId || !selectedIdentityId) {
-			assignError = 'Select a stamp and an identity first.'
+		if (!selectedStampId || !selectedIdentityId || !selectedAccountId) {
+			assignError = 'Select a stamp, account, and identity first.'
 			return
 		}
 		try {
 			const batchId = new BatchId(selectedStampId)
+
+			if (!postageStampsStore.getStamp(batchId)) {
+				const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
+				if (!beeStamp) {
+					assignError = 'Stamp data not found. Reload stamps first.'
+					return
+				}
+				postageStampsStore.addStamp({
+					accountId: selectedAccountId,
+					batchID: batchId,
+					signerKey: new PrivateKey(selectedSigner),
+					utilization: beeStamp.utilization,
+					usable: beeStamp.usable,
+					depth: beeStamp.depth,
+					amount: Number(beeStamp.amount),
+					bucketDepth: beeStamp.bucketDepth,
+					blockNumber: beeStamp.blockNumber,
+					immutableFlag: beeStamp.immutableFlag,
+					exists: beeStamp.exists,
+				})
+			}
+
 			identitiesStore.setDefaultStamp(selectedIdentityId, batchId)
 			assignMessage = `✅ Set identity stamp for ${selectedIdentityId.slice(0, 8)}…`
 		} catch (error) {
