@@ -272,18 +272,18 @@ export class SwarmIdProxy {
   /**
    * Setup listener for utilization updates from other tabs.
    * When another tab completes a write, it broadcasts an update.
-   * This tab reloads its stamper from cache to stay in sync.
+   * This tab applies the delta update directly from the message.
    */
   private setupUtilizationListener(): void {
     this.utilizationChannel.onmessage = (event) => {
       if (
         event.data.type === "utilization-updated" &&
-        event.data.batchId === this.postageBatchId
+        event.data.batchId === this.postageBatchId &&
+        this.stamper &&
+        event.data.buckets
       ) {
-        // Reload stamper from cache to get latest utilization
-        this.initializeStamper().catch((error) => {
-          console.error("[Proxy] Failed to reload stamper from cache:", error)
-        })
+        // Apply delta update directly - no IndexedDB read needed
+        this.stamper.applyUtilizationUpdate(event.data.buckets)
       }
     }
   }
@@ -308,12 +308,15 @@ export class SwarmIdProxy {
   /**
    * Broadcast utilization update to other tabs.
    * Called after successful writes to notify other tabs to refresh their stamper.
+   * Includes bucket data in the message to avoid IndexedDB race conditions.
    */
   private broadcastUtilizationUpdate(): void {
-    if (this.postageBatchId) {
+    if (this.postageBatchId && this.stamper) {
+      const buckets = this.stamper.getBucketUpdatesForBroadcast()
       this.utilizationChannel.postMessage({
         type: "utilization-updated",
         batchId: this.postageBatchId,
+        buckets,
       })
     }
   }
