@@ -226,3 +226,29 @@ export const NetworkSettingsSchemaV1 = z.object({
 })
 
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchemaV1>
+
+// ============================================================================
+// BroadcastChannel Message Schemas
+// ============================================================================
+
+/**
+ * Bucket update entry for cross-tab synchronization
+ */
+export const BucketUpdateSchema = z.object({
+  index: z.number().int().min(0).max(65535),
+  value: z.number().int().min(0),
+})
+
+/**
+ * Utilization update message sent via BroadcastChannel
+ */
+export const UtilizationUpdateMessageSchema = z.object({
+  type: z.literal("utilization-updated"),
+  batchId: z.string().length(64),
+  buckets: z.array(BucketUpdateSchema),
+})
+
+export type BucketUpdate = z.infer<typeof BucketUpdateSchema>
+export type UtilizationUpdateMessage = z.infer<
+  typeof UtilizationUpdateMessageSchema
+>

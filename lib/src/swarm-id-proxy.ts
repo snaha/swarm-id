@@ -92,7 +92,7 @@ import {
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
-import { DEFAULT_BEE_NODE_URL } from "./schemas"
+import { DEFAULT_BEE_NODE_URL, UtilizationUpdateMessageSchema } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -277,14 +277,14 @@ export class SwarmIdProxy {
   private setupUtilizationListener(): void {
     this.utilizationChannel.onmessage = (event) => {
       try {
+        const result = UtilizationUpdateMessageSchema.safeParse(event.data)
         if (
-          event.data.type === "utilization-updated" &&
-          event.data.batchId === this.postageBatchId &&
-          this.stamper &&
-          Array.isArray(event.data.buckets)
+          result.success &&
+          result.data.batchId === this.postageBatchId &&
+          this.stamper
         ) {
           // Apply delta update directly - no IndexedDB read needed
-          this.stamper.applyUtilizationUpdate(event.data.buckets)
+          this.stamper.applyUtilizationUpdate(result.data.buckets)
         }
       } catch (error) {
         console.error("[Proxy] Failed to apply utilization update:", error)
