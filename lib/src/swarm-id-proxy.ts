@@ -295,16 +295,20 @@ export class SwarmIdProxy {
   /**
    * Execute a write operation with an exclusive lock across all tabs.
    * Uses Web Locks API to ensure only one write happens at a time.
+   * Lock is scoped to the batch ID to allow different batches to write concurrently.
    */
   private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
+    const lockName = `swarm-write-${this.postageBatchId}`
     return navigator.locks.request(
-      "swarm-write",
+      lockName,
       { mode: "exclusive" },
       async () => {
         console.log("[Proxy] Acquired write lock")
-        const result = await operation()
-        console.log("[Proxy] Released write lock")
-        return result
+        try {
+          return await operation()
+        } finally {
+          console.log("[Proxy] Released write lock")
+        }
       },
     )
   }

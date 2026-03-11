@@ -1331,17 +1331,6 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
-   * Get dirty bucket indices for cross-tab synchronization.
-   * Call this BEFORE flush() to get buckets that were updated,
-   * as flush() clears the dirty bucket set.
-   *
-   * @returns Array of bucket indices that were updated
-   */
-  getDirtyBucketsSnapshot(): number[] {
-    return Array.from(this.dirtyBuckets)
-  }
-
-  /**
    * Apply utilization update from another tab.
    * Updates local bucket counters to match leader's state.
    *
