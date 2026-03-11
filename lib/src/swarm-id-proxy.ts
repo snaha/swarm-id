@@ -276,14 +276,18 @@ export class SwarmIdProxy {
    */
   private setupUtilizationListener(): void {
     this.utilizationChannel.onmessage = (event) => {
-      if (
-        event.data.type === "utilization-updated" &&
-        event.data.batchId === this.postageBatchId &&
-        this.stamper &&
-        event.data.buckets
-      ) {
-        // Apply delta update directly - no IndexedDB read needed
-        this.stamper.applyUtilizationUpdate(event.data.buckets)
+      try {
+        if (
+          event.data.type === "utilization-updated" &&
+          event.data.batchId === this.postageBatchId &&
+          this.stamper &&
+          Array.isArray(event.data.buckets)
+        ) {
+          // Apply delta update directly - no IndexedDB read needed
+          this.stamper.applyUtilizationUpdate(event.data.buckets)
+        }
+      } catch (error) {
+        console.error("[Proxy] Failed to apply utilization update:", error)
       }
     }
   }
@@ -303,22 +307,6 @@ export class SwarmIdProxy {
         return result
       },
     )
-  }
-
-  /**
-   * Broadcast utilization update to other tabs.
-   * Called after successful writes to notify other tabs to refresh their stamper.
-   * Includes bucket data in the message to avoid IndexedDB race conditions.
-   */
-  private broadcastUtilizationUpdate(): void {
-    if (this.postageBatchId && this.stamper) {
-      const buckets = this.stamper.getBucketUpdatesForBroadcast()
-      this.utilizationChannel.postMessage({
-        type: "utilization-updated",
-        batchId: this.postageBatchId,
-        buckets,
-      })
-    }
   }
 
   /**
@@ -405,10 +393,19 @@ export class SwarmIdProxy {
     }
 
     try {
+      // Capture bucket updates BEFORE flush clears dirtyBuckets
+      const buckets = this.stamper.getBucketUpdatesForBroadcast()
+
       await this.stamper.flush()
 
-      // Broadcast utilization update to other tabs after successful flush
-      this.broadcastUtilizationUpdate()
+      // Broadcast utilization update to other tabs with pre-captured buckets
+      if (this.postageBatchId && buckets.length > 0) {
+        this.utilizationChannel.postMessage({
+          type: "utilization-updated",
+          batchId: this.postageBatchId,
+          buckets,
+        })
+      }
     } catch (error) {
       console.error("[Proxy] Failed to save stamper state:", error)
     }

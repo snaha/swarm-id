@@ -1332,7 +1332,8 @@ export class UtilizationAwareStamper implements Stamper {
 
   /**
    * Get dirty bucket indices for cross-tab synchronization.
-   * Call this after flush() to get buckets that were updated.
+   * Call this BEFORE flush() to get buckets that were updated,
+   * as flush() clears the dirty bucket set.
    *
    * @returns Array of bucket indices that were updated
    */
@@ -1369,6 +1370,9 @@ export class UtilizationAwareStamper implements Stamper {
       this.depth,
     )
 
+    // Note: Do NOT clear dirtyBuckets here - those represent local writes
+    // that still need to be flushed. Only flush() should clear them.
+
     console.log(
       `[UtilizationAwareStamper] Applied update for ${buckets.length} buckets`,
     )
@@ -1377,6 +1381,8 @@ export class UtilizationAwareStamper implements Stamper {
   /**
    * Get bucket counter values for broadcasting to other tabs.
    * Returns only the dirty buckets with their current values.
+   *
+   * IMPORTANT: Call this BEFORE flush() as flush() clears dirtyBuckets.
    *
    * @returns Array of bucket index/value pairs for broadcasting
    */
