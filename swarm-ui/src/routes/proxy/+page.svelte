@@ -12,13 +12,6 @@
     if (authButtonContainer) {
       proxy.setAuthButtonContainer(authButtonContainer)
     }
-
-    console.log('[Proxy Page] ========================================')
-    console.log('[Proxy Page] Proxy page loaded successfully!')
-    console.log('[Proxy Page] Location:', window.location.href)
-    console.log('[Proxy Page] Hostname:', window.location.hostname)
-    console.log('[Proxy Page] Proxy initialized using library')
-    console.log('[Proxy Page] ========================================')
   })
 </script>
 

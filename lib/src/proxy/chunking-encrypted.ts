@@ -50,10 +50,6 @@ export async function buildEncryptedMerkleTree(
     // Calculate total span from all children (this is the total data size, not refs size!)
     const totalSpan = refs.reduce((sum, ref) => sum + ref.span, 0n)
 
-    console.log(
-      `[BuildEncryptedTree] Creating intermediate chunk for ${refs.length} refs, totalSpan=${totalSpan}`,
-    )
-
     // Build intermediate chunk payload containing all 64-byte references
     // IMPORTANT: Pad to 4096 bytes with zeros BEFORE encryption
     // This ensures that after decryption, the unused bytes are zeros,
@@ -64,17 +60,9 @@ export async function buildEncryptedMerkleTree(
       payload.set(ref.key, idx * 64 + 32)
     })
 
-    console.log(
-      `[BuildEncryptedTree] Payload size: ${payload.length} bytes (${refs.length} * 64 refs + zero padding)`,
-    )
-
     // Create chunk with correct span (total data size) + payload
     const spanBytes = Span.fromBigInt(totalSpan).toUint8Array()
     const chunkData = Binary.concatBytes(spanBytes, payload)
-
-    console.log(
-      `[BuildEncryptedTree] Chunk data size (before encryption): ${chunkData.length} bytes (span=8 + payload=${payload.length})`,
-    )
 
     // Encrypt the chunk ONCE to get address and key
     const encrypter = newChunkEncrypter()
@@ -82,20 +70,8 @@ export async function buildEncryptedMerkleTree(
       encrypter.encryptChunk(chunkData)
     const encryptedChunkData = Binary.concatBytes(encryptedSpan, encryptedData)
 
-    console.log(
-      `[BuildEncryptedTree] Encrypted chunk data size: ${encryptedChunkData.length} bytes (encryptedSpan=${encryptedSpan.length} + encryptedData=${encryptedData.length})`,
-    )
-
     // Calculate address from encrypted chunk
     const address = await calculateChunkAddress(encryptedChunkData)
-
-    console.log(
-      `[BuildEncryptedTree] Intermediate chunk address: ${address.toHex()}, key: ${Array.from(
-        key,
-      )
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")}`,
-    )
 
     // Pass the ENCRYPTED chunk data to callback for upload
     // This ensures the uploaded chunk has the same address we calculated

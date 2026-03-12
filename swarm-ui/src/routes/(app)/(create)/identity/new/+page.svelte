@@ -100,8 +100,6 @@
       name: idName || derivedIdentity.name,
     })
 
-    console.log('✅ Identity created:', identity.id)
-
     // Set as current account and identity
     sessionStore.setCurrentAccount(account.id.toHex())
     sessionStore.setCurrentIdentity(identity.id)

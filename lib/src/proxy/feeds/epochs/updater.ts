@@ -63,14 +63,6 @@ export class BasicEpochUpdater implements EpochUpdater {
     // Calculate epoch - auto-lookup if no hints provided
     const epoch = await this.calculateEpoch(at, hints, encryptionKey)
 
-    console.log("[EpochUpdater] Calculated epoch", {
-      at: at.toString(),
-      epochStart: epoch.start.toString(),
-      epochLevel: epoch.level,
-      hasHints: !!hints?.lastEpoch,
-      autoLookup: !hints?.lastEpoch,
-    })
-
     // Upload the chunk with timestamp + reference
     const socAddress = await this.uploadEpochChunk(
       epoch,
@@ -175,12 +167,6 @@ export class BasicEpochUpdater implements EpochUpdater {
     // The upload function will wrap this in a CAC (adding span) to get 48 or 80 bytes
     // which is the v1 format Bee expects for /bzz/ compatibility
     const payload = Binary.concatBytes(timestamp, reference)
-
-    console.log("[EpochUpdater] Uploading epoch update", {
-      at: at.toString(),
-      referenceLength: reference.length,
-      hasEncryptionKey: !!encryptionKey,
-    })
 
     const result = encryptionKey
       ? await uploadEncryptedSOC(

@@ -255,9 +255,6 @@ export class SwarmIdClient {
     // Create iframe for proxy
     this.iframe = document.createElement("iframe")
     this.iframe.src = `${this.iframeOrigin}${this.iframePath}`
-    console.log("[SwarmIdClient] Creating iframe with src:", this.iframe.src)
-    console.log("[SwarmIdClient] iframeOrigin:", this.iframeOrigin)
-    console.log("[SwarmIdClient] iframePath:", this.iframePath)
 
     // Common iframe styles
     this.iframe.style.border = "none"
@@ -273,7 +270,6 @@ export class SwarmIdClient {
           `Container element with ID "${this.containerId}" not found`,
         )
       }
-      console.log("[SwarmIdClient] Using container element:", this.containerId)
 
       // Fill the container
       this.iframe.style.width = "100%"
@@ -304,26 +300,16 @@ export class SwarmIdClient {
       }
     })
 
-    console.log(
-      "[SwarmIdClient] Iframe loaded, waiting for proxy initialization...",
-    )
-
     // Wait for proxy to signal it's ready
     await this.proxyInitializedPromise
-    console.log("[SwarmIdClient] Proxy initialized and ready")
 
     // Identify ourselves to the iframe
-    console.log(
-      "[SwarmIdClient] Sending parentIdentify to iframe at origin:",
-      this.iframeOrigin,
-    )
     this.sendMessage({
       type: "parentIdentify",
       popupMode: this.popupMode,
       metadata: this.metadata,
       buttonConfig: this.buttonConfig,
     })
-    console.log("[SwarmIdClient] parentIdentify sent")
 
     // Wait for iframe to be ready
     await this.readyPromise
@@ -339,7 +325,6 @@ export class SwarmIdClient {
       if (event.data?.type === "proxyInitialized") {
         // Security: Verify message is from OUR iframe (not another window/iframe)
         if (this.iframe && event.source === this.iframe.contentWindow) {
-          console.log("[SwarmIdClient] Received proxyInitialized from iframe")
           if (this.proxyInitializedResolve) {
             this.proxyInitializedResolve()
             this.proxyInitializedResolve = undefined // Prevent double resolution

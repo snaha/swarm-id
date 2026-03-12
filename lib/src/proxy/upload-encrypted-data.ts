@@ -100,22 +100,15 @@ export async function uploadEncryptedDataWithSigning(
   // to determine deferred mode (deferred = tag != 0), and dev mode blocks non-deferred uploads
   let tag: number | undefined = options?.tag
   if (!tag) {
-    console.log(`[UploadEncryptedData] Creating tag (required for dev mode)...`)
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
-    console.log(`[UploadEncryptedData] Tag created successfully: ${tag}`)
   } else {
-    console.log(`[UploadEncryptedData] Using existing tag from options: ${tag}`)
   }
 
   // Step 1: Split data into chunks
   const chunkPayloads = splitDataIntoChunks(data)
   let totalChunks = chunkPayloads.length
   let processedChunks = 0
-
-  console.log(
-    `[UploadEncryptedData] Splitting ${data.length} bytes into ${totalChunks} chunks`,
-  )
 
   // Progress callback helper
   const reportProgress = () => {
@@ -144,10 +137,6 @@ export async function uploadEncryptedDataWithSigning(
       encryptionKey,
     )
 
-    console.log(
-      `[UploadEncryptedData] Leaf chunk ${encryptedChunkRefs.length}: address=${encryptedChunk.address.toHex()}, span=${payload.length}, data size=${encryptedChunk.data.length}`,
-    )
-
     // Store reference with span (payload size for leaf chunks)
     encryptedChunkRefs.push({
       address: encryptedChunk.address.toUint8Array(),
@@ -156,10 +145,6 @@ export async function uploadEncryptedDataWithSigning(
     })
 
     // DEBUG: Trace encryption key storage
-    console.log(
-      "[UploadEncryptedData] encryptionKey stored:",
-      encryptedChunk.encryptionKey?.length,
-    )
 
     // Upload chunk with signing
     await uploadSingleEncryptedChunk(
@@ -187,25 +172,10 @@ export async function uploadEncryptedDataWithSigning(
     ref.set(encryptedChunkRefs[0].key, 32)
 
     // DEBUG: Trace 64-byte reference construction
-    console.log("[UploadEncryptedData] Building 64-byte ref:")
-    console.log("  address length:", encryptedChunkRefs[0].address.length)
-    console.log("  key length:", encryptedChunkRefs[0].key?.length)
-    console.log("  ref total length:", ref.length)
-    console.log("  ref content (first 32):", Array.from(ref.slice(0, 32)))
-    console.log("  ref content (last 32):", Array.from(ref.slice(32)))
 
     rootReference = new Reference(ref)
-    console.log(
-      "[UploadEncryptedData] Single chunk upload, reference:",
-      rootReference.toHex(),
-    )
   } else {
     // Multiple chunks - build encrypted tree using bee-js's implementation
-    console.log(
-      "[UploadEncryptedData] Building encrypted merkle tree for",
-      encryptedChunkRefs.length,
-      "chunks",
-    )
 
     rootReference = await buildEncryptedMerkleTree(
       encryptedChunkRefs,
@@ -214,10 +184,6 @@ export async function uploadEncryptedDataWithSigning(
         // encryptedChunkData = encryptedSpan (8 bytes) + encryptedPayload (4096 bytes) = 4104 bytes
         // We need to upload this without any modification
 
-        console.log(
-          `[UploadCallback] Received encrypted chunk data, size: ${encryptedChunkData.length} bytes`,
-        )
-
         // Calculate address for this intermediate chunk (needed for both stamper and utilization tracking)
         const address = calculateChunkAddress(encryptedChunkData)
 
@@ -225,9 +191,6 @@ export async function uploadEncryptedDataWithSigning(
         uploadedChunkAddresses.push(address.toUint8Array())
 
         // For client-side signing, use the calculated address
-        console.log(
-          `[UploadCallback] Calculated address for upload: ${address.toHex()}`,
-        )
 
         const envelope = stamper.stamp({
           hash: () => address.toUint8Array(),
@@ -236,17 +199,11 @@ export async function uploadEncryptedDataWithSigning(
           writer: undefined as any, // not used by stamper.stamp
         })
 
-        console.log(
-          `[UploadCallback] Uploading intermediate chunk with client-side signing...`,
-        )
         await bee.uploadChunk(
           envelope,
           encryptedChunkData,
           uploadOptionsWithTag,
           requestOptions,
-        )
-        console.log(
-          `[UploadCallback] Upload complete for address: ${address.toHex()}`,
         )
 
         // Count intermediate chunks in progress
@@ -254,11 +211,6 @@ export async function uploadEncryptedDataWithSigning(
         processedChunks++
         reportProgress()
       },
-    )
-
-    console.log(
-      "[UploadEncryptedData] Encrypted merkle tree complete, root reference:",
-      rootReference.toHex(),
     )
   }
 
@@ -302,24 +254,11 @@ async function uploadSingleChunkWithEnvelope(
   options?: UploadOptions,
   requestOptions?: BeeRequestOptions,
 ): Promise<void> {
-  const startTime = performance.now()
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
   const uploadOptions = { deferred: false, pin: false, ...options }
-  console.log(
-    `[uploadSingleChunkWithEnvelope] Options prepared:`,
-    uploadOptions,
-  )
 
-  const beeUploadStart = performance.now()
   await bee.uploadChunk(envelope, data, uploadOptions, requestOptions)
-  console.log(
-    `[uploadSingleChunkWithEnvelope] bee.uploadChunk (stamper) completed (+${(performance.now() - beeUploadStart).toFixed(2)}ms)`,
-  )
-
-  console.log(
-    `[uploadSingleChunkWithEnvelope] TOTAL: ${(performance.now() - startTime).toFixed(2)}ms`,
-  )
 }
 
 /**
@@ -341,12 +280,6 @@ export async function uploadSingleChunkWithEncryption(
   encryptionKey: Uint8Array,
   options?: UploadOptions,
 ): Promise<void> {
-  const startTime = performance.now()
-  console.log(
-    `[UploadSingleChunk] Starting upload, batch: ${stamper.batchId}, options:`,
-    options,
-  )
-
   // Validate payload size (1-4096 bytes, encryption handles padding)
   if (payload.length < 1 || payload.length > 4096) {
     throw new Error(
@@ -362,21 +295,13 @@ export async function uploadSingleChunkWithEncryption(
   }
 
   // Create encrypted content-addressed chunk
-  const encryptChunkStart = performance.now()
   const encryptedChunk = makeEncryptedContentAddressedChunk(
     payload,
     encryptionKey,
   )
-  console.log(
-    `[UploadSingleChunk] Encryption complete (+${(performance.now() - encryptChunkStart).toFixed(2)}ms)`,
-  )
 
   // Upload using the existing function that handles both stamper and batch cases
-  const uploadStart = performance.now()
   await uploadSingleEncryptedChunk(bee, stamper, encryptedChunk, options)
-  console.log(
-    `[UploadSingleChunk] Upload complete (+${(performance.now() - uploadStart).toFixed(2)}ms, TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
 }
 
 /**
@@ -441,12 +366,6 @@ async function uploadChunkWithFetch(
     headers["swarm-pin"] = options.pin.toString()
   }
 
-  console.log(
-    `[uploadChunkWithFetch] Uploading ${chunkData.length} bytes to ${bee.url}/chunks`,
-  )
-  console.log(`[uploadChunkWithFetch] Tag in options: ${options?.tag}`)
-  console.log(`[uploadChunkWithFetch] Headers being sent:`, headers)
-
   // Make direct fetch call to /chunks endpoint
   const response = await fetch(`${bee.url}/chunks`, {
     method: "POST",
@@ -462,9 +381,6 @@ async function uploadChunkWithFetch(
   }
 
   const result = await response.json()
-  console.log(
-    `[uploadChunkWithFetch] Upload successful, reference: ${result.reference}`,
-  )
 
   return new Reference(result.reference)
 }
@@ -516,35 +432,13 @@ export async function uploadEncryptedSOC(
   encryptionKey?: Uint8Array,
   options?: UploadOptions,
 ): Promise<UploadEncryptedSOCResult> {
-  const startTime = performance.now()
-  const requestedKeyPrefix = encryptionKey
-    ? Binary.uint8ArrayToHex(encryptionKey).slice(0, 8)
-    : undefined
-  console.log(`[UploadEncryptedSOC] Starting encrypted SOC upload`, {
-    dataLength: data.length,
-    identifier: identifier.toHex().substring(0, 16) + "...",
-    requestedKeyPrefix,
-  })
-
   // Validate data size (1-4096 bytes)
   if (data.length < 1 || data.length > 4096) {
     throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
   }
 
   // Step 1: Create encrypted CAC chunk
-  const encryptChunkStart = performance.now()
   const encryptedChunk = makeEncryptedContentAddressedChunk(data, encryptionKey)
-  console.log(
-    `[UploadEncryptedSOC] Created encrypted CAC (+${(performance.now() - encryptChunkStart).toFixed(2)}ms)`,
-    {
-      encryptedChunkAddress:
-        encryptedChunk.address.toHex().substring(0, 16) + "...",
-      encryptedChunkSize: encryptedChunk.data.length,
-      effectiveKeyPrefix: Binary.uint8ArrayToHex(
-        encryptedChunk.encryptionKey,
-      ).slice(0, 8),
-    },
-  )
 
   // Step 2: Construct SOC structure
   const owner = signer.publicKey().address()
@@ -566,26 +460,14 @@ export async function uploadEncryptedSOC(
   // Calculate SOC address: Keccak256(identifier + owner_address)
   const socAddress = makeSOCAddress(identifier, owner.toUint8Array())
 
-  console.log(
-    `[UploadEncryptedSOC] Constructed SOC (+${(performance.now() - startTime).toFixed(2)}ms)`,
-    {
-      socAddress: socAddress.toHex().substring(0, 16) + "...",
-      socDataSize: socData.length,
-      owner: owner.toHex().substring(0, 16) + "...",
-    },
-  )
-
   // Step 3: Create tag for tracking (if not provided in options)
   // IMPORTANT: Tag is REQUIRED in dev mode - Bee's /chunks endpoint uses tag presence
   // to determine deferred mode (deferred = tag != 0), and dev mode blocks non-deferred uploads
   let tag: number | undefined = options?.tag
   if (!tag) {
-    console.log(`[UploadEncryptedSOC] Creating tag (required for dev mode)...`)
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
-    console.log(`[UploadEncryptedSOC] Tag created successfully: ${tag}`)
   } else {
-    console.log(`[UploadEncryptedSOC] Using existing tag from options: ${tag}`)
   }
 
   // Step 4: Create envelope with stamper
@@ -596,17 +478,9 @@ export async function uploadEncryptedSOC(
     writer: undefined as any, // not used by stamper.stamp
   })
 
-  console.log(
-    `[UploadEncryptedSOC] Uploading to regular chunk endpoint... (+${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
-
   // Step 5: Upload using direct fetch (bypasses bee.uploadChunk size check)
   const uploadOptionsWithTag = { tag, deferred: false, pin: false, ...options }
   await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
-
-  console.log(
-    `[UploadEncryptedSOC] ✅ Upload complete (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
 
   return {
     socAddress: socAddress.toUint8Array(),
@@ -628,12 +502,6 @@ export async function uploadSOC(
   data: Uint8Array,
   options?: UploadOptions,
 ): Promise<UploadSOCResult> {
-  const startTime = performance.now()
-  console.log(`[UploadSOC] Starting SOC upload`, {
-    dataLength: data.length,
-    identifier: identifier.toHex().substring(0, 16) + "...",
-  })
-
   if (data.length < 1 || data.length > 4096) {
     throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
   }
@@ -662,10 +530,8 @@ export async function uploadSOC(
 
   let tag: number | undefined = options?.tag
   if (!tag) {
-    console.log(`[UploadSOC] Creating tag (required for dev mode)...`)
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
-    console.log(`[UploadSOC] Tag created successfully: ${tag}`)
   }
 
   const envelope = stamper.stamp({
@@ -675,16 +541,8 @@ export async function uploadSOC(
     writer: undefined as any,
   })
 
-  console.log(
-    `[UploadSOC] Uploading to regular chunk endpoint... (+${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
-
   const uploadOptionsWithTag = { tag, deferred: false, pin: false, ...options }
   await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
-
-  console.log(
-    `[UploadSOC] ✅ Upload complete (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
 
   return {
     socAddress: socAddress.toUint8Array(),
@@ -715,12 +573,6 @@ export async function uploadSOCViaSocEndpoint(
   data: Uint8Array,
   options?: UploadOptions,
 ): Promise<UploadSOCResult> {
-  const startTime = performance.now()
-  console.log(`[UploadSOCViaSoc] Starting SOC upload via /soc endpoint`, {
-    dataLength: data.length,
-    identifier: identifier.toHex().substring(0, 16) + "...",
-  })
-
   if (data.length < 1 || data.length > 4096) {
     throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
   }
@@ -743,19 +595,12 @@ export async function uploadSOCViaSocEndpoint(
   const socAddress = makeSOCAddress(identifier, owner.toUint8Array())
 
   // Debug logging for v1 format verification
-  console.log(`[UploadSOCViaSoc] CAC details:`, {
-    cacDataLength: cacData.length,
-    isValidV1Length: cacData.length === 48 || cacData.length === 80,
-    cacAddress: cac.address.toHex().substring(0, 16) + "...",
-  })
 
   // Create tag
   let tag: number | undefined = options?.tag
   if (!tag) {
-    console.log(`[UploadSOCViaSoc] Creating tag...`)
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
-    console.log(`[UploadSOCViaSoc] Tag created: ${tag}`)
   }
 
   // Stamp using SOC address (what Bee validates for /soc endpoint)
@@ -779,10 +624,6 @@ export async function uploadSOCViaSocEndpoint(
   // Build URL with signature query parameter
   const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
-  console.log(
-    `[UploadSOCViaSoc] Uploading to /soc endpoint... (+${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
-
   // Prepare HTTP headers (matching uploadChunkWithFetch pattern)
   const headers: Record<string, string> = {
     "content-type": "application/octet-stream",
@@ -798,8 +639,6 @@ export async function uploadSOCViaSocEndpoint(
     headers["swarm-pin"] = options.pin.toString()
   }
 
-  console.log(`[UploadSOCViaSoc] Headers being sent:`, headers)
-
   // Upload via /soc endpoint
   const response = await fetch(url, {
     method: "POST",
@@ -813,10 +652,6 @@ export async function uploadSOCViaSocEndpoint(
       `SOC upload failed: ${response.status} ${response.statusText} - ${errorText}`,
     )
   }
-
-  console.log(
-    `[UploadSOCViaSoc] ✅ Upload complete (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
 
   return {
     socAddress: socAddress.toUint8Array(),

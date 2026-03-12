@@ -126,17 +126,10 @@ export async function createActForContent(
 ): Promise<ActUploadResult> {
   // Generate random access key
   const accessKey = generateRandomKey()
-  console.log(`[ACT DEBUG] Access key: ${uint8ArrayToHex(accessKey)}`)
 
   // Encrypt the content reference with the access key
   // CTR mode preserves input length - 32-byte ref → 32-byte encrypted
-  console.log(
-    `[ACT DEBUG] Input to encrypt (content ref): ${uint8ArrayToHex(contentReference)}`,
-  )
   const encryptedRef = counterModeEncrypt(contentReference, accessKey)
-  console.log(
-    `[ACT DEBUG] Output encrypted (encrypted ref): ${uint8ArrayToHex(encryptedRef)}`,
-  )
 
   // Get publisher's public key
   const publisherPubKey = publicKeyFromPrivate(publisherPrivateKey)
@@ -176,7 +169,6 @@ export async function createActForContent(
 
   // 1. Serialize and upload ACT manifest (JSON Simple Manifest format)
   const actJson = serializeAct(entries)
-  console.log(`[ACT] Created ACT manifest: ${entries.length} entries`)
 
   const beeCompatible = options?.beeCompatible === true
 
@@ -197,15 +189,10 @@ export async function createActForContent(
         requestOptions,
       )
 
-  console.log(`[ACT] ACT manifest saved, root: ${actResult.reference}`)
-
   // 2. Serialize and upload encrypted grantee list
   const encryptedGranteeList = serializeAndEncryptGranteeList(
     granteePublicKeys,
     publisherPrivateKey,
-  )
-  console.log(
-    `[ACT] Created encrypted grantee list: ${encryptedGranteeList.length} bytes`,
   )
 
   const granteeListResult = await uploadEncryptedDataWithSigning(
@@ -226,8 +213,6 @@ export async function createActForContent(
     actResult.reference,
     granteeListResult.reference,
   )
-
-  console.log(`[ACT] Saving history manifest...`)
 
   // Save history tree bottom-up using Bee's actual returned references
   // This ensures parent nodes reference children by their actual storage addresses
@@ -256,8 +241,6 @@ export async function createActForContent(
 
   const historyReference = historyResult.rootReference
   const historyTagUid = historyResult.tagUid
-
-  console.log(`[ACT] History manifest saved, root: ${historyReference}`)
 
   // Compress publisher public key for API response
   const compressedPubKey = compressPublicKey(
@@ -334,7 +317,6 @@ export async function decryptActReference(
   }
 
   const actReference = entry.metadata.actReference
-  console.log(`[ACT] Found ACT in history at timestamp ${entry.timestamp}`)
 
   // Download ACT manifest (JSON Simple Manifest)
   const actData = await downloadDataWithChunkAPI(
@@ -345,7 +327,6 @@ export async function decryptActReference(
     requestOptions,
   )
   const entries = deserializeAct(actData)
-  console.log(`[ACT] Downloaded ACT: ${entries.length} entries`)
 
   // Derive keys using reader's private key and publisher's public key
   const derivedKeys = deriveKeys(
@@ -570,10 +551,6 @@ export async function addGranteesToAct(
   const newHistoryReference = historyResult.rootReference
   const historyTagUid = historyResult.tagUid
 
-  console.log(
-    `[ACT] Added ${newGranteePublicKeys.length} grantees, new history: ${newHistoryReference}`,
-  )
-
   return {
     historyReference: newHistoryReference,
     granteeListReference: granteeListResult.reference,
@@ -784,10 +761,6 @@ export async function revokeGranteesFromAct(
 
   const newHistoryReference = historyResult.rootReference
   const historyTagUid = historyResult.tagUid
-
-  console.log(
-    `[ACT] Revoked ${revokePublicKeys.length} grantees, key rotation complete`,
-  )
 
   return {
     encryptedReference: uint8ArrayToHex(newEncryptedRef),

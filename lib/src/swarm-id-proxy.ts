@@ -152,11 +152,6 @@ export class SwarmIdProxy {
     this.utilizationChannel = new BroadcastChannel("swarm-id-utilization")
     this.setupUtilizationListener()
 
-    console.log(
-      "[Proxy] Proxy initialized with Bee API from network settings:",
-      this.beeApiUrl,
-    )
-
     // Announce readiness to parent window immediately
     // This signals that our message listener is ready to receive parentIdentify
     this.announceReady()
@@ -177,7 +172,6 @@ export class SwarmIdProxy {
   private setupConnectedAppsListener(): void {
     // Avoid duplicate subscriptions
     if (this.unsubscribeConnectedApps) {
-      console.log("[Proxy] Already subscribed to connected apps storage")
       return
     }
 
@@ -187,7 +181,6 @@ export class SwarmIdProxy {
         this.handleConnectedAppsChange(connectedApps)
       },
     )
-    console.log("[Proxy] Subscribed to connected apps storage changes")
   }
 
   /**
@@ -214,7 +207,6 @@ export class SwarmIdProxy {
       // If already authenticated with same secret, nothing to do
     } else if (this.authenticated) {
       // No valid connection in storage, but we're authenticated - disconnect
-      console.log("[Proxy] Connection removed via storage event")
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
@@ -230,8 +222,6 @@ export class SwarmIdProxy {
   private async authenticateFromStorage(
     connectedApp: ConnectedApp,
   ): Promise<void> {
-    console.log("[Proxy] Authenticating from storage event")
-
     this.appSecret = connectedApp.appSecret
     this.authenticated = true
     this.authLoading = false
@@ -261,12 +251,10 @@ export class SwarmIdProxy {
     if (this.unsubscribeConnectedApps) {
       this.unsubscribeConnectedApps()
       this.unsubscribeConnectedApps = undefined
-      console.log("[Proxy] Unsubscribed from connected apps storage changes")
     }
 
     // Clean up utilization channel
     this.utilizationChannel.close()
-    console.log("[Proxy] Closed utilization channel")
   }
 
   /**
@@ -303,11 +291,9 @@ export class SwarmIdProxy {
       lockName,
       { mode: "exclusive" },
       async () => {
-        console.log("[Proxy] Acquired write lock")
         try {
           return await operation()
         } finally {
-          console.log("[Proxy] Released write lock")
         }
       },
     )
@@ -319,7 +305,6 @@ export class SwarmIdProxy {
    */
   private announceReady(): void {
     if (window.parent && window.parent !== window) {
-      console.log("[Proxy] Announcing readiness to parent window")
       window.parent.postMessage(
         { type: "proxyInitialized" },
         "*", // Wildcard since we don't know parent origin yet
@@ -376,11 +361,6 @@ export class SwarmIdProxy {
         accountInfo.owner,
         accountInfo.encryptionKey,
       )
-
-      console.log(
-        "[Proxy] Utilization-aware stamper initialized with depth:",
-        this.stamperDepth,
-      )
     } catch (error) {
       console.error("[Proxy] Failed to initialize stamper:", error)
       this.stamper = undefined
@@ -420,13 +400,6 @@ export class SwarmIdProxy {
    */
   private setupMessageListener(): void {
     window.addEventListener("message", async (event: MessageEvent) => {
-      console.log(
-        "[Proxy] Message received:",
-        event.data.type,
-        "from:",
-        event.origin,
-      )
-
       const { type } = event.data
 
       // Handle parent identification (must come first)
@@ -453,7 +426,6 @@ export class SwarmIdProxy {
       // Handle setButtonStyles message (UI-only, not in schema)
       if (type === "setButtonStyles") {
         this.currentStyles = event.data.styles
-        console.log("[Proxy] Button styles updated")
         // Re-render button if not authenticated
         if (!this.authenticated && this.authButtonContainer) {
           this.showAuthButton()
@@ -506,32 +478,19 @@ export class SwarmIdProxy {
       this.parentWindow = event.source as WindowProxy
     }
 
-    console.log("[Proxy] Parent identified via postMessage:", this.parentOrigin)
-    console.log("[Proxy] Parent locked in - cannot be changed")
-    console.log(
-      "[Proxy] Using Bee API URL from network settings:",
-      this.beeApiUrl,
-    )
-
     // Use parent's popup mode if provided
     if (parentPopupMode) {
       this.popupMode = parentPopupMode
-      console.log("[Proxy] Using popup mode from parent:", this.popupMode)
     }
 
     // Store metadata from parent
     if (parentMetadata) {
       this.appMetadata = parentMetadata
-      console.log(
-        "[Proxy] Received app metadata from parent:",
-        parentMetadata.name,
-      )
     }
 
     // Store button config from parent
     if (parentButtonConfig) {
       this.buttonConfig = parentButtonConfig
-      console.log("[Proxy] Received button config from parent")
     }
 
     // Load existing secret if available
@@ -703,7 +662,6 @@ export class SwarmIdProxy {
    */
   private async loadAuthData(): Promise<void> {
     if (!this.parentOrigin) {
-      console.log("[Proxy] No parent origin, cannot load auth data")
       this.authLoading = false
       return
     }
@@ -711,10 +669,6 @@ export class SwarmIdProxy {
     const sharedData = this.lookupAppSecretFromSharedStorage()
 
     if (sharedData) {
-      console.log(
-        "[Proxy] Auth data loaded from shared storage for:",
-        this.parentOrigin,
-      )
       this.appSecret = sharedData.secret
       this.authenticated = true
       this.authLoading = false
@@ -728,15 +682,10 @@ export class SwarmIdProxy {
         this.stamperDepth = stamp.depth
         await this.initializeStamper()
       } else {
-        console.log("[Proxy] No postage stamp found for connected identity")
         this.postageBatchId = undefined
         this.signerKey = undefined
       }
     } else {
-      console.log(
-        "[Proxy] No valid auth data found in shared storage for:",
-        this.parentOrigin,
-      )
       this.authLoading = false
       this.showAuthButton()
     }
@@ -758,7 +707,6 @@ export class SwarmIdProxy {
       const connectedApp = this.findMostRecentConnection(connectedApps)
 
       if (!connectedApp) {
-        console.log("[Proxy] No connected app found for:", this.parentOrigin)
         return undefined
       }
 
@@ -768,7 +716,6 @@ export class SwarmIdProxy {
       const identity = identities.find((i) => i.id === connectedApp.identityId)
 
       if (!identity) {
-        console.log("[Proxy] Identity not found:", connectedApp.identityId)
         return undefined
       }
 
@@ -789,10 +736,6 @@ export class SwarmIdProxy {
       }
 
       if (stamp) {
-        console.log(
-          "[Proxy] Found postage stamp for identity:",
-          stamp.batchID.toHex(),
-        )
       }
 
       return stamp
@@ -822,7 +765,6 @@ export class SwarmIdProxy {
       const connectedApp = this.findMostRecentConnection(connectedApps)
 
       if (!connectedApp) {
-        console.log("[Proxy] No connected app found for:", this.parentOrigin)
         return undefined
       }
 
@@ -832,7 +774,6 @@ export class SwarmIdProxy {
       const identity = identities.find((i) => i.id === connectedApp.identityId)
 
       if (!identity) {
-        console.log("[Proxy] Identity not found:", connectedApp.identityId)
         return undefined
       }
 
@@ -842,14 +783,8 @@ export class SwarmIdProxy {
       const account = accounts.find((a) => a.id.equals(identity.accountId))
 
       if (!account) {
-        console.log(
-          "[Proxy] Account not found for identity:",
-          identity.accountId.toHex(),
-        )
         return undefined
       }
-
-      console.log("[Proxy] Found account for app:", account.id.toHex())
 
       return {
         owner: account.id,
@@ -902,25 +837,13 @@ export class SwarmIdProxy {
       const connectedApp = this.findMostRecentConnection(connectedApps)
 
       if (!connectedApp) {
-        console.log(
-          "[Proxy] No connected app found in shared storage for:",
-          this.parentOrigin,
-        )
         return undefined
       }
 
       if (!connectedApp.appSecret) {
-        console.log(
-          "[Proxy] No appSecret in connected app record for:",
-          this.parentOrigin,
-        )
         return undefined
       }
 
-      console.log(
-        "[Proxy] Found valid app secret in shared storage for:",
-        this.parentOrigin,
-      )
       return {
         secret: connectedApp.appSecret,
         identityId: connectedApp.identityId,
@@ -939,11 +862,8 @@ export class SwarmIdProxy {
    */
   private clearAuthData(): void {
     if (!this.parentOrigin) {
-      console.log("[Proxy] No parent origin, cannot clear auth data")
       return
     }
-
-    console.log("[Proxy] Clearing auth data for:", this.parentOrigin)
 
     // Clear stamper state from localStorage
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
@@ -1013,8 +933,6 @@ export class SwarmIdProxy {
     message: { type: "checkAuth"; requestId: string },
     event: MessageEvent,
   ): void {
-    console.log("[Proxy] Checking authentication status...")
-
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
         {
@@ -1026,16 +944,12 @@ export class SwarmIdProxy {
         { targetOrigin: event.origin },
       )
     }
-
-    console.log("[Proxy] Authentication status:", this.authenticated)
   }
 
   private handleGetConnectionInfo(
     message: GetConnectionInfoMessage,
     event: MessageEvent,
   ): void {
-    console.log("[Proxy] Getting connection info...")
-
     let identity: { id: string; name: string; address: string } | undefined =
       undefined
 
@@ -1080,16 +994,12 @@ export class SwarmIdProxy {
         { targetOrigin: event.origin },
       )
     }
-
-    console.log("[Proxy] Connection info:", { canUpload, identity })
   }
 
   private async handleIsConnected(
     message: IsConnectedMessage,
     event: MessageEvent,
   ): Promise<void> {
-    console.log("[Proxy] Is connected request...")
-
     const connected = await this.bee.isConnected()
 
     if (event.source) {
@@ -1102,16 +1012,12 @@ export class SwarmIdProxy {
         { targetOrigin: event.origin },
       )
     }
-
-    console.log("[Proxy] Bee node connected:", connected)
   }
 
   private async handleGetNodeInfo(
     message: GetNodeInfoMessage,
     event: MessageEvent,
   ): Promise<void> {
-    console.log("[Proxy] Getting node info...")
-
     try {
       const nodeInfo = await this.bee.getNodeInfo()
 
@@ -1127,8 +1033,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Node info:", nodeInfo.beeMode)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1142,8 +1046,6 @@ export class SwarmIdProxy {
     message: { type: "disconnect"; requestId: string },
     event: MessageEvent,
   ): void {
-    console.log("[Proxy] Disconnect requested...")
-
     // Clear auth data
     this.clearAuthData()
 
@@ -1158,19 +1060,12 @@ export class SwarmIdProxy {
         { targetOrigin: event.origin },
       )
     }
-
-    console.log("[Proxy] Disconnected successfully")
   }
 
   private handleRequestAuth(
     message: RequestAuthMessage,
     _event: MessageEvent,
   ): void {
-    console.log(
-      "[Proxy] Request to show auth button for parent:",
-      this.parentOrigin,
-    )
-
     // Store styles for button creation
     this.currentStyles = message.styles
 
@@ -1255,11 +1150,6 @@ export class SwarmIdProxy {
     })
 
     this.authButtonContainer.appendChild(button)
-    console.log(
-      "[Proxy] Auth button shown (authenticated:",
-      isAuthenticated,
-      ")",
-    )
   }
 
   /**
@@ -1271,11 +1161,6 @@ export class SwarmIdProxy {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
       return false
     }
-
-    console.log(
-      "[Proxy] Opening authentication window for parent:",
-      this.parentOrigin,
-    )
 
     // Build authentication URL using shared utility
     // proxyMode=true: popup was opened from proxy iframe, so we validate
@@ -1318,7 +1203,6 @@ export class SwarmIdProxy {
           clearInterval(checkPopupClosed)
           // Only process if we're still in connecting state (auth didn't complete via storage event)
           if (this.isConnecting && !this.authenticated) {
-            console.log("[Proxy] Popup closed without completing auth")
             this.isConnecting = false
             this.showAuthButton()
           }
@@ -1361,8 +1245,6 @@ export class SwarmIdProxy {
    * Handle disconnect button click
    */
   private handleDisconnectClick(): void {
-    console.log("[Proxy] Disconnecting for parent:", this.parentOrigin)
-
     // Clear auth data
     this.clearAuthData()
 
@@ -1380,7 +1262,6 @@ export class SwarmIdProxy {
    */
   setAuthButtonContainer(container: HTMLElement): void {
     this.authButtonContainer = container
-    console.log("[Proxy] Auth button container set")
     // Show button now that container is available
     // (loadAuthData may have already run and set authenticated status)
     this.showAuthButton()
@@ -1391,8 +1272,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, data, options, requestOptions, enableProgress } = message
-
-    console.log("[Proxy] Upload data request, size:", data ? data.length : 0)
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -1437,9 +1316,6 @@ export class SwarmIdProxy {
         // Client-side chunking and signing
         let result
         if (options?.encrypt) {
-          console.log(
-            "[Proxy] Using client-side signing with encryption for uploadData",
-          )
           result = await uploadEncryptedDataWithSigning(
             context,
             data,
@@ -1449,7 +1325,6 @@ export class SwarmIdProxy {
             requestOptions,
           )
         } else {
-          console.log("[Proxy] Using client-side signing for uploadData")
           result = await uploadDataWithSigning(
             context,
             data,
@@ -1477,8 +1352,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Data uploaded:", uploadResult.reference)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1494,14 +1367,11 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, options, requestOptions } = message
 
-    console.log("[Proxy] Download data request, reference:", reference)
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
-      console.log("[Proxy] Downloading from Bee at:", this.beeApiUrl)
-
       // Download data using chunk API only (supports both regular and encrypted references)
       const data = await downloadDataWithChunkAPI(
         this.bee,
@@ -1510,8 +1380,6 @@ export class SwarmIdProxy {
         undefined,
         requestOptions,
       )
-
-      console.log("[Proxy] Download successful, data size:", data.length)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -1523,8 +1391,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Data downloaded:", reference)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1541,13 +1407,6 @@ export class SwarmIdProxy {
     const { requestId, data, name, options, requestOptions } = message
     const fileName = name || "index.bin"
 
-    console.log(
-      "[Proxy] Upload file request, name:",
-      fileName,
-      "size:",
-      data ? data.length : 0,
-    )
-
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
@@ -1562,13 +1421,6 @@ export class SwarmIdProxy {
       if (!this.stamper) {
         throw new Error("Stamper not initialized. Please login first.")
       }
-
-      console.log(
-        "[Proxy] Uploading file to Bee at:",
-        this.beeApiUrl,
-        "with batch:",
-        this.postageBatchId,
-      )
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const manifestResult = await this.withWriteLock(async () => {
@@ -1591,10 +1443,6 @@ export class SwarmIdProxy {
             undefined, // no progress callback for now
             requestOptions,
           )
-          console.log(
-            "[Proxy] Encrypted content uploaded, reference:",
-            contentUpload.reference.substring(0, 32) + "...",
-          )
         } else {
           contentUpload = await uploadDataWithSigning(
             context,
@@ -1602,10 +1450,6 @@ export class SwarmIdProxy {
             options,
             undefined, // no progress callback for now
             requestOptions,
-          )
-          console.log(
-            "[Proxy] Content uploaded (unencrypted), reference:",
-            contentUpload.reference,
           )
         }
 
@@ -1655,10 +1499,6 @@ export class SwarmIdProxy {
               }
             },
           )
-          console.log(
-            "[Proxy] Encrypted manifest uploaded, reference:",
-            result.rootReference.substring(0, 32) + "...",
-          )
         } else {
           result = await saveMantarayTreeRecursively(
             manifest,
@@ -1682,10 +1522,6 @@ export class SwarmIdProxy {
               }
             },
           )
-          console.log(
-            "[Proxy] Manifest uploaded (unencrypted), reference:",
-            result.rootReference,
-          )
         }
 
         // Save stamper state after successful upload
@@ -1706,8 +1542,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] File uploaded:", manifestResult.rootReference)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1723,19 +1557,11 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, path, options, requestOptions } = message
 
-    console.log(
-      "[Proxy] Download file request, reference:",
-      reference,
-      "path:",
-      path,
-    )
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
-      console.log("[Proxy] Downloading file from Bee at:", this.beeApiUrl)
-
       // Always load the manifest first - file uploads create manifests
       const manifest = await loadMantarayTreeWithChunkAPI(
         this.bee,
@@ -1775,7 +1601,6 @@ export class SwarmIdProxy {
 
       // Download actual content from the target address
       const targetRef = uint8ArrayToHex(contentNode.targetAddress)
-      console.log("[Proxy] Resolved content reference:", targetRef)
 
       const data = await downloadDataWithChunkAPI(
         this.bee,
@@ -1784,8 +1609,6 @@ export class SwarmIdProxy {
         undefined,
         requestOptions,
       )
-
-      console.log("[Proxy] File download successful, data size:", data.length)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -1798,8 +1621,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] File downloaded:", reference)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1814,8 +1635,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, data, options, requestOptions } = message
-
-    console.log("[Proxy] Upload chunk request, size:", data ? data.length : 0)
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -1841,8 +1660,6 @@ export class SwarmIdProxy {
       if (!this.stamper) {
         throw new Error("Failed to initialize stamper for signing")
       }
-
-      console.log("[Proxy] Signing and uploading chunk with signer key")
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const uploadResult = await this.withWriteLock(async () => {
@@ -1878,11 +1695,6 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        console.log(
-          "[Proxy] Chunk upload successful, reference:",
-          result.reference.toHex(),
-        )
-
         // Save stamper state after successful upload
         await this.saveStamperState()
 
@@ -1899,8 +1711,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Chunk uploaded:", uploadResult.reference.toHex())
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1916,22 +1726,17 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, options, requestOptions } = message
 
-    console.log("[Proxy] Download chunk request, reference:", reference)
     if (!this.authenticated || !this.appSecret) {
       throw new Error("Not authenticated. Please login first.")
     }
 
     try {
-      console.log("[Proxy] Downloading chunk from Bee at:", this.beeApiUrl)
-
       // Download chunk using bee-js (returns Uint8Array directly)
       const data = await this.bee.downloadChunk(
         reference,
         options,
         requestOptions,
       )
-
-      console.log("[Proxy] Chunk download successful, data size:", data.length)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -1943,8 +1748,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Chunk downloaded:", reference)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1956,8 +1759,6 @@ export class SwarmIdProxy {
 
   private handleGsocMine(message: GsocMineMessage, event: MessageEvent): void {
     const { requestId, targetOverlay, identifier, proximity } = message
-
-    console.log("[Proxy] GSOC mine request, targetOverlay:", targetOverlay)
 
     try {
       const signer = this.bee.gsocMine(targetOverlay, identifier, proximity)
@@ -1972,8 +1773,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] GSOC mine successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1989,8 +1788,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, signer, identifier, data, options, requestOptions } =
       message
-
-    console.log("[Proxy] GSOC send request")
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -2026,11 +1823,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log(
-        "[Proxy] GSOC send successful, reference:",
-        result.reference.toHex(),
-      )
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2049,8 +1841,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, identifier, data, signer, options } = message
-
-    console.log("[Proxy] SOC upload request")
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -2097,8 +1887,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] SOC upload successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2113,8 +1901,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, identifier, data, signer, options } = message
-
-    console.log("[Proxy] SOC raw upload request")
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -2160,8 +1946,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] SOC raw upload successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2177,8 +1961,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, owner, identifier, encryptionKey, requestOptions } =
       message
-
-    console.log("[Proxy] SOC download request")
 
     try {
       let resolvedOwner = owner
@@ -2216,8 +1998,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] SOC download successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2233,8 +2013,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, owner, identifier, encryptionKey, requestOptions } =
       message
-
-    console.log("[Proxy] SOC raw download request")
 
     try {
       let resolvedOwner = owner
@@ -2274,8 +2052,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] SOC raw download successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2290,8 +2066,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId } = message
-
-    console.log("[Proxy] SOC get owner request")
 
     try {
       if (!this.appSecret) {
@@ -2310,8 +2084,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] SOC get owner successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2385,8 +2157,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId } = message
 
-    console.log("[Proxy] Feed get owner request")
-
     try {
       if (!this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
@@ -2404,8 +2174,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Feed get owner successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2420,19 +2188,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, topic, owner, at, after, encryptionKey } = message
-
-    console.log("[Proxy] Epoch feed download reference request", {
-      topic,
-      owner: owner ?? "proxy",
-      at,
-      hasEncryptionKey: !!encryptionKey,
-      encryptionKeyPrefix: encryptionKey
-        ? encryptionKey.slice(0, 8)
-        : undefined,
-      encryptionKeyIsAllZero: encryptionKey
-        ? /^0+$/.test(encryptionKey)
-        : undefined,
-    })
 
     try {
       let resolvedOwner = owner
@@ -2455,13 +2210,6 @@ export class SwarmIdProxy {
         ? hexToUint8Array(encryptionKey)
         : undefined
 
-      console.log("[Proxy] Epoch debug lookup state", {
-        owner: resolvedOwner,
-        at: atValue.toString(),
-        withKey: undefined,
-        plain: undefined,
-      })
-
       let reference: Uint8Array | undefined
       if (epochKeyBytes) {
         const encryptedFinder = createAsyncEpochFinder({
@@ -2479,10 +2227,6 @@ export class SwarmIdProxy {
         })
         reference = await plainFinder.findAt(atValue, afterValue)
       }
-      console.log("[Proxy] Epoch feed download reference result", {
-        found: !!reference,
-        length: reference ? reference.length : 0,
-      })
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -2494,8 +2238,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Epoch feed download reference successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2513,21 +2255,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, topic, signer, at, reference, encryptionKey, hints } =
       message
-
-    console.log("[Proxy] Epoch feed upload reference request", {
-      topic,
-      signer: signer ? "provided" : "proxy",
-      at,
-      referenceLength: reference.length,
-      hasEncryptionKey: !!encryptionKey,
-      encryptionKeyPrefix: encryptionKey
-        ? encryptionKey.slice(0, 8)
-        : undefined,
-      encryptionKeyIsAllZero: encryptionKey
-        ? /^0+$/.test(encryptionKey)
-        : undefined,
-      hasHints: !!hints?.lastEpoch,
-    })
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -2569,13 +2296,6 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      console.log("[Proxy] Epoch upload", {
-        owner: ownerHex,
-        at: atValue.toString(),
-        hasEncryptionKey: !!epochEncryptionKey,
-        hasHints: !!epochHints,
-      })
-
       // Serialize write through Web Locks API to prevent concurrent uploads
       const updateResult = await this.withWriteLock(async () => {
         const referenceBytes = hexToUint8Array(reference)
@@ -2586,11 +2306,6 @@ export class SwarmIdProxy {
           epochEncryptionKey,
           epochHints,
         )
-        console.log("[Proxy] Epoch upload complete", {
-          socAddress: uint8ArrayToHex(result.socAddress),
-          epochStart: result.epoch.start.toString(),
-          epochLevel: result.epoch.level,
-        })
 
         const readBackFinder = createAsyncEpochFinder({
           bee: this.bee,
@@ -2600,12 +2315,7 @@ export class SwarmIdProxy {
         })
         // Upload read-back should verify the exact timestamp write and avoid
         // broad fallback scans over historical leaves on poisoned networks.
-        const readBack = await readBackFinder.findAt(atValue, atValue)
-        console.log("[Proxy] Epoch upload read-back", {
-          at: atValue.toString(),
-          found: !!readBack,
-          length: readBack ? readBack.length : 0,
-        })
+        await readBackFinder.findAt(atValue, atValue)
 
         await this.saveStamperState()
 
@@ -2628,8 +2338,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Epoch feed upload reference successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2646,8 +2354,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId } = message
-
-    console.log("[Proxy] Sequential feed get owner request")
 
     try {
       if (!this.appSecret) {
@@ -2666,8 +2372,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed get owner successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2808,8 +2512,6 @@ export class SwarmIdProxy {
       requestOptions,
     } = message
 
-    console.log("[Proxy] Sequential feed download payload request")
-
     try {
       if (!encryptionKey) {
         throw new Error("Encryption key is required for downloadPayload")
@@ -2860,8 +2562,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed download payload successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2888,8 +2588,6 @@ export class SwarmIdProxy {
       lookupTimeoutMs,
       requestOptions,
     } = message
-
-    console.log("[Proxy] Sequential feed download raw payload request")
 
     try {
       const resolvedOwner = await this.resolveSequentialOwner(owner)
@@ -2939,8 +2637,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed download raw payload successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2967,8 +2663,6 @@ export class SwarmIdProxy {
       lookupTimeoutMs,
       requestOptions,
     } = message
-
-    console.log("[Proxy] Sequential feed download reference request")
 
     try {
       if (!encryptionKey) {
@@ -3025,8 +2719,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed download reference successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3068,8 +2760,6 @@ export class SwarmIdProxy {
       options,
       requestOptions,
     } = message
-
-    console.log("[Proxy] Sequential feed upload payload request")
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3148,8 +2838,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed upload payload successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3178,8 +2866,6 @@ export class SwarmIdProxy {
       options,
       requestOptions,
     } = message
-
-    console.log("[Proxy] Sequential feed upload raw payload request")
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3229,29 +2915,8 @@ export class SwarmIdProxy {
       const identifier = new Identifier(identifierBytes)
 
       // Debug: log the values used for SOC address computation
-      console.log("[Proxy] Sequential feed upload details:", {
-        topic: uint8ArrayToHex(topicBytes),
-        owner: ownerAddress.toHex(),
-        index: resolvedIndex.toString(),
-        identifier: uint8ArrayToHex(identifierBytes),
-      })
 
       // DEBUG: Log payload details for /bzz/ compatibility analysis
-      console.log("[Proxy] DEBUG - Payload for /bzz/ analysis:", {
-        inputDataLength: data.length,
-        inputDataHex:
-          uint8ArrayToHex(data).substring(0, 128) +
-          (data.length > 64 ? "..." : ""),
-        hasTimestamp: useTimestamp,
-        timestamp: atValue.toString(),
-        finalPayloadLength: payload.length,
-        finalPayloadHex:
-          uint8ArrayToHex(payload).substring(0, 128) +
-          (payload.length > 64 ? "..." : ""),
-        expectedWrappedLength: payload.length + 8, // span(8) + payload
-        isValidV1Length: payload.length + 8 === 48 || payload.length + 8 === 80,
-        note: "For /bzz/, wrapped chunk must be 48 bytes (unenc) or 80 bytes (enc)",
-      })
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       // Upload SOC - use encryption if key provided, otherwise use /soc endpoint
@@ -3302,8 +2967,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed upload raw payload successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3331,8 +2994,6 @@ export class SwarmIdProxy {
       options,
       requestOptions,
     } = message
-
-    console.log("[Proxy] Sequential feed upload reference request")
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3423,8 +3084,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Sequential feed upload reference successful")
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3452,13 +3111,6 @@ export class SwarmIdProxy {
       requestOptions,
       enableProgress,
     } = message
-
-    console.log(
-      "[Proxy] ACT upload data request, size:",
-      data ? data.length : 0,
-      "grantees:",
-      grantees.length,
-    )
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3517,9 +3169,6 @@ export class SwarmIdProxy {
             options,
             onProgress,
             requestOptions,
-          )
-          console.log(
-            `[ACT DEBUG] Encrypted content reference (${contentUploadResult.reference.length} hex chars): ${contentUploadResult.reference}`,
           )
 
           // Step 2: Create Mantaray manifest wrapping the content
@@ -3591,16 +3240,9 @@ export class SwarmIdProxy {
                 },
               )
 
-          console.log(
-            `[ACT DEBUG] ${beeCompatible ? "Bee-compatible" : "Encrypted"} manifest reference (${manifestResult.rootReference.length} hex chars): ${manifestResult.rootReference}`,
-          )
-
           // Step 4: Use manifest reference for ACT encryption
           const manifestReferenceBytes = hexToUint8Array(
             manifestResult.rootReference,
-          )
-          console.log(
-            `[ACT DEBUG] Manifest reference bytes (${manifestReferenceBytes.length} bytes): ${uint8ArrayToHex(manifestReferenceBytes)}`,
           )
 
           // Create ACT for the manifest (which points to the content)
@@ -3611,10 +3253,6 @@ export class SwarmIdProxy {
             granteePublicKeys,
             options,
             requestOptions,
-          )
-
-          console.log(
-            `[ACT DEBUG] Encrypted reference: ${actResultValue.encryptedReference}`,
           )
 
           // Save stamper state after successful upload
@@ -3643,11 +3281,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log(
-        "[Proxy] ACT upload complete, historyReference:",
-        actResult.historyReference,
-      )
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3670,11 +3303,6 @@ export class SwarmIdProxy {
       requestOptions,
     } = message
 
-    console.log(
-      "[Proxy] ACT download data request, historyReference:",
-      historyReference,
-    )
-
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
@@ -3693,11 +3321,6 @@ export class SwarmIdProxy {
         readerPrivateKey,
         timestamp,
         requestOptions,
-      )
-
-      console.log(
-        "[Proxy] ACT decrypted, manifest reference:",
-        contentReference,
       )
 
       // Step 1: Download and unmarshal the Mantaray manifest (chunk API only)
@@ -3726,10 +3349,6 @@ export class SwarmIdProxy {
       }
 
       const actualContentRef = uint8ArrayToHex(contentNode.targetAddress)
-      console.log(
-        "[Proxy] Resolved actual content reference:",
-        actualContentRef,
-      )
 
       // Step 4: Download the actual content
       const data = await downloadDataWithChunkAPI(
@@ -3750,8 +3369,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] ACT download complete, data size:", data.length)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3766,13 +3383,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, historyReference, grantees, requestOptions } = message
-
-    console.log(
-      "[Proxy] ACT add grantees request, historyReference:",
-      historyReference,
-      "new grantees:",
-      grantees.length,
-    )
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3833,11 +3443,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log(
-        "[Proxy] ACT grantees added, new historyReference:",
-        result.historyReference,
-      )
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3858,13 +3463,6 @@ export class SwarmIdProxy {
       revokeGrantees,
       requestOptions,
     } = message
-
-    console.log(
-      "[Proxy] ACT revoke grantees request, historyReference:",
-      historyReference,
-      "revoke grantees:",
-      revokeGrantees.length,
-    )
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3927,11 +3525,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log(
-        "[Proxy] ACT grantees revoked, new historyReference:",
-        result.historyReference,
-      )
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3946,11 +3539,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, historyReference, requestOptions } = message
-
-    console.log(
-      "[Proxy] ACT get grantees request, historyReference:",
-      historyReference,
-    )
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -3979,8 +3567,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] ACT grantees retrieved:", grantees.length)
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3994,8 +3580,6 @@ export class SwarmIdProxy {
     message: GetPostageBatchMessage,
     event: MessageEvent,
   ): Promise<void> {
-    console.log("[Proxy] Get postage batch request")
-
     const stamp = this.lookupPostageStampForApp()
 
     if (!stamp) {
@@ -4009,7 +3593,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-      console.log("[Proxy] No postage stamp found for app")
       return
     }
 
@@ -4018,7 +3601,6 @@ export class SwarmIdProxy {
     try {
       const pricePerGBPerMonth = await fetchSwarmPrice()
       batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
-      console.log("[Proxy] Calculated TTL:", batchTTL, "seconds")
     } catch (error) {
       console.warn("[Proxy] Failed to calculate TTL:", error)
     }
@@ -4048,8 +3630,6 @@ export class SwarmIdProxy {
         { targetOrigin: event.origin },
       )
     }
-
-    console.log("[Proxy] Postage batch returned:", postageBatch.batchID)
   }
 
   /**
@@ -4060,8 +3640,6 @@ export class SwarmIdProxy {
     message: CreateFeedManifestMessage,
     event: MessageEvent,
   ): Promise<void> {
-    console.log("[Proxy] Create feed manifest request")
-
     const { topic, owner, feedType, uploadOptions, requestOptions } = message
 
     // Resolve owner - use provided or fall back to app signer
@@ -4100,14 +3678,6 @@ export class SwarmIdProxy {
 
     try {
       // DEBUG: Log manifest creation details for /bzz/ compatibility analysis
-      console.log("[Proxy] DEBUG - Feed manifest creation:", {
-        topic,
-        providedOwner: owner,
-        resolvedOwner,
-        feedType: feedType || "Sequence",
-        encrypt: uploadOptions?.encrypt !== false,
-        note: "resolvedOwner MUST match the owner used for feed upload",
-      })
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
@@ -4142,8 +3712,6 @@ export class SwarmIdProxy {
           { targetOrigin: event.origin },
         )
       }
-
-      console.log("[Proxy] Feed manifest created:", result.reference)
     } catch (error) {
       this.sendErrorToParent(
         event,

@@ -78,39 +78,29 @@
     try {
       isProcessing = true
       error = undefined
-      console.log('🔐 Connecting to Ethereum wallet...')
 
       // Connect wallet and sign SIWE message
       const signed = await connectAndSign()
-
-      console.log('✅ Wallet connected and message signed')
-      console.log('📍 Wallet address:', signed.address)
 
       const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
 
       // Derive swarmEncryptionKey from master key
       const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
-      console.log('🔑 SwarmEncryptionKey derived')
 
       // Encrypt masterKey before storage
-      console.log('🔒 Encrypting masterKey...')
 
       // Step 2: Generate encryption salt
       const encryptionSalt = generateEncryptionSalt()
-      console.log('🎲 Encryption salt generated')
 
       // Step 3: Derive encryption key from public key + salt
       const encryptionKey = await deriveEncryptionKey(signed.publicKey, encryptionSalt)
-      console.log('🔑 Encryption key derived')
 
       // Step 4: Encrypt masterKey
       const encryptedMasterKey = await encryptMasterKey(masterKey, encryptionKey)
-      console.log('✅ MasterKey encrypted')
 
       // Step 5: Encrypt secretSeed with masterKey as encryption key
       const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(masterKey)
       const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
-      console.log('✅ Secret seed encrypted with masterKey')
 
       // Store account with encrypted masterKey and encrypted secret seed
       const newAccount = accountsStore.addAccount({
@@ -129,7 +119,6 @@
 
       // Keep unencrypted masterKey in session temporarily for identity creation
       sessionStore.setTemporaryMasterKey(masterKey)
-      console.log('🔑 MasterKey stored in session (temporary)')
 
       // Navigate to identity creation page
       goto(resolve(routes.IDENTITY_NEW))

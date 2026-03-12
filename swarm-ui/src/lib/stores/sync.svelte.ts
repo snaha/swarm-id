@@ -24,7 +24,6 @@ const getBeeClient = () => {
 
   if (!bee) {
     const beeApiUrl = networkSettingsStore.beeNodeUrl
-    console.log(`[StateSync] Creating Bee client with URL: ${beeApiUrl}`)
     bee = new Bee(beeApiUrl)
   }
 

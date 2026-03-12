@@ -209,10 +209,6 @@ export async function downloadDataWithChunkAPI(
   onProgress?: (progress: UploadProgress) => void,
   requestOptions?: BeeRequestOptions,
 ): Promise<Uint8Array> {
-  console.log(
-    `[DownloadData] Downloading from reference: ${reference} (${reference.length} chars)`,
-  )
-
   // Convert hex string to Reference
   const ref = new Reference(reference)
 
@@ -234,8 +230,6 @@ export async function downloadDataWithChunkAPI(
 
   // Download and assemble all chunks
   const data = await joiner.readAll()
-
-  console.log(`[DownloadData] Download complete, ${data.length} bytes`)
 
   return data
 }

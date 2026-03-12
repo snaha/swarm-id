@@ -189,7 +189,6 @@ export async function createPasskeyAccount(
   // Check if PRF extension is available
   const extensionResults = credential.getClientExtensionResults()
   const prfEnabled = extensionResults.prf?.enabled ?? false
-  console.log('PRF extension:', prfEnabled ? 'enabled' : 'not available')
 
   if (!prfEnabled) {
     throw new Error(
@@ -198,8 +197,6 @@ export async function createPasskeyAccount(
   }
 
   const credentialId = bufferToBase64url(credential.rawId)
-  console.log('Registration: Credential created successfully')
-  console.log('Credential ID:', credentialId)
 
   // Check if we got PRF results during registration
   const prfResults = extensionResults.prf?.results?.first
@@ -208,7 +205,6 @@ export async function createPasskeyAccount(
 
   if (prfResults) {
     // Use PRF output from registration
-    console.log('Got PRF output during registration (single biometric prompt)')
     const seedBytes = await deriveMasterKeyFromPRF(toUint8Array(prfResults))
     const wallet = createEthereumWalletFromSeed(seedBytes)
     account = {
@@ -218,14 +214,11 @@ export async function createPasskeyAccount(
     }
   } else {
     // Fallback: authenticate separately to get PRF output
-    console.log('Authenticating to get PRF output (second biometric prompt)')
     account = await authenticateWithPasskey({
       rpId: options.rpId,
       allowCredentialIds: [credentialId],
     })
   }
-
-  console.log('Passkey account created with address:', toPrefixedHex(account.ethereumAddress))
 
   return account
 }
@@ -282,8 +275,6 @@ export async function authenticateWithPasskey(
       'PRF extension did not return results. Please use a device with Touch ID, Face ID, or Windows Hello.',
     )
   }
-
-  console.log('PRF output received:', toUint8Array(prfOutput).length, 'bytes')
 
   // Derive Ethereum wallet from PRF output
   const seedBytes = await deriveMasterKeyFromPRF(toUint8Array(prfOutput))

@@ -191,11 +191,6 @@ export async function buildBzzCompatibleManifest(
   // Calculate manifest address
   const rootChunk = makeContentAddressedChunk(manifest)
 
-  console.log(`[ManifestBuilder] Built flat /bzz/-compatible manifest:`)
-  console.log(`  Manifest size: ${manifest.length} bytes`)
-  console.log(`  Manifest address: ${rootChunk.address.toHex()}`)
-  console.log(`  Content reference: ${new Reference(refBytes).toHex()}`)
-
   return {
     manifestChunk: {
       data: manifest,
@@ -263,10 +258,6 @@ export function buildBzzManifestNode(
     "Content-Type": "application/octet-stream",
     Filename: "index.bin",
   })
-
-  console.log(
-    `[ManifestBuilder] Built MantarayNode manifest for content: ${new Reference(refBytes).toHex().substring(0, 16)}...`,
-  )
 
   return { manifestNode: manifest }
 }
@@ -363,13 +354,6 @@ export function buildMinimalManifest(
   manifest.set(refBytes, offset)
   offset += 32
 
-  console.log(
-    `[ManifestBuilder] Built minimal manifest: ${manifest.length} bytes`,
-  )
-  console.log(
-    `[ManifestBuilder] Content reference: ${new Reference(refBytes).toHex()}`,
-  )
-
   return manifest
 }
 
@@ -405,10 +389,6 @@ export function padPayloadForSOCDetection(payload: Uint8Array): Uint8Array {
   // Create padded buffer with zeros
   const padded = new Uint8Array(MAX_PADDED_PAYLOAD_SIZE)
   padded.set(payload, 0)
-
-  console.log(
-    `[ManifestBuilder] Padded payload: ${payload.length} → ${padded.length} bytes`,
-  )
 
   return padded
 }
@@ -516,7 +496,6 @@ export function extractReferenceFromManifest(manifestData: Uint8Array): string {
   }
 
   // Now at the "/" fork
-  const forkFlags = manifestData[forkOffset]
   const prefixLen = manifestData[forkOffset + 1]
 
   // Verify it's actually "/"
@@ -525,9 +504,6 @@ export function extractReferenceFromManifest(manifestData: Uint8Array): string {
       `Expected "/" prefix, got length ${prefixLen} and byte 0x${manifestData[forkOffset + 2].toString(16)}`,
     )
   }
-
-  // Check if this is a value type (reference is the target)
-  const isValueType = (forkFlags & FORK_FLAG_VALUE_TYPE) !== 0
 
   // Reference is at offset: forkOffset + 1 (flags) + 1 (prefixLen) + 30 (prefix) = forkOffset + 32
   const referenceOffset = forkOffset + 32
@@ -538,10 +514,6 @@ export function extractReferenceFromManifest(manifestData: Uint8Array): string {
   }
 
   const hexRef = new Reference(reference).toHex()
-
-  console.log(
-    `[ManifestBuilder] Extracted reference: ${hexRef} (valueType: ${isValueType})`,
-  )
 
   return hexRef
 }
@@ -601,8 +573,6 @@ export function extractEntryFromManifest(manifestData: Uint8Array): string {
   }
 
   const hexRef = new Reference(entry).toHex()
-
-  console.log(`[ManifestBuilder] Extracted entry: ${hexRef}`)
 
   return hexRef
 }
@@ -708,10 +678,6 @@ export function extractContentFromFlatManifest(
   }
 
   const hexRef = new Reference(reference).toHex()
-
-  console.log(
-    `[ManifestBuilder] Extracted content reference from flat manifest: ${hexRef}`,
-  )
 
   return hexRef
 }

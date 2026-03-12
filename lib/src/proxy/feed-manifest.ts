@@ -87,27 +87,13 @@ export async function createFeedManifestDirect(
   // Normalize owner (remove 0x prefix if present)
   const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
 
-  console.log("[FeedManifest] Creating feed manifest", {
-    topic: topic,
-    owner: normalizedOwner,
-    feedType: options?.feedType ?? "Sequence",
-    encrypt: options?.encrypt !== false,
-  })
-
   // DEBUG: Log what Bee will use for feed lookup
-  console.log("[FeedManifest] DEBUG - Manifest metadata that Bee will use:", {
-    "swarm-feed-owner": normalizedOwner,
-    "swarm-feed-topic": topic,
-    "swarm-feed-type": options?.feedType ?? "Sequence",
-    note: "Bee will compute feed identifier from topic+index, then SOC address from identifier+owner",
-  })
 
   // 1. Create tag for upload if not provided
   let tag = uploadOptions?.tag
   if (!tag) {
     const tagResponse = await bee.createTag()
     tag = tagResponse.uid
-    console.log(`[FeedManifest] Created tag: ${tag}`)
   }
   const uploadOptionsWithTag = { ...uploadOptions, tag }
 
@@ -132,10 +118,6 @@ export async function createFeedManifestDirect(
   const slashNodeData = await slashNode.marshal()
   const slashChunk = makeContentAddressedChunk(slashNodeData)
 
-  console.log(
-    `[FeedManifest] Uploading '/' child node, address: ${slashChunk.address.toHex().substring(0, 16)}...`,
-  )
-
   await uploadSingleChunk(
     bee,
     stamper,
@@ -151,20 +133,12 @@ export async function createFeedManifestDirect(
   // 6. Now marshal and upload the root node
   const rootNodeData = await rootNode.marshal()
 
-  console.log(
-    `[FeedManifest] Marshaled root manifest data: ${rootNodeData.length} bytes`,
-  )
-
   // 7. Encrypt and upload OR upload directly
   const shouldEncrypt = options?.encrypt !== false
 
   if (shouldEncrypt) {
     // Encrypted upload for root
     const encryptedChunk = makeEncryptedContentAddressedChunk(rootNodeData)
-
-    console.log(
-      `[FeedManifest] Uploading encrypted root chunk, address: ${encryptedChunk.address.toHex().substring(0, 16)}...`,
-    )
 
     await uploadSingleEncryptedChunk(
       bee,
@@ -180,18 +154,10 @@ export async function createFeedManifestDirect(
     ref.set(encryptedChunk.encryptionKey, 32)
     const reference = uint8ArrayToHex(ref)
 
-    console.log(
-      `[FeedManifest] Created encrypted feed manifest: ${reference.substring(0, 32)}...`,
-    )
-
     return { reference, tagUid: tag }
   } else {
     // Unencrypted upload for root
     const rootChunk = makeContentAddressedChunk(rootNodeData)
-
-    console.log(
-      `[FeedManifest] Uploading plain root chunk, address: ${rootChunk.address.toHex().substring(0, 16)}...`,
-    )
 
     await uploadSingleChunk(
       bee,
@@ -203,10 +169,6 @@ export async function createFeedManifestDirect(
 
     // Return 32-byte reference
     const reference = rootChunk.address.toHex()
-
-    console.log(
-      `[FeedManifest] Created unencrypted feed manifest: ${reference}`,
-    )
 
     return { reference, tagUid: tag }
   }

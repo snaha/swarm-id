@@ -117,7 +117,6 @@ export async function signSIWEMessage(params: {
 
   try {
     // Sign the message
-    console.log('📝 Requesting signature...')
     const signature = await signer.signMessage(message)
     const digest = hashMessage(message)
     const publicKey = SigningKey.recoverPublicKey(digest, signature)

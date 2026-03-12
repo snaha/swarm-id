@@ -47,15 +47,6 @@ export async function saveMantarayTreeRecursivelyEncrypted(
       makeEncryptedContentAddressedChunk(data)
 
     // DEBUG: Trace encryption key presence
-    console.log(
-      "[MantarayEncrypted] encryptionKey:",
-      encryptedChunk.encryptionKey?.length,
-      encryptedChunk.encryptionKey,
-    )
-    console.log(
-      "[MantarayEncrypted] address:",
-      encryptedChunk.address.toUint8Array().length,
-    )
 
     // Upload the encrypted chunk data
     const result = await uploadFn(

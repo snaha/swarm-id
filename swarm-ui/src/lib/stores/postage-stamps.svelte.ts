@@ -125,8 +125,6 @@ export const postageStampsStore = {
 
     // Save without triggering sync (to avoid infinite loop)
     savePostageStamps(postageStamps, true)
-
-    console.log(`[PostageStamps] Updated utilization for ${batchID.toHex()}: ${newUtilization}%`)
   },
 
   clear() {

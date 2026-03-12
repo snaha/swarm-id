@@ -174,21 +174,12 @@ export class VersionedStorageManager<T> {
       // Only handle events for our specific key
       if (event.key !== this.options.key) return
 
-      console.log(
-        `[${this.options.loggerName ?? "Storage"}] Storage event detected for key:`,
-        this.options.key,
-      )
-
       // Reload data and notify listeners
       const data = this.load()
       this.notifyListeners(data)
     }
 
     window.addEventListener("storage", this.boundStorageHandler)
-    console.log(
-      `[${this.options.loggerName ?? "Storage"}] Storage event listener set up for key:`,
-      this.options.key,
-    )
   }
 
   /**
@@ -198,10 +189,6 @@ export class VersionedStorageManager<T> {
     if (this.boundStorageHandler && typeof window !== "undefined") {
       window.removeEventListener("storage", this.boundStorageHandler)
       this.boundStorageHandler = undefined
-      console.log(
-        `[${this.options.loggerName ?? "Storage"}] Storage event listener removed for key:`,
-        this.options.key,
-      )
     }
   }
 

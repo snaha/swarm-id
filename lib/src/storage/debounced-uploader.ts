@@ -89,15 +89,8 @@ export class DebouncedUtilizationUploader {
     return new Promise<void>((resolve, reject) => {
       // Schedule new upload
       const timerId = setTimeout(async () => {
-        console.log(
-          `[DebouncedUploader] Executing scheduled upload for batch ${batchId}`,
-        )
-
         try {
           await uploadFn()
-          console.log(
-            `[DebouncedUploader] Upload completed for batch ${batchId}`,
-          )
           resolve()
         } catch (error) {
           console.error(
@@ -118,10 +111,6 @@ export class DebouncedUtilizationUploader {
         uploadFn,
         promise: { resolve, reject },
       })
-
-      console.log(
-        `[DebouncedUploader] Scheduled upload for batch ${batchId} (delay: ${actualDelay}ms)`,
-      )
     })
   }
 
@@ -135,8 +124,6 @@ export class DebouncedUtilizationUploader {
       return
     }
 
-    console.log(`[DebouncedUploader] Flushing upload for batch ${batchId}`)
-
     // Cancel timer
     if (pending.timerId) {
       clearTimeout(pending.timerId)
@@ -145,7 +132,6 @@ export class DebouncedUtilizationUploader {
     // Execute immediately
     try {
       await pending.uploadFn()
-      console.log(`[DebouncedUploader] Flush completed for batch ${batchId}`)
     } finally {
       this.pendingUploads.delete(batchId)
     }
@@ -156,10 +142,6 @@ export class DebouncedUtilizationUploader {
    */
   async flushAll(): Promise<void> {
     const batchIds = Array.from(this.pendingUploads.keys())
-
-    console.log(
-      `[DebouncedUploader] Flushing all ${batchIds.length} pending uploads`,
-    )
 
     await Promise.all(batchIds.map((batchId) => this.flush(batchId)))
   }
@@ -174,8 +156,6 @@ export class DebouncedUtilizationUploader {
       return
     }
 
-    console.log(`[DebouncedUploader] Canceling upload for batch ${batchId}`)
-
     if (pending.timerId) {
       clearTimeout(pending.timerId)
     }
@@ -187,10 +167,6 @@ export class DebouncedUtilizationUploader {
    * Cancel all pending uploads (discard all changes)
    */
   cancelAll(): void {
-    console.log(
-      `[DebouncedUploader] Canceling all ${this.pendingUploads.size} pending uploads`,
-    )
-
     for (const pending of this.pendingUploads.values()) {
       if (pending.timerId) {
         clearTimeout(pending.timerId)

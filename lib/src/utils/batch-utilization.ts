@@ -392,36 +392,21 @@ export async function uploadUtilizationChunk(
   data: Uint8Array,
   encryptionKey: Uint8Array,
 ): Promise<Uint8Array> {
-  const startTime = performance.now()
-  console.log(
-    `[UtilChunk] Starting upload for chunk ${chunkIndex}, Bee URL: ${bee.url}`,
-  )
-
+  void chunkIndex // Parameter kept for API compatibility
   // Calculate CAC reference first (before upload)
   const encryptedChunk = makeEncryptedContentAddressedChunk(data, encryptionKey)
   const cacReference = encryptedChunk.address.toUint8Array()
-  console.log(
-    `[UtilChunk] CAC calculated for chunk ${chunkIndex} (+${(performance.now() - startTime).toFixed(2)}ms)`,
-  )
 
   const tagResponse = await bee.createTag()
   const tag = tagResponse.uid
 
   // Upload using unified interface (with deferred: false for fast return)
-  const uploadStart = performance.now()
   await uploadSingleChunkWithEncryption(
     bee,
     stamper,
     data,
     encryptionKey,
     { deferred: false, tag }, // fast, non-blocking upload
-  )
-  console.log(
-    `[UtilChunk] Upload call completed for chunk ${chunkIndex} (+${(performance.now() - uploadStart).toFixed(2)}ms)`,
-  )
-
-  console.log(
-    `[UtilChunk] ✅ Uploaded CAC ${chunkIndex}: ${Binary.uint8ArrayToHex(cacReference).substring(0, 16)}... (TOTAL: ${(performance.now() - startTime).toFixed(2)}ms)`,
   )
 
   return cacReference
@@ -477,11 +462,7 @@ export async function downloadUtilizationChunk(
     }
 
     // Get the encrypted CAC data
-    const encryptedCACData = new Uint8Array(await cacResponse.arrayBuffer())
-
-    console.log(
-      `[UtilChunk] Downloaded encrypted CAC ${chunkIndex} (${encryptedCACData.length} bytes)`,
-    )
+    void (await cacResponse.arrayBuffer())
 
     // Decrypt the CAC data
     // TODO: Implement decryption
@@ -496,7 +477,6 @@ export async function downloadUtilizationChunk(
     ) {
       throw error
     }
-    console.warn(`[UtilChunk] Failed to download chunk ${chunkIndex}:`, error)
     return undefined
   }
 }
@@ -805,14 +785,8 @@ export async function loadUtilizationState(
   // TODO: Use bee, owner, encryptionKey when state feed is implemented
   const { bee: _bee, owner: _owner, encryptionKey: _encryptionKey } = options
 
-  console.log(
-    `[BatchUtil] Loading state for batch ${batchId.toHex().substring(0, 16)}...`,
-  )
-
   // Step 1: Try loading from IndexedDB cache
   const cachedChunks = await cache.getAllChunks(batchId.toHex())
-
-  console.log(`[BatchUtil] Found ${cachedChunks.length}/64 chunks in cache`)
 
   // Step 2: If we have all chunks in cache, reconstruct state
   if (cachedChunks.length === NUM_UTILIZATION_CHUNKS) {
@@ -834,8 +808,6 @@ export async function loadUtilizationState(
 
       const topic = makeBatchUtilizationTopic(batchId)
 
-      console.log(`[BatchUtil] ✅ Loaded from cache`)
-
       return {
         batchId,
         dataCounters,
@@ -850,7 +822,6 @@ export async function loadUtilizationState(
   }
 
   // Step 3: Download missing chunks from Swarm
-  console.log(`[BatchUtil] Downloading missing chunks from Swarm...`)
 
   const dataCounters = new Uint32Array(NUM_BUCKETS)
   const chunks: ChunkMetadata[] = []
@@ -888,10 +859,6 @@ export async function loadUtilizationState(
     })
   }
 
-  console.log(
-    `[BatchUtil] ✅ Initialized state with ${cachedChunks.length} cached chunks`,
-  )
-
   const topic = makeBatchUtilizationTopic(batchId)
 
   return {
@@ -928,15 +895,8 @@ export async function saveUtilizationState(
   const dirtyChunkIndices = tracker.getDirtyChunks()
 
   if (dirtyChunkIndices.length === 0) {
-    console.log(`[BatchUtil] No dirty chunks to upload`)
     return
   }
-
-  console.log(
-    `[BatchUtil] Uploading ${dirtyChunkIndices.length} dirty chunks...`,
-  )
-
-  let uploadedCount = 0
 
   for (const chunkIndex of dirtyChunkIndices) {
     const chunkMetadata = state.chunks[chunkIndex]
@@ -958,9 +918,6 @@ export async function saveUtilizationState(
 
       // Skip if reference unchanged (deduplication)
       if (chunkMetadata.contentHash === cacReferenceHex) {
-        console.log(
-          `[BatchUtil] Chunk ${chunkIndex} deduplicated (same content)`,
-        )
         tracker.markClean(chunkIndex)
         continue
       }
@@ -981,12 +938,6 @@ export async function saveUtilizationState(
 
       // Mark chunk as clean
       tracker.markClean(chunkIndex)
-
-      uploadedCount++
-
-      console.log(
-        `[BatchUtil] ✅ Uploaded chunk ${chunkIndex} (${uploadedCount}/${dirtyChunkIndices.length})`,
-      )
     } catch (error) {
       console.error(`[BatchUtil] Failed to upload chunk ${chunkIndex}:`, error)
       // Keep it marked as dirty for retry
@@ -996,10 +947,6 @@ export async function saveUtilizationState(
 
   // Update lastSync timestamp
   state.lastSync = Date.now()
-
-  console.log(
-    `[BatchUtil] ✅ Upload complete (${uploadedCount}/${dirtyChunkIndices.length} chunks)`,
-  )
 }
 
 // ============================================================================
@@ -1056,17 +1003,10 @@ export async function updateAfterWrite(
 
     // Mark the utilization chunk containing this bucket as dirty
     tracker.markDirty(bucket)
-
-    console.log(
-      `[BatchUtil] Data chunk assigned to bucket ${bucket}, slot ${slot}`,
-    )
   }
 
   // Log dirty chunks
   const dirtyChunks = tracker.getDirtyChunks()
-  console.log(
-    `[BatchUtil] Marked ${dirtyChunks.length} utilization chunks as dirty: ${dirtyChunks.join(", ")}`,
-  )
 
   // Mark chunks as dirty in state metadata
   for (const chunkIndex of dirtyChunks) {
@@ -1182,13 +1122,7 @@ export class UtilizationAwareStamper implements Stamper {
             cached.data,
           )
         }
-        console.log(
-          `[UtilizationAwareStamper] Loaded ${cachedChunks.length} chunks from cache for batch ${batchId.toHex()}, max bucket usage: ${Math.max(...Array.from(utilizationState.dataCounters))}`,
-        )
       } else {
-        console.log(
-          `[UtilizationAwareStamper] No cached state, starting fresh for batch ${batchId.toHex()}`,
-        )
       }
     } catch (error) {
       console.warn(
@@ -1257,13 +1191,8 @@ export class UtilizationAwareStamper implements Stamper {
    */
   async flush(): Promise<void> {
     if (!this.dirty) {
-      console.log(`[UtilizationAwareStamper] Nothing to flush`)
       return
     }
-
-    console.log(
-      `[UtilizationAwareStamper] Flushing ${this.dirtyBuckets.size} dirty buckets to cache`,
-    )
 
     // Mark utilization chunks as dirty for the affected buckets
     const dirtyChunkIndexes = new Set<number>()
@@ -1304,10 +1233,6 @@ export class UtilizationAwareStamper implements Stamper {
 
       // Update lastSync timestamp
       this.utilizationState.lastSync = Date.now()
-
-      console.log(
-        `[UtilizationAwareStamper] Flushed ${dirtyChunkIndexes.size} chunks to cache`,
-      )
     } catch (error) {
       console.error(
         `[UtilizationAwareStamper] Failed to flush to cache:`,
@@ -1361,10 +1286,6 @@ export class UtilizationAwareStamper implements Stamper {
 
     // Note: Do NOT clear dirtyBuckets here - those represent local writes
     // that still need to be flushed. Only flush() should clear them.
-
-    console.log(
-      `[UtilizationAwareStamper] Applied update for ${buckets.length} buckets`,
-    )
   }
 
   /**

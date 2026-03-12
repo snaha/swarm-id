@@ -77,10 +77,6 @@ export async function uploadDataWithSigning(
   let totalChunks = chunkPayloads.length
   let processedChunks = 0
 
-  console.log(
-    `[UploadData] Splitting ${data.length} bytes into ${totalChunks} chunks`,
-  )
-
   // Progress callback helper
   const reportProgress = () => {
     if (onProgress) {
@@ -122,17 +118,8 @@ export async function uploadDataWithSigning(
   if (chunkRefs.length === 1) {
     // Single chunk - use direct reference
     rootReference = new Reference(chunkRefs[0].address)
-    console.log(
-      "[UploadData] Single chunk upload, reference:",
-      rootReference.toHex(),
-    )
   } else {
     // Multiple chunks - build tree
-    console.log(
-      "[UploadData] Building merkle tree for",
-      chunkRefs.length,
-      "chunks",
-    )
 
     rootReference = await buildMerkleTree(
       chunkRefs,
@@ -150,11 +137,6 @@ export async function uploadDataWithSigning(
         processedChunks++
         reportProgress()
       },
-    )
-
-    console.log(
-      "[UploadData] Merkle tree complete, root reference:",
-      rootReference.toHex(),
     )
   }
 
@@ -179,7 +161,6 @@ export async function uploadSingleChunk(
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
   const uploadOptions = { deferred: false, pin: false, ...options }
-  console.log("[UploadData] uploadChunk options:", uploadOptions)
 
   if (stamper) {
     // Client-side signing - use adapter for cafe-utility Chunk interface

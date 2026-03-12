@@ -151,9 +151,6 @@ export function createSyncAccount(
 
     // Convert chunk addresses to Chunks
     const chunks = createChunksFromAddresses(chunkAddresses)
-    console.log(
-      `[SyncCoordinator] Tracking ${chunks.length} chunks for utilization, batch depth: ${stamp.depth}`,
-    )
 
     // Derive owner address from backup key
     const backupKeyHex = await deriveSecret(
@@ -178,19 +175,12 @@ export function createSyncAccount(
 
     // Calculate new utilization fraction
     const newUtilization = calculateUtilization(utilizationState, stamp.depth)
-    console.log(
-      `[SyncCoordinator] New utilization: ${(newUtilization * 100).toFixed(2)}%`,
-    )
 
     // Update stamp in store (without triggering sync)
     postageStampsStore.updateStampUtilization(batchID, newUtilization)
 
     // Schedule debounced upload of dirty chunks and WAIT for it
     if (tracker.hasDirtyChunks()) {
-      console.log(
-        `[SyncCoordinator] Scheduling upload of ${tracker.getDirtyChunks().length} dirty chunks`,
-      )
-
       // Get stamper for signing chunks (with loaded bucket state)
       const stamper = await postageStampsStore.getStamper(batchID, {
         owner,
@@ -235,24 +225,6 @@ export function createSyncAccount(
 
       return Promise.race([uploadPromise, timeoutPromise])
     }
-  }
-
-  /**
-   * Get current utilization percentage for logging
-   */
-  function getUtilizationPercentage(accountId: string): number {
-    const account = accountsStore.getAccount(new EthAddress(accountId))
-    if (!account) return 0
-
-    const defaultStamp =
-      account.defaultPostageStampBatchID ??
-      identitiesStore.getIdentitiesByAccount(account.id)[0]
-        ?.defaultPostageStampBatchID
-
-    if (!defaultStamp) return 0
-
-    const stamp = postageStampsStore.getStamp(new BatchId(defaultStamp))
-    return stamp?.utilization ?? 0
   }
 
   /**
@@ -327,9 +299,6 @@ export function createSyncAccount(
   ): Promise<SyncResult | undefined> {
     const startTime = performance.now()
     const timestamp = () => new Date().toISOString()
-    console.log(
-      `[SyncCoordinator ${timestamp()}] Starting sync for account ${accountId}`,
-    )
 
     // Capture state snapshot BEFORE any async operations
     const snapshotResult = getAccountStateSnapshot(accountId)
@@ -338,24 +307,15 @@ export function createSyncAccount(
     }
 
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
-    console.log(
-      `[SyncCoordinator ${timestamp()}] State snapshot captured: ${state.identities.length} identities, ${state.connectedApps.length} apps, ${state.postageStamps.length} stamps (+${(performance.now() - startTime).toFixed(2)}ms)`,
-    )
 
     try {
       // 1. Derive account signing key for feed
       const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
       const accountKey = new PrivateKey(backupKeyHex)
       const owner = accountKey.publicKey().address()
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Account key derived (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
 
       // 2. Serialize account state
       const jsonData = serializeAccountState(state)
-      console.log(
-        `[SyncCoordinator ${timestamp()}] State serialized, ${jsonData.length} bytes (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
 
       // 3. Get stamper from store
       const stamper = await postageStampsStore.getStamper(
@@ -370,14 +330,8 @@ export function createSyncAccount(
           `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`,
         )
       }
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Stamper ready (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
 
       // 4. Upload encrypted data to Swarm
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Starting encrypted upload... (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
       const uploadResult = await uploadEncryptedDataWithSigning(
         {
           bee,
@@ -387,33 +341,19 @@ export function createSyncAccount(
         hexToUint8Array(encryptionKey),
         undefined,
       )
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Upload completed, ${uploadResult.chunkAddresses.length} chunks (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
 
       // Collect chunk addresses for utilization tracking
       const allChunkAddresses = uploadResult.chunkAddresses
 
       // 5. Handle utilization tracking
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Waiting for utilization upload... (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
 
       try {
         await handleUtilizationUpdate(accountId, allChunkAddresses)
-
-        const percentage = getUtilizationPercentage(accountId)
-        console.log(
-          `[SyncCoordinator ${timestamp()}] Utilization: ${percentage.toFixed(2)}% (+${(performance.now() - startTime).toFixed(2)}ms)`,
-        )
       } catch (error) {
-        // Don't fail sync if utilization fails
+        // Don't fail sync if utilization fails - continue with feed update
         console.error(
           `[SyncCoordinator ${timestamp()}] Utilization upload failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
           error,
-        )
-        console.warn(
-          `[SyncCoordinator ${timestamp()}] Continuing with feed update anyway...`,
         )
       }
 
@@ -427,27 +367,14 @@ export function createSyncAccount(
       // Convert 128-char hex reference to 64-byte Uint8Array
       const refBytes = new Reference(uploadResult.reference).toUint8Array()
 
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Updating epoch feed... (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
       const updateResult = await updater.update(
         feedTimestamp,
         refBytes,
         stamper,
       )
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Epoch feed updated (+${(performance.now() - startTime).toFixed(2)}ms)`,
-      )
 
       // Add SOC chunk to tracked addresses
       allChunkAddresses.push(updateResult.socAddress)
-
-      console.log(
-        `[SyncCoordinator ${timestamp()}] ✅ Sync completed: ${uploadResult.reference}`,
-      )
-      console.log(
-        `[SyncCoordinator ${timestamp()}] ✅ TOTAL SYNC TIME: ${(performance.now() - startTime).toFixed(2)}ms`,
-      )
 
       return {
         status: "success",

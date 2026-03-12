@@ -38,8 +38,6 @@
       error = undefined
 
       decryptedMasterKey = await getMasterKeyFromAccount(account)
-
-      console.log('✅ Authentication successful')
     } catch (err) {
       error = err instanceof Error ? err.message : 'Authentication failed'
       console.error('❌ Authentication failed:', err)
@@ -57,8 +55,6 @@
 
     try {
       if (decryptedMasterKey) {
-        console.log('🔓 Decrypting secret seed...')
-
         // Derive encryption key from master key
         const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(decryptedMasterKey)
 
@@ -66,7 +62,6 @@
         secretSeed = await decryptSecretSeed(account.encryptedSecretSeed, secretSeedEncryptionKey)
 
         isUnmasked = true
-        console.log('✅ Secret seed decrypted')
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to decrypt secret seed'

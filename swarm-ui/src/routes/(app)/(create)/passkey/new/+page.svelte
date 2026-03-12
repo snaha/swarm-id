@@ -52,11 +52,9 @@
     try {
       isProcessing = true
       error = undefined
-      console.log('🔐 Creating passkey account...')
 
       // Create a new passkey account using account name as userId
       // Different names create different credentials on the same authenticator
-      console.log('📝 Creating new passkey account for:', accountName)
       const swarmIdDomain = window.location.hostname
       const challenge = new Bytes(keccak256(new TextEncoder().encode(swarmIdDomain))).toUint8Array()
 
@@ -68,11 +66,9 @@
         userName: accountName.trim(),
         userDisplayName: accountName.trim(),
       })
-      console.log('✅ Passkey created successfully')
 
       // Derive swarmEncryptionKey from master key
       const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(account.masterKey.toHex())
-      console.log('🔑 SwarmEncryptionKey derived')
 
       // Store account WITHOUT masterKey (passkey accounts never persist masterKey)
       const newAccount = accountsStore.addAccount({
@@ -88,7 +84,6 @@
 
       // Keep masterKey in session ONLY (not in account)
       sessionStore.setTemporaryMasterKey(account.masterKey)
-      console.log('🔑 MasterKey stored in session (temporary)')
 
       // Navigate to identity creation page
       goto(resolve(routes.IDENTITY_NEW))

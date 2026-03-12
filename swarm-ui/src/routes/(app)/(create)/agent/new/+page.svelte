@@ -76,7 +76,6 @@
     try {
       isProcessing = true
       error = undefined
-      console.log('Creating agent account...')
 
       // Create agent account from seed phrase using validated/normalized phrase
       const { account, masterKey } = createAgentAccount({
@@ -84,11 +83,8 @@
         seedPhrase: validation.phrase,
       })
 
-      console.log('Agent account created with address:', account.id.toString())
-
       // Derive swarmEncryptionKey from master key
       const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
-      console.log('SwarmEncryptionKey derived')
 
       // Store account (seed phrase is NOT stored - must be re-entered each time)
       const newAccount = accountsStore.addAccount({
@@ -103,7 +99,6 @@
 
       // Keep masterKey in session temporarily for identity creation
       sessionStore.setTemporaryMasterKey(masterKey)
-      console.log('MasterKey stored in session (temporary)')
 
       // Navigate to identity creation page
       goto(resolve(routes.IDENTITY_NEW))

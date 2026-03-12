@@ -21,8 +21,6 @@ export async function deriveSecret(
   masterKey: string,
   appOrigin: string,
 ): Promise<string> {
-  console.log("[KeyDerivation] Deriving secret for app:", appOrigin)
-
   const encoder = new TextEncoder()
 
   // Convert master key from hex string to Uint8Array
@@ -43,10 +41,6 @@ export async function deriveSecret(
 
   // Convert to hex string
   const secretHex = uint8ArrayToHex(new Uint8Array(signature))
-  console.log(
-    "[KeyDerivation] Secret derived:",
-    secretHex.substring(0, 16) + "...",
-  )
 
   return secretHex
 }
@@ -60,16 +54,10 @@ export async function deriveSecret(
  * @returns A random 32-byte key as a hex string
  */
 export async function generateMasterKey(): Promise<string> {
-  console.log("[KeyDerivation] Generating random master key...")
-
   const randomBytes = new Uint8Array(32)
   crypto.getRandomValues(randomBytes)
 
   const masterKey = uint8ArrayToHex(randomBytes)
-  console.log(
-    "[KeyDerivation] Master key generated:",
-    masterKey.substring(0, 16) + "...",
-  )
 
   return masterKey
 }
@@ -141,8 +129,6 @@ export async function deriveIdentityKey(
   accountMasterKey: string,
   identityId: string,
 ): Promise<string> {
-  console.log("[KeyDerivation] Deriving identity key for:", identityId)
-
   const encoder = new TextEncoder()
 
   // Convert account master key to Uint8Array
@@ -163,10 +149,6 @@ export async function deriveIdentityKey(
 
   // Convert to hex string
   const identityKeyHex = uint8ArrayToHex(new Uint8Array(signature))
-  console.log(
-    "[KeyDerivation] Identity key derived:",
-    identityKeyHex.substring(0, 16) + "...",
-  )
 
   return identityKeyHex
 }
