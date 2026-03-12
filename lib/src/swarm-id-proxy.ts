@@ -1786,30 +1786,37 @@ export class SwarmIdProxy {
     message: GsocSendMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, signer, identifier, data, options, requestOptions } =
-      message
+    const { requestId, signer, identifier, data, options } = message
 
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
 
-      if (!this.postageBatchId) {
+      if (!this.postageBatchId || !this.stamper) {
         throw new Error(
-          "No postage batch ID available. Please authenticate with a valid batch ID.",
+          "Postage batch ID and stamper required. Please login first.",
         )
       }
 
+      const signerKey = new PrivateKey(signer)
+      const id = new Identifier(identifier)
+
       // Serialize write through Web Locks API to prevent concurrent uploads
+      // Use client-side SOC upload (same as handleSocRawUpload) to work with gateways
       const result = await this.withWriteLock(async () => {
-        return this.bee.gsocSend(
-          this.postageBatchId!,
-          signer,
-          identifier,
+        const uploadResult = await uploadSOC(
+          this.bee,
+          this.stamper!,
+          signerKey,
+          id,
           data,
           options,
-          requestOptions,
         )
+
+        await this.saveStamperState()
+
+        return uploadResult
       })
 
       if (event.source) {
@@ -1817,7 +1824,7 @@ export class SwarmIdProxy {
           {
             type: "gsocSendResponse",
             requestId,
-            reference: result.reference.toHex(),
+            reference: uint8ArrayToHex(result.socAddress),
             tagUid: result.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
