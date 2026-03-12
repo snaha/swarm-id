@@ -1,9 +1,5 @@
-import {
-  Reference,
-  makeContentAddressedChunk,
-  MantarayNode,
-  NULL_ADDRESS,
-} from "@ethersphere/bee-js"
+import { Reference, MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
+import { makeContentAddressedChunk } from "../chunk"
 import { hexToUint8Array } from "../utils/hex"
 
 /**

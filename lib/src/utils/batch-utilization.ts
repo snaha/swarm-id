@@ -17,11 +17,13 @@ import {
   Identifier,
   type Bee,
   EthAddress,
-  makeEncryptedContentAddressedChunk,
   type EnvelopeWithBatchId,
-  type Chunk as BeeChunk,
 } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk } from "@ethersphere/bee-js"
+import {
+  makeEncryptedContentAddressedChunk,
+  makeContentAddressedChunk,
+  type ContentAddressedChunk,
+} from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { calculateContentHash } from "../storage/utilization-store"
@@ -100,7 +102,7 @@ export interface BatchUtilizationState {
  * Chunk with bucket assignment
  */
 export interface ChunkWithBucket {
-  chunk: BeeChunk
+  chunk: ContentAddressedChunk
   bucket: number
   slot: number
 }
@@ -141,7 +143,9 @@ export function toBucket(chunkAddress: Uint8Array): number {
 /**
  * Calculate bucket assignments for multiple chunks
  */
-export function assignChunksToBuckets(chunks: BeeChunk[]): ChunkWithBucket[] {
+export function assignChunksToBuckets(
+  chunks: ContentAddressedChunk[],
+): ChunkWithBucket[] {
   return chunks.map((chunk) => {
     const address = chunk.address.toUint8Array()
     const bucket = toBucket(address)
@@ -520,8 +524,8 @@ export function deserializeUint32Array(bytes: Uint8Array): Uint32Array {
 /**
  * Split data into 4KB chunks
  */
-export function splitIntoChunks(data: Uint8Array): BeeChunk[] {
-  const chunks: BeeChunk[] = []
+export function splitIntoChunks(data: Uint8Array): ContentAddressedChunk[] {
+  const chunks: ContentAddressedChunk[] = []
 
   for (let i = 0; i < data.length; i += CHUNK_SIZE) {
     const end = Math.min(i + CHUNK_SIZE, data.length)
@@ -541,7 +545,7 @@ export function splitIntoChunks(data: Uint8Array): BeeChunk[] {
  * Reconstruct data from chunks
  */
 export function reconstructFromChunks(
-  chunks: BeeChunk[],
+  chunks: ContentAddressedChunk[],
   originalLength: number,
 ): Uint8Array {
   const result = new Uint8Array(originalLength)
@@ -646,7 +650,7 @@ export function hasBucketCapacity(
  */
 export function calculateUtilizationUpdate(
   state: BatchUtilizationState,
-  dataChunks: BeeChunk[],
+  dataChunks: ContentAddressedChunk[],
   batchDepth: number,
 ): UtilizationUpdate {
   // Step 1: Copy current data counters (immutable update)
@@ -970,7 +974,7 @@ export async function saveUtilizationState(
  */
 export async function updateAfterWrite(
   batchId: BatchId,
-  dataChunks: BeeChunk[],
+  dataChunks: ContentAddressedChunk[],
   batchDepth: number,
   options: {
     bee: Bee

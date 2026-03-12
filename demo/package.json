@@ -16,7 +16,7 @@
     "clean": "rm -rf build .svelte-kit"
   },
   "dependencies": {
-    "@ethersphere/bee-js": "link:../bee-js",
+    "@ethersphere/bee-js": "^11.1.1",
     "@swarm-id/lib": "workspace:*"
   },
   "devDependencies": {

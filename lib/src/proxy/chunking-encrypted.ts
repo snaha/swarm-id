@@ -1,9 +1,5 @@
-import {
-  Reference,
-  Span,
-  calculateChunkAddress,
-  newChunkEncrypter,
-} from "@ethersphere/bee-js"
+import { Reference, Span } from "@ethersphere/bee-js"
+import { calculateChunkAddress, newChunkEncrypter } from "../chunk"
 import { Binary } from "cafe-utility"
 
 // Constants for encrypted chunking

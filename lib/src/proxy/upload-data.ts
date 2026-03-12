@@ -1,12 +1,12 @@
-import { makeContentAddressedChunk, Reference } from "@ethersphere/bee-js"
+import { Reference } from "@ethersphere/bee-js"
 import type {
   Bee,
   BeeRequestOptions,
   Stamper,
-  Chunk as BeeChunk,
   UploadOptions,
   UploadResult,
 } from "@ethersphere/bee-js"
+import { makeContentAddressedChunk, type ContentAddressedChunk } from "../chunk"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
 import type { UploadContext, UploadProgress, ChunkReference } from "./types"
 
@@ -38,7 +38,7 @@ class ChunkAdapter {
   span: bigint
   writer: SimpleUint8ArrayWriter
 
-  constructor(private chunk: BeeChunk) {
+  constructor(private chunk: ContentAddressedChunk) {
     this.span = chunk.span.toBigInt()
     this.writer = new SimpleUint8ArrayWriter(chunk.data)
   }
@@ -154,7 +154,7 @@ export async function uploadDataWithSigning(
 export async function uploadSingleChunk(
   bee: Bee,
   stamper: Stamper | undefined,
-  chunk: BeeChunk,
+  chunk: ContentAddressedChunk,
   options?: UploadOptions,
   requestOptions?: BeeRequestOptions,
 ): Promise<UploadResult> {

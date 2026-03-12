@@ -1,5 +1,5 @@
-import { makeContentAddressedChunk, Reference } from "@ethersphere/bee-js"
-import type { Chunk as BeeChunk } from "@ethersphere/bee-js"
+import { Reference } from "@ethersphere/bee-js"
+import { makeContentAddressedChunk, type ContentAddressedChunk } from "../chunk"
 import type { ChunkReference } from "./types"
 
 // Constants
@@ -23,7 +23,7 @@ export function splitDataIntoChunks(data: Uint8Array): Uint8Array[] {
  */
 export async function buildMerkleTree(
   chunkRefs: ChunkReference[],
-  onIntermediateChunk: (chunk: BeeChunk) => Promise<void>,
+  onIntermediateChunk: (chunk: ContentAddressedChunk) => Promise<void>,
 ): Promise<Reference> {
   // Single chunk - return direct reference
   if (chunkRefs.length === 1) {

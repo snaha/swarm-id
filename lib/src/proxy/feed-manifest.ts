@@ -1,15 +1,14 @@
-import {
-  MantarayNode,
-  makeEncryptedContentAddressedChunk,
-  makeContentAddressedChunk,
-  NULL_ADDRESS,
-} from "@ethersphere/bee-js"
+import { MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
 import type {
   Bee,
   Stamper,
   UploadOptions,
   BeeRequestOptions,
 } from "@ethersphere/bee-js"
+import {
+  makeEncryptedContentAddressedChunk,
+  makeContentAddressedChunk,
+} from "../chunk"
 import { uint8ArrayToHex } from "../utils/hex"
 import { uploadSingleChunk } from "./upload-data"
 import { uploadSingleEncryptedChunk } from "./upload-encrypted-data"

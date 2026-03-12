@@ -41,7 +41,6 @@ Master Key (from Passkey/SIWE challenge)
 - **swarm-ui/**: SvelteKit identity management UI (trusted domain)
 - **demo/**: Demo dApp showing library integration
 - **docs-site/**: Starlight (Astro) documentation website
-- **bee-js/**: Forked bee-js submodule with encrypted streaming chunks. Build: `pnpm build:bee-js`. Linked via `"@ethersphere/bee-js": "link:../bee-js"`.
 
 ## Commands
 

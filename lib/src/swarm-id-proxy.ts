@@ -45,7 +45,6 @@ import type {
 import { ParentToIframeMessageSchema } from "./types"
 import {
   Bee,
-  makeContentAddressedChunk,
   BatchId,
   EthAddress,
   PrivateKey,
@@ -54,6 +53,7 @@ import {
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
+import { makeContentAddressedChunk } from "./chunk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import {

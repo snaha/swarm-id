@@ -1,0 +1,57 @@
+import { Binary } from "cafe-utility"
+import { Reference, Span } from "@ethersphere/bee-js"
+
+const MAX_CHUNK_PAYLOAD_SIZE = 4096
+const SEGMENT_SIZE = 32
+
+/**
+ * Calculate a Binary Merkle Tree hash for a chunk
+ *
+ * The BMT chunk address is the hash of the 8 byte span and the root
+ * hash of a binary Merkle tree (BMT) built on the 32-byte segments
+ * of the underlying data.
+ *
+ * If the chunk content is less than 4k, the hash is calculated as
+ * if the chunk was padded with all zeros up to 4096 bytes.
+ *
+ * @param chunkContent Chunk data including span and payload as well
+ *
+ * @returns the keccak256 hash in a byte array
+ */
+export function calculateChunkAddress(chunkContent: Uint8Array): Reference {
+  const span = chunkContent.slice(0, Span.LENGTH)
+  const payload = chunkContent.slice(Span.LENGTH)
+  const rootHash = calculateBmtRootHash(payload)
+  const chunkHash = Binary.keccak256(Binary.concatBytes(span, rootHash))
+
+  return new Reference(chunkHash)
+}
+
+function calculateBmtRootHash(payload: Uint8Array): Uint8Array {
+  if (payload.length > MAX_CHUNK_PAYLOAD_SIZE) {
+    throw new Error(
+      `payload size ${payload.length} exceeds maximum chunk payload size ${MAX_CHUNK_PAYLOAD_SIZE}`,
+    )
+  }
+  const input = new Uint8Array(MAX_CHUNK_PAYLOAD_SIZE)
+  input.set(payload)
+
+  // Build BMT by hashing pairs of segments level by level
+  let currentLevel = Binary.partition(input, SEGMENT_SIZE)
+
+  while (currentLevel.length > 1) {
+    const nextLevel: Uint8Array[] = []
+
+    for (let i = 0; i < currentLevel.length; i += 2) {
+      const left = currentLevel[i]
+      const right = currentLevel[i + 1]
+      const combined = Binary.concatBytes(left, right)
+      const hash = Binary.keccak256(combined)
+      nextLevel.push(hash)
+    }
+
+    currentLevel = nextLevel
+  }
+
+  return currentLevel[0]
+}

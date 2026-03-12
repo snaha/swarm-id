@@ -1,19 +1,17 @@
-import {
-  makeEncryptedContentAddressedChunk,
-  makeContentAddressedChunk,
-  Reference,
-  calculateChunkAddress,
-  PrivateKey,
-  Identifier,
-} from "@ethersphere/bee-js"
+import { Reference, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import type {
   Bee,
   BeeRequestOptions,
   Stamper,
-  EncryptedChunk,
   UploadOptions,
   EnvelopeWithBatchId,
 } from "@ethersphere/bee-js"
+import {
+  makeContentAddressedChunk,
+  makeEncryptedContentAddressedChunk,
+  calculateChunkAddress,
+  type EncryptedChunk,
+} from "../chunk"
 import { Binary } from "cafe-utility"
 import { splitDataIntoChunks } from "./chunking"
 import { buildEncryptedMerkleTree } from "./chunking-encrypted"

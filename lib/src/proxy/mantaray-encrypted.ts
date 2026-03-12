@@ -1,5 +1,8 @@
-import { makeEncryptedContentAddressedChunk } from "@ethersphere/bee-js"
-import type { MantarayNode, EncryptedChunk } from "@ethersphere/bee-js"
+import type { MantarayNode } from "@ethersphere/bee-js"
+import {
+  makeEncryptedContentAddressedChunk,
+  type EncryptedChunk,
+} from "../chunk"
 import { uint8ArrayToHex } from "../utils/hex"
 
 /**
