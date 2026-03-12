@@ -24,7 +24,6 @@ jobs:
       - uses: actions/checkout@v5
         with:
           fetch-depth: 0
-          submodules: 'recursive'
 
       - name: Check for component changes
         id: changes
@@ -96,10 +95,6 @@ jobs:
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
-
-      - name: Build bee-js dependency
-        working-directory: ./bee-js
-        run: pnpm build
 
       - name: Build lib dependency
         working-directory: ./lib

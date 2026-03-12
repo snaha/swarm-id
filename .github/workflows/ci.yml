@@ -12,8 +12,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: 'recursive'
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -32,10 +30,6 @@ jobs:
 
       - name: Check formatting
         run: pnpm exec prettier --check .
-
-      - name: Build bee-js dependency
-        working-directory: ./bee-js
-        run: pnpm build
 
       - name: Build lib dependency
         working-directory: ./lib

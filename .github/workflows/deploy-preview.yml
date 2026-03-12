@@ -48,7 +48,7 @@ jobs:
             docs:
               - 'docs-site/**'
 
-  # Shared setup: build bee-js and lib (only if demo or id needs it)
+  # Shared setup: build lib (only if demo or id needs it)
   setup:
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -56,8 +56,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -74,9 +72,6 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build bee-js
-        run: pnpm build:bee-js
-
       - name: Build library
         run: pnpm build:lib
 
@@ -86,7 +81,6 @@ jobs:
           name: workspace
           path: |
             node_modules
-            bee-js/dist
             lib/dist
           retention-days: 1
 
@@ -98,8 +92,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -143,8 +135,6 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-        with:
-          submodules: recursive
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4

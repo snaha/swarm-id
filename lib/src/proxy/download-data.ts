@@ -1,16 +1,15 @@
 import {
-  ChunkJoiner,
   EthAddress,
   Identifier,
   Reference,
   Signature,
-  calculateChunkAddress,
 } from "@ethersphere/bee-js"
 import type {
   Bee,
   BeeRequestOptions,
   DownloadOptions,
 } from "@ethersphere/bee-js"
+import { calculateChunkAddress } from "../chunk"
 import { Binary } from "cafe-utility"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
@@ -209,27 +208,18 @@ export async function downloadDataWithChunkAPI(
   onProgress?: (progress: UploadProgress) => void,
   requestOptions?: BeeRequestOptions,
 ): Promise<Uint8Array> {
-  // Convert hex string to Reference
-  const ref = new Reference(reference)
+  // Use bee-js downloadData method
+  // Note: Progress callbacks are not supported by the official bee-js downloadData method
+  // If progress is needed, we would need to implement custom chunk-by-chunk downloading
+  const bytesData = await bee.downloadData(reference, options, requestOptions)
 
-  // Create ChunkJoiner with progress callback
-  const joiner = new ChunkJoiner(bee, ref, {
-    downloadOptions: options,
-    requestOptions,
-    onDownloadProgress: onProgress
-      ? (progress) => {
-          onProgress({
-            total: progress.total,
-            processed: progress.processed,
-          })
-        }
-      : undefined,
-    // Use reasonable concurrency for parallel chunk fetching
-    concurrency: 64,
-  })
+  // Convert Bytes to Uint8Array
+  const data = bytesData.toUint8Array()
 
-  // Download and assemble all chunks
-  const data = await joiner.readAll()
+  // Call progress callback with 100% completion if provided
+  if (onProgress) {
+    onProgress({ total: 1, processed: 1 })
+  }
 
   return data
 }
