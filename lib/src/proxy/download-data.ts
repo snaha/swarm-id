@@ -9,104 +9,21 @@ import type {
   BeeRequestOptions,
   DownloadOptions,
 } from "@ethersphere/bee-js"
-import { calculateChunkAddress } from "../chunk"
+import {
+  calculateChunkAddress,
+  decryptChunkData as decryptChunk,
+  DEFAULT_DOWNLOAD_CONCURRENCY,
+  ENCRYPTED_REF_SIZE,
+  IDENTIFIER_SIZE,
+  MAX_PAYLOAD_SIZE,
+  SOC_HEADER_SIZE,
+  SPAN_SIZE,
+  UNENCRYPTED_REF_SIZE,
+} from "../chunk"
 import { Binary } from "cafe-utility"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"
-
-const IDENTIFIER_SIZE = 32
-const SIGNATURE_SIZE = 65
-const SPAN_SIZE = 8
-const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
-const KEY_LENGTH = 32
-
-class Encryption {
-  private readonly encryptionKey: Uint8Array
-  private readonly keyLen: number
-  private readonly padding: number
-  private index: number
-  private readonly initCtr: number
-
-  constructor(key: Uint8Array, padding: number, initCtr: number) {
-    this.encryptionKey = key
-    this.keyLen = key.length
-    this.padding = padding
-    this.initCtr = initCtr
-    this.index = 0
-  }
-
-  decrypt(data: Uint8Array): Uint8Array {
-    const length = data.length
-
-    if (this.padding > 0 && length !== this.padding) {
-      throw new Error(
-        `data length ${length} different than padding ${this.padding}`,
-      )
-    }
-
-    const out = new Uint8Array(length)
-    this.transform(data, out)
-    return out
-  }
-
-  private transform(input: Uint8Array, out: Uint8Array): void {
-    const inLength = input.length
-
-    for (let i = 0; i < inLength; i += this.keyLen) {
-      const l = Math.min(this.keyLen, inLength - i)
-      this.transcrypt(
-        this.index,
-        input.subarray(i, i + l),
-        out.subarray(i, i + l),
-      )
-      this.index++
-    }
-  }
-
-  private transcrypt(i: number, input: Uint8Array, out: Uint8Array): void {
-    const ctrBytes = new Uint8Array(4)
-    const view = new DataView(ctrBytes.buffer)
-    view.setUint32(0, i + this.initCtr, true)
-
-    const keyAndCtr = new Uint8Array(this.encryptionKey.length + 4)
-    keyAndCtr.set(this.encryptionKey)
-    keyAndCtr.set(ctrBytes, this.encryptionKey.length)
-    const ctrHash = Binary.keccak256(keyAndCtr)
-    const segmentKey = Binary.keccak256(ctrHash)
-
-    const inLength = input.length
-    for (let j = 0; j < inLength; j++) {
-      out[j] = input[j] ^ segmentKey[j]
-    }
-  }
-}
-
-function newSpanEncryption(key: Uint8Array): Encryption {
-  const CHUNK_SIZE = 4096
-  return new Encryption(key, 0, Math.floor(CHUNK_SIZE / KEY_LENGTH))
-}
-
-function newDataEncryption(key: Uint8Array): Encryption {
-  const CHUNK_SIZE = 4096
-  return new Encryption(key, CHUNK_SIZE, 0)
-}
-
-function decryptChunkData(
-  key: Uint8Array,
-  encryptedChunkData: Uint8Array,
-): Uint8Array {
-  const spanDecrypter = newSpanEncryption(key)
-  const decryptedSpan = spanDecrypter.decrypt(encryptedChunkData.subarray(0, 8))
-
-  const dataDecrypter = newDataEncryption(key)
-  const decryptedData = dataDecrypter.decrypt(encryptedChunkData.subarray(8))
-
-  const result = new Uint8Array(8 + decryptedData.length)
-  result.set(decryptedSpan)
-  result.set(decryptedData, 8)
-  return result
-}
 
 function readSpan(spanBytes: Uint8Array): number {
   const view = new DataView(
@@ -155,7 +72,7 @@ function makeSingleOwnerChunkFromData(
   let rebuiltData: Uint8Array
 
   if (encryptionKey) {
-    const decrypted = decryptChunkData(encryptionKey, cacData)
+    const decrypted = decryptChunk(encryptionKey, cacData)
     spanBytes = decrypted.slice(0, SPAN_SIZE)
     const span = readSpan(spanBytes)
     payload = decrypted.slice(SPAN_SIZE, SPAN_SIZE + span)
@@ -194,6 +111,202 @@ function makeSingleOwnerChunkFromData(
 }
 
 /**
+ * Represents a reference with optional encryption key
+ */
+interface ChunkRef {
+  address: Uint8Array
+  encryptionKey?: Uint8Array
+}
+
+/**
+ * Parse a reference string into address and optional encryption key
+ */
+function parseReference(reference: string): ChunkRef {
+  const refBytes = hexToUint8Array(reference)
+
+  if (refBytes.length === UNENCRYPTED_REF_SIZE) {
+    return { address: refBytes }
+  } else if (refBytes.length === ENCRYPTED_REF_SIZE) {
+    return {
+      address: refBytes.slice(0, UNENCRYPTED_REF_SIZE),
+      encryptionKey: refBytes.slice(UNENCRYPTED_REF_SIZE),
+    }
+  }
+
+  throw new Error(
+    `Invalid reference length: ${refBytes.length}, expected ${UNENCRYPTED_REF_SIZE} or ${ENCRYPTED_REF_SIZE}`,
+  )
+}
+
+/**
+ * Extract references from an intermediate chunk payload
+ */
+function extractReferences(
+  payload: Uint8Array,
+  totalSpan: number,
+  isEncrypted: boolean,
+): ChunkRef[] {
+  const refs: ChunkRef[] = []
+  const refSize = isEncrypted ? ENCRYPTED_REF_SIZE : UNENCRYPTED_REF_SIZE
+
+  // Calculate actual number of refs based on payload content
+  // For encrypted, refs are 64 bytes each; for unencrypted, 32 bytes each
+  const maxRefs = Math.floor(payload.length / refSize)
+
+  // Calculate expected number of refs based on span
+  // Each leaf chunk can hold up to MAX_PAYLOAD_SIZE bytes
+  const expectedLeafChunks = Math.ceil(totalSpan / MAX_PAYLOAD_SIZE)
+
+  // We need to determine how many refs are actually in this chunk
+  // For intermediate chunks at higher levels, the number of children varies
+  const numRefs = Math.min(maxRefs, expectedLeafChunks)
+
+  for (let i = 0; i < numRefs; i++) {
+    const offset = i * refSize
+    if (offset + refSize > payload.length) break
+
+    const address = payload.slice(offset, offset + UNENCRYPTED_REF_SIZE)
+
+    // Check if this is a zero address (padding)
+    if (address.every((b) => b === 0)) break
+
+    if (isEncrypted) {
+      const key = payload.slice(
+        offset + UNENCRYPTED_REF_SIZE,
+        offset + ENCRYPTED_REF_SIZE,
+      )
+      refs.push({ address, encryptionKey: key })
+    } else {
+      refs.push({ address })
+    }
+  }
+
+  return refs
+}
+
+/**
+ * Download and process a single chunk
+ */
+async function downloadAndProcessChunk(
+  bee: Bee,
+  ref: ChunkRef,
+  requestOptions?: BeeRequestOptions,
+): Promise<{ span: number; payload: Uint8Array }> {
+  const addressHex = Binary.uint8ArrayToHex(ref.address)
+  const rawChunk = await bee.downloadChunk(
+    addressHex,
+    undefined,
+    requestOptions,
+  )
+
+  let chunkData: Uint8Array
+  if (ref.encryptionKey) {
+    chunkData = decryptChunk(ref.encryptionKey, rawChunk)
+  } else {
+    chunkData = rawChunk
+  }
+
+  const span = readSpan(chunkData.slice(0, SPAN_SIZE))
+  const payload = chunkData.slice(SPAN_SIZE)
+
+  return { span, payload }
+}
+
+/**
+ * Recursively join chunks to reconstruct data
+ * Uses parallel fetching for performance
+ */
+async function joinChunks(
+  bee: Bee,
+  ref: ChunkRef,
+  isEncrypted: boolean,
+  concurrency: number,
+  onChunkDownloaded: () => void,
+  requestOptions?: BeeRequestOptions,
+): Promise<Uint8Array> {
+  const { span, payload } = await downloadAndProcessChunk(
+    bee,
+    ref,
+    requestOptions,
+  )
+  onChunkDownloaded()
+
+  // Leaf chunk: data is in payload
+  if (span <= MAX_PAYLOAD_SIZE) {
+    return payload.slice(0, span)
+  }
+
+  // Intermediate chunk: contains references to other chunks
+  const childRefs = extractReferences(payload, span, isEncrypted)
+
+  if (childRefs.length === 0) {
+    throw new Error("No valid references found in intermediate chunk")
+  }
+
+  // Download children in parallel with concurrency limit
+  const results: Uint8Array[] = new Array(childRefs.length)
+
+  // Process in batches respecting concurrency limit
+  for (let i = 0; i < childRefs.length; i += concurrency) {
+    const batch = childRefs.slice(
+      i,
+      Math.min(i + concurrency, childRefs.length),
+    )
+    const batchResults = await Promise.all(
+      batch.map((childRef) =>
+        joinChunks(
+          bee,
+          childRef,
+          isEncrypted,
+          concurrency,
+          onChunkDownloaded,
+          requestOptions,
+        ),
+      ),
+    )
+    for (let j = 0; j < batchResults.length; j++) {
+      results[i + j] = batchResults[j]
+    }
+  }
+
+  // Concatenate all results
+  const totalLength = results.reduce((sum, r) => sum + r.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const chunk of results) {
+    result.set(chunk, offset)
+    offset += chunk.length
+  }
+
+  return result
+}
+
+/**
+ * Estimate total chunks for progress tracking
+ * This is an approximation based on span
+ */
+function estimateTotalChunks(span: number): number {
+  if (span <= MAX_PAYLOAD_SIZE) {
+    return 1
+  }
+
+  // Number of leaf chunks
+  const leafChunks = Math.ceil(span / MAX_PAYLOAD_SIZE)
+
+  // For a full binary tree with 64-way branching, intermediate chunks
+  // This is a rough estimate - actual count depends on tree structure
+  let intermediateChunks = 0
+  let level = leafChunks
+  while (level > 1) {
+    const branchingFactor = 64 // REFS_PER_CHUNK
+    level = Math.ceil(level / branchingFactor)
+    intermediateChunks += level
+  }
+
+  return leafChunks + intermediateChunks
+}
+
+/**
  * Download data using only the chunk API
  * This ensures encrypted data remains encrypted during transmission and avoids metadata leakage
  *
@@ -204,24 +317,91 @@ function makeSingleOwnerChunkFromData(
 export async function downloadDataWithChunkAPI(
   bee: Bee,
   reference: string,
-  options?: DownloadOptions,
+  _options?: DownloadOptions,
   onProgress?: (progress: UploadProgress) => void,
   requestOptions?: BeeRequestOptions,
 ): Promise<Uint8Array> {
-  // Use bee-js downloadData method
-  // Note: Progress callbacks are not supported by the official bee-js downloadData method
-  // If progress is needed, we would need to implement custom chunk-by-chunk downloading
-  const bytesData = await bee.downloadData(reference, options, requestOptions)
+  const rootRef = parseReference(reference)
+  const isEncrypted = rootRef.encryptionKey !== undefined
 
-  // Convert Bytes to Uint8Array
-  const data = bytesData.toUint8Array()
+  // First, download root chunk to get span for progress estimation
+  const { span, payload } = await downloadAndProcessChunk(
+    bee,
+    rootRef,
+    requestOptions,
+  )
 
-  // Call progress callback with 100% completion if provided
-  if (onProgress) {
-    onProgress({ total: 1, processed: 1 })
+  // For leaf chunks (small data), return immediately
+  if (span <= MAX_PAYLOAD_SIZE) {
+    if (onProgress) {
+      onProgress({ total: 1, processed: 1 })
+    }
+    return payload.slice(0, span)
   }
 
-  return data
+  // Estimate total chunks for progress tracking
+  const estimatedTotal = estimateTotalChunks(span)
+  let processedChunks = 1 // Already downloaded root
+
+  const onChunkDownloaded = () => {
+    processedChunks++
+    if (onProgress) {
+      onProgress({ total: estimatedTotal, processed: processedChunks })
+    }
+  }
+
+  // Report initial progress
+  if (onProgress) {
+    onProgress({ total: estimatedTotal, processed: 1 })
+  }
+
+  // Extract child references and join recursively
+  const childRefs = extractReferences(payload, span, isEncrypted)
+
+  if (childRefs.length === 0) {
+    throw new Error("No valid references found in root chunk")
+  }
+
+  // Download children in parallel
+  const results: Uint8Array[] = new Array(childRefs.length)
+
+  for (let i = 0; i < childRefs.length; i += DEFAULT_DOWNLOAD_CONCURRENCY) {
+    const batch = childRefs.slice(
+      i,
+      Math.min(i + DEFAULT_DOWNLOAD_CONCURRENCY, childRefs.length),
+    )
+    const batchResults = await Promise.all(
+      batch.map((childRef) =>
+        joinChunks(
+          bee,
+          childRef,
+          isEncrypted,
+          DEFAULT_DOWNLOAD_CONCURRENCY,
+          onChunkDownloaded,
+          requestOptions,
+        ),
+      ),
+    )
+    for (let j = 0; j < batchResults.length; j++) {
+      results[i + j] = batchResults[j]
+    }
+  }
+
+  // Concatenate all results
+  const totalLength = results.reduce((sum, r) => sum + r.length, 0)
+  const result = new Uint8Array(totalLength)
+  let offset = 0
+  for (const chunk of results) {
+    result.set(chunk, offset)
+    offset += chunk.length
+  }
+
+  // Final progress update
+  if (onProgress) {
+    onProgress({ total: processedChunks, processed: processedChunks })
+  }
+
+  return result
 }
 
 export async function downloadSOC(

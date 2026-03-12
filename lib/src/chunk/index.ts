@@ -1,5 +1,18 @@
 // Re-export public API for chunk functionality
 
+// Constants
+export {
+  MIN_PAYLOAD_SIZE,
+  MAX_PAYLOAD_SIZE,
+  SPAN_SIZE,
+  UNENCRYPTED_REF_SIZE,
+  ENCRYPTED_REF_SIZE,
+  IDENTIFIER_SIZE,
+  SIGNATURE_SIZE,
+  SOC_HEADER_SIZE,
+  DEFAULT_DOWNLOAD_CONCURRENCY,
+} from "./constants"
+
 // Encryption utilities
 export {
   type Key,
