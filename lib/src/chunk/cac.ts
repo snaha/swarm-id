@@ -3,21 +3,18 @@
 import { Binary } from "cafe-utility"
 import { Bytes, Reference, Span } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "./bmt"
+import { MAX_PAYLOAD_SIZE, MIN_PAYLOAD_SIZE } from "./constants"
 
 const ENCODER = new TextEncoder()
-
-// Constants
-const MIN_PAYLOAD_SIZE = 1
-const MAX_PAYLOAD_SIZE = 4096
 
 /**
  * Content addressed chunk interface
  */
 export interface ContentAddressedChunk {
   readonly data: Uint8Array // span + payload
-  span: Span
-  payload: Bytes
-  address: Reference // BMT hash
+  readonly span: Span
+  readonly payload: Bytes
+  readonly address: Reference // BMT hash
 }
 
 /**

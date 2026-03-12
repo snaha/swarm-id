@@ -5,13 +5,10 @@
 import { Binary } from "cafe-utility"
 import { Bytes, Reference, Span } from "@ethersphere/bee-js"
 import { calculateChunkAddress } from "./bmt"
+import { MAX_PAYLOAD_SIZE, MIN_PAYLOAD_SIZE } from "./constants"
 import { newChunkEncrypter, decryptChunkData, type Key } from "./encryption"
 
 const ENCODER = new TextEncoder()
-
-// Inline constants (from bee-js cac.ts)
-const MIN_PAYLOAD_SIZE = 1
-const MAX_PAYLOAD_SIZE = 4096
 
 /**
  * Encrypted chunk interface
@@ -21,10 +18,10 @@ const MAX_PAYLOAD_SIZE = 4096
 export interface EncryptedChunk {
   readonly data: Uint8Array // encrypted span + encrypted data
   readonly encryptionKey: Key // 32 bytes
-  span: Span // original (unencrypted) span
-  payload: Bytes // encrypted payload
-  address: Reference // BMT hash of encrypted data
-  reference: Reference // 64 bytes: address (32) + encryption key (32)
+  readonly span: Span // original (unencrypted) span
+  readonly payload: Bytes // encrypted payload
+  readonly address: Reference // BMT hash of encrypted data
+  readonly reference: Reference // 64 bytes: address (32) + encryption key (32)
 }
 
 /**
