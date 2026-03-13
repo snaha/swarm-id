@@ -47,15 +47,6 @@ envs:
   - key: NODE_ENV
     value: production
 
-  - key: ORIGIN
-    value: https://swarm-id.snaha.net
-
-  - key: APP_DOMAIN
-    value: https://swarm-demo.snaha.net
-
-  - key: ID_DOMAIN
-    value: https://swarm-id.snaha.net
-
 # Deployment alerts
 alerts:
   - rule: DEPLOYMENT_FAILED
