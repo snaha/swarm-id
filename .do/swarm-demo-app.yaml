@@ -53,7 +53,7 @@ envs:
   - key: APP_DOMAIN
     value: https://swarm-demo.snaha.net
 
-  - key: ID_DOMAIN
+  - key: PUBLIC_ID_DOMAIN
     value: https://swarm-id.snaha.net
 
 # Deployment alerts
