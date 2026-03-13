@@ -243,7 +243,7 @@
         devices, upgrade to a synced account by purchasing a Swarm postage stamp.
       </Typography>
     </Vertical>
-    <Horizontal --horizontal-justify-content="center">
+    <Horizontal --horizontal-justify-content="center" --horizontal-gap="var(--half-padding)">
       <Button
         variant="strong"
         dimension="compact"

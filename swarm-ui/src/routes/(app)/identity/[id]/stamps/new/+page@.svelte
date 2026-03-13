@@ -6,16 +6,18 @@
   import AddPostageStamp from '$lib/components/add-postage-stamp.svelte'
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
+  import { page } from '$app/stores'
   import routes from '$lib/routes'
-  import { navigateToConnectOrHome } from '$lib/utils/navigation'
+  import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { sessionStore } from '$lib/stores/session.svelte'
   import type { PostageStamp } from '@swarm-id/lib'
 
   type PageState = 'select' | 'purchase' | 'manual'
   type PurchaseState = 'waiting' | 'success' | 'error'
 
-  const account = $derived(sessionStore.data.account)
+  const identityId = $derived($page.params.id)
+  const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
+  const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
 
   // Bindable state from AddPostageStamp component
   let pageState = $state<PageState>('select')
@@ -25,35 +27,54 @@
   // Reference to AddPostageStamp component
   let addPostageStampRef = $state<AddPostageStamp>()
 
-  function handleSkip() {
-    navigateToConnectOrHome()
+  function navigateBack() {
+    if (identity) {
+      goto(resolve(routes.IDENTITY_STAMPS, { id: identity.id }))
+    } else {
+      history.back()
+    }
   }
 
   function handleClose() {
     if (pageState === 'select') {
-      navigateToConnectOrHome()
+      navigateBack()
     } else {
       pageState = 'select'
     }
   }
 
   function handleSuccess(stamp: PostageStamp) {
-    if (!account) return
+    if (!identity || !account) return
 
-    // Set as default stamp for the account
-    accountsStore.setDefaultStamp(account.id, stamp.batchID)
-
-    // If user chose separate stamps, go to identity stamp page next
-    if (sessionStore.data.selectedStampOption === 'separate') {
-      goto(resolve(routes.STAMPS_IDENTITY_NEW))
-      return
+    // If this account already has a default stamp, set this as the identity's default
+    // Otherwise make it the account's default
+    if (account.defaultPostageStampBatchID) {
+      identitiesStore.setDefaultStamp(identity.id, stamp.batchID)
+    } else {
+      accountsStore.setDefaultStamp(account.id, stamp.batchID)
     }
 
-    navigateToConnectOrHome()
+    navigateBack()
   }
+
+  // Derive intro and skip text based on whether account has a default stamp
+  const introText = $derived(
+    account?.defaultPostageStampBatchID
+      ? 'You chose to use a separate stamp for this identity.'
+      : 'Synced accounts require a Swarm postage stamp.',
+  )
+
+  const skipText = $derived(
+    account?.defaultPostageStampBatchID ? 'Use your account stamp instead' : 'Skip this step',
+  )
 </script>
 
-<CreationLayout title="Add postage stamp" onClose={handleClose} busy={pageState === 'purchase'}>
+<CreationLayout
+  title="Add postage stamp"
+  onClose={handleClose}
+  fullPage
+  busy={pageState === 'purchase'}
+>
   {#snippet content()}
     {#if !account}
       <Typography>No account data found. Please start from the home page.</Typography>
@@ -62,9 +83,9 @@
         bind:this={addPostageStampRef}
         accountId={account.id.toHex()}
         onSuccess={handleSuccess}
-        onSkip={handleSkip}
-        skipText="Skip this step"
-        introText="Synced accounts require a Swarm postage stamp."
+        onSkip={navigateBack}
+        {skipText}
+        {introText}
         bind:pageState
         bind:purchaseState
         bind:isFormDisabled

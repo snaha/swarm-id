@@ -418,42 +418,50 @@
             </Button>
           {/if}
 
-          <Horizontal
-            --horizontal-gap="var(--half-padding)"
-            --horizontal-align-items="stretch"
-            --horizontal-justify-content="stretch"
-            class="grower"
-          >
-            <Button variant="ghost" dimension="compact" onclick={notImplemented} flexGrow leftAlign>
-              <Rocket size={20} />
-              Upgrade account
-              <FlexItem />
-            </Button>
-            <Tooltip
-              show={showUpgradeTooltip}
-              position="top"
-              variant="small"
-              color="dark"
-              maxWidth="279px"
+          {#if !account.defaultPostageStampBatchID}
+            <Horizontal
+              --horizontal-gap="var(--half-padding)"
+              --horizontal-align-items="stretch"
+              --horizontal-justify-content="stretch"
+              class="grower"
             >
               <Button
                 variant="ghost"
-                dimension="small"
-                onmouseenter={() => (showUpgradeTooltip = true)}
-                onmouseleave={() => (showUpgradeTooltip = false)}
-                onclick={(e: MouseEvent) => {
-                  e.stopPropagation()
-                  showUpgradeTooltip = !showUpgradeTooltip
-                }}
+                dimension="compact"
+                onclick={notImplemented}
+                flexGrow
+                leftAlign
               >
-                <Information size={16} />
+                <Rocket size={20} />
+                Upgrade account
+                <FlexItem />
               </Button>
-              {#snippet helperText()}
-                Upgrading requires a Swarm postage stamp. You'll be able to upload content to Swarm
-                and access your account from any device.
-              {/snippet}
-            </Tooltip>
-          </Horizontal>
+              <Tooltip
+                show={showUpgradeTooltip}
+                position="top"
+                variant="small"
+                color="dark"
+                maxWidth="279px"
+              >
+                <Button
+                  variant="ghost"
+                  dimension="small"
+                  onmouseenter={() => (showUpgradeTooltip = true)}
+                  onmouseleave={() => (showUpgradeTooltip = false)}
+                  onclick={(e: MouseEvent) => {
+                    e.stopPropagation()
+                    showUpgradeTooltip = !showUpgradeTooltip
+                  }}
+                >
+                  <Information size={16} />
+                </Button>
+                {#snippet helperText()}
+                  Upgrading requires a Swarm postage stamp. You'll be able to upload content to
+                  Swarm and access your account from any device.
+                {/snippet}
+              </Tooltip>
+            </Horizontal>
+          {/if}
           <Horizontal
             --horizontal-gap="var(--half-padding)"
             --horizontal-align-items="stretch"

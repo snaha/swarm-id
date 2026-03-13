@@ -107,6 +107,10 @@
       : [],
   )
   const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
+  const selectedIdentity = $derived(
+    selectedIdentityId ? identitiesStore.getIdentity(selectedIdentityId) : undefined,
+  )
+  const identityHasStamp = $derived(!!selectedIdentity?.defaultPostageStampBatchID)
   const stampAssignments = $derived(
     (() => {
       const map = new SvelteMap<string, { account?: string; identity?: string }>()
@@ -355,6 +359,32 @@ Check console logs for details:
       assignError = error instanceof Error ? error.message : String(error)
     }
   }
+
+  function removeIdentityStamp() {
+    assignError = ''
+    assignMessage = ''
+    if (!selectedIdentityId) {
+      assignError = 'Select an identity first.'
+      return
+    }
+    identitiesStore.setDefaultStamp(selectedIdentityId, undefined)
+    assignMessage = `✅ Removed identity stamp from ${selectedIdentityId.slice(0, 8)}…`
+  }
+
+  function removeAccountStamp() {
+    assignError = ''
+    assignMessage = ''
+    if (!selectedAccountId) {
+      assignError = 'Select an account first.'
+      return
+    }
+    if (identityHasStamp) {
+      assignError = 'Remove identity stamp first before removing account stamp.'
+      return
+    }
+    accountsStore.setDefaultStamp(new EthAddress(selectedAccountId), undefined)
+    assignMessage = `✅ Removed account stamp from ${selectedAccountId.slice(0, 8)}…`
+  }
 </script>
 
 <Vertical
@@ -602,6 +632,25 @@ Check console logs for details:
           disabled={!accountHasDefaultStamp || !selectedStampId || !selectedIdentityId}
         >
           Set Identity Stamp
+        </Button>
+      </Horizontal>
+
+      <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+        <Button
+          variant="secondary"
+          danger
+          onclick={removeAccountStamp}
+          disabled={!accountHasDefaultStamp || identityHasStamp}
+        >
+          Remove Account Stamp
+        </Button>
+        <Button
+          variant="secondary"
+          danger
+          onclick={removeIdentityStamp}
+          disabled={!identityHasStamp}
+        >
+          Remove Identity Stamp
         </Button>
       </Horizontal>
 
