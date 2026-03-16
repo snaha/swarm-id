@@ -181,7 +181,7 @@ export function serializePostageStamp(
     utilization: stamp.utilization,
     usable: stamp.usable,
     depth: stamp.depth,
-    amount: stamp.amount,
+    amount: stamp.amount.toString(), // Convert bigint to string for JSON
     bucketDepth: stamp.bucketDepth,
     blockNumber: stamp.blockNumber,
     immutableFlag: stamp.immutableFlag,

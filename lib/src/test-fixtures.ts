@@ -96,7 +96,7 @@ export function createPostageStamp(
     utilization: 0,
     usable: true,
     depth: 20,
-    amount: 100000000,
+    amount: 100000000n,
     bucketDepth: 16,
     blockNumber: 12345678,
     immutableFlag: false,

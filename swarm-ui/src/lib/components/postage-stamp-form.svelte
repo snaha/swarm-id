@@ -4,11 +4,12 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
   import FormattedNumberInput from '$lib/components/ui/input/formatted-number/input.svelte'
+  import FormattedBigintInput from '$lib/components/ui/input/formatted-bigint/input.svelte'
 
   interface Props {
     batchID: string
     depth: number
-    amount: number
+    amount: bigint
     blockNumber: number
     signerKey: string
     submitError?: string
@@ -37,8 +38,8 @@
     if (isNaN(depth)) return 'Depth must be a number'
     if (depth < 17 || depth > 40) return 'Depth must be between 17 and 40'
 
-    if (isNaN(amount)) return 'Amount must be a number'
-    if (amount < 0) return 'Amount must be 0 or greater'
+    if (typeof amount !== 'bigint') return 'Amount must be a valid integer'
+    if (amount < 0n) return 'Amount must be 0 or greater'
 
     if (isNaN(blockNumber)) return 'Block number must be a number'
     if (blockNumber < 0) return 'Block number must be 0 or greater'
@@ -91,7 +92,7 @@
         max={255}
         step={1}
       />
-      <FormattedNumberInput
+      <FormattedBigintInput
         variant="outline"
         dimension="compact"
         name="amount"
@@ -99,8 +100,7 @@
         bind:value={amount}
         label="Amount"
         class="flex-grow"
-        min={0}
-        step={1}
+        min={0n}
       />
       <FormattedNumberInput
         variant="outline"

@@ -51,7 +51,7 @@
   let batchID = $state('')
   let depth = $state(20)
   let signerKey = $state('')
-  let amount = $state(0)
+  let amount = $state(0n)
   let blockNumber = $state(0)
   let submitError = $state<string | undefined>(undefined)
 
@@ -126,7 +126,7 @@
         batchID: new BatchId(batch.batchId),
         signerKey: new PrivateKey(signerKeyBytes),
         depth: batch.depth,
-        amount: parseInt(batch.amount, 10),
+        amount: BigInt(batch.amount),
         blockNumber: parseInt(batch.blockNumber, HEX_BASE),
         utilization: 0,
         usable: true,

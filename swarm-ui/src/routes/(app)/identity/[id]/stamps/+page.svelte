@@ -30,9 +30,9 @@
   const MS_PER_SECOND = 1000
   const MAX_UTILIZATION_PERCENT = 100
   const SWARMSCAN_STATS_URL = 'https://api.swarmscan.io/v1/postage-stamps/stats'
-  const CHUNKS_PER_GB = 262144
+  const CHUNKS_PER_GB = 262144n
   const SECONDS_PER_MONTH = 2592000
-  const PLUR_PER_BZZ = 1e16
+  const PLUR_PER_BZZ = 10_000_000_000_000_000n // 1e16 as bigint
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
 
   const identityId = $derived(page.params.id)
@@ -112,8 +112,11 @@
     price: number,
     blockTimestamp: number | undefined,
   ): string {
-    const perChunkPerMonthCost = (price * PLUR_PER_BZZ) / CHUNKS_PER_GB
-    const durationMonths = stamp.amount / perChunkPerMonthCost
+    // Convert price to bigint (price is BZZ per GB per month)
+    const perChunkPerMonthCost =
+      (BigInt(Math.floor(price * 1e6)) * PLUR_PER_BZZ) / (CHUNKS_PER_GB * 1_000_000n)
+    const durationMonths =
+      perChunkPerMonthCost > 0n ? Number(stamp.amount / perChunkPerMonthCost) : 0
     const durationSeconds = durationMonths * SECONDS_PER_MONTH
 
     // Use block timestamp if available, otherwise fall back to createdAt
@@ -128,8 +131,11 @@
     price: number,
     blockTimestamp: number | undefined,
   ): boolean {
-    const perChunkPerMonthCost = (price * PLUR_PER_BZZ) / CHUNKS_PER_GB
-    const durationMonths = stamp.amount / perChunkPerMonthCost
+    // Convert price to bigint (price is BZZ per GB per month)
+    const perChunkPerMonthCost =
+      (BigInt(Math.floor(price * 1e6)) * PLUR_PER_BZZ) / (CHUNKS_PER_GB * 1_000_000n)
+    const durationMonths =
+      perChunkPerMonthCost > 0n ? Number(stamp.amount / perChunkPerMonthCost) : 0
     const totalLifetimeMs = durationMonths * SECONDS_PER_MONTH * MS_PER_SECOND
 
     // Use block timestamp if available, otherwise fall back to createdAt
