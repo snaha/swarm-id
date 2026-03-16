@@ -1,9 +1,11 @@
 <script lang="ts">
-  import Button from '$lib/components/ui/button.svelte'
-  import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import CreationLayout from '$lib/components/creation-layout.svelte'
-  import AddPostageStamp from '$lib/components/add-postage-stamp.svelte'
+  import AddPostageStamp, {
+    type PageState,
+    type PurchaseState,
+  } from '$lib/components/add-postage-stamp.svelte'
+  import AddPostageStampButtons from '$lib/components/add-postage-stamp-buttons.svelte'
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
   import { page } from '$app/stores'
@@ -11,9 +13,6 @@
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import type { PostageStamp } from '@swarm-id/lib'
-
-  type PageState = 'select' | 'purchase' | 'manual'
-  type PurchaseState = 'waiting' | 'success' | 'error'
 
   const identityId = $derived($page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -95,32 +94,14 @@
 
   {#snippet buttonContent()}
     {#if account}
-      {#if pageState === 'purchase' && purchaseState === 'error'}
-        <Horizontal --horizontal-gap="var(--half-padding)">
-          <Button
-            variant="strong"
-            dimension="compact"
-            onclick={() => addPostageStampRef?.handlePurchase()}
-          >
-            Try again
-          </Button>
-          <Button
-            variant="ghost"
-            dimension="compact"
-            onclick={() => addPostageStampRef?.goToSelect()}
-          >
-            Back
-          </Button>
-        </Horizontal>
-      {:else if pageState === 'manual'}
-        <Button
-          dimension="compact"
-          onclick={() => addPostageStampRef?.handleAddStamp()}
-          disabled={isFormDisabled}
-        >
-          Add postage stamp
-        </Button>
-      {/if}
+      <AddPostageStampButtons
+        {pageState}
+        {purchaseState}
+        {isFormDisabled}
+        onTryAgain={() => addPostageStampRef?.handlePurchase()}
+        onBack={() => addPostageStampRef?.goToSelect()}
+        onAddStamp={() => addPostageStampRef?.handleAddStamp()}
+      />
     {/if}
   {/snippet}
 </CreationLayout>

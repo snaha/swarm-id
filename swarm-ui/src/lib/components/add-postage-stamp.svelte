@@ -21,8 +21,8 @@
   const HEX_BASE = 16
   const SUCCESS_REDIRECT_DELAY_MS = 1500
 
-  type PageState = 'select' | 'purchase' | 'manual'
-  type PurchaseState = 'waiting' | 'success' | 'error'
+  export type PageState = 'select' | 'purchase' | 'manual'
+  export type PurchaseState = 'waiting' | 'success' | 'error'
 
   interface Props {
     accountId: string
