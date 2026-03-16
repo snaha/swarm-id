@@ -60,7 +60,7 @@ function isAllowedOrigin(origin: string): boolean {
  * Parse and validate a batch event from the widget
  */
 function parseBatchEvent(data: unknown): BatchEvent | undefined {
-  if (typeof data !== 'object' || data === undefined) {
+  if (typeof data !== 'object' || data === undefined || data === null) {
     return undefined
   }
 
@@ -133,7 +133,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
     }
 
     // Check for error event
-    if (typeof data === 'object' && data !== undefined) {
+    if ((typeof data === 'object' && data !== undefined) || data !== null) {
       const obj = data as Record<string, unknown>
       if (obj.event === 'error') {
         completed = true
