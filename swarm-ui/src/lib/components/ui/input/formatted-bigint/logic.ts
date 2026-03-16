@@ -10,7 +10,7 @@ export interface FormatResult {
 }
 
 // Get locale-specific group separator
-export function getLocaleSeparators(locale: string | null | undefined): LocaleSeparators {
+export function getLocaleSeparators(locale: string | undefined): LocaleSeparators {
   const formatter = new Intl.NumberFormat(locale || undefined)
   const parts = formatter.formatToParts(1234n)
 
@@ -20,7 +20,7 @@ export function getLocaleSeparators(locale: string | null | undefined): LocaleSe
 }
 
 // Format bigint with thousand separators
-export function formatBigint(value: bigint, locale: string | null | undefined): string {
+export function formatBigint(value: bigint, locale: string | undefined): string {
   return new Intl.NumberFormat(locale || undefined, {
     maximumFractionDigits: 0,
   }).format(value)
@@ -29,7 +29,7 @@ export function formatBigint(value: bigint, locale: string | null | undefined): 
 // Parse formatted string to bigint
 export function parseBigint(
   formattedValue: string,
-  locale: string | null | undefined,
+  locale: string | undefined,
 ): bigint | undefined {
   if (!formattedValue || formattedValue === '-') return undefined
 
@@ -60,7 +60,7 @@ export function isValidBigintChar(char: string, min?: bigint): boolean {
 }
 
 // Convert formatted string to unformatted (remove thousand separators)
-export function toUnformatted(formattedValue: string, locale: string | null | undefined): string {
+export function toUnformatted(formattedValue: string, locale: string | undefined): string {
   const { groupSeparator } = getLocaleSeparators(locale)
   return formattedValue.replace(new RegExp(`\\${groupSeparator}`, 'g'), '')
 }
@@ -69,7 +69,7 @@ export function toUnformatted(formattedValue: string, locale: string | null | un
 export function formattedToUnformattedPos(
   formattedValue: string,
   formattedPos: number,
-  locale: string | null | undefined,
+  locale: string | undefined,
 ): number {
   const { groupSeparator } = getLocaleSeparators(locale)
   let unformattedPos = 0
@@ -85,7 +85,7 @@ export function formattedToUnformattedPos(
 export function unformattedToFormattedPos(
   formattedValue: string,
   unformattedPos: number,
-  locale: string | null | undefined,
+  locale: string | undefined,
 ): number {
   const { groupSeparator } = getLocaleSeparators(locale)
   let unformattedCount = 0
@@ -108,7 +108,7 @@ export function unformattedToFormattedPos(
 export function applyLiveFormatting(
   rawValue: string,
   cursorPos: number,
-  locale: string | null | undefined,
+  locale: string | undefined,
 ): FormatResult {
   const { groupSeparator } = getLocaleSeparators(locale)
 
@@ -156,7 +156,7 @@ export function applyLiveFormatting(
 // Filter pasted text to remove invalid characters
 export function filterPastedText(
   pastedText: string,
-  locale: string | null | undefined,
+  locale: string | undefined,
   min?: bigint,
 ): string {
   const { groupSeparator } = getLocaleSeparators(locale)
@@ -188,7 +188,7 @@ export function filterPastedText(
 export function shouldPreventChar(
   key: string,
   displayValue: string,
-  locale: string | null | undefined,
+  locale: string | undefined,
   min?: bigint,
   cursorPos?: number,
 ): boolean {

@@ -7,12 +7,13 @@ import {
   shouldPreventChar,
   applyConstraints,
   validateDigitLimits,
+  MAX_INTEGER_DIGITS,
 } from './logic'
 import type { BigintInputStore } from './store.svelte'
 
 export interface EventHandlerConfig {
   store: BigintInputStore
-  locale: string | null | undefined
+  locale: string | undefined
   constraints?: {
     min?: bigint
     max?: bigint
@@ -143,7 +144,7 @@ function handleSeparatorDeletion(
 
 function isInputValueReliable(inputValue: string): boolean {
   if (!inputValue) return false
-  if (inputValue.length > 50) return false
+  if (inputValue.length > MAX_INTEGER_DIGITS + 1) return false
   return true
 }
 

@@ -4,10 +4,10 @@ export interface BigintInputStore {
   readonly value: bigint | undefined
   readonly displayValue: string
   readonly isFocused: boolean
-  updateValue: (formattedValue: string, locale: string | null | undefined) => void
+  updateValue: (formattedValue: string, locale: string | undefined) => void
   setValue: (newValue: bigint | undefined) => void
   setDisplayValue: (newDisplayValue: string) => void
-  updateDisplayValue: (value: bigint | undefined, locale: string | null | undefined) => void
+  updateDisplayValue: (value: bigint | undefined, locale: string | undefined) => void
   setFocus: (focused: boolean) => void
 }
 
@@ -27,7 +27,7 @@ export function withBigintInputStore(initialValue?: bigint): BigintInputStore {
       return isFocused
     },
 
-    updateValue(formattedValue: string, locale: string | null | undefined) {
+    updateValue(formattedValue: string, locale: string | undefined) {
       const parsedValue = parseBigint(formattedValue, locale)
       if (parsedValue !== undefined) {
         value = parsedValue
@@ -47,7 +47,7 @@ export function withBigintInputStore(initialValue?: bigint): BigintInputStore {
     },
 
     // Update display value from a bigint value
-    updateDisplayValue(newValue: bigint | undefined, locale: string | null | undefined) {
+    updateDisplayValue(newValue: bigint | undefined, locale: string | undefined) {
       value = newValue
 
       if (!isFocused) {

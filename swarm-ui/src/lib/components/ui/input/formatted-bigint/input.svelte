@@ -15,7 +15,7 @@
     value?: bigint
     min?: bigint
     max?: bigint
-    locale: string | null | undefined
+    locale: string | undefined
   }
 
   let { value = $bindable(), min, max, locale, placeholder = '0', ...restProps }: Props = $props()
