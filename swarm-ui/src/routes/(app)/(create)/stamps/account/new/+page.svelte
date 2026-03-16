@@ -72,14 +72,12 @@
   {/snippet}
 
   {#snippet buttonContent()}
-    {#if account}
+    {#if account && addPostageStampRef}
       <AddPostageStampButtons
         {pageState}
         {purchaseState}
         {isFormDisabled}
-        onTryAgain={() => addPostageStampRef?.handlePurchase()}
-        onBack={() => addPostageStampRef?.goToSelect()}
-        onAddStamp={() => addPostageStampRef?.handleAddStamp()}
+        stampRef={addPostageStampRef}
       />
     {/if}
   {/snippet}
