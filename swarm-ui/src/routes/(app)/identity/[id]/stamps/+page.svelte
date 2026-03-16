@@ -31,9 +31,22 @@
   const MAX_UTILIZATION_PERCENT = 100
   const SWARMSCAN_STATS_URL = 'https://api.swarmscan.io/v1/postage-stamps/stats'
   const CHUNKS_PER_GB = 262144n
-  const SECONDS_PER_MONTH = 2592000
-  const PLUR_PER_BZZ = 10_000_000_000_000_000n // 1e16 as bigint
+  const SECONDS_PER_MONTH = 2592000n
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
+  const PLUR_DECIMALS = 16
+
+  function bzzToPlur(bzz: number): bigint {
+    const str = bzz.toFixed(PLUR_DECIMALS)
+    const [intPart, decPart = ''] = str.split('.')
+    const paddedDec = decPart.padEnd(PLUR_DECIMALS, '0').slice(0, PLUR_DECIMALS)
+    return BigInt(intPart + paddedDec)
+  }
+
+  function calculateBatchDurationSeconds(amount: bigint, pricePerGBPerMonth: number): number {
+    const perChunkPerMonthCost = bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB
+    if (perChunkPerMonthCost === 0n) return 0
+    return Number((amount * SECONDS_PER_MONTH) / perChunkPerMonthCost)
+  }
 
   const identityId = $derived(page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -112,12 +125,7 @@
     price: number,
     blockTimestamp: number | undefined,
   ): string {
-    // Convert price to bigint (price is BZZ per GB per month)
-    const perChunkPerMonthCost =
-      (BigInt(Math.floor(price * 1e6)) * PLUR_PER_BZZ) / (CHUNKS_PER_GB * 1_000_000n)
-    const durationMonths =
-      perChunkPerMonthCost > 0n ? Number(stamp.amount / perChunkPerMonthCost) : 0
-    const durationSeconds = durationMonths * SECONDS_PER_MONTH
+    const durationSeconds = calculateBatchDurationSeconds(stamp.amount, price)
 
     // Use block timestamp if available, otherwise fall back to createdAt
     const startTimeMs =
@@ -131,12 +139,7 @@
     price: number,
     blockTimestamp: number | undefined,
   ): boolean {
-    // Convert price to bigint (price is BZZ per GB per month)
-    const perChunkPerMonthCost =
-      (BigInt(Math.floor(price * 1e6)) * PLUR_PER_BZZ) / (CHUNKS_PER_GB * 1_000_000n)
-    const durationMonths =
-      perChunkPerMonthCost > 0n ? Number(stamp.amount / perChunkPerMonthCost) : 0
-    const totalLifetimeMs = durationMonths * SECONDS_PER_MONTH * MS_PER_SECOND
+    const totalLifetimeMs = calculateBatchDurationSeconds(stamp.amount, price) * MS_PER_SECOND
 
     // Use block timestamp if available, otherwise fall back to createdAt
     const startTimeMs =
@@ -144,7 +147,7 @@
 
     const expiryTimestamp = startTimeMs + totalLifetimeMs
     const remainingMs = expiryTimestamp - Date.now()
-    const oneMonthMs = SECONDS_PER_MONTH * MS_PER_SECOND
+    const oneMonthMs = Number(SECONDS_PER_MONTH) * MS_PER_SECOND
 
     return (
       remainingMs > 0 &&

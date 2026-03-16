@@ -39,7 +39,7 @@
     if (depth < 17 || depth > 40) return 'Depth must be between 17 and 40'
 
     if (amount !== undefined && typeof amount !== 'bigint') return 'Amount must be a valid integer'
-    if (amount < 0n) return 'Amount must be 0 or greater'
+    if (amount !== undefined && amount < 0n) return 'Amount must be 0 or greater'
 
     if (isNaN(blockNumber)) return 'Block number must be a number'
     if (blockNumber < 0) return 'Block number must be 0 or greater'
