@@ -199,6 +199,75 @@
         </Grid>
       </section>
     </main>
+
+    <footer class="footer">
+      <div class="footer-content">
+        <div class="footer-grid">
+          <div class="footer-brand">
+            <SwarmLogo fill="var(--colors-dark-top)" height={24} />
+            <Typography class="footer-mission">
+              Swarm provides censorship resistant storage and communication infrastructure for a
+              sovereign digital society.
+            </Typography>
+            <div class="footer-brand-links">
+              <a href="https://papers.ethswarm.org/" target="_blank" rel="noopener">Papers</a>
+              <a href="https://ethswarm.org/foundation" target="_blank" rel="noopener">Foundation</a
+              >
+              <a href="https://ethswarm.org/jobs" target="_blank" rel="noopener">Jobs</a>
+            </div>
+          </div>
+
+          <Vertical class="footer-column" --vertical-gap="var(--half-padding)">
+            <Typography variant="h6" class="footer-heading">Use Swarm</Typography>
+            <a href="https://ethswarm.org/build" target="_blank" rel="noopener">Start Building</a>
+            <a href="https://ethswarm.org/build/run-a-full-node" target="_blank" rel="noopener"
+              >Run a Node</a
+            >
+            <a href="https://ethswarm.org/build/desktop" target="_blank" rel="noopener"
+              >Swarm Desktop</a
+            >
+            <a href="https://github.com/ethersphere/awesome-swarm" target="_blank" rel="noopener"
+              >Awesome Swarm</a
+            >
+            <a href="https://gateway.ethswarm.org/" target="_blank" rel="noopener">Swarm Gateway</a>
+            <a href="https://ethswarm.org/get-bzz" target="_blank" rel="noopener">Get BZZ</a>
+          </Vertical>
+
+          <Vertical class="footer-column" --vertical-gap="var(--half-padding)">
+            <Typography variant="h6" class="footer-heading">Resources</Typography>
+            <a href="https://ethswarm.org/why" target="_blank" rel="noopener">Technology</a>
+            <a href="https://docs.ethswarm.org/docs/" target="_blank" rel="noopener">Bee docs</a>
+            <a href="https://bee-js.ethswarm.org/docs/" target="_blank" rel="noopener"
+              >Bee.js docs</a
+            >
+            <a href="https://swarmscan.io/" target="_blank" rel="noopener">Network stats</a>
+            <a href="https://ethswarm.org/contribute" target="_blank" rel="noopener">Contribute</a>
+            <a href="https://roadmap.ethswarm.org/" target="_blank" rel="noopener">Roadmap</a>
+            <a href="https://blog.ethswarm.org" target="_blank" rel="noopener">Blog</a>
+          </Vertical>
+
+          <Vertical class="footer-column" --vertical-gap="var(--half-padding)">
+            <Typography variant="h6" class="footer-heading">Ecosystem</Typography>
+            <a href="https://ethswarm.org/grants" target="_blank" rel="noopener">Grants</a>
+            <a href="https://app.dework.xyz/swarm-41421" target="_blank" rel="noopener">Bounties</a>
+            <a href="https://fairdatasociety.org/" target="_blank" rel="noopener"
+              >Fair Data Society</a
+            >
+            <a href="https://toolkit.ethswarm.org/" target="_blank" rel="noopener"
+              >The Hivemaker's Code</a
+            >
+          </Vertical>
+        </div>
+
+        <div class="footer-bottom">
+          <span>Swarm Foundation, 2026</span>
+          <span class="footer-dot">·</span>
+          <a href="https://ethswarm.org/privacy" target="_blank" rel="noopener">Privacy policy</a>
+          <span class="footer-dot">·</span>
+          <a href="https://swarm.bzz.link/" target="_blank" rel="noopener">Hosted on Swarm</a>
+        </div>
+      </div>
+    </footer>
   </div>
 {/if}
 
@@ -377,5 +446,131 @@
 
   :global(.benefit-body) {
     color: var(--colors-dark-high);
+  }
+
+  /* Footer styles */
+  .footer {
+    margin-top: var(--quadruple-padding);
+    padding: var(--quadruple-padding) var(--double-padding);
+    border-top: 1px solid #2f3842;
+  }
+
+  .footer-content {
+    max-width: 1200px;
+    margin: 0 auto;
+  }
+
+  .footer-grid {
+    display: grid;
+    grid-template-columns: 1.5fr 1fr 1fr 1fr;
+    gap: var(--double-padding);
+  }
+
+  .footer-brand {
+    display: flex;
+    flex-direction: column;
+    gap: var(--padding);
+  }
+
+  :global(.footer-mission) {
+    color: #8b909a !important;
+    font-size: 14px !important;
+    line-height: 20px !important;
+    max-width: 280px;
+  }
+
+  .footer-brand-links {
+    display: flex;
+    flex-direction: column;
+    gap: var(--half-padding);
+  }
+
+  .footer-brand-links a {
+    color: #f6f7f9;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+    transition: color 0.2s ease;
+  }
+
+  .footer-brand-links a:hover {
+    color: #ffffff;
+  }
+
+  @media screen and (max-width: 900px) {
+    .footer-grid {
+      grid-template-columns: repeat(2, 1fr);
+    }
+
+    .footer {
+      padding: var(--double-padding) var(--padding);
+    }
+
+    .footer-brand {
+      grid-column: span 2;
+    }
+
+    :global(.footer-mission) {
+      max-width: none;
+    }
+  }
+
+  @media screen and (max-width: 600px) {
+    .footer-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .footer-brand {
+      grid-column: span 1;
+    }
+  }
+
+  :global(.footer-column) {
+    align-items: flex-start;
+  }
+
+  :global(.footer-heading) {
+    color: #8b909a !important;
+    font-size: 14px !important;
+    font-weight: 600 !important;
+    margin-bottom: var(--half-padding);
+  }
+
+  :global(.footer-column a) {
+    color: #f6f7f9;
+    text-decoration: none;
+    font-size: 14px;
+    font-weight: 600;
+    line-height: 1.5;
+    transition: color 0.2s ease;
+  }
+
+  :global(.footer-column a:hover) {
+    color: #ffffff;
+  }
+
+  .footer-bottom {
+    display: flex;
+    align-items: center;
+    gap: var(--padding);
+    margin-top: var(--quadruple-padding);
+    color: #f6f7f9;
+    font-size: 10px;
+  }
+
+  .footer-dot {
+    color: #8b909a;
+  }
+
+  .footer-bottom a {
+    color: #f6f7f9;
+    font-size: 10px;
+    text-decoration: none;
+    transition: color 0.2s ease;
+  }
+
+  .footer-bottom a:hover {
+    color: #ffffff;
   }
 </style>
