@@ -143,7 +143,7 @@
         >
           <div class="benefit-item">
             <div class="benefit-icon">
-              <Gateway size={48} />
+              <Gateway size={48 as 32} />
             </div>
             <Vertical --vertical-gap="var(--half-padding)">
               <Typography variant="h4">Easy Swarm Integration</Typography>
@@ -157,7 +157,7 @@
 
           <div class="benefit-item">
             <div class="benefit-icon">
-              <Db2DataSharingGroup size={48} />
+              <Db2DataSharingGroup size={48 as 32} />
             </div>
             <Vertical --vertical-gap="var(--half-padding)">
               <Typography variant="h4">Permissionless Sharing with Full Control</Typography>
@@ -171,7 +171,7 @@
 
           <div class="benefit-item">
             <div class="benefit-icon">
-              <Login size={48} />
+              <Login size={48 as 32} />
             </div>
             <Vertical --vertical-gap="var(--half-padding)">
               <Typography variant="h4">Sign Up with Ethereum Wallet or Passkey</Typography>
@@ -185,7 +185,7 @@
 
           <div class="benefit-item">
             <div class="benefit-icon">
-              <UserIdentification size={48} />
+              <UserIdentification size={48 as 32} />
             </div>
             <Vertical --vertical-gap="var(--half-padding)">
               <Typography variant="h4">One Place for All Your Identities</Typography>
