@@ -19,7 +19,7 @@
   import UserIdentification from 'carbon-icons-svelte/lib/UserIdentification.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
 
-  const DOCS_URL = 'https://swarm-docs.snaha.net'
+  const DOCS_URL = 'https://swarm.snaha.net/docs'
 
   const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
