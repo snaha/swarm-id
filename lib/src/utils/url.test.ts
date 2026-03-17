@@ -123,4 +123,27 @@ describe("buildAuthUrl", () => {
     expect(url).toContain("proxyMode=true")
     expect(url).toContain("agent=")
   })
+
+  it("should include challenge when provided", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { proxyMode: true, challenge: "test-challenge-123" },
+    )
+
+    expect(url).toContain("challenge=test-challenge-123")
+    expect(url).toContain("proxyMode=true")
+  })
+
+  it("should not include challenge when not provided", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { proxyMode: true },
+    )
+
+    expect(url).not.toContain("challenge")
+  })
 })

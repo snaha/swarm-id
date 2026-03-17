@@ -42,7 +42,11 @@ import type {
   PostageBatch,
   ConnectedApp,
 } from "./types"
-import { ParentToIframeMessageSchema } from "./types"
+import {
+  ParentToIframeMessageSchema,
+  PopupToIframeMessageSchema,
+} from "./types"
+import type { PopupToIframeMessage } from "./types"
 import {
   Bee,
   BatchId,
@@ -103,6 +107,7 @@ import {
   parseCompressedPublicKey,
 } from "./proxy/act"
 
+const ITP_CHALLENGE_KEY = "swarm-itp-challenge"
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
@@ -127,6 +132,10 @@ export class SwarmIdProxy {
   private signerKey: string | undefined
   private stamper: UtilizationAwareStamper | undefined
   private stamperDepth: number = 23 // Default depth
+  private readOnly: boolean = false
+  private readOnlyIdentity:
+    | { id: string; name: string; address: string }
+    | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
@@ -205,8 +214,10 @@ export class SwarmIdProxy {
         await this.authenticateFromStorage(connectedApp)
       }
       // If already authenticated with same secret, nothing to do
-    } else if (this.authenticated) {
-      // No valid connection in storage, but we're authenticated - disconnect
+    } else if (this.authenticated && !this.readOnly) {
+      // No valid connection in storage, but we're authenticated - disconnect.
+      // Skip when in readOnly mode (ITP): storage is partitioned so the iframe
+      // can't see connected apps, but auth was established via postMessage.
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
@@ -241,6 +252,56 @@ export class SwarmIdProxy {
       type: "authSuccess",
       origin: this.parentOrigin!,
     })
+  }
+
+  /**
+   * Handle messages from the auth popup (same-origin postMessage).
+   * Used as ITP fallback when storage events don't fire due to partitioning.
+   */
+  private async handlePopupMessage(
+    message: PopupToIframeMessage,
+  ): Promise<void> {
+    if (message.type === "setSecret") {
+      // Validate the appOrigin matches our parent
+      if (message.appOrigin !== this.parentOrigin) {
+        console.warn(
+          "[Proxy] setSecret appOrigin mismatch:",
+          message.appOrigin,
+          "!==",
+          this.parentOrigin,
+        )
+        return
+      }
+
+      // Clean up ITP challenge
+      localStorage.removeItem(ITP_CHALLENGE_KEY)
+
+      // Authenticate in read-only mode (no stamps available via postMessage)
+      this.appSecret = message.data.secret
+      this.authenticated = true
+      this.readOnly = true
+      this.authLoading = false
+      this.isConnecting = false
+
+      // Store identity info from message (can't read from partitioned localStorage)
+      if (message.data.identityId && message.data.identityName) {
+        this.readOnlyIdentity = {
+          id: message.data.identityId,
+          name: message.data.identityName,
+          address: message.data.identityAddress ?? "",
+        }
+      }
+
+      // No stamp lookup — localStorage is partitioned, stamps not accessible
+      this.postageBatchId = undefined
+      this.signerKey = undefined
+
+      this.showAuthButton()
+      this.sendToParent({
+        type: "authSuccess",
+        origin: this.parentOrigin!,
+      })
+    }
   }
 
   /**
@@ -412,6 +473,15 @@ export class SwarmIdProxy {
       if (!this.parentIdentified) {
         console.warn("[Proxy] Ignoring message - parent not identified yet")
         return
+      }
+
+      // Handle same-origin popup messages (ITP postMessage fallback)
+      if (event.origin === window.location.origin && type === "setSecret") {
+        const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
+        if (popupResult.success) {
+          await this.handlePopupMessage(popupResult.data)
+          return
+        }
       }
 
       // Validate origin - only accept messages from parent
@@ -886,6 +956,8 @@ export class SwarmIdProxy {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
+    this.readOnly = false
+    this.readOnlyIdentity = undefined
 
     // Show login button
     this.showAuthButton()
@@ -955,33 +1027,40 @@ export class SwarmIdProxy {
 
     // Look up identity info if authenticated
     if (this.authenticated && this.parentOrigin) {
-      try {
-        const connectedAppsManager = createConnectedAppsStorageManager()
-        const connectedApps = connectedAppsManager.load()
-        const connectedApp = this.findMostRecentConnection(connectedApps)
+      if (this.readOnly && this.readOnlyIdentity) {
+        // In read-only mode, use identity info from the setSecret message
+        // (localStorage is partitioned, can't read connected apps)
+        identity = this.readOnlyIdentity
+      } else {
+        try {
+          const connectedAppsManager = createConnectedAppsStorageManager()
+          const connectedApps = connectedAppsManager.load()
+          const connectedApp = this.findMostRecentConnection(connectedApps)
 
-        if (connectedApp) {
-          const identitiesManager = createIdentitiesStorageManager()
-          const identities = identitiesManager.load()
-          const foundIdentity = identities.find(
-            (i) => i.id === connectedApp.identityId,
-          )
+          if (connectedApp) {
+            const identitiesManager = createIdentitiesStorageManager()
+            const identities = identitiesManager.load()
+            const foundIdentity = identities.find(
+              (i) => i.id === connectedApp.identityId,
+            )
 
-          if (foundIdentity) {
-            identity = {
-              id: foundIdentity.id,
-              name: foundIdentity.name,
-              address: foundIdentity.accountId.toHex(),
+            if (foundIdentity) {
+              identity = {
+                id: foundIdentity.id,
+                name: foundIdentity.name,
+                address: foundIdentity.accountId.toHex(),
+              }
             }
           }
+        } catch (error) {
+          console.error("[Proxy] Error looking up identity:", error)
         }
-      } catch (error) {
-        console.error("[Proxy] Error looking up identity:", error)
       }
     }
 
-    // canUpload is true if we have both a postage batch ID and signer key
-    const canUpload = !!(this.postageBatchId && this.signerKey)
+    // canUpload is true if we have stamps and are not in read-only mode
+    const canUpload =
+      !!(this.postageBatchId && this.signerKey) && !this.readOnly
 
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
@@ -989,6 +1068,7 @@ export class SwarmIdProxy {
           type: "connectionInfoResponse",
           requestId: message.requestId,
           canUpload,
+          readOnly: this.readOnly || undefined,
           identity,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
@@ -1165,13 +1245,17 @@ export class SwarmIdProxy {
     // Build authentication URL using shared utility
     // proxyMode=true: popup was opened from proxy iframe, so we validate
     // same-origin opener and send setSecret via postMessage
+    // challenge: used for ITP detection — popup checks if it can read this from localStorage
+    const challenge = crypto.randomUUID()
+    localStorage.setItem(ITP_CHALLENGE_KEY, challenge)
+
     // Get base path from current location (e.g., /id/pr-140/proxy -> /id/pr-140)
     const basePath = window.location.pathname.replace(/\/proxy$/, "")
     const authUrl = buildAuthUrl(
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      { proxyMode: true }, // proxyMode - enables same-origin validation and setSecret message
+      { proxyMode: true, challenge },
     )
 
     // Open as popup or full window based on popupMode

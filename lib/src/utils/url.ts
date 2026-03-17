@@ -15,6 +15,12 @@ export interface BuildAuthUrlOptions {
    * Agents are automated services that can perform operations on behalf of users.
    */
   agent?: boolean
+  /**
+   * Challenge string for ITP detection. When present, the popup checks
+   * if it can read this challenge from localStorage to determine whether
+   * storage is partitioned (ITP enabled).
+   */
+  challenge?: string
 }
 
 /**
@@ -61,6 +67,10 @@ export function buildAuthUrl(
     if (metadata.icon) {
       params.set("appIcon", metadata.icon)
     }
+  }
+
+  if (options?.challenge) {
+    params.set("challenge", options.challenge)
   }
 
   if (options?.agent) {

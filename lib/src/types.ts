@@ -551,6 +551,7 @@ export type AuthStatus = z.infer<typeof AuthStatusSchema>
 
 export const ConnectionInfoSchema = z.object({
   canUpload: z.boolean(),
+  readOnly: z.boolean().optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1177,6 +1178,7 @@ export const ConnectionInfoResponseMessageSchema = z.object({
   type: z.literal("connectionInfoResponse"),
   requestId: z.string(),
   canUpload: z.boolean(),
+  readOnly: z.boolean().optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1577,6 +1579,9 @@ export const AuthDataSchema = z.object({
   postageBatchId: BatchIdSchema.optional(),
   signerKey: PrivateKeySchema.optional(),
   networkSettings: NetworkSettingsSchemaV1.optional(),
+  identityId: z.string().optional(),
+  identityName: z.string().optional(),
+  identityAddress: z.string().length(40).optional(),
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>

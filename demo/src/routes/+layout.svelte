@@ -8,10 +8,11 @@
   import MobileMenuButton from '$lib/components/layout/mobile-menu-button.svelte'
   import ConsolePanel from '$lib/components/layout/console-panel.svelte'
   import SafariWarning from '$lib/components/safari-warning.svelte'
+  import ReadOnlyBanner from '$lib/components/read-only-banner.svelte'
 
   let { children } = $props()
 
-  const hasITP =
+  const isSafari =
     typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
   onMount(() => {
@@ -48,7 +49,9 @@
     <!-- Scrollable page content -->
     <main class="flex-1 overflow-y-auto p-6 md:p-10">
       <div class="mx-auto max-w-[800px] space-y-6">
-        {#if hasITP}
+        {#if clientStore.readOnly}
+          <ReadOnlyBanner />
+        {:else if isSafari && !clientStore.authenticated}
           <SafariWarning />
         {/if}
         {@render children()}

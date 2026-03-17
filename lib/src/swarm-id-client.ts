@@ -860,6 +860,7 @@ export class SwarmIdClient {
       type: "connectionInfoResponse"
       requestId: string
       canUpload: boolean
+      readOnly?: boolean
       identity?: { id: string; name: string; address: string }
     }>({
       type: "getConnectionInfo",
@@ -868,6 +869,7 @@ export class SwarmIdClient {
 
     return {
       canUpload: response.canUpload,
+      readOnly: response.readOnly,
       identity: response.identity,
     }
   }
