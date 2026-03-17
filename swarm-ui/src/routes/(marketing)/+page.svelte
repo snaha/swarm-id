@@ -8,6 +8,7 @@
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
+  import ResponsiveLayout from '$lib/components/ui/responsive-layout.svelte'
   import Grid from '$lib/components/ui/grid.svelte'
   import Code from 'carbon-icons-svelte/lib/Code.svelte'
   import Development from 'carbon-icons-svelte/lib/Development.svelte'
@@ -62,7 +63,7 @@
             Swarm ID gives Web3 apps a decentralized identity layer with built-in access control and
             monetization capabilities.
           </Typography>
-          <Horizontal --horizontal-gap="var(--padding)">
+          <ResponsiveLayout --responsive-gap="var(--padding)" class="hero-cta">
             <Button
               variant="strong"
               dimension="default"
@@ -81,7 +82,7 @@
               Read the docs
               <ArrowRight size={20} />
             </Button>
-          </Horizontal>
+          </ResponsiveLayout>
         </div>
       </section>
 
@@ -380,6 +381,16 @@
     :global(.hero-subtitle) {
       font-size: 24px !important;
       line-height: 32px !important;
+    }
+  }
+
+  @media screen and (max-width: 1023px) {
+    :global(.hero-cta) {
+      width: 100%;
+    }
+
+    :global(.hero-cta > span) {
+      width: 100%;
     }
   }
 
