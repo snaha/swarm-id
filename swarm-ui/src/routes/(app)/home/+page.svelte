@@ -29,10 +29,10 @@
   })
   const hasAccounts = $derived(accountsStore.accounts.length > 0)
 
-  // Redirect to account creation if no accounts exist
+  // Redirect to product page if no accounts
   $effect(() => {
     if (!hasAccounts) {
-      goto(resolve(routes.ACCOUNT_NEW))
+      goto(resolve('/'))
     }
   })
 

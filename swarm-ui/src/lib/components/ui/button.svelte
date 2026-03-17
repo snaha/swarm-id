@@ -103,7 +103,7 @@
     border-radius: var(--border-radius);
     font-style: normal;
     font-weight: 400;
-    font-family: var(--font-family-sans-serif);
+    font-family: var(--font-family-button);
     text-decoration: none;
     white-space: nowrap;
     &.busy {

@@ -4,27 +4,27 @@
   interface Props {
     children: Snippet
     class?: string
-    '--grid-template-columns'?: string
-    '--grid-gap'?: string
-    '--grid-align-items'?: string
+    cssGridTemplateColumns?: string
+    cssGap?: string
+    cssAlignItems?: string
     [key: string]: unknown
   }
 
   let {
     children,
     class: className,
-    '--grid-template-columns': gridTemplateColumns = '1fr 1fr',
-    '--grid-gap': gridGap = 'var(--padding)',
-    '--grid-align-items': gridAlignItems = 'center',
+    cssGridTemplateColumns = '1fr 1fr',
+    cssGap = 'var(--padding)',
+    cssAlignItems = 'center',
     ...restProps
   }: Props = $props()
 </script>
 
 <div
   class="grid {className ?? ''}"
-  style:--grid-template-columns={gridTemplateColumns}
-  style:--grid-gap={gridGap}
-  style:--grid-align-items={gridAlignItems}
+  style:--grid-template-columns={cssGridTemplateColumns}
+  style:--grid-gap={cssGap}
+  style:--grid-align-items={cssAlignItems}
   {...restProps}
 >
   {@render children()}
