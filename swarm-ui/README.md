@@ -102,6 +102,10 @@ This trusted domain UI will integrate with the Swarm network through:
 - Cryptographic operations must use established libraries (no custom crypto implementations)
 - Follow principle of least privilege for key access and permissions
 
+## Acknowledgements
+
+- **Polycon** — Identity icons are generated using an algorithm based on [Polycon](https://github.com/Montoya/polycon) by [Christian Montoya](https://github.com/Montoya). The original SDBM hash and 2×2 triangle/square grid approach has been adapted as an inline SVG Svelte component with a custom brand color palette.
+
 ## Related Documentation
 
 - [docs/proposal.md](docs/proposal.md) - Full PoC proposal with user flows and architecture

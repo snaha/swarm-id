@@ -2,7 +2,7 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
-  import Hashicon from '$lib/components/hashicon.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import SwarmLogo from '$lib/components/swarm-logo.svelte'
   import { page } from '$app/state'
   import { resolve } from '$app/paths'
@@ -56,7 +56,7 @@
           onclick={() => (drawerOpen = true)}
           class="clickable"
         >
-          <Hashicon value={identity.id} size={32} />
+          <Polycon value={identity.id} size={32} />
           <Vertical --vertical-gap="0">
             <Typography variant="small">{account.name}</Typography>
             <Typography>{identity.name}</Typography>

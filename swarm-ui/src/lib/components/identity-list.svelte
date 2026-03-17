@@ -3,7 +3,7 @@
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import Button from '$lib/components/ui/button.svelte'
-  import Hashicon from '$lib/components/hashicon.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
   import type { Identity } from '$lib/types'
@@ -60,7 +60,7 @@
           --horizontal-justify-content="stretch"
           style="flex: 1"
         >
-          <Hashicon value={identity.id} size={40} />
+          <Polycon value={identity.id} size={40} />
           <Vertical --vertical-gap="0" --vertical-align-items="start" style="flex: 1;">
             <Typography variant="small">{account.name}</Typography>
             <Typography>

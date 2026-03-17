@@ -17,7 +17,7 @@
   import { AppDataSchema } from '$lib/types'
   import type { Account, Identity } from '$lib/types'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-  import Hashicon from '$lib/components/hashicon.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import { ArrowRight } from 'carbon-icons-svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import {
@@ -282,7 +282,7 @@
 {:else if selectedIdentity && authenticated}
   <Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
     <Vertical --vertical-gap="var(--half-padding)">
-      <Hashicon value={selectedIdentity.id} size={80} />
+      <Polycon value={selectedIdentity.id} size={80} />
       <Typography>{selectedIdentity.name}</Typography>
     </Vertical>
     <Vertical --vertical-gap="var(--half-padding)">

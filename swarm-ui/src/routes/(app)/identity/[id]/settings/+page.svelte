@@ -8,7 +8,7 @@
   import Input from '$lib/components/ui/input/input.svelte'
   import { page } from '$app/state'
   import { identitiesStore } from '$lib/stores/identities.svelte'
-  import Hashicon from '$lib/components/hashicon.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import CopyButton from '$lib/components/copy-button.svelte'
   import Divider from '$lib/components/ui/divider.svelte'
   import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
@@ -79,7 +79,7 @@
             oninput={onNameChange}
           />
           {#if identity}
-            <Hashicon value={identity.id} size={40} />
+            <Polycon value={identity.id} size={40} />
           {/if}
         </Horizontal>
       </Vertical>

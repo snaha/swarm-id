@@ -8,7 +8,7 @@
   import ChevronDown from 'carbon-icons-svelte/lib/ChevronDown.svelte'
   import routes from '$lib/routes'
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
-  import Hashicon from '$lib/components/hashicon.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import CreationLayout from '$lib/components/creation-layout.svelte'
   import Tooltip from '$lib/components/ui/tooltip.svelte'
   import { goto } from '$app/navigation'
@@ -152,7 +152,7 @@
               />
             </div>
             {#if derivedIdentity}
-              <Hashicon value={derivedIdentity.id} size={40} />
+              <Polycon value={derivedIdentity.id} size={40} />
             {/if}
           </Horizontal>
           <Typography variant="small">Displayed in your account and apps</Typography>
