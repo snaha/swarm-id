@@ -43,7 +43,7 @@ test.describe('Agent Account', () => {
     await page.click('button:has-text("Confirm")')
 
     // Should navigate to home (local account skips stamp setup)
-    await page.waitForURL('/')
+    await page.waitForURL('/home')
     // Home page shows "Welcome to Swarm ID" in h4
     await expect(page.getByRole('heading', { name: 'Welcome to Swarm ID' })).toBeVisible()
   })
@@ -61,7 +61,7 @@ test.describe('Agent Account', () => {
     await page.waitForURL(/identity\/new/)
 
     await page.click('button:has-text("Confirm")')
-    await page.waitForURL('/')
+    await page.waitForURL('/home')
 
     // Navigate to connect page with app params via hash
     await page.goto(`/connect#origin=${TEST_APP_ORIGIN}&appName=${TEST_APP_NAME}`)
