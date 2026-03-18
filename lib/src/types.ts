@@ -17,6 +17,7 @@ export const STORAGE_KEY_IDENTITIES = "swarm-id-identities"
 export const STORAGE_KEY_CONNECTED_APPS = "swarm-id-connected-apps"
 export const STORAGE_KEY_POSTAGE_STAMPS = "swarm-id-postage-stamps"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
+export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
 
 // ============================================================================
 // Base Types

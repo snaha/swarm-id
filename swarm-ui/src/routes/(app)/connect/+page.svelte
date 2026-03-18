@@ -9,7 +9,7 @@
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
-  import { deriveIdentityKey, deriveSecret } from '@swarm-id/lib'
+  import { deriveIdentityKey, deriveSecret, STORAGE_CHALLENGE_KEY } from '@swarm-id/lib'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { EthAddress } from '@ethersphere/bee-js'
@@ -56,8 +56,6 @@
     const hash = window.location.hash.slice(1) // Remove the leading '#'
     return new URLSearchParams(hash)
   }
-
-  const STORAGE_CHALLENGE_KEY = 'swarm-storage-challenge'
 
   onMount(() => {
     // Get parameters from URL hash (e.g., #origin=foo&appName=bar)
