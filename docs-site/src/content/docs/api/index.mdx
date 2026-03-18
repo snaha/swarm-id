@@ -376,14 +376,14 @@ Use this method to check if the user can upload data and to get information abou
 
 **Returns:** `Promise<ConnectionInfo>` - The connection info object
 
-| Property           | Type                  | Description                                                |
-| ------------------ | --------------------- | ---------------------------------------------------------- |
-| `canUpload`            | `boolean`             | Whether the user can upload data (has stamps and storage is not partitioned) |
-| `storagePartitioned`   | `boolean \| undefined`| `true` when browser storage partitioning prevents access to stamps/signer keys |
-| `identity`             | `object \| undefined` | The connected identity details (if authenticated)          |
-| `identity.id`      | `string`              | Unique identifier for the identity                         |
-| `identity.name`    | `string`              | Display name of the identity                               |
-| `identity.address` | `string`              | Ethereum address associated with the identity              |
+| Property             | Type                   | Description                                                                    |
+| -------------------- | ---------------------- | ------------------------------------------------------------------------------ |
+| `canUpload`          | `boolean`              | Whether the user can upload data (has stamps and storage is not partitioned)   |
+| `storagePartitioned` | `boolean \| undefined` | `true` when browser storage partitioning prevents access to stamps/signer keys |
+| `identity`           | `object \| undefined`  | The connected identity details (if authenticated)                              |
+| `identity.id`        | `string`               | Unique identifier for the identity                                             |
+| `identity.name`      | `string`               | Display name of the identity                                                   |
+| `identity.address`   | `string`               | Ethereum address associated with the identity                                  |
 
 **Throws:**
 
