@@ -275,6 +275,17 @@
 
 <style>
   .product-page {
+    /* Force dark mode colors for child components */
+    --colors-top: var(--colors-dark-top);
+    --colors-ultra-high: var(--colors-dark-ultra-high);
+    --colors-ultra-high-50: var(--colors-dark-ultra-high-50);
+    --colors-high: var(--colors-dark-high);
+    --colors-low: var(--colors-dark-low);
+    --colors-ultra-low: var(--colors-dark-ultra-low);
+    --colors-base: var(--colors-dark-base);
+    --colors-green: var(--colors-dark-green);
+    --colors-red: var(--colors-dark-red);
+
     --font-family-sans-serif: var(--font-family-inter);
     --font-family-h1: var(--font-family-inter);
     --font-family-h2: var(--font-family-inter);
