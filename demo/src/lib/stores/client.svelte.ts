@@ -30,7 +30,7 @@ interface StampInfo {
 let client = $state<SwarmIdClient | undefined>(undefined)
 let authenticated = $state(false)
 let canUpload = $state(false)
-let readOnly = $state(false)
+let storagePartitioned = $state(false)
 let identity = $state<IdentityInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
 let storageVerified = $state(false)
@@ -86,8 +86,8 @@ async function updateAuthStatus(isAuthenticated: boolean) {
         `Connection info: canUpload=${connectionInfo.canUpload}, identity=${JSON.stringify(connectionInfo.identity)}`,
       )
       canUpload = connectionInfo.canUpload
-      readOnly = connectionInfo.readOnly ?? false
-      if (connectionInfo.readOnly) {
+      storagePartitioned = connectionInfo.storagePartitioned ?? false
+      if (connectionInfo.storagePartitioned) {
         logStore.log(
           'Read-only mode: browser storage partitioning limits this session to downloads only',
           'warn',
@@ -116,7 +116,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
     await updatePostageStampInfo()
   } else {
     canUpload = false
-    readOnly = false
+    storagePartitioned = false
     stamp = undefined
 
     if (currentIdentityId) {
@@ -138,8 +138,8 @@ export const clientStore = {
   get canUpload() {
     return canUpload
   },
-  get readOnly() {
-    return readOnly
+  get storagePartitioned() {
+    return storagePartitioned
   },
   get identity() {
     return identity
@@ -247,7 +247,7 @@ export const clientStore = {
     client = undefined
     authenticated = false
     canUpload = false
-    readOnly = false
+    storagePartitioned = false
     identity = undefined
     stamp = undefined
     socWriterInstance = undefined

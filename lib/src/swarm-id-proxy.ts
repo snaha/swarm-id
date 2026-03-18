@@ -132,8 +132,8 @@ export class SwarmIdProxy {
   private signerKey: string | undefined
   private stamper: UtilizationAwareStamper | undefined
   private stamperDepth: number = 23 // Default depth
-  private readOnly: boolean = false
-  private readOnlyIdentity:
+  private storagePartitioned: boolean = false
+  private storagePartitionedIdentity:
     | { id: string; name: string; address: string }
     | undefined
   private utilizationStore: UtilizationStoreDB | undefined
@@ -214,9 +214,9 @@ export class SwarmIdProxy {
         await this.authenticateFromStorage(connectedApp)
       }
       // If already authenticated with same secret, nothing to do
-    } else if (this.authenticated && !this.readOnly) {
+    } else if (this.authenticated && !this.storagePartitioned) {
       // No valid connection in storage, but we're authenticated - disconnect.
-      // Skip when in readOnly mode (storage partitioning): storage is partitioned so the iframe
+      // Skip when storage is partitioned: the iframe
       // can't see connected apps, but auth was established via postMessage.
       this.clearAuthData()
       this.sendToParent({
@@ -276,16 +276,16 @@ export class SwarmIdProxy {
       // Clean up storage partitioning challenge
       localStorage.removeItem(STORAGE_CHALLENGE_KEY)
 
-      // Authenticate in read-only mode (no stamps available via postMessage)
+      // Authenticate in storage-partitioned mode (no stamps available via postMessage)
       this.appSecret = message.data.secret
       this.authenticated = true
-      this.readOnly = true
+      this.storagePartitioned = true
       this.authLoading = false
       this.isConnecting = false
 
       // Store identity info from message (can't read from partitioned localStorage)
       if (message.data.identityId && message.data.identityName) {
-        this.readOnlyIdentity = {
+        this.storagePartitionedIdentity = {
           id: message.data.identityId,
           name: message.data.identityName,
           address: message.data.identityAddress ?? "",
@@ -956,8 +956,8 @@ export class SwarmIdProxy {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
-    this.readOnly = false
-    this.readOnlyIdentity = undefined
+    this.storagePartitioned = false
+    this.storagePartitionedIdentity = undefined
 
     // Show login button
     this.showAuthButton()
@@ -1027,10 +1027,10 @@ export class SwarmIdProxy {
 
     // Look up identity info if authenticated
     if (this.authenticated && this.parentOrigin) {
-      if (this.readOnly && this.readOnlyIdentity) {
-        // In read-only mode, use identity info from the setSecret message
+      if (this.storagePartitioned && this.storagePartitionedIdentity) {
+        // Storage is partitioned, use identity info from the setSecret message
         // (localStorage is partitioned, can't read connected apps)
-        identity = this.readOnlyIdentity
+        identity = this.storagePartitionedIdentity
       } else {
         try {
           const connectedAppsManager = createConnectedAppsStorageManager()
@@ -1058,9 +1058,9 @@ export class SwarmIdProxy {
       }
     }
 
-    // canUpload is true if we have stamps and are not in read-only mode
+    // canUpload is true if we have stamps and storage is not partitioned
     const canUpload =
-      !!(this.postageBatchId && this.signerKey) && !this.readOnly
+      !!(this.postageBatchId && this.signerKey) && !this.storagePartitioned
 
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
@@ -1068,7 +1068,7 @@ export class SwarmIdProxy {
           type: "connectionInfoResponse",
           requestId: message.requestId,
           canUpload,
-          readOnly: this.readOnly || undefined,
+          storagePartitioned: this.storagePartitioned || undefined,
           identity,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },

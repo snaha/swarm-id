@@ -550,8 +550,10 @@ export type AuthStatus = z.infer<typeof AuthStatusSchema>
 // ============================================================================
 
 export const ConnectionInfoSchema = z.object({
+  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned) */
   canUpload: z.boolean(),
-  readOnly: z.boolean().optional(),
+  /** Whether browser storage partitioning prevents access to stamps/signer keys (e.g. Safari ITP, strict privacy settings) */
+  storagePartitioned: z.boolean().optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1178,7 +1180,7 @@ export const ConnectionInfoResponseMessageSchema = z.object({
   type: z.literal("connectionInfoResponse"),
   requestId: z.string(),
   canUpload: z.boolean(),
-  readOnly: z.boolean().optional(),
+  storagePartitioned: z.boolean().optional(),
   identity: z
     .object({
       id: z.string(),

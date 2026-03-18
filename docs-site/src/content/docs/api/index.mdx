@@ -378,8 +378,9 @@ Use this method to check if the user can upload data and to get information abou
 
 | Property           | Type                  | Description                                                |
 | ------------------ | --------------------- | ---------------------------------------------------------- |
-| `canUpload`        | `boolean`             | Whether the user can upload data (has valid postage stamp) |
-| `identity`         | `object \| undefined` | The connected identity details (if authenticated)          |
+| `canUpload`            | `boolean`             | Whether the user can upload data (has stamps and storage is not partitioned) |
+| `storagePartitioned`   | `boolean \| undefined`| `true` when browser storage partitioning prevents access to stamps/signer keys |
+| `identity`             | `object \| undefined` | The connected identity details (if authenticated)          |
 | `identity.id`      | `string`              | Unique identifier for the identity                         |
 | `identity.name`    | `string`              | Display name of the identity                               |
 | `identity.address` | `string`              | Ethereum address associated with the identity              |
@@ -395,6 +396,8 @@ Use this method to check if the user can upload data and to get information abou
 const info = await client.getConnectionInfo()
 if (info.canUpload) {
   console.log('Ready to upload as:', info.identity?.name)
+} else if (info.storagePartitioned) {
+  console.log('Storage partitioned — downloads only')
 } else {
   console.log('No postage stamp available')
 }

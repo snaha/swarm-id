@@ -8,7 +8,7 @@
   import MobileMenuButton from '$lib/components/layout/mobile-menu-button.svelte'
   import ConsolePanel from '$lib/components/layout/console-panel.svelte'
   import SafariWarning from '$lib/components/safari-warning.svelte'
-  import ReadOnlyBanner from '$lib/components/read-only-banner.svelte'
+  import StoragePartitionedBanner from '$lib/components/storage-partitioned-banner.svelte'
 
   let { children } = $props()
 
@@ -49,8 +49,8 @@
     <!-- Scrollable page content -->
     <main class="flex-1 overflow-y-auto p-6 md:p-10">
       <div class="mx-auto max-w-[800px] space-y-6">
-        {#if clientStore.readOnly}
-          <ReadOnlyBanner />
+        {#if clientStore.storagePartitioned}
+          <StoragePartitionedBanner />
         {:else if isSafari && !clientStore.authenticated}
           <SafariWarning />
         {/if}

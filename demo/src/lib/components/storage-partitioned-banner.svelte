@@ -7,7 +7,7 @@
 </script>
 
 <Alert variant="warning" class="border-2">
-  <AlertTitle class="text-base font-bold">Read-Only Mode</AlertTitle>
+  <AlertTitle class="text-base font-bold">Storage Partitioned</AlertTitle>
   <AlertDescription>
     {#if isSafariOrIOS}
       <p class="mb-3 leading-relaxed">

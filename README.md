@@ -383,7 +383,7 @@ paths:
 
 ### Safari not working
 
-Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, which breaks the authentication flow. To use Safari:
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes (a form of storage partitioning), which breaks the authentication flow. To use Safari:
 
 - **macOS:** Safari Settings (⌘,) → Privacy → uncheck "Prevent cross-site tracking"
 - **iOS:** Settings → Apps → Safari → toggle off "Prevent Cross-Site Tracking"
