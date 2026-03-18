@@ -78,7 +78,6 @@ import {
   ParentToIframeMessageSchema,
   AppMetadataSchema,
 } from "./types"
-import { buildAuthUrl } from "./utils/url"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/key-derivation"
 
@@ -784,10 +783,8 @@ export class SwarmIdClient {
    * to grant Storage Access. For Safari, see https://github.com/snaha/swarm-id/issues/167
    *
    * @param options - Configuration options for the connect flow
-   * @param options.popupMode - Whether to open as a popup window ("popup") or full window ("window", default)
    * @param options.agent - When true, shows the agent sign-up option on the connect page
-   * @returns The URL that was opened (useful for testing or reference)
-   * @throws {Error} If the client is not initialized
+   * @throws {Error} If the client is not initialized or the popup fails to open
    *
    * @example
    * ```typescript
@@ -795,36 +792,29 @@ export class SwarmIdClient {
    * await client.initialize()
    *
    * // Open authentication page
-   * const url = client.connect()
-   * console.log('Authentication opened at:', url)
-   *
-   * // Open as popup window
-   * client.connect({ popupMode: "popup" })
+   * await client.connect()
    *
    * // Open with agent sign-up option visible
-   * client.connect({ agent: true })
+   * await client.connect({ agent: true })
    * ```
    */
-  connect(options: ConnectOptions = {}): string {
+  async connect(options: ConnectOptions = {}): Promise<void> {
     this.ensureReady()
+    const requestId = this.generateRequestId()
 
-    const { popupMode = "window", agent } = options
+    const response = await this.sendRequest<{
+      type: "connectResponse"
+      requestId: string
+      success: boolean
+    }>({
+      type: "connect",
+      requestId,
+      agent: options.agent,
+    })
 
-    const authUrl = buildAuthUrl(
-      this.iframeOrigin,
-      window.location.origin,
-      this.metadata,
-      { agent },
-    )
-
-    // Open as popup or full window based on popupMode
-    if (popupMode === "popup") {
-      window.open(authUrl, "_blank", "width=500,height=600")
-    } else {
-      window.open(authUrl, "_blank")
+    if (!response.success) {
+      throw new Error("Failed to open authentication popup")
     }
-
-    return authUrl
   }
 
   /**

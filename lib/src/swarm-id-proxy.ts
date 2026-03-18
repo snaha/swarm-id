@@ -726,6 +726,10 @@ export class SwarmIdProxy {
         await this.handleCreateFeedManifest(message, event)
         break
 
+      case "connect":
+        this.handleConnect(message, event)
+        break
+
       default:
         // TypeScript should ensure this is never reached
         const exhaustiveCheck: never = message
@@ -1238,19 +1242,32 @@ export class SwarmIdProxy {
     this.authButtonContainer.appendChild(button)
   }
 
+  private handleConnect(
+    message: { type: "connect"; requestId: string; agent?: boolean },
+    event: MessageEvent,
+  ): void {
+    const success = this.openAuthPopup({ agent: message.agent })
+    ;(event.source as WindowProxy).postMessage(
+      {
+        type: "connectResponse",
+        requestId: message.requestId,
+        success,
+      },
+      { targetOrigin: event.origin },
+    )
+  }
+
   /**
    * Open the authentication popup window.
    * Returns true if popup was opened, false if parent origin is not set.
    */
-  private openAuthPopup(): boolean {
+  private openAuthPopup(options?: { agent?: boolean }): boolean {
     if (!this.parentOrigin) {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
       return false
     }
 
     // Build authentication URL using shared utility
-    // proxyMode=true: popup was opened from proxy iframe, so we validate
-    // same-origin opener and send setSecret via postMessage
     // challenge: used for storage partitioning detection — popup checks if it can read this from localStorage
     const challenge = crypto.randomUUID()
     localStorage.setItem(STORAGE_CHALLENGE_KEY, challenge)
@@ -1261,7 +1278,7 @@ export class SwarmIdProxy {
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      { proxyMode: true, challenge },
+      { challenge, agent: options?.agent },
     )
 
     // Open as popup or full window based on popupMode

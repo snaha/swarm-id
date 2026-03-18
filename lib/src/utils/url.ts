@@ -5,12 +5,6 @@ import type { AppMetadata } from "../types"
  */
 export interface BuildAuthUrlOptions {
   /**
-   * When true, enables proxy mode which validates same-origin opener
-   * and sends setSecret via postMessage.
-   * Used primarily for local development and testing scenarios.
-   */
-  proxyMode?: boolean
-  /**
    * When true, shows the agent sign-up option on the connect page.
    * Agents are automated services that can perform operations on behalf of users.
    */
@@ -54,10 +48,6 @@ export function buildAuthUrl(
   // Build URL with hash parameters (avoids re-renders in SPA)
   const params = new URLSearchParams()
   params.set("origin", origin)
-
-  if (options?.proxyMode) {
-    params.set("proxyMode", "true")
-  }
 
   if (metadata) {
     params.set("appName", metadata.name)

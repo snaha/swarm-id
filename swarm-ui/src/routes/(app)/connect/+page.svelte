@@ -62,11 +62,10 @@
     const hashParams = getHashParams()
     showAgentSignup = hashParams.has('agent')
 
-    // Storage partitioning detection: if proxy opened this popup with a challenge,
+    // Storage partitioning detection: proxy opens this popup with a challenge,
     // check if we can read it from localStorage (shared storage)
-    const proxyMode = hashParams.get('proxyMode') === 'true'
     const challenge = hashParams.get('challenge')
-    if (proxyMode && challenge) {
+    if (challenge) {
       const storedChallenge = localStorage.getItem(STORAGE_CHALLENGE_KEY)
       if (storedChallenge === challenge) {
         // Storage is shared — normal mode, clean up challenge

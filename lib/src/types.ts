@@ -985,6 +985,12 @@ export const GetPostageBatchMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const ConnectMessageSchema = z.object({
+  type: z.literal("connect"),
+  requestId: z.string(),
+  agent: z.boolean().optional(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -1023,6 +1029,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
   GetPostageBatchMessageSchema,
+  ConnectMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -1090,6 +1097,7 @@ export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
 export type GetPostageBatchMessage = z.infer<
   typeof GetPostageBatchMessageSchema
 >
+export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -1626,11 +1634,6 @@ export interface AuthOptions {
  * Configuration options for the connect() method.
  */
 export interface ConnectOptions {
-  /**
-   * Whether to open as a popup window ("popup") or full window ("window").
-   * @default "window"
-   */
-  popupMode?: "popup" | "window"
   /**
    * When true, shows the agent sign-up option on the connect page.
    * Agents are automated services that can perform operations on behalf of users.

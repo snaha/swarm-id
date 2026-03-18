@@ -238,7 +238,7 @@ export const clientStore = {
     if (status.authenticated) {
       await client.disconnect()
     } else {
-      client.connect({ agent: options?.agent })
+      await client.connect({ agent: options?.agent })
     }
   },
 

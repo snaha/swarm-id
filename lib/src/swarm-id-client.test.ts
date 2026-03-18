@@ -38,84 +38,61 @@ describe("SwarmIdClient connect()", () => {
     })
   })
 
-  it("should build correct authentication URL with metadata", () => {
-    // Mock ensureReady to bypass initialization requirement
+  it("should send connect message to proxy", async () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    const sendRequestSpy = vi
+      .spyOn(client as never, "sendRequest")
+      .mockResolvedValue({
+        type: "connectResponse",
+        requestId: "test",
+        success: true,
+      })
 
-    const expectedUrl =
-      "https://swarm-id.example.com/connect#origin=https%3A%2F%2Flocalhost&appName=Test+App&appDescription=A+test+application"
+    await client.connect()
 
-    const openedUrl = client.connect()
-
-    expect(window.open).toHaveBeenCalledWith(expectedUrl, "_blank")
-    expect(openedUrl).toBe(expectedUrl)
-  })
-
-  it("should open popup window when popupMode is 'popup'", () => {
-    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-
-    client.connect({ popupMode: "popup" })
-
-    expect(window.open).toHaveBeenCalledWith(
-      expect.stringContaining("connect#"),
-      "_blank",
-      "width=500,height=600",
+    expect(sendRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "connect",
+        agent: undefined,
+      }),
     )
   })
 
-  it("should open full window when popupMode is 'window'", () => {
+  it("should send agent flag to proxy when agent option is true", async () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    const sendRequestSpy = vi
+      .spyOn(client as never, "sendRequest")
+      .mockResolvedValue({
+        type: "connectResponse",
+        requestId: "test",
+        success: true,
+      })
 
-    client.connect({ popupMode: "window" })
+    await client.connect({ agent: true })
 
-    expect(window.open).toHaveBeenCalledWith(
-      expect.stringContaining("connect#"),
-      "_blank",
+    expect(sendRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "connect",
+        agent: true,
+      }),
     )
   })
 
-  it("should include agent parameter when agent option is true", () => {
+  it("should throw when popup fails to open", async () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-
-    const openedUrl = client.connect({ agent: true })
-
-    expect(openedUrl).toContain("agent=")
-    expect(window.open).toHaveBeenCalledWith(
-      expect.stringContaining("agent="),
-      "_blank",
-    )
-  })
-
-  it("should not include agent parameter when agent option is false or not set", () => {
-    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-
-    const openedUrl = client.connect()
-
-    expect(openedUrl).not.toContain("agent")
-  })
-
-  it("should work with minimal metadata", () => {
-    const clientWithMinimalMetadata = new SwarmIdClient({
-      iframeOrigin: "https://swarm-id.example.com",
-      metadata: {
-        name: "Minimal App",
-      },
+    vi.spyOn(client as never, "sendRequest").mockResolvedValue({
+      type: "connectResponse",
+      requestId: "test",
+      success: false,
     })
 
-    vi.spyOn(clientWithMinimalMetadata, "ensureReady").mockImplementation(
-      () => {},
+    await expect(client.connect()).rejects.toThrow(
+      "Failed to open authentication popup",
     )
-
-    const expectedUrl =
-      "https://swarm-id.example.com/connect#origin=https%3A%2F%2Flocalhost&appName=Minimal+App"
-    const openedUrl = clientWithMinimalMetadata.connect()
-
-    expect(window.open).toHaveBeenCalledWith(expectedUrl, "_blank")
-    expect(openedUrl).toBe(expectedUrl)
   })
 
-  it("should throw error if client is not initialized", () => {
-    expect(() => client.connect()).toThrow(
+  it("should throw error if client is not initialized", async () => {
+    await expect(client.connect()).rejects.toThrow(
       "SwarmIdClient not initialized. Call initialize() first.",
     )
   })
