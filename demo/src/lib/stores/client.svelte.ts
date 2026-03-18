@@ -89,7 +89,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
       readOnly = connectionInfo.readOnly ?? false
       if (connectionInfo.readOnly) {
         logStore.log(
-          'Read-only mode: Safari tracking protection limits this session to downloads only',
+          'Read-only mode: browser storage partitioning limits this session to downloads only',
           'warn',
         )
       } else if (!connectionInfo.canUpload) {

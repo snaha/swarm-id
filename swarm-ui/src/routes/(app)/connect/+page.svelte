@@ -39,7 +39,7 @@
   let showSeedModal = $state(false)
   let pendingAgentAccount = $state<Account | undefined>(undefined)
   let showAgentSignup = $state(false)
-  let itpDetected = $state(false)
+  let storagePartitioned = $state(false)
   let lastAppSecret = $state<string | undefined>(undefined)
 
   const allIdentities = $derived(identitiesStore.identities)
@@ -57,25 +57,25 @@
     return new URLSearchParams(hash)
   }
 
-  const ITP_CHALLENGE_KEY = 'swarm-itp-challenge'
+  const STORAGE_CHALLENGE_KEY = 'swarm-storage-challenge'
 
   onMount(() => {
     // Get parameters from URL hash (e.g., #origin=foo&appName=bar)
     const hashParams = getHashParams()
     showAgentSignup = hashParams.has('agent')
 
-    // ITP detection: if proxy opened this popup with a challenge,
+    // Storage partitioning detection: if proxy opened this popup with a challenge,
     // check if we can read it from localStorage (shared storage)
     const proxyMode = hashParams.get('proxyMode') === 'true'
     const challenge = hashParams.get('challenge')
     if (proxyMode && challenge) {
-      const storedChallenge = localStorage.getItem(ITP_CHALLENGE_KEY)
+      const storedChallenge = localStorage.getItem(STORAGE_CHALLENGE_KEY)
       if (storedChallenge === challenge) {
         // Storage is shared — normal mode, clean up challenge
-        localStorage.removeItem(ITP_CHALLENGE_KEY)
+        localStorage.removeItem(STORAGE_CHALLENGE_KEY)
       } else {
-        // Storage is partitioned — ITP detected, use postMessage fallback
-        itpDetected = true
+        // Storage is partitioned — use postMessage fallback
+        storagePartitioned = true
       }
     }
 
@@ -180,7 +180,7 @@
       return
     }
 
-    // Store for potential ITP postMessage fallback
+    // Store for potential storage partitioning postMessage fallback
     lastAppSecret = appSecret
 
     // Write to localStorage - this triggers storage events in the iframe
@@ -199,7 +199,7 @@
   }
 
   /**
-   * Send app secret to the iframe via postMessage (ITP fallback).
+   * Send app secret to the iframe via postMessage (storage partitioning fallback).
    * When storage is partitioned, the iframe can't receive the secret via storage events,
    * so we send it directly via window.opener (which points to the iframe that opened this popup).
    */
@@ -319,9 +319,9 @@
   }
 
   function closeWindowWithSessionCleanup() {
-    // When ITP is detected, send the secret via postMessage to the iframe
+    // When storage partitioning is detected, send the secret via postMessage to the iframe
     // since storage events won't fire across partitioned storage
-    if (itpDetected && lastAppSecret) {
+    if (storagePartitioned && lastAppSecret) {
       sendSecretToOpener(lastAppSecret)
     }
     sessionStore.clear()

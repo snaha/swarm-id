@@ -16,9 +16,9 @@ export interface BuildAuthUrlOptions {
    */
   agent?: boolean
   /**
-   * Challenge string for ITP detection. When present, the popup checks
+   * Challenge string for storage partitioning detection. When present, the popup checks
    * if it can read this challenge from localStorage to determine whether
-   * storage is partitioned (ITP enabled).
+   * storage is partitioned.
    */
   challenge?: string
 }

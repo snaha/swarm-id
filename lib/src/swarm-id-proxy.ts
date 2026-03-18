@@ -107,7 +107,7 @@ import {
   parseCompressedPublicKey,
 } from "./proxy/act"
 
-const ITP_CHALLENGE_KEY = "swarm-itp-challenge"
+const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
@@ -216,7 +216,7 @@ export class SwarmIdProxy {
       // If already authenticated with same secret, nothing to do
     } else if (this.authenticated && !this.readOnly) {
       // No valid connection in storage, but we're authenticated - disconnect.
-      // Skip when in readOnly mode (ITP): storage is partitioned so the iframe
+      // Skip when in readOnly mode (storage partitioning): storage is partitioned so the iframe
       // can't see connected apps, but auth was established via postMessage.
       this.clearAuthData()
       this.sendToParent({
@@ -256,7 +256,7 @@ export class SwarmIdProxy {
 
   /**
    * Handle messages from the auth popup (same-origin postMessage).
-   * Used as ITP fallback when storage events don't fire due to partitioning.
+   * Used as storage partitioning fallback when storage events don't fire due to partitioning.
    */
   private async handlePopupMessage(
     message: PopupToIframeMessage,
@@ -273,8 +273,8 @@ export class SwarmIdProxy {
         return
       }
 
-      // Clean up ITP challenge
-      localStorage.removeItem(ITP_CHALLENGE_KEY)
+      // Clean up storage partitioning challenge
+      localStorage.removeItem(STORAGE_CHALLENGE_KEY)
 
       // Authenticate in read-only mode (no stamps available via postMessage)
       this.appSecret = message.data.secret
@@ -475,7 +475,7 @@ export class SwarmIdProxy {
         return
       }
 
-      // Handle same-origin popup messages (ITP postMessage fallback)
+      // Handle same-origin popup messages (storage partitioning postMessage fallback)
       if (event.origin === window.location.origin && type === "setSecret") {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
         if (popupResult.success) {
@@ -1245,9 +1245,9 @@ export class SwarmIdProxy {
     // Build authentication URL using shared utility
     // proxyMode=true: popup was opened from proxy iframe, so we validate
     // same-origin opener and send setSecret via postMessage
-    // challenge: used for ITP detection — popup checks if it can read this from localStorage
+    // challenge: used for storage partitioning detection — popup checks if it can read this from localStorage
     const challenge = crypto.randomUUID()
-    localStorage.setItem(ITP_CHALLENGE_KEY, challenge)
+    localStorage.setItem(STORAGE_CHALLENGE_KEY, challenge)
 
     // Get base path from current location (e.g., /id/pr-140/proxy -> /id/pr-140)
     const basePath = window.location.pathname.replace(/\/proxy$/, "")
