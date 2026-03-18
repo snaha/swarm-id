@@ -281,6 +281,7 @@
     --font-family-h4: var(--font-family-inter);
     --font-family-h5: var(--font-family-inter);
     --font-family-h6: var(--font-family-inter);
+    --max-width: 1152px;
     font-family: var(--font-family-inter);
     min-height: 100vh;
     background: #0e1215;
@@ -292,7 +293,7 @@
     justify-content: space-between;
     align-items: center;
     padding: var(--double-padding);
-    max-width: 1200px;
+    max-width: 100%;
     margin: 0 auto;
   }
 
@@ -312,7 +313,7 @@
     display: flex;
     flex-direction: column;
     gap: var(--quadruple-padding);
-    /* max-width: 1200px; */
+    max-width: var(--max-width);
     margin: 0 auto;
     padding: 0 var(--double-padding);
     /* Desktop: 320px from top - 106px header = 214px */
@@ -467,8 +468,9 @@
   }
 
   .footer-content {
-    max-width: 1200px;
+    max-width: var(--max-width);
     margin: 0 auto;
+    padding: 0 var(--double-padding);
   }
 
   .footer-grid {
@@ -525,6 +527,10 @@
     :global(.footer-mission) {
       max-width: none;
     }
+
+    .footer-content {
+      padding: 0 var(--padding);
+    }
   }
 
   @media screen and (max-width: 600px) {
@@ -534,6 +540,9 @@
 
     .footer-brand {
       grid-column: span 1;
+    }
+    .footer-content {
+      padding: 0 var(--padding);
     }
   }
 
