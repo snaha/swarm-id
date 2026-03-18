@@ -20,7 +20,7 @@
   import Information from 'carbon-icons-svelte/lib/Information.svelte'
   import Rocket from 'carbon-icons-svelte/lib/Rocket.svelte'
   import TrashCan from 'carbon-icons-svelte/lib/TrashCan.svelte'
-  import Unlink from 'carbon-icons-svelte/lib/Unlink.svelte'
+  import Logout from 'carbon-icons-svelte/lib/Logout.svelte'
   import NetworkSettingsModal from './network-settings-modal.svelte'
   import ThemeToggle from './theme-toggle.svelte'
   import FlexItem from '$lib/components/ui/flex-item.svelte'
@@ -28,7 +28,7 @@
   import Badge from '$lib/components/ui/badge.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { createEncryptedExport } from '@swarm-id/lib'
+  import { createEncryptedExport, SWARM_SECRET_PREFIX } from '@swarm-id/lib'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import type { Account, Identity } from '$lib/types'
@@ -152,6 +152,26 @@
         URL.revokeObjectURL(url)
       }
     }
+  }
+
+  async function handleSignOut() {
+    const accountId = account.id
+    const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
+
+    for (const identity of accountIdentities) {
+      const apps = connectedAppsStore.getAppsByIdentityId(identity.id)
+      for (const app of apps) {
+        localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
+      }
+      connectedAppsStore.removeAppsByIdentityId(identity.id)
+      identitiesStore.removeIdentity(identity.id)
+    }
+    postageStampsStore.removeStampsByAccount(accountId.toHex())
+    accountsStore.removeAccount(accountId)
+
+    sessionStore.clearAccount()
+    drawerOpen = false
+    await goto(resolve(routes.HOME))
   }
 </script>
 
@@ -509,10 +529,12 @@
               {/snippet}
             </Tooltip>
           </Horizontal>
-          <Button variant="ghost" dimension="compact" leftAlign onclick={notImplemented}>
-            <Unlink size={20} />
-            Disconnect
-          </Button>
+          {#if account.defaultPostageStampBatchID}
+            <Button variant="ghost" dimension="compact" leftAlign onclick={handleSignOut}>
+              <Logout size={20} />
+              Sign out
+            </Button>
+          {/if}
           <Button
             variant="ghost"
             dimension="compact"
