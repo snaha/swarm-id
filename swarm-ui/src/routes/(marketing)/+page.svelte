@@ -4,6 +4,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import routes from '$lib/routes'
   import SwarmLogo from '$lib/components/swarm-logo.svelte'
+  import SwarmOnlyLogo from '$lib/components/swarm-only-logo.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
@@ -205,7 +206,7 @@
       <div class="footer-content">
         <div class="footer-grid">
           <div class="footer-brand">
-            <SwarmLogo fill="var(--colors-dark-top)" height={24} />
+            <SwarmOnlyLogo fill="var(--colors-dark-top)" height={24} />
             <Typography class="footer-mission">
               Swarm provides censorship resistant storage and communication infrastructure for a
               sovereign digital society.
@@ -462,15 +463,11 @@
 
   /* Footer styles */
   .footer {
+    max-width: var(--max-width);
+    margin: 0 auto;
     margin-top: var(--quadruple-padding);
     padding: var(--quadruple-padding) var(--double-padding);
     border-top: 1px solid #2f3842;
-  }
-
-  .footer-content {
-    max-width: var(--max-width);
-    margin: 0 auto;
-    padding: 0 var(--double-padding);
   }
 
   .footer-grid {
@@ -482,6 +479,7 @@
   .footer-brand {
     display: flex;
     flex-direction: column;
+    align-items: flex-start;
     gap: var(--padding);
   }
 
@@ -527,10 +525,6 @@
     :global(.footer-mission) {
       max-width: none;
     }
-
-    .footer-content {
-      padding: 0 var(--padding);
-    }
   }
 
   @media screen and (max-width: 600px) {
@@ -540,9 +534,6 @@
 
     .footer-brand {
       grid-column: span 1;
-    }
-    .footer-content {
-      padding: 0 var(--padding);
     }
   }
 
