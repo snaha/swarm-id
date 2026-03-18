@@ -1,4 +1,5 @@
 const routes = {
+  ROOT: '/' as const,
   HOME: '/(app)/home' as const,
   CONNECT: '/(app)/connect' as const,
   ACCOUNT_NEW: '/(app)/account/new' as const,

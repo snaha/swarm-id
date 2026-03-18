@@ -32,7 +32,7 @@
   // Redirect to product page if no accounts
   $effect(() => {
     if (!hasAccounts) {
-      goto(resolve('/'))
+      goto(resolve(routes.ROOT))
     }
   })
 
