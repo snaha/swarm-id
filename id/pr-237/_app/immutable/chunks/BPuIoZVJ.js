@@ -1,1 +1,0 @@
-import{a7 as t,a4 as b,a3 as h,Y as k,a8 as S}from"./tZ6cG3D-.js";function u(r,a){return r===a||r?.[S]===a}function c(r={},a,f,T){return t(()=>{var i,s;return b(()=>{i=s,s=[],h(()=>{r!==f(...s)&&(a(r,...s),i&&u(f(...i),r)&&a(null,...i))})}),()=>{k(()=>{s&&u(f(...s),r)&&a(null,...s)})}}),r}export{c as b};
