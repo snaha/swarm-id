@@ -3,9 +3,9 @@
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
+  import Select from '$lib/components/ui/select/select.svelte'
   import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
   import Information from 'carbon-icons-svelte/lib/Information.svelte'
-  import ChevronDown from 'carbon-icons-svelte/lib/ChevronDown.svelte'
   import routes from '$lib/routes'
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import Polycon from '$lib/components/polycon.svelte'
@@ -25,6 +25,11 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
 
   type StampOption = 'account' | 'separate'
+
+  const stampOptions = [
+    { value: 'account', label: 'Use account stamp (default)' },
+    { value: 'separate', label: 'Use separate stamp (advanced)' },
+  ]
 
   let idName = $state('')
   let selectedStampOption = $state<StampOption>('account')
@@ -113,15 +118,15 @@
       return
     }
 
-    // Synced account without an account stamp → go to account stamp page first
-    if (!account.defaultPostageStampBatchID) {
-      goto(resolve(routes.STAMPS_ACCOUNT_NEW))
+    // Synced account + "separate" → go directly to identity stamp page
+    if (selectedStampOption === 'separate') {
+      goto(resolve(routes.STAMPS_IDENTITY_NEW))
       return
     }
 
-    // Synced account with account stamp + "separate" → go to identity stamp page
-    if (selectedStampOption === 'separate') {
-      goto(resolve(routes.STAMPS_IDENTITY_NEW))
+    // Synced account + "account" option → check for account stamp
+    if (!account.defaultPostageStampBatchID) {
+      goto(resolve(routes.STAMPS_ACCOUNT_NEW))
       return
     }
 
@@ -162,16 +167,13 @@
         {#if isSyncedCreation}
           <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
             <div class="input-grow">
-              <Vertical --vertical-gap="var(--quarter-padding)">
-                <Typography>Postage stamp</Typography>
-                <div class="select-wrapper">
-                  <select class="stamp-select" bind:value={selectedStampOption}>
-                    <option value="account">Use account stamp (default)</option>
-                    <option value="separate">Use separate stamp (advanced)</option>
-                  </select>
-                  <ChevronDown size={20} class="select-icon" />
-                </div>
-              </Vertical>
+              <Select
+                variant="outline"
+                dimension="compact"
+                label="Postage stamp"
+                bind:value={selectedStampOption}
+                items={stampOptions}
+              />
             </div>
             <Tooltip
               helperText="Use your account stamp for simplicity, or assign a separate stamp to keep this identity's activity separate from your other identities. You can change this later."
@@ -183,6 +185,8 @@
               <Button
                 variant="ghost"
                 dimension="compact"
+                onmouseenter={() => (showStampTooltip = true)}
+                onmouseleave={() => (showStampTooltip = false)}
                 onclick={() => (showStampTooltip = !showStampTooltip)}
               >
                 <Information size={20} />
@@ -212,45 +216,5 @@
   .input-grow {
     flex: 1;
     min-width: 0;
-  }
-
-  /* Select wrapper for custom styled select */
-  .select-wrapper {
-    position: relative;
-    width: 100%;
-  }
-
-  .stamp-select {
-    width: 100%;
-    padding: var(--half-padding);
-    padding-right: calc(var(--half-padding) + 24px);
-    border: 1px solid var(--colors-ultra-high);
-    background: transparent;
-    font-family: var(--font-family-sans-serif);
-    font-size: var(--font-size);
-    line-height: var(--line-height);
-    color: var(--colors-ultra-high);
-    cursor: pointer;
-    appearance: none;
-    -webkit-appearance: none;
-    -moz-appearance: none;
-  }
-
-  .stamp-select:focus {
-    outline: var(--focus-outline);
-    outline-offset: var(--focus-outline-offset);
-  }
-
-  .stamp-select:hover {
-    border-color: var(--colors-top);
-  }
-
-  .select-wrapper :global(.select-icon) {
-    position: absolute;
-    right: var(--half-padding);
-    top: 50%;
-    transform: translateY(-50%);
-    pointer-events: none;
-    color: var(--colors-ultra-high);
   }
 </style>

@@ -29,6 +29,7 @@ export interface PurchaseStampOptions {
   onError: (error: Error) => void
   onCancel: () => void
   mocked?: boolean // For testing - returns dummy batches
+  mockError?: boolean // For testing - simulate error instead of success
 }
 
 /**
@@ -100,7 +101,7 @@ function parseBatchEvent(data: unknown): BatchEvent | undefined {
  * @param options - Purchase options including destination address and callbacks
  */
 export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
-  const { destination, onSuccess, onError, onCancel, mocked } = options
+  const { destination, onSuccess, onError, onCancel, mocked, mockError } = options
 
   const url = buildWidgetUrl(destination, mocked)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
@@ -184,16 +185,22 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
         completed = true
         cleanup()
         popup.close()
-        // Generate a 64-character hex batch ID
-        const batchId =
-          crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 32)
-        onSuccess({
-          event: 'batch',
-          batchId,
-          depth: 20,
-          amount: '10000000000',
-          blockNumber: '0x' + Math.floor(Date.now() / 1000).toString(16),
-        })
+
+        if (mockError) {
+          onError(new Error('Mock error: Purchase failed'))
+        } else {
+          // Generate a 64-character hex batch ID
+          const batchId =
+            crypto.randomUUID().replace(/-/g, '') +
+            crypto.randomUUID().replace(/-/g, '').slice(0, 32)
+          onSuccess({
+            event: 'batch',
+            batchId,
+            depth: 20,
+            amount: '10000000000',
+            blockNumber: '0x' + Math.floor(Date.now() / 1000).toString(16),
+          })
+        }
       }
     }, MOCK_DELAY_MS)
   }

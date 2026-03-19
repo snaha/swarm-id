@@ -31,6 +31,7 @@
       const masterKey = await getMasterKeyFromAccount(account)
       sessionStore.setAccount(account)
       sessionStore.setTemporaryMasterKey(masterKey)
+      sessionStore.setSyncedCreation(account.defaultPostageStampBatchID !== undefined)
       goto(resolve(routes.IDENTITY_NEW))
     } catch (err) {
       if (err instanceof SeedPhraseRequiredError) {
@@ -51,6 +52,7 @@
       const masterKey = getMasterKeyFromAgentAccount(account, seedPhrase)
       sessionStore.setAccount(account)
       sessionStore.setTemporaryMasterKey(masterKey)
+      sessionStore.setSyncedCreation(account.defaultPostageStampBatchID !== undefined)
       goto(resolve(routes.IDENTITY_NEW))
     } catch (err) {
       console.error('Invalid seed phrase:', err)

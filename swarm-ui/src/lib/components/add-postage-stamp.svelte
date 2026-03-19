@@ -5,8 +5,7 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Loader from '$lib/components/ui/loader.svelte'
-  import ErrorMessage from '$lib/components/ui/error-message.svelte'
-  import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import Launch from 'carbon-icons-svelte/lib/Launch.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
@@ -17,19 +16,25 @@
     type BatchEvent,
   } from '$lib/services/multichain-widget'
   import type { PostageStamp } from '@swarm-id/lib'
+  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
 
   const HEX_BASE = 16
-  const SUCCESS_REDIRECT_DELAY_MS = 1500
+  const POLYCON_SIZE = 80
 
   export type PageState = 'select' | 'purchase' | 'manual'
   export type PurchaseState = 'waiting' | 'success' | 'error'
+  export type StampVariant = 'account-creation' | 'dashboard' | 'external-app'
 
   interface Props {
     accountId: string
     onSuccess: (stamp: PostageStamp) => void
     onSkip?: () => void
-    skipText?: string
     introText?: string
+    // Variant determines success/error screen layout
+    variant?: StampVariant
+    // For account-creation variant
+    identityName?: string
+    identityValue?: string
     // Bindable state for parent to read
     pageState?: PageState
     purchaseState?: PurchaseState
@@ -40,12 +45,17 @@
     accountId,
     onSuccess,
     onSkip,
-    skipText = 'Skip this step',
     introText = 'Synced accounts require a Swarm postage stamp.',
+    variant = 'dashboard',
+    identityName,
+    identityValue,
     pageState = $bindable<PageState>('select'),
     purchaseState = $bindable<PurchaseState>('waiting'),
     isFormDisabled = $bindable(true),
   }: Props = $props()
+
+  // Saved stamp reference for success screen navigation
+  let savedStamp = $state<PostageStamp | undefined>(undefined)
 
   // Manual form state
   let batchID = $state('')
@@ -56,12 +66,10 @@
   let submitError = $state<string | undefined>(undefined)
 
   // Purchase flow state
-  let purchaseError = $state<string | undefined>(undefined)
   let signerKeyBytes = $state<Uint8Array | undefined>(undefined)
 
   export function goToSelect() {
     pageState = 'select'
-    purchaseError = undefined
   }
 
   export function handleAddStamp() {
@@ -99,7 +107,6 @@
     // Update state
     pageState = 'purchase'
     purchaseState = 'waiting'
-    purchaseError = undefined
 
     // Open widget
     openStampPurchaseWidget({
@@ -107,15 +114,14 @@
       onSuccess: handleWidgetSuccess,
       onError: handleWidgetError,
       onCancel: handleWidgetCancel,
-      // Use mocked mode in development
-      mocked: import.meta.env.DEV,
+      mocked: devSettingsStore.data.mockStampEnabled,
+      mockError: devSettingsStore.data.mockStampResult === 'error',
     })
   }
 
   function handleWidgetSuccess(batch: BatchEvent) {
     if (!signerKeyBytes) {
       purchaseState = 'error'
-      purchaseError = 'Signer key not found'
       return
     }
 
@@ -135,21 +141,21 @@
         exists: true,
       })
 
+      savedStamp = stamp
       purchaseState = 'success'
-
-      // Call onSuccess after a short delay
-      setTimeout(() => {
-        onSuccess(stamp)
-      }, SUCCESS_REDIRECT_DELAY_MS)
-    } catch (error) {
+    } catch {
       purchaseState = 'error'
-      purchaseError = error instanceof Error ? error.message : 'Failed to save postage stamp'
     }
   }
 
-  function handleWidgetError(error: Error) {
+  export function handleContinue() {
+    if (savedStamp) {
+      onSuccess(savedStamp)
+    }
+  }
+
+  function handleWidgetError() {
     purchaseState = 'error'
-    purchaseError = error.message
   }
 
   function handleWidgetCancel() {
@@ -180,7 +186,7 @@
 
     {#if onSkip}
       <Typography variant="small">
-        Not ready? <button class="link" onclick={onSkip}>{skipText}</button>.
+        Not ready? <button class="link" onclick={onSkip}>Skip this step</button>.
       </Typography>
     {/if}
   </Vertical>
@@ -205,13 +211,40 @@
       --vertical-justify-content="center"
       style="flex: 1;"
     >
-      <div class="success-icon">
-        <Checkmark size={32} />
-      </div>
-      <Typography center>Stamp purchased successfully!</Typography>
-      <Typography variant="small" center>
-        Your new postage stamp has been saved and is ready to use.
+      {#if variant === 'account-creation' && identityValue}
+        <Polycon value={identityValue} size={POLYCON_SIZE} />
+        {#if identityName}
+          <Typography variant="small" center>{identityName}</Typography>
+        {/if}
+      {/if}
+
+      <Typography variant="h4" center>
+        {#if variant === 'account-creation'}
+          ✅ All set!
+        {:else if variant === 'external-app'}
+          ✅ Upgrade successful!
+        {:else}
+          ✅ Upgrade successful
+        {/if}
       </Typography>
+
+      <Typography center>
+        {#if variant === 'account-creation'}
+          Your Swarm identity is ready to use.
+        {:else if variant === 'external-app'}
+          Your postage stamp was added to your account
+        {:else}
+          Your postage stamp is ready to use with your account.
+        {/if}
+      </Typography>
+
+      {#if variant === 'account-creation'}
+        <Typography variant="small" center class="footer-text">
+          Manage your account and create more identities at <a href={window.location.origin}
+            >{window.location.hostname}</a
+          >
+        </Typography>
+      {/if}
     </Vertical>
   {:else if purchaseState === 'error'}
     <Vertical
@@ -220,22 +253,28 @@
       --vertical-justify-content="center"
       style="flex: 1;"
     >
-      <Typography center>Something went wrong during the purchase.</Typography>
-      {#if purchaseError}
-        <ErrorMessage>{purchaseError}</ErrorMessage>
-      {/if}
+      <Typography variant="h4" center>‼️ Something went wrong</Typography>
+      <Typography center>An unexpected error occurred. Please try again.</Typography>
     </Vertical>
   {/if}
 {:else if pageState === 'manual'}
-  <PostageStampForm
-    bind:batchID
-    bind:depth
-    bind:amount
-    bind:blockNumber
-    bind:signerKey
-    bind:disabled={isFormDisabled}
-    {submitError}
-  />
+  <Vertical --vertical-gap="var(--double-padding)">
+    <Typography>
+      Please enter postage stamp details. If you don't have one, you can <button
+        class="link"
+        onclick={handlePurchase}>purchase a new stamp</button
+      >.
+    </Typography>
+    <PostageStampForm
+      bind:batchID
+      bind:depth
+      bind:amount
+      bind:blockNumber
+      bind:signerKey
+      bind:disabled={isFormDisabled}
+      {submitError}
+    />
+  </Vertical>
 {/if}
 
 <style>
@@ -249,14 +288,7 @@
     font: inherit;
   }
 
-  .success-icon {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 64px;
-    height: 64px;
-    border-radius: 50%;
-    background: var(--colors-green);
-    color: var(--colors-base);
+  :global(.footer-text) {
+    opacity: 0.6;
   }
 </style>

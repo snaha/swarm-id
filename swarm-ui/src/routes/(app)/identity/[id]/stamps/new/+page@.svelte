@@ -4,6 +4,7 @@
   import AddPostageStamp, {
     type PageState,
     type PurchaseState,
+    type StampVariant,
   } from '$lib/components/add-postage-stamp.svelte'
   import AddPostageStampButtons from '$lib/components/add-postage-stamp-buttons.svelte'
   import { goto } from '$app/navigation'
@@ -12,11 +13,25 @@
   import routes from '$lib/routes'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { sessionStore } from '$lib/stores/session.svelte'
   import type { PostageStamp } from '@swarm-id/lib'
 
   const identityId = $derived($page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
   const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+
+  // Determine variant based on whether user came from external app
+  const appData = $derived(sessionStore.data.appData)
+  const variant = $derived<StampVariant>(appData ? 'external-app' : 'dashboard')
+
+  // Check if this is an upgrade (local account getting its first stamp)
+  const isUpgrade = $derived(!account?.defaultPostageStampBatchID)
+
+  function handleGoToApp() {
+    if (appData?.appUrl) {
+      window.location.href = appData.appUrl
+    }
+  }
 
   // Bindable state from AddPostageStamp component
   let pageState = $state<PageState>('select')
@@ -56,20 +71,16 @@
     navigateBack()
   }
 
-  // Derive intro and skip text based on whether account has a default stamp
+  // Derive intro text based on whether account has a default stamp
   const introText = $derived(
     account?.defaultPostageStampBatchID
       ? 'You chose to use a separate stamp for this identity.'
-      : 'Synced accounts require a Swarm postage stamp.',
-  )
-
-  const skipText = $derived(
-    account?.defaultPostageStampBatchID ? 'Use your account stamp instead' : 'Skip this step',
+      : 'Synced accounts let you upload content to Swarm and access your account from any device.',
   )
 </script>
 
 <CreationLayout
-  title="Add postage stamp"
+  title={isUpgrade ? 'Upgrade account' : 'Add postage stamp'}
   onClose={handleClose}
   fullPage
   busy={pageState === 'purchase'}
@@ -82,9 +93,9 @@
         bind:this={addPostageStampRef}
         accountId={account.id.toHex()}
         onSuccess={handleSuccess}
-        onSkip={navigateBack}
-        {skipText}
+        onSkip={isUpgrade ? undefined : navigateBack}
         {introText}
+        {variant}
         bind:pageState
         bind:purchaseState
         bind:isFormDisabled
@@ -99,6 +110,9 @@
         {purchaseState}
         {isFormDisabled}
         stampRef={addPostageStampRef}
+        {variant}
+        appName={appData?.appName}
+        onGoToApp={handleGoToApp}
       />
     {/if}
   {/snippet}

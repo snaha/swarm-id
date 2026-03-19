@@ -11,6 +11,7 @@
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { syncStore } from '$lib/stores/sync.svelte'
+  import { devSettingsStore, type MockStampResult } from '$lib/stores/dev-settings.svelte'
   import Tabs from './tabs.svelte'
   import CopyButton from './copy-button.svelte'
   import StatusDot from './status-dot.svelte'
@@ -82,6 +83,18 @@
     },
   ]
   let selectedSigner = $state(KNOWN_SIGNERS[0].value)
+
+  // Mock stamp widget settings
+  let mockStampEnabled = $state(devSettingsStore.data.mockStampEnabled)
+  let mockStampResult = $state<MockStampResult>(devSettingsStore.data.mockStampResult)
+
+  $effect(() => {
+    devSettingsStore.setMockStampEnabled(mockStampEnabled)
+  })
+
+  $effect(() => {
+    devSettingsStore.setMockStampResult(mockStampResult)
+  })
 
   const stampOptions = $derived(
     beeStamps.map((stamp) => ({
@@ -466,6 +479,37 @@ Check console logs for details:
   <!-- Stamps Tab -->
   {#if activeTab === 'stamps'}
     <Vertical --vertical-gap="var(--padding)">
+      <!-- Mock Stamp Widget Settings -->
+      <Vertical --vertical-gap="var(--half-padding)">
+        <Typography variant="h3">Mock Stamp Widget</Typography>
+        <Typography variant="small">
+          Control the behavior of the stamp purchase widget in the app.
+        </Typography>
+
+        <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
+          <label class="checkbox-label">
+            <input type="checkbox" bind:checked={mockStampEnabled} />
+            Enable mock mode
+          </label>
+        </Horizontal>
+
+        {#if mockStampEnabled}
+          <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
+            <Typography variant="small">Mock result:</Typography>
+            <label class="radio-label">
+              <input type="radio" value="success" bind:group={mockStampResult} />
+              Success
+            </label>
+            <label class="radio-label">
+              <input type="radio" value="error" bind:group={mockStampResult} />
+              Error
+            </label>
+          </Horizontal>
+        {/if}
+      </Vertical>
+
+      <Divider --margin="var(--padding) 0" />
+
       <Typography variant="h3">Buy Postage Stamp</Typography>
       <Typography variant="small">
         Buy a postage stamp on the local blockchain for testing uploads.
@@ -699,3 +743,13 @@ Check console logs for details:
     </Vertical>
   {/if}
 </Vertical>
+
+<style>
+  .checkbox-label,
+  .radio-label {
+    display: flex;
+    align-items: center;
+    gap: var(--half-padding);
+    cursor: pointer;
+  }
+</style>
