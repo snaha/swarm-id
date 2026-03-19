@@ -1243,10 +1243,18 @@ export class SwarmIdProxy {
   }
 
   private handleConnect(
-    message: { type: "connect"; requestId: string; agent?: boolean },
+    message: {
+      type: "connect"
+      requestId: string
+      agent?: boolean
+      popupMode?: "popup" | "window"
+    },
     event: MessageEvent,
   ): void {
-    const success = this.openAuthPopup({ agent: message.agent })
+    const success = this.openAuthPopup({
+      agent: message.agent,
+      popupMode: message.popupMode,
+    })
     ;(event.source as WindowProxy).postMessage(
       {
         type: "connectResponse",
@@ -1261,7 +1269,10 @@ export class SwarmIdProxy {
    * Open the authentication popup window.
    * Returns true if popup was opened, false if parent origin is not set.
    */
-  private openAuthPopup(options?: { agent?: boolean }): boolean {
+  private openAuthPopup(options?: {
+    agent?: boolean
+    popupMode?: "popup" | "window"
+  }): boolean {
     if (!this.parentOrigin) {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
       return false
@@ -1281,9 +1292,10 @@ export class SwarmIdProxy {
       { challenge, agent: options?.agent },
     )
 
-    // Open as popup or full window based on popupMode
+    // Open as popup or full window based on popupMode (per-call override takes precedence)
+    const effectivePopupMode = options?.popupMode ?? this.popupMode
     let popup: Window | null = null
-    if (this.popupMode === "popup") {
+    if (effectivePopupMode === "popup") {
       popup = window.open(authUrl, "_blank", "width=500,height=600")
     } else {
       popup = window.open(authUrl, "_blank")
@@ -1523,6 +1535,12 @@ export class SwarmIdProxy {
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
       }
 
       if (!this.postageBatchId) {
@@ -1912,6 +1930,12 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
+      }
+
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -1973,6 +1997,12 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
+      }
+
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -2031,6 +2061,12 @@ export class SwarmIdProxy {
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
       }
 
       if (!this.postageBatchId || !this.stamper) {
@@ -2385,6 +2421,12 @@ export class SwarmIdProxy {
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
+      }
+
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
       }
 
       if (!this.postageBatchId || !this.stamper) {
@@ -2891,6 +2933,11 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
+      }
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -2996,6 +3043,11 @@ export class SwarmIdProxy {
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
+      }
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
       }
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
@@ -3124,6 +3176,11 @@ export class SwarmIdProxy {
     try {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
+      }
+      if (this.storagePartitioned) {
+        throw new Error(
+          "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+        )
       }
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
@@ -3798,6 +3855,15 @@ export class SwarmIdProxy {
         event,
         message.requestId,
         "No owner provided and no app signer available",
+      )
+      return
+    }
+
+    if (this.storagePartitioned) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        "Uploads are unavailable in download-only mode due to browser storage partitioning.",
       )
       return
     }

@@ -989,6 +989,7 @@ export const ConnectMessageSchema = z.object({
   type: z.literal("connect"),
   requestId: z.string(),
   agent: z.boolean().optional(),
+  popupMode: z.enum(["popup", "window"]).optional(),
 })
 
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
@@ -1639,6 +1640,11 @@ export interface ConnectOptions {
    * Agents are automated services that can perform operations on behalf of users.
    */
   agent?: boolean
+  /**
+   * Override popup mode for this connect call.
+   * "popup" opens a sized popup window, "window" opens a full browser tab.
+   */
+  popupMode?: "popup" | "window"
 }
 
 // ============================================================================

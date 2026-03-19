@@ -12,7 +12,7 @@ This monorepo implements a cross-browser compatible authentication and identity 
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; Safari requires disabling cross-site tracking prevention.
+The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; Safari works in download-only mode (auth works, uploads disabled due to ITP storage partitioning).
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
@@ -94,7 +94,7 @@ Open http://localhost:3000 - that's it!
 - Identity UI runs on port 5174
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** Safari requires disabling cross-site tracking prevention (Settings → Privacy → uncheck "Prevent cross-site tracking"). See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
+**Note:** Safari operates in download-only mode — authentication and downloads work, but uploads are disabled due to ITP storage partitioning. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 
 ### Development Mode (with hot reload)
 
@@ -381,13 +381,11 @@ paths:
 - Library changes: restart `pnpm dev:lib` or rebuild
 - SvelteKit changes: automatic hot reload
 
-### Safari not working
+### Safari limitations
 
-Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes (a form of storage partitioning), which breaks the authentication flow. To use Safari:
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, which prevents access to signing keys and postage stamps. Safari operates in **download-only mode**: authentication and downloads work, but uploads are not available.
 
-- **macOS:** Safari Settings (⌘,) → Privacy → uncheck "Prevent cross-site tracking"
-- **iOS:** Settings → Apps → Safari → toggle off "Prevent Cross-Site Tracking"
-- **Safari private mode** works with ITP disabled, but sessions are ephemeral (lost when the private window closes)
+- **Safari private mode**: Sessions are ephemeral (lost when the private window closes)
 
 See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 

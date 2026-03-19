@@ -777,10 +777,10 @@ export class SwarmIdClient {
    * **Browser Compatibility:**
    * - Production (Chrome/Firefox): Works immediately
    * - Localhost (Chrome/Firefox): Works after iframe button grants Storage Access
-   * - Safari (any, including private mode): Requires disabling cross-site tracking prevention in settings. Private mode sessions are ephemeral (lost when the private window closes).
+   * - Safari (any): Download-only mode — auth works, uploads disabled (ITP storage partitioning). Private mode sessions are ephemeral (lost when the private window closes).
    *
    * For localhost development with Chrome/Firefox, click the iframe button first
-   * to grant Storage Access. For Safari, see https://github.com/snaha/swarm-id/issues/167
+   * to grant Storage Access. For Safari details, see https://github.com/snaha/swarm-id/issues/167
    *
    * @param options - Configuration options for the connect flow
    * @param options.agent - When true, shows the agent sign-up option on the connect page
@@ -810,6 +810,7 @@ export class SwarmIdClient {
       type: "connect",
       requestId,
       agent: options.agent,
+      popupMode: options.popupMode,
     })
 
     if (!response.success) {
