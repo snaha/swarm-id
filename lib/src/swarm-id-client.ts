@@ -76,12 +76,10 @@ import type {
 import {
   IframeToParentMessageSchema,
   ParentToIframeMessageSchema,
-  PopupToIframeMessageSchema,
   AppMetadataSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/key-derivation"
-import { buildAuthUrl } from "./utils/url"
 
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -345,18 +343,6 @@ export class SwarmIdClient {
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
         )
-        return
-      }
-
-      // Relay setSecret from popup to proxy iframe (storage partitioning fallback)
-      if (event.data?.type === "setSecret") {
-        const result = PopupToIframeMessageSchema.safeParse(event.data)
-        if (result.success && this.iframe?.contentWindow) {
-          this.iframe.contentWindow.postMessage(
-            result.data,
-            new URL(this.iframeOrigin).origin,
-          )
-        }
         return
       }
 
@@ -812,26 +798,21 @@ export class SwarmIdClient {
    * await client.connect({ agent: true })
    * ```
    */
-  connect(options: ConnectOptions = {}): void {
+  async connect(options: ConnectOptions = {}): Promise<void> {
     this.ensureReady()
+    const requestId = this.generateRequestId()
 
-    const challenge = crypto.randomUUID()
-    this.sendMessage({ type: "storeChallenge", challenge })
+    const response = await this.sendRequest<{
+      type: "connectResponse"
+      requestId: string
+      success: boolean
+    }>({
+      type: "connect",
+      requestId,
+      agent: options.agent,
+    })
 
-    const authUrl = buildAuthUrl(
-      this.iframeOrigin,
-      window.location.origin,
-      this.metadata,
-      { challenge, agent: options.agent },
-    )
-
-    const mode = options.popupMode ?? this.popupMode
-    const popup =
-      mode === "popup"
-        ? window.open(authUrl, "_blank", "width=500,height=600")
-        : window.open(authUrl, "_blank")
-
-    if (!popup) {
+    if (!response.success) {
       throw new Error("Failed to open authentication popup")
     }
   }

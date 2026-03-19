@@ -210,24 +210,19 @@
       return
     }
 
-    const message = {
-      type: 'setSecret',
-      appOrigin: sessionStore.data.appOrigin,
-      data: {
-        secret: appSecret,
-        identityId: selectedIdentity.id,
-        identityName: selectedIdentity.name,
-        identityAddress: selectedIdentity.accountId.toHex(),
+    window.opener.postMessage(
+      {
+        type: 'setSecret',
+        appOrigin: sessionStore.data.appOrigin,
+        data: {
+          secret: appSecret,
+          identityId: selectedIdentity.id,
+          identityName: selectedIdentity.name,
+          identityAddress: selectedIdentity.accountId.toHex(),
+        },
       },
-    }
-
-    // Send to proxy origin (iframe button flow — opener is proxy)
-    window.opener.postMessage(message, window.location.origin)
-
-    // Send to dApp origin (library button flow — opener is dApp)
-    if (sessionStore.data.appOrigin !== window.location.origin) {
-      window.opener.postMessage(message, sessionStore.data.appOrigin)
-    }
+      window.location.origin,
+    )
   }
 
   async function tryGetMasterKeyFromAccount(account: Account) {

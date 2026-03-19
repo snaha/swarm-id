@@ -3,19 +3,18 @@ import { SwarmIdClient } from "./swarm-id-client"
 
 describe("SwarmIdClient connect()", () => {
   let client: SwarmIdClient
-  let mockWindow: Record<string, unknown>
 
   beforeEach(() => {
-    mockWindow = {
+    // Mock window object and its properties
+    const mockWindow = {
       addEventListener: vi.fn(),
       removeEventListener: vi.fn(),
       parent: { postMessage: vi.fn() },
       location: { origin: "https://localhost" },
-      open: vi.fn().mockReturnValue({}),
+      open: vi.fn(),
     }
 
     vi.stubGlobal("window", mockWindow)
-    vi.stubGlobal("crypto", { randomUUID: () => "test-uuid" })
     vi.stubGlobal("document", {
       createElement: vi.fn().mockReturnValue({
         style: {},
@@ -39,67 +38,61 @@ describe("SwarmIdClient connect()", () => {
     })
   })
 
-  it("should send storeChallenge and open popup with correct URL", () => {
+  it("should send connect message to proxy", async () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-    const sendMessageSpy = vi
-      .spyOn(client as never, "sendMessage")
-      .mockImplementation(() => {})
+    const sendRequestSpy = vi
+      .spyOn(client as never, "sendRequest")
+      .mockResolvedValue({
+        type: "connectResponse",
+        requestId: "test",
+        success: true,
+      })
 
-    client.connect()
+    await client.connect()
 
-    expect(sendMessageSpy).toHaveBeenCalledWith({
-      type: "storeChallenge",
-      challenge: "test-uuid",
+    expect(sendRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "connect",
+        agent: undefined,
+      }),
+    )
+  })
+
+  it("should send agent flag to proxy when agent option is true", async () => {
+    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    const sendRequestSpy = vi
+      .spyOn(client as never, "sendRequest")
+      .mockResolvedValue({
+        type: "connectResponse",
+        requestId: "test",
+        success: true,
+      })
+
+    await client.connect({ agent: true })
+
+    expect(sendRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "connect",
+        agent: true,
+      }),
+    )
+  })
+
+  it("should throw when popup fails to open", async () => {
+    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    vi.spyOn(client as never, "sendRequest").mockResolvedValue({
+      type: "connectResponse",
+      requestId: "test",
+      success: false,
     })
 
-    expect(mockWindow.open).toHaveBeenCalledWith(
-      expect.stringContaining("https://swarm-id.example.com/connect#"),
-      "_blank",
-    )
-
-    const url = (mockWindow.open as ReturnType<typeof vi.fn>).mock
-      .calls[0][0] as string
-    expect(url).toContain("origin=")
-    expect(url).toContain("challenge=test-uuid")
-    expect(url).toContain("appName=Test+App")
-  })
-
-  it("should include agent flag in URL", () => {
-    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-    vi.spyOn(client as never, "sendMessage").mockImplementation(() => {})
-
-    client.connect({ agent: true })
-
-    const url = (mockWindow.open as ReturnType<typeof vi.fn>).mock
-      .calls[0][0] as string
-    expect(url).toContain("agent=")
-  })
-
-  it("should throw when popup is blocked", () => {
-    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-    vi.spyOn(client as never, "sendMessage").mockImplementation(() => {})
-    ;(mockWindow.open as ReturnType<typeof vi.fn>).mockReturnValue(undefined)
-
-    expect(() => client.connect()).toThrow(
+    await expect(client.connect()).rejects.toThrow(
       "Failed to open authentication popup",
     )
   })
 
-  it("should open popup with features string when popupMode is popup", () => {
-    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-    vi.spyOn(client as never, "sendMessage").mockImplementation(() => {})
-
-    client.connect({ popupMode: "popup" })
-
-    expect(mockWindow.open).toHaveBeenCalledWith(
-      expect.stringContaining("https://swarm-id.example.com/connect#"),
-      "_blank",
-      "width=500,height=600",
-    )
-  })
-
-  it("should throw error if client is not initialized", () => {
-    expect(() => client.connect()).toThrow(
+  it("should throw error if client is not initialized", async () => {
+    await expect(client.connect()).rejects.toThrow(
       "SwarmIdClient not initialized. Call initialize() first.",
     )
   })

@@ -481,12 +481,8 @@ export class SwarmIdProxy {
         return
       }
 
-      // Handle setSecret messages from popup (same-origin) or relayed by parent (partitioned storage)
-      if (
-        (event.origin === window.location.origin ||
-          event.origin === this.parentOrigin) &&
-        type === "setSecret"
-      ) {
+      // Handle same-origin popup messages (storage partitioning postMessage fallback)
+      if (event.origin === window.location.origin && type === "setSecret") {
         const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
         if (popupResult.success) {
           await this.handlePopupMessage(popupResult.data)
@@ -730,8 +726,8 @@ export class SwarmIdProxy {
         await this.handleCreateFeedManifest(message, event)
         break
 
-      case "storeChallenge":
-        localStorage.setItem(STORAGE_CHALLENGE_KEY, message.challenge)
+      case "connect":
+        this.handleConnect(message, event)
         break
 
       default:
@@ -1244,6 +1240,21 @@ export class SwarmIdProxy {
     })
 
     this.authButtonContainer.appendChild(button)
+  }
+
+  private handleConnect(
+    message: { type: "connect"; requestId: string; agent?: boolean },
+    event: MessageEvent,
+  ): void {
+    const success = this.openAuthPopup({ agent: message.agent })
+    ;(event.source as WindowProxy).postMessage(
+      {
+        type: "connectResponse",
+        requestId: message.requestId,
+        success,
+      },
+      { targetOrigin: event.origin },
+    )
   }
 
   /**

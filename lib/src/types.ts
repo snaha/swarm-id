@@ -985,9 +985,10 @@ export const GetPostageBatchMessageSchema = z.object({
   requestId: z.string(),
 })
 
-export const StoreChallengeMessageSchema = z.object({
-  type: z.literal("storeChallenge"),
-  challenge: z.string(),
+export const ConnectMessageSchema = z.object({
+  type: z.literal("connect"),
+  requestId: z.string(),
+  agent: z.boolean().optional(),
 })
 
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
@@ -1028,7 +1029,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
   GetPostageBatchMessageSchema,
-  StoreChallengeMessageSchema,
+  ConnectMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -1096,7 +1097,7 @@ export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
 export type GetPostageBatchMessage = z.infer<
   typeof GetPostageBatchMessageSchema
 >
-export type StoreChallengeMessage = z.infer<typeof StoreChallengeMessageSchema>
+export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -1196,6 +1197,12 @@ export const ConnectionInfoResponseMessageSchema = z.object({
       address: z.string().length(40),
     })
     .optional(),
+})
+
+export const ConnectResponseMessageSchema = z.object({
+  type: z.literal("connectResponse"),
+  requestId: z.string(),
+  success: z.boolean(),
 })
 
 export const IsConnectedResponseMessageSchema = z.object({
@@ -1430,6 +1437,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoResponseMessageSchema,
+  ConnectResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
   GsocMineResponseMessageSchema,
@@ -1489,6 +1497,9 @@ export type UploadProgressMessage = z.infer<typeof UploadProgressMessageSchema>
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoResponseMessage = z.infer<
   typeof ConnectionInfoResponseMessageSchema
+>
+export type ConnectResponseMessage = z.infer<
+  typeof ConnectResponseMessageSchema
 >
 export type IsConnectedResponseMessage = z.infer<
   typeof IsConnectedResponseMessageSchema
@@ -1628,11 +1639,6 @@ export interface ConnectOptions {
    * Agents are automated services that can perform operations on behalf of users.
    */
   agent?: boolean
-  /**
-   * How to display the authentication popup: "popup" (sized window) or "window" (new tab).
-   * Overrides the client-level popupMode for this call.
-   */
-  popupMode?: "popup" | "window"
 }
 
 // ============================================================================
