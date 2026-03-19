@@ -16,6 +16,7 @@
   const identity = $derived(
     currentIdentityId ? identitiesStore.getIdentity(currentIdentityId) : undefined,
   )
+  const appData = $derived(sessionStore.data.appData)
 
   // Bindable state from AddPostageStamp component
   let pageState = $state<PageState>('select')
@@ -60,6 +61,7 @@
         variant="account-creation"
         identityName={identity?.name}
         identityValue={identity?.id}
+        autoNavigateOnSuccess={!!appData}
         bind:pageState
         bind:purchaseState
         bind:isFormDisabled

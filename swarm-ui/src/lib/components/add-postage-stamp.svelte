@@ -17,6 +17,8 @@
   } from '$lib/services/multichain-widget'
   import type { PostageStamp } from '@swarm-id/lib'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
+  import { resolve } from '$app/paths'
+  import routes from '$lib/routes'
 
   const HEX_BASE = 16
   const POLYCON_SIZE = 80
@@ -39,6 +41,8 @@
     pageState?: PageState
     purchaseState?: PurchaseState
     isFormDisabled?: boolean
+    // When true, call onSuccess immediately after purchase (skip success screen)
+    autoNavigateOnSuccess?: boolean
   }
 
   let {
@@ -52,6 +56,7 @@
     pageState = $bindable<PageState>('select'),
     purchaseState = $bindable<PurchaseState>('waiting'),
     isFormDisabled = $bindable(true),
+    autoNavigateOnSuccess = false,
   }: Props = $props()
 
   // Saved stamp reference for success screen navigation
@@ -141,6 +146,13 @@
         exists: true,
       })
 
+      // In auto-navigate mode, call onSuccess immediately (skip success screen)
+      if (autoNavigateOnSuccess) {
+        onSuccess(stamp)
+        return
+      }
+
+      // Otherwise, show success screen
       savedStamp = stamp
       purchaseState = 'success'
     } catch {
@@ -240,9 +252,8 @@
 
       {#if variant === 'account-creation'}
         <Typography variant="small" center class="footer-text">
-          Manage your account and create more identities at <a href={window.location.origin}
-            >{window.location.hostname}</a
-          >
+          Manage your account and create more identities at
+          <a href={resolve(routes.ROOT)} target="_blank">{window.location.hostname}</a>
         </Typography>
       {/if}
     </Vertical>
