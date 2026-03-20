@@ -31,18 +31,29 @@ export default defineConfig({
             '--disable-gpu',
             '--disable-web-security',
             '--disable-features=VizDisplayCompositor',
+            '--disable-popup-blocking',
           ],
         },
       },
     },
   ],
 
-  webServer: {
-    command: 'pnpm dev',
-    port: 5174,
-    reuseExistingServer: !process.env.CI,
-    timeout: 30000,
-    stdout: 'pipe',
-    stderr: 'pipe',
-  },
+  webServer: [
+    {
+      command: 'pnpm dev',
+      port: 5174,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+    {
+      command: 'pnpm --filter @swarm-id/demo dev',
+      port: 3000,
+      reuseExistingServer: !process.env.CI,
+      timeout: 30000,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  ],
 })
