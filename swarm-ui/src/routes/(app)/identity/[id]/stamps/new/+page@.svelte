@@ -28,9 +28,7 @@
   const isUpgrade = $derived(!account?.defaultPostageStampBatchID)
 
   function handleGoToApp() {
-    if (appData?.appUrl) {
-      window.location.href = appData.appUrl
-    }
+    window.close()
   }
 
   // Bindable state from AddPostageStamp component

@@ -98,6 +98,7 @@
       onSuccess(stamp)
     } catch (error) {
       submitError = error instanceof Error ? error.message : 'Failed to add postage stamp'
+      console.error(submitError, { error })
     }
   }
 
@@ -155,8 +156,11 @@
       // Otherwise, show success screen
       savedStamp = stamp
       purchaseState = 'success'
-    } catch {
+    } catch (error) {
       purchaseState = 'error'
+      console.error(error instanceof Error ? error.message : 'Failed to add postage stamp', {
+        error,
+      })
     }
   }
 
@@ -166,8 +170,9 @@
     }
   }
 
-  function handleWidgetError() {
+  function handleWidgetError(error: Error) {
     purchaseState = 'error'
+    console.error(error.message, { error })
   }
 
   function handleWidgetCancel() {

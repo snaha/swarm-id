@@ -15,7 +15,7 @@ export type AccountSyncType = 'local' | 'synced'
 // App Metadata (used for connection requests - local to swarm-ui)
 // ============================================================================
 
-const UrlSchema = z.string().url()
+const UrlSchema = z.url()
 
 export const AppDataSchema = z.object({
   appUrl: UrlSchema,
