@@ -2,7 +2,9 @@
   import Button from '$lib/components/ui/button.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import { themeStore } from '$lib/stores/theme.svelte'
-  import { Automatic, Light, Asleep } from 'carbon-icons-svelte'
+  import Automatic from 'carbon-icons-svelte/lib/Automatic.svelte'
+  import Light from 'carbon-icons-svelte/lib/Light.svelte'
+  import Asleep from 'carbon-icons-svelte/lib/Asleep.svelte'
 </script>
 
 <Horizontal --horizontal-gap="0" style="border: 1px solid var(--colors-low)">

@@ -16,6 +16,7 @@
   import ChevronRight from 'carbon-icons-svelte/lib/ChevronRight.svelte'
   import CloseLarge from 'carbon-icons-svelte/lib/CloseLarge.svelte'
   import Export from 'carbon-icons-svelte/lib/Export.svelte'
+  import ContentDeliveryNetwork from 'carbon-icons-svelte/lib/ContentDeliveryNetwork.svelte'
   import IbmCloudHyperProtectCryptoServices from 'carbon-icons-svelte/lib/IbmCloudHyperProtectCryptoServices.svelte'
   import Information from 'carbon-icons-svelte/lib/Information.svelte'
   import Rocket from 'carbon-icons-svelte/lib/Rocket.svelte'
@@ -176,7 +177,11 @@
 </script>
 
 {#if drawerOpen}
-  <div class="drawer">
+  <button class="sidebar-backdrop" onclick={() => (drawerOpen = false)} aria-label="Close menu"
+  ></button>
+{/if}
+<div class="sidebar-wrapper" class:open={drawerOpen}>
+  <div class="sidebar">
     <Vertical --vertical-gap="0">
       {#if screen === 'main'}
         <Horizontal
@@ -263,6 +268,7 @@
               --horizontal-justify-content="stretch"
               style="flex: 1"
             >
+              <ContentDeliveryNetwork size={20} />
               Network settings
             </Horizontal></Button
           >
@@ -549,7 +555,7 @@
       {/if}
     </Vertical>
   </div>
-{/if}
+</div>
 {#if account.type === 'ethereum'}
   <ViewGenerationDetailsModal
     bind:open={showGenerationDetailsModal}
@@ -571,17 +577,74 @@
 />
 
 <style>
-  .drawer {
-    position: absolute;
-    top: var(--double-padding);
-    right: var(--double-padding);
-    width: 360px;
-    max-height: calc(100dvh - 2 * var(--double-padding));
-    background: var(--colors-base);
+  .sidebar-backdrop {
+    display: none;
+  }
+
+  .sidebar-wrapper {
+    flex-shrink: 0;
+    width: 375px;
+    overflow: hidden;
+    transition: width 0.25s ease-out;
     border-left: 1px solid var(--colors-low);
-    padding: 0;
+  }
+
+  .sidebar-wrapper:not(.open) {
+    width: 0;
+    border-left: none;
+  }
+
+  .sidebar {
+    width: 375px;
+    height: 100vh;
+    background: var(--colors-base);
     overflow-y: auto;
-    z-index: 50;
-    box-shadow: 0px 4px 12px 4px var(--colors-dark-25);
+    transform: translateX(0);
+    transition: transform 0.25s ease-out;
+  }
+
+  .sidebar-wrapper:not(.open) .sidebar {
+    transform: translateX(100%);
+  }
+
+  /* Mobile: Full screen */
+  @media screen and (max-width: 640px) {
+    .sidebar-backdrop {
+      display: block;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.5);
+      z-index: 99;
+      border: none;
+      cursor: pointer;
+      opacity: 1;
+      transition: opacity 0.25s ease-out;
+    }
+
+    .sidebar-wrapper {
+      position: fixed;
+      inset: 0;
+      width: 100vw;
+      z-index: 100;
+      border-left: none;
+    }
+
+    .sidebar-wrapper:not(.open) {
+      width: 100vw;
+      pointer-events: none;
+    }
+
+    .sidebar {
+      width: 100vw;
+      height: 100vh;
+    }
+  }
+
+  /* Respect reduced motion */
+  @media (prefers-reduced-motion: reduce) {
+    .sidebar-wrapper,
+    .sidebar {
+      transition: none;
+    }
   }
 </style>

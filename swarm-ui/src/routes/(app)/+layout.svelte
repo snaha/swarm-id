@@ -36,7 +36,7 @@
     --vertical-justify-content="flex-start"
     --vertical-gap="var(--double-padding)"
     class="main-layout"
-    style="flex: 1;"
+    style="flex: 1; min-width: 0;"
   >
     <Horizontal
       --horizontal-justify-content="space-between"
@@ -83,7 +83,6 @@
     flex-direction: row;
     min-height: 100vh;
     background: var(--colors-ultra-low);
-    position: relative;
     align-items: stretch;
     justify-content: space-around;
   }
