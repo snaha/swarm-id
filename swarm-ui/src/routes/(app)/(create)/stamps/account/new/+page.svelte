@@ -72,7 +72,7 @@
         variant="account-creation"
         identityName={identity?.name}
         identityValue={identity?.id}
-        autoNavigateOnSuccess={!!appData}
+        autoNavigateOnSuccess={!!appData || sessionStore.data.selectedStampOption === 'separate'}
         bind:pageState
         bind:purchaseState
         bind:isFormDisabled

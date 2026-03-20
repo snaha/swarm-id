@@ -118,9 +118,9 @@
       return
     }
 
-    // Synced account + "separate" → go directly to identity stamp page
+    // Synced account + "separate" → need BOTH stamps, start with account stamp
     if (selectedStampOption === 'separate') {
-      goto(resolve(routes.STAMPS_IDENTITY_NEW))
+      goto(resolve(routes.STAMPS_ACCOUNT_NEW))
       return
     }
 
