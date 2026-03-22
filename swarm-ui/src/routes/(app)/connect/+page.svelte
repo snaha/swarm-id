@@ -40,6 +40,7 @@
   let pendingAgentAccount = $state<Account | undefined>(undefined)
   let showAgentSignup = $state(false)
   let storagePartitioned = $state(false)
+  let storageChallenge = $state<string | undefined>(undefined)
   let lastAppSecret = $state<string | undefined>(undefined)
 
   const allIdentities = $derived(identitiesStore.identities)
@@ -73,6 +74,7 @@
       } else {
         // Storage is partitioned — use postMessage fallback
         storagePartitioned = true
+        storageChallenge = challenge
       }
     }
 
@@ -206,7 +208,7 @@
       return
     }
 
-    if (!sessionStore.data.appOrigin || !selectedIdentity) {
+    if (!sessionStore.data.appOrigin || !selectedIdentity || !storageChallenge) {
       return
     }
 
@@ -214,6 +216,7 @@
       {
         type: 'setSecret',
         appOrigin: sessionStore.data.appOrigin,
+        challenge: storageChallenge,
         data: {
           secret: appSecret,
           identityId: selectedIdentity.id,

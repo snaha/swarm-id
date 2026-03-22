@@ -559,7 +559,7 @@ export const ConnectionInfoSchema = z.object({
     .object({
       id: z.string(),
       name: z.string(),
-      address: z.string().length(40),
+      address: AddressSchema,
     })
     .optional(),
 })
@@ -1195,7 +1195,7 @@ export const ConnectionInfoResponseMessageSchema = z.object({
     .object({
       id: z.string(),
       name: z.string(),
-      address: z.string().length(40),
+      address: AddressSchema,
     })
     .optional(),
 })
@@ -1593,7 +1593,7 @@ export const AuthDataSchema = z.object({
   networkSettings: NetworkSettingsSchemaV1.optional(),
   identityId: z.string().optional(),
   identityName: z.string().optional(),
-  identityAddress: z.string().length(40).optional(),
+  identityAddress: AddressSchema.optional(),
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>
@@ -1601,6 +1601,7 @@ export type AuthData = z.infer<typeof AuthDataSchema>
 export const SetSecretMessageSchema = z.object({
   type: z.literal("setSecret"),
   appOrigin: z.string(),
+  challenge: z.string(),
   data: AuthDataSchema,
 })
 
