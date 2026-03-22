@@ -371,11 +371,11 @@ The iframe needs access to shared localStorage to read accounts, identities, and
 
 ### Environment Compatibility
 
-| Environment                           | Iframe button | Custom button       | Notes                                                                  |
-| ------------------------------------- | ------------- | ------------------- | ---------------------------------------------------------------------- |
-| **Production (Chrome/Firefox)**       | Yes           | Yes                 | Secure context, storage not partitioned                                |
-| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first                            |
-| **Safari (any)**                      | Yes           | Yes                 | Download-only mode: auth works, uploads disabled (ITP storage partitioning) |
+| Environment                           | Iframe button | Custom button       | Notes                                                                        |
+| ------------------------------------- | ------------- | ------------------- | ---------------------------------------------------------------------------- |
+| **Production (Chrome/Firefox)**       | Yes           | Yes                 | Secure context, storage not partitioned                                      |
+| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first                                  |
+| **Safari (any)**                      | Yes           | Yes                 | Download-only mode: auth works, uploads disabled (ITP storage partitioning)  |
 | **Safari private mode**               | Yes           | Yes                 | Download-only mode; sessions are ephemeral (lost when private window closes) |
 
 ### How It Works
