@@ -17,6 +17,7 @@ export const STORAGE_KEY_IDENTITIES = "swarm-id-identities"
 export const STORAGE_KEY_CONNECTED_APPS = "swarm-id-connected-apps"
 export const STORAGE_KEY_POSTAGE_STAMPS = "swarm-id-postage-stamps"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
+export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
 
 // ============================================================================
 // Base Types
@@ -550,12 +551,15 @@ export type AuthStatus = z.infer<typeof AuthStatusSchema>
 // ============================================================================
 
 export const ConnectionInfoSchema = z.object({
+  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned) */
   canUpload: z.boolean(),
+  /** Whether browser storage partitioning prevents access to stamps/signer keys (e.g. Safari ITP, strict privacy settings) */
+  storagePartitioned: z.boolean().optional(),
   identity: z
     .object({
       id: z.string(),
       name: z.string(),
-      address: z.string().length(40),
+      address: AddressSchema,
     })
     .optional(),
 })
@@ -981,6 +985,13 @@ export const GetPostageBatchMessageSchema = z.object({
   requestId: z.string(),
 })
 
+export const ConnectMessageSchema = z.object({
+  type: z.literal("connect"),
+  requestId: z.string(),
+  agent: z.boolean().optional(),
+  popupMode: z.enum(["popup", "window"]).optional(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -1019,6 +1030,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
   GetPostageBatchMessageSchema,
+  ConnectMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -1086,6 +1098,7 @@ export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
 export type GetPostageBatchMessage = z.infer<
   typeof GetPostageBatchMessageSchema
 >
+export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -1177,11 +1190,12 @@ export const ConnectionInfoResponseMessageSchema = z.object({
   type: z.literal("connectionInfoResponse"),
   requestId: z.string(),
   canUpload: z.boolean(),
+  storagePartitioned: z.boolean().optional(),
   identity: z
     .object({
       id: z.string(),
       name: z.string(),
-      address: z.string().length(40),
+      address: AddressSchema,
     })
     .optional(),
 })
@@ -1577,6 +1591,9 @@ export const AuthDataSchema = z.object({
   postageBatchId: BatchIdSchema.optional(),
   signerKey: PrivateKeySchema.optional(),
   networkSettings: NetworkSettingsSchemaV1.optional(),
+  identityId: z.string().optional(),
+  identityName: z.string().optional(),
+  identityAddress: AddressSchema.optional(),
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>
@@ -1584,6 +1601,7 @@ export type AuthData = z.infer<typeof AuthDataSchema>
 export const SetSecretMessageSchema = z.object({
   type: z.literal("setSecret"),
   appOrigin: z.string(),
+  challenge: z.string(),
   data: AuthDataSchema,
 })
 
@@ -1619,15 +1637,15 @@ export interface AuthOptions {
  */
 export interface ConnectOptions {
   /**
-   * Whether to open as a popup window ("popup") or full window ("window").
-   * @default "window"
-   */
-  popupMode?: "popup" | "window"
-  /**
    * When true, shows the agent sign-up option on the connect page.
    * Agents are automated services that can perform operations on behalf of users.
    */
   agent?: boolean
+  /**
+   * Override popup mode for this connect call.
+   * "popup" opens a sized popup window, "window" opens a full browser tab.
+   */
+  popupMode?: "popup" | "window"
 }
 
 // ============================================================================

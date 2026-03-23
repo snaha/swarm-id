@@ -359,7 +359,7 @@ export {
 export type { ActEntry } from "./proxy/act"
 
 // Constant exports
-export { SWARM_SECRET_PREFIX } from "./types"
+export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"
 
 // URL building utilities
 export { buildAuthUrl } from "./utils/url"

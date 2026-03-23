@@ -30,8 +30,7 @@ const client = new SwarmIdClient({
 await client.initialize()
 
 // Option 1: Open authentication page manually
-const authUrl = client.connect()
-console.log('Authentication opened at:', authUrl)
+await client.connect()
 
 // Option 2: Check authentication status and upload if authenticated
 const status = await client.checkAuthStatus()
@@ -245,20 +244,19 @@ In addition to the iframe-based authentication (via `getAuthIframe()`), you can 
 
 ```typescript
 // Open authentication page (default: new window)
-const url = client.connect()
+await client.connect()
 
 // Open as popup window
-client.connect({ popupMode: 'popup' })
+await client.connect({ popupMode: 'popup' })
 
 // Open with agent sign-up option visible
-client.connect({ agent: true })
+await client.connect({ agent: true })
 ```
 
 **When to use `connect()`:**
 
 - When you want to trigger authentication from a custom UI element
 - When you prefer the authentication to open in a new window instead of an iframe
-- When you need the authentication URL for testing or debugging
 
 **Authentication Flow:**
 
@@ -320,11 +318,12 @@ interface ConnectOptions {
 }
 ```
 
-**Returns:** `string` - The URL that was opened (useful for testing or reference)
+**Returns:** `Promise<void>` - Resolves when the authentication popup has been opened
 
 **Throws:**
 
 - `Error` if the client is not initialized
+- `Error` if the popup fails to open
 
 **Example:**
 
@@ -333,14 +332,13 @@ const client = new SwarmIdClient({ ... })
 await client.initialize()
 
 // Open authentication page (default: new window)
-const url = client.connect()
-console.log('Authentication opened at:', url)
+await client.connect()
 
 // Open as popup window
-client.connect({ popupMode: 'popup' })
+await client.connect({ popupMode: 'popup' })
 
 // Open with agent sign-up option visible
-client.connect({ agent: true })
+await client.connect({ agent: true })
 ```
 
 ---
@@ -376,13 +374,14 @@ Use this method to check if the user can upload data and to get information abou
 
 **Returns:** `Promise<ConnectionInfo>` - The connection info object
 
-| Property           | Type                  | Description                                                |
-| ------------------ | --------------------- | ---------------------------------------------------------- |
-| `canUpload`        | `boolean`             | Whether the user can upload data (has valid postage stamp) |
-| `identity`         | `object \| undefined` | The connected identity details (if authenticated)          |
-| `identity.id`      | `string`              | Unique identifier for the identity                         |
-| `identity.name`    | `string`              | Display name of the identity                               |
-| `identity.address` | `string`              | Ethereum address associated with the identity              |
+| Property             | Type                   | Description                                                                    |
+| -------------------- | ---------------------- | ------------------------------------------------------------------------------ |
+| `canUpload`          | `boolean`              | Whether the user can upload data (has stamps and storage is not partitioned)   |
+| `storagePartitioned` | `boolean \| undefined` | `true` when browser storage partitioning prevents access to stamps/signer keys |
+| `identity`           | `object \| undefined`  | The connected identity details (if authenticated)                              |
+| `identity.id`        | `string`               | Unique identifier for the identity                                             |
+| `identity.name`      | `string`               | Display name of the identity                                                   |
+| `identity.address`   | `string`               | Ethereum address associated with the identity                                  |
 
 **Throws:**
 
@@ -395,6 +394,8 @@ Use this method to check if the user can upload data and to get information abou
 const info = await client.getConnectionInfo()
 if (info.canUpload) {
   console.log('Ready to upload as:', info.identity?.name)
+} else if (info.storagePartitioned) {
+  console.log('Storage partitioned — downloads only')
 } else {
   console.log('No postage stamp available')
 }

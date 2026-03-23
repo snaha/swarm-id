@@ -79,17 +79,6 @@ describe("buildAuthUrl", () => {
     )
   })
 
-  it("should include proxyMode when option is true", () => {
-    const url = buildAuthUrl(
-      "https://swarm-id.example.com",
-      "https://myapp.example.com",
-      { name: "Test App" },
-      { proxyMode: true },
-    )
-
-    expect(url).toContain("proxyMode=true")
-  })
-
   it("should include agent parameter when option is true", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",
@@ -112,15 +101,36 @@ describe("buildAuthUrl", () => {
     expect(url).not.toContain("agent")
   })
 
-  it("should include both proxyMode and agent when both options are true", () => {
+  it("should include challenge and agent when both options are set", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",
       "https://myapp.example.com",
       { name: "Test App" },
-      { proxyMode: true, agent: true },
+      { agent: true, challenge: "test-challenge-123" },
     )
 
-    expect(url).toContain("proxyMode=true")
+    expect(url).toContain("challenge=test-challenge-123")
     expect(url).toContain("agent=")
+  })
+
+  it("should include challenge when provided", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+      { challenge: "test-challenge-123" },
+    )
+
+    expect(url).toContain("challenge=test-challenge-123")
+  })
+
+  it("should not include challenge when not provided", () => {
+    const url = buildAuthUrl(
+      "https://swarm-id.example.com",
+      "https://myapp.example.com",
+      { name: "Test App" },
+    )
+
+    expect(url).not.toContain("challenge")
   })
 })

@@ -5,16 +5,16 @@ import type { AppMetadata } from "../types"
  */
 export interface BuildAuthUrlOptions {
   /**
-   * When true, enables proxy mode which validates same-origin opener
-   * and sends setSecret via postMessage.
-   * Used primarily for local development and testing scenarios.
-   */
-  proxyMode?: boolean
-  /**
    * When true, shows the agent sign-up option on the connect page.
    * Agents are automated services that can perform operations on behalf of users.
    */
   agent?: boolean
+  /**
+   * Challenge string for storage partitioning detection. When present, the popup checks
+   * if it can read this challenge from localStorage to determine whether
+   * storage is partitioned.
+   */
+  challenge?: string
 }
 
 /**
@@ -49,10 +49,6 @@ export function buildAuthUrl(
   const params = new URLSearchParams()
   params.set("origin", origin)
 
-  if (options?.proxyMode) {
-    params.set("proxyMode", "true")
-  }
-
   if (metadata) {
     params.set("appName", metadata.name)
     if (metadata.description) {
@@ -61,6 +57,10 @@ export function buildAuthUrl(
     if (metadata.icon) {
       params.set("appIcon", metadata.icon)
     }
+  }
+
+  if (options?.challenge) {
+    params.set("challenge", options.challenge)
   }
 
   if (options?.agent) {

@@ -9,7 +9,7 @@
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
-  import { deriveIdentityKey, deriveSecret } from '@swarm-id/lib'
+  import { deriveIdentityKey, deriveSecret, STORAGE_CHALLENGE_KEY } from '@swarm-id/lib'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { EthAddress } from '@ethersphere/bee-js'
@@ -39,6 +39,9 @@
   let showSeedModal = $state(false)
   let pendingAgentAccount = $state<Account | undefined>(undefined)
   let showAgentSignup = $state(false)
+  let storagePartitioned = $state(false)
+  let storageChallenge = $state<string | undefined>(undefined)
+  let lastAppSecret = $state<string | undefined>(undefined)
 
   const allIdentities = $derived(identitiesStore.identities)
   const identities = $derived.by(() => {
@@ -59,6 +62,21 @@
     // Get parameters from URL hash (e.g., #origin=foo&appName=bar)
     const hashParams = getHashParams()
     showAgentSignup = hashParams.has('agent')
+
+    // Storage partitioning detection: proxy opens this popup with a challenge,
+    // check if we can read it from localStorage (shared storage)
+    const challenge = hashParams.get('challenge')
+    if (challenge) {
+      const storedChallenge = localStorage.getItem(STORAGE_CHALLENGE_KEY)
+      if (storedChallenge === challenge) {
+        // Storage is shared — normal mode, clean up challenge
+        localStorage.removeItem(STORAGE_CHALLENGE_KEY)
+      } else {
+        // Storage is partitioned — use postMessage fallback
+        storagePartitioned = true
+        storageChallenge = challenge
+      }
+    }
 
     if (!sessionStore.data.appOrigin) {
       const appOrigin = hashParams.get('origin')
@@ -161,6 +179,9 @@
       return
     }
 
+    // Store for potential storage partitioning postMessage fallback
+    lastAppSecret = appSecret
+
     // Write to localStorage - this triggers storage events in the iframe
     // which will detect the new connection and authenticate
     connectedAppsStore.addOrUpdateApp(
@@ -173,6 +194,37 @@
         appSecret,
       },
       DEFAULT_SESSION_DURATION,
+    )
+  }
+
+  /**
+   * Send app secret to the iframe via postMessage (storage partitioning fallback).
+   * When storage is partitioned, the iframe can't receive the secret via storage events,
+   * so we send it directly via window.opener (which points to the iframe that opened this popup).
+   */
+  function sendSecretToOpener(appSecret: string) {
+    if (!window.opener) {
+      console.warn('[Connect] No window.opener available for postMessage')
+      return
+    }
+
+    if (!sessionStore.data.appOrigin || !selectedIdentity || !storageChallenge) {
+      return
+    }
+
+    window.opener.postMessage(
+      {
+        type: 'setSecret',
+        appOrigin: sessionStore.data.appOrigin,
+        challenge: storageChallenge,
+        data: {
+          secret: appSecret,
+          identityId: selectedIdentity.id,
+          identityName: selectedIdentity.name,
+          identityAddress: selectedIdentity.accountId.toHex(),
+        },
+      },
+      window.location.origin,
     )
   }
 
@@ -267,6 +319,11 @@
   }
 
   function closeWindowWithSessionCleanup() {
+    // When storage partitioning is detected, send the secret via postMessage to the iframe
+    // since storage events won't fire across partitioned storage
+    if (storagePartitioned && lastAppSecret) {
+      sendSecretToOpener(lastAppSecret)
+    }
     sessionStore.clear()
     window.close()
   }

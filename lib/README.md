@@ -371,14 +371,12 @@ The iframe needs access to shared localStorage to read accounts, identities, and
 
 ### Environment Compatibility
 
-| Environment                           | Iframe button | Custom button       | Notes                                             |
-| ------------------------------------- | ------------- | ------------------- | ------------------------------------------------- |
-| **Production (Chrome/Firefox)**       | Yes           | Yes                 | Secure context, storage not partitioned           |
-| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first       |
-| **Safari (any)**                      | Yes\*         | Yes\*               | Requires disabling cross-site tracking prevention |
-| **Safari private mode**               | Yes\*         | Yes\*               | Works with ITP disabled; sessions are ephemeral   |
-
-\* Safari requires disabling cross-site tracking prevention: macOS: Settings → Privacy → uncheck "Prevent cross-site tracking". iOS: Settings → Apps → Safari → toggle off "Prevent Cross-Site Tracking" (this affects all iOS browsers since they all use WebKit). See [#167](https://github.com/snaha/swarm-id/issues/167).
+| Environment                           | Iframe button | Custom button       | Notes                                                                        |
+| ------------------------------------- | ------------- | ------------------- | ---------------------------------------------------------------------------- |
+| **Production (Chrome/Firefox)**       | Yes           | Yes                 | Secure context, storage not partitioned                                      |
+| **Localhost (Chrome, Firefox, etc.)** | Yes           | After iframe button | Iframe button requests Storage Access first                                  |
+| **Safari (any)**                      | Yes           | Yes                 | Download-only mode: auth works, uploads disabled (ITP storage partitioning)  |
+| **Safari private mode**               | Yes           | Yes                 | Download-only mode; sessions are ephemeral (lost when private window closes) |
 
 ### How It Works
 
@@ -386,15 +384,15 @@ The iframe needs access to shared localStorage to read accounts, identities, and
 
 **Localhost (Chrome/Firefox)**: Browsers partition iframe storage, requiring the [Storage Access API](https://developer.mozilla.org/en-US/docs/Web/API/Storage_Access_API). The iframe button triggers a user gesture inside the iframe, allowing it to request Storage Access. Once granted, the custom button also works.
 
-**Safari**: Safari's Intelligent Tracking Prevention (ITP) partitions all storage for third-party iframes. Users must disable cross-site tracking prevention for authentication to work. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
+**Safari**: Safari's Intelligent Tracking Prevention (ITP) partitions all storage for third-party iframes, preventing access to signing keys and postage stamps. Safari operates in download-only mode: authentication and downloads work, but uploads are not available. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
 
-**Safari private mode**: Works with ITP disabled, but sessions are ephemeral — all storage is cleared when the private window closes.
+**Safari private mode**: Download-only mode applies; sessions are also ephemeral — all storage is cleared when the private window closes.
 
 ### Recommendation
 
 - **Production (Chrome/Firefox)**: Either button works immediately
 - **Development**: Use Chrome/Firefox with iframe button first, then custom button works
-- **Safari**: Disable cross-site tracking prevention; private mode sessions are ephemeral
+- **Safari**: Download-only mode (auth works, uploads disabled); private mode sessions are ephemeral
 
 ## Development
 

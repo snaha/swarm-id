@@ -42,7 +42,12 @@ import type {
   PostageBatch,
   ConnectedApp,
 } from "./types"
-import { ParentToIframeMessageSchema } from "./types"
+import {
+  ParentToIframeMessageSchema,
+  PopupToIframeMessageSchema,
+  STORAGE_CHALLENGE_KEY,
+} from "./types"
+import type { PopupToIframeMessage } from "./types"
 import {
   Bee,
   BatchId,
@@ -127,6 +132,11 @@ export class SwarmIdProxy {
   private signerKey: string | undefined
   private stamper: UtilizationAwareStamper | undefined
   private stamperDepth: number = 23 // Default depth
+  private storagePartitioned: boolean = false
+  private pendingChallenge: string | undefined
+  private storagePartitionedIdentity:
+    | { id: string; name: string; address: string }
+    | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private authButtonContainer: HTMLElement | undefined
@@ -205,8 +215,10 @@ export class SwarmIdProxy {
         await this.authenticateFromStorage(connectedApp)
       }
       // If already authenticated with same secret, nothing to do
-    } else if (this.authenticated) {
-      // No valid connection in storage, but we're authenticated - disconnect
+    } else if (this.authenticated && !this.storagePartitioned) {
+      // No valid connection in storage, but we're authenticated - disconnect.
+      // Skip when storage is partitioned: the iframe
+      // can't see connected apps, but auth was established via postMessage.
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
@@ -224,6 +236,8 @@ export class SwarmIdProxy {
   ): Promise<void> {
     this.appSecret = connectedApp.appSecret
     this.authenticated = true
+    this.storagePartitioned = false
+    this.storagePartitionedIdentity = undefined
     this.authLoading = false
     this.isConnecting = false
 
@@ -241,6 +255,70 @@ export class SwarmIdProxy {
       type: "authSuccess",
       origin: this.parentOrigin!,
     })
+  }
+
+  /**
+   * Handle messages from the auth popup (same-origin postMessage).
+   * Used as storage partitioning fallback when storage events don't fire due to partitioning.
+   */
+  private async handlePopupMessage(
+    message: PopupToIframeMessage,
+  ): Promise<void> {
+    if (message.type === "setSecret") {
+      // Validate the appOrigin matches our parent
+      if (message.appOrigin !== this.parentOrigin) {
+        console.warn(
+          "[Proxy] setSecret appOrigin mismatch:",
+          message.appOrigin,
+          "!==",
+          this.parentOrigin,
+        )
+        return
+      }
+
+      // Verify challenge matches what we generated in openAuthPopup()
+      if (
+        !this.pendingChallenge ||
+        message.challenge !== this.pendingChallenge
+      ) {
+        console.warn("[Proxy] setSecret challenge mismatch — ignoring")
+        return
+      }
+
+      // Clean up challenge
+      this.pendingChallenge = undefined
+      localStorage.removeItem(STORAGE_CHALLENGE_KEY)
+
+      // Authenticate in storage-partitioned mode (no stamps available via postMessage)
+      this.appSecret = message.data.secret
+      this.authenticated = true
+      this.storagePartitioned = true
+      this.authLoading = false
+      this.isConnecting = false
+
+      // Store identity info from message (can't read from partitioned localStorage)
+      if (
+        message.data.identityId &&
+        message.data.identityName &&
+        message.data.identityAddress
+      ) {
+        this.storagePartitionedIdentity = {
+          id: message.data.identityId,
+          name: message.data.identityName,
+          address: message.data.identityAddress,
+        }
+      }
+
+      // No stamp lookup — localStorage is partitioned, stamps not accessible
+      this.postageBatchId = undefined
+      this.signerKey = undefined
+
+      this.showAuthButton()
+      this.sendToParent({
+        type: "authSuccess",
+        origin: this.parentOrigin!,
+      })
+    }
   }
 
   /**
@@ -412,6 +490,15 @@ export class SwarmIdProxy {
       if (!this.parentIdentified) {
         console.warn("[Proxy] Ignoring message - parent not identified yet")
         return
+      }
+
+      // Handle same-origin popup messages (storage partitioning postMessage fallback)
+      if (event.origin === window.location.origin && type === "setSecret") {
+        const popupResult = PopupToIframeMessageSchema.safeParse(event.data)
+        if (popupResult.success) {
+          await this.handlePopupMessage(popupResult.data)
+          return
+        }
       }
 
       // Validate origin - only accept messages from parent
@@ -650,6 +737,10 @@ export class SwarmIdProxy {
         await this.handleCreateFeedManifest(message, event)
         break
 
+      case "connect":
+        this.handleConnect(message, event)
+        break
+
       default:
         // TypeScript should ensure this is never reached
         const exhaustiveCheck: never = message
@@ -886,6 +977,9 @@ export class SwarmIdProxy {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
+    this.storagePartitioned = false
+    this.storagePartitionedIdentity = undefined
+    this.pendingChallenge = undefined
 
     // Show login button
     this.showAuthButton()
@@ -907,6 +1001,14 @@ export class SwarmIdProxy {
           error,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
+      )
+    }
+  }
+
+  private ensureCanUpload(): void {
+    if (this.storagePartitioned) {
+      throw new Error(
+        "Uploads are unavailable in download-only mode due to browser storage partitioning.",
       )
     }
   }
@@ -955,33 +1057,40 @@ export class SwarmIdProxy {
 
     // Look up identity info if authenticated
     if (this.authenticated && this.parentOrigin) {
-      try {
-        const connectedAppsManager = createConnectedAppsStorageManager()
-        const connectedApps = connectedAppsManager.load()
-        const connectedApp = this.findMostRecentConnection(connectedApps)
+      if (this.storagePartitioned && this.storagePartitionedIdentity) {
+        // Storage is partitioned, use identity info from the setSecret message
+        // (localStorage is partitioned, can't read connected apps)
+        identity = this.storagePartitionedIdentity
+      } else {
+        try {
+          const connectedAppsManager = createConnectedAppsStorageManager()
+          const connectedApps = connectedAppsManager.load()
+          const connectedApp = this.findMostRecentConnection(connectedApps)
 
-        if (connectedApp) {
-          const identitiesManager = createIdentitiesStorageManager()
-          const identities = identitiesManager.load()
-          const foundIdentity = identities.find(
-            (i) => i.id === connectedApp.identityId,
-          )
+          if (connectedApp) {
+            const identitiesManager = createIdentitiesStorageManager()
+            const identities = identitiesManager.load()
+            const foundIdentity = identities.find(
+              (i) => i.id === connectedApp.identityId,
+            )
 
-          if (foundIdentity) {
-            identity = {
-              id: foundIdentity.id,
-              name: foundIdentity.name,
-              address: foundIdentity.accountId.toHex(),
+            if (foundIdentity) {
+              identity = {
+                id: foundIdentity.id,
+                name: foundIdentity.name,
+                address: foundIdentity.accountId.toHex(),
+              }
             }
           }
+        } catch (error) {
+          console.error("[Proxy] Error looking up identity:", error)
         }
-      } catch (error) {
-        console.error("[Proxy] Error looking up identity:", error)
       }
     }
 
-    // canUpload is true if we have both a postage batch ID and signer key
-    const canUpload = !!(this.postageBatchId && this.signerKey)
+    // canUpload is true if we have stamps and storage is not partitioned
+    const canUpload =
+      !!(this.postageBatchId && this.signerKey) && !this.storagePartitioned
 
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
@@ -989,6 +1098,7 @@ export class SwarmIdProxy {
           type: "connectionInfoResponse",
           requestId: message.requestId,
           canUpload,
+          storagePartitioned: this.storagePartitioned || undefined,
           identity,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
@@ -1152,31 +1262,61 @@ export class SwarmIdProxy {
     this.authButtonContainer.appendChild(button)
   }
 
+  private handleConnect(
+    message: {
+      type: "connect"
+      requestId: string
+      agent?: boolean
+      popupMode?: "popup" | "window"
+    },
+    event: MessageEvent,
+  ): void {
+    const success = this.openAuthPopup({
+      agent: message.agent,
+      popupMode: message.popupMode,
+    })
+    ;(event.source as WindowProxy).postMessage(
+      {
+        type: "connectResponse",
+        requestId: message.requestId,
+        success,
+      },
+      { targetOrigin: event.origin },
+    )
+  }
+
   /**
    * Open the authentication popup window.
    * Returns true if popup was opened, false if parent origin is not set.
    */
-  private openAuthPopup(): boolean {
+  private openAuthPopup(options?: {
+    agent?: boolean
+    popupMode?: "popup" | "window"
+  }): boolean {
     if (!this.parentOrigin) {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
       return false
     }
 
     // Build authentication URL using shared utility
-    // proxyMode=true: popup was opened from proxy iframe, so we validate
-    // same-origin opener and send setSecret via postMessage
+    // challenge: used for storage partitioning detection — popup checks if it can read this from localStorage
+    const challenge = crypto.randomUUID()
+    this.pendingChallenge = challenge
+    localStorage.setItem(STORAGE_CHALLENGE_KEY, challenge)
+
     // Get base path from current location (e.g., /id/pr-140/proxy -> /id/pr-140)
     const basePath = window.location.pathname.replace(/\/proxy$/, "")
     const authUrl = buildAuthUrl(
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      { proxyMode: true }, // proxyMode - enables same-origin validation and setSecret message
+      { challenge, agent: options?.agent },
     )
 
-    // Open as popup or full window based on popupMode
+    // Open as popup or full window based on popupMode (per-call override takes precedence)
+    const effectivePopupMode = options?.popupMode ?? this.popupMode
     let popup: Window | null = null
-    if (this.popupMode === "popup") {
+    if (effectivePopupMode === "popup") {
       popup = window.open(authUrl, "_blank", "width=500,height=600")
     } else {
       popup = window.open(authUrl, "_blank")
@@ -1277,6 +1417,8 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+
+      this.ensureCanUpload()
 
       if (!this.signerKey || !this.postageBatchId) {
         throw new Error(
@@ -1411,6 +1553,8 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+
+      this.ensureCanUpload()
 
       if (!this.postageBatchId) {
         throw new Error(
@@ -1641,6 +1785,8 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
+      this.ensureCanUpload()
+
       if (!this.signerKey || !this.postageBatchId) {
         throw new Error(
           "Signer key and postage batch ID required. Please authenticate.",
@@ -1793,6 +1939,8 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
+      this.ensureCanUpload()
+
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -1854,6 +2002,8 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
+      this.ensureCanUpload()
+
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -1913,6 +2063,8 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+
+      this.ensureCanUpload()
 
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
@@ -2267,6 +2419,8 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+
+      this.ensureCanUpload()
 
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
@@ -2772,6 +2926,7 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+      this.ensureCanUpload()
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -2878,6 +3033,7 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+      this.ensureCanUpload()
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -3006,6 +3162,7 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+      this.ensureCanUpload()
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
@@ -3123,6 +3280,8 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+
+      this.ensureCanUpload()
 
       if (!this.signerKey || !this.postageBatchId) {
         throw new Error(
@@ -3396,6 +3555,8 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
 
+      this.ensureCanUpload()
+
       if (!this.signerKey || !this.postageBatchId) {
         throw new Error(
           "Signer key and postage batch ID required. Please login first.",
@@ -3475,6 +3636,8 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
+
+      this.ensureCanUpload()
 
       if (!this.signerKey || !this.postageBatchId) {
         throw new Error(
@@ -3665,25 +3828,16 @@ export class SwarmIdProxy {
       return
     }
 
-    if (!this.postageBatchId) {
-      this.sendErrorToParent(
-        event,
-        message.requestId,
-        "No postage batch configured",
-      )
-      return
-    }
-
-    if (!this.stamper) {
-      this.sendErrorToParent(
-        event,
-        message.requestId,
-        "Stamper not initialized. Please login first.",
-      )
-      return
-    }
-
     try {
+      this.ensureCanUpload()
+
+      if (!this.postageBatchId) {
+        throw new Error("No postage batch configured")
+      }
+
+      if (!this.stamper) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
       // DEBUG: Log manifest creation details for /bzz/ compatibility analysis
 
       // Serialize write through Web Locks API to prevent concurrent uploads
