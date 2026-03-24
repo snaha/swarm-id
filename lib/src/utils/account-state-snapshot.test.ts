@@ -8,6 +8,8 @@ import {
 import type { Account, ConnectedApp, PostageStamp } from "../schemas"
 import {
   TEST_ETH_ADDRESS_HEX,
+  TEST_IDENTITY_ADDRESS_HEX,
+  TEST_IDENTITY_ADDRESS_2_HEX,
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
@@ -195,7 +197,7 @@ describe("appSecret in snapshots", () => {
         appUrl: "https://example.com",
         appName: "Test App",
         lastConnectedAt: 1700000000000,
-        identityId: "identity-1",
+        identityId: TEST_IDENTITY_ADDRESS_HEX,
         appSecret: "preserved-secret",
       },
     ]
@@ -312,18 +314,18 @@ describe("edge cases", () => {
   it("should handle multiple entities of each type", () => {
     const account = createPasskeyAccount()
     const identities = [
-      createIdentity({ id: "id-1", name: "Identity One" }),
-      createIdentity({ id: "id-2", name: "Identity Two" }),
-      createIdentity({ id: "id-3", name: "Identity Three" }),
+      createIdentity({ id: TEST_IDENTITY_ADDRESS_HEX, name: "Identity One" }),
+      createIdentity({ id: TEST_IDENTITY_ADDRESS_2_HEX, name: "Identity Two" }),
+      createIdentity({ id: "3".repeat(40), name: "Identity Three" }),
     ]
     const connectedApps = [
       createConnectedApp({
         appUrl: "https://app1.example.com",
-        identityId: "id-1",
+        identityId: TEST_IDENTITY_ADDRESS_HEX,
       }),
       createConnectedApp({
         appUrl: "https://app2.example.com",
-        identityId: "id-2",
+        identityId: TEST_IDENTITY_ADDRESS_2_HEX,
       }),
     ]
     const postageStamps = [
@@ -519,7 +521,7 @@ describe("bee-js type conversions", () => {
       },
       identities: [
         {
-          id: "id-1",
+          id: TEST_IDENTITY_ADDRESS_HEX,
           accountId: TEST_ETH_ADDRESS_HEX,
           name: "Identity",
           createdAt: 1700000000000,

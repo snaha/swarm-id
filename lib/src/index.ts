@@ -22,6 +22,9 @@ export {
   utils,
 } from "./utils/key-derivation"
 
+// Hex address utility
+export { hexAddress } from "./utils/hex"
+
 // Batch utilization tracking
 export {
   initializeBatchUtilization,
@@ -208,9 +211,6 @@ export type {
   UploadProgress,
   RequestOptions,
   DownloadOptions,
-  Reference,
-  BatchId,
-  Address,
   ParentToIframeMessage,
   IframeToParentMessage,
   PopupToIframeMessage,
@@ -282,6 +282,29 @@ export {
   NetworkSettingsSchemaV1,
 } from "./schemas"
 
+// Base validation schemas and types
+export {
+  ReferenceSchema,
+  BatchIdSchema,
+  AddressSchema,
+  PrivateKeySchema,
+  EncryptionKeySchema,
+  IdentifierSchema,
+  SignatureSchema,
+  TimestampSchema,
+  FeedIndexSchema,
+} from "./schemas"
+export type {
+  Reference,
+  BatchId,
+  Address,
+  PrivateKey,
+  Identifier,
+  Signature,
+  Timestamp,
+  FeedIndex,
+} from "./schemas"
+
 // Batch utilization types
 export type {
   BatchUtilizationState,
@@ -310,9 +333,6 @@ export type {
 
 // Schema exports (for validation)
 export {
-  ReferenceSchema,
-  BatchIdSchema,
-  AddressSchema,
   UploadOptionsSchema,
   ActUploadOptionsSchema,
   RequestOptionsSchema,

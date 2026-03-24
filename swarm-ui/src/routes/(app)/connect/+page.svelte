@@ -221,7 +221,7 @@
           secret: appSecret,
           identityId: selectedIdentity.id,
           identityName: selectedIdentity.name,
-          identityAddress: selectedIdentity.accountId.toHex(),
+          identityAddress: selectedIdentity.id,
         },
       },
       window.location.origin,

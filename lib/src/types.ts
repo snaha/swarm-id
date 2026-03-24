@@ -3,7 +3,36 @@ import type {
   PrivateKey as BeePrivateKey,
   Topic as BeeTopic,
 } from "@ethersphere/bee-js"
-import { NetworkSettingsSchemaV1 } from "./schemas"
+import {
+  NetworkSettingsSchemaV1,
+  ReferenceSchema,
+  BatchIdSchema,
+  AddressSchema,
+  PrivateKeySchema,
+  EncryptionKeySchema,
+  IdentifierSchema,
+  SignatureSchema,
+  TimestampSchema,
+  FeedIndexSchema,
+} from "./schemas"
+import type {
+  Reference,
+  Address,
+  Identifier,
+  Signature,
+  Timestamp,
+  FeedIndex,
+} from "./schemas"
+export type {
+  Reference,
+  BatchId,
+  Address,
+  PrivateKey,
+  Identifier,
+  Signature,
+  Timestamp,
+  FeedIndex,
+} from "./schemas"
 
 // ============================================================================
 // Constants
@@ -18,47 +47,6 @@ export const STORAGE_KEY_CONNECTED_APPS = "swarm-id-connected-apps"
 export const STORAGE_KEY_POSTAGE_STAMPS = "swarm-id-postage-stamps"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
-
-// ============================================================================
-// Base Types
-// ============================================================================
-
-// Helper for hex string validation
-const hexString = (length: number) =>
-  z.string().regex(new RegExp(`^[0-9a-fA-F]{${length}}$`), {
-    message: `Must be a ${length}-character hex string`,
-  })
-
-// Support both regular (32-byte = 64 hex chars) and encrypted (64-byte = 128 hex chars) references
-export const ReferenceSchema = z
-  .string()
-  .regex(/^[0-9a-fA-F]{64}$|^[0-9a-fA-F]{128}$/, {
-    message:
-      "Reference must be 64 hex chars (32 bytes) or 128 hex chars (64 bytes for encrypted)",
-  })
-export const BatchIdSchema = hexString(64) // 32 bytes
-export const AddressSchema = hexString(40) // 20 bytes
-export const PrivateKeySchema = hexString(64) // 32 bytes
-export const EncryptionKeySchema = hexString(64) // 32 bytes symmetric key
-export const IdentifierSchema = hexString(64) // 32 bytes
-export const SignatureSchema = hexString(130) // 65 bytes
-export const TimestampSchema = z.preprocess(
-  (val) => (typeof val === "bigint" ? val.toString() : val),
-  z.union([z.number(), z.string()]),
-)
-export const FeedIndexSchema = z.preprocess(
-  (val) => (typeof val === "bigint" ? val.toString() : val),
-  z.union([z.number(), z.string()]),
-)
-
-export type Reference = z.infer<typeof ReferenceSchema>
-export type BatchId = z.infer<typeof BatchIdSchema>
-export type Address = z.infer<typeof AddressSchema>
-export type PrivateKey = z.infer<typeof PrivateKeySchema>
-export type Identifier = z.infer<typeof IdentifierSchema>
-export type Signature = z.infer<typeof SignatureSchema>
-export type Timestamp = z.infer<typeof TimestampSchema>
-export type FeedIndex = z.infer<typeof FeedIndexSchema>
 
 // ============================================================================
 // Upload/Download Options

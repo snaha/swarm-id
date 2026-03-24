@@ -93,8 +93,8 @@ test.describe('Demo App Connect Flow', () => {
     await expect(page.locator('.min-w-0.flex-1 .text-sm.font-medium')).toBeVisible({
       timeout: 15000,
     })
-    // The address is displayed in truncated format (first 6 chars + ... + last 4 chars)
-    // For the test seed phrase, the address is 0x9858EfFD...EcaEda94
+    // The identity address is displayed in truncated format (first 6 chars + ... + last 4 chars)
+    // For the test seed phrase, this is the HD wallet child key address
     await expect(page.locator('.min-w-0.flex-1 .text-xs.font-mono')).toContainText('...')
   })
 
@@ -168,8 +168,8 @@ test.describe('Demo App Connect Flow', () => {
     await expect(page.locator('.min-w-0.flex-1 .text-sm.font-medium')).toBeVisible({
       timeout: 15000,
     })
-    // The address is displayed in truncated format (first 6 chars + ... + last 4 chars)
-    // For the test seed phrase, the address is 0x9858EfFD...EcaEda94
+    // The identity address is displayed in truncated format (first 6 chars + ... + last 4 chars)
+    // For the test seed phrase, this is the HD wallet child key address
     await expect(page.locator('.min-w-0.flex-1 .text-xs.font-mono')).toContainText('...')
   })
 
@@ -237,8 +237,8 @@ test.describe('Demo App Connect Flow', () => {
     await expect(page.locator('.min-w-0.flex-1 .text-sm.font-medium')).toBeVisible({
       timeout: 15000,
     })
-    // The address is displayed in truncated format (first 6 chars + ... + last 4 chars)
-    // For the test seed phrase, the address is 0x9858EfFD...EcaEda94
+    // The identity address is displayed in truncated format (first 6 chars + ... + last 4 chars)
+    // For the test seed phrase, this is the HD wallet child key address
     await expect(page.locator('.min-w-0.flex-1 .text-xs.font-mono')).toContainText('...')
   })
 
@@ -327,8 +327,8 @@ test.describe('Demo App Connect Flow', () => {
     await expect(page.locator('.min-w-0.flex-1 .text-sm.font-medium')).toBeVisible({
       timeout: 15000,
     })
-    // The address is displayed in truncated format (first 6 chars + ... + last 4 chars)
-    // For the test seed phrase, the address is 0x9858EfFD...EcaEda94
+    // The identity address is displayed in truncated format (first 6 chars + ... + last 4 chars)
+    // For the test seed phrase, this is the HD wallet child key address
     await expect(page.locator('.min-w-0.flex-1 .text-xs.font-mono')).toContainText('...')
   })
 })
