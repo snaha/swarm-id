@@ -20,7 +20,7 @@
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import ErrorMessage from '$lib/components/ui/error-message.svelte'
-  import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+  import { deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let accountName = $state('Passkey')

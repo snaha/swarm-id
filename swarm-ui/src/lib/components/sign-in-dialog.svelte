@@ -14,7 +14,7 @@
   import routes from '$lib/routes'
   import { layoutStore } from '$lib/stores/layout.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { parseEncryptedExportHeader } from '@swarm-id/lib'
+  import { parseEncryptedExportHeader } from '@snaha/swarm-id'
 
   interface Props {
     open: boolean

@@ -1,0 +1,9 @@
+{
+  "packages": {
+    "lib": {
+      "release-type": "node",
+      "package-name": "@snaha/swarm-id",
+      "include-component-in-tag": false
+    }
+  }
+}

@@ -17,7 +17,7 @@
   },
   "dependencies": {
     "@ethersphere/bee-js": "^11.1.1",
-    "@swarm-id/lib": "workspace:*"
+    "@snaha/swarm-id": "workspace:*"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",

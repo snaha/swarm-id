@@ -1,6 +1,6 @@
 {
-  "name": "@swarm-id/lib",
-  "version": "1.0.0",
+  "name": "@snaha/swarm-id",
+  "version": "0.0.1",
   "type": "module",
   "description": "Swarm ID library for authentication and Bee API operations",
   "main": "dist/swarm-id.esm.js",
@@ -38,8 +38,16 @@
     "bee",
     "web3"
   ],
-  "author": "",
-  "license": "ISC",
+  "author": "snaha",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/snaha/swarm-id"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
   "dependencies": {
     "@ethersphere/bee-js": "^11.1.1",
     "cafe-utility": "33.3.2",

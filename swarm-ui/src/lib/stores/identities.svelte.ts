@@ -1,6 +1,6 @@
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import { createIdentitiesStorageManager, type Identity } from '@swarm-id/lib'
+import { createIdentitiesStorageManager, type Identity } from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 

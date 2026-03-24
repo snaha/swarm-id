@@ -9,7 +9,7 @@ const config: KnipConfig = {
   },
   ignore: ['src/lib/components/ui/**'],
   ignoreDependencies: [
-    '@swarm-id/lib',
+    '@snaha/swarm-id',
     '@ethersphere/bee-js',
     '@sveltejs/adapter-static',
     'tailwindcss',

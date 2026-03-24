@@ -19,7 +19,7 @@ This demo shows how to integrate the Swarm ID library into a dApp for authentica
 The demo imports from the library via workspace link:
 
 ```typescript
-import { SwarmIdClient } from '@swarm-id/lib'
+import { SwarmIdClient } from '@snaha/swarm-id'
 ```
 
 The library handles all the complex authentication, message passing, validation, and type safety internally. The demo HTML only needs to:
@@ -66,7 +66,7 @@ No HTTPS or certificates required - `localhost` is a secure context.
 The client is configured in `src/lib/stores/client.svelte.ts` using Svelte 5 runes:
 
 ```typescript
-import { SwarmIdClient } from '@swarm-id/lib'
+import { SwarmIdClient } from '@snaha/swarm-id'
 
 const client = new SwarmIdClient({
   iframeOrigin: proxyOrigin,

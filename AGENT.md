@@ -37,7 +37,7 @@ Master Key (from Passkey/SIWE challenge)
 
 ## Packages
 
-- **lib/**: TypeScript library (@swarm-id/lib) — auth and Bee API operations
+- **lib/**: TypeScript library (@snaha/swarm-id) — auth and Bee API operations
 - **swarm-ui/**: SvelteKit identity management UI (trusted domain)
 - **demo/**: Demo dApp showing library integration
 - **docs-site/**: Starlight (Astro) documentation website
@@ -58,7 +58,7 @@ pnpm clean            # Clean build outputs
 
 Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
 
-- **@swarm-id/lib**: `format:check`, `lint`, `typecheck`, `test`
+- **@snaha/swarm-id**: `format:check`, `lint`, `typecheck`, `test`
 - **swarm-identity**: `lint`, `check`, `knip`
 
 ## Library Core (`lib/`)

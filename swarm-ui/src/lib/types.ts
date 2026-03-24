@@ -1,5 +1,5 @@
 // Type definitions for Swarm Identity
-// Re-exports types from @swarm-id/lib
+// Re-exports types from @snaha/swarm-id
 
 import { z } from 'zod'
 
@@ -7,7 +7,7 @@ import { z } from 'zod'
 // Re-export types from lib
 // ============================================================================
 
-export type { Account, Identity, ConnectedApp, PostageStamp } from '@swarm-id/lib'
+export type { Account, Identity, ConnectedApp, PostageStamp } from '@snaha/swarm-id'
 
 export type AccountSyncType = 'local' | 'synced'
 

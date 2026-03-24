@@ -12,11 +12,11 @@
     "dev:bee:logs": "fdp-play logs queen --follow",
     "dev:bee:fresh": "fdp-play start -w 1 --fresh --pull",
     "dev:demo": "pnpm --filter @swarm-id/demo dev",
-    "dev:lib": "pnpm --filter @swarm-id/lib build:watch",
+    "dev:lib": "pnpm --filter @snaha/swarm-id build:watch",
     "dev:swarm-ui": "pnpm --filter swarm-identity dev",
     "dev:docs": "pnpm --filter @swarm-id/docs dev",
     "build": "pnpm -r --workspace-concurrency=1 build",
-    "build:lib": "pnpm --filter @swarm-id/lib build",
+    "build:lib": "pnpm --filter @snaha/swarm-id build",
     "build:demo": "pnpm --filter @swarm-id/demo build",
     "build:swarm-ui": "pnpm --filter swarm-identity build",
     "build:swarm-demo": "pnpm build:lib && pnpm build:demo",
@@ -25,8 +25,8 @@
     "preview:docs": "pnpm --filter @swarm-id/docs preview",
     "clean": "pnpm -r clean && rm -rf swarm-id-build demo/build",
     "install:all": "pnpm install",
-    "check:all": "pnpm --filter @swarm-id/lib check:all && pnpm --filter swarm-identity check:all && pnpm --filter @swarm-id/demo check:all",
-    "format:all": "pnpm --filter @swarm-id/lib format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format"
+    "check:all": "pnpm --filter @snaha/swarm-id check:all && pnpm --filter swarm-identity check:all && pnpm --filter @swarm-id/demo check:all",
+    "format:all": "pnpm --filter @snaha/swarm-id format && pnpm --filter swarm-identity format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format"
   },
   "devDependencies": {
     "@fairdatasociety/fdp-play": "^3.3.0",

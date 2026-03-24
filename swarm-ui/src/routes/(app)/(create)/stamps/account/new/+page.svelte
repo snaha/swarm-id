@@ -13,7 +13,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { PostageStamp } from '@swarm-id/lib'
+  import type { PostageStamp } from '@snaha/swarm-id'
 
   const account = $derived(sessionStore.data.account)
   const currentIdentityId = $derived(sessionStore.data.currentIdentityId)

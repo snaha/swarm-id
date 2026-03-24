@@ -5,7 +5,7 @@
 
 import { HDNodeWallet, Mnemonic } from 'ethers'
 import { EthAddress, Bytes } from '@ethersphere/bee-js'
-import type { AgentAccount } from '@swarm-id/lib'
+import type { AgentAccount } from '@snaha/swarm-id'
 
 export interface AgentAccountResult {
   ethereumAddress: EthAddress

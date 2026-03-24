@@ -3,7 +3,7 @@
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import type { ConnectedApp, Identity } from '$lib/types'
-  import { DEFAULT_SESSION_DURATION } from '@swarm-id/lib'
+  import { DEFAULT_SESSION_DURATION } from '@snaha/swarm-id'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import Badge from './ui/badge.svelte'
   import Dropdown from './ui/dropdown.svelte'
@@ -11,7 +11,7 @@
   import List from './ui/list/list.svelte'
   import ListItem from './ui/list/list-item.svelte'
   import DeleteModal from './delete-modal.svelte'
-  import { SWARM_SECRET_PREFIX } from '@swarm-id/lib'
+  import { SWARM_SECRET_PREFIX } from '@snaha/swarm-id'
 
   interface Props {
     apps: ConnectedApp[]

@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config'
 export default defineConfig({
   plugins: [sveltekit()],
   optimizeDeps: {
-    exclude: ['@swarm-id/lib'],
+    exclude: ['@snaha/swarm-id'],
   },
   ssr: {
     noExternal: ['carbon-icons-svelte'],

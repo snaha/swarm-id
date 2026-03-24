@@ -6,7 +6,7 @@
   import { logStore } from '$lib/stores/log.svelte'
   import { bytesToHex } from '$lib/utils/hex'
   import { validateHex } from '$lib/utils/validation'
-  import { extractContentFromFlatManifest, extractEntryFromManifest } from '@swarm-id/lib'
+  import { extractContentFromFlatManifest, extractEntryFromManifest } from '@snaha/swarm-id'
   import type { ResultData } from './result-types'
 
   interface Props {

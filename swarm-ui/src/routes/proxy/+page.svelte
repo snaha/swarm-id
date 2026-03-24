@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte'
-  import { initProxy } from '@swarm-id/lib'
+  import { initProxy } from '@snaha/swarm-id'
 
   let authButtonContainer: HTMLDivElement
 

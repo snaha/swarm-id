@@ -1,4 +1,4 @@
-import { SwarmIdClient, formatTTL } from '@swarm-id/lib'
+import { SwarmIdClient, formatTTL } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
 

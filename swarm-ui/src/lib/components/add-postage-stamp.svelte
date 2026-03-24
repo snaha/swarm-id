@@ -15,7 +15,7 @@
     generateSignerKey,
     type BatchEvent,
   } from '$lib/services/multichain-widget'
-  import type { PostageStamp } from '@swarm-id/lib'
+  import type { PostageStamp } from '@snaha/swarm-id'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'

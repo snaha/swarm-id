@@ -22,7 +22,7 @@
     deriveSecretSeedEncryptionKey,
     encryptSecretSeed,
   } from '$lib/utils/encryption'
-  import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+  import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
   import { EthAddress, BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
 

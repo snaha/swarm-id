@@ -15,7 +15,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
-  import { restoreAccountFromSwarm, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+  import { restoreAccountFromSwarm, deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
   import { Bee, BatchId, EthAddress } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
   import {

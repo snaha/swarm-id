@@ -22,7 +22,7 @@
   import { Bytes } from '@ethersphere/bee-js'
   import { toPrefixedHex } from '$lib/utils/hex'
   import { generateDockerName } from '$lib/docker-name'
-  import { hexAddress } from '@swarm-id/lib'
+  import { hexAddress } from '@snaha/swarm-id'
   import Vertical from '$lib/components/ui/vertical.svelte'
 
   type StampOption = 'account' | 'separate'

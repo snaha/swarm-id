@@ -8,13 +8,13 @@ The `SwarmIdClient` is the main class for integrating Swarm ID authentication an
 ## Installation
 
 ```bash
-pnpm add @swarm-id/lib
+pnpm add @snaha/swarm-id
 ```
 
 ## Quick Start
 
 ```typescript
-import { SwarmIdClient } from '@swarm-id/lib'
+import { SwarmIdClient } from '@snaha/swarm-id'
 
 const client = new SwarmIdClient({
   iframeOrigin: 'https://swarm-id.example.com',
@@ -1512,14 +1512,14 @@ import type {
   ParseHeaderResult,
   AccountStateSnapshot,
   RestoreAccountResult,
-} from '@swarm-id/lib'
+} from '@snaha/swarm-id'
 ```
 
 ---
 
 ## Backup Encryption
 
-Functions for creating and reading encrypted `.swarmid` backup files. Exported from `@swarm-id/lib`.
+Functions for creating and reading encrypted `.swarmid` backup files. Exported from `@snaha/swarm-id`.
 
 ### `createEncryptedExport(account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex)`
 

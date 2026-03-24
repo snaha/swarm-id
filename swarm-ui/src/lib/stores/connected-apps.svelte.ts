@@ -1,5 +1,5 @@
 import { browser } from '$app/environment'
-import { createConnectedAppsStorageManager, type ConnectedApp } from '@swarm-id/lib'
+import { createConnectedAppsStorageManager, type ConnectedApp } from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 import { sessionStore } from './session.svelte'
 import { identitiesStore } from './identities.svelte'

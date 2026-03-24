@@ -1,4 +1,4 @@
-import type { Account, Identity, ConnectedApp, PostageStamp } from '@swarm-id/lib'
+import type { Account, Identity, ConnectedApp, PostageStamp } from '@snaha/swarm-id'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { identitiesStore } from '$lib/stores/identities.svelte'
 import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'

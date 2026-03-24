@@ -5,7 +5,7 @@ import {
   type PostageStamp,
   UtilizationAwareStamper,
   UtilizationStoreDB,
-} from '@swarm-id/lib'
+} from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================

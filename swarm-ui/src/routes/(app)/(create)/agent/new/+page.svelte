@@ -20,7 +20,7 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
-  import { deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+  import { deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
