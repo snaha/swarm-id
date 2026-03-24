@@ -1,3 +1,5 @@
+import { hexAddress } from '@swarm-id/lib'
+
 const adjective = [
   'admiring',
   'adoring',
@@ -353,23 +355,9 @@ function capitalize(s: string) {
   return s.slice(0, 1).toUpperCase() + s.slice(1)
 }
 
-function validateEthereumAddress(address: string): string {
-  // Remove '0x' prefix if present
-  const cleanAddress = address.toLowerCase().replace(/^0x/, '')
-
-  // Validate: must be exactly 40 hexadecimal characters
-  if (!/^[0-9a-f]{40}$/.test(cleanAddress)) {
-    throw new Error(
-      `Invalid Ethereum address format: ${address}. Expected 40 hex characters with optional 0x prefix.`,
-    )
-  }
-
-  return cleanAddress
-}
-
 function addressToRandomNumbers(address: string): [number, number] {
   // Validate and clean the address
-  const cleanAddress = validateEthereumAddress(address)
+  const cleanAddress = hexAddress(address)
 
   // Take 13 hex chars (52 bits) for each number - safely within JavaScript's 53-bit integer range
   // 13 hex chars = 52 bits < 53 bits (safe integer range)

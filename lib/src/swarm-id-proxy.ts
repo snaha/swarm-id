@@ -1078,7 +1078,7 @@ export class SwarmIdProxy {
               identity = {
                 id: foundIdentity.id,
                 name: foundIdentity.name,
-                address: foundIdentity.accountId.toHex(),
+                address: foundIdentity.id,
               }
             }
           }

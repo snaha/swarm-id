@@ -7,7 +7,12 @@
  */
 
 import { z } from "zod"
-import { EthAddress, BatchId, Bytes, PrivateKey } from "@ethersphere/bee-js"
+import {
+  EthAddress,
+  BatchId as BeeBatchId,
+  Bytes,
+  PrivateKey as BeePrivateKey,
+} from "@ethersphere/bee-js"
 
 // ============================================================================
 // Network Settings Constants
@@ -15,6 +20,46 @@ import { EthAddress, BatchId, Bytes, PrivateKey } from "@ethersphere/bee-js"
 
 export const DEFAULT_BEE_NODE_URL = "https://api.gateway.ethswarm.org/"
 export const DEFAULT_GNOSIS_RPC_URL = "https://xdai.fairdatasociety.org/"
+
+// ============================================================================
+// Base Validation Schemas (hex strings, no transforms)
+// ============================================================================
+
+const hexString = (length: number) =>
+  z.string().regex(new RegExp(`^[0-9a-fA-F]{${length}}$`), {
+    message: `Must be a ${length}-character hex string`,
+  })
+
+// Support both regular (32-byte = 64 hex chars) and encrypted (64-byte = 128 hex chars) references
+export const ReferenceSchema = z
+  .string()
+  .regex(/^[0-9a-fA-F]{64}$|^[0-9a-fA-F]{128}$/, {
+    message:
+      "Reference must be 64 hex chars (32 bytes) or 128 hex chars (64 bytes for encrypted)",
+  })
+export const BatchIdSchema = hexString(64) // 32 bytes
+export const AddressSchema = hexString(40) // 20 bytes
+export const PrivateKeySchema = hexString(64) // 32 bytes
+export const EncryptionKeySchema = hexString(64) // 32 bytes symmetric key
+export const IdentifierSchema = hexString(64) // 32 bytes
+export const SignatureSchema = hexString(130) // 65 bytes
+export const TimestampSchema = z.preprocess(
+  (val) => (typeof val === "bigint" ? val.toString() : val),
+  z.union([z.number(), z.string()]),
+)
+export const FeedIndexSchema = z.preprocess(
+  (val) => (typeof val === "bigint" ? val.toString() : val),
+  z.union([z.number(), z.string()]),
+)
+
+export type Reference = z.infer<typeof ReferenceSchema>
+export type BatchId = z.infer<typeof BatchIdSchema>
+export type Address = z.infer<typeof AddressSchema>
+export type PrivateKey = z.infer<typeof PrivateKeySchema>
+export type Identifier = z.infer<typeof IdentifierSchema>
+export type Signature = z.infer<typeof SignatureSchema>
+export type Timestamp = z.infer<typeof TimestampSchema>
+export type FeedIndex = z.infer<typeof FeedIndexSchema>
 
 // ============================================================================
 // Primitive → bee-js Type Transforms (internal, for entity schemas)
@@ -34,7 +79,7 @@ const StoredEthAddress = z
 const StoredBatchId = z
   .string()
   .length(64)
-  .transform((s) => new BatchId(s))
+  .transform((s) => new BeeBatchId(s))
 
 /**
  * Schema for PrivateKey - validates 64-char hex string, transforms to PrivateKey
@@ -42,7 +87,7 @@ const StoredBatchId = z
 const StoredPrivateKey = z
   .string()
   .length(64)
-  .transform((s) => new PrivateKey(s))
+  .transform((s) => new BeePrivateKey(s))
 
 /**
  * Schema for Bytes - validates number array, transforms to Bytes
@@ -115,7 +160,7 @@ export const AccountSchemaV1 = z.discriminatedUnion("type", [
  * Identity Schema V1
  */
 export const IdentitySchemaV1 = z.object({
-  id: z.string(),
+  id: AddressSchema,
   accountId: StoredEthAddress,
   name: z.string(),
   defaultPostageStampBatchID: StoredBatchId.optional(),

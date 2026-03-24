@@ -12,6 +12,7 @@ import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import {
   TEST_ETH_ADDRESS_HEX,
+  TEST_IDENTITY_ADDRESS_HEX,
   TEST_BATCH_ID_HEX,
   createPasskeyAccount,
   createIdentity,
@@ -47,7 +48,7 @@ function createMockStores() {
 
   const connectedAppsStore: ConnectedAppsStoreInterface = {
     getAppsByIdentityId: vi.fn((identityId: string) =>
-      identityId === "identity-1" ? [connectedApp] : [],
+      identityId === TEST_IDENTITY_ADDRESS_HEX ? [connectedApp] : [],
     ),
   }
 

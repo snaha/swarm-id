@@ -22,6 +22,7 @@
   import { Bytes } from '@ethersphere/bee-js'
   import { toPrefixedHex } from '$lib/utils/hex'
   import { generateDockerName } from '$lib/docker-name'
+  import { hexAddress } from '@swarm-id/lib'
   import Vertical from '$lib/components/ui/vertical.svelte'
 
   type StampOption = 'account' | 'separate'
@@ -66,7 +67,7 @@
 
   function deriveIdentityFromAccount(account: Account, masterKey: Bytes, index: number) {
     const identityWallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey)).deriveChild(index)
-    const id = identityWallet.address
+    const id = hexAddress(identityWallet.address)
     const name = generateDockerName(id)
     const accountId = account.id
     const createdAt = Date.now()

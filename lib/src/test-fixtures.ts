@@ -13,11 +13,13 @@ import type {
 
 export const TEST_ETH_ADDRESS_HEX = "a".repeat(40)
 export const TEST_ETH_ADDRESS_2_HEX = "b".repeat(40)
+export const TEST_IDENTITY_ADDRESS_HEX = "1".repeat(40)
+export const TEST_IDENTITY_ADDRESS_2_HEX = "2".repeat(40)
 export const TEST_BATCH_ID_HEX = "c".repeat(64)
 export const TEST_BATCH_ID_2_HEX = "e".repeat(64)
 export const TEST_PRIVATE_KEY_HEX = "d".repeat(64)
 export const TEST_ENCRYPTION_KEY_HEX = "f".repeat(64)
-export const DIFFERENT_ENCRYPTION_KEY_HEX = "1".repeat(64)
+export const DIFFERENT_ENCRYPTION_KEY_HEX = "3".repeat(64)
 
 export function createPasskeyAccount(
   overrides?: Partial<PasskeyAccount>,
@@ -65,7 +67,7 @@ export function createAgentAccount(
 
 export function createIdentity(overrides?: Partial<Identity>): Identity {
   return {
-    id: "identity-1",
+    id: TEST_IDENTITY_ADDRESS_HEX,
     accountId: new EthAddress(TEST_ETH_ADDRESS_HEX),
     name: "Default Identity",
     createdAt: 1700000000000,
@@ -80,7 +82,7 @@ export function createConnectedApp(
     appUrl: "https://app.example.com",
     appName: "Test App",
     lastConnectedAt: 1700000000000,
-    identityId: "identity-1",
+    identityId: TEST_IDENTITY_ADDRESS_HEX,
     appSecret: "secret-should-be-stripped",
     ...overrides,
   }
