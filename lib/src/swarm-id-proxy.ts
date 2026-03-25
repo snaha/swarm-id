@@ -480,9 +480,6 @@ export class SwarmIdProxy {
         this.stamper,
         desiredCount,
       )
-      console.debug(
-        `[Proxy] StampWorkerPool created with ${desiredCount} workers`,
-      )
       return this.stampWorkerPool
     } catch (error) {
       console.warn("[Proxy] Failed to create StampWorkerPool:", error)
