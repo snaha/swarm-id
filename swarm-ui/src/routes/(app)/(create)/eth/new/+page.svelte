@@ -31,7 +31,11 @@
   import { WarningAlt } from 'carbon-icons-svelte'
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
-  import { deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
+  import {
+    deriveAccountSwarmEncryptionKey,
+    getOrCreateDeviceId,
+    mergeDevices,
+  } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -113,6 +117,7 @@
         encryptionSalt: encryptionSalt,
         encryptedSecretSeed: encryptedSecretSeed,
         swarmEncryptionKey: swarmEncryptionKey,
+        devices: mergeDevices([], getOrCreateDeviceId()),
       })
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')

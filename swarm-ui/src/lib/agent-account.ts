@@ -6,6 +6,7 @@
 import { HDNodeWallet, Mnemonic } from 'ethers'
 import { EthAddress, Bytes } from '@ethersphere/bee-js'
 import type { AgentAccount } from '@snaha/swarm-id'
+import { getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
 
 export interface AgentAccountResult {
   ethereumAddress: EthAddress
@@ -96,6 +97,7 @@ export function createAgentAccount(options: CreateAgentAccountOptions): CreateAg
       name: options.name,
       createdAt: Date.now(),
       type: 'agent',
+      devices: mergeDevices([], getOrCreateDeviceId()),
     },
     masterKey,
   }

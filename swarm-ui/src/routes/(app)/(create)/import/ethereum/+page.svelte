@@ -98,10 +98,12 @@
           defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
             ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
             : undefined,
+          devices: [],
         },
         identities: result.data.identities,
         connectedApps: result.data.connectedApps,
         postageStamps: result.data.postageStamps,
+        devices: result.data.metadata.devices,
       })
 
       sessionStore.setAccount(account)

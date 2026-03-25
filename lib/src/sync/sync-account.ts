@@ -281,6 +281,7 @@ export function createSyncAccount(
         defaultPostageStampBatchID: defaultStampBatchID.toHex(),
         createdAt: account.createdAt,
         lastModified: Date.now(),
+        devices: account.devices,
       },
       identities,
       connectedApps: apps,

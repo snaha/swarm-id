@@ -66,6 +66,7 @@ export function serializeAccountStateSnapshot(input: {
       defaultPostageStampBatchID: input.metadata.defaultPostageStampBatchID,
       createdAt: input.metadata.createdAt,
       lastModified: input.metadata.lastModified,
+      devices: input.metadata.devices,
     },
     identities: input.identities.map(serializeIdentity),
     connectedApps: input.connectedApps.map(serializeConnectedApp),

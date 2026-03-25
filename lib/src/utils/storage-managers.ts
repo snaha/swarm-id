@@ -96,43 +96,30 @@ const parsePostageStampsV1: VersionParser<PostageStamp> = (data: unknown) => {
  * Serialize Account for storage
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
+  const common = {
+    id: account.id.toString(),
+    name: account.name,
+    createdAt: account.createdAt,
+    type: account.type,
+    swarmEncryptionKey: account.swarmEncryptionKey,
+    defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toString(),
+    devices: account.devices,
+  }
+
   if (account.type === "passkey") {
+    return { ...common, credentialId: account.credentialId }
+  } else if (account.type === "ethereum") {
     return {
-      id: account.id.toString(),
-      name: account.name,
-      createdAt: account.createdAt,
-      type: account.type,
-      credentialId: account.credentialId,
-      swarmEncryptionKey: account.swarmEncryptionKey,
-      defaultPostageStampBatchID:
-        account.defaultPostageStampBatchID?.toString(),
-    }
-  } else if (account.type === "agent") {
-    return {
-      id: account.id.toString(),
-      name: account.name,
-      createdAt: account.createdAt,
-      type: account.type,
-      swarmEncryptionKey: account.swarmEncryptionKey,
-      defaultPostageStampBatchID:
-        account.defaultPostageStampBatchID?.toString(),
-    }
-  } else {
-    return {
-      id: account.id.toString(),
-      name: account.name,
-      createdAt: account.createdAt,
-      type: account.type,
+      ...common,
       ethereumAddress: account.ethereumAddress.toString(),
       encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
       encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
       encryptedSecretSeed: Array.from(
         account.encryptedSecretSeed.toUint8Array(),
       ),
-      swarmEncryptionKey: account.swarmEncryptionKey,
-      defaultPostageStampBatchID:
-        account.defaultPostageStampBatchID?.toString(),
     }
+  } else {
+    return common
   }
 }
 

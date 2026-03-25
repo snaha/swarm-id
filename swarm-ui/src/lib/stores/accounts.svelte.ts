@@ -1,6 +1,6 @@
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import { createAccountsStorageManager, type Account } from '@snaha/swarm-id'
+import { createAccountsStorageManager, type Account, type Device } from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
@@ -48,6 +48,13 @@ export const accountsStore = {
     accounts = accounts.map((account) => (account.id.equals(id) ? { ...account, name } : account))
     saveAccounts(accounts)
     triggerSync(id.toHex())
+  },
+
+  updateDevices(id: EthAddress, devices: Device[]) {
+    accounts = accounts.map((account) =>
+      account.id.equals(id) ? { ...account, devices } : account,
+    )
+    saveAccounts(accounts)
   },
 
   setDefaultStamp(id: EthAddress, batchID: BatchId | undefined) {

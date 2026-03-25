@@ -20,7 +20,11 @@
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import ErrorMessage from '$lib/components/ui/error-message.svelte'
-  import { deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
+  import {
+    deriveAccountSwarmEncryptionKey,
+    getOrCreateDeviceId,
+    mergeDevices,
+  } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let accountName = $state('Passkey')
@@ -78,6 +82,7 @@
         type: 'passkey',
         credentialId: account.credentialId,
         swarmEncryptionKey: swarmEncryptionKey,
+        devices: mergeDevices([], getOrCreateDeviceId()),
       })
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')
