@@ -7,7 +7,7 @@
   import Close from 'carbon-icons-svelte/lib/Close.svelte'
   import Input from './ui/input/input.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-  import { DEFAULT_BEE_NODE_URL, DEFAULT_GNOSIS_RPC_URL } from '@swarm-id/lib'
+  import { DEFAULT_BEE_NODE_URL, DEFAULT_GNOSIS_RPC_URL } from '@snaha/swarm-id'
 
   const UrlSchema = z.string().url()
 

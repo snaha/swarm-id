@@ -304,7 +304,7 @@ import {
   createEncryptedExport,
   decryptEncryptedExport,
   parseEncryptedExportHeader,
-} from "@swarm-id/lib"
+} from "@snaha/swarm-id"
 
 // Export (no re-auth needed — uses stored swarmEncryptionKey)
 const exported = await createEncryptedExport(
@@ -334,7 +334,7 @@ The `serializeAccountStateSnapshot()` and `deserializeAccountStateSnapshot()` fu
 When a passkey auth succeeds on a new device with no local account, `restoreAccountFromSwarm()` derives the necessary keys, finds the epoch feed in Swarm, downloads and decrypts the latest account snapshot.
 
 ```typescript
-import { restoreAccountFromSwarm } from "@swarm-id/lib"
+import { restoreAccountFromSwarm } from "@snaha/swarm-id"
 
 const result = await restoreAccountFromSwarm(
   bee,

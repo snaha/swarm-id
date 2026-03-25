@@ -1,4 +1,4 @@
-import { hexAddress } from '@swarm-id/lib'
+import { hexAddress } from '@snaha/swarm-id'
 
 const adjective = [
   'admiring',

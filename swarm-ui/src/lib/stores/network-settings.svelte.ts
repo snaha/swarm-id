@@ -4,7 +4,7 @@ import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
   type NetworkSettings,
-} from '@swarm-id/lib'
+} from '@snaha/swarm-id'
 
 export interface NetworkSettingsStore {
   settings: NetworkSettings

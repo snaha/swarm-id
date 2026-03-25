@@ -1,7 +1,7 @@
 // Session store for tracking current account/identity creation flow
 
 import type { Account, AppData } from '$lib/types'
-import type { EncryptedSwarmIdExport } from '@swarm-id/lib'
+import type { EncryptedSwarmIdExport } from '@snaha/swarm-id'
 import { Bytes } from '@ethersphere/bee-js'
 
 export type SessionData = {

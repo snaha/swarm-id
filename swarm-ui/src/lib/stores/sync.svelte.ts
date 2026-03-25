@@ -3,7 +3,7 @@ import {
   type SyncAccountFunction,
   UtilizationStoreDB,
   DebouncedUtilizationUploader,
-} from '@swarm-id/lib'
+} from '@snaha/swarm-id'
 import { identitiesStore } from './identities.svelte'
 import { connectedAppsStore } from './connected-apps.svelte'
 import { postageStampsStore } from './postage-stamps.svelte'

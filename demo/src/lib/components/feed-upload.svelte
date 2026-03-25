@@ -7,7 +7,7 @@
   import { logStore } from '$lib/stores/log.svelte'
   import { buildV1Payload, hexToBytes } from '$lib/utils/hex'
   import { validateHex } from '$lib/utils/validation'
-  import { buildBzzManifestNode, saveMantarayTreeRecursively } from '@swarm-id/lib'
+  import { buildBzzManifestNode, saveMantarayTreeRecursively } from '@snaha/swarm-id'
   import type { ResultData } from './result-types'
 
   interface Props {

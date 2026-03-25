@@ -13,7 +13,7 @@
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { authenticateWithPasskey } from '$lib/passkey'
-  import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@swarm-id/lib'
+  import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
   import { BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
 

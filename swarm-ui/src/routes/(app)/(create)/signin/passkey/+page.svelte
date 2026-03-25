@@ -13,7 +13,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { authenticateWithPasskey } from '$lib/passkey'
-  import { restoreAccountFromSwarm } from '@swarm-id/lib'
+  import { restoreAccountFromSwarm } from '@snaha/swarm-id'
   import { Bee, BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
 

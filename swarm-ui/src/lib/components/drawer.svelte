@@ -31,7 +31,7 @@
   import Badge from '$lib/components/ui/badge.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { createEncryptedExport, SWARM_SECRET_PREFIX } from '@swarm-id/lib'
+  import { createEncryptedExport, SWARM_SECRET_PREFIX } from '@snaha/swarm-id'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import type { Account, Identity } from '$lib/types'

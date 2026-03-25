@@ -14,7 +14,7 @@
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { PostageStamp } from '@swarm-id/lib'
+  import type { PostageStamp } from '@snaha/swarm-id'
 
   const identityId = $derived($page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)

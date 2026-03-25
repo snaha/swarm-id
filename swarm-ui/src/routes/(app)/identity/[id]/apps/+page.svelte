@@ -2,7 +2,7 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import AppList from '$lib/components/app-list.svelte'
-  import { DEFAULT_SESSION_DURATION, DAY, HOUR } from '@swarm-id/lib'
+  import { DEFAULT_SESSION_DURATION, DAY, HOUR } from '@snaha/swarm-id'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { page } from '$app/state'
   import Grid from '$lib/components/ui/grid.svelte'

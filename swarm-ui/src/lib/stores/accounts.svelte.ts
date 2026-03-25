@@ -1,6 +1,6 @@
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import { createAccountsStorageManager, type Account } from '@swarm-id/lib'
+import { createAccountsStorageManager, type Account } from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
