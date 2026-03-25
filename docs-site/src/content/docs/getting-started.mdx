@@ -113,38 +113,6 @@ console.log(fileData.name, fileData.data)
 
 ## Local Development
 
-For local development, you'll need to set up HTTPS servers with proper certificates.
-
-### Prerequisites
-
-1. **Install mkcert** for local SSL certificates:
-
-   ```bash
-   # macOS
-   brew install mkcert
-
-   # Linux
-   wget https://github.com/FiloSottile/mkcert/releases/download/v1.4.4/mkcert-v1.4.4-linux-amd64
-   chmod +x mkcert-v1.4.4-linux-amd64
-   sudo mv mkcert-v1.4.4-linux-amd64 /usr/local/bin/mkcert
-   ```
-
-2. **Generate certificates**:
-
-   ```bash
-   mkcert -install
-   mkcert swarm-app.local swarm-id.local
-   ```
-
-3. **Configure `/etc/hosts`**:
-
-   ```
-   127.0.0.1  swarm-app.local
-   127.0.0.1  swarm-id.local
-   ```
-
-### Running Locally
-
 ```bash
 # Clone the repository
 git clone https://github.com/snaha/swarm-id
@@ -152,14 +120,17 @@ git clone https://github.com/snaha/swarm-id
 # Install dependencies
 pnpm install
 
-# Build the library
-cd lib && pnpm build && cd ..
-
-# Start the development servers
-./start-servers.sh
+# Start both demo and identity UI
+pnpm dev
 ```
 
-Then open [https://swarm-app.local:8080](https://swarm-app.local:8080) in your browser.
+Open http://localhost:3000 — that's it!
+
+- Demo app runs on port 3000
+- Identity UI runs on port 5174
+- No HTTPS, certificates, or custom domains required (`localhost` is a [secure context](https://developer.mozilla.org/en-US/docs/Web/Security/Secure_Contexts))
+
+For advanced setup (local Bee cluster, SSH tunnels for real-domain testing, known dev keys), see the [Local Development guide](/local-development).
 
 ## Import & Export
 

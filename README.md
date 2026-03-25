@@ -1,14 +1,15 @@
 # Swarm Identity Management
 
-This monorepo implements a cross-browser compatible authentication and identity management system for Swarm dApps.
+Cross-browser compatible authentication and identity management for Swarm dApps.
+
+**[Documentation](https://swarm-docs.snaha.net)** | **[Demo](https://swarm-demo.snaha.net)** | **[Identity UI](https://swarm-id.snaha.net)**
 
 ## Packages
 
-- **[lib/](./lib/README.md)** - The Swarm ID TypeScript library for authentication and Bee API operations
-- **[swarm-ui/](./swarm-ui/)** - SvelteKit-based identity management UI
-- **[demo/](./demo/)** - Demo dApp with library integration examples
-- **[docs-site/](./docs-site/)** - Starlight (Astro) documentation website
-- **[bee-js/](https://github.com/agazso/bee-js/tree/feat/encrypted-chunk-streams)** - A custom fork of the [bee-js](https://github.com/ethersphere/bee-js) library, containing encrypted, streaming chunked upload and download functionality.
+- **[lib/](./lib/README.md)** — `@snaha/swarm-id` TypeScript library for authentication and Bee API operations
+- **[swarm-ui/](./swarm-ui/)** — SvelteKit identity management UI (trusted domain)
+- **[demo/](./demo/)** — Demo dApp with library integration examples
+- **[docs-site/](./docs-site/)** — Starlight (Astro) documentation website
 
 ## Architecture
 
@@ -16,14 +17,42 @@ The project uses an OAuth-style popup authentication flow using the Storage Acce
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
-## Live Demos
+[Architecture deep-dive →](https://swarm-docs.snaha.net/architecture)
 
-The applications are deployed and available at:
+## Quick Start
 
-- **Demo App**: [https://swarm-demo.snaha.net](https://swarm-demo.snaha.net)
-- **Identity UI**: [https://swarm-id.snaha.net](https://swarm-id.snaha.net)
+```bash
+pnpm add @snaha/swarm-id
+```
 
-### Deployment
+```typescript
+import { SwarmIdClient } from '@snaha/swarm-id'
+
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.snaha.net',
+  metadata: {
+    name: 'My dApp',
+    description: 'A demo Swarm application',
+  },
+  onAuthChange: (authenticated) => {
+    console.log('Auth status:', authenticated)
+  },
+})
+
+await client.initialize()
+
+const status = await client.checkAuthStatus()
+if (status.authenticated) {
+  const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
+  console.log('Uploaded:', result.reference)
+}
+
+client.destroy()
+```
+
+[Full integration guide →](https://swarm-docs.snaha.net/getting-started)
+
+## Deployment
 
 Both apps are deployed to Digital Ocean App Platform as separate static sites:
 
@@ -37,51 +66,7 @@ Both apps are deployed to Digital Ocean App Platform as separate static sites:
 - SvelteKit identity management UI
 - Proxy/auth pages for iframe communication
 
-## Quick Start
-
-### Build Everything
-
-```bash
-# Clone the forked bee-js library
-git clone https://github.com/agazso/bee-js
-
-# Build the forked bee-js library
-cd bee-js && git checkout feat/encrypted-chunk-streams && npm install && npm build
-
-# Install all workspace dependencies
-pnpm install
-
-# Build library + both apps
-pnpm build
-
-# Or build specific apps
-pnpm build:swarm-demo    # Builds lib + demo app
-pnpm build:swarm-id      # Builds lib + identity UI
-```
-
-### Build Outputs
-
-**demo/build/** (Demo App)
-
-```
-demo/build/
-├── index.html          # SvelteKit static output (SPA fallback)
-└── _app/               # Vite-bundled assets (JS, CSS)
-```
-
-**swarm-id-build/** (Identity UI)
-
-```
-swarm-id-build/
-├── [SvelteKit app files including prerendered routes: /proxy, /connect]
-└── _app/               # Vite-bundled assets (JS, CSS)
-```
-
-See [lib/README.md](./lib/README.md) for detailed library documentation.
-
-## Local Development Setup
-
-### Quick Start
+## Local Development
 
 ```bash
 pnpm install
@@ -152,24 +137,7 @@ curl -X POST "http://localhost:1633/stamps/10000000/17"
 curl "http://localhost:1633/stamps/<batchID>"
 ```
 
-**Client-Side Stamp Signing:**
-
-Stamps bought via the API are owned by the queen node. Use the queen's private key for client-side signing:
-
-```typescript
-import { Stamper } from '@ethersphere/bee-js'
-
-const queenKey = '566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9'
-const stamper = Stamper.fromBlank(queenKey, batchId, depth)
-const envelope = stamper.stamp(chunk)
-```
-
-**Known Keys:**
-
-| Node     | Private Key                                                        | Address                                      |
-| -------- | ------------------------------------------------------------------ | -------------------------------------------- |
-| Queen    | `566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9` | `0x26234a2ad3ba8b398a762f279b792cfacd536a3f` |
-| Worker 1 | `195cf6324303f6941ad119d0a1d2e862d810078e1370b8d205552a543ff40aab` | -                                            |
+See the [Local Development guide](https://swarm-docs.snaha.net/local-development) for client-side stamp signing, known dev keys, SSH tunnel setup, and more.
 
 ### Developer Tools (/dev route)
 
@@ -179,189 +147,15 @@ The Identity UI includes a Developer Tools page at http://localhost:5174/dev wit
 - **Stamps**: Buy postage stamps from the local Bee node using pre-funded signer keys
 - **Sync**: Manually trigger account sync to test postage stamp utilization tracking
 
-### Testing with Real Domains (SSH Tunnel)
-
-To test storage partitioning behavior with real TLS certificates (as in production), you can use SSH tunnels to a VPS with nginx.
-
-**Architecture:**
-
-```
-Your VPS (nginx + HTTPS)              Your Local Machine
-┌─────────────────────────┐           ┌─────────────────────┐
-│ demo.yourdomain.com     │◄──────────│ SSH -R tunnels      │
-│   → 127.0.0.1:18080     │           │   18080 → demo      │
-│ id.yourdomain.com       │           │   5174 → identity   │
-│   → 127.0.0.1:5174      │           │   (Vite dev server) │
-└─────────────────────────┘           └─────────────────────┘
-```
-
-**VPS Setup (one-time):**
-
-1. Add nginx server blocks pointing to `127.0.0.1:18080` (demo) and `127.0.0.1:5174` (identity)
-2. Get SSL certificates with certbot
-3. Add DNS A records for both subdomains
-
-**Local usage:**
-
-```bash
-# Terminal 1: Start demo server
-pnpm dev:demo
-
-# Terminal 2: Start SvelteKit dev server with allowed hosts
-VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=id.yourdomain.com pnpm dev:swarm-ui
-
-# Terminal 3: Open SSH tunnel
-ssh -R 18080:localhost:3000 -R 5174:localhost:5174 user@your-vps
-```
-
-**Note:** The `VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable is required when accessing the Vite dev server through a foreign hostname. Without it, Vite will reject requests from the tunneled domain.
-
-**Access the demo:**
-
-```
-https://demo.yourdomain.com/?idDomain=https://id.yourdomain.com
-```
-
-The `?idDomain=` parameter tells the demo which identity service to use. This allows testing cross-origin storage partitioning with real browser security policies while still having hot reload for the identity UI.
-
-**Important:**
-
-- If you change library code, rebuild it: `cd lib && pnpm build`
-- Use `cd lib && pnpm build:watch` for automatic rebuilds during development
-
 ## Project Structure
 
 ```
 .
-├── lib/                  # Swarm ID TypeScript library
-│   ├── src/              # Library source code
-│   ├── dist/             # Built library files (ES6 modules)
-│   └── README.md         # Library documentation
+├── lib/                  # @snaha/swarm-id TypeScript library
 ├── demo/                 # Demo app (SvelteKit)
-│   ├── src/              # SvelteKit source code
-│   │   ├── routes/       # SvelteKit routes (/, /feeds, /soc, etc.)
-│   │   └── lib/          # Stores, components, utilities
-│   └── build/            # Build output (deployed to swarm-demo.snaha.net)
-├── swarm-ui/             # SvelteKit identity management UI
-│   ├── src/              # SvelteKit source code
-│   │   └── routes/       # SvelteKit routes including /proxy and /connect
-│   └── build/            # SvelteKit production build
-├── docs-site/            # Starlight documentation site
-│   ├── src/content/docs/ # Documentation pages (MDX)
-│   └── dist/             # Built static site
-├── bee-js/               # bee-js library (linked dependency)
+├── swarm-ui/             # Identity management UI (SvelteKit)
+├── docs-site/            # Documentation website (Starlight/Astro)
 └── swarm-id-build/       # Build output (deployed to swarm-id.snaha.net)
-```
-
-### Key Build Artifacts
-
-**Library Distribution** (`lib/dist/`)
-
-- ES6 modules with TypeScript definitions
-- Source maps for debugging
-- ~350KB per module (uncompressed)
-- Imported via standard `<script type="module">`
-
-**Demo App Build** (`demo/build/`)
-
-- SvelteKit static build via `@sveltejs/adapter-static`
-- Vite bundles all dependencies (library included via workspace link)
-- Deployed to swarm-demo.snaha.net
-
-**Identity UI Build** (`swarm-id-build/`)
-
-- Full SvelteKit production build
-- Prerendered routes for `/proxy` and `/connect`
-- Deployed to swarm-id.snaha.net
-
-## Documentation
-
-- **[Documentation Site](./docs-site/)**: Full documentation website (run `pnpm docs:dev` to preview)
-- **[The Book of Swarm](./The-Book-of-Swarm.pdf)**: Comprehensive Swarm documentation
-- **[Swarm Identity Management Proposal](./docs/Swarm-Identity-Management-Proposal.md)**: Identity system proposal
-- **[Library Documentation](./lib/README.md)**: API reference and usage examples
-
-### Documentation Development
-
-```bash
-# Start docs dev server (http://localhost:4321)
-pnpm dev:docs
-
-# Build docs for production
-pnpm build:docs
-
-# Preview production build
-pnpm preview:docs
-```
-
-## Development Workflow
-
-### Architecture Overview
-
-```
-┌─────────────────────────────────────────────────────────┐
-│  Browser: http://localhost:3000 (Demo App)              │
-│  ┌────────────────────────────────────────────────┐     │
-│  │ Demo App (SvelteKit)                            │     │
-│  │                                                │     │
-│  │  ┌─────────────────────────────────────────┐   │     │
-│  │  │ <iframe src="http://localhost:5174">    │   │     │
-│  │  │                                         │   │     │
-│  │  │ Identity UI (SvelteKit)                 │   │     │
-│  │  │   - Proxy for Bee API calls             │   │     │
-│  │  │   - Auth popup handler                  │   │     │
-│  │  └─────────────────────────────────────────┘   │     │
-│  └────────────────────────────────────────────────┘     │
-└─────────────────────────────────────────────────────────┘
-```
-
-## Development Tips
-
-- **TypeScript Execution**: Use `pnpx tsx` instead of `npx ts-node` to run TypeScript files
-- **Browser DevTools**: Check Application → Storage to verify storage partitioning
-- **Hot Reload**: Changes in `swarm-ui/src/` will automatically reload in the browser
-- **Debugging**: Use browser DevTools on both the parent page and the iframe
-
-## AI Coding Agent Configuration
-
-This project includes configuration for [Claude Code](https://docs.anthropic.com/en/docs/claude-code) and other AI coding agents, following [best practices](https://code.claude.com/docs/en/best-practices.md) for effective AI-assisted development.
-
-### Structure
-
-```
-CLAUDE.md                        → symlink to AGENT.md
-AGENT.md                         # Core project context: architecture, commands, code style rules
-.claude/
-├── settings.json                # Shared team settings (permissions, hooks)
-├── settings.local.json          # Personal overrides (gitignored)
-└── rules/                       # Modular, path-scoped instructions
-    ├── swarm-ui.md              # Svelte 5, Diete, Carbon Icons (loads for swarm-ui/** only)
-    ├── figma.md                 # Figma MCP workflow (loads for swarm-ui/** only)
-    └── bee-cluster.md           # Local Bee cluster commands and known dev keys
-```
-
-### How It Works
-
-- **`AGENT.md`** is the main instruction file, kept concise (~100 lines). It contains only information that would cause mistakes if absent: architecture overview, essential commands, code style rules (no-semicolons, no-null, no-any), and pre-commit requirements.
-
-- **`.claude/rules/`** contains modular rules that load automatically based on which files are being edited. For example, Svelte 5 rune patterns and Diete design system conventions only load when working in `swarm-ui/`.
-
-- **`.claude/settings.json`** defines shared team configuration:
-  - **Permissions**: Pre-approved commands (`pnpm build`, `pnpm check:all`, `git status`, Figma MCP tools, etc.) so agents don't prompt for common operations.
-
-- **`settings.local.json`** (gitignored) is for personal permission overrides.
-
-### Adding New Rules
-
-To add context that only applies to a specific package or directory, create a new `.md` file in `.claude/rules/` with a YAML frontmatter `paths` filter:
-
-```markdown
----
-paths:
-  - 'lib/**'
----
-
-# lib-specific instructions here
 ```
 
 ## Troubleshooting
