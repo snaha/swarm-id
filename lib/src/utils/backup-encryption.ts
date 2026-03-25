@@ -2,11 +2,12 @@
  * Backup Encryption Module
  *
  * Provides AES-GCM-256 encryption for .swarmid backup files.
- * The encryption key is derived from the account's swarmEncryptionKey
- * (which is always persisted on all account types), so export requires
- * NO re-authentication. Import requires auth to re-derive the key.
+ * The encryption key is derived from swarmEncryptionKey, which is itself
+ * derived from the account's derivationKey (always persisted on all
+ * account types), so export requires NO re-authentication.
+ * Import requires auth to re-derive the key.
  *
- * Key chain: masterKey → swarmEncryptionKey (stored) → backupKey (HMAC-SHA256)
+ * Key chain: masterKey → derivationKey (stored) → swarmEncryptionKey → backupKey (HMAC-SHA256)
  */
 
 import { z } from "zod"

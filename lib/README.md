@@ -304,22 +304,24 @@ import {
   createEncryptedExport,
   decryptEncryptedExport,
   parseEncryptedExportHeader,
+  deriveSwarmEncryptionKey,
 } from "@snaha/swarm-id"
 
-// Export (no re-auth needed — uses stored swarmEncryptionKey)
+// Export (no re-auth needed — derive swarmEncryptionKey from stored derivationKey)
+const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
 const exported = await createEncryptedExport(
   account,
   identities,
   connectedApps,
   postageStamps,
-  swarmEncryptionKeyHex,
+  swarmEncryptionKey,
 )
 
 // Read header metadata without decrypting
 const header = parseEncryptedExportHeader(fileData)
 
 // Import (requires auth to re-derive key)
-const result = await decryptEncryptedExport(fileData, swarmEncryptionKeyHex)
+const result = await decryptEncryptedExport(fileData, swarmEncryptionKey)
 if (result.success) {
   console.log(result.data) // AccountStateSnapshot
 }

@@ -170,17 +170,52 @@ export async function deriveAccountBackupKey(
 }
 
 /**
- * Derive account Swarm encryption key from account master key
+ * Derive account derivation key from account master key
  *
- * Used for encrypting account snapshot data before upload to Swarm
+ * A generic 32-byte root key stored on the account, used for deterministically
+ * deriving further keys (e.g. swarmEncryptionKey) without re-authentication.
  *
  * @param accountMasterKey - Account master key (hex string)
- * @returns 32-byte encryption key (as hex string)
+ * @returns 32-byte derivation key (as hex string)
  */
-export async function deriveAccountSwarmEncryptionKey(
+export async function deriveAccountDerivationKey(
   accountMasterKey: string,
 ): Promise<string> {
-  return deriveSecret(accountMasterKey, `swarm-encryption`)
+  return deriveSecret(accountMasterKey, `derivation-key`)
+}
+
+/**
+ * Derive Swarm encryption key from account derivation key
+ *
+ * Used for encrypting account snapshot data before upload to Swarm.
+ * Derived from the stored derivationKey rather than the master key directly.
+ *
+ * @param derivationKey - Account derivation key (hex string)
+ * @returns 32-byte encryption key (as hex string)
+ */
+export async function deriveSwarmEncryptionKey(
+  derivationKey: string,
+): Promise<string> {
+  return deriveSecret(derivationKey, `swarm-encryption`)
+}
+
+/**
+ * Derive postage batch signer key from account derivation key
+ *
+ * Used as the PrivateKey for signing chunks uploaded with a postage batch.
+ * When identityId is provided, derives a unique signer key per identity;
+ * otherwise derives an account-level signer key.
+ *
+ * @param derivationKey - Account derivation key (hex string)
+ * @param identityId - Optional identity ID for per-identity signer keys
+ * @returns 32-byte signer key (as hex string)
+ */
+export async function derivePostageSignerKey(
+  derivationKey: string,
+  identityId?: string,
+): Promise<string> {
+  const context = identityId ? `postage-signer:${identityId}` : `postage-signer`
+  return deriveSecret(derivationKey, context)
 }
 
 /**

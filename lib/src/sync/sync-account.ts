@@ -15,7 +15,11 @@ import {
   Reference,
   type Chunk,
 } from "@ethersphere/bee-js"
-import { deriveSecret, hexToUint8Array } from "../utils/key-derivation"
+import {
+  deriveSecret,
+  deriveSwarmEncryptionKey,
+  hexToUint8Array,
+} from "../utils/key-derivation"
 import {
   updateAfterWrite,
   saveUtilizationState,
@@ -152,11 +156,13 @@ export function createSyncAccount(
     // Convert chunk addresses to Chunks
     const chunks = createChunksFromAddresses(chunkAddresses)
 
-    // Derive owner address from backup key
-    const backupKeyHex = await deriveSecret(
-      account.swarmEncryptionKey,
-      "backup-key",
+    // Derive swarm encryption key from derivation key
+    const swarmEncryptionKey = await deriveSwarmEncryptionKey(
+      account.derivationKey,
     )
+
+    // Derive owner address from backup key
+    const backupKeyHex = await deriveSecret(swarmEncryptionKey, "backup-key")
     const backupKey = new PrivateKey(backupKeyHex)
     const owner = backupKey.publicKey().address()
 
@@ -168,7 +174,7 @@ export function createSyncAccount(
       {
         bee,
         owner,
-        encryptionKey: hexToUint8Array(account.swarmEncryptionKey),
+        encryptionKey: hexToUint8Array(swarmEncryptionKey),
         cache: utilizationStore,
       },
     )
@@ -184,7 +190,7 @@ export function createSyncAccount(
       // Get stamper for signing chunks (with loaded bucket state)
       const stamper = await postageStampsStore.getStamper(batchID, {
         owner,
-        encryptionKey: hexToUint8Array(account.swarmEncryptionKey),
+        encryptionKey: hexToUint8Array(swarmEncryptionKey),
       })
       if (!stamper) {
         console.warn("[SyncCoordinator] Cannot create stamper, skipping upload")
@@ -198,7 +204,7 @@ export function createSyncAccount(
           await saveUtilizationState(utilizationState, {
             bee,
             stamper,
-            encryptionKey: hexToUint8Array(account.swarmEncryptionKey),
+            encryptionKey: hexToUint8Array(swarmEncryptionKey),
             cache: utilizationStore,
             tracker,
           })
@@ -234,13 +240,14 @@ export function createSyncAccount(
    * @param accountId - Account ID (hex address)
    * @returns Snapshot and sync context, or undefined if account/stamp not found
    */
-  function getAccountStateSnapshot(accountId: string):
+  async function getAccountStateSnapshot(accountId: string): Promise<
     | {
         snapshot: AccountStateSnapshot
         encryptionKey: string
         defaultStamp: PostageStamp
       }
-    | undefined {
+    | undefined
+  > {
     // Get account
     const account = accountsStore.getAccount(new EthAddress(accountId))
     if (!account) {
@@ -264,6 +271,9 @@ export function createSyncAccount(
       console.warn("[SyncCoordinator] Default stamp not found")
       return undefined
     }
+
+    // Derive swarm encryption key from stored derivation key
+    const encryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
 
     // Collect account state
     const identities = identitiesStore.getIdentitiesByAccount(account.id)
@@ -290,7 +300,7 @@ export function createSyncAccount(
 
     return {
       snapshot,
-      encryptionKey: account.swarmEncryptionKey,
+      encryptionKey,
       defaultStamp,
     }
   }
@@ -301,8 +311,8 @@ export function createSyncAccount(
     const startTime = performance.now()
     const timestamp = () => new Date().toISOString()
 
-    // Capture state snapshot BEFORE any async operations
-    const snapshotResult = getAccountStateSnapshot(accountId)
+    // Capture state snapshot (derives encryption key from derivation key)
+    const snapshotResult = await getAccountStateSnapshot(accountId)
     if (!snapshotResult) {
       return undefined
     }

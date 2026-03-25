@@ -75,10 +75,14 @@ Master Key (from Passkey/SIWE challenge)
 ├─> App-Specific Secret (HMAC-SHA256 with app origin)
 │       ├─> Low-stakes keys (feed, session) → shared with apps
 │       └─> High-stakes keys (stamps, ACT) → never shared
-├─> swarmEncryptionKey (HMAC-SHA256, persisted in account)
-│       ├─> backupKey (HMAC-SHA256 with "swarm-id-backup-encryption-v1")
-│       │       └─> AES-GCM-256 CryptoKey (for .swarmid encryption)
-│       └─> backup private key (for Swarm epoch feed owner)
+├─> derivationKey (HMAC-SHA256 with "derivation-key", persisted in account)
+│       ├─> swarmEncryptionKey (HMAC-SHA256 with "swarm-encryption")
+│       │       ├─> backup AES key (HMAC-SHA256 with "swarm-id-backup-encryption-v1")
+│       │       │       └─> AES-GCM-256 CryptoKey (for .swarmid encryption)
+│       │       └─> backup feed key (HMAC-SHA256 with "backup-key")
+│       │               └─> backup private key (for Swarm epoch feed owner)
+│       └─> postageSignerKey (HMAC-SHA256 with "postage-signer" or "postage-signer:{identityId}")
+│               └─> PrivateKey for signing postage batch chunks
 ```
 
 ### App Secret Derivation
@@ -157,12 +161,13 @@ During Ethereum account import, the user must re-enter their secret seed. The ma
 
 ### Export Flow
 
-Export requires **no re-authentication** — the `swarmEncryptionKey` is already persisted in the account. The flow:
+Export requires **no re-authentication** — the `derivationKey` is already persisted in the account. The flow:
 
 1. Serialize account state via `serializeAccountStateSnapshot()` (strips `appSecret`)
-2. Derive AES-GCM-256 key: `swarmEncryptionKey` → HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`
-3. Encrypt with random 12-byte IV
-4. Build header with account metadata + ciphertext
+2. Derive `swarmEncryptionKey` from `derivationKey` via HMAC-SHA256 with context `"swarm-encryption"`
+3. Derive AES-GCM-256 key: `swarmEncryptionKey` → HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`
+4. Encrypt with random 12-byte IV
+5. Build header with account metadata + ciphertext
 
 ### Import Flow
 
@@ -170,18 +175,19 @@ Import **requires authentication** to re-derive the encryption key:
 
 1. Parse the plaintext header to identify account type and metadata
 2. User authenticates (passkey or wallet) to obtain `masterKey`
-3. Derive `swarmEncryptionKey` → `backupKey` → AES-GCM-256 key
+3. Derive `derivationKey` → `swarmEncryptionKey` → `backupKey` → AES-GCM-256 key
 4. Decrypt and validate the payload via `deserializeAccountStateSnapshot()`
 
 ### Swarm Restore Flow
 
 When a passkey auth succeeds on a new device with no local account:
 
-1. Derive `swarmEncryptionKey` from `masterKey`
-2. Derive `backupKey` → epoch feed owner private key
-3. Build feed topic from account ID
-4. Look up latest epoch feed entry in Swarm
-5. Download and decrypt the account snapshot
+1. Derive `derivationKey` from `masterKey`
+2. Derive `swarmEncryptionKey` from `derivationKey`
+3. Derive `backupKey` → epoch feed owner private key
+4. Build feed topic from account ID
+5. Look up latest epoch feed entry in Swarm
+6. Download and decrypt the account snapshot
 
 ### Security: appSecret Exclusion
 

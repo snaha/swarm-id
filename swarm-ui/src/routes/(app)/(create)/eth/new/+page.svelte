@@ -31,11 +31,7 @@
   import { WarningAlt } from 'carbon-icons-svelte'
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
-  import {
-    deriveAccountSwarmEncryptionKey,
-    getOrCreateDeviceId,
-    mergeDevices,
-  } from '@snaha/swarm-id'
+  import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -88,8 +84,8 @@
 
       const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
 
-      // Derive swarmEncryptionKey from master key
-      const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
+      // Derive derivationKey from master key
+      const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
 
       // Encrypt masterKey before storage
 
@@ -116,7 +112,7 @@
         encryptedMasterKey: encryptedMasterKey,
         encryptionSalt: encryptionSalt,
         encryptedSecretSeed: encryptedSecretSeed,
-        swarmEncryptionKey: swarmEncryptionKey,
+        derivationKey,
         devices: mergeDevices([], getOrCreateDeviceId()),
       })
       sessionStore.setAccount(newAccount)

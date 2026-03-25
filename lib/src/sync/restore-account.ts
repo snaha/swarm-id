@@ -15,7 +15,8 @@ import {
   type Bytes,
 } from "@ethersphere/bee-js"
 import {
-  deriveAccountSwarmEncryptionKey,
+  deriveAccountDerivationKey,
+  deriveSwarmEncryptionKey,
   deriveSecret,
 } from "../utils/key-derivation"
 import { ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
@@ -29,7 +30,7 @@ import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
  */
 export interface RestoreAccountResult {
   snapshot: AccountStateSnapshot
-  swarmEncryptionKey: string
+  derivationKey: string
   credentialId: string
 }
 
@@ -50,10 +51,9 @@ export async function restoreAccountFromSwarm(
 ): Promise<RestoreAccountResult | undefined> {
   const accountId = ethereumAddress.toHex()
 
-  // 1. Derive the swarm encryption key from the master key
-  const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
-    masterKey.toHex(),
-  )
+  // 1. Derive the derivation key and swarm encryption key from the master key
+  const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
+  const swarmEncryptionKey = await deriveSwarmEncryptionKey(derivationKey)
 
   // 2. Derive the backup key (used as feed owner)
   const backupKeyHex = await deriveSecret(swarmEncryptionKey, "backup-key")
@@ -84,7 +84,7 @@ export async function restoreAccountFromSwarm(
 
   return {
     snapshot,
-    swarmEncryptionKey,
+    derivationKey,
     credentialId,
   }
 }

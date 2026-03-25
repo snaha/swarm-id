@@ -19,8 +19,8 @@ export const TEST_IDENTITY_ADDRESS_2_HEX = "2".repeat(40)
 export const TEST_BATCH_ID_HEX = "c".repeat(64)
 export const TEST_BATCH_ID_2_HEX = "e".repeat(64)
 export const TEST_PRIVATE_KEY_HEX = "d".repeat(64)
-export const TEST_ENCRYPTION_KEY_HEX = "f".repeat(64)
-export const DIFFERENT_ENCRYPTION_KEY_HEX = "3".repeat(64)
+export const TEST_DERIVATION_KEY_HEX = "f".repeat(64)
+export const DIFFERENT_DERIVATION_KEY_HEX = "1".repeat(64)
 
 export const TEST_DEVICE_ID = "550e8400-e29b-41d4-a716-446655440000"
 
@@ -42,7 +42,7 @@ export function createPasskeyAccount(
     createdAt: 1700000000000,
     type: "passkey" as const,
     credentialId: "credential-abc-123",
-    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
     ...overrides,
   }
@@ -60,7 +60,7 @@ export function createEthereumAccount(
     encryptedMasterKey: new Bytes(new Uint8Array([1, 2, 3, 4])),
     encryptionSalt: new Bytes(new Uint8Array([5, 6, 7, 8])),
     encryptedSecretSeed: new Bytes(new Uint8Array([9, 10, 11, 12])),
-    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
     ...overrides,
   }
@@ -74,7 +74,7 @@ export function createAgentAccount(
     name: "Test Agent Account",
     createdAt: 1700000000000,
     type: "agent" as const,
-    swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
     ...overrides,
   }

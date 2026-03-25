@@ -56,6 +56,7 @@
       <AddPostageStamp
         bind:this={addPostageStampRef}
         accountId={account.id.toHex()}
+        identityId={currentIdentityId}
         onSuccess={handleSuccess}
         introText="You chose to use a separate stamp for this identity."
         variant="account-creation"

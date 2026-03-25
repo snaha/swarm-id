@@ -90,6 +90,7 @@
       <AddPostageStamp
         bind:this={addPostageStampRef}
         accountId={account.id.toHex()}
+        {identityId}
         onSuccess={handleSuccess}
         onSkip={isUpgrade ? undefined : navigateBack}
         {introText}

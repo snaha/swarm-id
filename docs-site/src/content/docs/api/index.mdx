@@ -1523,27 +1523,28 @@ Functions for creating and reading encrypted `.swarmid` backup files. Exported f
 
 ### `createEncryptedExport(account, identities, connectedApps, postageStamps, swarmEncryptionKeyHex)`
 
-Create a fully encrypted `.swarmid` export object. Serializes account data, derives an AES-GCM-256 key from the stored `swarmEncryptionKey`, encrypts the payload, and builds a header with account metadata.
+Create a fully encrypted `.swarmid` export object. Serializes account data, derives an AES-GCM-256 key from the `swarmEncryptionKey` (which is itself derived from the account's stored `derivationKey`), encrypts the payload, and builds a header with account metadata.
 
 **Parameters:**
 
-| Parameter               | Type             | Description                                             |
-| ----------------------- | ---------------- | ------------------------------------------------------- |
-| `account`               | `Account`        | The account to export                                   |
-| `identities`            | `Identity[]`     | Account identities                                      |
-| `connectedApps`         | `ConnectedApp[]` | Connected applications (`appSecret` is stripped)        |
-| `postageStamps`         | `PostageStamp[]` | Postage stamps                                          |
-| `swarmEncryptionKeyHex` | `string`         | Hex-encoded swarm encryption key (persisted on account) |
+| Parameter               | Type             | Description                                                                                            |
+| ----------------------- | ---------------- | ------------------------------------------------------------------------------------------------------ |
+| `account`               | `Account`        | The account to export                                                                                  |
+| `identities`            | `Identity[]`     | Account identities                                                                                     |
+| `connectedApps`         | `ConnectedApp[]` | Connected applications (`appSecret` is stripped)                                                       |
+| `postageStamps`         | `PostageStamp[]` | Postage stamps                                                                                         |
+| `swarmEncryptionKeyHex` | `string`         | Hex-encoded swarm encryption key (derived from `account.derivationKey` via `deriveSwarmEncryptionKey`) |
 
 **Returns:** `Promise<EncryptedSwarmIdExport>`
 
 ```typescript
+const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
 const exported = await createEncryptedExport(
   account,
   identities,
   connectedApps,
   postageStamps,
-  swarmEncryptionKeyHex,
+  swarmEncryptionKey,
 )
 // Save as .swarmid file
 const blob = new Blob([JSON.stringify(exported)], { type: 'application/json' })
@@ -1555,15 +1556,16 @@ Decrypt an encrypted `.swarmid` export and return the parsed account state snaps
 
 **Parameters:**
 
-| Parameter               | Type      | Description                            |
-| ----------------------- | --------- | -------------------------------------- |
-| `encryptedData`         | `unknown` | The parsed JSON from a `.swarmid` file |
-| `swarmEncryptionKeyHex` | `string`  | Hex-encoded swarm encryption key       |
+| Parameter               | Type      | Description                                                     |
+| ----------------------- | --------- | --------------------------------------------------------------- |
+| `encryptedData`         | `unknown` | The parsed JSON from a `.swarmid` file                          |
+| `swarmEncryptionKeyHex` | `string`  | Hex-encoded swarm encryption key (derived from `derivationKey`) |
 
 **Returns:** `Promise<AccountStateSnapshotResult>` — `{ success: true, data: AccountStateSnapshot }` or `{ success: false, error: ZodError }`
 
 ```typescript
-const result = await decryptEncryptedExport(fileData, swarmEncryptionKeyHex)
+const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
+const result = await decryptEncryptedExport(fileData, swarmEncryptionKey)
 if (result.success) {
   const { identities, connectedApps, postageStamps } = result.data
 }
@@ -1583,13 +1585,13 @@ Parse and validate just the encrypted export header without decrypting. Useful f
 
 ### `deriveBackupEncryptionKey(swarmEncryptionKeyHex)`
 
-Derive an AES-GCM-256 `CryptoKey` for backup encryption from the stored `swarmEncryptionKey`. Uses HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`.
+Derive an AES-GCM-256 `CryptoKey` for backup encryption from the `swarmEncryptionKey` (which is itself derived from the stored `derivationKey`). Uses HMAC-SHA256 with context `"swarm-id-backup-encryption-v1"`.
 
 **Parameters:**
 
-| Parameter               | Type     | Description                      |
-| ----------------------- | -------- | -------------------------------- |
-| `swarmEncryptionKeyHex` | `string` | Hex-encoded swarm encryption key |
+| Parameter               | Type     | Description                                                     |
+| ----------------------- | -------- | --------------------------------------------------------------- |
+| `swarmEncryptionKeyHex` | `string` | Hex-encoded swarm encryption key (derived from `derivationKey`) |
 
 **Returns:** `Promise<CryptoKey>`
 
@@ -1686,7 +1688,34 @@ Restore account state from Swarm using passkey authentication result. Derives ke
 ```typescript
 interface RestoreAccountResult {
   snapshot: AccountStateSnapshot
-  swarmEncryptionKey: string
+  derivationKey: string
   credentialId: string
 }
+```
+
+## Key Derivation
+
+### `derivePostageSignerKey(derivationKey, identityId?)`
+
+Derive a deterministic postage batch signer key from the account's derivation key. When `identityId` is provided, derives a unique signer key for that identity; otherwise derives an account-level signer key.
+
+**Parameters:**
+
+| Parameter       | Type                  | Description                                       |
+| --------------- | --------------------- | ------------------------------------------------- |
+| `derivationKey` | `string`              | Account derivation key (64-char hex)              |
+| `identityId`    | `string \| undefined` | Optional identity ID for per-identity signer keys |
+
+**Returns:** `Promise<string>` — 32-byte signer key as hex string
+
+```typescript
+import { derivePostageSignerKey } from '@snaha/swarm-id'
+import { PrivateKey } from '@ethersphere/bee-js'
+
+// Account-level signer key
+const signerKeyHex = await derivePostageSignerKey(account.derivationKey)
+const signerKey = new PrivateKey(signerKeyHex)
+
+// Identity-specific signer key
+const identitySignerKeyHex = await derivePostageSignerKey(account.derivationKey, identity.id)
 ```

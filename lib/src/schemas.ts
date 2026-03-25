@@ -121,7 +121,7 @@ const CommonAccountSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
-  swarmEncryptionKey: z.string().length(64),
+  derivationKey: z.string().length(64), // derived key for deterministic sub-key generation (64-char hex)
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
 })

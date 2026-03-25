@@ -69,7 +69,7 @@
           name: result.snapshot.metadata.accountName,
           type: 'passkey',
           credentialId: passkeyAccount.credentialId,
-          swarmEncryptionKey: result.swarmEncryptionKey,
+          derivationKey: result.derivationKey,
           defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
             ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
             : undefined,

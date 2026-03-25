@@ -10,12 +10,11 @@
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { BatchId, PrivateKey } from '@ethersphere/bee-js'
-  import {
-    openStampPurchaseWidget,
-    generateSignerKey,
-    type BatchEvent,
-  } from '$lib/services/multichain-widget'
+  import { openStampPurchaseWidget, type BatchEvent } from '$lib/services/multichain-widget'
+  import { derivePostageSignerKey, hexToUint8Array } from '@snaha/swarm-id'
   import type { PostageStamp } from '@snaha/swarm-id'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { EthAddress } from '@ethersphere/bee-js'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
@@ -29,6 +28,7 @@
 
   interface Props {
     accountId: string
+    identityId?: string
     onSuccess: (stamp: PostageStamp) => void
     onSkip?: () => void
     introText?: string
@@ -47,6 +47,7 @@
 
   let {
     accountId,
+    identityId,
     onSuccess,
     onSkip,
     introText = 'Synced accounts require a Swarm postage stamp.',
@@ -102,9 +103,15 @@
     }
   }
 
-  export function handlePurchase() {
-    // Generate random signer key
-    signerKeyBytes = generateSignerKey()
+  export async function handlePurchase() {
+    // Derive signer key from account's derivation key
+    const account = accountsStore.getAccount(new EthAddress(accountId))
+    if (!account) {
+      console.error('[AddPostageStamp] Account not found', accountId)
+      return
+    }
+    const signerKeyHex = await derivePostageSignerKey(account.derivationKey, identityId)
+    signerKeyBytes = hexToUint8Array(signerKeyHex)
     const signerKeyPrivate = new PrivateKey(signerKeyBytes)
 
     // Derive destination address from signer key

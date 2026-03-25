@@ -13,7 +13,11 @@
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { authenticateWithPasskey } from '$lib/passkey'
-  import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
+  import {
+    decryptEncryptedExport,
+    deriveAccountDerivationKey,
+    deriveSwarmEncryptionKey,
+  } from '@snaha/swarm-id'
   import { BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
 
@@ -56,9 +60,8 @@
         return
       }
 
-      const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(
-        passkeyAccount.masterKey.toHex(),
-      )
+      const derivationKey = await deriveAccountDerivationKey(passkeyAccount.masterKey.toHex())
+      const swarmEncryptionKey = await deriveSwarmEncryptionKey(derivationKey)
 
       const result = await decryptEncryptedExport(fileData, swarmEncryptionKey)
 
@@ -75,7 +78,7 @@
           name: result.data.metadata.accountName,
           type: 'passkey',
           credentialId: passkeyAccount.credentialId,
-          swarmEncryptionKey,
+          derivationKey,
           defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
             ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
             : undefined,

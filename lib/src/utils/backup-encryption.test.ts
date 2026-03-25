@@ -13,8 +13,8 @@ import {
 import {
   TEST_ETH_ADDRESS_HEX,
   TEST_ETH_ADDRESS_2_HEX,
-  TEST_ENCRYPTION_KEY_HEX,
-  DIFFERENT_ENCRYPTION_KEY_HEX,
+  TEST_DERIVATION_KEY_HEX,
+  DIFFERENT_DERIVATION_KEY_HEX,
   createPasskeyAccount,
   createEthereumAccount,
   createAgentAccount,
@@ -39,7 +39,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       identities,
       connectedApps,
       postageStamps,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(encrypted.accountType).toBe("passkey")
@@ -52,7 +52,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
     const result = await decryptEncryptedExport(
       encrypted,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(result.success).toBe(true)
@@ -75,7 +75,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       identities,
       [],
       [],
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(encrypted.accountType).toBe("ethereum")
@@ -83,7 +83,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
     const result = await decryptEncryptedExport(
       encrypted,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(result.success).toBe(true)
@@ -102,14 +102,14 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       identities,
       [],
       [],
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(encrypted.accountType).toBe("agent")
 
     const result = await decryptEncryptedExport(
       encrypted,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(result.success).toBe(true)
@@ -133,7 +133,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       identities,
       connectedApps,
       postageStamps,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     // Simulate file write + read
@@ -142,7 +142,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
     const result = await decryptEncryptedExport(
       fileData,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(result.success).toBe(true)
@@ -168,12 +168,12 @@ describe("appSecret preservation in encrypted export", () => {
       [],
       connectedApps,
       [],
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     const result = await decryptEncryptedExport(
       encrypted,
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     expect(result.success).toBe(true)
@@ -189,8 +189,8 @@ describe("appSecret preservation in encrypted export", () => {
 
 describe("key derivation determinism", () => {
   it("should derive the same CryptoKey from the same swarmEncryptionKey", async () => {
-    const key1 = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
-    const key2 = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const key1 = await deriveBackupEncryptionKey(TEST_DERIVATION_KEY_HEX)
+    const key2 = await deriveBackupEncryptionKey(TEST_DERIVATION_KEY_HEX)
 
     // Verify determinism: encrypt with key1, decrypt with key2
     const plaintext = '{"determinism":"test"}'
@@ -201,8 +201,8 @@ describe("key derivation determinism", () => {
   })
 
   it("should derive different keys from different swarmEncryptionKeys", async () => {
-    const key1 = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
-    const key2 = await deriveBackupEncryptionKey(DIFFERENT_ENCRYPTION_KEY_HEX)
+    const key1 = await deriveBackupEncryptionKey(TEST_DERIVATION_KEY_HEX)
+    const key2 = await deriveBackupEncryptionKey(DIFFERENT_DERIVATION_KEY_HEX)
 
     // Encrypt with key1, should fail to decrypt with key2
     const ciphertext = await encryptBackupPayload('{"test":true}', key1)
@@ -223,12 +223,12 @@ describe("wrong key rejection", () => {
       [createIdentity()],
       [],
       [],
-      account.swarmEncryptionKey,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     const result = await decryptEncryptedExport(
       encrypted,
-      DIFFERENT_ENCRYPTION_KEY_HEX,
+      DIFFERENT_DERIVATION_KEY_HEX,
     )
 
     expect(result.success).toBe(false)
@@ -237,9 +237,9 @@ describe("wrong key rejection", () => {
   })
 
   it("should fail at the payload level with wrong key", async () => {
-    const correctKey = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const correctKey = await deriveBackupEncryptionKey(TEST_DERIVATION_KEY_HEX)
     const wrongKey = await deriveBackupEncryptionKey(
-      DIFFERENT_ENCRYPTION_KEY_HEX,
+      DIFFERENT_DERIVATION_KEY_HEX,
     )
 
     const ciphertext = await encryptBackupPayload('{"test": true}', correctKey)
@@ -298,7 +298,7 @@ describe("schema validation", () => {
       [],
       [],
       [],
-      TEST_ENCRYPTION_KEY_HEX,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
@@ -311,7 +311,7 @@ describe("schema validation", () => {
       [],
       [],
       [],
-      TEST_ENCRYPTION_KEY_HEX,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
@@ -324,7 +324,7 @@ describe("schema validation", () => {
       [],
       [],
       [],
-      TEST_ENCRYPTION_KEY_HEX,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
@@ -378,7 +378,7 @@ describe("parseEncryptedExportHeader", () => {
       [],
       [],
       [],
-      TEST_ENCRYPTION_KEY_HEX,
+      TEST_DERIVATION_KEY_HEX,
     )
 
     const result = parseEncryptedExportHeader(encrypted)
@@ -419,7 +419,7 @@ describe("parseEncryptedExportHeader", () => {
 
 describe("encryptBackupPayload / decryptBackupPayload", () => {
   it("should encrypt and decrypt a payload", async () => {
-    const key = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const key = await deriveBackupEncryptionKey(TEST_DERIVATION_KEY_HEX)
     const plaintext = '{"hello":"world"}'
 
     const ciphertext = await encryptBackupPayload(plaintext, key)
@@ -431,7 +431,7 @@ describe("encryptBackupPayload / decryptBackupPayload", () => {
   })
 
   it("should produce different ciphertext for same input (random IV)", async () => {
-    const key = await deriveBackupEncryptionKey(TEST_ENCRYPTION_KEY_HEX)
+    const key = await deriveBackupEncryptionKey(TEST_DERIVATION_KEY_HEX)
     const plaintext = '{"test":true}'
 
     const ct1 = await encryptBackupPayload(plaintext, key)

@@ -15,7 +15,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
-  import { restoreAccountFromSwarm, deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
+  import { restoreAccountFromSwarm, deriveAccountDerivationKey } from '@snaha/swarm-id'
   import { Bee, BatchId, EthAddress } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
   import {
@@ -80,7 +80,7 @@
         const encryptedMasterKey = await encryptMasterKey(masterKey, encryptionKey)
         const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(masterKey)
         const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
-        const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
+        const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
 
         account = restoreAccountToStores({
           account: {
@@ -92,7 +92,7 @@
             encryptedMasterKey,
             encryptionSalt,
             encryptedSecretSeed,
-            swarmEncryptionKey,
+            derivationKey,
             defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
               ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
               : undefined,

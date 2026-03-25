@@ -20,11 +20,7 @@
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import ErrorMessage from '$lib/components/ui/error-message.svelte'
-  import {
-    deriveAccountSwarmEncryptionKey,
-    getOrCreateDeviceId,
-    mergeDevices,
-  } from '@snaha/swarm-id'
+  import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let accountName = $state('Passkey')
@@ -71,8 +67,8 @@
         userDisplayName: accountName.trim(),
       })
 
-      // Derive swarmEncryptionKey from master key
-      const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(account.masterKey.toHex())
+      // Derive derivationKey from master key
+      const derivationKey = await deriveAccountDerivationKey(account.masterKey.toHex())
 
       // Store account WITHOUT masterKey (passkey accounts never persist masterKey)
       const newAccount = accountsStore.addAccount({
@@ -81,7 +77,7 @@
         name: accountName.trim(),
         type: 'passkey',
         credentialId: account.credentialId,
-        swarmEncryptionKey: swarmEncryptionKey,
+        derivationKey,
         devices: mergeDevices([], getOrCreateDeviceId()),
       })
       sessionStore.setAccount(newAccount)

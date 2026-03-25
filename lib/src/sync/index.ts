@@ -2,7 +2,9 @@
 export {
   // Account-level key derivation
   deriveAccountBackupKey,
-  deriveAccountSwarmEncryptionKey,
+  deriveAccountDerivationKey,
+  deriveSwarmEncryptionKey,
+  derivePostageSignerKey,
   backupKeyToPrivateKey,
 } from "../utils/key-derivation"
 export { serializeAccountState, deserializeAccountState } from "./serialization"
