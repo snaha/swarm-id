@@ -17,7 +17,7 @@
 
   let data = $state('Hello, Swarm!')
   let encrypt = $state(true)
-  let useWebSocket = $state(true)
+  let useWebSocket = $state(false)
   let useWorkers = $state(true)
   let workerCount = $state(navigator.hardwareConcurrency ?? 4)
   let concurrency = $state(32)
