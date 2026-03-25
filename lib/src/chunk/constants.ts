@@ -16,3 +16,6 @@ export const SOC_HEADER_SIZE = IDENTIFIER_SIZE + SIGNATURE_SIZE
 
 // Download concurrency
 export const DEFAULT_DOWNLOAD_CONCURRENCY = 64
+
+// Upload concurrency (lower than download due to more server-side overhead)
+export const DEFAULT_UPLOAD_CONCURRENCY = 8

@@ -11,6 +11,7 @@ export {
   SIGNATURE_SIZE,
   SOC_HEADER_SIZE,
   DEFAULT_DOWNLOAD_CONCURRENCY,
+  DEFAULT_UPLOAD_CONCURRENCY,
 } from "./constants"
 
 // Encryption utilities

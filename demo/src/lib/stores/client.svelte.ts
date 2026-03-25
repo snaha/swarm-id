@@ -4,7 +4,7 @@ import { logStore } from './log.svelte'
 
 const PROXY_PATH = '/proxy'
 const STORAGE_VERIFIED_KEY = 'swarm-demo-storage-verified'
-const CLIENT_TIMEOUT = 60000
+const CLIENT_TIMEOUT = 600000 // 10 minutes for large file uploads
 
 const BEE_ICON =
   'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='

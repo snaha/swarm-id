@@ -19,6 +19,12 @@
   const REFERENCE_LENGTH = 64
   const ENCRYPTED_REFERENCE_LENGTH = 128
 
+  function formatBytes(bytes: number): string {
+    if (bytes < 1024) return `${bytes} B`
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
+  }
+
   async function handleDownload() {
     result = undefined
     error = undefined
@@ -32,7 +38,10 @@
 
     try {
       logStore.log(`Downloading file from reference: ${ref}`)
+      const downloadStartTime = Date.now()
       const fileData = await clientStore.client!.downloadFile(ref)
+      const elapsedTime = (Date.now() - downloadStartTime) / 1000
+      const speed = elapsedTime > 0 ? fileData.data.length / elapsedTime : 0
       logStore.log(
         `Download successful! Filename: ${fileData.name} (${fileData.data.length} bytes)`,
       )
@@ -46,13 +55,16 @@
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
-      URL.revokeObjectURL(url)
+      // Delay URL revocation to allow browser to process download
+      setTimeout(() => URL.revokeObjectURL(url), 1000)
 
       result = {
         title: 'File downloaded:',
         entries: [
           { label: 'Filename', value: fileData.name },
-          { label: 'Size', value: `${fileData.data.length} bytes` },
+          { label: 'Size', value: formatBytes(fileData.data.length) },
+          { label: 'Time', value: `${elapsedTime.toFixed(2)}s` },
+          { label: 'Speed', value: `${formatBytes(speed)}/s` },
         ],
         status: 'success',
       }

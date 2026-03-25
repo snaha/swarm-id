@@ -101,6 +101,14 @@ export interface UploadOptions {
   deferred?: boolean
   redundancyLevel?: number
   onProgress?: (progress: UploadProgress) => void
+  /** Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used. */
+  useWebSocket?: boolean
+  /** Use Web Workers for parallel stamp signing. Speeds up upload on multi-core CPUs. */
+  useWorkers?: boolean
+  /** Number of Web Workers to use for parallel stamp signing. Defaults to navigator.hardwareConcurrency. */
+  workerCount?: number
+  /** Upload concurrency (parallel in-flight chunks). HTTP default: 8, WebSocket default: 32. */
+  concurrency?: number
 }
 
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>
@@ -663,6 +671,10 @@ export const UploadDataMessageSchema = z.object({
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
   enableProgress: z.boolean().optional(),
+  useWebSocket: z.boolean().optional(),
+  useWorkers: z.boolean().optional(),
+  workerCount: z.number().optional(),
+  concurrency: z.number().optional(),
 })
 
 export const DownloadDataMessageSchema = z.object({
@@ -680,6 +692,11 @@ export const UploadFileMessageSchema = z.object({
   name: z.string().optional(),
   options: UploadOptionsSchema,
   requestOptions: RequestOptionsSchema,
+  enableProgress: z.boolean().optional(),
+  useWebSocket: z.boolean().optional(),
+  useWorkers: z.boolean().optional(),
+  workerCount: z.number().optional(),
+  concurrency: z.number().optional(),
 })
 
 export const DownloadFileMessageSchema = z.object({
