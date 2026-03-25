@@ -231,6 +231,7 @@ export async function createEncryptedExport(
       defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
       createdAt: account.createdAt,
       lastModified: now,
+      devices: account.devices,
     },
     identities,
     connectedApps,

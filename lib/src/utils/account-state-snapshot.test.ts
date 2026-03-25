@@ -19,6 +19,7 @@ import {
   createIdentity,
   createConnectedApp,
   createPostageStamp,
+  createDevice,
 } from "../test-fixtures"
 
 /**
@@ -41,6 +42,7 @@ function serializeFromAccount(
       defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
       createdAt: account.createdAt,
       lastModified: Date.now(),
+      devices: account.devices,
     },
     identities,
     connectedApps,
@@ -169,6 +171,54 @@ describe("round-trip: serialize → JSON → deserialize", () => {
       "https://example.com/icon.png",
     )
     expect(result.data.postageStamps[0].batchTTL).toBe(86400)
+  })
+})
+
+// ============================================================================
+// Device Tracking Tests
+// ============================================================================
+
+describe("device tracking in metadata", () => {
+  it("should round-trip devices through metadata", () => {
+    const device = createDevice()
+    const account = createPasskeyAccount({ devices: [device] })
+    const serialized = serializeFromAccount(account, [], [], [])
+    const result = deserializeAccountStateSnapshot(
+      JSON.parse(JSON.stringify(serialized)),
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect(result.data.metadata.devices).toHaveLength(1)
+    expect(result.data.metadata.devices[0].deviceId).toBe(device.deviceId)
+    expect(result.data.metadata.devices[0].createdAt).toBe(device.createdAt)
+    expect(result.data.metadata.devices[0].lastSignedInAt).toBe(
+      device.lastSignedInAt,
+    )
+  })
+
+  it("should default to empty array when devices are absent", () => {
+    const raw = {
+      version: 1,
+      timestamp: Date.now(),
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test",
+        createdAt: 1700000000000,
+        lastModified: Date.now(),
+      },
+      identities: [],
+      connectedApps: [],
+      postageStamps: [],
+    }
+
+    const result = deserializeAccountStateSnapshot(raw)
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect(result.data.metadata.devices).toEqual([])
   })
 })
 

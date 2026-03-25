@@ -73,10 +73,12 @@
           defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
             ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
             : undefined,
+          devices: [],
         },
         identities: result.snapshot.identities,
         connectedApps: result.snapshot.connectedApps,
         postageStamps: result.snapshot.postageStamps,
+        devices: result.snapshot.metadata.devices,
       })
 
       sessionStore.setAccount(restoredAccount)

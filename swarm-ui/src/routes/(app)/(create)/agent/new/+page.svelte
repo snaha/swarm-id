@@ -20,7 +20,11 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
-  import { deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
+  import {
+    deriveAccountSwarmEncryptionKey,
+    getOrCreateDeviceId,
+    mergeDevices,
+  } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -93,6 +97,7 @@
         createdAt: account.createdAt,
         type: 'agent',
         swarmEncryptionKey,
+        devices: mergeDevices([], getOrCreateDeviceId()),
       })
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')

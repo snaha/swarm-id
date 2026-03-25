@@ -3,6 +3,7 @@
  */
 import { EthAddress, BatchId, PrivateKey, Bytes } from "@ethersphere/bee-js"
 import type {
+  Device,
   PasskeyAccount,
   EthereumAccount,
   AgentAccount,
@@ -21,6 +22,17 @@ export const TEST_PRIVATE_KEY_HEX = "d".repeat(64)
 export const TEST_ENCRYPTION_KEY_HEX = "f".repeat(64)
 export const DIFFERENT_ENCRYPTION_KEY_HEX = "3".repeat(64)
 
+export const TEST_DEVICE_ID = "550e8400-e29b-41d4-a716-446655440000"
+
+export function createDevice(overrides?: Partial<Device>): Device {
+  return {
+    deviceId: TEST_DEVICE_ID,
+    createdAt: 1700000000000,
+    lastSignedInAt: 1700000000000,
+    ...overrides,
+  }
+}
+
 export function createPasskeyAccount(
   overrides?: Partial<PasskeyAccount>,
 ): PasskeyAccount {
@@ -31,6 +43,7 @@ export function createPasskeyAccount(
     type: "passkey" as const,
     credentialId: "credential-abc-123",
     swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    devices: [],
     ...overrides,
   }
 }
@@ -48,6 +61,7 @@ export function createEthereumAccount(
     encryptionSalt: new Bytes(new Uint8Array([5, 6, 7, 8])),
     encryptedSecretSeed: new Bytes(new Uint8Array([9, 10, 11, 12])),
     swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    devices: [],
     ...overrides,
   }
 }
@@ -61,6 +75,7 @@ export function createAgentAccount(
     createdAt: 1700000000000,
     type: "agent" as const,
     swarmEncryptionKey: TEST_ENCRYPTION_KEY_HEX,
+    devices: [],
     ...overrides,
   }
 }

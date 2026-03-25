@@ -1,4 +1,5 @@
-import type { Account, Identity, ConnectedApp, PostageStamp } from '@snaha/swarm-id'
+import type { Account, Identity, ConnectedApp, PostageStamp, Device } from '@snaha/swarm-id'
+import { mergeDevices, getOrCreateDeviceId } from '@snaha/swarm-id'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { identitiesStore } from '$lib/stores/identities.svelte'
 import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
@@ -9,10 +10,12 @@ interface RestoreData {
   identities: Identity[]
   connectedApps: ConnectedApp[]
   postageStamps: PostageStamp[]
+  devices?: Device[]
 }
 
 export function restoreAccountToStores(data: RestoreData): Account {
-  accountsStore.addAccount(data.account)
+  const devices = mergeDevices(data.devices ?? [], getOrCreateDeviceId())
+  accountsStore.addAccount({ ...data.account, devices })
 
   for (const identity of data.identities) {
     identitiesStore.addIdentity(identity)

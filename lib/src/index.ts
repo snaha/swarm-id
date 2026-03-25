@@ -264,6 +264,7 @@ export type {
 
 // Entity types from schemas
 export type {
+  Device,
   Account,
   PasskeyAccount,
   EthereumAccount,
@@ -277,6 +278,7 @@ export type {
 
 // Network settings constants and schema
 export {
+  DeviceSchemaV1,
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
   NetworkSettingsSchemaV1,
@@ -304,6 +306,13 @@ export type {
   Timestamp,
   FeedIndex,
 } from "./schemas"
+
+// Device ID utilities
+export {
+  getOrCreateDeviceId,
+  getDeviceId,
+  mergeDevices,
+} from "./utils/device-id"
 
 // Batch utilization types
 export type {

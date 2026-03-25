@@ -18,6 +18,7 @@ import {
   createIdentity,
   createConnectedApp,
   createPostageStamp,
+  createDevice,
 } from "../test-fixtures"
 
 // ============================================================================
@@ -276,6 +277,36 @@ describe("createSyncAccount", () => {
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeUndefined()
     expect(uploadCallCount).toBe(0)
+  })
+
+  it("should include account devices in synced metadata", async () => {
+    const device = createDevice()
+    const stores = createMockStores()
+    ;(
+      stores.accountsStore.getAccount as ReturnType<typeof vi.fn>
+    ).mockReturnValue(
+      createPasskeyAccount({
+        defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+        devices: [device],
+      }),
+    )
+
+    const syncAccount = createSyncAccount({
+      bee: {} as never,
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect(capturedUploadData).toBeDefined()
+    const deserialized = deserializeAccountState(capturedUploadData!)
+
+    expect(deserialized.metadata.devices).toHaveLength(1)
+    expect(deserialized.metadata.devices[0].deviceId).toBe(device.deviceId)
   })
 
   it("should include SOC address in returned chunk addresses", async () => {

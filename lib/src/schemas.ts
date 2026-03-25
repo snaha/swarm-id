@@ -97,36 +97,52 @@ const StoredBytes = z
   .transform((arr) => new Bytes(new Uint8Array(arr)))
 
 // ============================================================================
+// Device Schema
+// ============================================================================
+
+/**
+ * Device Schema V1
+ * Tracks devices that have accessed an account for multi-device support.
+ */
+export const DeviceSchemaV1 = z.object({
+  deviceId: z.string(),
+  createdAt: z.number(),
+  lastSignedInAt: z.number(),
+})
+
+// ============================================================================
 // Account Schemas
 // ============================================================================
 
 /**
- * Passkey Account Schema V1
+ * Common fields shared by all account types
  */
-export const PasskeyAccountSchemaV1 = z.object({
+const CommonAccountSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
+  swarmEncryptionKey: z.string().length(64),
+  defaultPostageStampBatchID: StoredBatchId.optional(),
+  devices: z.array(DeviceSchemaV1).default([]),
+})
+
+/**
+ * Passkey Account Schema V1
+ */
+export const PasskeyAccountSchemaV1 = CommonAccountSchemaV1.extend({
   type: z.literal("passkey"),
   credentialId: z.string(),
-  swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
-  defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
 })
 
 /**
  * Ethereum Account Schema V1
  */
-export const EthereumAccountSchemaV1 = z.object({
-  id: StoredEthAddress,
-  name: z.string(),
-  createdAt: z.number(),
+export const EthereumAccountSchemaV1 = CommonAccountSchemaV1.extend({
   type: z.literal("ethereum"),
   ethereumAddress: StoredEthAddress,
   encryptedMasterKey: StoredBytes,
   encryptionSalt: StoredBytes,
-  encryptedSecretSeed: StoredBytes, // Encrypted secret seed for later retrieval
-  swarmEncryptionKey: z.string().length(64), // NEW: derived encryption key for Swarm data (64-char hex)
-  defaultPostageStampBatchID: StoredBatchId.optional(), // NEW: account default stamp
+  encryptedSecretSeed: StoredBytes,
 })
 
 /**
@@ -134,13 +150,8 @@ export const EthereumAccountSchemaV1 = z.object({
  * For automated testing and programmatic use with BIP39 seed phrases
  * Seed phrase is NOT stored - must be re-entered on each authentication (like passkey)
  */
-export const AgentAccountSchemaV1 = z.object({
-  id: StoredEthAddress,
-  name: z.string(),
-  createdAt: z.number(),
+export const AgentAccountSchemaV1 = CommonAccountSchemaV1.extend({
   type: z.literal("agent"),
-  swarmEncryptionKey: z.string().length(64), // derived encryption key for Swarm data (64-char hex)
-  defaultPostageStampBatchID: StoredBatchId.optional(),
 })
 
 /**
@@ -225,6 +236,7 @@ export const AccountMetadataSchemaV1 = z.object({
   defaultPostageStampBatchID: z.string().length(64).optional(), // BatchId hex string
   createdAt: z.number(),
   lastModified: z.number(),
+  devices: z.array(DeviceSchemaV1).default([]),
 })
 
 const ACCOUNT_STATE_SNAPSHOT_VERSION = 1
@@ -247,6 +259,7 @@ export const AccountStateSnapshotSchemaV1 = z.object({
 // Derived Types (guaranteed to match current schema version)
 // ============================================================================
 
+export type Device = z.infer<typeof DeviceSchemaV1>
 export type PasskeyAccount = z.infer<typeof PasskeyAccountSchemaV1>
 export type EthereumAccount = z.infer<typeof EthereumAccountSchemaV1>
 export type AgentAccount = z.infer<typeof AgentAccountSchemaV1>
