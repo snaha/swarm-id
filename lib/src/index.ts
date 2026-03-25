@@ -398,6 +398,9 @@ export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"
 // URL building utilities
 export { buildAuthUrl } from "./utils/url"
 
+// Browser detection utilities
+export { isWebKit } from "./utils/browser"
+
 // Manifest builder utilities for /bzz/ feed compatibility
 export {
   buildBzzCompatibleManifest,

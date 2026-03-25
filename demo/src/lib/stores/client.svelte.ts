@@ -3,7 +3,6 @@ import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
 
 const PROXY_PATH = '/proxy'
-const STORAGE_VERIFIED_KEY = 'swarm-demo-storage-verified'
 const CLIENT_TIMEOUT = 600000 // 10 minutes for large file uploads
 
 const BEE_ICON =
@@ -33,7 +32,6 @@ let canUpload = $state(false)
 let storagePartitioned = $state(false)
 let identity = $state<IdentityInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
-let storageVerified = $state(false)
 let deferred = $state(false)
 let initializing = $state(false)
 
@@ -77,9 +75,6 @@ async function updateAuthStatus(isAuthenticated: boolean) {
   authenticated = isAuthenticated
 
   if (isAuthenticated) {
-    storageVerified = true
-    localStorage.setItem(STORAGE_VERIFIED_KEY, 'true')
-
     try {
       const connectionInfo = await client!.getConnectionInfo()
       logStore.log(
@@ -147,9 +142,6 @@ export const clientStore = {
   get stamp() {
     return stamp
   },
-  get storageVerified() {
-    return storageVerified
-  },
   get deferred() {
     return deferred
   },
@@ -168,8 +160,6 @@ export const clientStore = {
     initializing = true
 
     const proxyOrigin = resolveProxyOrigin()
-    storageVerified = localStorage.getItem(STORAGE_VERIFIED_KEY) === 'true'
-
     logStore.log('Initializing Swarm ID client...')
     logStore.log(`PROXY_ORIGIN: ${proxyOrigin}`)
     logStore.log(`PROXY_PATH: ${PROXY_PATH}`)
