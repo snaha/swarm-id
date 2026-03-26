@@ -28,6 +28,7 @@ import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { calculateContentHash } from "../storage/utilization-store"
 import { uploadSingleChunkWithEncryption } from "../proxy/upload-encrypted-data"
+import { tryCreateTag } from "./tag"
 
 // ============================================================================
 // Constants
@@ -401,8 +402,7 @@ export async function uploadUtilizationChunk(
   const encryptedChunk = makeEncryptedContentAddressedChunk(data, encryptionKey)
   const cacReference = encryptedChunk.address.toUint8Array()
 
-  const tagResponse = await bee.createTag()
-  const tag = tagResponse.uid
+  const tag = await tryCreateTag(bee)
 
   // Upload using unified interface (with deferred: false for fast return)
   await uploadSingleChunkWithEncryption(

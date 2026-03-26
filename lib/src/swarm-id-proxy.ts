@@ -97,6 +97,7 @@ import {
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
+import { tryCreateTag } from "./utils/tag"
 import { DEFAULT_BEE_NODE_URL, UtilizationUpdateMessageSchema } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
@@ -1613,11 +1614,7 @@ export class SwarmIdProxy {
         })
 
         // Step 3: Upload manifest (encrypted only if encryptManifest=true)
-        let manifestTag = options?.tag
-        if (!manifestTag) {
-          const tagResponse = await context.bee.createTag()
-          manifestTag = tagResponse.uid
-        }
+        const manifestTag = options?.tag ?? (await tryCreateTag(context.bee))
 
         const shouldEncryptManifest = options?.encryptManifest === true
         let result: { rootReference: string; tagUid?: number }
@@ -1824,11 +1821,7 @@ export class SwarmIdProxy {
         const envelope = this.stamper!.stamp(chunkAdapter)
 
         // Create a tag if not provided (required for dev mode)
-        let tag = options?.tag
-        if (!tag) {
-          const tagResponse = await this.bee.createTag()
-          tag = tagResponse.uid
-        }
+        const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
         // Use non-deferred mode for faster uploads (returns immediately)
         const uploadOptions = { ...options, tag, deferred: false, pin: false }
@@ -3353,11 +3346,7 @@ export class SwarmIdProxy {
           })
 
           // Create a tag for the manifest uploads (required for dev mode)
-          let manifestTag = options?.tag
-          if (!manifestTag) {
-            const tagResponse = await context.bee.createTag()
-            manifestTag = tagResponse.uid
-          }
+          const manifestTag = options?.tag ?? (await tryCreateTag(context.bee))
 
           const beeCompatible = options?.beeCompatible === true
 

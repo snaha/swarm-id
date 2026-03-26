@@ -12,6 +12,7 @@ import {
 import { uint8ArrayToHex } from "../utils/hex"
 import { uploadSingleChunk } from "./upload-data"
 import { uploadSingleEncryptedChunk } from "./upload-encrypted-data"
+import { tryCreateTag } from "../utils/tag"
 
 /**
  * Options for creating a feed manifest
@@ -89,11 +90,7 @@ export async function createFeedManifestDirect(
   // DEBUG: Log what Bee will use for feed lookup
 
   // 1. Create tag for upload if not provided
-  let tag = uploadOptions?.tag
-  if (!tag) {
-    const tagResponse = await bee.createTag()
-    tag = tagResponse.uid
-  }
+  const tag = uploadOptions?.tag ?? (await tryCreateTag(bee))
   const uploadOptionsWithTag = { ...uploadOptions, tag }
 
   // 2. Create root MantarayNode with "/" fork containing feed metadata
