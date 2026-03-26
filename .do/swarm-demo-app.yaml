@@ -48,7 +48,7 @@ envs:
     value: production
 
   - key: CI
-    value: true
+    value: 'true'
 
   - key: PUBLIC_ID_DOMAIN
     value: https://swarm-id.snaha.net
