@@ -73,6 +73,7 @@ import {
   downloadEncryptedSOC,
 } from "./proxy/download-data"
 import type { UploadContext, UploadProgress } from "./proxy/types"
+import { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
   saveMantarayTreeRecursively,
@@ -132,6 +133,7 @@ export class SwarmIdProxy {
   private postageBatchId: string | undefined
   private signerKey: string | undefined
   private stamper: UtilizationAwareStamper | undefined
+  private stampWorkerPool: StampWorkerPool | undefined
   private stamperDepth: number = 23 // Default depth
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
@@ -443,6 +445,45 @@ export class SwarmIdProxy {
     } catch (error) {
       console.error("[Proxy] Failed to initialize stamper:", error)
       this.stamper = undefined
+    }
+  }
+
+  /**
+   * Get or create a StampWorkerPool for parallel signing.
+   * Lazy-initialized on first use and reused across uploads.
+   * If requestedCount differs from the current pool size, the pool is recreated.
+   */
+  private async getOrCreateWorkerPool(
+    requestedCount?: number,
+  ): Promise<StampWorkerPool | undefined> {
+    const desiredCount =
+      requestedCount ??
+      (typeof navigator !== "undefined" && navigator.hardwareConcurrency
+        ? Math.min(navigator.hardwareConcurrency, 8)
+        : 4)
+
+    if (this.stampWorkerPool && this.stampWorkerPool.size === desiredCount) {
+      return this.stampWorkerPool
+    }
+
+    // Terminate old pool if count changed
+    if (this.stampWorkerPool) {
+      this.stampWorkerPool.terminate()
+      this.stampWorkerPool = undefined
+    }
+
+    if (!this.signerKey || !this.stamper) return undefined
+
+    try {
+      this.stampWorkerPool = await StampWorkerPool.create(
+        this.signerKey,
+        this.stamper,
+        desiredCount,
+      )
+      return this.stampWorkerPool
+    } catch (error) {
+      console.warn("[Proxy] Failed to create StampWorkerPool:", error)
+      return undefined
     }
   }
 
@@ -1412,7 +1453,17 @@ export class SwarmIdProxy {
     message: UploadDataMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, data, options, requestOptions, enableProgress } = message
+    const {
+      requestId,
+      data,
+      options,
+      requestOptions,
+      enableProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+    } = message
 
     try {
       if (!this.authenticated || !this.appSecret) {
@@ -1448,12 +1499,18 @@ export class SwarmIdProxy {
           }
         : undefined
 
+      const wsOptions = useWebSocket ? { concurrency } : undefined
+      const workerPool = useWorkers
+        ? await this.getOrCreateWorkerPool(workerCount)
+        : undefined
+
       // Serialize write through Web Locks API to prevent concurrent uploads
       const uploadResult = await this.withWriteLock(async () => {
         // Prepare upload context
         const context: UploadContext = {
           bee: this.bee,
           stamper: this.stamper!,
+          workerPool,
         }
 
         // Client-side chunking and signing
@@ -1466,6 +1523,8 @@ export class SwarmIdProxy {
             options,
             onProgress,
             requestOptions,
+            wsOptions,
+            concurrency,
           )
         } else {
           result = await uploadDataWithSigning(
@@ -1547,7 +1606,18 @@ export class SwarmIdProxy {
     message: UploadFileMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, data, name, options, requestOptions } = message
+    const {
+      requestId,
+      data,
+      name,
+      options,
+      requestOptions,
+      enableProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+    } = message
     const fileName = name || "index.bin"
 
     try {
@@ -1567,12 +1637,35 @@ export class SwarmIdProxy {
         throw new Error("Stamper not initialized. Please login first.")
       }
 
+      // Progress callback (if enabled)
+      const onProgress = enableProgress
+        ? (progress: UploadProgress) => {
+            if (event.source) {
+              ;(event.source as WindowProxy).postMessage(
+                {
+                  type: "uploadProgress",
+                  requestId,
+                  total: progress.total,
+                  processed: progress.processed,
+                } satisfies IframeToParentMessage,
+                { targetOrigin: event.origin },
+              )
+            }
+          }
+        : undefined
+
+      const wsOptions = useWebSocket ? { concurrency } : undefined
+      const workerPool = useWorkers
+        ? await this.getOrCreateWorkerPool(workerCount)
+        : undefined
+
       // Serialize write through Web Locks API to prevent concurrent uploads
       const manifestResult = await this.withWriteLock(async () => {
         // Prepare upload context
         const context: UploadContext = {
           bee: this.bee,
           stamper: this.stamper!,
+          workerPool,
         }
 
         // Step 1: Upload file data (encrypted by default, unless encrypt=false)
@@ -1585,15 +1678,17 @@ export class SwarmIdProxy {
             data,
             undefined, // generate random encryption key
             options,
-            undefined, // no progress callback for now
+            onProgress,
             requestOptions,
+            wsOptions,
+            concurrency,
           )
         } else {
           contentUpload = await uploadDataWithSigning(
             context,
             data,
             options,
-            undefined, // no progress callback for now
+            onProgress,
             requestOptions,
           )
         }

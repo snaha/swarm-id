@@ -17,6 +17,10 @@
 
   let data = $state('Hello, Swarm!')
   let encrypt = $state(true)
+  let useWebSocket = $state(false)
+  let useWorkers = $state(true)
+  let workerCount = $state(navigator.hardwareConcurrency ?? 4)
+  let concurrency = $state(32)
   let result = $state<ResultData | undefined>(undefined)
   let error = $state<string | undefined>(undefined)
 
@@ -40,6 +44,10 @@
       const uploadResult = await clientStore.client!.uploadData(uint8Data, {
         encrypt,
         deferred: clientStore.deferred,
+        useWebSocket,
+        useWorkers,
+        workerCount: useWorkers ? workerCount : undefined,
+        concurrency,
       })
       logStore.log(
         `Upload successful! Reference: ${uploadResult.reference} (${uploadResult.reference.length} chars)`,
@@ -85,6 +93,52 @@
             Required for dev mode. Uncheck for direct uploads in production.
           </p>
         </div>
+      </div>
+
+      <div class="flex items-start gap-2">
+        <Checkbox bind:checked={useWebSocket} id="data-ws" />
+        <div>
+          <Label for="data-ws" class="cursor-pointer">Use WebSocket upload</Label>
+          <p class="text-xs text-muted-foreground mt-1">
+            Stream chunks over WebSocket instead of HTTP.
+          </p>
+        </div>
+      </div>
+
+      <div class="flex items-start gap-2">
+        <Checkbox bind:checked={useWorkers} id="data-workers" />
+        <div>
+          <Label for="data-workers" class="cursor-pointer">Use Web Workers for stamping</Label>
+          <p class="text-xs text-muted-foreground mt-1">
+            Parallel ECDSA signing across CPU cores. Speeds up large uploads.
+          </p>
+        </div>
+      </div>
+
+      {#if useWorkers}
+        <div class="flex items-center gap-2 pl-6">
+          <Label for="data-worker-count">Worker count</Label>
+          <input
+            id="data-worker-count"
+            type="number"
+            min="1"
+            max="32"
+            class="w-20 rounded-md border border-input bg-background px-3 py-1 text-sm"
+            bind:value={workerCount}
+          />
+        </div>
+      {/if}
+
+      <div class="flex items-center gap-2">
+        <Label for="data-concurrency">Upload concurrency</Label>
+        <input
+          id="data-concurrency"
+          type="number"
+          min="1"
+          max="128"
+          class="w-20 rounded-md border border-input bg-background px-3 py-1 text-sm"
+          bind:value={concurrency}
+        />
       </div>
     </div>
 

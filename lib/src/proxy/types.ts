@@ -1,4 +1,5 @@
 import type { Bee, Stamper } from "@ethersphere/bee-js"
+import type { StampWorkerPool } from "./stamp-worker-pool"
 
 /**
  * Upload context shared across handlers
@@ -6,6 +7,7 @@ import type { Bee, Stamper } from "@ethersphere/bee-js"
 export interface UploadContext {
   bee: Bee
   stamper: Stamper
+  workerPool?: StampWorkerPool
 }
 
 /**
@@ -29,4 +31,12 @@ export interface ChunkReference {
 export interface EncryptedChunkReference {
   address: Uint8Array // 32-byte chunk address
   key: Uint8Array // 32-byte encryption key
+}
+
+/**
+ * Options for WebSocket-based chunk upload
+ */
+export interface WebSocketUploadOptions {
+  /** WebSocket concurrency (in-flight chunks). Defaults to 32. */
+  concurrency?: number
 }

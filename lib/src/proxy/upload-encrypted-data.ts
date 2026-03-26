@@ -11,11 +11,19 @@ import {
   makeEncryptedContentAddressedChunk,
   calculateChunkAddress,
   type EncryptedChunk,
+  DEFAULT_UPLOAD_CONCURRENCY,
 } from "../chunk"
 import { Binary } from "cafe-utility"
 import { splitDataIntoChunks } from "./chunking"
 import { buildEncryptedMerkleTree } from "./chunking-encrypted"
-import type { UploadContext, UploadProgress } from "./types"
+import { ChunkUploadStream } from "./chunk-upload-stream"
+import { marshalEnvelope } from "./stamp-marshal"
+import type {
+  UploadContext,
+  UploadProgress,
+  WebSocketUploadOptions,
+} from "./types"
+import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
 
 /**
@@ -27,8 +35,13 @@ export interface UploadEncryptedDataResult {
   chunkAddresses: Uint8Array[] // Addresses of all uploaded chunks
 }
 
+// ============================================================================
+// Stamper Adapters
+// ============================================================================
+
 /**
- * Simple Uint8ArrayWriter implementation for ChunkAdapter
+ * Minimal writer stub — the Stamper interface requires a writer field
+ * but never actually calls it during stamp().
  */
 class SimpleUint8ArrayWriter {
   cursor: number = 0
@@ -47,37 +60,198 @@ class SimpleUint8ArrayWriter {
   }
 }
 
-/**
- * Adapter to convert EncryptedChunk to cafe-utility Chunk interface
- * This allows the Stamper to work with encrypted chunks
- */
-class EncryptedChunkAdapter {
-  span: bigint
-  writer: SimpleUint8ArrayWriter
-
-  constructor(private encryptedChunk: EncryptedChunk) {
-    this.span = encryptedChunk.span.toBigInt()
-    this.writer = new SimpleUint8ArrayWriter(encryptedChunk.data)
-  }
-
-  hash(): Uint8Array {
-    return this.encryptedChunk.address.toUint8Array()
-  }
-
-  build(): Uint8Array {
-    return this.encryptedChunk.data
-  }
+/** Stamp chunk data by address and return the envelope. */
+function stampChunkData(
+  stamper: Stamper,
+  chunkData: Uint8Array,
+  address: Uint8Array,
+): EnvelopeWithBatchId {
+  return stamper.stamp({
+    hash: () => address,
+    build: () => chunkData,
+    span: 0n,
+    writer: new SimpleUint8ArrayWriter(chunkData),
+  })
 }
 
 /**
- * Upload encrypted data with client-side signing
- * Handles chunking, encryption, merkle tree building, and progress reporting
+ * Async stamp function — abstraction over sync Stamper and parallel StampWorkerPool.
+ * Both HTTP and WebSocket upload paths use this type.
+ */
+type StampChunkFn = (
+  chunkData: Uint8Array,
+  address: Uint8Array,
+) => Promise<EnvelopeWithBatchId>
+
+/** Create a StampChunkFn from a Stamper and optional worker pool. */
+function makeStampFn(
+  stamper: Stamper,
+  workerPool?: StampWorkerPool,
+): StampChunkFn {
+  if (workerPool) {
+    return (chunkData, address) => workerPool.stampChunkData(chunkData, address)
+  }
+  return (chunkData, address) =>
+    Promise.resolve(stampChunkData(stamper, chunkData, address))
+}
+
+// ============================================================================
+// Encryption
+// ============================================================================
+
+interface EncryptedChunkRef {
+  address: Uint8Array
+  key: Uint8Array
+  span: bigint
+}
+
+/** Encrypt all payloads into EncryptedChunks and collect their references (CPU-only). */
+function encryptChunkPayloads(
+  payloads: Uint8Array[],
+  encryptionKey?: Uint8Array,
+): { chunks: EncryptedChunk[]; refs: EncryptedChunkRef[] } {
+  const chunks: EncryptedChunk[] = []
+  const refs: EncryptedChunkRef[] = []
+
+  for (const payload of payloads) {
+    const chunk = makeEncryptedContentAddressedChunk(payload, encryptionKey)
+    chunks.push(chunk)
+    refs.push({
+      address: chunk.address.toUint8Array(),
+      key: chunk.encryptionKey,
+      span: BigInt(payload.length),
+    })
+  }
+
+  return { chunks, refs }
+}
+
+// ============================================================================
+// Chunk Upload (HTTP / WebSocket)
+// ============================================================================
+
+/** A callback invoked after each chunk upload, for progress tracking. */
+type OnChunkUploaded = (address: Uint8Array) => void
+
+/** Upload a single stamped chunk via HTTP. */
+async function uploadStampedChunkViaHttp(
+  bee: Bee,
+  stamp: StampChunkFn,
+  chunkData: Uint8Array,
+  address: Uint8Array,
+  options: UploadOptions,
+  requestOptions?: BeeRequestOptions,
+): Promise<void> {
+  const envelope = await stamp(chunkData, address)
+  await bee.uploadChunk(envelope, chunkData, options, requestOptions)
+}
+
+/** Upload a single stamped chunk via WebSocket. */
+async function uploadStampedChunkViaWebSocket(
+  stamp: StampChunkFn,
+  stream: ChunkUploadStream,
+  chunkData: Uint8Array,
+  address: Uint8Array,
+): Promise<void> {
+  const envelope = await stamp(chunkData, address)
+  const stamped = Binary.concatBytes(marshalEnvelope(envelope), chunkData)
+  await stream.uploadChunk(stamped)
+}
+
+/** Upload encrypted chunks via HTTP with sliding-window concurrency. */
+async function uploadChunksViaHttp(
+  bee: Bee,
+  stamp: StampChunkFn,
+  chunks: EncryptedChunk[],
+  options: UploadOptions,
+  requestOptions: BeeRequestOptions | undefined,
+  onUploaded: OnChunkUploaded,
+  concurrency: number = DEFAULT_UPLOAD_CONCURRENCY,
+): Promise<void> {
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (nextIndex < chunks.length) {
+      const chunk = chunks[nextIndex++]
+      await uploadStampedChunkViaHttp(
+        bee,
+        stamp,
+        chunk.data,
+        chunk.address.toUint8Array(),
+        options,
+        requestOptions,
+      )
+      onUploaded(chunk.address.toUint8Array())
+    }
+  }
+
+  await Promise.all(
+    Array.from({ length: Math.min(concurrency, chunks.length) }, () =>
+      worker(),
+    ),
+  )
+}
+
+/** Upload encrypted chunks via WebSocket with per-chunk stamping. */
+async function uploadChunksViaWebSocket(
+  stamp: StampChunkFn,
+  stream: ChunkUploadStream,
+  chunks: EncryptedChunk[],
+  onUploaded: OnChunkUploaded,
+): Promise<void> {
+  // Worker pool pattern: interleave stamping with I/O so the event loop stays responsive.
+  // Each async worker: take next chunk → stamp → send → wait for ack → repeat.
+  let nextIndex = 0
+
+  const worker = async () => {
+    while (nextIndex < chunks.length) {
+      const chunk = chunks[nextIndex++]
+      await uploadStampedChunkViaWebSocket(
+        stamp,
+        stream,
+        chunk.data,
+        chunk.address.toUint8Array(),
+      )
+      onUploaded(chunk.address.toUint8Array())
+    }
+  }
+
+  const workerCount = stream.getConcurrency()
+  await Promise.all(Array.from({ length: workerCount }, () => worker()))
+}
+
+// ============================================================================
+// Merkle Tree
+// ============================================================================
+
+/**
+ * Build the root reference from encrypted chunk refs.
+ * Single-chunk → direct 64-byte reference.
+ * Multi-chunk → build merkle tree, uploading intermediate chunks via `uploadIntermediate`.
+ */
+async function buildRootReference(
+  refs: EncryptedChunkRef[],
+  uploadIntermediate: (chunkData: Uint8Array) => Promise<void>,
+): Promise<Reference> {
+  if (refs.length === 1) {
+    const ref = new Uint8Array(64)
+    ref.set(refs[0].address, 0)
+    ref.set(refs[0].key, 32)
+    return new Reference(ref)
+  }
+
+  return buildEncryptedMerkleTree(refs, uploadIntermediate)
+}
+
+// ============================================================================
+// Main Entry Point
+// ============================================================================
+
+/**
+ * Upload encrypted data with client-side signing.
  *
- * @param context - Upload context with bee instance and authentication
- * @param data - Data to encrypt and upload
- * @param encryptionKey - Optional 32-byte encryption key (generates random if not provided)
- * @param options - Upload options
- * @param onProgress - Progress callback
+ * Pipeline: split → encrypt → upload leaves → build merkle tree → return reference.
+ * Supports both HTTP (batched) and WebSocket (per-chunk stamped) transport.
  */
 export async function uploadEncryptedDataWithSigning(
   context: UploadContext,
@@ -86,138 +260,121 @@ export async function uploadEncryptedDataWithSigning(
   options?: UploadOptions,
   onProgress?: (progress: UploadProgress) => void,
   requestOptions?: BeeRequestOptions,
+  webSocket?: WebSocketUploadOptions,
+  httpConcurrency?: number,
 ): Promise<UploadEncryptedDataResult> {
-  const { bee, stamper } = context
+  const { bee, stamper, workerPool } = context
 
-  // Validate authentication method
   if (!stamper) {
     throw new Error("No authentication method available")
   }
 
-  // Create a tag for tracking upload progress (required for fast deferred uploads)
-  // IMPORTANT: Tag is REQUIRED in dev mode - Bee's /chunks endpoint uses tag presence
-  // to determine deferred mode (deferred = tag != 0), and dev mode blocks non-deferred uploads
+  // Create a tag for tracking upload progress (gateway-compatible)
   const tag = options?.tag ?? (await tryCreateTag(bee))
-
-  // Step 1: Split data into chunks
-  const chunkPayloads = splitDataIntoChunks(data)
-  let totalChunks = chunkPayloads.length
-  let processedChunks = 0
-
-  // Progress callback helper
-  const reportProgress = () => {
-    if (onProgress) {
-      onProgress({ total: totalChunks, processed: processedChunks })
-    }
-  }
-
-  // Step 2: Process and encrypt leaf chunks
-  const encryptedChunkRefs: Array<{
-    address: Uint8Array
-    key: Uint8Array
-    span: bigint
-  }> = []
-
-  // Track all uploaded chunk addresses for utilization
-  const uploadedChunkAddresses: Uint8Array[] = []
-
-  // Merge tag into options for all chunk uploads
   const uploadOptionsWithTag = { ...options, tag }
 
-  for (const payload of chunkPayloads) {
-    // Create and encrypt content-addressed chunk
-    const encryptedChunk = makeEncryptedContentAddressedChunk(
-      payload,
-      encryptionKey,
-    )
+  // Create stamp function — uses worker pool (parallel) or sync stamper
+  const stamp = makeStampFn(stamper, workerPool)
 
-    // Store reference with span (payload size for leaf chunks)
-    encryptedChunkRefs.push({
-      address: encryptedChunk.address.toUint8Array(),
-      key: encryptedChunk.encryptionKey,
-      span: BigInt(payload.length),
-    })
+  // Step 1: Split and encrypt (CPU work)
+  const payloads = splitDataIntoChunks(data)
+  const { chunks: encryptedChunks, refs: encryptedChunkRefs } =
+    encryptChunkPayloads(payloads, encryptionKey)
 
-    // DEBUG: Trace encryption key storage
+  // Progress tracking
+  let totalChunks = encryptedChunks.length
+  let processedChunks = 0
+  const reportProgress = () =>
+    onProgress?.({ total: totalChunks, processed: processedChunks })
 
-    // Upload chunk with signing
-    await uploadSingleEncryptedChunk(
-      bee,
-      stamper,
-      encryptedChunk,
-      uploadOptionsWithTag,
-      requestOptions,
-    )
+  const uploadedChunkAddresses: Uint8Array[] = []
 
-    // Track uploaded chunk address for utilization
-    uploadedChunkAddresses.push(encryptedChunk.address.toUint8Array())
-
+  const onChunkUploaded: OnChunkUploaded = (address) => {
+    uploadedChunkAddresses.push(address)
     processedChunks++
     reportProgress()
   }
 
-  // Step 3: Build encrypted merkle tree (if multiple chunks)
-  let rootReference: Reference
+  // Step 2: Open WebSocket stream if requested
+  let wsStream: ChunkUploadStream | undefined
+  if (webSocket) {
+    wsStream = new ChunkUploadStream(bee.url, {
+      tag,
+      concurrency: webSocket.concurrency,
+    })
+    await wsStream.open()
+  }
 
-  if (encryptedChunkRefs.length === 1) {
-    // Single chunk - use direct reference (64 bytes)
-    const ref = new Uint8Array(64)
-    ref.set(encryptedChunkRefs[0].address, 0)
-    ref.set(encryptedChunkRefs[0].key, 32)
+  try {
+    // Step 3: Upload chunks
+    if (wsStream) {
+      await uploadChunksViaWebSocket(
+        stamp,
+        wsStream,
+        encryptedChunks,
+        onChunkUploaded,
+      )
+    } else {
+      await uploadChunksViaHttp(
+        bee,
+        stamp,
+        encryptedChunks,
+        uploadOptionsWithTag,
+        requestOptions,
+        onChunkUploaded,
+        httpConcurrency,
+      )
+    }
 
-    // DEBUG: Trace 64-byte reference construction
-
-    rootReference = new Reference(ref)
-  } else {
-    // Multiple chunks - build encrypted tree using bee-js's implementation
-
-    rootReference = await buildEncryptedMerkleTree(
+    // Step 4: Build merkle tree (uploads intermediate chunks)
+    const rootReference = await buildRootReference(
       encryptedChunkRefs,
-      async (encryptedChunkData) => {
-        // Upload the already-encrypted intermediate chunk
-        // encryptedChunkData = encryptedSpan (8 bytes) + encryptedPayload (4096 bytes) = 4104 bytes
-        // We need to upload this without any modification
-
-        // Calculate address for this intermediate chunk (needed for both stamper and utilization tracking)
-        const address = calculateChunkAddress(encryptedChunkData)
-
-        // Track this intermediate chunk address for utilization
+      async (chunkData) => {
+        const address = calculateChunkAddress(chunkData)
         uploadedChunkAddresses.push(address.toUint8Array())
 
-        // For client-side signing, use the calculated address
+        if (wsStream) {
+          await uploadStampedChunkViaWebSocket(
+            stamp,
+            wsStream,
+            chunkData,
+            address.toUint8Array(),
+          )
+        } else {
+          await uploadStampedChunkViaHttp(
+            bee,
+            stamp,
+            chunkData,
+            address.toUint8Array(),
+            uploadOptionsWithTag,
+            requestOptions,
+          )
+        }
 
-        const envelope = stamper.stamp({
-          hash: () => address.toUint8Array(),
-          build: () => encryptedChunkData,
-          span: 0n, // not used by stamper.stamp
-          writer: undefined as any, // not used by stamper.stamp
-        })
-
-        await bee.uploadChunk(
-          envelope,
-          encryptedChunkData,
-          uploadOptionsWithTag,
-          requestOptions,
-        )
-
-        // Count intermediate chunks in progress
         totalChunks++
         processedChunks++
         reportProgress()
       },
     )
-  }
 
-  // Return result with 64-byte reference (128 hex chars)
-  return {
-    reference: rootReference.toHex(),
-    tagUid: tag,
-    chunkAddresses: uploadedChunkAddresses,
+    return {
+      reference: rootReference.toHex(),
+      tagUid: tag,
+      chunkAddresses: uploadedChunkAddresses,
+    }
+  } finally {
+    if (wsStream) {
+      await wsStream.close()
+    }
   }
 }
 
+// ============================================================================
+// Single Chunk Upload Helpers
+// ============================================================================
+
 /**
- * Upload a single encrypted chunk with optional signing
+ * Upload a single encrypted chunk with client-side signing via HTTP.
  */
 export async function uploadSingleEncryptedChunk(
   bee: Bee,
@@ -226,33 +383,15 @@ export async function uploadSingleEncryptedChunk(
   options?: UploadOptions,
   requestOptions?: BeeRequestOptions,
 ): Promise<void> {
-  // Client-side signing - use adapter for cafe-utility Chunk interface
-  const chunkAdapter = new EncryptedChunkAdapter(encryptedChunk)
-  const envelope = stamper.stamp(chunkAdapter)
-  await uploadSingleChunkWithEnvelope(
+  const stamp = makeStampFn(stamper)
+  await uploadStampedChunkViaHttp(
     bee,
-    envelope,
+    stamp,
     encryptedChunk.data,
-    options,
+    encryptedChunk.address.toUint8Array(),
+    { deferred: false, pin: false, ...options },
     requestOptions,
   )
-}
-
-/**
- * Upload a single encrypted chunk with optional signing
- */
-async function uploadSingleChunkWithEnvelope(
-  bee: Bee,
-  envelope: EnvelopeWithBatchId,
-  data: Uint8Array,
-  options?: UploadOptions,
-  requestOptions?: BeeRequestOptions,
-): Promise<void> {
-  // Use non-deferred mode for faster uploads (returns immediately)
-  // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { deferred: false, ...options }
-
-  await bee.uploadChunk(envelope, data, uploadOptions, requestOptions)
 }
 
 /**
@@ -333,25 +472,13 @@ async function uploadChunkWithFetch(
   chunkData: Uint8Array,
   options?: UploadOptions,
 ): Promise<Reference> {
-  // Marshal the envelope to hex for the HTTP header
-  // Order: batchId (32) + index (8) + timestamp (8) + signature (65) = 113 bytes
-  const marshaledStamp = Binary.concatBytes(
-    envelope.batchId.toUint8Array(),
-    envelope.index,
-    envelope.timestamp,
-    envelope.signature,
-  )
+  const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
 
-  // Convert to hex string (226 chars) - using Binary.uint8ArrayToHex for browser compatibility
-  const stampHex = Binary.uint8ArrayToHex(marshaledStamp)
-
-  // Prepare HTTP headers
   const headers: Record<string, string> = {
     "content-type": "application/octet-stream",
     "swarm-postage-stamp": stampHex,
   }
 
-  // Add optional headers
   if (options?.tag) headers["swarm-tag"] = options.tag.toString()
   if (options?.deferred !== undefined) {
     headers["swarm-deferred-upload"] = options.deferred.toString()
@@ -360,7 +487,6 @@ async function uploadChunkWithFetch(
     headers["swarm-pin"] = options.pin.toString()
   }
 
-  // Make direct fetch call to /chunks endpoint
   const response = await fetch(`${bee.url}/chunks`, {
     method: "POST",
     headers,
@@ -592,15 +718,7 @@ export async function uploadSOCViaSocEndpoint(
     writer: undefined as any,
   })
 
-  // Marshal the envelope to hex for the HTTP header
-  // Order: batchId (32) + index (8) + timestamp (8) + signature (65) = 113 bytes
-  const marshaledStamp = Binary.concatBytes(
-    envelope.batchId.toUint8Array(),
-    envelope.index,
-    envelope.timestamp,
-    envelope.signature,
-  )
-  const stampHex = Binary.uint8ArrayToHex(marshaledStamp)
+  const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
 
   // Build URL with signature query parameter
   const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`

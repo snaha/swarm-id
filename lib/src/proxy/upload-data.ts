@@ -6,7 +6,11 @@ import type {
   UploadOptions,
   UploadResult,
 } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk, type ContentAddressedChunk } from "../chunk"
+import {
+  makeContentAddressedChunk,
+  type ContentAddressedChunk,
+  DEFAULT_UPLOAD_CONCURRENCY,
+} from "../chunk"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
 import type { UploadContext, UploadProgress, ChunkReference } from "./types"
 import { tryCreateTag } from "../utils/tag"
@@ -87,26 +91,33 @@ export async function uploadDataWithSigning(
   // Merge tag into options for all chunk uploads
   const uploadOptionsWithTag = { ...options, tag }
 
+  // Create all chunks first (CPU work)
+  const chunks: ContentAddressedChunk[] = []
   for (const payload of chunkPayloads) {
-    // Create content-addressed chunk
     const chunk = makeContentAddressedChunk(payload)
+    chunks.push(chunk)
+    chunkRefs.push({ address: chunk.address.toUint8Array() })
+  }
 
-    // Store reference
-    chunkRefs.push({
-      address: chunk.address.toUint8Array(),
-    })
-
-    // Upload chunk with signing
-    await uploadSingleChunk(
-      bee,
-      stamper,
-      chunk,
-      uploadOptionsWithTag,
-      requestOptions,
+  // Upload in parallel batches
+  for (let i = 0; i < chunks.length; i += DEFAULT_UPLOAD_CONCURRENCY) {
+    const batch = chunks.slice(
+      i,
+      Math.min(i + DEFAULT_UPLOAD_CONCURRENCY, chunks.length),
     )
-
-    processedChunks++
-    reportProgress()
+    await Promise.all(
+      batch.map(async (chunk) => {
+        await uploadSingleChunk(
+          bee,
+          stamper,
+          chunk,
+          uploadOptionsWithTag,
+          requestOptions,
+        )
+        processedChunks++
+        reportProgress()
+      }),
+    )
   }
 
   // Step 3: Build merkle tree (if multiple chunks)

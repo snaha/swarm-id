@@ -450,6 +450,11 @@ export class SwarmIdClient {
         break
       }
 
+      case "uploadProgress":
+        // Progress messages are handled by dedicated listeners in uploadData/uploadFile
+        // Don't resolve pending request - wait for the actual response
+        break
+
       default:
         // Handle response messages with requestId
         if ("requestId" in message) {
@@ -1005,7 +1010,14 @@ export class SwarmIdClient {
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
-    const { onProgress, ...serializableOptions } = options ?? {}
+    const {
+      onProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+      ...serializableOptions
+    } = options ?? {}
 
     // Setup progress listener if callback provided
     let progressListener: ((event: MessageEvent) => void) | undefined
@@ -1044,6 +1056,10 @@ export class SwarmIdClient {
         options: serializableOptions,
         requestOptions,
         enableProgress: !!onProgress,
+        useWebSocket,
+        useWorkers,
+        workerCount,
+        concurrency,
       })
 
       return {
@@ -1153,7 +1169,14 @@ export class SwarmIdClient {
   ): Promise<UploadResult> {
     this.ensureReady()
     const requestId = this.generateRequestId()
-    const { onProgress: _onProgress, ...serializableOptions } = options ?? {}
+    const {
+      onProgress,
+      useWebSocket,
+      useWorkers,
+      workerCount,
+      concurrency,
+      ...serializableOptions
+    } = options ?? {}
 
     let data: Uint8Array<ArrayBuffer>
     let fileName: string | undefined = name
@@ -1170,23 +1193,59 @@ export class SwarmIdClient {
       )
     }
 
-    const response = await this.sendRequest<{
-      type: "uploadFileResponse"
-      requestId: string
-      reference: Reference
-      tagUid?: number
-    }>({
-      type: "uploadFile",
-      requestId,
-      data,
-      name: fileName,
-      options: serializableOptions,
-      requestOptions,
-    })
+    // Setup progress listener if callback provided
+    let progressListener: ((event: MessageEvent) => void) | undefined
+    if (onProgress) {
+      progressListener = (event: MessageEvent) => {
+        if (event.origin !== new URL(this.iframeOrigin).origin) return
 
-    return {
-      reference: response.reference,
-      tagUid: response.tagUid,
+        try {
+          const message = IframeToParentMessageSchema.parse(event.data)
+          if (
+            message.type === "uploadProgress" &&
+            message.requestId === requestId
+          ) {
+            onProgress({
+              total: message.total,
+              processed: message.processed,
+            })
+          }
+        } catch {
+          // Ignore invalid messages
+        }
+      }
+      window.addEventListener("message", progressListener)
+    }
+
+    try {
+      const response = await this.sendRequest<{
+        type: "uploadFileResponse"
+        requestId: string
+        reference: Reference
+        tagUid?: number
+      }>({
+        type: "uploadFile",
+        requestId,
+        data,
+        name: fileName,
+        options: serializableOptions,
+        requestOptions,
+        enableProgress: !!onProgress,
+        useWebSocket,
+        useWorkers,
+        workerCount,
+        concurrency,
+      })
+
+      return {
+        reference: response.reference,
+        tagUid: response.tagUid,
+      }
+    } finally {
+      // Clean up progress listener
+      if (progressListener) {
+        window.removeEventListener("message", progressListener)
+      }
     }
   }
 

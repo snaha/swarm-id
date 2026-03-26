@@ -25,6 +25,9 @@ export {
 // Hex address utility
 export { hexAddress } from "./utils/hex"
 
+// Stamp worker pool for parallel ECDSA signing
+export { StampWorkerPool } from "./proxy/stamp-worker-pool"
+
 // Batch utilization tracking
 export {
   initializeBatchUtilization,
