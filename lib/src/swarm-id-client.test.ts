@@ -23,10 +23,6 @@ describe("SwarmIdClient connect()", () => {
         src: "",
         contentWindow: { postMessage: vi.fn() },
       }),
-      body: {
-        appendChild: vi.fn(),
-        removeChild: vi.fn(),
-      },
     })
 
     client = new SwarmIdClient({
@@ -38,8 +34,55 @@ describe("SwarmIdClient connect()", () => {
     })
   })
 
-  it("should send connect message to proxy", async () => {
+  it("should send generateChallenge and open popup from parent when storage is not partitioned", async () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    const sendRequestSpy = vi
+      .spyOn(client as never, "sendRequest")
+      .mockResolvedValue({
+        type: "generateChallengeResponse",
+        requestId: "test",
+        authUrl:
+          "https://swarm-id.example.com/connect#origin=https%3A%2F%2Flocalhost",
+      })
+
+    await client.connect()
+
+    expect(sendRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "generateChallenge",
+        agent: undefined,
+      }),
+    )
+    expect(window.open).toHaveBeenCalledWith(
+      "https://swarm-id.example.com/connect#origin=https%3A%2F%2Flocalhost",
+      "_blank",
+    )
+  })
+
+  it("should send agent flag in generateChallenge when agent option is true", async () => {
+    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    const sendRequestSpy = vi
+      .spyOn(client as never, "sendRequest")
+      .mockResolvedValue({
+        type: "generateChallengeResponse",
+        requestId: "test",
+        authUrl: "https://swarm-id.example.com/connect#origin=test&agent=",
+      })
+
+    await client.connect({ agent: true })
+
+    expect(sendRequestSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "generateChallenge",
+        agent: true,
+      }),
+    )
+  })
+
+  it("should send connect message to proxy when storage is partitioned", async () => {
+    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    // Simulate storagePartitioned = true by triggering handleIframeMessage
+    ;(client as never)["storagePartitioned"] = true
     const sendRequestSpy = vi
       .spyOn(client as never, "sendRequest")
       .mockResolvedValue({
@@ -58,28 +101,9 @@ describe("SwarmIdClient connect()", () => {
     )
   })
 
-  it("should send agent flag to proxy when agent option is true", async () => {
+  it("should throw when popup fails to open in partitioned mode", async () => {
     vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-    const sendRequestSpy = vi
-      .spyOn(client as never, "sendRequest")
-      .mockResolvedValue({
-        type: "connectResponse",
-        requestId: "test",
-        success: true,
-      })
-
-    await client.connect({ agent: true })
-
-    expect(sendRequestSpy).toHaveBeenCalledWith(
-      expect.objectContaining({
-        type: "connect",
-        agent: true,
-      }),
-    )
-  })
-
-  it("should throw when popup fails to open", async () => {
-    vi.spyOn(client, "ensureReady").mockImplementation(() => {})
+    ;(client as never)["storagePartitioned"] = true
     vi.spyOn(client as never, "sendRequest").mockResolvedValue({
       type: "connectResponse",
       requestId: "test",

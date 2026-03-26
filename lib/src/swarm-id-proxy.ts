@@ -583,6 +583,17 @@ export class SwarmIdProxy {
     // Load existing secret if available
     await this.loadAuthData()
 
+    // Detect storage partitioning using Storage Access API
+    let storagePartitioned = false
+    try {
+      if (typeof document.hasStorageAccess === "function") {
+        const hasAccess = await document.hasStorageAccess()
+        storagePartitioned = !hasAccess
+      }
+    } catch {
+      // If hasStorageAccess() fails, assume not partitioned
+    }
+
     // Acknowledge receipt
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
@@ -590,6 +601,7 @@ export class SwarmIdProxy {
           type: "proxyReady",
           authenticated: this.authenticated,
           parentOrigin: this.parentOrigin,
+          storagePartitioned,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
       )
@@ -739,6 +751,10 @@ export class SwarmIdProxy {
 
       case "connect":
         this.handleConnect(message, event)
+        break
+
+      case "generateChallenge":
+        this.handleGenerateChallenge(message, event)
         break
 
       default:
@@ -1280,6 +1296,47 @@ export class SwarmIdProxy {
         type: "connectResponse",
         requestId: message.requestId,
         success,
+      },
+      { targetOrigin: event.origin },
+    )
+  }
+
+  private handleGenerateChallenge(
+    message: {
+      type: "generateChallenge"
+      requestId: string
+      agent?: boolean
+    },
+    event: MessageEvent,
+  ): void {
+    if (!this.parentOrigin) {
+      this.sendErrorToParent(
+        event,
+        message.requestId,
+        "Cannot generate challenge - parent origin not set",
+      )
+      return
+    }
+
+    const challenge = crypto.randomUUID()
+    this.pendingChallenge = challenge
+    localStorage.setItem(STORAGE_CHALLENGE_KEY, challenge)
+
+    const basePath = window.location.pathname.replace(/\/proxy$/, "")
+    const authUrl = buildAuthUrl(
+      window.location.origin + basePath,
+      this.parentOrigin,
+      this.appMetadata,
+      { challenge, agent: message.agent },
+    )
+
+    this.isConnecting = true
+    this.showAuthButton()
+    ;(event.source as WindowProxy).postMessage(
+      {
+        type: "generateChallengeResponse",
+        requestId: message.requestId,
+        authUrl,
       },
       { targetOrigin: event.origin },
     )

@@ -980,6 +980,12 @@ export const ConnectMessageSchema = z.object({
   popupMode: z.enum(["popup", "window"]).optional(),
 })
 
+export const GenerateChallengeMessageSchema = z.object({
+  type: z.literal("generateChallenge"),
+  requestId: z.string(),
+  agent: z.boolean().optional(),
+})
+
 export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
@@ -1019,6 +1025,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActGetGranteesMessageSchema,
   GetPostageBatchMessageSchema,
   ConnectMessageSchema,
+  GenerateChallengeMessageSchema,
 ])
 
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
@@ -1087,6 +1094,9 @@ export type GetPostageBatchMessage = z.infer<
   typeof GetPostageBatchMessageSchema
 >
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
+export type GenerateChallengeMessage = z.infer<
+  typeof GenerateChallengeMessageSchema
+>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
 // ============================================================================
@@ -1097,6 +1107,7 @@ export const ProxyReadyMessageSchema = z.object({
   type: z.literal("proxyReady"),
   authenticated: z.boolean(),
   parentOrigin: z.string(),
+  storagePartitioned: z.boolean(),
 })
 
 export const InitErrorMessageSchema = z.object({
@@ -1192,6 +1203,12 @@ export const ConnectResponseMessageSchema = z.object({
   type: z.literal("connectResponse"),
   requestId: z.string(),
   success: z.boolean(),
+})
+
+export const GenerateChallengeResponseMessageSchema = z.object({
+  type: z.literal("generateChallengeResponse"),
+  requestId: z.string(),
+  authUrl: z.string(),
 })
 
 export const IsConnectedResponseMessageSchema = z.object({
@@ -1427,6 +1444,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ErrorMessageSchema,
   ConnectionInfoResponseMessageSchema,
   ConnectResponseMessageSchema,
+  GenerateChallengeResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
   GsocMineResponseMessageSchema,
@@ -1489,6 +1507,9 @@ export type ConnectionInfoResponseMessage = z.infer<
 >
 export type ConnectResponseMessage = z.infer<
   typeof ConnectResponseMessageSchema
+>
+export type GenerateChallengeResponseMessage = z.infer<
+  typeof GenerateChallengeResponseMessageSchema
 >
 export type IsConnectedResponseMessage = z.infer<
   typeof IsConnectedResponseMessageSchema

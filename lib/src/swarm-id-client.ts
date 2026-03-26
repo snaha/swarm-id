@@ -122,6 +122,7 @@ export class SwarmIdClient {
   private initializationTimeout: number
   private onAuthChange?: (authenticated: boolean) => void
   private popupMode: "popup" | "window"
+  private storagePartitioned: boolean = false
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
   private containerId?: string
@@ -372,6 +373,7 @@ export class SwarmIdClient {
     switch (message.type) {
       case "proxyReady":
         this.ready = true
+        this.storagePartitioned = message.storagePartitioned
         if (this.readyResolve) {
           this.readyResolve()
         }
@@ -802,19 +804,40 @@ export class SwarmIdClient {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
-    const response = await this.sendRequest<{
-      type: "connectResponse"
-      requestId: string
-      success: boolean
-    }>({
-      type: "connect",
-      requestId,
-      agent: options.agent,
-      popupMode: options.popupMode,
-    })
+    if (this.storagePartitioned) {
+      // Storage is partitioned (Safari/ITP): iframe opens popup (may trigger browser warning)
+      const response = await this.sendRequest<{
+        type: "connectResponse"
+        requestId: string
+        success: boolean
+      }>({
+        type: "connect",
+        requestId,
+        agent: options.agent,
+        popupMode: options.popupMode,
+      })
 
-    if (!response.success) {
-      throw new Error("Failed to open authentication popup")
+      if (!response.success) {
+        throw new Error("Failed to open authentication popup")
+      }
+    } else {
+      // Storage is shared: parent opens popup directly (no browser warning)
+      const response = await this.sendRequest<{
+        type: "generateChallengeResponse"
+        requestId: string
+        authUrl: string
+      }>({
+        type: "generateChallenge",
+        requestId,
+        agent: options.agent,
+      })
+
+      const effectivePopupMode = options.popupMode ?? this.popupMode
+      if (effectivePopupMode === "popup") {
+        window.open(response.authUrl, "_blank", "width=500,height=600")
+      } else {
+        window.open(response.authUrl, "_blank")
+      }
     }
   }
 
