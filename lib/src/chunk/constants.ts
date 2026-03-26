@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Chunk size constants
 export const MIN_PAYLOAD_SIZE = 1
 export const MAX_PAYLOAD_SIZE = 4096

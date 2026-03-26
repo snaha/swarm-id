@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { Reference, MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "../chunk"
 import { hexToUint8Array } from "../utils/hex"

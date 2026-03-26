@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts">
   import CreateNewAccount from '$lib/components/create-new-account.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'

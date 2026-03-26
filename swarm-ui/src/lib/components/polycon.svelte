@@ -1,4 +1,9 @@
 <!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
+<!--
   Polycon — polygon-based identicon generator.
 
   Based on Polycon by Christian Montoya (https://github.com/Montoya/polycon).

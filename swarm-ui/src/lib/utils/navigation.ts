@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { goto } from '$app/navigation'
 import { resolve } from '$app/paths'
 import routes from '$lib/routes'

@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 // Session store for tracking current account/identity creation flow
 
 import type { Account, AppData } from '$lib/types'

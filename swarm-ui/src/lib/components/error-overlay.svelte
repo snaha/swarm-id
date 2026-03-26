@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts">
   import Button from '$lib/components/ui/button.svelte'
   import Typography from '$lib/components/ui/typography.svelte'

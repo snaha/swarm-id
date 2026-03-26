@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Passkey-based identity management using WebAuthn
  * Derives deterministic Ethereum addresses from platform authenticator PRF output

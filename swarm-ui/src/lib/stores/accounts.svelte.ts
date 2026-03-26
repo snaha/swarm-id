@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { createAccountsStorageManager, type Account, type Device } from '@snaha/swarm-id'

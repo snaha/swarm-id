@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { PUBLIC_ID_DOMAIN } from '$env/static/public'
 
 export function resolveProxyOrigin(): string {

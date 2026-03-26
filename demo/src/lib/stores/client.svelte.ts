@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { SwarmIdClient, formatTTL } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'

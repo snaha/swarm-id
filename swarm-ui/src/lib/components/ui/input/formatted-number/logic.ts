@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { formatNumber, parseLocalizedNumber } from '$lib/utils/format'
 
 export const DEFAULT_MAXIMUM_FRACTION_DIGITS = 2

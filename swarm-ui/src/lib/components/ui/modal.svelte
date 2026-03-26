@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts" module>
   import { browser } from '$app/environment'
   import { onDestroy, onMount } from 'svelte'

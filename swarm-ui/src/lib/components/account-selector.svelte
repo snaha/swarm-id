@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts">
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Select from '$lib/components/ui/select/select.svelte'

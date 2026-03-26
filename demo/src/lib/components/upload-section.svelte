@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts">
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card'
   import { Textarea } from '$lib/components/ui/textarea'

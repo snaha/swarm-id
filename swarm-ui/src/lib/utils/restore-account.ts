@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import type { Account, Identity, ConnectedApp, PostageStamp, Device } from '@snaha/swarm-id'
 import { mergeDevices, getOrCreateDeviceId } from '@snaha/swarm-id'
 import { accountsStore } from '$lib/stores/accounts.svelte'

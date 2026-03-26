@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
