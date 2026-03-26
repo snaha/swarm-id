@@ -6,6 +6,7 @@
   import type { ResultData } from './result-types'
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
+  import { formatBytes } from '$lib/utils/format'
 
   interface Props {
     reference?: string
@@ -18,12 +19,6 @@
 
   const REFERENCE_LENGTH = 64
   const ENCRYPTED_REFERENCE_LENGTH = 128
-
-  function formatBytes(bytes: number): string {
-    if (bytes < 1024) return `${bytes} B`
-    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
-    return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
-  }
 
   async function handleDownload() {
     result = undefined
