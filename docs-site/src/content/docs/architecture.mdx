@@ -29,7 +29,7 @@ The architecture consists of three main components:
 │  ┌────────────────────────────────────────────────────┐     │
 │  │ Auth Popup (https://swarm-id.snaha.net)            │     │
 │  │                                                    │     │
-│  │ SwarmIdAuth                                        │     │
+│  │ Auth Popup (SvelteKit /connect route)               │     │
 │  │   - Stores master key (first-party context)        │     │
 │  │   - Derives app-specific secrets                   │     │
 │  │   - Sends secret to iframe via postMessage         │     │
@@ -57,14 +57,14 @@ Runs inside the hidden iframe on the trusted domain. It:
 - Proxies Bee API calls with authentication
 - Validates all incoming messages from the parent
 
-### SwarmIdAuth
+### Auth Popup
 
-Runs in the authentication popup window. It:
+The authentication popup is implemented as a SvelteKit route (`/connect`) in the identity management UI. It:
 
 - Manages the master key in first-party localStorage
 - Derives app-specific secrets using HMAC-SHA256
 - Sends secrets to the iframe via postMessage
-- Provides the authentication UI
+- Provides the authentication UI (Passkey/WebAuthn and SIWE flows)
 
 ## Key Hierarchy
 
