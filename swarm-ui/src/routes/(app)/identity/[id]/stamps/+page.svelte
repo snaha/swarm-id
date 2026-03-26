@@ -34,6 +34,7 @@
   const SECONDS_PER_MONTH = 2592000n
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
   const PLUR_DECIMALS = 16
+  const BEEPORT_TOPUP_URL = 'https://beeport.eth.limo/?topup='
 
   function bzzToPlur(bzz: number): bigint {
     const str = bzz.toFixed(PLUR_DECIMALS)
@@ -177,6 +178,15 @@
       >
         {#snippet buttons()}
           <CopyButton text={stamp.batchID.toHex()} />
+          <Button
+            variant="ghost"
+            dimension="compact"
+            href={`${BEEPORT_TOPUP_URL}${stamp.batchID.toHex()}`}
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            Top up
+          </Button>
         {/snippet}
       </Input>
 

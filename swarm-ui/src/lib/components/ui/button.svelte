@@ -17,6 +17,8 @@
   }
   interface AnchorElement extends HTMLAnchorAttributes, ButtonProps {
     href?: HTMLAnchorAttributes['href']
+    target?: HTMLAnchorAttributes['target']
+    rel?: HTMLAnchorAttributes['rel']
     type?: never
     disabled?: boolean
   }
@@ -24,6 +26,8 @@
   interface ButtonElement extends HTMLButtonAttributes, ButtonProps {
     type?: HTMLButtonAttributes['type']
     href?: never
+    target?: never
+    rel?: never
     disabled?: boolean
   }
   export type Props = AnchorElement | ButtonElement
@@ -38,6 +42,8 @@
     focus,
     disabled = $bindable(),
     href,
+    target,
+    rel,
     class: className = '',
     leftAlign = false,
     flexGrow = false,
@@ -61,6 +67,8 @@
     class:danger
     class:busy
     {href}
+    target={href ? target : undefined}
+    rel={href ? rel : undefined}
     {disabled}
     {...restProps}
   >
