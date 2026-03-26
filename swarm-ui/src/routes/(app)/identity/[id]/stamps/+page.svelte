@@ -155,10 +155,6 @@
       (remainingMs < oneMonthMs || remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION)
     )
   }
-
-  function handleTopUp(batchId: BatchId) {
-    window.open(`${BEEPORT_TOPUP_URL}${batchId.toHex()}`, '_blank')
-  }
 </script>
 
 {#snippet stampDetails(stamp: PostageStamp, isAccountStamp: boolean)}
