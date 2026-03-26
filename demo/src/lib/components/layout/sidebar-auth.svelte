@@ -7,17 +7,8 @@
   import InfoButton from '$lib/components/ui/tooltip/info-button.svelte'
   import { clientStore } from '$lib/stores/client.svelte'
 
-  const isHTTP = $derived(typeof window !== 'undefined' && window.location.protocol === 'http:')
-  const hasITP = $derived(
-    typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent),
-  )
-
   let agentSignup = $state(false)
   let popoverOpen = $state(false)
-
-  const connectDisabled = $derived(
-    isHTTP && !hasITP && !clientStore.storageVerified && !clientStore.authenticated,
-  )
 
   // Close popover when auth state changes (covers iframe button connect/disconnect)
   let prevAuth = $state(clientStore.authenticated)
@@ -112,18 +103,11 @@
           clientStore.connect({ agent: agentSignup })
           popoverOpen = false
         }}
-        disabled={connectDisabled}
         size="sm"
         class="w-full mt-2"
       >
         {clientStore.authenticated ? 'Disconnect' : 'Connect'}
       </Button>
-      {#if connectDisabled}
-        <p class="text-xs text-muted-foreground mt-1.5">
-          Disabled because your browser cannot verify cross-site storage access yet. Use the iframe
-          button below to authenticate first.
-        </p>
-      {/if}
     </div>
 
     <Separator />

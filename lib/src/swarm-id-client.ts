@@ -80,6 +80,8 @@ import {
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/key-derivation"
+import { buildAuthUrl } from "./utils/url"
+import { isWebKit } from "./utils/browser"
 
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -780,12 +782,13 @@ export class SwarmIdClient {
    * to the client when they return.
    *
    * **Browser Compatibility:**
-   * - Production (Chrome/Firefox): Works immediately
-   * - Localhost (Chrome/Firefox): Works after iframe button grants Storage Access
-   * - Safari (any): Download-only mode — auth works, uploads disabled (ITP storage partitioning). Private mode sessions are ephemeral (lost when the private window closes).
+   * - Chrome/Firefox: Opens window directly from parent context (preserves user gesture,
+   *   no popup blocking). Auth is communicated via localStorage storage events.
+   * - Safari/iOS: Delegates to proxy iframe which opens popup with storage partitioning
+   *   detection. Download-only mode — auth works, uploads disabled (ITP storage partitioning).
+   *   Private mode sessions are ephemeral (lost when the private window closes).
    *
-   * For localhost development with Chrome/Firefox, click the iframe button first
-   * to grant Storage Access. For Safari details, see https://github.com/snaha/swarm-id/issues/167
+   * For Safari details, see https://github.com/snaha/swarm-id/issues/167
    *
    * @param options - Configuration options for the connect flow
    * @param options.agent - When true, shows the agent sign-up option on the connect page
@@ -805,21 +808,41 @@ export class SwarmIdClient {
    */
   async connect(options: ConnectOptions = {}): Promise<void> {
     this.ensureReady()
-    const requestId = this.generateRequestId()
 
-    const response = await this.sendRequest<{
-      type: "connectResponse"
-      requestId: string
-      success: boolean
-    }>({
-      type: "connect",
-      requestId,
-      agent: options.agent,
-      popupMode: options.popupMode,
-    })
+    if (isWebKit()) {
+      // Safari/iOS: proxy opens popup with storage partitioning challenge
+      const requestId = this.generateRequestId()
+      const response = await this.sendRequest<{
+        type: "connectResponse"
+        requestId: string
+        success: boolean
+      }>({
+        type: "connect",
+        requestId,
+        agent: options.agent,
+        popupMode: options.popupMode,
+      })
+      if (!response.success) {
+        throw new Error("Failed to open authentication popup")
+      }
+    } else {
+      // Chrome/Firefox: open window directly to preserve user gesture (avoids popup blocking).
+      // No challenge needed — these browsers don't partition same-origin localStorage,
+      // so the proxy iframe picks up auth changes via storage events.
+      const basePath = this.iframePath.replace(/\/proxy$/, "")
+      const authUrl = buildAuthUrl(
+        this.iframeOrigin + basePath,
+        window.location.origin,
+        this.metadata,
+        { agent: options.agent },
+      )
 
-    if (!response.success) {
-      throw new Error("Failed to open authentication popup")
+      const effectivePopupMode = options.popupMode ?? this.popupMode
+      if (effectivePopupMode === "popup") {
+        window.open(authUrl, "_blank", "width=500,height=600")
+      } else {
+        window.open(authUrl, "_blank")
+      }
     }
   }
 
