@@ -98,7 +98,6 @@
           `Step 1: Uploading content (${uint8Data.length} bytes, deferred: ${deferred})...`,
         )
         const uploadResult = await clientStore.client!.uploadData(uint8Data, {
-          pin: false,
           encrypt: false,
           deferred,
         })
@@ -114,7 +113,6 @@
           async (data: Uint8Array, isRoot: boolean) => {
             logStore.log(`  Uploading ${isRoot ? 'root' : 'child'} node (${data.length} bytes)...`)
             const uploadResult = await clientStore.client!.uploadData(data, {
-              pin: false,
               encrypt: false,
               deferred,
             })
@@ -157,7 +155,6 @@
           const v1Payload = buildV1Payload(manifestReference, timestamp)
           const feedResult = await writer.uploadRawPayload(v1Payload, {
             ...options,
-            pin: false,
             deferred,
             hasTimestamp: false,
           })

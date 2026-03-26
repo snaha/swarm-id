@@ -9,6 +9,7 @@ import type {
 import { makeContentAddressedChunk, type ContentAddressedChunk } from "../chunk"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
 import type { UploadContext, UploadProgress, ChunkReference } from "./types"
+import { tryCreateTag } from "../utils/tag"
 
 /**
  * Simple Uint8ArrayWriter implementation for ChunkAdapter
@@ -66,11 +67,7 @@ export async function uploadDataWithSigning(
   const { bee, stamper } = context
 
   // Create a tag for tracking upload progress (required for fast deferred uploads)
-  let tag: number | undefined = options?.tag
-  if (!tag) {
-    const tagResponse = await bee.createTag()
-    tag = tagResponse.uid
-  }
+  const tag = options?.tag ?? (await tryCreateTag(bee))
 
   // Step 1: Split data into chunks
   const chunkPayloads = splitDataIntoChunks(data)
@@ -160,7 +157,7 @@ export async function uploadSingleChunk(
 ): Promise<UploadResult> {
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { deferred: false, pin: false, ...options }
+  const uploadOptions = { deferred: false, ...options }
 
   if (stamper) {
     // Client-side signing - use adapter for cafe-utility Chunk interface

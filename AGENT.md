@@ -94,6 +94,11 @@ Authentication uses storage events: popup writes to localStorage → storage eve
 - Component tests (`*.ct.spec.ts`): Playwright
 - E2E tests (`tests/*.test.ts`): Playwright
 
+## Version control conventions
+
+- Use conventional commits
+- Don't use the issue number in branch names
+
 ## Deployment
 
 - **Demo**: https://swarm-demo.snaha.net

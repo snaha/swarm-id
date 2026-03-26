@@ -38,7 +38,6 @@
       const uint8Data = encoder.encode(data)
 
       const uploadResult = await clientStore.client!.uploadData(uint8Data, {
-        pin: false,
         encrypt,
         deferred: clientStore.deferred,
       })

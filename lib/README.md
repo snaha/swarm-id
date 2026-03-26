@@ -118,7 +118,6 @@ console.log("Authenticated:", status.authenticated)
 const result = await client.uploadData(
   "your-postage-batch-id",
   new Uint8Array([1, 2, 3, 4, 5]),
-  { pin: true },
 )
 console.log("Uploaded:", result.reference)
 
