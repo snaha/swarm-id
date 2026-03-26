@@ -6,7 +6,7 @@ import starlight from '@astrojs/starlight'
 const base = process.env.BASE_URL || '/'
 
 export default defineConfig({
-  site: 'https://swarm-docs.snaha.net',
+  site: 'https://swarm.snaha.net/docs',
   base,
   integrations: [
     starlight({

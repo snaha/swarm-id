@@ -66,11 +66,11 @@ client.destroy()
 
 ## Documentation
 
-Full documentation is available at **[swarm-docs.snaha.net](https://swarm-docs.snaha.net)**:
+Full documentation is available at **[swarm.snaha.net/docs](https://swarm.snaha.net/docs)**:
 
-- [Quick Start](https://swarm-docs.snaha.net/getting-started) — Installation and integration guide
-- [Architecture](https://swarm-docs.snaha.net/architecture) — How the system works, key hierarchy, backup & recovery
-- [API Reference](https://swarm-docs.snaha.net/api) — Complete SwarmIdClient API documentation
+- [Quick Start](https://swarm.snaha.net/docs/getting-started) — Installation and integration guide
+- [Architecture](https://swarm.snaha.net/docs/architecture) — How the system works, key hierarchy, backup & recovery
+- [API Reference](https://swarm.snaha.net/docs/api) — Complete SwarmIdClient API documentation
 
 ## License
 
