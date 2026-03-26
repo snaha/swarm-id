@@ -157,7 +157,7 @@ export async function uploadSingleChunk(
 ): Promise<UploadResult> {
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { deferred: false, pin: false, ...options }
+  const uploadOptions = { deferred: false, ...options }
 
   if (stamper) {
     // Client-side signing - use adapter for cafe-utility Chunk interface

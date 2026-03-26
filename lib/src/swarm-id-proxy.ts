@@ -1824,7 +1824,7 @@ export class SwarmIdProxy {
         const tag = options?.tag ?? (await tryCreateTag(this.bee))
 
         // Use non-deferred mode for faster uploads (returns immediately)
-        const uploadOptions = { ...options, tag, deferred: false, pin: false }
+        const uploadOptions = { ...options, tag, deferred: false }
 
         // Upload with envelope signature
         const result = await this.bee.uploadChunk(

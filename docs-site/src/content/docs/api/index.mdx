@@ -1139,7 +1139,6 @@ console.log('Feed accessible at /bzz/' + manifestRef)
 // Create manifest with explicit owner
 const manifestRef = await client.createFeedManifest(topic, {
   owner: '0x1234...',
-  uploadOptions: { pin: true },
 })
 
 // Use with feed writer

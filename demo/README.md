@@ -101,7 +101,7 @@ The identity management (authentication, key derivation, storage) is handled by 
 
 ```javascript
 const data = new TextEncoder().encode('Hello, Swarm!')
-const result = await client.uploadData('your-postage-batch-id', data, { pin: true })
+const result = await client.uploadData('your-postage-batch-id', data)
 console.log('Reference:', result.reference)
 ```
 

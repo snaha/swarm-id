@@ -53,7 +53,7 @@
       const reference = await clientStore.client!.createFeedManifest(topic, {
         owner,
         feedType,
-        uploadOptions: { encrypt: encryptManifest, pin: false, deferred: clientStore.deferred },
+        uploadOptions: { encrypt: encryptManifest, deferred: clientStore.deferred },
       })
 
       logStore.log(`Feed manifest created: ${reference}`)

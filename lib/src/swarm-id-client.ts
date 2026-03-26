@@ -2553,7 +2553,6 @@ export class SwarmIdClient {
    * // Create manifest with explicit owner
    * const manifestRef = await client.createFeedManifest(topic, {
    *   owner: '0x1234...',
-   *   uploadOptions: { pin: true }
    * })
    * ```
    */

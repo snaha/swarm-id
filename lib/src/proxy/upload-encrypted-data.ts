@@ -250,7 +250,7 @@ async function uploadSingleChunkWithEnvelope(
 ): Promise<void> {
   // Use non-deferred mode for faster uploads (returns immediately)
   // Note: pinning is incompatible with deferred mode, so disable it
-  const uploadOptions = { deferred: false, pin: false, ...options }
+  const uploadOptions = { deferred: false, ...options }
 
   await bee.uploadChunk(envelope, data, uploadOptions, requestOptions)
 }
@@ -468,7 +468,7 @@ export async function uploadEncryptedSOC(
   })
 
   // Step 5: Upload using direct fetch (bypasses bee.uploadChunk size check)
-  const uploadOptionsWithTag = { tag, deferred: false, pin: false, ...options }
+  const uploadOptionsWithTag = { tag, deferred: false, ...options }
   await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
 
   return {
@@ -526,7 +526,7 @@ export async function uploadSOC(
     writer: undefined as any,
   })
 
-  const uploadOptionsWithTag = { tag, deferred: false, pin: false, ...options }
+  const uploadOptionsWithTag = { tag, deferred: false, ...options }
   await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
 
   return {
