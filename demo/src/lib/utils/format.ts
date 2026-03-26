@@ -1,4 +1,4 @@
-const UNITS = ["B", "KB", "MB", "GB", "TB"] as const
+const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
 const KILO = 1024
 
 export function formatBytes(bytes: number): string {
