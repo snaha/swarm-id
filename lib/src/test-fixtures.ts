@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Shared test fixtures for backup-encryption, account-state-snapshot, and sync tests.
  */

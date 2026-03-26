@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 const UNITS = ['B', 'KB', 'MB', 'GB', 'TB'] as const
 const KILO = 1024
 

@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 /**
  * Detect WebKit-based browsers (Safari on macOS, all browsers on iOS/iPadOS).
  * iOS browsers all use WebKit regardless of branding.

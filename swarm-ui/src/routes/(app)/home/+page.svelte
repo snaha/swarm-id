@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts">
   import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
   import IdentityList from '$lib/components/identity-list.svelte'

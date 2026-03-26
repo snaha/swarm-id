@@ -1,3 +1,6 @@
+// Copyright 2024 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
 import autoprefixer from 'autoprefixer'
 import postcssNesting from 'postcss-nesting'
 

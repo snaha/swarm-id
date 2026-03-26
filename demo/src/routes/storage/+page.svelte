@@ -1,3 +1,8 @@
+<!--
+  Copyright 2024 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
 <script lang="ts">
   import UploadSection from '$lib/components/upload-section.svelte'
   import DownloadSection from '$lib/components/download-section.svelte'
