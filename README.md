@@ -2,7 +2,7 @@
 
 Cross-browser compatible authentication and identity management for Swarm dApps.
 
-**[Documentation](https://swarm-docs.snaha.net)** | **[Demo](https://swarm-demo.snaha.net)** | **[Identity UI](https://swarm-id.snaha.net)**
+**[Documentation](https://swarm.snaha.net/docs)** | **[Demo](https://swarm-demo.snaha.net)** | **[Identity UI](https://swarm-id.snaha.net)**
 
 ## Packages
 
@@ -17,7 +17,7 @@ The project uses an OAuth-style popup authentication flow using the Storage Acce
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
-[Architecture deep-dive →](https://swarm-docs.snaha.net/architecture)
+[Architecture deep-dive →](https://swarm.snaha.net/docs/architecture)
 
 ## Quick Start
 
@@ -50,7 +50,7 @@ if (status.authenticated) {
 client.destroy()
 ```
 
-[Full integration guide →](https://swarm-docs.snaha.net/getting-started)
+[Full integration guide →](https://swarm.snaha.net/docs/getting-started)
 
 ## Deployment
 
@@ -137,7 +137,7 @@ curl -X POST "http://localhost:1633/stamps/10000000/17"
 curl "http://localhost:1633/stamps/<batchID>"
 ```
 
-See the [Local Development guide](https://swarm-docs.snaha.net/local-development) for client-side stamp signing, known dev keys, SSH tunnel setup, and more.
+See the [Local Development guide](https://swarm.snaha.net/docs/local-development) for client-side stamp signing, known dev keys, SSH tunnel setup, and more.
 
 ### Developer Tools (/dev route)
 
