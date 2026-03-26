@@ -31,6 +31,7 @@ interface WorkerHandle {
 }
 
 const DEFAULT_WORKER_COUNT = 4
+const WORKER_INIT_TIMEOUT_MS = 5_000
 
 export class StampWorkerPool {
   private workers: WorkerHandle[]
@@ -109,13 +110,19 @@ export class StampWorkerPool {
       // Init worker with private key, collect issuer from ready response
       const initPromise = new Promise<Uint8Array>((resolve, reject) => {
         const origHandler = worker.onmessage
+        const origErrorHandler = worker.onerror
+        const timer = setTimeout(() => {
+          reject(new Error("Stamp worker init timed out"))
+        }, WORKER_INIT_TIMEOUT_MS)
         worker.onmessage = (
           event: MessageEvent<
             StampWorkerReadyResponse | StampWorkerSignedResponse
           >,
         ) => {
           if (event.data.type === "ready") {
+            clearTimeout(timer)
             worker.onmessage = origHandler
+            worker.onerror = origErrorHandler
             resolve(
               Binary.hexToUint8Array(
                 (event.data as StampWorkerReadyResponse).issuerHex,
@@ -123,7 +130,10 @@ export class StampWorkerPool {
             )
           }
         }
-        worker.onerror = () => reject(new Error("Worker init failed"))
+        worker.onerror = () => {
+          clearTimeout(timer)
+          reject(new Error("Worker init failed"))
+        }
         worker.postMessage({ type: "init", signerKeyHex })
       })
 

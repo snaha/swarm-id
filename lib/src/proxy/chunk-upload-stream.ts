@@ -104,7 +104,14 @@ export class ChunkUploadStream {
       }, WS_ACK_TIMEOUT_MS)
 
       this.pendingAcks.push({ resolve, reject, timer })
-      this.ws!.send(stampedData)
+      try {
+        this.ws!.send(stampedData)
+      } catch (err) {
+        // send() failed (e.g. buffer full) — remove pending ack and reject
+        this.pendingAcks.pop()
+        clearTimeout(timer)
+        reject(err instanceof Error ? err : new Error("WebSocket send failed"))
+      }
     })
   }
 
@@ -154,7 +161,7 @@ export class ChunkUploadStream {
     const oldest = this.pendingAcks[0]
     if (!oldest) return Promise.resolve()
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       const originalResolve = oldest.resolve
       oldest.resolve = () => {
         originalResolve()
@@ -163,7 +170,7 @@ export class ChunkUploadStream {
       const originalReject = oldest.reject
       oldest.reject = (error: Error) => {
         originalReject(error)
-        resolve() // unblock the waiter even on error
+        reject(error)
       }
     })
   }

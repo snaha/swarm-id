@@ -673,8 +673,8 @@ export const UploadDataMessageSchema = z.object({
   enableProgress: z.boolean().optional(),
   useWebSocket: z.boolean().optional(),
   useWorkers: z.boolean().optional(),
-  workerCount: z.number().optional(),
-  concurrency: z.number().optional(),
+  workerCount: z.number().int().min(1).max(32).optional(),
+  concurrency: z.number().int().min(1).max(256).optional(),
 })
 
 export const DownloadDataMessageSchema = z.object({
@@ -695,8 +695,8 @@ export const UploadFileMessageSchema = z.object({
   enableProgress: z.boolean().optional(),
   useWebSocket: z.boolean().optional(),
   useWorkers: z.boolean().optional(),
-  workerCount: z.number().optional(),
-  concurrency: z.number().optional(),
+  workerCount: z.number().int().min(1).max(32).optional(),
+  concurrency: z.number().int().min(1).max(256).optional(),
 })
 
 export const DownloadFileMessageSchema = z.object({
