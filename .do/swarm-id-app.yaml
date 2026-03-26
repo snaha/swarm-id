@@ -47,6 +47,9 @@ envs:
   - key: NODE_ENV
     value: production
 
+  - key: CI
+    value: true
+
 # Deployment alerts
 alerts:
   - rule: DEPLOYMENT_FAILED
