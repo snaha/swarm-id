@@ -19,7 +19,7 @@ export interface CreateAgentAccountOptions {
 }
 
 export interface CreateAgentAccountResult {
-  account: Omit<AgentAccount, 'swarmEncryptionKey'>
+  account: Omit<AgentAccount, 'derivationKey'>
   masterKey: Bytes
 }
 

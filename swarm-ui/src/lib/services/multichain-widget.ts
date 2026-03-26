@@ -205,12 +205,3 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
     }, MOCK_DELAY_MS)
   }
 }
-
-/**
- * Generate a random signer key (32 bytes)
- */
-export function generateSignerKey(): Uint8Array {
-  const key = new Uint8Array(32)
-  crypto.getRandomValues(key)
-  return key
-}

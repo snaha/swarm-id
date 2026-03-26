@@ -31,7 +31,11 @@
   import Badge from '$lib/components/ui/badge.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { createEncryptedExport, SWARM_SECRET_PREFIX } from '@snaha/swarm-id'
+  import {
+    createEncryptedExport,
+    deriveSwarmEncryptionKey,
+    SWARM_SECRET_PREFIX,
+  } from '@snaha/swarm-id'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import type { Account, Identity } from '$lib/types'
@@ -130,7 +134,7 @@
         accountIdentities,
         connectedApps,
         postageStamps,
-        account.swarmEncryptionKey,
+        await deriveSwarmEncryptionKey(account.derivationKey),
       )
       const json = JSON.stringify(encrypted, undefined, 2)
       const blob = new Blob([json], { type: 'application/json' })

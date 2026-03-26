@@ -90,7 +90,11 @@ import {
   createAccountsStorageManager,
   disconnectApp,
 } from "./utils/storage-managers"
-import { hexToUint8Array, uint8ArrayToHex } from "./utils/key-derivation"
+import {
+  hexToUint8Array,
+  uint8ArrayToHex,
+  deriveSwarmEncryptionKey,
+} from "./utils/key-derivation"
 import {
   createAsyncEpochFinder,
   createEpochUpdater,
@@ -420,7 +424,7 @@ export class SwarmIdProxy {
     }
 
     // Look up account info for utilization tracking
-    const accountInfo = this.lookupAccountForApp()
+    const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo) {
       console.warn("[Proxy] Cannot initialize stamper: account not found")
       return
@@ -884,9 +888,9 @@ export class SwarmIdProxy {
    *
    * @returns Account info with owner address and encryption key, or undefined if not found
    */
-  private lookupAccountForApp():
-    | { owner: EthAddress; encryptionKey: Uint8Array }
-    | undefined {
+  private async lookupAccountForApp(): Promise<
+    { owner: EthAddress; encryptionKey: Uint8Array } | undefined
+  > {
     if (!this.parentOrigin) {
       return undefined
     }
@@ -919,9 +923,14 @@ export class SwarmIdProxy {
         return undefined
       }
 
+      // Derive swarm encryption key from stored derivation key
+      const swarmEncryptionKey = await deriveSwarmEncryptionKey(
+        account.derivationKey,
+      )
+
       return {
         owner: account.id,
-        encryptionKey: hexToUint8Array(account.swarmEncryptionKey),
+        encryptionKey: hexToUint8Array(swarmEncryptionKey),
       }
     } catch (error) {
       console.error("[Proxy] Error looking up account:", error)

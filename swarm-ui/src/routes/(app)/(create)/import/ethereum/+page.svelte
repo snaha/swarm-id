@@ -22,7 +22,11 @@
     deriveSecretSeedEncryptionKey,
     encryptSecretSeed,
   } from '$lib/utils/encryption'
-  import { decryptEncryptedExport, deriveAccountSwarmEncryptionKey } from '@snaha/swarm-id'
+  import {
+    decryptEncryptedExport,
+    deriveAccountDerivationKey,
+    deriveSwarmEncryptionKey,
+  } from '@snaha/swarm-id'
   import { EthAddress, BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
 
@@ -67,7 +71,8 @@
       }
 
       const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
-      const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
+      const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
+      const swarmEncryptionKey = await deriveSwarmEncryptionKey(derivationKey)
 
       const result = await decryptEncryptedExport(fileData, swarmEncryptionKey)
 
@@ -94,7 +99,7 @@
           encryptedMasterKey,
           encryptionSalt,
           encryptedSecretSeed,
-          swarmEncryptionKey,
+          derivationKey,
           defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
             ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
             : undefined,

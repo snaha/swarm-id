@@ -20,11 +20,7 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
-  import {
-    deriveAccountSwarmEncryptionKey,
-    getOrCreateDeviceId,
-    mergeDevices,
-  } from '@snaha/swarm-id'
+  import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -87,8 +83,8 @@
         seedPhrase: validation.phrase,
       })
 
-      // Derive swarmEncryptionKey from master key
-      const swarmEncryptionKey = await deriveAccountSwarmEncryptionKey(masterKey.toHex())
+      // Derive derivationKey from master key
+      const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
 
       // Store account (seed phrase is NOT stored - must be re-entered each time)
       const newAccount = accountsStore.addAccount({
@@ -96,7 +92,7 @@
         name: account.name,
         createdAt: account.createdAt,
         type: 'agent',
-        swarmEncryptionKey,
+        derivationKey,
         devices: mergeDevices([], getOrCreateDeviceId()),
       })
       sessionStore.setAccount(newAccount)

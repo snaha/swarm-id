@@ -101,7 +101,7 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     name: account.name,
     createdAt: account.createdAt,
     type: account.type,
-    swarmEncryptionKey: account.swarmEncryptionKey,
+    derivationKey: account.derivationKey,
     defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toString(),
     devices: account.devices,
   }
