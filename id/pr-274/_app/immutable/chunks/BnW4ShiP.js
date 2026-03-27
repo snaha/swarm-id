@@ -1,0 +1,1 @@
+import{h as n,_ as i,b as o,g as s}from"./BYjc83Ch.js";const a=640;function u(){let t=n(i(e()));window.addEventListener("resize",()=>{o(t,e(),!0)});function e(){return window.innerWidth<=a}return{get mobile(){return s(t)},set mobile(r){o(t,r,!0)}}}const c=u();export{c as l};
