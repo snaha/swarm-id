@@ -65,6 +65,7 @@
     "@typescript-eslint/parser": "8.48.1",
     "@vitest/ui": "^4.0.16",
     "eslint": "9.39.1",
+    "eslint-plugin-notice": "^1.0.0",
     "prettier": "3.7.3",
     "rollup": "4.53.3",
     "tslib": "2.8.1",
