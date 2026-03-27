@@ -14,9 +14,6 @@ importers:
       concurrently:
         specifier: ^9.1.2
         version: 9.2.1
-      eslint-plugin-notice:
-        specifier: ^1.0.0
-        version: 1.0.0(eslint@9.39.1(jiti@2.6.1))
       prettier:
         specifier: ^3.8.1
         version: 3.8.1
@@ -57,6 +54,9 @@ importers:
       eslint-config-prettier:
         specifier: 10.1.8
         version: 10.1.8(eslint@9.39.1(jiti@2.6.1))
+      eslint-plugin-notice:
+        specifier: ^1.0.0
+        version: 1.0.0(eslint@9.39.1(jiti@2.6.1))
       eslint-plugin-svelte:
         specifier: 3.14.0
         version: 3.14.0(eslint@9.39.1(jiti@2.6.1))(svelte@5.48.2)
@@ -154,6 +154,9 @@ importers:
       eslint:
         specifier: 9.39.1
         version: 9.39.1(jiti@2.6.1)
+      eslint-plugin-notice:
+        specifier: ^1.0.0
+        version: 1.0.0(eslint@9.39.1(jiti@2.6.1))
       prettier:
         specifier: 3.7.3
         version: 3.7.3
@@ -224,6 +227,9 @@ importers:
       eslint-config-prettier:
         specifier: 10.1.8
         version: 10.1.8(eslint@9.39.1(jiti@2.6.1))
+      eslint-plugin-notice:
+        specifier: ^1.0.0
+        version: 1.0.0(eslint@9.39.1(jiti@2.6.1))
       eslint-plugin-svelte:
         specifier: 3.14.0
         version: 3.14.0(eslint@9.39.1(jiti@2.6.1))(svelte@5.48.2)
