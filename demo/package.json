@@ -11,7 +11,7 @@
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:all": "pnpm lint && pnpm check && pnpm knip",
     "lint": "prettier --check . && eslint .",
-    "format": "prettier --write .",
+    "format": "prettier --write . && eslint . --fix",
     "knip": "knip",
     "clean": "rm -rf build .svelte-kit"
   },

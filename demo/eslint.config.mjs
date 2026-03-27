@@ -36,8 +36,7 @@ export default typescriptEslint.config(
       'notice/notice': [
         'error',
         {
-          mustMatch:
-            '// Copyright 2024 The Swarm Authors\\. All rights reserved\\.',
+          mustMatch: '// Copyright 2024 The Swarm Authors\\. All rights reserved\\.',
           template:
             '// Copyright 2024 The Swarm Authors. All rights reserved.\n// SPDX-License-Identifier: Apache-2.0\n\n',
         },
