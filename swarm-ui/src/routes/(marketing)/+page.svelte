@@ -19,6 +19,7 @@
   import Login from 'carbon-icons-svelte/lib/Login.svelte'
   import UserIdentification from 'carbon-icons-svelte/lib/UserIdentification.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
+  import PreAuthSettingsMenu from '$lib/components/pre-auth-settings-menu.svelte'
 
   const DOCS_URL = 'https://swarm.snaha.net/docs'
 
@@ -39,6 +40,7 @@
         <SwarmLogo fill="var(--colors-dark-top)" height={30} />
       </a>
       <Horizontal --horizontal-gap="var(--half-padding)">
+        <PreAuthSettingsMenu mode="dark" />
         <Button variant="strong" dimension="compact" mode="dark" href={resolve(routes.ACCOUNT_NEW)}>
           Create identity
         </Button>

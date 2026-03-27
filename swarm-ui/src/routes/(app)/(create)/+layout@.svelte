@@ -1,8 +1,13 @@
 <script lang="ts">
+  import PreAuthSettingsMenu from '$lib/components/pre-auth-settings-menu.svelte'
+
   let { children } = $props()
 </script>
 
 <div class="page-wrapper">
+  <div class="settings-menu">
+    <PreAuthSettingsMenu />
+  </div>
   <div class="page-content">
     <div class="content-area">
       {@render children()}
@@ -38,6 +43,13 @@
     width: 100%;
   }
 
+  .settings-menu {
+    position: absolute;
+    top: var(--double-padding);
+    right: var(--double-padding);
+    z-index: 10;
+  }
+
   @media screen and (max-width: 640px) {
     .page-content {
       padding: var(--padding);
@@ -45,6 +57,11 @@
 
     .content-area {
       flex: 1;
+    }
+
+    .settings-menu {
+      top: var(--padding);
+      right: var(--padding);
     }
   }
 </style>

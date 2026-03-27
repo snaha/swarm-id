@@ -10,6 +10,7 @@
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import Drawer from '$lib/components/drawer.svelte'
+  import PreAuthSettingsMenu from '$lib/components/pre-auth-settings-menu.svelte'
 
   let { children } = $props()
 
@@ -62,6 +63,8 @@
             <Typography>{identity.name}</Typography>
           </Vertical>
         </Horizontal>
+      {:else}
+        <PreAuthSettingsMenu />
       {/if}
     </Horizontal>
 
