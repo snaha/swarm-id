@@ -31,6 +31,7 @@
   "devDependencies": {
     "@fairdatasociety/fdp-play": "^3.3.0",
     "concurrently": "^9.1.2",
+    "eslint-plugin-notice": "^1.0.0",
     "prettier": "^3.8.1",
     "serve": "^14.2.4"
   },
@@ -50,8 +51,14 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@tailwindcss/oxide",
+      "bufferutil",
+      "cpu-features",
+      "es5-ext",
       "esbuild",
-      "sharp"
+      "protobufjs",
+      "sharp",
+      "ssh2",
+      "utf-8-validate"
     ]
   }
 }
