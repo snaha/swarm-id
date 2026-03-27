@@ -4,12 +4,10 @@
   import type { Mode } from '$lib/components/ui/button.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
-  import Vertical from '$lib/components/ui/vertical.svelte'
-  import FlexItem from '$lib/components/ui/flex-item.svelte'
   import NetworkSettingsModal from './network-settings-modal.svelte'
   import ThemeToggle from './theme-toggle.svelte'
-  import SettingsAdjust from 'carbon-icons-svelte/lib/SettingsAdjust.svelte'
   import ContentDeliveryNetwork from 'carbon-icons-svelte/lib/ContentDeliveryNetwork.svelte'
+  import Asleep from 'carbon-icons-svelte/lib/Asleep.svelte'
 
   interface Props {
     mode?: Mode
@@ -18,60 +16,44 @@
   let { mode = 'auto' }: Props = $props()
 
   let networkSettingsModalOpen = $state(false)
-  let dropdownOpen = $state(false)
 </script>
 
-<Dropdown
-  buttonVariant="ghost"
-  buttonDimension="compact"
-  {mode}
-  autoClose={false}
-  bind:open={dropdownOpen}
->
-  {#snippet button()}
-    <SettingsAdjust size={20} />
-  {/snippet}
-  <div class="menu">
-    <Vertical --vertical-gap="0" --vertical-align-items="stretch">
-      <Button
-        variant="ghost"
-        dimension="compact"
-        onclick={() => {
-          networkSettingsModalOpen = true
-          dropdownOpen = false
-        }}
-      >
-        <Horizontal
-          --horizontal-gap="var(--half-padding)"
-          --horizontal-align-items="center"
-          --horizontal-justify-content="stretch"
-          style="flex: 1"
-        >
-          <ContentDeliveryNetwork size={20} />
-          Network settings
-        </Horizontal>
-      </Button>
-      <Horizontal
-        --horizontal-gap="var(--half-padding)"
-        --horizontal-align-items="center"
-        --horizontal-justify-content="stretch"
-        style="flex: 1; padding: var(--half-padding);"
-      >
-        <Typography style="padding: var(--half-padding)">Appearance</Typography>
-        <FlexItem />
+<Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+  <Button
+    variant="ghost"
+    dimension="compact"
+    {mode}
+    onclick={() => {
+      networkSettingsModalOpen = true
+    }}
+  >
+    <ContentDeliveryNetwork size={20} />
+    Network settings
+  </Button>
+  <Dropdown buttonVariant="ghost" buttonDimension="compact" {mode} left>
+    {#snippet button()}
+      <Asleep size={20} />
+    {/snippet}
+    <div class="popover">
+      <Horizontal --horizontal-gap="var(--half-padding)">
+        <Typography class="label">Appearance</Typography>
         <ThemeToggle />
       </Horizontal>
-    </Vertical>
-  </div>
-</Dropdown>
+    </div>
+  </Dropdown>
+</Horizontal>
 
 <NetworkSettingsModal bind:open={networkSettingsModalOpen} />
 
 <style lang="postcss">
-  .menu {
+  .popover {
     background-color: var(--colors-ultra-low);
     border: 1px solid var(--colors-low);
-    padding: var(--half-padding);
-    min-width: 220px;
+    padding: var(--padding);
+  }
+
+  :global(.label) {
+    color: var(--colors-high);
+    min-width: 149px;
   }
 </style>
