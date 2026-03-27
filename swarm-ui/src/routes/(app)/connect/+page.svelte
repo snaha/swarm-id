@@ -75,7 +75,13 @@
         // Storage is partitioned — use postMessage fallback
         storagePartitioned = true
         storageChallenge = challenge
+        // Persist so it survives in-popup navigation (e.g. identity creation flow)
+        sessionStore.setStoragePartitioned(challenge)
       }
+    } else if (sessionStore.data.storagePartitioned && sessionStore.data.storageChallenge) {
+      // Restore partitioning state after in-popup navigation (e.g. back from identity creation)
+      storagePartitioned = true
+      storageChallenge = sessionStore.data.storageChallenge
     }
 
     if (!sessionStore.data.appOrigin) {

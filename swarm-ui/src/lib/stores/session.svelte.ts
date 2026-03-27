@@ -26,6 +26,9 @@ export type SessionData = {
   appData?: AppData
   appOrigin?: string
 
+  storagePartitioned?: boolean
+  storageChallenge?: string
+
   // Import flow
   importFileData?: unknown
   importHeader?: EncryptedSwarmIdExport
@@ -101,6 +104,10 @@ export const sessionStore = {
 
   clearStampOption() {
     session = { ...session, selectedStampOption: undefined }
+  },
+
+  setStoragePartitioned(challenge: string) {
+    session = { ...session, storagePartitioned: true, storageChallenge: challenge }
   },
 
   clear() {
