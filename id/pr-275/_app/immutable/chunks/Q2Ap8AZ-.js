@@ -1,1 +1,0 @@
-import{a9 as t,a4 as b,a3 as h,X as k,aa as S}from"./BYjc83Ch.js";function u(a,s){return a===s||a?.[S]===s}function d(a={},s,f,T){return t(()=>{var i,r;return b(()=>{i=r,r=[],h(()=>{a!==f(...r)&&(s(a,...r),i&&u(f(...i),a)&&s(null,...i))})}),()=>{k(()=>{r&&u(f(...r),a)&&s(null,...r)})}}),a}export{d as b};
