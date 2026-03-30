@@ -233,6 +233,7 @@
           identityId: selectedIdentity.id,
           identityName: selectedIdentity.name,
           identityAddress: selectedIdentity.id,
+          identityPublicKey: selectedIdentity.publicKey,
         },
       },
       window.location.origin,

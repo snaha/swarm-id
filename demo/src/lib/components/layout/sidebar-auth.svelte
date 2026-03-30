@@ -14,6 +14,15 @@
 
   let agentSignup = $state(false)
   let popoverOpen = $state(false)
+  let copied = $state(false)
+
+  async function copyPublicKey() {
+    const pk = clientStore.identity?.publicKey
+    if (!pk) return
+    await navigator.clipboard.writeText(pk)
+    copied = true
+    setTimeout(() => (copied = false), 2000)
+  }
 
   // Close popover when auth state changes (covers iframe button connect/disconnect)
   let prevAuth = $state(clientStore.authenticated)
@@ -114,6 +123,57 @@
         {clientStore.authenticated ? 'Disconnect' : 'Connect'}
       </Button>
     </div>
+
+    {#if clientStore.authenticated && clientStore.identity?.publicKey}
+      <Separator />
+
+      <!-- Public key section -->
+      <div>
+        <span class="text-xs font-medium text-muted-foreground uppercase tracking-wider"
+          >Public Key</span
+        >
+        <div class="flex items-center gap-1.5 mt-1">
+          <span class="text-xs font-mono text-muted-foreground truncate min-w-0 flex-1">
+            {clientStore.identity.publicKey.slice(0, 10)}...{clientStore.identity.publicKey.slice(
+              -8,
+            )}
+          </span>
+          <Button variant="ghost" size="icon" class="h-6 w-6 shrink-0" onclick={copyPublicKey}>
+            {#if copied}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+                class="text-green-500"
+              >
+                <path d="M20 6 9 17l-5-5" />
+              </svg>
+            {:else}
+              <svg
+                xmlns="http://www.w3.org/2000/svg"
+                width="14"
+                height="14"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                stroke-width="2"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              >
+                <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
+                <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
+              </svg>
+            {/if}
+          </Button>
+        </div>
+      </div>
+    {/if}
 
     <Separator />
 

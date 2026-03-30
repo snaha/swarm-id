@@ -24,6 +24,7 @@ export const TEST_BATCH_ID_2_HEX = "e".repeat(64)
 export const TEST_PRIVATE_KEY_HEX = "d".repeat(64)
 export const TEST_DERIVATION_KEY_HEX = "f".repeat(64)
 export const DIFFERENT_DERIVATION_KEY_HEX = "1".repeat(64)
+export const TEST_PUBLIC_KEY_HEX = "02" + "a".repeat(64)
 
 export const TEST_DEVICE_ID = "550e8400-e29b-41d4-a716-446655440000"
 

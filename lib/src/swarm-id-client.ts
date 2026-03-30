@@ -883,7 +883,12 @@ export class SwarmIdClient {
       requestId: string
       canUpload: boolean
       storagePartitioned?: boolean
-      identity?: { id: string; name: string; address: string }
+      identity?: {
+        id: string
+        name: string
+        address: string
+        publicKey?: string
+      }
     }>({
       type: "getConnectionInfo",
       requestId,

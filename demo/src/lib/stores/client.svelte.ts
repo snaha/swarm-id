@@ -15,6 +15,7 @@ interface IdentityInfo {
   id: string
   name: string
   address: string
+  publicKey?: string
 }
 
 interface StampInfo {
@@ -95,13 +96,13 @@ async function updateAuthStatus(isAuthenticated: boolean) {
       }
 
       if (connectionInfo.identity) {
-        const { id, name, address } = connectionInfo.identity
+        const { id, name, address, publicKey } = connectionInfo.identity
         if (currentIdentityId && currentIdentityId !== id) {
           logStore.log(`Identity switched from "${currentIdentityName}" to "${name}"`)
         }
         currentIdentityId = id
         currentIdentityName = name
-        identity = { id, name, address }
+        identity = { id, name, address, publicKey }
       }
     } catch (error) {
       logStore.log(
