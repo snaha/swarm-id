@@ -1,9 +1,9 @@
-// Copyright 2024 The Swarm Authors. All rights reserved.
+// Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 const EXPECTED_SPDX = 'SPDX-License-Identifier: Apache-2.0'
-const EXPECTED_COPYRIGHT = 'Copyright 2024 The Swarm Authors. All rights reserved.'
-const HEADER_TEMPLATE = `<!--\n  Copyright 2024 The Swarm Authors. All rights reserved.\n  SPDX-License-Identifier: Apache-2.0\n-->\n\n`
+const EXPECTED_COPYRIGHT = 'Copyright 2026 The Swarm Authors. All rights reserved.'
+const HEADER_TEMPLATE = `<!--\n  Copyright 2026 The Swarm Authors. All rights reserved.\n  SPDX-License-Identifier: Apache-2.0\n-->\n\n`
 
 /** @type {import('eslint').Rule.RuleModule} */
 const rule = {
@@ -16,7 +16,7 @@ const rule = {
     schema: [],
     messages: {
       missingHeader:
-        'Missing license header. Add <!-- Copyright 2024 The Swarm Authors ... SPDX-License-Identifier: Apache-2.0 --> at top of file.',
+        'Missing license header. Add <!-- Copyright 2026 The Swarm Authors ... SPDX-License-Identifier: Apache-2.0 --> at top of file.',
       wrongHeader: 'License header does not match expected format.',
     },
   },

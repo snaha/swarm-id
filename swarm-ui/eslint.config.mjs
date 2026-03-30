@@ -1,4 +1,4 @@
-// Copyright 2024 The Swarm Authors. All rights reserved.
+// Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import js from '@eslint/js'
@@ -36,9 +36,9 @@ export default typescriptEslint.config(
       'notice/notice': [
         'error',
         {
-          mustMatch: '// Copyright 2024 The Swarm Authors\\. All rights reserved\\.',
+          mustMatch: '// Copyright 2026 The Swarm Authors\\. All rights reserved\\.',
           template:
-            '// Copyright 2024 The Swarm Authors. All rights reserved.\n// SPDX-License-Identifier: Apache-2.0\n\n',
+            '// Copyright 2026 The Swarm Authors. All rights reserved.\n// SPDX-License-Identifier: Apache-2.0\n\n',
         },
       ],
     },
