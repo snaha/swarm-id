@@ -364,6 +364,10 @@ Check console logs for details:
         })
       } else if (useCustomSigner) {
         const beeStamp = postageStampsStore.getStamp(batchId)
+        if (!beeStamp) {
+          assignError = 'Stamp not found in local storage.'
+          return
+        }
         if (beeStamp.signerKey !== signerKeyToUse) {
           postageStampsStore.removeStamp(batchId, beeStamp.accountId)
           postageStampsStore.addStamp({
