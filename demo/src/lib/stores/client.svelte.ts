@@ -18,6 +18,11 @@ interface IdentityInfo {
   publicKey?: string
 }
 
+interface AppKeyInfo {
+  address: string
+  publicKey: string
+}
+
 interface StampInfo {
   batchID: string
   utilization: string
@@ -35,6 +40,7 @@ let authenticated = $state(false)
 let canUpload = $state(false)
 let storagePartitioned = $state(false)
 let identity = $state<IdentityInfo | undefined>(undefined)
+let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
@@ -104,6 +110,8 @@ async function updateAuthStatus(isAuthenticated: boolean) {
         currentIdentityName = name
         identity = { id, name, address, publicKey }
       }
+
+      appKey = connectionInfo.appKey
     } catch (error) {
       logStore.log(
         `Failed to get connection info: ${error instanceof Error ? error.message : String(error)}`,
@@ -124,6 +132,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
       currentIdentityName = undefined
     }
     identity = undefined
+    appKey = undefined
   }
 }
 
@@ -142,6 +151,9 @@ export const clientStore = {
   },
   get identity() {
     return identity
+  },
+  get appKey() {
+    return appKey
   },
   get stamp() {
     return stamp
@@ -243,6 +255,7 @@ export const clientStore = {
     canUpload = false
     storagePartitioned = false
     identity = undefined
+    appKey = undefined
     stamp = undefined
     socWriterInstance = undefined
   },

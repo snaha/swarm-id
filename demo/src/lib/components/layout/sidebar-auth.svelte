@@ -14,15 +14,6 @@
 
   let agentSignup = $state(false)
   let popoverOpen = $state(false)
-  let copied = $state(false)
-
-  async function copyPublicKey() {
-    const pk = clientStore.identity?.publicKey
-    if (!pk) return
-    await navigator.clipboard.writeText(pk)
-    copied = true
-    setTimeout(() => (copied = false), 2000)
-  }
 
   // Close popover when auth state changes (covers iframe button connect/disconnect)
   let prevAuth = $state(clientStore.authenticated)
@@ -73,64 +64,6 @@
           <div class="text-xs font-mono text-muted-foreground truncate">
             {clientStore.identity.address.slice(0, 6)}...{clientStore.identity.address.slice(-4)}
           </div>
-          {#if clientStore.identity.publicKey}
-            <div class="flex items-center gap-1 mt-0.5">
-              <span class="text-[10px] font-mono text-muted-foreground/70 truncate">
-                {clientStore.identity.publicKey.slice(
-                  0,
-                  8,
-                )}...{clientStore.identity.publicKey.slice(-6)}
-              </span>
-              <span
-                role="button"
-                tabindex="0"
-                class="inline-flex items-center justify-center h-4 w-4 rounded hover:bg-accent shrink-0 cursor-pointer"
-                onclick={(e) => {
-                  e.stopPropagation()
-                  copyPublicKey()
-                }}
-                onkeydown={(e) => {
-                  if (e.key === 'Enter' || e.key === ' ') {
-                    e.stopPropagation()
-                    copyPublicKey()
-                  }
-                }}
-              >
-                {#if copied}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="text-green-500"
-                  >
-                    <path d="M20 6 9 17l-5-5" />
-                  </svg>
-                {:else}
-                  <svg
-                    xmlns="http://www.w3.org/2000/svg"
-                    width="10"
-                    height="10"
-                    viewBox="0 0 24 24"
-                    fill="none"
-                    stroke="currentColor"
-                    stroke-width="2"
-                    stroke-linecap="round"
-                    stroke-linejoin="round"
-                    class="text-muted-foreground/70"
-                  >
-                    <rect width="14" height="14" x="8" y="8" rx="2" ry="2" />
-                    <path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2" />
-                  </svg>
-                {/if}
-              </span>
-            </div>
-          {/if}
         </div>
         <svg
           xmlns="http://www.w3.org/2000/svg"

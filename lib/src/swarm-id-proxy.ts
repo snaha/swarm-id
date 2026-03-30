@@ -115,6 +115,8 @@ import {
   revokeGranteesFromAct,
   getGranteesFromAct,
   parseCompressedPublicKey,
+  publicKeyFromPrivate,
+  compressPublicKey,
 } from "./proxy/act"
 
 const DEFAULT_ACT_FILENAME = "index.bin"
@@ -1145,6 +1147,19 @@ export class SwarmIdProxy {
       }
     }
 
+    // Derive app-specific key from appSecret when authenticated
+    let appKey: { address: string; publicKey: string } | undefined = undefined
+
+    if (this.authenticated && this.appSecret) {
+      const privKeyBytes = hexToUint8Array(this.appSecret)
+      const { x, y } = publicKeyFromPrivate(privKeyBytes)
+      const compressed = compressPublicKey(x, y)
+      appKey = {
+        address: new PrivateKey(this.appSecret).publicKey().address().toHex(),
+        publicKey: uint8ArrayToHex(compressed),
+      }
+    }
+
     // canUpload is true if we have stamps and storage is not partitioned
     const canUpload =
       !!(this.postageBatchId && this.signerKey) && !this.storagePartitioned
@@ -1157,6 +1172,7 @@ export class SwarmIdProxy {
           canUpload,
           storagePartitioned: this.storagePartitioned || undefined,
           identity,
+          appKey,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
       )

@@ -16,6 +16,7 @@
     { href: '/access-control', label: 'Access Control' },
     { href: '/soc', label: 'SOC' },
     { href: '/feeds', label: 'Feeds' },
+    { href: '/account', label: 'Account' },
   ]
 </script>
 

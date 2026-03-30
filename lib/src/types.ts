@@ -563,6 +563,13 @@ export const ConnectionInfoSchema = z.object({
       publicKey: CompressedPublicKeySchema.optional(),
     })
     .optional(),
+  /** App-specific key derived from identity + app origin (use publicKey for ACT grantee operations) */
+  appKey: z
+    .object({
+      address: AddressSchema,
+      publicKey: CompressedPublicKeySchema,
+    })
+    .optional(),
 })
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
@@ -1207,6 +1214,12 @@ export const ConnectionInfoResponseMessageSchema = z.object({
       name: z.string(),
       address: AddressSchema,
       publicKey: CompressedPublicKeySchema.optional(),
+    })
+    .optional(),
+  appKey: z
+    .object({
+      address: AddressSchema,
+      publicKey: CompressedPublicKeySchema,
     })
     .optional(),
 })
