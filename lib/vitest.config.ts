@@ -1,4 +1,4 @@
-// Copyright 2024 The Swarm Authors. All rights reserved.
+// Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import { defineConfig } from "vitest/config"

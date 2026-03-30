@@ -1,12 +1,20 @@
-// Copyright 2024 The Swarm Authors. All rights reserved.
+// Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
 import js from '@eslint/js'
 import eslintConfigPrettier from 'eslint-config-prettier'
 import eslintPluginSvelte from 'eslint-plugin-svelte'
+import notice from 'eslint-plugin-notice'
 import globals from 'globals'
 import svelteParser from 'svelte-eslint-parser'
 import typescriptEslint from 'typescript-eslint'
+import svelteLicenseHeader from '../eslint-rule-svelte-license-header.js'
+
+const svelteLicensePlugin = {
+  rules: {
+    'license-header': svelteLicenseHeader,
+  },
+}
 
 export default typescriptEslint.config(
   js.configs.recommended,
@@ -22,6 +30,20 @@ export default typescriptEslint.config(
     },
   },
   {
+    files: ['**/*.ts', '**/*.js', '**/*.mjs'],
+    plugins: { notice },
+    rules: {
+      'notice/notice': [
+        'error',
+        {
+          mustMatch: '// Copyright 2026 The Swarm Authors\\. All rights reserved\\.',
+          template:
+            '// Copyright 2026 The Swarm Authors. All rights reserved.\n// SPDX-License-Identifier: Apache-2.0\n\n',
+        },
+      ],
+    },
+  },
+  {
     files: ['**/*.svelte'],
     languageOptions: {
       parser: svelteParser,
@@ -30,7 +52,10 @@ export default typescriptEslint.config(
         extraFileExtensions: ['.svelte'],
       },
     },
-    rules: {},
+    plugins: { 'svelte-license': svelteLicensePlugin },
+    rules: {
+      'svelte-license/license-header': 'error',
+    },
   },
   {
     files: ['**/*.svelte.ts'],

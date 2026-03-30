@@ -50,8 +50,14 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@tailwindcss/oxide",
+      "bufferutil",
+      "cpu-features",
+      "es5-ext",
       "esbuild",
-      "sharp"
+      "protobufjs",
+      "sharp",
+      "ssh2",
+      "utf-8-validate"
     ]
   }
 }
