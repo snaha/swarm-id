@@ -89,6 +89,11 @@
   ]
   let selectedSigner = $state(KNOWN_SIGNERS[0].value)
 
+  // Custom signer key settings
+  let useCustomSigner = $state(false)
+  let customSignerKey = $state('')
+  let customSignerError = $state<string | undefined>(undefined)
+
   // Mock stamp widget settings
   let mockStampEnabled = $state(devSettingsStore.data.mockStampEnabled)
   let mockStampResult = $state<MockStampResult>(devSettingsStore.data.mockStampResult)
@@ -99,6 +104,23 @@
 
   $effect(() => {
     devSettingsStore.setMockStampResult(mockStampResult)
+  })
+
+  // Validate custom signer key when enabled
+  $effect(() => {
+    if (useCustomSigner) {
+      if (customSignerKey.length === 0) {
+        customSignerError = 'Custom signer key is required'
+      } else if (!/^[0-9a-fA-F]+$/.test(customSignerKey)) {
+        customSignerError = 'Signer key must be a valid hex string'
+      } else if (customSignerKey.length !== 64) {
+        customSignerError = 'Signer key must be exactly 64 characters (hex)'
+      } else {
+        customSignerError = undefined
+      }
+    } else {
+      customSignerError = undefined
+    }
   })
 
   const stampOptions = $derived(
@@ -304,9 +326,22 @@ Check console logs for details:
       assignError = 'Select a stamp and an account first.'
       return
     }
+
+    // Validate custom signer if enabled
+    if (useCustomSigner && customSignerError) {
+      assignError = customSignerError
+      return
+    }
+
     try {
       const batchId = new BatchId(selectedStampId)
       const accountId = new EthAddress(selectedAccountId)
+
+      // Determine which signer key to use
+      const signerKeyToUse =
+        useCustomSigner && customSignerKey
+          ? new PrivateKey(customSignerKey)
+          : new PrivateKey(selectedSigner)
 
       if (!postageStampsStore.getStamp(batchId)) {
         const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
@@ -317,7 +352,7 @@ Check console logs for details:
         postageStampsStore.addStamp({
           accountId: selectedAccountId,
           batchID: batchId,
-          signerKey: new PrivateKey(selectedSigner),
+          signerKey: signerKeyToUse,
           utilization: beeStamp.utilization,
           usable: beeStamp.usable,
           depth: beeStamp.depth,
@@ -327,6 +362,15 @@ Check console logs for details:
           immutableFlag: beeStamp.immutableFlag,
           exists: beeStamp.exists,
         })
+      } else if (useCustomSigner) {
+        const beeStamp = postageStampsStore.getStamp(batchId)
+        if (beeStamp.signerKey !== signerKeyToUse) {
+          postageStampsStore.removeStamp(batchId, beeStamp.accountId)
+          postageStampsStore.addStamp({
+            ...beeStamp,
+            signerKey: signerKeyToUse,
+          })
+        }
       }
 
       accountsStore.setDefaultStamp(accountId, batchId)
@@ -347,8 +391,21 @@ Check console logs for details:
       assignError = 'Select a stamp, account, and identity first.'
       return
     }
+
+    // Validate custom signer if enabled
+    if (useCustomSigner && customSignerError) {
+      assignError = customSignerError
+      return
+    }
+
     try {
       const batchId = new BatchId(selectedStampId)
+
+      // Determine which signer key to use
+      const signerKeyToUse =
+        useCustomSigner && customSignerKey
+          ? new PrivateKey(customSignerKey)
+          : new PrivateKey(selectedSigner)
 
       if (!postageStampsStore.getStamp(batchId)) {
         const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
@@ -359,7 +416,7 @@ Check console logs for details:
         postageStampsStore.addStamp({
           accountId: selectedAccountId,
           batchID: batchId,
-          signerKey: new PrivateKey(selectedSigner),
+          signerKey: signerKeyToUse,
           utilization: beeStamp.utilization,
           usable: beeStamp.usable,
           depth: beeStamp.depth,
@@ -670,6 +727,22 @@ Check console logs for details:
           bind:value={selectedIdentityId}
           disabled={!accountHasDefaultStamp}
         />
+
+        <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+          <label class="checkbox-label">
+            <input type="checkbox" bind:checked={useCustomSigner} />
+            Use custom signer key
+          </label>
+        </Horizontal>
+
+        {#if useCustomSigner}
+          <Input
+            label="Custom Signer Key"
+            bind:value={customSignerKey}
+            disabled={!useCustomSigner}
+            error={customSignerError}
+          />
+        {/if}
       </Vertical>
 
       <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
