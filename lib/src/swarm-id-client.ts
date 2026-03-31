@@ -1204,7 +1204,7 @@ export class SwarmIdClient {
       ...serializableOptions
     } = options ?? {}
 
-    let data: Uint8Array<ArrayBuffer>
+    let data: Uint8Array
     let fileName: string | undefined = name
 
     if (file instanceof File) {

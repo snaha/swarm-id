@@ -1,5 +1,5 @@
 {
-  "name": "swarm-id-explorations",
+  "name": "swarm-id",
   "version": "1.0.0",
   "private": true,
   "description": "Swarm Identity Management - Monorepo",
