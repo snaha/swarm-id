@@ -73,6 +73,7 @@
   function deriveIdentityFromAccount(account: Account, masterKey: Bytes, index: number) {
     const identityWallet = HDNodeWallet.fromSeed(toPrefixedHex(masterKey)).deriveChild(index)
     const id = hexAddress(identityWallet.address)
+    const publicKey = identityWallet.publicKey.slice(2).toLowerCase()
     const name = generateDockerName(id)
     const accountId = account.id
     const createdAt = Date.now()
@@ -80,6 +81,7 @@
       id,
       accountId,
       name,
+      publicKey,
       createdAt,
     }
     return identity

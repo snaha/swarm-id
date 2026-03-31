@@ -12,6 +12,7 @@ import {
   BatchIdSchema,
   AddressSchema,
   PrivateKeySchema,
+  CompressedPublicKeySchema,
   EncryptionKeySchema,
   IdentifierSchema,
   SignatureSchema,
@@ -559,6 +560,14 @@ export const ConnectionInfoSchema = z.object({
       id: z.string(),
       name: z.string(),
       address: AddressSchema,
+      publicKey: CompressedPublicKeySchema.optional(),
+    })
+    .optional(),
+  /** App-specific key derived from identity + app origin (use publicKey for ACT grantee operations) */
+  appKey: z
+    .object({
+      address: AddressSchema,
+      publicKey: CompressedPublicKeySchema,
     })
     .optional(),
 })
@@ -1204,6 +1213,13 @@ export const ConnectionInfoResponseMessageSchema = z.object({
       id: z.string(),
       name: z.string(),
       address: AddressSchema,
+      publicKey: CompressedPublicKeySchema.optional(),
+    })
+    .optional(),
+  appKey: z
+    .object({
+      address: AddressSchema,
+      publicKey: CompressedPublicKeySchema,
     })
     .optional(),
 })
@@ -1602,6 +1618,7 @@ export const AuthDataSchema = z.object({
   identityId: z.string().optional(),
   identityName: z.string().optional(),
   identityAddress: AddressSchema.optional(),
+  identityPublicKey: CompressedPublicKeySchema.optional(),
 })
 
 export type AuthData = z.infer<typeof AuthDataSchema>

@@ -134,6 +134,7 @@ export function serializeIdentity(identity: Identity): Record<string, unknown> {
     id: identity.id,
     accountId: identity.accountId.toString(),
     name: identity.name,
+    publicKey: identity.publicKey,
     defaultPostageStampBatchID: identity.defaultPostageStampBatchID?.toString(),
     createdAt: identity.createdAt,
     settings: identity.settings,

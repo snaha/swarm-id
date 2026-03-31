@@ -43,6 +43,7 @@ export const ReferenceSchema = z
 export const BatchIdSchema = hexString(64) // 32 bytes
 export const AddressSchema = hexString(40) // 20 bytes
 export const PrivateKeySchema = hexString(64) // 32 bytes
+export const CompressedPublicKeySchema = hexString(66) // 33 bytes compressed secp256k1
 export const EncryptionKeySchema = hexString(64) // 32 bytes symmetric key
 export const IdentifierSchema = hexString(64) // 32 bytes
 export const SignatureSchema = hexString(130) // 65 bytes
@@ -59,6 +60,7 @@ export type Reference = z.infer<typeof ReferenceSchema>
 export type BatchId = z.infer<typeof BatchIdSchema>
 export type Address = z.infer<typeof AddressSchema>
 export type PrivateKey = z.infer<typeof PrivateKeySchema>
+export type CompressedPublicKey = z.infer<typeof CompressedPublicKeySchema>
 export type Identifier = z.infer<typeof IdentifierSchema>
 export type Signature = z.infer<typeof SignatureSchema>
 export type Timestamp = z.infer<typeof TimestampSchema>
@@ -177,6 +179,7 @@ export const IdentitySchemaV1 = z.object({
   id: AddressSchema,
   accountId: StoredEthAddress,
   name: z.string(),
+  publicKey: CompressedPublicKeySchema.optional(),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   createdAt: z.number(),
   settings: z

@@ -115,6 +115,8 @@ import {
   revokeGranteesFromAct,
   getGranteesFromAct,
   parseCompressedPublicKey,
+  publicKeyFromPrivate,
+  compressPublicKey,
 } from "./proxy/act"
 
 const DEFAULT_ACT_FILENAME = "index.bin"
@@ -145,7 +147,7 @@ export class SwarmIdProxy {
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   private storagePartitionedIdentity:
-    | { id: string; name: string; address: string }
+    | { id: string; name: string; address: string; publicKey?: string }
     | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
@@ -316,6 +318,7 @@ export class SwarmIdProxy {
           id: message.data.identityId,
           name: message.data.identityName,
           address: message.data.identityAddress,
+          publicKey: message.data.identityPublicKey,
         }
       }
 
@@ -1106,8 +1109,9 @@ export class SwarmIdProxy {
     message: GetConnectionInfoMessage,
     event: MessageEvent,
   ): void {
-    let identity: { id: string; name: string; address: string } | undefined =
-      undefined
+    let identity:
+      | { id: string; name: string; address: string; publicKey?: string }
+      | undefined = undefined
 
     // Look up identity info if authenticated
     if (this.authenticated && this.parentOrigin) {
@@ -1133,12 +1137,26 @@ export class SwarmIdProxy {
                 id: foundIdentity.id,
                 name: foundIdentity.name,
                 address: foundIdentity.id,
+                publicKey: foundIdentity.publicKey,
               }
             }
           }
         } catch (error) {
           console.error("[Proxy] Error looking up identity:", error)
         }
+      }
+    }
+
+    // Derive app-specific key from appSecret when authenticated
+    let appKey: { address: string; publicKey: string } | undefined = undefined
+
+    if (this.authenticated && this.appSecret) {
+      const privKeyBytes = hexToUint8Array(this.appSecret)
+      const { x, y } = publicKeyFromPrivate(privKeyBytes)
+      const compressed = compressPublicKey(x, y)
+      appKey = {
+        address: new PrivateKey(this.appSecret).publicKey().address().toHex(),
+        publicKey: uint8ArrayToHex(compressed),
       }
     }
 
@@ -1154,6 +1172,7 @@ export class SwarmIdProxy {
           canUpload,
           storagePartitioned: this.storagePartitioned || undefined,
           identity,
+          appKey,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
       )
