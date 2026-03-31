@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.1](https://github.com/snaha/swarm-id/compare/v0.1.0...v0.1.1) (2026-03-31)
+
+
+### Features
+
+* add public key to identity ([#282](https://github.com/snaha/swarm-id/issues/282)) ([6b41053](https://github.com/snaha/swarm-id/commit/6b410532147ee5a3f58004ff311e0baca3ebeb07))
+
+
+### Bug Fixes
+
+* npm publish failure ([#288](https://github.com/snaha/swarm-id/issues/288)) ([f77bb54](https://github.com/snaha/swarm-id/commit/f77bb542e6265f6e1a39fd09737d44c021df8473))
+
 ## [0.1.0](https://github.com/snaha/swarm-id/compare/v0.0.1...v0.1.0) (2026-03-31)
 
 
