@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.2](https://github.com/snaha/swarm-id/compare/v0.1.1...v0.1.2) (2026-04-01)
+
+
+### Bug Fixes
+
+* feed writer to use batch stamper ([#291](https://github.com/snaha/swarm-id/issues/291)) ([c78e60d](https://github.com/snaha/swarm-id/commit/c78e60d327b40718211eda75a537724affc77cbb))
+
 ## [0.1.1](https://github.com/snaha/swarm-id/compare/v0.1.0...v0.1.1) (2026-03-31)
 
 
