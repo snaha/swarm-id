@@ -1,17 +1,31 @@
-name: Release GitHub
+name: Release & Publish
 
+# Both release and publish live in one file so that npm's OIDC trusted publisher
+# always sees the same workflow_ref. A separate publish.yml called via workflow_call
+# would cause the OIDC token to reference the *caller* (release.yml), failing auth.
+#
+# Triggers (all go through this single workflow):
+#   1. Push to main (regular commit) → release-please creates/updates a release PR,
+#      publish is skipped
+#   2. Push to main (release PR merged) → release-please detects the merged PR,
+#      creates a GitHub release + tag → publish runs and publishes to npm
+#   3. Manual workflow_dispatch → release-please is skipped, publish runs and
+#      publishes to npm directly
 on:
   push:
     branches:
       - main
+  workflow_dispatch: # allows manual publish from the Actions tab
 
 permissions:
-  contents: write
-  pull-requests: write
-  id-token: write
+  contents: write # release-please needs to create releases and tags
+  pull-requests: write # release-please needs to create/update release PRs
+  id-token: write # npm OIDC trusted publishing (provenance)
 
 jobs:
   release-please:
+    # Only run on push — skip on manual workflow_dispatch which is for publishing to npm only
+    if: github.event_name == 'push'
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs['lib--release_created'] }}
@@ -21,5 +35,35 @@ jobs:
 
   publish:
     needs: release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    uses: ./.github/workflows/publish.yml
+    # Runs on manual dispatch OR when release-please creates a new release.
+    # When release-please is skipped (workflow_dispatch), the dependency is
+    # satisfied automatically — this is default GitHub Actions behavior.
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      (needs.release-please.outputs.release_created == 'true')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - run: pnpm --filter @snaha/swarm-id build
+
+      - name: Upgrade npm for OIDC support
+        run: npm install -g npm@latest
+
+      - name: Publish to npm
+        working-directory: lib
+        run: npm publish --provenance --access public
