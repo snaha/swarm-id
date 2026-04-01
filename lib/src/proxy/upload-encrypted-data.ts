@@ -458,57 +458,6 @@ export interface UploadSOCResult {
 }
 
 /**
- * Upload chunk via direct fetch to /chunks endpoint
- *
- * This is a temporary workaround for bee.uploadChunk's 4104-byte size limit.
- * Can be replaced with bee.uploadChunk when it supports SOC chunks (4201 bytes).
- *
- * @param bee - Bee client instance
- * @param envelope - Envelope with postage stamp signature
- * @param chunkData - Full chunk data (can be > 4104 bytes for SOC)
- * @param options - Upload options
- * @returns Reference to the uploaded chunk
- */
-async function uploadChunkWithFetch(
-  bee: Bee,
-  envelope: EnvelopeWithBatchId,
-  chunkData: Uint8Array,
-  options?: UploadOptions,
-): Promise<Reference> {
-  const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
-
-  const headers: Record<string, string> = {
-    "content-type": "application/octet-stream",
-    "swarm-postage-stamp": stampHex,
-  }
-
-  if (options?.tag) headers["swarm-tag"] = options.tag.toString()
-  if (options?.deferred !== undefined) {
-    headers["swarm-deferred-upload"] = options.deferred.toString()
-  }
-  if (options?.pin !== undefined) {
-    headers["swarm-pin"] = options.pin.toString()
-  }
-
-  const response = await fetch(`${bee.url}/chunks`, {
-    method: "POST",
-    headers,
-    body: chunkData,
-  })
-
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(
-      `Chunk upload failed: ${response.status} ${response.statusText} - ${errorText}`,
-    )
-  }
-
-  const result = await response.json()
-
-  return new Reference(result.reference)
-}
-
-/**
  * Calculate SOC address from identifier and owner
  */
 function makeSOCAddress(
@@ -523,28 +472,10 @@ function makeSOCAddress(
 }
 
 /**
- * Upload an encrypted Single Owner Chunk (SOC) using the fast chunk upload path
+ * Upload an encrypted Single Owner Chunk (SOC) via the /soc endpoint.
  *
- * This function constructs an encrypted SOC manually and uploads it via the regular
- * /chunks endpoint for better performance compared to the /soc endpoint.
- *
- * SOC Structure (Book of Swarm 2.2.3, 2.2.4):
- * - 32 bytes: identifier
- * - 65 bytes: signature (r, s, v)
- * - 8 bytes: span (from encrypted CAC)
- * - up to 4096 bytes: encrypted payload (from encrypted CAC)
- *
- * The signature signs: hash(identifier + encrypted_CAC.address)
- * SOC address: Keccak256(identifier + owner_address)
- *
- * @param bee - Bee client instance
- * @param stamper - Stamper for client-side signing
- * @param signer - SOC owner's private key
- * @param identifier - 32-byte SOC identifier
- * @param data - Payload data (1-4096 bytes)
- * @param encryptionKey - Optional 32-byte encryption key (random if not provided)
- * @param options - Upload options (tag, deferred, etc.)
- * @returns SOC address, encryption key, and optional tag UID
+ * Encrypts the data into a CAC, signs it as a SOC, stamps it, and uploads
+ * via /soc/{owner}/{id}?sig=... endpoint.
  */
 export async function uploadEncryptedSOC(
   bee: Bee,
@@ -563,42 +494,55 @@ export async function uploadEncryptedSOC(
   // Step 1: Create encrypted CAC chunk
   const encryptedChunk = makeEncryptedContentAddressedChunk(data, encryptionKey)
 
-  // Step 2: Construct SOC structure
+  // Step 2: Sign SOC
   const owner = signer.publicKey().address()
 
-  // Sign: hash(identifier + encrypted_CAC.address)
   const toSign = Binary.concatBytes(
     identifier.toUint8Array(),
     encryptedChunk.address.toUint8Array(),
   )
   const signature = signer.sign(toSign)
 
-  // Build SOC data: identifier (32) + signature (65) + encrypted_CAC.data
-  const socData = Binary.concatBytes(
-    identifier.toUint8Array(),
-    signature.toUint8Array(),
-    encryptedChunk.data,
-  )
-
-  // Calculate SOC address: Keccak256(identifier + owner_address)
   const socAddress = makeSOCAddress(identifier, owner.toUint8Array())
 
   // Step 3: Create tag for tracking (if not provided in options)
-  // IMPORTANT: Tag is REQUIRED in dev mode - Bee's /chunks endpoint uses tag presence
-  // to determine deferred mode (deferred = tag != 0), and dev mode blocks non-deferred uploads
   const tag = options?.tag ?? (await tryCreateTag(bee))
 
-  // Step 4: Create envelope with stamper
+  // Step 4: Stamp and upload via /soc endpoint
   const envelope = stamper.stamp({
     hash: () => socAddress.toUint8Array(),
-    build: () => socData,
-    span: 0n, // not used by stamper.stamp
-    writer: undefined as any, // not used by stamper.stamp
+    build: () => encryptedChunk.data,
+    span: 0n,
+    writer: undefined as any,
   })
 
-  // Step 5: Upload using direct fetch (bypasses bee.uploadChunk size check)
-  const uploadOptionsWithTag = { tag, deferred: false, ...options }
-  await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
+  const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
+  const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
+
+  const headers: Record<string, string> = {
+    "content-type": "application/octet-stream",
+    "swarm-postage-stamp": stampHex,
+  }
+  if (tag) headers["swarm-tag"] = tag.toString()
+  if (options?.deferred !== undefined) {
+    headers["swarm-deferred-upload"] = options.deferred.toString()
+  }
+  if (options?.pin !== undefined) {
+    headers["swarm-pin"] = options.pin.toString()
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: encryptedChunk.data,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(
+      `SOC upload failed: ${response.status} ${response.statusText} - ${errorText}`,
+    )
+  }
 
   return {
     socAddress: socAddress.toUint8Array(),
@@ -608,9 +552,7 @@ export async function uploadEncryptedSOC(
 }
 
 /**
- * Upload a plain Single Owner Chunk (SOC) using the fast chunk upload path
- *
- * This constructs an unencrypted SOC and uploads it via /chunks to avoid /soc size limits.
+ * Upload a plain Single Owner Chunk (SOC) via the /soc endpoint.
  */
 export async function uploadSOC(
   bee: Bee,
@@ -625,11 +567,6 @@ export async function uploadSOC(
   }
 
   const cac = makeContentAddressedChunk(data)
-  // Bee recognizes SOCs by full SOC size (32+65+4104). Pad CAC to 4104 bytes
-  // so /chunks treats this as a SOC instead of a regular chunk, avoiding
-  // "stamp signature is invalid" errors.
-  const cacData = new Uint8Array(8 + 4096)
-  cacData.set(cac.data)
   const owner = signer.publicKey().address()
 
   const toSign = Binary.concatBytes(
@@ -638,25 +575,44 @@ export async function uploadSOC(
   )
   const signature = signer.sign(toSign)
 
-  const socData = Binary.concatBytes(
-    identifier.toUint8Array(),
-    signature.toUint8Array(),
-    cacData,
-  )
-
   const socAddress = makeSOCAddress(identifier, owner.toUint8Array())
 
   const tag = options?.tag ?? (await tryCreateTag(bee))
 
   const envelope = stamper.stamp({
     hash: () => socAddress.toUint8Array(),
-    build: () => socData,
+    build: () => cac.data,
     span: 0n,
     writer: undefined as any,
   })
 
-  const uploadOptionsWithTag = { tag, deferred: false, ...options }
-  await uploadChunkWithFetch(bee, envelope, socData, uploadOptionsWithTag)
+  const stampHex = Binary.uint8ArrayToHex(marshalEnvelope(envelope))
+  const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
+
+  const headers: Record<string, string> = {
+    "content-type": "application/octet-stream",
+    "swarm-postage-stamp": stampHex,
+  }
+  if (tag) headers["swarm-tag"] = tag.toString()
+  if (options?.deferred !== undefined) {
+    headers["swarm-deferred-upload"] = options.deferred.toString()
+  }
+  if (options?.pin !== undefined) {
+    headers["swarm-pin"] = options.pin.toString()
+  }
+
+  const response = await fetch(url, {
+    method: "POST",
+    headers,
+    body: cac.data,
+  })
+
+  if (!response.ok) {
+    const errorText = await response.text()
+    throw new Error(
+      `SOC upload failed: ${response.status} ${response.statusText} - ${errorText}`,
+    )
+  }
 
   return {
     socAddress: socAddress.toUint8Array(),
@@ -726,7 +682,7 @@ export async function uploadSOCViaSocEndpoint(
   // Build URL with signature query parameter
   const url = `${bee.url}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
-  // Prepare HTTP headers (matching uploadChunkWithFetch pattern)
+  // Prepare HTTP headers
   const headers: Record<string, string> = {
     "content-type": "application/octet-stream",
     "swarm-postage-stamp": stampHex,
