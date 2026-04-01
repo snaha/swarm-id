@@ -229,7 +229,7 @@ export function mockFetch(store?: MockChunkStore, owner?: EthAddress): void {
       })
     }
 
-    // Check if it's a chunk upload (used by uploadChunkWithFetch)
+    // Check if it's a chunk upload
     if (urlStr.includes("/chunks") && init?.method === "POST") {
       const body = init?.body as Uint8Array
       if (!body) {
