@@ -36,11 +36,14 @@ jobs:
   publish:
     needs: release-please
     # Runs on manual dispatch OR when release-please creates a new release.
-    # When release-please is skipped (workflow_dispatch), the dependency is
-    # satisfied automatically — this is default GitHub Actions behavior.
+    # !failure() is required because GitHub Actions skips dependent jobs when
+    # their dependency is skipped — without it, workflow_dispatch would never
+    # reach this job's condition. Unlike always(), !failure() still respects
+    # workflow cancellation and won't run if release-please fails.
     if: |
-      github.event_name == 'workflow_dispatch' ||
-      (needs.release-please.outputs.release_created == 'true')
+      !failure() &&
+      (github.event_name == 'workflow_dispatch' ||
+      needs.release-please.outputs.release_created == 'true')
     runs-on: ubuntu-latest
     permissions:
       contents: read
