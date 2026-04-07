@@ -118,6 +118,12 @@ import {
   publicKeyFromPrivate,
   compressPublicKey,
 } from "./proxy/act"
+import {
+  uploadSocViaSubsidisedGateway,
+  uploadEncryptedSocViaSubsidisedGateway,
+  uploadDataViaSubsidisedGateway,
+  uploadFileViaSubsidisedGateway,
+} from "./proxy/upload-subsidised"
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -161,6 +167,7 @@ export class SwarmIdProxy {
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
   private utilizationChannel: BroadcastChannel
+  private subsidisedGatewayUrl: string | undefined
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -632,6 +639,12 @@ export class SwarmIdProxy {
       this.buttonConfig = parentButtonConfig
     }
 
+    // Store subsidised gateway URL from parent
+    const parentSubsidisedGatewayUrl = message.subsidisedGatewayUrl
+    if (parentSubsidisedGatewayUrl) {
+      this.subsidisedGatewayUrl = parentSubsidisedGatewayUrl
+    }
+
     // Load existing secret if available
     await this.loadAuthData()
 
@@ -1063,11 +1076,29 @@ export class SwarmIdProxy {
   }
 
   private ensureCanUpload(): void {
+    // Allow uploads if subsidised mode is active (gateway handles stamping)
+    if (this.isSubsidisedModeActive()) {
+      return
+    }
     if (this.storagePartitioned) {
       throw new Error(
         "Uploads are unavailable in download-only mode due to browser storage partitioning.",
       )
     }
+  }
+
+  /**
+   * Check if subsidised upload mode is active.
+   * Subsidised mode is active when:
+   * - User has no postage stamp OR no signer key, OR storage is partitioned
+   *   (can't access stamp when partitioned)
+   * - AND a subsidised gateway URL is configured
+   */
+  private isSubsidisedModeActive(): boolean {
+    return (
+      (!this.postageBatchId || !this.signerKey || this.storagePartitioned) &&
+      !!this.subsidisedGatewayUrl
+    )
   }
 
   /**
@@ -1160,9 +1191,18 @@ export class SwarmIdProxy {
       }
     }
 
-    // canUpload is true if we have stamps and storage is not partitioned
-    const canUpload =
-      !!(this.postageBatchId && this.signerKey) && !this.storagePartitioned
+    // Determine upload mode
+    // User-stamp mode only available when storage is NOT partitioned (can access stamp)
+    // Subsidised mode takes precedence when storage is partitioned (can't access stamp)
+    let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
+    if (this.postageBatchId && this.signerKey && !this.storagePartitioned) {
+      uploadMode = "user-stamp"
+    } else if (this.subsidisedGatewayUrl) {
+      uploadMode = "subsidised"
+    }
+
+    // canUpload is true if user has stamps, or subsidised gateway is configured
+    const canUpload = uploadMode !== "unavailable"
 
     if (event.source) {
       ;(event.source as WindowProxy).postMessage(
@@ -1171,6 +1211,7 @@ export class SwarmIdProxy {
           requestId: message.requestId,
           canUpload,
           storagePartitioned: this.storagePartitioned || undefined,
+          uploadMode,
           identity,
           appKey,
         } satisfies IframeToParentMessage,
@@ -1503,6 +1544,34 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const result = await uploadDataViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          data,
+          {
+            pin: options?.pin,
+            encrypt: options?.encrypt,
+            deferred: options?.deferred,
+            redundancyLevel: options?.redundancyLevel,
+          },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "uploadDataResponse",
+              requestId,
+              reference: result.reference,
+              tagUid: result.tagUid,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and signer are available
       if (!this.signerKey || !this.postageBatchId) {
         throw new Error(
           "Signer key and postage batch ID required. Please login first.",
@@ -1658,6 +1727,36 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const result = await uploadFileViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          data,
+          fileName,
+          {
+            pin: options?.pin,
+            encrypt: options?.encrypt,
+            deferred: options?.deferred,
+            redundancyLevel: options?.redundancyLevel,
+            contentType: "application/octet-stream",
+          },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "uploadFileResponse",
+              requestId,
+              reference: result.reference,
+              tagUid: result.tagUid,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp is available
       if (!this.postageBatchId) {
         throw new Error(
           "No postage batch ID available. Please authenticate with a valid batch ID.",
@@ -1910,15 +2009,42 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please authenticate.",
-        )
-      }
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
         throw new Error(
           `Invalid chunk size: ${data.length} bytes. Chunks must be between 1 and 4096 bytes.`,
+        )
+      }
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        // Create content-addressed chunk to get the reference
+        const chunk = makeContentAddressedChunk(data)
+
+        // Upload data via subsidised gateway - gateway stamps it
+        await uploadDataViaSubsidisedGateway(this.subsidisedGatewayUrl!, data, {
+          pin: options?.pin,
+          deferred: options?.deferred,
+          redundancyLevel: options?.redundancyLevel,
+        })
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "uploadChunkResponse",
+              requestId,
+              reference: chunk.address.toHex(),
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and signer are available
+      if (!this.signerKey || !this.postageBatchId) {
+        throw new Error(
+          "Signer key and postage batch ID required. Please authenticate.",
         )
       }
 
@@ -2060,14 +2186,39 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
+      const signerKey = new PrivateKey(signer)
+      const id = new Identifier(identifier)
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const result = await uploadSocViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          signerKey,
+          id,
+          data,
+          { pin: options?.pin, deferred: options?.deferred },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "gsocSendResponse",
+              requestId,
+              reference: uint8ArrayToHex(result.socAddress),
+              tagUid: result.tagUid,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
         )
       }
-
-      const signerKey = new PrivateKey(signer)
-      const id = new Identifier(identifier)
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       // Use client-side SOC upload (same as handleSocRawUpload) to work with gateways
@@ -2123,15 +2274,43 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
+      const signerKey = signer ?? this.appSecret
+      const signerKeyObj = new PrivateKey(signerKey)
+      const id = new Identifier(identifier)
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const result = await uploadEncryptedSocViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          signerKeyObj,
+          id,
+          data,
+          undefined,
+          { pin: options?.pin, deferred: options?.deferred },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "socUploadResponse",
+              requestId,
+              reference: uint8ArrayToHex(result.socAddress),
+              tagUid: result.tagUid,
+              encryptionKey: uint8ArrayToHex(result.encryptionKey),
+              owner: signerKeyObj.publicKey().address().toHex(),
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
         )
       }
-
-      const signerKey = signer ?? this.appSecret
-      const signerKeyObj = new PrivateKey(signerKey)
-      const id = new Identifier(identifier)
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
@@ -2185,15 +2364,42 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
+      const signerKey = signer ?? this.appSecret
+      const signerKeyObj = new PrivateKey(signerKey)
+      const id = new Identifier(identifier)
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const result = await uploadSocViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          signerKeyObj,
+          id,
+          data,
+          { pin: options?.pin, deferred: options?.deferred },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "socRawUploadResponse",
+              requestId,
+              reference: uint8ArrayToHex(result.socAddress),
+              tagUid: result.tagUid,
+              encryptionKey: undefined,
+              owner: signerKeyObj.publicKey().address().toHex(),
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
       if (!this.postageBatchId || !this.stamper) {
         throw new Error(
           "Postage batch ID and stamper required. Please login first.",
         )
       }
-
-      const signerKey = signer ?? this.appSecret
-      const signerKeyObj = new PrivateKey(signerKey)
-      const id = new Identifier(identifier)
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {

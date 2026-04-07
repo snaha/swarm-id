@@ -550,11 +550,21 @@ export type AuthStatus = z.infer<typeof AuthStatusSchema>
 // Connection Info
 // ============================================================================
 
+export const UploadModeSchema = z.enum([
+  "user-stamp",
+  "subsidised",
+  "unavailable",
+])
+
+export type UploadMode = z.infer<typeof UploadModeSchema>
+
 export const ConnectionInfoSchema = z.object({
-  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned) */
+  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned, or subsidised gateway configured) */
   canUpload: z.boolean(),
   /** Whether browser storage partitioning prevents access to stamps/signer keys (e.g. Safari ITP, strict privacy settings) */
   storagePartitioned: z.boolean().optional(),
+  /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
+  uploadMode: UploadModeSchema.optional(),
   identity: z
     .object({
       id: z.string(),
@@ -659,6 +669,7 @@ export const ParentIdentifyMessageSchema = z.object({
   popupMode: z.enum(["popup", "window"]).optional(),
   metadata: AppMetadataSchema,
   buttonConfig: ButtonConfigSchema,
+  subsidisedGatewayUrl: z.string().url().optional(),
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -1208,6 +1219,7 @@ export const ConnectionInfoResponseMessageSchema = z.object({
   requestId: z.string(),
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
+  uploadMode: UploadModeSchema.optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1651,6 +1663,8 @@ export interface ClientOptions {
   metadata: AppMetadata
   buttonConfig?: ButtonConfig
   containerId?: string // ID of container element to place iframe in (optional)
+  /** URL of a subsidised gateway for users without postage stamps. Gateway handles stamping server-side. */
+  subsidisedGatewayUrl?: string
 }
 
 export interface AuthOptions {

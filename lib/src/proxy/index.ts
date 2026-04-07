@@ -4,5 +4,6 @@
 export * from "./types"
 export * from "./chunking"
 export * from "./upload-data"
+export * from "./upload-subsidised"
 export * from "./feeds"
 export * from "./act"

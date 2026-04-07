@@ -130,6 +130,7 @@ export class SwarmIdClient {
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
   private containerId?: string
+  private subsidisedGatewayUrl?: string
   private ready: boolean = false
   private readyPromise: Promise<void>
   private readyResolve?: () => void
@@ -183,6 +184,7 @@ export class SwarmIdClient {
     this.metadata = options.metadata
     this.buttonConfig = options.buttonConfig
     this.containerId = options.containerId
+    this.subsidisedGatewayUrl = options.subsidisedGatewayUrl
 
     // Validate metadata
     try {
@@ -313,6 +315,7 @@ export class SwarmIdClient {
       popupMode: this.popupMode,
       metadata: this.metadata,
       buttonConfig: this.buttonConfig,
+      subsidisedGatewayUrl: this.subsidisedGatewayUrl,
     })
 
     // Wait for iframe to be ready
