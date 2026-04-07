@@ -107,8 +107,10 @@ To provide a subsidised gateway for your dApp:
 
 1. Run a Bee node with a funded wallet
 2. Purchase a postage stamp with sufficient depth and amount for your expected usage
-3. Configure the Bee node to accept uploads using this stamp
-4. Expose the Bee API (typically port 1633) via HTTPS
+3. Deploy a gateway proxy (such as [swarm-gateway](https://github.com/ethersphere/swarm-gateway)) in front of your Bee node that automatically injects the postage stamp header for uploads
+4. Expose the gateway via HTTPS
+
+The gateway proxy intercepts upload requests and adds the required postage stamp header, so clients can upload without providing their own stamp.
 
 :::caution
 Monitor your stamp's utilization and balance. When a stamp is depleted, uploads will fail. Consider automating stamp top-ups based on usage.
