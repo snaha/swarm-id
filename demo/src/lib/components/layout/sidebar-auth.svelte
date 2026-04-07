@@ -13,6 +13,7 @@
   import { clientStore } from '$lib/stores/client.svelte'
 
   let agentSignup = $state(false)
+  let useSubsidisedGateway = $state(false)
   let popoverOpen = $state(false)
 
   // Close popover when auth state changes (covers iframe button connect/disconnect)
@@ -105,7 +106,7 @@
       </div>
       <Button
         onclick={() => {
-          clientStore.connect({ agent: agentSignup })
+          clientStore.connect({ agent: agentSignup, useSubsidisedGateway })
           popoverOpen = false
         }}
         size="sm"
@@ -141,6 +142,17 @@
         <Checkbox bind:checked={agentSignup} id="popover-agent-signup" />
         <Label for="popover-agent-signup" class="cursor-pointer text-xs text-muted-foreground">
           Agent sign-up
+        </Label>
+      </div>
+
+      <!-- Subsidised gateway -->
+      <div class="flex items-center gap-2">
+        <Checkbox bind:checked={useSubsidisedGateway} id="popover-subsidised-gateway" />
+        <Label
+          for="popover-subsidised-gateway"
+          class="cursor-pointer text-xs text-muted-foreground"
+        >
+          Use subsidised gateway
         </Label>
       </div>
     {/if}

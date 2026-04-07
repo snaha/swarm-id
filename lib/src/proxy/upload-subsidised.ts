@@ -6,14 +6,34 @@
  *
  * These functions upload data to a subsidised gateway that handles stamping
  * server-side. They do NOT require a postage batch ID.
+ *
+ * IMPORTANT: This module uses /chunks and /soc endpoints ONLY.
+ * Never use /bytes or /bzz - the subsidised gateway may not support them.
  */
 
-import { PrivateKey, Identifier } from "@ethersphere/bee-js"
+import {
+  PrivateKey,
+  Identifier,
+  MantarayNode,
+  NULL_ADDRESS,
+} from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import {
   makeContentAddressedChunk,
   makeEncryptedContentAddressedChunk,
 } from "../chunk"
+import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
+import { saveMantarayTreeRecursively } from "./mantaray"
+import { hexToUint8Array } from "../utils/hex"
+import type { ChunkReference } from "./types"
+
+/**
+ * Normalize a URL by removing trailing slash.
+ * Prevents double-slash issues when concatenating with endpoint paths.
+ */
+function normalizeUrl(url: string): string {
+  return url.endsWith("/") ? url.slice(0, -1) : url
+}
 
 /**
  * Upload a Single Owner Chunk via the subsidised gateway.
@@ -44,8 +64,8 @@ export async function uploadSocViaSubsidisedGateway(
     Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
   )
 
-  // Build URL with signature query parameter
-  const url = `${subsidisedGatewayUrl}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
+  // Build URL with signature query parameter (normalize to prevent double slashes)
+  const url = `${normalizeUrl(subsidisedGatewayUrl)}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
   // Prepare HTTP headers - NO stamp header, gateway handles stamping
   const headers: Record<string, string> = {
@@ -111,8 +131,8 @@ export async function uploadEncryptedSocViaSubsidisedGateway(
     Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
   )
 
-  // Build URL with signature query parameter
-  const url = `${subsidisedGatewayUrl}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
+  // Build URL with signature query parameter (normalize to prevent double slashes)
+  const url = `${normalizeUrl(subsidisedGatewayUrl)}/soc/${owner.toHex()}/${identifier.toHex()}?sig=${signature.toHex()}`
 
   // Prepare HTTP headers - NO stamp header, gateway handles stamping
   const headers: Record<string, string> = {
@@ -147,23 +167,21 @@ export async function uploadEncryptedSocViaSubsidisedGateway(
 }
 
 /**
- * Upload data via the subsidised gateway using direct HTTP.
- * The gateway handles stamping - we don't provide a postage batch ID.
+ * Upload a single pre-built chunk via the subsidised gateway.
+ * The gateway handles stamping - we just send the chunk data.
+ *
+ * @param subsidisedGatewayUrl - Gateway URL
+ * @param chunkData - Full chunk data (span + payload, 8 + 1-4096 bytes)
+ * @param options - Upload options
+ * @returns The chunk reference
  */
-export async function uploadDataViaSubsidisedGateway(
+export async function uploadChunkViaSubsidisedGateway(
   subsidisedGatewayUrl: string,
-  data: Uint8Array,
-  options?: {
-    pin?: boolean
-    encrypt?: boolean
-    deferred?: boolean
-    redundancyLevel?: number
-  },
-): Promise<{ reference: string; tagUid?: number }> {
-  // Build URL - use /bytes endpoint for raw data upload
-  const url = `${subsidisedGatewayUrl}/bytes`
+  chunkData: Uint8Array,
+  options?: { pin?: boolean; deferred?: boolean },
+): Promise<{ reference: string }> {
+  const url = `${normalizeUrl(subsidisedGatewayUrl)}/chunks`
 
-  // Prepare HTTP headers - NO stamp header, gateway handles stamping
   const headers: Record<string, string> = {
     "content-type": "application/octet-stream",
   }
@@ -174,37 +192,103 @@ export async function uploadDataViaSubsidisedGateway(
   if (options?.pin !== undefined) {
     headers["swarm-pin"] = options.pin.toString()
   }
-  if (options?.encrypt !== undefined) {
-    headers["swarm-encrypt"] = options.encrypt.toString()
-  }
-  if (options?.redundancyLevel !== undefined) {
-    headers["swarm-redundancy-level"] = options.redundancyLevel.toString()
-  }
 
-  // Upload via /bytes endpoint
   const response = await fetch(url, {
     method: "POST",
     headers,
-    body: data,
+    body: chunkData,
   })
 
   if (!response.ok) {
     const errorText = await response.text()
     throw new Error(
-      `Subsidised data upload failed: ${response.status} ${response.statusText} - ${errorText}`,
+      `Subsidised chunk upload failed: ${response.status} ${response.statusText} - ${errorText}`,
     )
   }
 
   const result = await response.json()
-  return {
-    reference: result.reference,
-    tagUid: result.tagUid,
-  }
+  return { reference: result.reference }
 }
 
 /**
- * Upload file via the subsidised gateway using direct HTTP.
+ * Upload data via the subsidised gateway using /chunks endpoint.
+ *
+ * This function splits data into chunks locally, creates content-addressed
+ * chunks, uploads them via /chunks, and builds a merkle tree for large data.
+ *
  * The gateway handles stamping - we don't provide a postage batch ID.
+ *
+ * NOTE: The encrypt option is not supported with subsidised gateway.
+ * Encryption must be done client-side before calling this function.
+ */
+export async function uploadDataViaSubsidisedGateway(
+  subsidisedGatewayUrl: string,
+  data: Uint8Array,
+  options?: {
+    pin?: boolean
+    deferred?: boolean
+    redundancyLevel?: number
+  },
+): Promise<{ reference: string; tagUid?: number }> {
+  // Split data into 4096-byte payloads
+  const chunkPayloads = splitDataIntoChunks(data)
+
+  // Create CAC for each payload and upload
+  const chunkRefs: ChunkReference[] = []
+
+  for (const payload of chunkPayloads) {
+    const chunk = makeContentAddressedChunk(payload)
+    await uploadChunkViaSubsidisedGateway(
+      subsidisedGatewayUrl,
+      chunk.data,
+      options,
+    )
+    chunkRefs.push({ address: chunk.address.toUint8Array() })
+  }
+
+  // If single chunk, return its reference directly
+  if (chunkRefs.length === 1) {
+    return {
+      reference: uint8ArrayToHex(chunkRefs[0].address),
+    }
+  }
+
+  // Build merkle tree for multiple chunks
+  const rootRef = await buildMerkleTree(
+    chunkRefs,
+    async (intermediateChunk) => {
+      await uploadChunkViaSubsidisedGateway(
+        subsidisedGatewayUrl,
+        intermediateChunk.data,
+        options,
+      )
+    },
+  )
+
+  return { reference: rootRef.toHex() }
+}
+
+/**
+ * Convert Uint8Array to hex string.
+ */
+function uint8ArrayToHex(bytes: Uint8Array): string {
+  return Array.from(bytes)
+    .map((b) => b.toString(16).padStart(2, "0"))
+    .join("")
+}
+
+/**
+ * Upload file via the subsidised gateway using /chunks endpoint.
+ *
+ * This function:
+ * 1. Uploads file content via uploadDataViaSubsidisedGateway
+ * 2. Builds a Mantaray manifest with proper metadata
+ * 3. Uploads the manifest tree via /chunks
+ *
+ * The gateway handles stamping - we don't provide a postage batch ID.
+ *
+ * NOTE: The encrypt option is not supported with subsidised gateway.
+ * Encryption must be done client-side before calling this function.
  */
 export async function uploadFileViaSubsidisedGateway(
   subsidisedGatewayUrl: string,
@@ -212,51 +296,46 @@ export async function uploadFileViaSubsidisedGateway(
   fileName: string,
   options?: {
     pin?: boolean
-    encrypt?: boolean
     deferred?: boolean
     redundancyLevel?: number
     contentType?: string
   },
 ): Promise<{ reference: string; tagUid?: number }> {
-  // Build URL - use /bzz endpoint for file upload with manifest
-  const encodedFileName = encodeURIComponent(fileName)
-  const url = `${subsidisedGatewayUrl}/bzz?name=${encodedFileName}`
+  // 1. Upload file content
+  const contentResult = await uploadDataViaSubsidisedGateway(
+    subsidisedGatewayUrl,
+    data,
+    options,
+  )
+  const contentRefBytes = hexToUint8Array(contentResult.reference)
 
-  // Prepare HTTP headers - NO stamp header, gateway handles stamping
-  const headers: Record<string, string> = {
-    "content-type": options?.contentType || "application/octet-stream",
-  }
+  // 2. Build manifest with fileName (matching handleUploadFile pattern)
+  const manifest = new MantarayNode()
 
-  if (options?.deferred !== undefined) {
-    headers["swarm-deferred-upload"] = options.deferred.toString()
-  }
-  if (options?.pin !== undefined) {
-    headers["swarm-pin"] = options.pin.toString()
-  }
-  if (options?.encrypt !== undefined) {
-    headers["swarm-encrypt"] = options.encrypt.toString()
-  }
-  if (options?.redundancyLevel !== undefined) {
-    headers["swarm-redundancy-level"] = options.redundancyLevel.toString()
-  }
-
-  // Upload via /bzz endpoint
-  const response = await fetch(url, {
-    method: "POST",
-    headers,
-    body: data,
+  // Add file fork with content-type and filename metadata
+  manifest.addFork(fileName, contentRefBytes, {
+    "Content-Type": options?.contentType || "application/octet-stream",
+    Filename: fileName,
   })
 
-  if (!response.ok) {
-    const errorText = await response.text()
-    throw new Error(
-      `Subsidised file upload failed: ${response.status} ${response.statusText} - ${errorText}`,
-    )
-  }
+  // Add root fork with website-index-document pointing to fileName
+  manifest.addFork("/", NULL_ADDRESS, {
+    "website-index-document": fileName,
+  })
 
-  const result = await response.json()
-  return {
-    reference: result.reference,
-    tagUid: result.tagUid,
-  }
+  // 3. Upload manifest tree using saveMantarayTreeRecursively
+  const result = await saveMantarayTreeRecursively(
+    manifest,
+    async (nodeData) => {
+      const chunk = makeContentAddressedChunk(nodeData)
+      await uploadChunkViaSubsidisedGateway(
+        subsidisedGatewayUrl,
+        chunk.data,
+        options,
+      )
+      return { reference: chunk.address.toHex() }
+    },
+  )
+
+  return { reference: result.rootReference }
 }

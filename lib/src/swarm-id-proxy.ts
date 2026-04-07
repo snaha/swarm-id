@@ -123,6 +123,7 @@ import {
   uploadEncryptedSocViaSubsidisedGateway,
   uploadDataViaSubsidisedGateway,
   uploadFileViaSubsidisedGateway,
+  uploadChunkViaSubsidisedGateway,
 } from "./proxy/upload-subsidised"
 
 const DEFAULT_ACT_FILENAME = "index.bin"
@@ -641,6 +642,10 @@ export class SwarmIdProxy {
 
     // Store subsidised gateway URL from parent
     const parentSubsidisedGatewayUrl = message.subsidisedGatewayUrl
+    console.log(
+      "[Proxy] parentIdentify - subsidisedGatewayUrl:",
+      parentSubsidisedGatewayUrl,
+    )
     if (parentSubsidisedGatewayUrl) {
       this.subsidisedGatewayUrl = parentSubsidisedGatewayUrl
     }
@@ -1095,10 +1100,16 @@ export class SwarmIdProxy {
    * - AND a subsidised gateway URL is configured
    */
   private isSubsidisedModeActive(): boolean {
-    return (
+    const result =
       (!this.postageBatchId || !this.signerKey || this.storagePartitioned) &&
       !!this.subsidisedGatewayUrl
-    )
+    console.log("[Proxy] isSubsidisedModeActive:", result, {
+      hasPostageBatchId: !!this.postageBatchId,
+      hasSignerKey: !!this.signerKey,
+      storagePartitioned: this.storagePartitioned,
+      subsidisedGatewayUrl: this.subsidisedGatewayUrl,
+    })
+    return result
   }
 
   /**
@@ -1545,13 +1556,13 @@ export class SwarmIdProxy {
       this.ensureCanUpload()
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
+      // Note: encrypt option not supported with subsidised gateway - must encrypt client-side
       if (this.isSubsidisedModeActive()) {
         const result = await uploadDataViaSubsidisedGateway(
           this.subsidisedGatewayUrl!,
           data,
           {
             pin: options?.pin,
-            encrypt: options?.encrypt,
             deferred: options?.deferred,
             redundancyLevel: options?.redundancyLevel,
           },
@@ -1728,6 +1739,7 @@ export class SwarmIdProxy {
       this.ensureCanUpload()
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
+      // Note: encrypt option not supported with subsidised gateway - must encrypt client-side
       if (this.isSubsidisedModeActive()) {
         const result = await uploadFileViaSubsidisedGateway(
           this.subsidisedGatewayUrl!,
@@ -1735,7 +1747,6 @@ export class SwarmIdProxy {
           fileName,
           {
             pin: options?.pin,
-            encrypt: options?.encrypt,
             deferred: options?.deferred,
             redundancyLevel: options?.redundancyLevel,
             contentType: "application/octet-stream",
@@ -2021,12 +2032,15 @@ export class SwarmIdProxy {
         // Create content-addressed chunk to get the reference
         const chunk = makeContentAddressedChunk(data)
 
-        // Upload data via subsidised gateway - gateway stamps it
-        await uploadDataViaSubsidisedGateway(this.subsidisedGatewayUrl!, data, {
-          pin: options?.pin,
-          deferred: options?.deferred,
-          redundancyLevel: options?.redundancyLevel,
-        })
+        // Upload chunk directly via /chunks endpoint - gateway stamps it
+        await uploadChunkViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          chunk.data,
+          {
+            pin: options?.pin,
+            deferred: options?.deferred,
+          },
+        )
 
         if (event.source) {
           ;(event.source as WindowProxy).postMessage(

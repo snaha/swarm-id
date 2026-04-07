@@ -886,6 +886,7 @@ export class SwarmIdClient {
       requestId: string
       canUpload: boolean
       storagePartitioned?: boolean
+      uploadMode?: "user-stamp" | "subsidised" | "unavailable"
       identity?: {
         id: string
         name: string
@@ -904,6 +905,7 @@ export class SwarmIdClient {
     return {
       canUpload: response.canUpload,
       storagePartitioned: response.storagePartitioned,
+      uploadMode: response.uploadMode,
       identity: response.identity,
       appKey: response.appKey,
     }

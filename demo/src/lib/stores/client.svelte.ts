@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SwarmIdClient, formatTTL } from '@snaha/swarm-id'
+import { SwarmIdClient, formatTTL, DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
 
@@ -39,6 +39,7 @@ let client = $state<SwarmIdClient | undefined>(undefined)
 let authenticated = $state(false)
 let canUpload = $state(false)
 let storagePartitioned = $state(false)
+let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailable')
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
@@ -48,6 +49,7 @@ let initializing = $state(false)
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
 let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
+let currentSubsidisedGatewayUrl: string | undefined = DEFAULT_BEE_NODE_URL
 
 async function updatePostageStampInfo() {
   if (!client) return
@@ -92,6 +94,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
       )
       canUpload = connectionInfo.canUpload
       storagePartitioned = connectionInfo.storagePartitioned ?? false
+      uploadMode = connectionInfo.uploadMode ?? 'unavailable'
       if (connectionInfo.storagePartitioned) {
         logStore.log(
           'Read-only mode: browser storage partitioning limits this session to downloads only',
@@ -124,6 +127,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
   } else {
     canUpload = false
     storagePartitioned = false
+    uploadMode = 'unavailable'
     stamp = undefined
 
     if (currentIdentityId) {
@@ -148,6 +152,9 @@ export const clientStore = {
   },
   get storagePartitioned() {
     return storagePartitioned
+  },
+  get uploadMode() {
+    return uploadMode
   },
   get identity() {
     return identity
@@ -186,6 +193,7 @@ export const clientStore = {
       iframeOrigin: proxyOrigin,
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
+      subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
       onAuthChange: async (auth: boolean) => {
         logStore.log(`Auth status changed: ${auth}`)
         await updateAuthStatus(auth)
@@ -238,7 +246,21 @@ export const clientStore = {
     }
   },
 
-  async connect(options?: { agent?: boolean }) {
+  async connect(options?: { agent?: boolean; useSubsidisedGateway?: boolean }) {
+    const useSubsidised = options?.useSubsidisedGateway ?? true
+    const subsidisedUrl = useSubsidised ? DEFAULT_BEE_NODE_URL : undefined
+
+    // If subsidised gateway setting changed, reinitialize the client
+    if (client && currentSubsidisedGatewayUrl !== subsidisedUrl) {
+      logStore.log(
+        `Subsidised gateway changed to ${useSubsidised ? 'enabled' : 'disabled'}, reinitializing client...`,
+      )
+      client.destroy()
+      client = undefined
+      currentSubsidisedGatewayUrl = subsidisedUrl
+      await this.initialize()
+    }
+
     if (!client) return
     const status = await client.checkAuthStatus()
     if (status.authenticated) {
@@ -254,6 +276,7 @@ export const clientStore = {
     authenticated = false
     canUpload = false
     storagePartitioned = false
+    uploadMode = 'unavailable'
     identity = undefined
     appKey = undefined
     stamp = undefined
