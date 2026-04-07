@@ -650,6 +650,14 @@ export class SwarmIdProxy {
       this.subsidisedGatewayUrl = parentSubsidisedGatewayUrl
     }
 
+    // Override: disable subsidised gateway when using custom Bee API URL
+    if (this.beeApiUrl !== DEFAULT_BEE_NODE_URL && this.subsidisedGatewayUrl) {
+      console.log(
+        "[Proxy] Custom Bee API URL detected, disabling subsidised gateway",
+      )
+      this.subsidisedGatewayUrl = undefined
+    }
+
     // Load existing secret if available
     await this.loadAuthData()
 
@@ -1141,6 +1149,7 @@ export class SwarmIdProxy {
           requestId: message.requestId,
           authenticated: this.authenticated,
           origin: this.authenticated ? this.parentOrigin : undefined,
+          beeApiUrl: this.beeApiUrl,
         } satisfies IframeToParentMessage,
         { targetOrigin: event.origin },
       )

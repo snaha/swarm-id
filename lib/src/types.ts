@@ -542,6 +542,7 @@ export interface SequentialFeedWriter extends SequentialFeedReader {
 export const AuthStatusSchema = z.object({
   authenticated: z.boolean(),
   origin: z.string().optional(),
+  beeApiUrl: z.string().url().optional(),
 })
 
 export type AuthStatus = z.infer<typeof AuthStatusSchema>
@@ -1149,6 +1150,7 @@ export const AuthStatusResponseMessageSchema = z.object({
   requestId: z.string(),
   authenticated: z.boolean(),
   origin: z.string().optional(),
+  beeApiUrl: z.string().url().optional(),
 })
 
 export const DisconnectResponseMessageSchema = z.object({

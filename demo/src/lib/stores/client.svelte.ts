@@ -45,6 +45,7 @@ let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
+let beeApiUrl = $state<string | undefined>(undefined)
 
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
@@ -177,6 +178,12 @@ export const clientStore = {
   get socWriter() {
     return socWriterInstance
   },
+  get beeApiUrl() {
+    return beeApiUrl
+  },
+  get hasCustomBeeApiUrl() {
+    return beeApiUrl !== undefined && beeApiUrl !== DEFAULT_BEE_NODE_URL
+  },
 
   async initialize() {
     if (client || initializing) return
@@ -234,6 +241,7 @@ export const clientStore = {
 
       logStore.log('Checking auth status...')
       const status = await client.checkAuthStatus()
+      beeApiUrl = status.beeApiUrl
       logStore.log(`Auth status: ${status.authenticated ? 'authenticated' : 'not authenticated'}`)
       await updateAuthStatus(status.authenticated)
     } catch (error) {

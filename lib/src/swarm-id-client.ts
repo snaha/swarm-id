@@ -683,6 +683,7 @@ export class SwarmIdClient {
       requestId: string
       authenticated: boolean
       origin?: string
+      beeApiUrl?: string
     }>({
       type: "checkAuth",
       requestId,
@@ -691,6 +692,7 @@ export class SwarmIdClient {
     return {
       authenticated: response.authenticated,
       origin: response.origin,
+      beeApiUrl: response.beeApiUrl,
     }
   }
 
