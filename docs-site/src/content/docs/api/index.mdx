@@ -48,20 +48,21 @@ Creates a new SwarmIdClient instance.
 
 **Parameters:**
 
-| Parameter                       | Type                               | Required | Description                                                      |
-| ------------------------------- | ---------------------------------- | -------- | ---------------------------------------------------------------- |
-| `options.iframeOrigin`          | `string`                           | Yes      | The origin URL where the Swarm ID proxy iframe is hosted         |
-| `options.iframePath`            | `string`                           | No       | The path to the proxy iframe (defaults to `"/proxy"`)            |
-| `options.timeout`               | `number`                           | No       | Request timeout in milliseconds (defaults to `30000`)            |
-| `options.initializationTimeout` | `number`                           | No       | Initialization timeout in milliseconds (defaults to `30000`)     |
-| `options.onAuthChange`          | `(authenticated: boolean) => void` | No       | Callback function invoked when authentication status changes     |
-| `options.popupMode`             | `"popup" \| "window"`              | No       | How to display the authentication popup (defaults to `"window"`) |
-| `options.metadata`              | `AppMetadata`                      | Yes      | Application metadata shown to users during authentication        |
-| `options.metadata.name`         | `string`                           | Yes      | Application name (1-100 characters)                              |
-| `options.metadata.description`  | `string`                           | No       | Application description (max 500 characters)                     |
-| `options.metadata.icon`         | `string`                           | No       | Application icon as a data URL (SVG or PNG, max 4KB)             |
-| `options.buttonConfig`          | `ButtonConfig`                     | No       | Button configuration for the authentication UI                   |
-| `options.containerId`           | `string`                           | No       | ID of container element to place iframe in (optional)            |
+| Parameter                       | Type                               | Required | Description                                                                                                                      |
+| ------------------------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
+| `options.iframeOrigin`          | `string`                           | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                         |
+| `options.iframePath`            | `string`                           | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                            |
+| `options.timeout`               | `number`                           | No       | Request timeout in milliseconds (defaults to `30000`)                                                                            |
+| `options.initializationTimeout` | `number`                           | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                     |
+| `options.onAuthChange`          | `(authenticated: boolean) => void` | No       | Callback function invoked when authentication status changes                                                                     |
+| `options.popupMode`             | `"popup" \| "window"`              | No       | How to display the authentication popup (defaults to `"window"`)                                                                 |
+| `options.metadata`              | `AppMetadata`                      | Yes      | Application metadata shown to users during authentication                                                                        |
+| `options.metadata.name`         | `string`                           | Yes      | Application name (1-100 characters)                                                                                              |
+| `options.metadata.description`  | `string`                           | No       | Application description (max 500 characters)                                                                                     |
+| `options.metadata.icon`         | `string`                           | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                             |
+| `options.buttonConfig`          | `ButtonConfig`                     | No       | Button configuration for the authentication UI                                                                                   |
+| `options.containerId`           | `string`                           | No       | ID of container element to place iframe in (optional)                                                                            |
+| `options.subsidisedGatewayUrl`  | `string`                           | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](/subsidised-gateway) for details. |
 
 **Throws:** `Error` if the provided app metadata is invalid
 
@@ -274,10 +275,11 @@ Checks the current authentication status with the Swarm ID proxy.
 
 **Returns:** `Promise<AuthStatus>` - The authentication status object
 
-| Property        | Type                  | Description                                      |
-| --------------- | --------------------- | ------------------------------------------------ |
-| `authenticated` | `boolean`             | Whether the user is currently authenticated      |
-| `origin`        | `string \| undefined` | The origin that authenticated (if authenticated) |
+| Property        | Type                  | Description                                         |
+| --------------- | --------------------- | --------------------------------------------------- |
+| `authenticated` | `boolean`             | Whether the user is currently authenticated         |
+| `origin`        | `string \| undefined` | The origin that authenticated (if authenticated)    |
+| `beeApiUrl`     | `string \| undefined` | The Bee API URL configured in the identity provider |
 
 **Throws:**
 
@@ -374,14 +376,19 @@ Use this method to check if the user can upload data and to get information abou
 
 **Returns:** `Promise<ConnectionInfo>` - The connection info object
 
-| Property             | Type                   | Description                                                                    |
-| -------------------- | ---------------------- | ------------------------------------------------------------------------------ |
-| `canUpload`          | `boolean`              | Whether the user can upload data (has stamps and storage is not partitioned)   |
-| `storagePartitioned` | `boolean \| undefined` | `true` when browser storage partitioning prevents access to stamps/signer keys |
-| `identity`           | `object \| undefined`  | The connected identity details (if authenticated)                              |
-| `identity.id`        | `string`               | Unique identifier for the identity                                             |
-| `identity.name`      | `string`               | Display name of the identity                                                   |
-| `identity.address`   | `string`               | Ethereum address associated with the identity                                  |
+| Property             | Type                                            | Description                                                                                                 |
+| -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `canUpload`          | `boolean`                                       | Whether the user can upload data                                                                            |
+| `uploadMode`         | `"user-stamp" \| "subsidised" \| "unavailable"` | How uploads will be handled. See [Upload Availability](/subsidised-gateway#upload-availability-truth-table) |
+| `storagePartitioned` | `boolean \| undefined`                          | `true` when browser storage partitioning prevents access to stamps/signer keys                              |
+| `identity`           | `object \| undefined`                           | The connected identity details (if authenticated)                                                           |
+| `identity.id`        | `string`                                        | Unique identifier for the identity                                                                          |
+| `identity.name`      | `string`                                        | Display name of the identity                                                                                |
+| `identity.address`   | `string`                                        | Ethereum address associated with the identity                                                               |
+| `identity.publicKey` | `string \| undefined`                           | Public key of the identity                                                                                  |
+| `appKey`             | `object \| undefined`                           | The app-specific key details                                                                                |
+| `appKey.address`     | `string`                                        | Ethereum address of the app key                                                                             |
+| `appKey.publicKey`   | `string`                                        | Public key of the app key                                                                                   |
 
 **Throws:**
 
@@ -393,11 +400,15 @@ Use this method to check if the user can upload data and to get information abou
 ```typescript
 const info = await client.getConnectionInfo()
 if (info.canUpload) {
-  console.log('Ready to upload as:', info.identity?.name)
+  if (info.uploadMode === 'subsidised') {
+    console.log('Uploads will use the subsidised gateway')
+  } else {
+    console.log('Uploads will use your postage stamp')
+  }
 } else if (info.storagePartitioned) {
   console.log('Storage partitioned — downloads only')
 } else {
-  console.log('No postage stamp available')
+  console.log('No upload capability available')
 }
 ```
 
