@@ -61,7 +61,10 @@ import {
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk } from "./chunk"
+import {
+  makeContentAddressedChunk,
+  makeEncryptedContentAddressedChunk,
+} from "./chunk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import { uploadDataWithSigning } from "./proxy/upload-data"
 import {
@@ -101,6 +104,9 @@ import {
 import {
   createAsyncEpochFinder,
   createEpochUpdater,
+  EpochIndex,
+  MAX_LEVEL,
+  AsyncEpochFinder,
 } from "./proxy/feeds/epochs"
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
@@ -2770,23 +2776,11 @@ export class SwarmIdProxy {
 
       this.ensureCanUpload()
 
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
       const signerKey = signer ?? this.appSecret
       const signerKeyObj = new PrivateKey(signerKey)
       const topicObj = new Topic(hexToUint8Array(topic))
       const ownerHex = signerKeyObj.publicKey().address().toHex()
       const ownerAddress = new EthAddress(ownerHex)
-      const updater = createEpochUpdater({
-        bee: this.bee,
-        topic: topicObj,
-        owner: ownerAddress,
-        signer: signerKeyObj,
-      })
       const atValue = this.parseFeedTimestamp(at)
       const epochEncryptionKey = encryptionKey
         ? hexToUint8Array(encryptionKey)
@@ -2805,9 +2799,103 @@ export class SwarmIdProxy {
           }
         : undefined
 
+      // Calculate epoch based on hints or by looking up current state
+      const epoch = await this.calculateEpochForUpdate(
+        topicObj,
+        ownerAddress,
+        atValue,
+        epochHints,
+        epochEncryptionKey,
+      )
+
+      // Build identifier: Keccak256(topic || Keccak256(start || level))
+      const epochHash = await epoch.marshalBinary()
+      const identifier = new Identifier(
+        Binary.keccak256(
+          Binary.concatBytes(topicObj.toUint8Array(), epochHash),
+        ),
+      )
+
+      // Build payload: timestamp (8 bytes big-endian) + reference
+      const referenceBytes = hexToUint8Array(reference)
+      if (referenceBytes.length !== 32 && referenceBytes.length !== 64) {
+        throw new Error(
+          `Reference must be 32 or 64 bytes, got ${referenceBytes.length}`,
+        )
+      }
+      const timestamp = new Uint8Array(8)
+      const tsView = new DataView(timestamp.buffer)
+      tsView.setBigUint64(0, atValue, false) // big-endian
+      const payload = Binary.concatBytes(timestamp, referenceBytes)
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        let socAddress: Uint8Array
+        if (epochEncryptionKey) {
+          const result = await uploadEncryptedSocViaSubsidisedGateway(
+            this.subsidisedGatewayUrl!,
+            signerKeyObj,
+            identifier,
+            payload,
+            epochEncryptionKey,
+            { deferred: false },
+          )
+          socAddress = result.socAddress
+        } else {
+          const result = await uploadSocViaSubsidisedGateway(
+            this.subsidisedGatewayUrl!,
+            signerKeyObj,
+            identifier,
+            payload,
+            { deferred: false },
+          )
+          socAddress = result.socAddress
+        }
+
+        // Verify upload with read-back
+        const readBackFinder = createAsyncEpochFinder({
+          bee: this.bee,
+          topic: topicObj,
+          owner: ownerAddress,
+          encryptionKey: epochEncryptionKey,
+        })
+        await readBackFinder.findAt(atValue, atValue)
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "epochFeedUploadReferenceResponse",
+              requestId,
+              socAddress: uint8ArrayToHex(socAddress),
+              encryptionKey: encryptionKey ? encryptionKey : undefined,
+              epoch: {
+                start: epoch.start.toString(),
+                level: epoch.level,
+              },
+              timestamp: atValue.toString(),
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
+
+      const updater = createEpochUpdater({
+        bee: this.bee,
+        topic: topicObj,
+        owner: ownerAddress,
+        signer: signerKeyObj,
+      })
+
       // Serialize write through Web Locks API to prevent concurrent uploads
       const updateResult = await this.withWriteLock(async () => {
-        const referenceBytes = hexToUint8Array(reference)
         const result = await updater.update(
           atValue,
           referenceBytes,
@@ -2856,6 +2944,44 @@ export class SwarmIdProxy {
           : "Epoch feed upload reference failed",
       )
     }
+  }
+
+  /**
+   * Calculate epoch for an update based on hints or by looking up current state
+   */
+  private async calculateEpochForUpdate(
+    topic: Topic,
+    owner: EthAddress,
+    at: bigint,
+    hints?: {
+      lastEpoch: { start: bigint; level: number }
+      lastTimestamp?: bigint
+    },
+    encryptionKey?: Uint8Array,
+  ): Promise<EpochIndex> {
+    // Fast path: use provided hints
+    if (hints?.lastEpoch && hints.lastTimestamp !== undefined) {
+      const prevEpoch = new EpochIndex(
+        hints.lastEpoch.start,
+        hints.lastEpoch.level,
+      )
+      return prevEpoch.next(hints.lastTimestamp, at)
+    }
+
+    // Slow path: lookup current state using AsyncEpochFinder directly
+    // (not the interface) to access findAtWithMetadata
+    const finder = new AsyncEpochFinder(this.bee, topic, owner, encryptionKey)
+
+    // Use findAtWithMetadata to get both reference AND epoch info
+    const current = await finder.findAtWithMetadata(at)
+
+    if (!current) {
+      // First update ever - use root epoch
+      return new EpochIndex(0n, MAX_LEVEL)
+    }
+
+    // Calculate next epoch based on found state
+    return current.epoch.next(current.timestamp, at)
   }
 
   private async handleSequentialFeedGetOwner(
@@ -3275,11 +3401,6 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
       this.ensureCanUpload()
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
 
       const signerKey = signer ?? this.appSecret
       const signerKeyObj = new PrivateKey(signerKey)
@@ -3312,13 +3433,49 @@ export class SwarmIdProxy {
         )
       }
 
+      const identifierBytes = this.makeSequentialFeedIdentifier(
+        topicBytes,
+        resolvedIndex,
+      )
+      const identifier = new Identifier(identifierBytes)
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const result = await uploadEncryptedSocViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          signerKeyObj,
+          identifier,
+          payload,
+          undefined,
+          { pin: options?.pin, deferred: options?.deferred },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "seqFeedUploadPayloadResponse",
+              requestId,
+              reference: uint8ArrayToHex(result.socAddress),
+              feedIndex: resolvedIndex.toString(),
+              owner: ownerAddress.toHex(),
+              encryptionKey: uint8ArrayToHex(result.encryptionKey),
+              tagUid: result.tagUid,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
+
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
-        const identifierBytes = this.makeSequentialFeedIdentifier(
-          topicBytes,
-          resolvedIndex,
-        )
-        const identifier = new Identifier(identifierBytes)
         const uploadResult = await uploadEncryptedSOC(
           this.bee,
           this.stamper!,
@@ -3382,11 +3539,6 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
       this.ensureCanUpload()
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
 
       const signerKey = signer ?? this.appSecret
       const signerKeyObj = new PrivateKey(signerKey)
@@ -3425,9 +3577,51 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Debug: log the values used for SOC address computation
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        let result
+        if (encryptionKey) {
+          result = await uploadEncryptedSocViaSubsidisedGateway(
+            this.subsidisedGatewayUrl!,
+            signerKeyObj,
+            identifier,
+            payload,
+            hexToUint8Array(encryptionKey),
+            { pin: options?.pin, deferred: options?.deferred },
+          )
+        } else {
+          result = await uploadSocViaSubsidisedGateway(
+            this.subsidisedGatewayUrl!,
+            signerKeyObj,
+            identifier,
+            payload,
+            { pin: options?.pin, deferred: options?.deferred },
+          )
+        }
 
-      // DEBUG: Log payload details for /bzz/ compatibility analysis
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "seqFeedUploadRawPayloadResponse",
+              requestId,
+              reference: uint8ArrayToHex(result.socAddress),
+              feedIndex: resolvedIndex.toString(),
+              owner: ownerAddress.toHex(),
+              encryptionKey: encryptionKey ? encryptionKey : undefined,
+              tagUid: result.tagUid,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       // Upload SOC - use encryption if key provided, otherwise use /soc endpoint
@@ -3511,11 +3705,6 @@ export class SwarmIdProxy {
         throw new Error("Not authenticated. Please login first.")
       }
       this.ensureCanUpload()
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
 
       const signerKey = signer ?? this.appSecret
       const signerKeyObj = new PrivateKey(signerKey)
@@ -3553,15 +3742,51 @@ export class SwarmIdProxy {
         )
       }
 
+      const identifierBytes = this.makeSequentialFeedIdentifier(
+        topicBytes,
+        resolvedIndex,
+      )
+      const identifier = new Identifier(identifierBytes)
+
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        // uploadReference always uses encryption
+        const result = await uploadEncryptedSocViaSubsidisedGateway(
+          this.subsidisedGatewayUrl!,
+          signerKeyObj,
+          identifier,
+          payload,
+          undefined,
+          { pin: options?.pin, deferred: options?.deferred },
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "seqFeedUploadReferenceResponse",
+              requestId,
+              reference: uint8ArrayToHex(result.socAddress),
+              feedIndex: resolvedIndex.toString(),
+              owner: ownerAddress.toHex(),
+              encryptionKey: uint8ArrayToHex(result.encryptionKey),
+              tagUid: result.tagUid,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
+      if (!this.postageBatchId || !this.stamper) {
+        throw new Error(
+          "Postage batch ID and stamper required. Please login first.",
+        )
+      }
+
       // Serialize write through Web Locks API to prevent concurrent uploads
       const { result, encryptionKeyResult } = await this.withWriteLock(
         async () => {
-          const identifierBytes = this.makeSequentialFeedIdentifier(
-            topicBytes,
-            resolvedIndex,
-          )
-          const identifier = new Identifier(identifierBytes)
-
           // uploadReference always uses encryption
           const encResult = await uploadEncryptedSOC(
             this.bee,
@@ -4175,6 +4400,29 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload()
 
+      // Handle subsidised gateway mode - gateway handles stamping server-side
+      if (this.isSubsidisedModeActive()) {
+        const reference = await this.createFeedManifestSubsidised(
+          topic,
+          resolvedOwner,
+          feedType,
+          uploadOptions?.encrypt !== false, // Default encrypted
+        )
+
+        if (event.source) {
+          ;(event.source as WindowProxy).postMessage(
+            {
+              type: "createFeedManifestResponse",
+              requestId: message.requestId,
+              reference,
+            } satisfies IframeToParentMessage,
+            { targetOrigin: event.origin },
+          )
+        }
+        return
+      }
+
+      // User stamp mode - validate stamp and stamper
       if (!this.postageBatchId) {
         throw new Error("No postage batch configured")
       }
@@ -4182,7 +4430,6 @@ export class SwarmIdProxy {
       if (!this.stamper) {
         throw new Error("Stamper not initialized. Please login first.")
       }
-      // DEBUG: Log manifest creation details for /bzz/ compatibility analysis
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
@@ -4223,6 +4470,78 @@ export class SwarmIdProxy {
         message.requestId,
         error instanceof Error ? error.message : "Create feed manifest failed",
       )
+    }
+  }
+
+  /**
+   * Create a feed manifest via subsidised gateway
+   * Builds manifest locally and uploads chunks via /chunks endpoint
+   */
+  private async createFeedManifestSubsidised(
+    topic: string,
+    owner: string,
+    feedType?: "Sequence" | "Epoch",
+    encrypt: boolean = true,
+  ): Promise<string> {
+    // Normalize owner (remove 0x prefix if present)
+    const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
+
+    // Create root MantarayNode with "/" fork containing feed metadata
+    const rootNode = new MantarayNode()
+    rootNode.addFork("/", NULL_ADDRESS, {
+      "swarm-feed-owner": normalizedOwner,
+      "swarm-feed-topic": topic,
+      "swarm-feed-type": feedType ?? "Sequence",
+    })
+
+    // Get the "/" child node (addFork created it)
+    // 47 is ASCII code for '/'
+    const slashFork = rootNode.forks.get(47)
+    if (!slashFork) {
+      throw new Error("Failed to create '/' fork")
+    }
+    const slashNode = slashFork.node
+
+    // Marshal and upload the "/" child node FIRST (saveRecursively pattern)
+    const slashNodeData = await slashNode.marshal()
+    const slashChunk = makeContentAddressedChunk(slashNodeData)
+
+    await uploadChunkViaSubsidisedGateway(
+      this.subsidisedGatewayUrl!,
+      slashChunk.data,
+    )
+
+    // Set the child's selfAddress to the uploaded chunk address
+    slashNode.selfAddress = slashChunk.address.toUint8Array()
+
+    // Marshal the root node
+    const rootNodeData = await rootNode.marshal()
+
+    if (encrypt) {
+      // Encrypted upload for root
+      const encryptedChunk = makeEncryptedContentAddressedChunk(rootNodeData)
+
+      await uploadChunkViaSubsidisedGateway(
+        this.subsidisedGatewayUrl!,
+        encryptedChunk.data,
+      )
+
+      // Return 64-byte reference (address + key)
+      const ref = new Uint8Array(64)
+      ref.set(encryptedChunk.address.toUint8Array(), 0)
+      ref.set(encryptedChunk.encryptionKey, 32)
+      return uint8ArrayToHex(ref)
+    } else {
+      // Unencrypted upload for root
+      const rootChunk = makeContentAddressedChunk(rootNodeData)
+
+      await uploadChunkViaSubsidisedGateway(
+        this.subsidisedGatewayUrl!,
+        rootChunk.data,
+      )
+
+      // Return 32-byte reference
+      return rootChunk.address.toHex()
     }
   }
 }
