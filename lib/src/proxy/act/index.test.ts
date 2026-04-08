@@ -27,15 +27,15 @@ import { collectActEntriesFromJson, findActEntryByKey } from "./act"
 import { decryptAndDeserializeGranteeList } from "./grantee-list"
 
 // Mock the upload/download functions
-vi.mock("../upload-encrypted-data", () => ({
-  uploadEncryptedDataWithSigning: vi.fn(),
+vi.mock("../upload", () => ({
+  uploadData: vi.fn(),
 }))
 
 vi.mock("../download-data", () => ({
   downloadDataWithChunkAPI: vi.fn(),
 }))
 
-import { uploadEncryptedDataWithSigning } from "../upload-encrypted-data"
+import { uploadData } from "../upload"
 import { downloadDataWithChunkAPI } from "../download-data"
 
 // Helper to create a random 32-byte array
@@ -87,17 +87,20 @@ async function computeContentHash(data: Uint8Array): Promise<string> {
 function createContentAddressedUploadMock() {
   const storage: Map<string, Uint8Array> = new Map()
 
+  // Mock for the new unified uploadData API
   const uploadMock = async (
-    _ctx: UploadContext,
+    _target: unknown,
     data: Uint8Array,
+    options?: { encryptionKey?: Uint8Array | boolean },
   ): Promise<{
     reference: string
     tagUid?: number
-    chunkAddresses: Uint8Array[]
+    chunkAddresses?: Uint8Array[]
   }> => {
     const address = await computeContentHash(data)
-    // Fake 64-byte encrypted reference: address + address
-    const ref = `${address}${address}`
+    // If encryption is requested, return 64-byte reference; otherwise 32-byte
+    const isEncrypted = options?.encryptionKey !== undefined
+    const ref = isEncrypted ? `${address}${address}` : address
     storage.set(ref, data)
     return { reference: ref, chunkAddresses: [] }
   }
@@ -172,7 +175,7 @@ describe("createActForContent", () => {
 
     // Use content-addressed storage mock
     const { storage, uploadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const result = await createActForContent(
       context,
@@ -213,7 +216,7 @@ describe("createActForContent", () => {
 
     // Use content-addressed storage mock
     const { storage, uploadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const result = await createActForContent(
       context,
@@ -262,7 +265,7 @@ describe("createActForContent", () => {
 
     // Use content-addressed storage mock
     const { storage, uploadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const result = await createActForContent(
       context,
@@ -315,7 +318,7 @@ describe("decryptActReference", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -350,7 +353,7 @@ describe("decryptActReference", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -384,7 +387,7 @@ describe("decryptActReference", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -424,7 +427,7 @@ describe("addGranteesToAct", () => {
     // Use content-addressed storage mock
     const { storage, uploadMock, downloadMock } =
       createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -496,7 +499,7 @@ describe("revokeGranteesFromAct", () => {
     // Use content-addressed storage mock
     const { storage, uploadMock, downloadMock } =
       createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -576,7 +579,7 @@ describe("getGranteesFromAct", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -607,7 +610,7 @@ describe("getGranteesFromAct", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const context = createMockContext()
     const createResult = await createActForContent(
@@ -649,7 +652,7 @@ describe("ACT end-to-end flow", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     // Step 1: Publisher creates ACT with Alice and Bob
     const createResult = await createActForContent(
