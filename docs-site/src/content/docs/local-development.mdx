@@ -5,13 +5,167 @@ description: Advanced local development setup for Swarm ID
 
 This guide covers advanced local development topics. For basic setup, see the [Quick Start](/getting-started).
 
+## Starting the Local Bee Cluster
+
+The project uses [FDP Play](https://github.com/fairDataSociety/fdp-play) to run a local Bee cluster with blockchain support.
+
+### Quick Start
+
+```bash
+# Start Bee cluster in background
+pnpm dev:bee:detach
+
+# Start the development servers
+pnpm dev
+```
+
+### All Cluster Commands
+
+| Command               | Description                              |
+| --------------------- | ---------------------------------------- |
+| `pnpm dev:bee`        | Start cluster interactively (shows logs) |
+| `pnpm dev:bee:detach` | Start cluster in background              |
+| `pnpm dev:bee:stop`   | Stop the cluster                         |
+| `pnpm dev:bee:logs`   | View queen node logs                     |
+| `pnpm dev:bee:fresh`  | Clean start with latest images           |
+
+### Local Endpoints
+
+Once the cluster is running, these endpoints are available:
+
+| Service        | URL                      |
+| -------------- | ------------------------ |
+| Queen Bee API  | `http://localhost:1633`  |
+| Worker 1 API   | `http://localhost:11633` |
+| Blockchain RPC | `http://localhost:9545`  |
+
+## Developer Tools (/dev)
+
+The Identity UI includes a Developer Tools page at `http://localhost:5174/dev` with utilities for testing and debugging.
+
+### Overview Tab
+
+- **Endpoint Status** — Live indicators showing connectivity to local Bee endpoints
+- **Test Connect Flow** — Quick link to test the authentication flow with the demo app
+- **Local Data Summary** — Shows counts of accounts, identities, connected apps, and stamps
+- **Clear All Data** — Wipes all local storage (accounts, identities, stamps)
+
+### Stamps Tab
+
+The main tool for managing postage stamps in development:
+
+**Buy Postage Stamp**
+
+1. Select a signer key (Queen, Wallet 0, or Wallet 1)
+2. Set amount and depth (defaults work for testing)
+3. Click "Buy Stamp"
+4. Wait ~30 seconds for the stamp to become usable
+
+**Manage Existing Stamps**
+
+- Click "Refresh" to load stamps from the Bee node
+- View batch ID, depth, and utilization for each stamp
+- Assign stamps to accounts or identities
+- Remove stamp assignments
+
+**Mock Stamp Widget**
+
+- Toggle mock mode to test the stamp purchase UI without blockchain transactions
+- Configure mock responses (success or error) for widget testing
+
+### Sync Tab
+
+Test the postage stamp utilization tracking:
+
+- Trigger manual sync for all accounts with stamps
+- View sync results with success/failure counts
+- Check browser console for detailed `[StateSync]` logs
+
+## Getting a Postage Batch
+
+Postage stamps are required for uploading data to Swarm. In development, you can get stamps through the Developer Tools or via API.
+
+### Using Developer Tools (Recommended)
+
+1. Navigate to `http://localhost:5174/dev`
+2. Go to the **Stamps** tab
+3. Select a signer key (Queen is pre-funded)
+4. Click **Buy Stamp**
+5. Wait ~30 seconds for the stamp to become usable
+6. Assign the stamp to an account
+
+### Using the API
+
+```bash
+# Buy a stamp with amount 10000000 and depth 17
+curl -X POST "http://localhost:1633/stamps/10000000/17"
+```
+
+### Understanding Stamp Parameters
+
+| Parameter  | Description                                             |
+| ---------- | ------------------------------------------------------- |
+| **Amount** | How much BZZ to allocate (affects storage duration)     |
+| **Depth**  | Determines how much data can be stored (2^depth chunks) |
+
+For local development, the defaults (amount: 10000000, depth: 17) are sufficient for testing.
+
+:::caution
+After purchasing a stamp, you must wait approximately 30 seconds before it becomes usable. The Developer Tools page will show "Usable: No" until the stamp is ready.
+:::
+
+## Common Gotchas
+
+### Stamp Not Usable After Purchase
+
+After buying a postage stamp, wait ~30 seconds before using it. The stamp needs to be registered on the blockchain before the Bee node accepts it.
+
+### Safari Upload Limitations
+
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, which prevents access to stamps and signer keys. Safari operates in **download-only mode**. See [issue #167](https://github.com/snaha/swarm-id/issues/167) for details.
+
+Safari private browsing sessions are also ephemeral — data is lost when the window closes.
+
+### Storage Partitioning Debugging
+
+To check if storage is partitioned:
+
+1. Open browser DevTools
+2. Go to **Application** → **Storage**
+3. Look for partitioned storage indicators
+
+On Chrome/Firefox localhost, storage should work immediately. If issues occur, try clicking the iframe first to trigger Storage Access API.
+
+### Bee Cluster Won't Start
+
+- Ensure Docker is running
+- Check if ports 1633, 11633, or 9545 are already in use
+- Try `pnpm dev:bee:fresh` for a clean start
+
+### Library Changes Not Reflected
+
+If you modify code in `lib/`, you need to rebuild:
+
+```bash
+cd lib && pnpm build
+# Or for continuous rebuilding:
+cd lib && pnpm build:watch
+```
+
+### Account vs Identity Stamps
+
+When assigning stamps:
+
+1. First assign a stamp to the **account**
+2. Then you can assign stamps to **identities** under that account
+
+You cannot assign an identity stamp without an account-level stamp.
+
 ## Development Tips
 
 - **TypeScript Execution**: Use `pnpx tsx` instead of `npx ts-node` to run TypeScript files
-- **Browser DevTools**: Check Application → Storage to verify storage partitioning
 - **Hot Reload**: Changes in `swarm-ui/src/` will automatically reload in the browser
 - **Debugging**: Use browser DevTools on both the parent page and the iframe
-- **Library changes**: If you change library code, rebuild it with `cd lib && pnpm build`, or use `cd lib && pnpm build:watch` for automatic rebuilds
 
 ## Client-Side Stamp Signing
 
