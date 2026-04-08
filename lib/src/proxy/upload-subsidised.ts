@@ -16,16 +16,21 @@ import {
   Identifier,
   MantarayNode,
   NULL_ADDRESS,
+  Reference,
+  Span,
 } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import {
   makeContentAddressedChunk,
   makeEncryptedContentAddressedChunk,
+  calculateChunkAddress,
+  newChunkEncrypter,
 } from "../chunk"
 import { splitDataIntoChunks, buildMerkleTree } from "./chunking"
+import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
 import { saveMantarayTreeRecursively } from "./mantaray"
 import { hexToUint8Array } from "../utils/hex"
-import type { ChunkReference } from "./types"
+import type { ChunkReference, UploadProgress } from "./types"
 
 /**
  * Normalize a URL by removing trailing slash.
@@ -275,6 +280,184 @@ function uint8ArrayToHex(bytes: Uint8Array): string {
   return Array.from(bytes)
     .map((b) => b.toString(16).padStart(2, "0"))
     .join("")
+}
+
+/**
+ * Result of uploading encrypted data via subsidised gateway
+ */
+export interface UploadEncryptedDataSubsidisedResult {
+  reference: string // 64-byte reference as hex: address (32) + encryption key (32)
+  tagUid?: number
+}
+
+/**
+ * Encrypted chunk reference for building merkle tree
+ */
+interface EncryptedChunkRef {
+  address: Uint8Array // 32-byte address
+  key: Uint8Array // 32-byte encryption key
+  span: bigint // Span of the original data
+}
+
+/**
+ * Upload encrypted data via the subsidised gateway using /chunks endpoint.
+ *
+ * This function:
+ * 1. Splits data into 4096-byte payloads
+ * 2. Encrypts each payload client-side (generates random key per chunk)
+ * 3. Uploads encrypted chunks via /chunks endpoint (gateway handles stamping)
+ * 4. Builds encrypted merkle tree for multi-chunk data
+ *
+ * Returns a 64-byte encrypted reference: address (32) + encryption key (32)
+ *
+ * @param subsidisedGatewayUrl - Gateway URL
+ * @param data - Raw data to encrypt and upload
+ * @param encryptionKey - Optional encryption key (32 bytes) for single chunk.
+ *                        For multi-chunk data, this is ignored and random keys are used.
+ * @param options - Upload options
+ * @param onProgress - Progress callback
+ */
+export async function uploadEncryptedDataViaSubsidisedGateway(
+  subsidisedGatewayUrl: string,
+  data: Uint8Array,
+  encryptionKey?: Uint8Array,
+  options?: { pin?: boolean; deferred?: boolean },
+  onProgress?: (progress: UploadProgress) => void,
+): Promise<UploadEncryptedDataSubsidisedResult> {
+  // Split data into 4096-byte payloads
+  const payloads = splitDataIntoChunks(data)
+
+  // Encrypt each payload and collect references
+  const encryptedChunks: Array<{
+    data: Uint8Array
+    address: Uint8Array
+    key: Uint8Array
+  }> = []
+  const encryptedRefs: EncryptedChunkRef[] = []
+
+  for (const payload of payloads) {
+    // Use provided key for single chunk, or let makeEncryptedContentAddressedChunk generate random key
+    const chunk = makeEncryptedContentAddressedChunk(
+      payload,
+      payloads.length === 1 ? encryptionKey : undefined,
+    )
+    encryptedChunks.push({
+      data: chunk.data,
+      address: chunk.address.toUint8Array(),
+      key: chunk.encryptionKey,
+    })
+    encryptedRefs.push({
+      address: chunk.address.toUint8Array(),
+      key: chunk.encryptionKey,
+      span: BigInt(payload.length),
+    })
+  }
+
+  // Track progress
+  const totalChunks = encryptedChunks.length
+  let processedChunks = 0
+
+  // Upload all encrypted chunks
+  for (const chunk of encryptedChunks) {
+    await uploadChunkViaSubsidisedGateway(subsidisedGatewayUrl, chunk.data, {
+      ...options,
+    })
+    processedChunks++
+    onProgress?.({ total: totalChunks, processed: processedChunks })
+  }
+
+  // If single chunk, return 64-byte reference directly
+  if (encryptedRefs.length === 1) {
+    const ref = new Uint8Array(64)
+    ref.set(encryptedRefs[0].address, 0)
+    ref.set(encryptedRefs[0].key, 32)
+    return { reference: uint8ArrayToHex(ref) }
+  }
+
+  // Build encrypted merkle tree for multiple chunks
+  const rootRef = await buildEncryptedMerkleTreeSubsidised(
+    encryptedRefs,
+    async (chunkData) => {
+      await uploadChunkViaSubsidisedGateway(subsidisedGatewayUrl, chunkData, {
+        ...options,
+      })
+    },
+  )
+
+  return { reference: rootRef.toHex() }
+}
+
+/**
+ * Build encrypted merkle tree and upload intermediate chunks via subsidised gateway.
+ *
+ * This is adapted from chunking-encrypted.ts but uses the subsidised gateway for uploads.
+ */
+async function buildEncryptedMerkleTreeSubsidised(
+  encryptedChunks: EncryptedChunkRef[],
+  onChunk: (encryptedChunkData: Uint8Array) => Promise<void>,
+): Promise<Reference> {
+  // Single chunk case
+  if (encryptedChunks.length === 1) {
+    const ref = new Uint8Array(64)
+    ref.set(encryptedChunks[0].address, 0)
+    ref.set(encryptedChunks[0].key, 32)
+    return new Reference(ref)
+  }
+
+  // Multi-chunk case: build intermediate chunks
+  const intermediateChunks: EncryptedChunkRef[] = []
+
+  for (let i = 0; i < encryptedChunks.length; i += ENCRYPTED_REFS_PER_CHUNK) {
+    const refs = encryptedChunks.slice(
+      i,
+      Math.min(i + ENCRYPTED_REFS_PER_CHUNK, encryptedChunks.length),
+    )
+
+    // Calculate total span from all children
+    const totalSpan = refs.reduce((sum, ref) => sum + ref.span, 0n)
+
+    // Build intermediate chunk payload containing all 64-byte references
+    // Pad to 4096 bytes with zeros BEFORE encryption
+    const payload = new Uint8Array(4096)
+    refs.forEach((ref, idx) => {
+      payload.set(ref.address, idx * 64)
+      payload.set(ref.key, idx * 64 + 32)
+    })
+
+    // Create chunk with correct span + payload
+    const spanBytes = Span.fromBigInt(totalSpan).toUint8Array()
+    const chunkData = Binary.concatBytes(spanBytes, payload)
+
+    // Encrypt the chunk
+    const encrypter = newChunkEncrypter()
+    const { key, encryptedSpan, encryptedData } =
+      encrypter.encryptChunk(chunkData)
+    const encryptedChunkData = Binary.concatBytes(encryptedSpan, encryptedData)
+
+    // Calculate address from encrypted chunk
+    const address = await calculateChunkAddress(encryptedChunkData)
+
+    // Upload the encrypted chunk
+    await onChunk(encryptedChunkData)
+
+    // Store reference
+    intermediateChunks.push({
+      address: address.toUint8Array(),
+      key,
+      span: totalSpan,
+    })
+  }
+
+  // Recursively build tree if needed
+  if (intermediateChunks.length > 1) {
+    return buildEncryptedMerkleTreeSubsidised(intermediateChunks, onChunk)
+  }
+
+  // Return root reference (64 bytes)
+  const rootRef = new Uint8Array(64)
+  rootRef.set(intermediateChunks[0].address, 0)
+  rootRef.set(intermediateChunks[0].key, 32)
+  return new Reference(rootRef)
 }
 
 /**

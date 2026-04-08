@@ -11,10 +11,20 @@
  * - History manifest (tracks ACT versions over time)
  */
 
-import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
+import type {
+  Bee,
+  BeeRequestOptions,
+  Stamper,
+  UploadOptions,
+} from "@ethersphere/bee-js"
 import type { UploadContext, UploadProgress } from "../types"
+import type { StampWorkerPool } from "../stamp-worker-pool"
 import { uploadEncryptedDataWithSigning } from "../upload-encrypted-data"
 import { uploadDataWithSigning } from "../upload-data"
+import {
+  uploadDataViaSubsidisedGateway,
+  uploadEncryptedDataViaSubsidisedGateway,
+} from "../upload-subsidised"
 import { downloadDataWithChunkAPI } from "../download-data"
 import { hexToUint8Array, uint8ArrayToHex } from "../../utils/hex"
 import {
@@ -28,6 +38,62 @@ import {
 } from "./crypto"
 
 type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
+
+// ============================================================================
+// ACT Upload Configuration (discriminated union)
+// ============================================================================
+
+/**
+ * Stamper-based upload configuration (user has postage batch)
+ */
+export interface ActUploadStamperConfig {
+  bee: Bee
+  stamper: Stamper
+  workerPool: StampWorkerPool
+}
+
+/**
+ * Subsidised gateway configuration (gateway handles stamping)
+ */
+export interface ActUploadSubsidisedConfig {
+  bee: Bee
+  subsidisedGatewayUrl: string
+}
+
+/**
+ * Union type - exactly one mode must be specified
+ */
+export type ActUploadConfig = ActUploadStamperConfig | ActUploadSubsidisedConfig
+
+/**
+ * Type guard for stamper mode
+ */
+export function isStamperConfig(
+  config: ActUploadConfig,
+): config is ActUploadStamperConfig {
+  return "stamper" in config
+}
+
+/**
+ * Type guard for subsidised mode
+ */
+export function isSubsidisedConfig(
+  config: ActUploadConfig,
+): config is ActUploadSubsidisedConfig {
+  return "subsidisedGatewayUrl" in config
+}
+
+/**
+ * Helper to create UploadContext from stamper config
+ */
+function toUploadContext(config: ActUploadStamperConfig): UploadContext {
+  return {
+    bee: config.bee,
+    stamper: config.stamper,
+    workerPool: config.workerPool,
+  }
+}
+
 import {
   serializeAct,
   deserializeAct,
@@ -109,7 +175,7 @@ function formatDecryptedReference(decryptedRef: Uint8Array): string {
  * 2. Encrypted grantee list (for publisher management)
  * 3. History manifest (tracks ACT versions over time)
  *
- * @param context - Upload context with bee and stamper
+ * @param config - Upload configuration (stamper or subsidised gateway)
  * @param contentReference - The reference to protect (32 or 64 bytes)
  * @param publisherPrivateKey - Publisher's private key (32 bytes)
  * @param granteePublicKeys - Array of grantee public keys
@@ -119,7 +185,7 @@ function formatDecryptedReference(decryptedRef: Uint8Array): string {
  * @returns Multiple references for ACT
  */
 export async function createActForContent(
-  context: UploadContext,
+  config: ActUploadConfig,
   contentReference: Uint8Array,
   publisherPrivateKey: Uint8Array,
   granteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
@@ -175,37 +241,67 @@ export async function createActForContent(
 
   const beeCompatible = options?.beeCompatible === true
 
-  const actResult = beeCompatible
-    ? await uploadDataWithSigning(
-        context,
-        actJson,
-        options,
-        undefined,
-        requestOptions,
-      )
-    : await uploadEncryptedDataWithSigning(
-        context,
-        actJson,
-        undefined,
-        options,
-        undefined,
-        requestOptions,
-      )
+  let actResult: { reference: string; tagUid?: number }
+  let granteeListResult: { reference: string; tagUid?: number }
 
-  // 2. Serialize and upload encrypted grantee list
-  const encryptedGranteeList = serializeAndEncryptGranteeList(
-    granteePublicKeys,
-    publisherPrivateKey,
-  )
+  if (isSubsidisedConfig(config)) {
+    // Subsidised gateway mode - upload without stamps
+    actResult = beeCompatible
+      ? await uploadDataViaSubsidisedGateway(
+          config.subsidisedGatewayUrl,
+          actJson,
+        )
+      : await uploadEncryptedDataViaSubsidisedGateway(
+          config.subsidisedGatewayUrl,
+          actJson,
+        )
 
-  const granteeListResult = await uploadEncryptedDataWithSigning(
-    context,
-    encryptedGranteeList,
-    undefined,
-    options,
-    undefined,
-    requestOptions,
-  )
+    // 2. Serialize and upload encrypted grantee list
+    const encryptedGranteeList = serializeAndEncryptGranteeList(
+      granteePublicKeys,
+      publisherPrivateKey,
+    )
+
+    granteeListResult = await uploadEncryptedDataViaSubsidisedGateway(
+      config.subsidisedGatewayUrl,
+      encryptedGranteeList,
+    )
+  } else {
+    // Stamper mode - use uploadEncryptedDataWithSigning
+    const context = toUploadContext(config)
+
+    actResult = beeCompatible
+      ? await uploadDataWithSigning(
+          context,
+          actJson,
+          options,
+          undefined,
+          requestOptions,
+        )
+      : await uploadEncryptedDataWithSigning(
+          context,
+          actJson,
+          undefined,
+          options,
+          undefined,
+          requestOptions,
+        )
+
+    // 2. Serialize and upload encrypted grantee list
+    const encryptedGranteeList = serializeAndEncryptGranteeList(
+      granteePublicKeys,
+      publisherPrivateKey,
+    )
+
+    granteeListResult = await uploadEncryptedDataWithSigning(
+      context,
+      encryptedGranteeList,
+      undefined,
+      options,
+      undefined,
+      requestOptions,
+    )
+  }
 
   // 3. Create and upload history manifest
   const timestamp = getCurrentTimestamp()
@@ -222,23 +318,38 @@ export async function createActForContent(
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = beeCompatible
-        ? await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            isRoot ? onProgress : undefined,
-            requestOptions,
-          )
-        : await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined,
-            options,
-            isRoot ? onProgress : undefined,
-            requestOptions,
-          )
-      return result
+      if (isSubsidisedConfig(config)) {
+        return beeCompatible
+          ? await uploadDataViaSubsidisedGateway(
+              config.subsidisedGatewayUrl,
+              data,
+            )
+          : await uploadEncryptedDataViaSubsidisedGateway(
+              config.subsidisedGatewayUrl,
+              data,
+              undefined,
+              undefined,
+              isRoot ? onProgress : undefined,
+            )
+      } else {
+        const context = toUploadContext(config)
+        return beeCompatible
+          ? await uploadDataWithSigning(
+              context,
+              data,
+              options,
+              isRoot ? onProgress : undefined,
+              requestOptions,
+            )
+          : await uploadEncryptedDataWithSigning(
+              context,
+              data,
+              undefined,
+              options,
+              isRoot ? onProgress : undefined,
+              requestOptions,
+            )
+      }
     },
   )
 
@@ -382,7 +493,7 @@ export async function decryptActReference(
  * Add grantees to an existing ACT
  */
 export async function addGranteesToAct(
-  context: UploadContext,
+  config: ActUploadConfig,
   historyReference: string,
   publisherPrivateKey: Uint8Array,
   newGranteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
@@ -390,7 +501,7 @@ export async function addGranteesToAct(
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActGranteeModifyResult> {
-  const { bee } = context
+  const { bee } = config
   const beeCompatible = historyReference.length === 64
 
   // Download history manifest
@@ -487,36 +598,66 @@ export async function addGranteesToAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const actResult = beeCompatible
-    ? await uploadDataWithSigning(
-        context,
-        newActJson,
-        options,
-        undefined,
-        requestOptions,
-      )
-    : await uploadEncryptedDataWithSigning(
-        context,
-        newActJson,
-        undefined,
-        options,
-        undefined,
-        requestOptions,
-      )
 
-  // Upload updated grantee list
-  const encryptedGranteeList = serializeAndEncryptGranteeList(
-    updatedGrantees,
-    publisherPrivateKey,
-  )
-  const granteeListResult = await uploadEncryptedDataWithSigning(
-    context,
-    encryptedGranteeList,
-    undefined,
-    options,
-    undefined,
-    requestOptions,
-  )
+  let actResult: { reference: string; tagUid?: number }
+  let granteeListResult: { reference: string; tagUid?: number }
+
+  if (isSubsidisedConfig(config)) {
+    // Subsidised gateway mode
+    actResult = beeCompatible
+      ? await uploadDataViaSubsidisedGateway(
+          config.subsidisedGatewayUrl,
+          newActJson,
+        )
+      : await uploadEncryptedDataViaSubsidisedGateway(
+          config.subsidisedGatewayUrl,
+          newActJson,
+        )
+
+    // Upload updated grantee list
+    const encryptedGranteeList = serializeAndEncryptGranteeList(
+      updatedGrantees,
+      publisherPrivateKey,
+    )
+    granteeListResult = await uploadEncryptedDataViaSubsidisedGateway(
+      config.subsidisedGatewayUrl,
+      encryptedGranteeList,
+    )
+  } else {
+    // Stamper mode
+    const context = toUploadContext(config)
+
+    actResult = beeCompatible
+      ? await uploadDataWithSigning(
+          context,
+          newActJson,
+          options,
+          undefined,
+          requestOptions,
+        )
+      : await uploadEncryptedDataWithSigning(
+          context,
+          newActJson,
+          undefined,
+          options,
+          undefined,
+          requestOptions,
+        )
+
+    // Upload updated grantee list
+    const encryptedGranteeList = serializeAndEncryptGranteeList(
+      updatedGrantees,
+      publisherPrivateKey,
+    )
+    granteeListResult = await uploadEncryptedDataWithSigning(
+      context,
+      encryptedGranteeList,
+      undefined,
+      options,
+      undefined,
+      requestOptions,
+    )
+  }
 
   // Add new history entry
   const timestamp = getCurrentTimestamp()
@@ -531,23 +672,38 @@ export async function addGranteesToAct(
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = beeCompatible
-        ? await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            isRoot ? onProgress : undefined,
-            requestOptions,
-          )
-        : await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined,
-            options,
-            isRoot ? onProgress : undefined,
-            requestOptions,
-          )
-      return result
+      if (isSubsidisedConfig(config)) {
+        return beeCompatible
+          ? await uploadDataViaSubsidisedGateway(
+              config.subsidisedGatewayUrl,
+              data,
+            )
+          : await uploadEncryptedDataViaSubsidisedGateway(
+              config.subsidisedGatewayUrl,
+              data,
+              undefined,
+              undefined,
+              isRoot ? onProgress : undefined,
+            )
+      } else {
+        const context = toUploadContext(config)
+        return beeCompatible
+          ? await uploadDataWithSigning(
+              context,
+              data,
+              options,
+              isRoot ? onProgress : undefined,
+              requestOptions,
+            )
+          : await uploadEncryptedDataWithSigning(
+              context,
+              data,
+              undefined,
+              options,
+              isRoot ? onProgress : undefined,
+              requestOptions,
+            )
+      }
     },
   )
 
@@ -566,7 +722,7 @@ export async function addGranteesToAct(
  * Revoke grantees from an ACT (performs key rotation)
  */
 export async function revokeGranteesFromAct(
-  context: UploadContext,
+  config: ActUploadConfig,
   historyReference: string,
   encryptedReference: string,
   publisherPrivateKey: Uint8Array,
@@ -575,7 +731,7 @@ export async function revokeGranteesFromAct(
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActRevocationResult> {
-  const { bee } = context
+  const { bee } = config
   const beeCompatible = historyReference.length === 64
 
   // Download history manifest
@@ -698,36 +854,66 @@ export async function revokeGranteesFromAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const actResult = beeCompatible
-    ? await uploadDataWithSigning(
-        context,
-        newActJson,
-        options,
-        undefined,
-        requestOptions,
-      )
-    : await uploadEncryptedDataWithSigning(
-        context,
-        newActJson,
-        undefined,
-        options,
-        undefined,
-        requestOptions,
-      )
 
-  // Upload updated grantee list
-  const encryptedGranteeList = serializeAndEncryptGranteeList(
-    remainingGrantees,
-    publisherPrivateKey,
-  )
-  const granteeListResult = await uploadEncryptedDataWithSigning(
-    context,
-    encryptedGranteeList,
-    undefined,
-    options,
-    undefined,
-    requestOptions,
-  )
+  let actResult: { reference: string; tagUid?: number }
+  let granteeListResult: { reference: string; tagUid?: number }
+
+  if (isSubsidisedConfig(config)) {
+    // Subsidised gateway mode
+    actResult = beeCompatible
+      ? await uploadDataViaSubsidisedGateway(
+          config.subsidisedGatewayUrl,
+          newActJson,
+        )
+      : await uploadEncryptedDataViaSubsidisedGateway(
+          config.subsidisedGatewayUrl,
+          newActJson,
+        )
+
+    // Upload updated grantee list
+    const encryptedGranteeList = serializeAndEncryptGranteeList(
+      remainingGrantees,
+      publisherPrivateKey,
+    )
+    granteeListResult = await uploadEncryptedDataViaSubsidisedGateway(
+      config.subsidisedGatewayUrl,
+      encryptedGranteeList,
+    )
+  } else {
+    // Stamper mode
+    const context = toUploadContext(config)
+
+    actResult = beeCompatible
+      ? await uploadDataWithSigning(
+          context,
+          newActJson,
+          options,
+          undefined,
+          requestOptions,
+        )
+      : await uploadEncryptedDataWithSigning(
+          context,
+          newActJson,
+          undefined,
+          options,
+          undefined,
+          requestOptions,
+        )
+
+    // Upload updated grantee list
+    const encryptedGranteeList = serializeAndEncryptGranteeList(
+      remainingGrantees,
+      publisherPrivateKey,
+    )
+    granteeListResult = await uploadEncryptedDataWithSigning(
+      context,
+      encryptedGranteeList,
+      undefined,
+      options,
+      undefined,
+      requestOptions,
+    )
+  }
 
   // Add new history entry
   const timestamp = getCurrentTimestamp()
@@ -742,23 +928,38 @@ export async function revokeGranteesFromAct(
   const historyResult = await saveHistoryTreeRecursively(
     historyManifest,
     async (data, isRoot) => {
-      const result = beeCompatible
-        ? await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            isRoot ? onProgress : undefined,
-            requestOptions,
-          )
-        : await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined,
-            options,
-            isRoot ? onProgress : undefined,
-            requestOptions,
-          )
-      return result
+      if (isSubsidisedConfig(config)) {
+        return beeCompatible
+          ? await uploadDataViaSubsidisedGateway(
+              config.subsidisedGatewayUrl,
+              data,
+            )
+          : await uploadEncryptedDataViaSubsidisedGateway(
+              config.subsidisedGatewayUrl,
+              data,
+              undefined,
+              undefined,
+              isRoot ? onProgress : undefined,
+            )
+      } else {
+        const context = toUploadContext(config)
+        return beeCompatible
+          ? await uploadDataWithSigning(
+              context,
+              data,
+              options,
+              isRoot ? onProgress : undefined,
+              requestOptions,
+            )
+          : await uploadEncryptedDataWithSigning(
+              context,
+              data,
+              undefined,
+              options,
+              isRoot ? onProgress : undefined,
+              requestOptions,
+            )
+      }
     },
   )
 
