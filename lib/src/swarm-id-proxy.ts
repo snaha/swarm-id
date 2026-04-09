@@ -66,19 +66,18 @@ import {
   makeEncryptedContentAddressedChunk,
 } from "./chunk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
-import { uploadDataWithSigning } from "./proxy/upload-data"
 import {
-  uploadEncryptedDataWithSigning,
-  uploadEncryptedSOC,
+  uploadData,
   uploadSOC,
-  uploadSOCViaSocEndpoint,
-} from "./proxy/upload-encrypted-data"
+  uploadChunk,
+  type UploadTarget,
+} from "./proxy/upload"
 import {
   downloadDataWithChunkAPI,
   downloadSOC,
   downloadEncryptedSOC,
 } from "./proxy/download-data"
-import type { UploadContext, UploadProgress } from "./proxy/types"
+import type { UploadProgress } from "./proxy/types"
 import { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
@@ -125,14 +124,6 @@ import {
   compressPublicKey,
   type ActUploadConfig,
 } from "./proxy/act"
-import {
-  uploadSocViaSubsidisedGateway,
-  uploadEncryptedSocViaSubsidisedGateway,
-  uploadDataViaSubsidisedGateway,
-  uploadFileViaSubsidisedGateway,
-  uploadChunkViaSubsidisedGateway,
-  uploadEncryptedDataViaSubsidisedGateway,
-} from "./proxy/upload-subsidised"
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -1575,15 +1566,15 @@ export class SwarmIdProxy {
       // Handle subsidised gateway mode - gateway handles stamping server-side
       // Note: encrypt option not supported with subsidised gateway - must encrypt client-side
       if (this.isSubsidisedModeActive()) {
-        const result = await uploadDataViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
-          data,
-          {
-            pin: options?.pin,
-            deferred: options?.deferred,
-            redundancyLevel: options?.redundancyLevel,
-          },
-        )
+        const target: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        const result = await uploadData(target, data, {
+          pin: options?.pin,
+          deferred: options?.deferred,
+        })
 
         if (event.source) {
           ;(event.source as WindowProxy).postMessage(
@@ -1634,35 +1625,25 @@ export class SwarmIdProxy {
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const uploadResult = await this.withWriteLock(async () => {
-        // Prepare upload context
-        const context: UploadContext = {
+        // Prepare upload target
+        const target: UploadTarget = {
+          mode: "stamper",
           bee: this.bee,
           stamper: this.stamper!,
           workerPool,
         }
 
         // Client-side chunking and signing
-        let result
-        if (options?.encrypt) {
-          result = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // encryption key (auto-generated)
-            options,
-            onProgress,
-            requestOptions,
-            wsOptions,
-            concurrency,
-          )
-        } else {
-          result = await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            onProgress,
-            requestOptions,
-          )
-        }
+        const result = await uploadData(target, data, {
+          encryptionKey: options?.encrypt ? true : undefined,
+          pin: options?.pin,
+          deferred: options?.deferred,
+          tag: options?.tag,
+          webSocket: wsOptions,
+          httpConcurrency: concurrency,
+          onProgress,
+          requestOptions,
+        })
 
         // Save stamper state after successful upload
         await this.saveStamperState()
@@ -1758,15 +1739,40 @@ export class SwarmIdProxy {
       // Handle subsidised gateway mode - gateway handles stamping server-side
       // Note: encrypt option not supported with subsidised gateway - must encrypt client-side
       if (this.isSubsidisedModeActive()) {
-        const result = await uploadFileViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
-          data,
-          fileName,
-          {
-            pin: options?.pin,
-            deferred: options?.deferred,
-            redundancyLevel: options?.redundancyLevel,
-            contentType: "application/octet-stream",
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        // 1. Upload file content
+        const contentResult = await uploadData(subsidisedTarget, data, {
+          pin: options?.pin,
+          deferred: options?.deferred,
+        })
+        const contentRefBytes = hexToUint8Array(contentResult.reference)
+
+        // 2. Build manifest with fileName
+        const fileManifest = new MantarayNode()
+
+        fileManifest.addFork(fileName, contentRefBytes, {
+          "Content-Type": "application/octet-stream",
+          Filename: fileName,
+        })
+
+        fileManifest.addFork("/", NULL_ADDRESS, {
+          "website-index-document": fileName,
+        })
+
+        // 3. Upload manifest tree
+        const manifestResult = await saveMantarayTreeRecursively(
+          fileManifest,
+          async (nodeData) => {
+            const chunk = makeContentAddressedChunk(nodeData)
+            await uploadChunk(subsidisedTarget, chunk.data, {
+              pin: options?.pin,
+              deferred: options?.deferred,
+            })
+            return { reference: chunk.address.toHex() }
           },
         )
 
@@ -1775,8 +1781,8 @@ export class SwarmIdProxy {
             {
               type: "uploadFileResponse",
               requestId,
-              reference: result.reference,
-              tagUid: result.tagUid,
+              reference: manifestResult.rootReference,
+              tagUid: undefined,
             } satisfies IframeToParentMessage,
             { targetOrigin: event.origin },
           )
@@ -1819,8 +1825,9 @@ export class SwarmIdProxy {
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const manifestResult = await this.withWriteLock(async () => {
-        // Prepare upload context
-        const context: UploadContext = {
+        // Prepare upload target
+        const stamperTarget: UploadTarget = {
+          mode: "stamper",
           bee: this.bee,
           stamper: this.stamper!,
           workerPool,
@@ -1828,28 +1835,17 @@ export class SwarmIdProxy {
 
         // Step 1: Upload file data (encrypted by default, unless encrypt=false)
         const shouldEncryptContent = options?.encrypt !== false
-        let contentUpload: { reference: string; tagUid?: number }
 
-        if (shouldEncryptContent) {
-          contentUpload = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // generate random encryption key
-            options,
-            onProgress,
-            requestOptions,
-            wsOptions,
-            concurrency,
-          )
-        } else {
-          contentUpload = await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            onProgress,
-            requestOptions,
-          )
-        }
+        const contentUpload = await uploadData(stamperTarget, data, {
+          encryptionKey: shouldEncryptContent ? true : undefined,
+          pin: options?.pin,
+          deferred: options?.deferred,
+          tag: options?.tag,
+          webSocket: wsOptions,
+          httpConcurrency: concurrency,
+          onProgress,
+          requestOptions,
+        })
 
         // Step 2: Create Mantaray manifest wrapping the content
         const manifest = new MantarayNode()
@@ -1867,7 +1863,7 @@ export class SwarmIdProxy {
         })
 
         // Step 3: Upload manifest (encrypted only if encryptManifest=true)
-        const manifestTag = options?.tag ?? (await tryCreateTag(context.bee))
+        const manifestTag = options?.tag ?? (await tryCreateTag(this.bee))
 
         const shouldEncryptManifest = options?.encryptManifest === true
         let result: { rootReference: string; tagUid?: number }
@@ -1876,13 +1872,14 @@ export class SwarmIdProxy {
           result = await saveMantarayTreeRecursivelyEncrypted(
             manifest,
             async (encryptedData, address, isRoot) => {
-              const envelope = context.stamper.stamp({
+              const envelope = this.stamper!.stamp({
                 hash: () => address,
                 build: () => encryptedData,
                 span: 0n,
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 writer: undefined as any,
               })
-              await context.bee.uploadChunk(
+              await this.bee.uploadChunk(
                 envelope,
                 encryptedData,
                 { ...options, tag: manifestTag, deferred: false },
@@ -1898,13 +1895,14 @@ export class SwarmIdProxy {
             manifest,
             async (chunkData, isRoot) => {
               const chunk = makeContentAddressedChunk(chunkData)
-              const envelope = context.stamper.stamp({
+              const envelope = this.stamper!.stamp({
                 hash: () => chunk.address.toUint8Array(),
                 build: () => chunk.data,
                 span: chunk.span.toBigInt(),
+                // eslint-disable-next-line @typescript-eslint/no-explicit-any
                 writer: undefined as any,
               })
-              const uploadResult = await context.bee.uploadChunk(
+              const uploadResult = await this.bee.uploadChunk(
                 envelope,
                 chunk.data,
                 { ...options, tag: manifestTag, deferred: false },
@@ -2049,15 +2047,16 @@ export class SwarmIdProxy {
         // Create content-addressed chunk to get the reference
         const chunk = makeContentAddressedChunk(data)
 
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
         // Upload chunk directly via /chunks endpoint - gateway stamps it
-        await uploadChunkViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
-          chunk.data,
-          {
-            pin: options?.pin,
-            deferred: options?.deferred,
-          },
-        )
+        await uploadChunk(subsidisedTarget, chunk.data, {
+          pin: options?.pin,
+          deferred: options?.deferred,
+        })
 
         if (event.source) {
           ;(event.source as WindowProxy).postMessage(
@@ -2222,13 +2221,15 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        const result = await uploadSocViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
-          signerKey,
-          id,
-          data,
-          { pin: options?.pin, deferred: options?.deferred },
-        )
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        const result = await uploadSOC(subsidisedTarget, signerKey, id, data, {
+          pin: options?.pin,
+          deferred: options?.deferred,
+        })
 
         if (event.source) {
           ;(event.source as WindowProxy).postMessage(
@@ -2254,13 +2255,22 @@ export class SwarmIdProxy {
       // Serialize write through Web Locks API to prevent concurrent uploads
       // Use client-side SOC upload (same as handleSocRawUpload) to work with gateways
       const result = await this.withWriteLock(async () => {
+        const stamperTarget: UploadTarget = {
+          mode: "stamper",
+          bee: this.bee,
+          stamper: this.stamper!,
+        }
+
         const uploadResult = await uploadSOC(
-          this.bee,
-          this.stamper!,
+          stamperTarget,
           signerKey,
           id,
           data,
-          options,
+          {
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          },
         )
 
         await this.saveStamperState()
@@ -2311,14 +2321,25 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        const result = await uploadEncryptedSocViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        // Upload encrypted SOC with auto-generated key
+        const result = await uploadSOC(
+          subsidisedTarget,
           signerKeyObj,
           id,
           data,
-          undefined,
-          { pin: options?.pin, deferred: options?.deferred },
+          {
+            encryptionKey: true,
+            pin: options?.pin,
+            deferred: options?.deferred,
+          },
         )
+
+        const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
 
         if (event.source) {
           ;(event.source as WindowProxy).postMessage(
@@ -2327,7 +2348,8 @@ export class SwarmIdProxy {
               requestId,
               reference: uint8ArrayToHex(result.socAddress),
               tagUid: result.tagUid,
-              encryptionKey: uint8ArrayToHex(result.encryptionKey),
+              // encryptionKey always present when using encryptionKey: true
+              encryptionKey: encKeyHex,
               owner: signerKeyObj.publicKey().address().toHex(),
             } satisfies IframeToParentMessage,
             { targetOrigin: event.origin },
@@ -2345,20 +2367,32 @@ export class SwarmIdProxy {
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
-        const uploadResult = await uploadEncryptedSOC(
-          this.bee,
-          this.stamper!,
+        const stamperTarget: UploadTarget = {
+          mode: "stamper",
+          bee: this.bee,
+          stamper: this.stamper!,
+        }
+
+        // Upload encrypted SOC with auto-generated key
+        const uploadResult = await uploadSOC(
+          stamperTarget,
           signerKeyObj,
           id,
           data,
-          undefined,
-          options,
+          {
+            encryptionKey: true,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          },
         )
 
         await this.saveStamperState()
 
         return uploadResult
       })
+
+      const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
 
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
@@ -2367,7 +2401,8 @@ export class SwarmIdProxy {
             requestId,
             reference: uint8ArrayToHex(result.socAddress),
             tagUid: result.tagUid,
-            encryptionKey: uint8ArrayToHex(result.encryptionKey),
+            // encryptionKey always present when using encryptionKey: true
+            encryptionKey: encKeyHex,
             owner: signerKeyObj.publicKey().address().toHex(),
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
@@ -2401,12 +2436,21 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        const result = await uploadSocViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        // Upload plain (unencrypted) SOC
+        const result = await uploadSOC(
+          subsidisedTarget,
           signerKeyObj,
           id,
           data,
-          { pin: options?.pin, deferred: options?.deferred },
+          {
+            pin: options?.pin,
+            deferred: options?.deferred,
+          },
         )
 
         if (event.source) {
@@ -2434,13 +2478,23 @@ export class SwarmIdProxy {
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
+        const stamperTarget: UploadTarget = {
+          mode: "stamper",
+          bee: this.bee,
+          stamper: this.stamper!,
+        }
+
+        // Upload plain (unencrypted) SOC
         const uploadResult = await uploadSOC(
-          this.bee,
-          this.stamper!,
+          stamperTarget,
           signerKeyObj,
           id,
           data,
-          options,
+          {
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          },
         )
 
         await this.saveStamperState()
@@ -2832,27 +2886,22 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        let socAddress: Uint8Array
-        if (epochEncryptionKey) {
-          const result = await uploadEncryptedSocViaSubsidisedGateway(
-            this.subsidisedGatewayUrl!,
-            signerKeyObj,
-            identifier,
-            payload,
-            epochEncryptionKey,
-            { deferred: false },
-          )
-          socAddress = result.socAddress
-        } else {
-          const result = await uploadSocViaSubsidisedGateway(
-            this.subsidisedGatewayUrl!,
-            signerKeyObj,
-            identifier,
-            payload,
-            { deferred: false },
-          )
-          socAddress = result.socAddress
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
         }
+
+        const result = await uploadSOC(
+          subsidisedTarget,
+          signerKeyObj,
+          identifier,
+          payload,
+          {
+            encryptionKey: epochEncryptionKey,
+            deferred: false,
+          },
+        )
+        const socAddress = result.socAddress
 
         // Verify upload with read-back
         const readBackFinder = createAsyncEpochFinder({
@@ -3443,13 +3492,22 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        const result = await uploadEncryptedSocViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        // Upload encrypted SOC with auto-generated key
+        const result = await uploadSOC(
+          subsidisedTarget,
           signerKeyObj,
           identifier,
           payload,
-          undefined,
-          { pin: options?.pin, deferred: options?.deferred },
+          {
+            encryptionKey: true,
+            pin: options?.pin,
+            deferred: options?.deferred,
+          },
         )
 
         if (event.source) {
@@ -3460,7 +3518,9 @@ export class SwarmIdProxy {
               reference: uint8ArrayToHex(result.socAddress),
               feedIndex: resolvedIndex.toString(),
               owner: ownerAddress.toHex(),
-              encryptionKey: uint8ArrayToHex(result.encryptionKey),
+              encryptionKey: result.encryptionKey
+                ? uint8ArrayToHex(result.encryptionKey)
+                : undefined,
               tagUid: result.tagUid,
             } satisfies IframeToParentMessage,
             { targetOrigin: event.origin },
@@ -3478,14 +3538,24 @@ export class SwarmIdProxy {
 
       // Serialize write through Web Locks API to prevent concurrent uploads
       const result = await this.withWriteLock(async () => {
-        const uploadResult = await uploadEncryptedSOC(
-          this.bee,
-          this.stamper!,
+        const stamperTarget: UploadTarget = {
+          mode: "stamper",
+          bee: this.bee,
+          stamper: this.stamper!,
+        }
+
+        // Upload encrypted SOC with auto-generated key
+        const uploadResult = await uploadSOC(
+          stamperTarget,
           signerKeyObj,
           identifier,
           payload,
-          undefined,
-          options,
+          {
+            encryptionKey: true,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          },
         )
 
         await this.saveStamperState()
@@ -3501,7 +3571,8 @@ export class SwarmIdProxy {
             reference: uint8ArrayToHex(result.socAddress),
             feedIndex: resolvedIndex.toString(),
             owner: ownerAddress.toHex(),
-            encryptionKey: uint8ArrayToHex(result.encryptionKey),
+            // encryptionKey always present when using encryptionKey: true
+            encryptionKey: uint8ArrayToHex(result.encryptionKey!),
             tagUid: result.tagUid,
           } satisfies IframeToParentMessage,
           { targetOrigin: event.origin },
@@ -3581,25 +3652,24 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        let result
-        if (encryptionKey) {
-          result = await uploadEncryptedSocViaSubsidisedGateway(
-            this.subsidisedGatewayUrl!,
-            signerKeyObj,
-            identifier,
-            payload,
-            hexToUint8Array(encryptionKey),
-            { pin: options?.pin, deferred: options?.deferred },
-          )
-        } else {
-          result = await uploadSocViaSubsidisedGateway(
-            this.subsidisedGatewayUrl!,
-            signerKeyObj,
-            identifier,
-            payload,
-            { pin: options?.pin, deferred: options?.deferred },
-          )
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
         }
+
+        const result = await uploadSOC(
+          subsidisedTarget,
+          signerKeyObj,
+          identifier,
+          payload,
+          {
+            encryptionKey: encryptionKey
+              ? hexToUint8Array(encryptionKey)
+              : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+          },
+        )
 
         if (event.source) {
           ;(event.source as WindowProxy).postMessage(
@@ -3626,34 +3696,29 @@ export class SwarmIdProxy {
       }
 
       // Serialize write through Web Locks API to prevent concurrent uploads
-      // Upload SOC - use encryption if key provided, otherwise use /soc endpoint
-      // The /soc endpoint is needed for non-encrypted uploads because:
-      // - Small SOCs (< 4104 bytes) are misidentified as CAC by /chunks endpoint
-      // - /soc endpoint explicitly handles SOC without size-based detection
-      // - Preserves v1 format (48-byte CAC) required for /bzz/ compatibility
+      // Upload SOC - use encryption if key provided, otherwise plain SOC
+      // The unified uploadSOC handles /soc endpoint properly for v1 format
       const result = await this.withWriteLock(async () => {
-        let uploadResult
-        if (encryptionKey) {
-          uploadResult = await uploadEncryptedSOC(
-            this.bee,
-            this.stamper!,
-            signerKeyObj,
-            identifier,
-            payload,
-            hexToUint8Array(encryptionKey),
-            options,
-          )
-        } else {
-          // Use /soc endpoint for non-encrypted uploads (v1 format for /bzz/ compat)
-          uploadResult = await uploadSOCViaSocEndpoint(
-            this.bee,
-            this.stamper!,
-            signerKeyObj,
-            identifier,
-            payload,
-            options,
-          )
+        const stamperTarget: UploadTarget = {
+          mode: "stamper",
+          bee: this.bee,
+          stamper: this.stamper!,
         }
+
+        const uploadResult = await uploadSOC(
+          stamperTarget,
+          signerKeyObj,
+          identifier,
+          payload,
+          {
+            encryptionKey: encryptionKey
+              ? hexToUint8Array(encryptionKey)
+              : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          },
+        )
 
         await this.saveStamperState()
 
@@ -3752,14 +3817,22 @@ export class SwarmIdProxy {
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
-        // uploadReference always uses encryption
-        const result = await uploadEncryptedSocViaSubsidisedGateway(
-          this.subsidisedGatewayUrl!,
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        }
+
+        // uploadReference always uses encryption with auto-generated key
+        const result = await uploadSOC(
+          subsidisedTarget,
           signerKeyObj,
           identifier,
           payload,
-          undefined,
-          { pin: options?.pin, deferred: options?.deferred },
+          {
+            encryptionKey: true,
+            pin: options?.pin,
+            deferred: options?.deferred,
+          },
         )
 
         if (event.source) {
@@ -3770,7 +3843,9 @@ export class SwarmIdProxy {
               reference: uint8ArrayToHex(result.socAddress),
               feedIndex: resolvedIndex.toString(),
               owner: ownerAddress.toHex(),
-              encryptionKey: uint8ArrayToHex(result.encryptionKey),
+              encryptionKey: result.encryptionKey
+                ? uint8ArrayToHex(result.encryptionKey)
+                : undefined,
               tagUid: result.tagUid,
             } satisfies IframeToParentMessage,
             { targetOrigin: event.origin },
@@ -3789,22 +3864,33 @@ export class SwarmIdProxy {
       // Serialize write through Web Locks API to prevent concurrent uploads
       const { result, encryptionKeyResult } = await this.withWriteLock(
         async () => {
-          // uploadReference always uses encryption
-          const encResult = await uploadEncryptedSOC(
-            this.bee,
-            this.stamper!,
+          const stamperTarget: UploadTarget = {
+            mode: "stamper",
+            bee: this.bee,
+            stamper: this.stamper!,
+          }
+
+          // uploadReference always uses encryption with auto-generated key
+          const encResult = await uploadSOC(
+            stamperTarget,
             signerKeyObj,
             identifier,
             payload,
-            undefined,
-            options,
+            {
+              encryptionKey: true,
+              pin: options?.pin,
+              deferred: options?.deferred,
+              tag: options?.tag,
+            },
           )
 
           await this.saveStamperState()
 
           return {
             result: encResult,
-            encryptionKeyResult: uint8ArrayToHex(encResult.encryptionKey),
+            encryptionKeyResult: encResult.encryptionKey
+              ? uint8ArrayToHex(encResult.encryptionKey)
+              : undefined,
           }
         },
       )
@@ -3886,17 +3972,19 @@ export class SwarmIdProxy {
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
         const subsidisedGatewayUrl = this.subsidisedGatewayUrl!
+        const subsidisedTarget: UploadTarget = {
+          mode: "subsidised",
+          gatewayUrl: subsidisedGatewayUrl,
+        }
         const beeCompatible = options?.beeCompatible === true
 
         // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
-        const contentUploadResult =
-          await uploadEncryptedDataViaSubsidisedGateway(
-            subsidisedGatewayUrl,
-            data,
-            undefined, // generate random encryption key
-            { pin: options?.pin, deferred: options?.deferred },
-            onProgress,
-          )
+        const contentUploadResult = await uploadData(subsidisedTarget, data, {
+          encryptionKey: true, // generate random encryption key
+          pin: options?.pin,
+          deferred: options?.deferred,
+          onProgress,
+        })
 
         // Step 2: Create Mantaray manifest wrapping the content
         const manifest = new MantarayNode()
@@ -3915,21 +4003,19 @@ export class SwarmIdProxy {
         const manifestResult = beeCompatible
           ? await saveMantarayTreeRecursively(manifest, async (chunkData) => {
               const chunk = makeContentAddressedChunk(chunkData)
-              await uploadChunkViaSubsidisedGateway(
-                subsidisedGatewayUrl,
-                chunk.data,
-                { pin: options?.pin, deferred: options?.deferred },
-              )
+              await uploadChunk(subsidisedTarget, chunk.data, {
+                pin: options?.pin,
+                deferred: options?.deferred,
+              })
               return { reference: chunk.address.toHex() }
             })
           : await saveMantarayTreeRecursivelyEncrypted(
               manifest,
               async (encryptedData) => {
-                await uploadChunkViaSubsidisedGateway(
-                  subsidisedGatewayUrl,
-                  encryptedData,
-                  { pin: options?.pin, deferred: options?.deferred },
-                )
+                await uploadChunk(subsidisedTarget, encryptedData, {
+                  pin: options?.pin,
+                  deferred: options?.deferred,
+                })
                 return {}
               },
             )
@@ -3985,8 +4071,9 @@ export class SwarmIdProxy {
         throw new Error("Stamper not initialized. Please login first.")
       }
 
-      // Prepare upload context
-      const context: UploadContext = {
+      // Prepare upload target
+      const stamperTarget: UploadTarget = {
+        mode: "stamper",
         bee: this.bee,
         stamper: this.stamper,
       }
@@ -3995,14 +4082,14 @@ export class SwarmIdProxy {
       const { actResult, contentUpload } = await this.withWriteLock(
         async () => {
           // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
-          const contentUploadResult = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // generate random encryption key
-            options,
+          const contentUploadResult = await uploadData(stamperTarget, data, {
+            encryptionKey: true, // generate random encryption key
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
             onProgress,
             requestOptions,
-          )
+          })
 
           // Step 2: Create Mantaray manifest wrapping the content
           // Content reference is now 64 bytes (encrypted reference: address + encryption key)
@@ -4020,7 +4107,7 @@ export class SwarmIdProxy {
           })
 
           // Create a tag for the manifest uploads (required for dev mode)
-          const manifestTag = options?.tag ?? (await tryCreateTag(context.bee))
+          const manifestTag = options?.tag ?? (await tryCreateTag(this.bee))
 
           const beeCompatible = options?.beeCompatible === true
 
@@ -4030,13 +4117,14 @@ export class SwarmIdProxy {
                 manifest,
                 async (chunkData, isRoot) => {
                   const chunk = makeContentAddressedChunk(chunkData)
-                  const envelope = context.stamper.stamp({
+                  const envelope = this.stamper!.stamp({
                     hash: () => chunk.address.toUint8Array(),
                     build: () => chunk.data,
                     span: 0n,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     writer: undefined as any,
                   })
-                  await context.bee.uploadChunk(
+                  await this.bee.uploadChunk(
                     envelope,
                     chunk.data,
                     { ...options, tag: manifestTag, deferred: false },
@@ -4051,13 +4139,14 @@ export class SwarmIdProxy {
             : await saveMantarayTreeRecursivelyEncrypted(
                 manifest,
                 async (encryptedData, address, isRoot) => {
-                  const envelope = context.stamper.stamp({
+                  const envelope = this.stamper!.stamp({
                     hash: () => address,
                     build: () => encryptedData,
                     span: 0n,
+                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
                     writer: undefined as any,
                   })
-                  await context.bee.uploadChunk(
+                  await this.bee.uploadChunk(
                     envelope,
                     encryptedData,
                     { ...options, tag: manifestTag, deferred: false },
@@ -4672,6 +4761,11 @@ export class SwarmIdProxy {
     feedType?: "Sequence" | "Epoch",
     encrypt: boolean = true,
   ): Promise<string> {
+    const subsidisedTarget: UploadTarget = {
+      mode: "subsidised",
+      gatewayUrl: this.subsidisedGatewayUrl!,
+    }
+
     // Normalize owner (remove 0x prefix if present)
     const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
 
@@ -4695,10 +4789,7 @@ export class SwarmIdProxy {
     const slashNodeData = await slashNode.marshal()
     const slashChunk = makeContentAddressedChunk(slashNodeData)
 
-    await uploadChunkViaSubsidisedGateway(
-      this.subsidisedGatewayUrl!,
-      slashChunk.data,
-    )
+    await uploadChunk(subsidisedTarget, slashChunk.data)
 
     // Set the child's selfAddress to the uploaded chunk address
     slashNode.selfAddress = slashChunk.address.toUint8Array()
@@ -4710,10 +4801,7 @@ export class SwarmIdProxy {
       // Encrypted upload for root
       const encryptedChunk = makeEncryptedContentAddressedChunk(rootNodeData)
 
-      await uploadChunkViaSubsidisedGateway(
-        this.subsidisedGatewayUrl!,
-        encryptedChunk.data,
-      )
+      await uploadChunk(subsidisedTarget, encryptedChunk.data)
 
       // Return 64-byte reference (address + key)
       const ref = new Uint8Array(64)
@@ -4724,10 +4812,7 @@ export class SwarmIdProxy {
       // Unencrypted upload for root
       const rootChunk = makeContentAddressedChunk(rootNodeData)
 
-      await uploadChunkViaSubsidisedGateway(
-        this.subsidisedGatewayUrl!,
-        rootChunk.data,
-      )
+      await uploadChunk(subsidisedTarget, rootChunk.data)
 
       // Return 32-byte reference
       return rootChunk.address.toHex()

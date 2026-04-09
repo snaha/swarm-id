@@ -12,10 +12,7 @@ import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
-import {
-  uploadEncryptedSOC,
-  uploadSOCViaSocEndpoint,
-} from "../../upload-encrypted-data"
+import { uploadSOC, type UploadTarget } from "../../upload"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
 
@@ -171,24 +168,16 @@ export class BasicEpochUpdater implements EpochUpdater {
     // which is the v1 format Bee expects for /bzz/ compatibility
     const payload = Binary.concatBytes(timestamp, reference)
 
-    const result = encryptionKey
-      ? await uploadEncryptedSOC(
-          this.bee,
-          stamper,
-          this.signer,
-          identifier,
-          payload,
-          encryptionKey,
-          { deferred: false }, // deferred setting is NOT the cause of /bzz/ timeout
-        )
-      : await uploadSOCViaSocEndpoint(
-          this.bee,
-          stamper,
-          this.signer,
-          identifier,
-          payload,
-          { deferred: false }, // deferred setting is NOT the cause of /bzz/ timeout
-        )
+    const target: UploadTarget = {
+      mode: "stamper",
+      bee: this.bee,
+      stamper,
+    }
+
+    const result = await uploadSOC(target, this.signer, identifier, payload, {
+      encryptionKey,
+      deferred: false, // deferred setting is NOT the cause of /bzz/ timeout
+    })
 
     return result.socAddress
   }

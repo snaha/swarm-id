@@ -76,9 +76,11 @@ function makeSingleOwnerChunkFromData(
 
   if (encryptionKey) {
     const decrypted = decryptChunk(encryptionKey, cacData)
+
     spanBytes = decrypted.slice(0, SPAN_SIZE)
     const span = readSpan(spanBytes)
     payload = decrypted.slice(SPAN_SIZE, SPAN_SIZE + span)
+
     rebuiltData = Binary.concatBytes(
       identifier.toUint8Array(),
       signature.toUint8Array(),

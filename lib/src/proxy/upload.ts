@@ -115,8 +115,8 @@ export interface UploadDataResult {
  * Options for SOC upload
  */
 export interface UploadSOCOptions {
-  /** Encryption key: undefined = plain SOC, Uint8Array = encrypt data */
-  encryptionKey?: Uint8Array
+  /** Encryption key: undefined = plain SOC, Uint8Array = use this key, true = auto-generate */
+  encryptionKey?: Uint8Array | true
   /** Pin the uploaded SOC */
   pin?: boolean
   /** Use deferred upload mode */
@@ -844,28 +844,37 @@ export async function uploadSOC(
 
   const isEncrypted = options?.encryptionKey !== undefined
 
-  // Create CAC (plain or encrypted)
-  let cac: ContentAddressedChunk | EncryptedChunk
+  // Build chunk and determine what to sign/send
+  let chunkAddress: Uint8Array
+  let socBody: Uint8Array
   let encryptionKeyResult: Uint8Array | undefined
 
   if (isEncrypted) {
+    // For encrypted SOC: use makeEncryptedContentAddressedChunk
+    // This encrypts both span and payload, giving us the correct address for signing
+    const encryptionKey =
+      options.encryptionKey === true ? undefined : options.encryptionKey
     const encryptedChunk = makeEncryptedContentAddressedChunk(
       data,
-      options.encryptionKey,
+      encryptionKey,
     )
-    cac = encryptedChunk
+
+    chunkAddress = encryptedChunk.address.toUint8Array()
+    socBody = encryptedChunk.data
     encryptionKeyResult = encryptedChunk.encryptionKey
   } else {
-    cac = makeContentAddressedChunk(data)
+    // For plain SOC: use unencrypted CAC
+    const cac = makeContentAddressedChunk(data)
+    chunkAddress = cac.address.toUint8Array()
+    socBody = cac.data
   }
 
   const owner = signer.publicKey().address()
 
-  // Sign: hash(identifier + cac.address)
-  const toSign = Binary.concatBytes(
-    identifier.toUint8Array(),
-    cac.address.toUint8Array(),
-  )
+  // Sign: hash(identifier + chunkAddress)
+  // For encrypted SOCs, this is the encrypted chunk address
+  // For plain SOCs, this is the unencrypted chunk address
+  const toSign = Binary.concatBytes(identifier.toUint8Array(), chunkAddress)
   const signature = signer.sign(toSign)
 
   // Calculate SOC address
@@ -891,7 +900,7 @@ export async function uploadSOC(
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: cac.data,
+      body: socBody,
     })
 
     if (!response.ok) {
@@ -912,7 +921,7 @@ export async function uploadSOC(
 
     const envelope = stamper.stamp({
       hash: () => socAddressBytes,
-      build: () => cac.data,
+      build: () => socBody,
       span: 0n,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       writer: undefined as any,
@@ -936,7 +945,7 @@ export async function uploadSOC(
     const response = await fetch(url, {
       method: "POST",
       headers,
-      body: cac.data,
+      body: socBody,
     })
 
     if (!response.ok) {

@@ -30,7 +30,7 @@ import {
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { calculateContentHash } from "../storage/utilization-store"
-import { uploadSingleChunkWithEncryption } from "../proxy/upload-encrypted-data"
+import { uploadData, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 
 // ============================================================================
@@ -386,8 +386,7 @@ export function makeChunkIdentifier(
  * Architecture: Just upload encrypted chunk data as CAC (immutable)
  *
  * @param bee - Bee client instance
- * @param batchId - Batch ID (for logging)
- * @param postageBatchId - Postage stamp batch ID
+ * @param stamper - Stamper for signing
  * @param chunkIndex - Chunk index (0-63)
  * @param data - Chunk data to upload (4KB)
  * @param encryptionKey - Encryption key (32 bytes)
@@ -401,20 +400,35 @@ export async function uploadUtilizationChunk(
   encryptionKey: Uint8Array,
 ): Promise<Uint8Array> {
   void chunkIndex // Parameter kept for API compatibility
+
+  // Validate inputs
+  if (data.length < 1 || data.length > 4096) {
+    throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
+  }
+  if (encryptionKey.length !== 32) {
+    throw new Error(
+      `Invalid encryption key length: ${encryptionKey.length} (expected 32)`,
+    )
+  }
+
   // Calculate CAC reference first (before upload)
   const encryptedChunk = makeEncryptedContentAddressedChunk(data, encryptionKey)
   const cacReference = encryptedChunk.address.toUint8Array()
 
   const tag = await tryCreateTag(bee)
 
-  // Upload using unified interface (with deferred: false for fast return)
-  await uploadSingleChunkWithEncryption(
+  const target: UploadTarget = {
+    mode: "stamper",
     bee,
     stamper,
-    data,
+  }
+
+  // Upload using unified interface (with deferred: false for fast return)
+  await uploadData(target, data, {
     encryptionKey,
-    { deferred: false, tag }, // fast, non-blocking upload
-  )
+    deferred: false,
+    tag,
+  })
 
   return cacReference
 }

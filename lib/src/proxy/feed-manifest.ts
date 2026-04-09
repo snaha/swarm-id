@@ -13,8 +13,7 @@ import {
   makeContentAddressedChunk,
 } from "../chunk"
 import { uint8ArrayToHex } from "../utils/hex"
-import { uploadSingleChunk } from "./upload-data"
-import { uploadSingleEncryptedChunk } from "./upload-encrypted-data"
+import { uploadChunk, type UploadTarget } from "./upload"
 import { tryCreateTag } from "../utils/tag"
 
 /**
@@ -85,16 +84,25 @@ export async function createFeedManifestDirect(
   owner: string,
   options?: CreateFeedManifestOptions,
   uploadOptions?: UploadOptions,
-  requestOptions?: BeeRequestOptions,
+  _requestOptions?: BeeRequestOptions,
 ): Promise<CreateFeedManifestResult> {
   // Normalize owner (remove 0x prefix if present)
   const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
 
-  // DEBUG: Log what Bee will use for feed lookup
+  // Create upload target
+  const target: UploadTarget = {
+    mode: "stamper",
+    bee,
+    stamper,
+  }
 
   // 1. Create tag for upload if not provided
   const tag = uploadOptions?.tag ?? (await tryCreateTag(bee))
-  const uploadOptionsWithTag = { ...uploadOptions, tag }
+  const chunkOptions = {
+    pin: uploadOptions?.pin,
+    deferred: uploadOptions?.deferred,
+    tag,
+  }
 
   // 2. Create root MantarayNode with "/" fork containing feed metadata
   const rootNode = new MantarayNode()
@@ -117,13 +125,7 @@ export async function createFeedManifestDirect(
   const slashNodeData = await slashNode.marshal()
   const slashChunk = makeContentAddressedChunk(slashNodeData)
 
-  await uploadSingleChunk(
-    bee,
-    stamper,
-    slashChunk,
-    uploadOptionsWithTag,
-    requestOptions,
-  )
+  await uploadChunk(target, slashChunk.data, chunkOptions)
 
   // 5. Set the child's selfAddress to the uploaded chunk address
   // This is used when marshaling the root node
@@ -139,13 +141,7 @@ export async function createFeedManifestDirect(
     // Encrypted upload for root
     const encryptedChunk = makeEncryptedContentAddressedChunk(rootNodeData)
 
-    await uploadSingleEncryptedChunk(
-      bee,
-      stamper,
-      encryptedChunk,
-      uploadOptionsWithTag,
-      requestOptions,
-    )
+    await uploadChunk(target, encryptedChunk.data, chunkOptions)
 
     // Return 64-byte reference (address + key)
     const ref = new Uint8Array(64)
@@ -158,13 +154,7 @@ export async function createFeedManifestDirect(
     // Unencrypted upload for root
     const rootChunk = makeContentAddressedChunk(rootNodeData)
 
-    await uploadSingleChunk(
-      bee,
-      stamper,
-      rootChunk,
-      uploadOptionsWithTag,
-      requestOptions,
-    )
+    await uploadChunk(target, rootChunk.data, chunkOptions)
 
     // Return 32-byte reference
     const reference = rootChunk.address.toHex()
