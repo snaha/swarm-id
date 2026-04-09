@@ -4,6 +4,13 @@
 import type { AppMetadata } from "../types"
 
 /**
+ * Normalize a URL by removing trailing slash.
+ */
+export function normalizeUrl(url: string): string {
+  return url.endsWith("/") ? url.slice(0, -1) : url
+}
+
+/**
  * Configuration options for building the authentication URL.
  */
 export interface BuildAuthUrlOptions {

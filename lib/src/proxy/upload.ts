@@ -39,6 +39,8 @@ import { marshalEnvelope } from "./stamp-marshal"
 import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
+import { uint8ArrayToHex } from "../utils/hex"
+import { normalizeUrl } from "../utils/url"
 
 // ============================================================================
 // Types
@@ -222,22 +224,6 @@ function makeStampFn(
   }
   return (chunkData, address) =>
     Promise.resolve(stampChunkData(stamper, chunkData, address))
-}
-
-/**
- * Normalize a URL by removing trailing slash.
- */
-function normalizeUrl(url: string): string {
-  return url.endsWith("/") ? url.slice(0, -1) : url
-}
-
-/**
- * Convert Uint8Array to hex string.
- */
-function uint8ArrayToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
 }
 
 // ============================================================================
@@ -1016,8 +1002,6 @@ export {
   uploadChunkViaSubsidisedGatewayInternal,
   uploadStampedChunkViaHttp,
   makeStampFn,
-  normalizeUrl,
-  uint8ArrayToHex,
   buildPlainMerkleTree,
   buildEncryptedMerkleTree,
   encryptChunkPayloads,

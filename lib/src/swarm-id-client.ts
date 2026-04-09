@@ -82,7 +82,7 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
-import { uint8ArrayToHex } from "./utils/key-derivation"
+import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
 

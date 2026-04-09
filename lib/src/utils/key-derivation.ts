@@ -9,6 +9,7 @@
  */
 
 import { PrivateKey } from "@ethersphere/bee-js"
+import { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
 /**
  * Derive an app-specific secret from a master key and app origin
@@ -65,38 +66,8 @@ export async function generateMasterKey(): Promise<string> {
   return masterKey
 }
 
-/**
- * Convert a hex string to Uint8Array
- *
- * @param hexString - Hex string (e.g., "deadbeef")
- * @returns Uint8Array
- */
-export function hexToUint8Array(hexString: string): Uint8Array {
-  // Remove any whitespace and ensure even length
-  const hex = hexString.replace(/\s/g, "")
-  if (hex.length % 2 !== 0) {
-    throw new Error("Invalid hex string: length must be even")
-  }
-
-  const bytes = new Uint8Array(hex.length / 2)
-  for (let i = 0; i < hex.length; i += 2) {
-    bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16)
-  }
-
-  return bytes
-}
-
-/**
- * Convert a Uint8Array to hex string
- *
- * @param bytes - Uint8Array to convert
- * @returns Hex string (e.g., "deadbeef")
- */
-export function uint8ArrayToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, "0"))
-    .join("")
-}
+// Re-export hex utilities for backwards compatibility
+export { hexToUint8Array, uint8ArrayToHex } from "./hex"
 
 /**
  * Verify that a derived secret matches the expected value
