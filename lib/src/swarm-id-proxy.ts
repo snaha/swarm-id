@@ -392,9 +392,30 @@ export class SwarmIdProxy {
         try {
           return await operation()
         } finally {
+          await this.saveStamperStateIfNeeded()
         }
       },
     )
+  }
+
+  /**
+   * Create an onProgress callback for upload operations.
+   * Returns undefined if progress reporting is disabled.
+   */
+  private createProgressCallback(
+    event: MessageEvent,
+    requestId: string,
+    enableProgress: boolean | undefined,
+  ): ((progress: UploadProgress) => void) | undefined {
+    if (!enableProgress) return undefined
+    return (progress: UploadProgress) => {
+      this.postMessage(event, {
+        type: "uploadProgress",
+        requestId,
+        total: progress.total,
+        processed: progress.processed,
+      })
+    }
   }
 
   /**
@@ -736,16 +757,11 @@ export class SwarmIdProxy {
     await this.loadAuthData()
 
     // Acknowledge receipt
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "proxyReady",
-          authenticated: this.authenticated,
-          parentOrigin: this.parentOrigin,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "proxyReady",
+      authenticated: this.authenticated,
+      parentOrigin: this.parentOrigin,
+    })
   }
 
   /**
@@ -1150,15 +1166,12 @@ export class SwarmIdProxy {
     requestId: string | undefined,
     error: string,
   ): void {
-    if (event.source && requestId) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "error",
-          requestId,
-          error,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
+    if (requestId) {
+      this.postMessage(event, {
+        type: "error",
+        requestId,
+        error,
+      })
     }
   }
 
@@ -1202,6 +1215,22 @@ export class SwarmIdProxy {
     this.parentWindow.postMessage(message, this.parentOrigin)
   }
 
+  /**
+   * Send message to the event source (parent window that sent the request)
+   */
+  private postMessage(
+    event: MessageEvent,
+    message: IframeToParentMessage,
+  ): void {
+    if (!event.source) {
+      console.warn("[Proxy] Cannot send message - no event source")
+      return
+    }
+    ;(event.source as WindowProxy).postMessage(message, {
+      targetOrigin: event.origin,
+    })
+  }
+
   // ============================================================================
   // Message Handlers
   // ============================================================================
@@ -1210,18 +1239,13 @@ export class SwarmIdProxy {
     message: { type: "checkAuth"; requestId: string },
     event: MessageEvent,
   ): void {
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "authStatusResponse",
-          requestId: message.requestId,
-          authenticated: this.authenticated,
-          origin: this.authenticated ? this.parentOrigin : undefined,
-          beeApiUrl: this.beeApiUrl,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "authStatusResponse",
+      requestId: message.requestId,
+      authenticated: this.authenticated,
+      origin: this.authenticated ? this.parentOrigin : undefined,
+      beeApiUrl: this.beeApiUrl,
+    })
   }
 
   private handleGetConnectionInfo(
@@ -1292,20 +1316,15 @@ export class SwarmIdProxy {
     // canUpload is true if user has stamps, or subsidised gateway is configured
     const canUpload = uploadMode !== "unavailable"
 
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "connectionInfoResponse",
-          requestId: message.requestId,
-          canUpload,
-          storagePartitioned: this.storagePartitioned || undefined,
-          uploadMode,
-          identity,
-          appKey,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "connectionInfoResponse",
+      requestId: message.requestId,
+      canUpload,
+      storagePartitioned: this.storagePartitioned || undefined,
+      uploadMode,
+      identity,
+      appKey,
+    })
   }
 
   private async handleIsConnected(
@@ -1314,16 +1333,11 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const connected = await this.bee.isConnected()
 
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "isConnectedResponse",
-          requestId: message.requestId,
-          connected,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "isConnectedResponse",
+      requestId: message.requestId,
+      connected,
+    })
   }
 
   private async handleGetNodeInfo(
@@ -1333,18 +1347,13 @@ export class SwarmIdProxy {
     try {
       const nodeInfo = await this.bee.getNodeInfo()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "getNodeInfoResponse",
-            requestId: message.requestId,
-            beeMode: nodeInfo.beeMode,
-            chequebookEnabled: nodeInfo.chequebookEnabled,
-            swapEnabled: nodeInfo.swapEnabled,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "getNodeInfoResponse",
+        requestId: message.requestId,
+        beeMode: nodeInfo.beeMode,
+        chequebookEnabled: nodeInfo.chequebookEnabled,
+        swapEnabled: nodeInfo.swapEnabled,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1362,16 +1371,11 @@ export class SwarmIdProxy {
     this.clearAuthData()
 
     // Send response
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "disconnectResponse",
-          requestId: message.requestId,
-          success: true,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "disconnectResponse",
+      requestId: message.requestId,
+      success: true,
+    })
   }
 
   private handleRequestAuth(
@@ -1477,14 +1481,11 @@ export class SwarmIdProxy {
       agent: message.agent,
       popupMode: message.popupMode,
     })
-    ;(event.source as WindowProxy).postMessage(
-      {
-        type: "connectResponse",
-        requestId: message.requestId,
-        success,
-      },
-      { targetOrigin: event.origin },
-    )
+    this.postMessage(event, {
+      type: "connectResponse",
+      requestId: message.requestId,
+      success,
+    })
   }
 
   /**
@@ -1635,21 +1636,11 @@ export class SwarmIdProxy {
       const target = await this.getUploadTarget({ useWorkers, workerCount })
 
       // Create progress callback if enabled (works in both modes)
-      const onProgress = enableProgress
-        ? (progress: UploadProgress) => {
-            if (event.source) {
-              ;(event.source as WindowProxy).postMessage(
-                {
-                  type: "uploadProgress",
-                  requestId,
-                  total: progress.total,
-                  processed: progress.processed,
-                } satisfies IframeToParentMessage,
-                { targetOrigin: event.origin },
-              )
-            }
-          }
-        : undefined
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
 
       // Execute upload with mode-aware locking
       const uploadResult = await this.withModeAwareWriteLock(async () => {
@@ -1663,22 +1654,16 @@ export class SwarmIdProxy {
           onProgress,
           requestOptions,
         })
-        await this.saveStamperStateIfNeeded()
         return result
       })
 
       // Send response
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "uploadDataResponse",
-            requestId,
-            reference: uploadResult.reference,
-            tagUid: uploadResult.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "uploadDataResponse",
+        requestId,
+        reference: uploadResult.reference,
+        tagUid: uploadResult.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1708,16 +1693,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "downloadDataResponse",
-            requestId,
-            data: data as Uint8Array,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "downloadDataResponse",
+        requestId,
+        data: data as Uint8Array,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1755,27 +1735,17 @@ export class SwarmIdProxy {
       const target = await this.getUploadTarget({ useWorkers, workerCount })
 
       // Create progress callback if enabled
-      const onProgress = enableProgress
-        ? (progress: UploadProgress) => {
-            if (event.source) {
-              ;(event.source as WindowProxy).postMessage(
-                {
-                  type: "uploadProgress",
-                  requestId,
-                  total: progress.total,
-                  processed: progress.processed,
-                } satisfies IframeToParentMessage,
-                { targetOrigin: event.origin },
-              )
-            }
-          }
-        : undefined
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
+
+      // Create or use provided tag for the entire upload operation
+      const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
 
       // Execute upload with mode-aware locking
       const manifestResult = await this.withModeAwareWriteLock(async () => {
-        // Create or use provided tag for the entire upload operation
-        const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
-
         // Step 1: Upload file content
         // Encrypted by default (unless encrypt=false) - encryption is client-side
         const shouldEncryptContent = options?.encrypt !== false
@@ -1842,22 +1812,16 @@ export class SwarmIdProxy {
           }
         }
 
-        await this.saveStamperStateIfNeeded()
         return result
       })
 
       // Send response
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "uploadFileResponse",
-            requestId,
-            reference: manifestResult.rootReference,
-            tagUid: manifestResult.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "uploadFileResponse",
+        requestId,
+        reference: manifestResult.rootReference,
+        tagUid: manifestResult.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1926,17 +1890,12 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "downloadFileResponse",
-            requestId,
-            name,
-            data,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "downloadFileResponse",
+        requestId,
+        name,
+        data,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1982,16 +1941,11 @@ export class SwarmIdProxy {
           deferred: options?.deferred,
         })
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "uploadChunkResponse",
-              requestId,
-              reference: chunk.address.toHex(),
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "uploadChunkResponse",
+          requestId,
+          reference: chunk.address.toHex(),
+        })
         return
       }
 
@@ -2040,22 +1994,14 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
         return result
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "uploadChunkResponse",
-            requestId,
-            reference: uploadResult.reference.toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "uploadChunkResponse",
+        requestId,
+        reference: uploadResult.reference.toHex(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2083,16 +2029,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "downloadChunkResponse",
-            requestId,
-            data: data as Uint8Array,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "downloadChunkResponse",
+        requestId,
+        data: data as Uint8Array,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2108,16 +2049,11 @@ export class SwarmIdProxy {
     try {
       const signer = this.bee.gsocMine(targetOverlay, identifier, proximity)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "gsocMineResponse",
-            requestId,
-            signer: signer.toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "gsocMineResponse",
+        requestId,
+        signer: signer.toHex(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2155,17 +2091,12 @@ export class SwarmIdProxy {
           deferred: options?.deferred,
         })
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "gsocSendResponse",
-              requestId,
-              reference: uint8ArrayToHex(result.socAddress),
-              tagUid: result.tagUid,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "gsocSendResponse",
+          requestId,
+          reference: uint8ArrayToHex(result.socAddress),
+          tagUid: result.tagUid,
+        })
         return
       }
 
@@ -2197,22 +2128,15 @@ export class SwarmIdProxy {
           },
         )
 
-        await this.saveStamperState()
-
         return uploadResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "gsocSendResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "gsocSendResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        tagUid: result.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2265,20 +2189,15 @@ export class SwarmIdProxy {
 
         const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "socUploadResponse",
-              requestId,
-              reference: uint8ArrayToHex(result.socAddress),
-              tagUid: result.tagUid,
-              // encryptionKey always present when using encryptionKey: true
-              encryptionKey: encKeyHex,
-              owner: signerKeyObj.publicKey().address().toHex(),
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "socUploadResponse",
+          requestId,
+          reference: uint8ArrayToHex(result.socAddress),
+          tagUid: result.tagUid,
+          // encryptionKey always present when using encryptionKey: true
+          encryptionKey: encKeyHex,
+          owner: signerKeyObj.publicKey().address().toHex(),
+        })
         return
       }
 
@@ -2311,27 +2230,20 @@ export class SwarmIdProxy {
           },
         )
 
-        await this.saveStamperState()
-
         return uploadResult
       })
 
       const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socUploadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            tagUid: result.tagUid,
-            // encryptionKey always present when using encryptionKey: true
-            encryptionKey: encKeyHex,
-            owner: signerKeyObj.publicKey().address().toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socUploadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        tagUid: result.tagUid,
+        // encryptionKey always present when using encryptionKey: true
+        encryptionKey: encKeyHex,
+        owner: signerKeyObj.publicKey().address().toHex(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2377,19 +2289,14 @@ export class SwarmIdProxy {
           },
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "socRawUploadResponse",
-              requestId,
-              reference: uint8ArrayToHex(result.socAddress),
-              tagUid: result.tagUid,
-              encryptionKey: undefined,
-              owner: signerKeyObj.publicKey().address().toHex(),
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "socRawUploadResponse",
+          requestId,
+          reference: uint8ArrayToHex(result.socAddress),
+          tagUid: result.tagUid,
+          encryptionKey: undefined,
+          owner: signerKeyObj.publicKey().address().toHex(),
+        })
         return
       }
 
@@ -2421,24 +2328,17 @@ export class SwarmIdProxy {
           },
         )
 
-        await this.saveStamperState()
-
         return uploadResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socRawUploadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            tagUid: result.tagUid,
-            encryptionKey: undefined,
-            owner: signerKeyObj.publicKey().address().toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socRawUploadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        tagUid: result.tagUid,
+        encryptionKey: undefined,
+        owner: signerKeyObj.publicKey().address().toHex(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2475,22 +2375,17 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socDownloadResponse",
-            requestId,
-            data: soc.data,
-            identifier: soc.identifier,
-            signature: soc.signature,
-            span: soc.span,
-            payload: soc.payload,
-            address: soc.address,
-            owner: soc.owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socDownloadResponse",
+        requestId,
+        data: soc.data,
+        identifier: soc.identifier,
+        signature: soc.signature,
+        span: soc.span,
+        payload: soc.payload,
+        address: soc.address,
+        owner: soc.owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2529,22 +2424,17 @@ export class SwarmIdProxy {
           )
         : await downloadSOC(this.bee, resolvedOwner, identifier, requestOptions)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socRawDownloadResponse",
-            requestId,
-            data: soc.data,
-            identifier: soc.identifier,
-            signature: soc.signature,
-            span: soc.span,
-            payload: soc.payload,
-            address: soc.address,
-            owner: soc.owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socRawDownloadResponse",
+        requestId,
+        data: soc.data,
+        identifier: soc.identifier,
+        signature: soc.signature,
+        span: soc.span,
+        payload: soc.payload,
+        address: soc.address,
+        owner: soc.owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2567,16 +2457,11 @@ export class SwarmIdProxy {
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socGetOwnerResponse",
-            requestId,
-            owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socGetOwnerResponse",
+        requestId,
+        owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2657,16 +2542,11 @@ export class SwarmIdProxy {
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "feedGetOwnerResponse",
-            requestId,
-            owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "feedGetOwnerResponse",
+        requestId,
+        owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2721,16 +2601,11 @@ export class SwarmIdProxy {
         reference = await plainFinder.findAt(atValue, afterValue)
       }
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "epochFeedDownloadReferenceResponse",
-            requestId,
-            reference: reference ? uint8ArrayToHex(reference) : undefined,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "epochFeedDownloadReferenceResponse",
+        requestId,
+        reference: reference ? uint8ArrayToHex(reference) : undefined,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2836,22 +2711,17 @@ export class SwarmIdProxy {
         })
         await readBackFinder.findAt(atValue, atValue)
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "epochFeedUploadReferenceResponse",
-              requestId,
-              socAddress: uint8ArrayToHex(socAddress),
-              encryptionKey: encryptionKey ? encryptionKey : undefined,
-              epoch: {
-                start: epoch.start.toString(),
-                level: epoch.level,
-              },
-              timestamp: atValue.toString(),
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "epochFeedUploadReferenceResponse",
+          requestId,
+          socAddress: uint8ArrayToHex(socAddress),
+          encryptionKey: encryptionKey ? encryptionKey : undefined,
+          epoch: {
+            start: epoch.start.toString(),
+            level: epoch.level,
+          },
+          timestamp: atValue.toString(),
+        })
         return
       }
 
@@ -2889,27 +2759,20 @@ export class SwarmIdProxy {
         // broad fallback scans over historical leaves on poisoned networks.
         await readBackFinder.findAt(atValue, atValue)
 
-        await this.saveStamperState()
-
         return result
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "epochFeedUploadReferenceResponse",
-            requestId,
-            socAddress: uint8ArrayToHex(updateResult.socAddress),
-            encryptionKey: encryptionKey ? encryptionKey : undefined,
-            epoch: {
-              start: updateResult.epoch.start.toString(),
-              level: updateResult.epoch.level,
-            },
-            timestamp: updateResult.timestamp.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "epochFeedUploadReferenceResponse",
+        requestId,
+        socAddress: uint8ArrayToHex(updateResult.socAddress),
+        encryptionKey: encryptionKey ? encryptionKey : undefined,
+        epoch: {
+          start: updateResult.epoch.start.toString(),
+          level: updateResult.epoch.level,
+        },
+        timestamp: updateResult.timestamp.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2972,16 +2835,11 @@ export class SwarmIdProxy {
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedGetOwnerResponse",
-            requestId,
-            owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedGetOwnerResponse",
+        requestId,
+        owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3159,19 +3017,14 @@ export class SwarmIdProxy {
       const parsed = this.parseSequentialPayload(soc.payload, useTimestamp)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedDownloadPayloadResponse",
-            requestId,
-            payload: parsed.payload,
-            timestamp: parsed.timestamp,
-            feedIndex: resolvedIndex.toString(),
-            feedIndexNext: nextIndex.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedDownloadPayloadResponse",
+        requestId,
+        payload: parsed.payload,
+        timestamp: parsed.timestamp,
+        feedIndex: resolvedIndex.toString(),
+        feedIndexNext: nextIndex.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3234,19 +3087,14 @@ export class SwarmIdProxy {
       const parsed = this.parseSequentialPayload(soc.payload, useTimestamp)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedDownloadRawPayloadResponse",
-            requestId,
-            payload: parsed.payload,
-            timestamp: parsed.timestamp,
-            feedIndex: resolvedIndex.toString(),
-            feedIndexNext: nextIndex.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedDownloadRawPayloadResponse",
+        requestId,
+        payload: parsed.payload,
+        timestamp: parsed.timestamp,
+        feedIndex: resolvedIndex.toString(),
+        feedIndexNext: nextIndex.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3317,18 +3165,13 @@ export class SwarmIdProxy {
       const referenceHex = uint8ArrayToHex(parsed.payload)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedDownloadReferenceResponse",
-            requestId,
-            reference: referenceHex,
-            feedIndex: resolvedIndex.toString(),
-            feedIndexNext: nextIndex.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedDownloadReferenceResponse",
+        requestId,
+        reference: referenceHex,
+        feedIndex: resolvedIndex.toString(),
+        feedIndexNext: nextIndex.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3434,22 +3277,17 @@ export class SwarmIdProxy {
           },
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "seqFeedUploadPayloadResponse",
-              requestId,
-              reference: uint8ArrayToHex(result.socAddress),
-              feedIndex: resolvedIndex.toString(),
-              owner: ownerAddress.toHex(),
-              encryptionKey: result.encryptionKey
-                ? uint8ArrayToHex(result.encryptionKey)
-                : undefined,
-              tagUid: result.tagUid,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "seqFeedUploadPayloadResponse",
+          requestId,
+          reference: uint8ArrayToHex(result.socAddress),
+          feedIndex: resolvedIndex.toString(),
+          owner: ownerAddress.toHex(),
+          encryptionKey: result.encryptionKey
+            ? uint8ArrayToHex(result.encryptionKey)
+            : undefined,
+          tagUid: result.tagUid,
+        })
         return
       }
 
@@ -3482,26 +3320,19 @@ export class SwarmIdProxy {
           },
         )
 
-        await this.saveStamperState()
-
         return uploadResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedUploadPayloadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            feedIndex: resolvedIndex.toString(),
-            owner: ownerAddress.toHex(),
-            // encryptionKey always present when using encryptionKey: true
-            encryptionKey: uint8ArrayToHex(result.encryptionKey!),
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedUploadPayloadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: resolvedIndex.toString(),
+        owner: ownerAddress.toHex(),
+        // encryptionKey always present when using encryptionKey: true
+        encryptionKey: uint8ArrayToHex(result.encryptionKey!),
+        tagUid: result.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3595,20 +3426,15 @@ export class SwarmIdProxy {
           },
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "seqFeedUploadRawPayloadResponse",
-              requestId,
-              reference: uint8ArrayToHex(result.socAddress),
-              feedIndex: resolvedIndex.toString(),
-              owner: ownerAddress.toHex(),
-              encryptionKey: encryptionKey ? encryptionKey : undefined,
-              tagUid: result.tagUid,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "seqFeedUploadRawPayloadResponse",
+          requestId,
+          reference: uint8ArrayToHex(result.socAddress),
+          feedIndex: resolvedIndex.toString(),
+          owner: ownerAddress.toHex(),
+          encryptionKey: encryptionKey ? encryptionKey : undefined,
+          tagUid: result.tagUid,
+        })
         return
       }
 
@@ -3644,25 +3470,18 @@ export class SwarmIdProxy {
           },
         )
 
-        await this.saveStamperState()
-
         return uploadResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedUploadRawPayloadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            feedIndex: resolvedIndex.toString(),
-            owner: ownerAddress.toHex(),
-            encryptionKey: encryptionKey ? encryptionKey : undefined,
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedUploadRawPayloadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: resolvedIndex.toString(),
+        owner: ownerAddress.toHex(),
+        encryptionKey: encryptionKey ? encryptionKey : undefined,
+        tagUid: result.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3759,22 +3578,17 @@ export class SwarmIdProxy {
           },
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "seqFeedUploadReferenceResponse",
-              requestId,
-              reference: uint8ArrayToHex(result.socAddress),
-              feedIndex: resolvedIndex.toString(),
-              owner: ownerAddress.toHex(),
-              encryptionKey: result.encryptionKey
-                ? uint8ArrayToHex(result.encryptionKey)
-                : undefined,
-              tagUid: result.tagUid,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "seqFeedUploadReferenceResponse",
+          requestId,
+          reference: uint8ArrayToHex(result.socAddress),
+          feedIndex: resolvedIndex.toString(),
+          owner: ownerAddress.toHex(),
+          encryptionKey: result.encryptionKey
+            ? uint8ArrayToHex(result.encryptionKey)
+            : undefined,
+          tagUid: result.tagUid,
+        })
         return
       }
 
@@ -3808,8 +3622,6 @@ export class SwarmIdProxy {
             },
           )
 
-          await this.saveStamperState()
-
           return {
             result: encResult,
             encryptionKeyResult: encResult.encryptionKey
@@ -3819,20 +3631,15 @@ export class SwarmIdProxy {
         },
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedUploadReferenceResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            feedIndex: resolvedIndex.toString(),
-            owner: ownerAddress.toHex(),
-            encryptionKey: encryptionKeyResult,
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedUploadReferenceResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: resolvedIndex.toString(),
+        owner: ownerAddress.toHex(),
+        encryptionKey: encryptionKeyResult,
+        tagUid: result.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3874,21 +3681,11 @@ export class SwarmIdProxy {
       )
 
       // Progress callback (if enabled)
-      const onProgress = enableProgress
-        ? (progress: UploadProgress) => {
-            if (event.source) {
-              ;(event.source as WindowProxy).postMessage(
-                {
-                  type: "uploadProgress",
-                  requestId,
-                  total: progress.total,
-                  processed: progress.processed,
-                } satisfies IframeToParentMessage,
-                { targetOrigin: event.origin },
-              )
-            }
-          }
-        : undefined
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
 
       // Use appSecret as publisher private key (user's identity key for this app)
       const publisherPrivateKey = hexToUint8Array(this.appSecret)
@@ -3966,21 +3763,16 @@ export class SwarmIdProxy {
         )
 
         // Send final response
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "actUploadDataResponse",
-              requestId,
-              encryptedReference: actResult.encryptedReference,
-              historyReference: actResult.historyReference,
-              granteeListReference: actResult.granteeListReference,
-              publisherPubKey: actResult.publisherPubKey,
-              actReference: actResult.actReference,
-              tagUid: contentUploadResult.tagUid,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "actUploadDataResponse",
+          requestId,
+          encryptedReference: actResult.encryptedReference,
+          historyReference: actResult.historyReference,
+          granteeListReference: actResult.granteeListReference,
+          publisherPubKey: actResult.publisherPubKey,
+          actReference: actResult.actReference,
+          tagUid: contentUploadResult.tagUid,
+        })
         return
       }
 
@@ -4110,9 +3902,6 @@ export class SwarmIdProxy {
             requestOptions,
           )
 
-          // Save stamper state after successful upload
-          await this.saveStamperState()
-
           return {
             actResult: actResultValue,
             contentUpload: contentUploadResult,
@@ -4121,21 +3910,16 @@ export class SwarmIdProxy {
       )
 
       // Send final response
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actUploadDataResponse",
-            requestId,
-            encryptedReference: actResult.encryptedReference,
-            historyReference: actResult.historyReference,
-            granteeListReference: actResult.granteeListReference,
-            publisherPubKey: actResult.publisherPubKey,
-            actReference: actResult.actReference,
-            tagUid: contentUpload.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actUploadDataResponse",
+        requestId,
+        encryptedReference: actResult.encryptedReference,
+        historyReference: actResult.historyReference,
+        granteeListReference: actResult.granteeListReference,
+        publisherPubKey: actResult.publisherPubKey,
+        actReference: actResult.actReference,
+        tagUid: contentUpload.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -4214,16 +3998,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actDownloadDataResponse",
-            requestId,
-            data: data as Uint8Array,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actDownloadDataResponse",
+        requestId,
+        data: data as Uint8Array,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -4271,18 +4050,13 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "actAddGranteesResponse",
-              requestId,
-              historyReference: result.historyReference,
-              granteeListReference: result.granteeListReference,
-              actReference: result.actReference,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "actAddGranteesResponse",
+          requestId,
+          historyReference: result.historyReference,
+          granteeListReference: result.granteeListReference,
+          actReference: result.actReference,
+        })
         return
       }
 
@@ -4322,24 +4096,16 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
         return addResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actAddGranteesResponse",
-            requestId,
-            historyReference: result.historyReference,
-            granteeListReference: result.granteeListReference,
-            actReference: result.actReference,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actAddGranteesResponse",
+        requestId,
+        historyReference: result.historyReference,
+        granteeListReference: result.granteeListReference,
+        actReference: result.actReference,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -4394,19 +4160,14 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "actRevokeGranteesResponse",
-              requestId,
-              encryptedReference: result.encryptedReference,
-              historyReference: result.historyReference,
-              granteeListReference: result.granteeListReference,
-              actReference: result.actReference,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "actRevokeGranteesResponse",
+          requestId,
+          encryptedReference: result.encryptedReference,
+          historyReference: result.historyReference,
+          granteeListReference: result.granteeListReference,
+          actReference: result.actReference,
+        })
         return
       }
 
@@ -4447,25 +4208,17 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
         return revokeResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actRevokeGranteesResponse",
-            requestId,
-            encryptedReference: result.encryptedReference,
-            historyReference: result.historyReference,
-            granteeListReference: result.granteeListReference,
-            actReference: result.actReference,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actRevokeGranteesResponse",
+        requestId,
+        encryptedReference: result.encryptedReference,
+        historyReference: result.historyReference,
+        granteeListReference: result.granteeListReference,
+        actReference: result.actReference,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -4498,16 +4251,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actGetGranteesResponse",
-            requestId,
-            grantees,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actGetGranteesResponse",
+        requestId,
+        grantees,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -4524,16 +4272,11 @@ export class SwarmIdProxy {
     const stamp = this.lookupPostageStampForApp()
 
     if (!stamp) {
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "getPostageBatchResponse",
-            requestId: message.requestId,
-            postageBatch: undefined,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "getPostageBatchResponse",
+        requestId: message.requestId,
+        postageBatch: undefined,
+      })
       return
     }
 
@@ -4561,16 +4304,11 @@ export class SwarmIdProxy {
       batchTTL,
     }
 
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "getPostageBatchResponse",
-          requestId: message.requestId,
-          postageBatch,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "getPostageBatchResponse",
+      requestId: message.requestId,
+      postageBatch,
+    })
   }
 
   /**
@@ -4611,16 +4349,11 @@ export class SwarmIdProxy {
           uploadOptions?.encrypt !== false, // Default encrypted
         )
 
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "createFeedManifestResponse",
-              requestId: message.requestId,
-              reference,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
+        this.postMessage(event, {
+          type: "createFeedManifestResponse",
+          requestId: message.requestId,
+          reference,
+        })
         return
       }
 
@@ -4650,22 +4383,14 @@ export class SwarmIdProxy {
           requestOptions,
         )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
         return createResult
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "createFeedManifestResponse",
-            requestId: message.requestId,
-            reference: result.reference,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "createFeedManifestResponse",
+        requestId: message.requestId,
+        reference: result.reference,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
