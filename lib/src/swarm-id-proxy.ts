@@ -2022,57 +2022,16 @@ export class SwarmIdProxy {
       const signerKey = new PrivateKey(signer)
       const id = new Identifier(identifier)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        const result = await uploadSOC(subsidisedTarget, signerKey, id, data, {
-          pin: options?.pin,
-          deferred: options?.deferred,
-        })
-
-        this.postMessage(event, {
-          type: "gsocSendResponse",
-          requestId,
-          reference: uint8ArrayToHex(result.socAddress),
-          tagUid: result.tagUid,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      // Use client-side SOC upload (same as handleSocRawUpload) to work with gateways
-      const result = await this.withWriteLock(async () => {
-        const stamperTarget: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-        }
-
-        const uploadResult = await uploadSOC(
-          stamperTarget,
-          signerKey,
-          id,
-          data,
-          {
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKey, id, data, {
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
-          },
-        )
-
-        return uploadResult
-      })
+          })
+        },
+      )
 
       this.postMessage(event, {
         type: "gsocSendResponse",
@@ -2110,71 +2069,17 @@ export class SwarmIdProxy {
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        // Upload encrypted SOC with auto-generated key
-        const result = await uploadSOC(
-          subsidisedTarget,
-          signerKeyObj,
-          id,
-          data,
-          {
-            encryptionKey: true,
-            pin: options?.pin,
-            deferred: options?.deferred,
-          },
-        )
-
-        const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
-
-        this.postMessage(event, {
-          type: "socUploadResponse",
-          requestId,
-          reference: uint8ArrayToHex(result.socAddress),
-          tagUid: result.tagUid,
-          // encryptionKey always present when using encryptionKey: true
-          encryptionKey: encKeyHex,
-          owner: signerKeyObj.publicKey().address().toHex(),
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        const stamperTarget: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-        }
-
-        // Upload encrypted SOC with auto-generated key
-        const uploadResult = await uploadSOC(
-          stamperTarget,
-          signerKeyObj,
-          id,
-          data,
-          {
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, id, data, {
             encryptionKey: true,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
-          },
-        )
-
-        return uploadResult
-      })
+          })
+        },
+      )
 
       const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
 
@@ -2183,7 +2088,6 @@ export class SwarmIdProxy {
         requestId,
         reference: uint8ArrayToHex(result.socAddress),
         tagUid: result.tagUid,
-        // encryptionKey always present when using encryptionKey: true
         encryptionKey: encKeyHex,
         owner: signerKeyObj.publicKey().address().toHex(),
       })
@@ -2213,66 +2117,16 @@ export class SwarmIdProxy {
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        // Upload plain (unencrypted) SOC
-        const result = await uploadSOC(
-          subsidisedTarget,
-          signerKeyObj,
-          id,
-          data,
-          {
-            pin: options?.pin,
-            deferred: options?.deferred,
-          },
-        )
-
-        this.postMessage(event, {
-          type: "socRawUploadResponse",
-          requestId,
-          reference: uint8ArrayToHex(result.socAddress),
-          tagUid: result.tagUid,
-          encryptionKey: undefined,
-          owner: signerKeyObj.publicKey().address().toHex(),
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        const stamperTarget: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-        }
-
-        // Upload plain (unencrypted) SOC
-        const uploadResult = await uploadSOC(
-          stamperTarget,
-          signerKeyObj,
-          id,
-          data,
-          {
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, id, data, {
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
-          },
-        )
-
-        return uploadResult
-      })
+          })
+        },
+      )
 
       this.postMessage(event, {
         type: "socRawUploadResponse",
