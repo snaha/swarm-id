@@ -641,19 +641,12 @@ export class SwarmIdProxy {
 
     // Store subsidised gateway URL from parent
     const parentSubsidisedGatewayUrl = message.subsidisedGatewayUrl
-    console.log(
-      "[Proxy] parentIdentify - subsidisedGatewayUrl:",
-      parentSubsidisedGatewayUrl,
-    )
     if (parentSubsidisedGatewayUrl) {
       this.subsidisedGatewayUrl = parentSubsidisedGatewayUrl
     }
 
     // Override: disable subsidised gateway when using custom Bee API URL
     if (this.beeApiUrl !== DEFAULT_BEE_NODE_URL && this.subsidisedGatewayUrl) {
-      console.log(
-        "[Proxy] Custom Bee API URL detected, disabling subsidised gateway",
-      )
       this.subsidisedGatewayUrl = undefined
     }
 
@@ -1107,16 +1100,10 @@ export class SwarmIdProxy {
    * - AND a subsidised gateway URL is configured
    */
   private isSubsidisedModeActive(): boolean {
-    const result =
+    return (
       (!this.postageBatchId || !this.signerKey || this.storagePartitioned) &&
       !!this.subsidisedGatewayUrl
-    console.log("[Proxy] isSubsidisedModeActive:", result, {
-      hasPostageBatchId: !!this.postageBatchId,
-      hasSignerKey: !!this.signerKey,
-      storagePartitioned: this.storagePartitioned,
-      subsidisedGatewayUrl: this.subsidisedGatewayUrl,
-    })
-    return result
+    )
   }
 
   /**
