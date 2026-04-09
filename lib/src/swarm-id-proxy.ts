@@ -1915,7 +1915,6 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
-
       this.ensureCanUpload()
 
       // Validate chunk size (must be between 1 and 4096 bytes)
@@ -1925,82 +1924,26 @@ export class SwarmIdProxy {
         )
       }
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        // Create content-addressed chunk to get the reference
-        const chunk = makeContentAddressedChunk(data)
+      // Get mode-appropriate upload target
+      const target = await this.getUploadTarget()
 
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
+      // Create content-addressed chunk from raw payload
+      const chunk = makeContentAddressedChunk(data)
 
-        // Upload chunk directly via /chunks endpoint - gateway stamps it
-        await uploadChunk(subsidisedTarget, chunk.data, {
+      // Execute upload with mode-aware locking
+      await this.withModeAwareWriteLock(async () => {
+        await uploadChunk(target, chunk.data, {
           pin: options?.pin,
-          deferred: options?.deferred,
-        })
-
-        this.postMessage(event, {
-          type: "uploadChunkResponse",
-          requestId,
-          reference: chunk.address.toHex(),
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and signer are available
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please authenticate.",
-        )
-      }
-
-      if (!this.stamper) {
-        await this.initializeStamper()
-      }
-
-      if (!this.stamper) {
-        throw new Error("Failed to initialize stamper for signing")
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const uploadResult = await this.withWriteLock(async () => {
-        // Create content-addressed chunk
-        const chunk = makeContentAddressedChunk(data)
-
-        // Create adapter for cafe-utility Chunk interface
-        const chunkAdapter = {
-          hash: () => chunk.address.toUint8Array(),
-          build: () => chunk.data,
-          span: 0n, // not used by stamper.stamp
-          writer: undefined as any, // not used by stamper.stamp
-        }
-
-        // Sign the chunk to create envelope
-        const envelope = this.stamper!.stamp(chunkAdapter)
-
-        // Create a tag if not provided (required for dev mode)
-        const tag = options?.tag ?? (await tryCreateTag(this.bee))
-
-        // Use non-deferred mode for faster uploads (returns immediately)
-        const uploadOptions = { ...options, tag, deferred: false }
-
-        // Upload with envelope signature
-        const result = await this.bee.uploadChunk(
-          envelope,
-          chunk.data,
-          uploadOptions,
+          deferred: options?.deferred ?? false,
+          tag: options?.tag,
           requestOptions,
-        )
-
-        return result
+        })
       })
 
       this.postMessage(event, {
         type: "uploadChunkResponse",
         requestId,
-        reference: uploadResult.reference.toHex(),
+        reference: chunk.address.toHex(),
       })
     } catch (error) {
       this.sendErrorToParent(
