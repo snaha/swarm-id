@@ -593,14 +593,17 @@ export class SwarmIdProxy {
   /**
    * Execute operation with write lock only in stamper mode.
    * In subsidised mode, skip locking (no local stamp state to protect).
+   * Also handles getting the upload target based on mode.
    */
   private async withModeAwareWriteLock<T>(
-    operation: () => Promise<T>,
+    targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
+    operation: (target: UploadTarget) => Promise<T>,
   ): Promise<T> {
+    const target = await this.getUploadTarget(targetOptions)
     if (this.isSubsidisedModeActive()) {
-      return operation()
+      return operation(target)
     }
-    return this.withWriteLock(operation)
+    return this.withWriteLock(() => operation(target))
   }
 
   /**
@@ -1632,9 +1635,6 @@ export class SwarmIdProxy {
       }
       this.ensureCanUpload()
 
-      // Get mode-appropriate upload target
-      const target = await this.getUploadTarget({ useWorkers, workerCount })
-
       // Create progress callback if enabled (works in both modes)
       const onProgress = this.createProgressCallback(
         event,
@@ -1643,19 +1643,22 @@ export class SwarmIdProxy {
       )
 
       // Execute upload with mode-aware locking
-      const uploadResult = await this.withModeAwareWriteLock(async () => {
-        const result = await uploadData(target, data, {
-          encryptionKey: options?.encrypt ? true : undefined,
-          pin: options?.pin,
-          deferred: options?.deferred,
-          tag: options?.tag,
-          webSocket: useWebSocket ? { concurrency } : undefined,
-          httpConcurrency: concurrency,
-          onProgress,
-          requestOptions,
-        })
-        return result
-      })
+      const uploadResult = await this.withModeAwareWriteLock(
+        { useWorkers, workerCount },
+        async (target) => {
+          const result = await uploadData(target, data, {
+            encryptionKey: options?.encrypt ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+            webSocket: useWebSocket ? { concurrency } : undefined,
+            httpConcurrency: concurrency,
+            onProgress,
+            requestOptions,
+          })
+          return result
+        },
+      )
 
       // Send response
       this.postMessage(event, {
@@ -1731,9 +1734,6 @@ export class SwarmIdProxy {
       }
       this.ensureCanUpload()
 
-      // Get mode-appropriate upload target
-      const target = await this.getUploadTarget({ useWorkers, workerCount })
-
       // Create progress callback if enabled
       const onProgress = this.createProgressCallback(
         event,
@@ -1745,75 +1745,78 @@ export class SwarmIdProxy {
       const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
 
       // Execute upload with mode-aware locking
-      const manifestResult = await this.withModeAwareWriteLock(async () => {
-        // Step 1: Upload file content
-        // Encrypted by default (unless encrypt=false) - encryption is client-side
-        const shouldEncryptContent = options?.encrypt !== false
+      const manifestResult = await this.withModeAwareWriteLock(
+        { useWorkers, workerCount },
+        async (target) => {
+          // Step 1: Upload file content
+          // Encrypted by default (unless encrypt=false) - encryption is client-side
+          const shouldEncryptContent = options?.encrypt !== false
 
-        const contentUpload = await uploadData(target, data, {
-          encryptionKey: shouldEncryptContent ? true : undefined,
-          pin: options?.pin,
-          deferred: options?.deferred,
-          tag: uploadTag,
-          webSocket: useWebSocket ? { concurrency } : undefined,
-          httpConcurrency: concurrency,
-          onProgress,
-          requestOptions,
-        })
+          const contentUpload = await uploadData(target, data, {
+            encryptionKey: shouldEncryptContent ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: uploadTag,
+            webSocket: useWebSocket ? { concurrency } : undefined,
+            httpConcurrency: concurrency,
+            onProgress,
+            requestOptions,
+          })
 
-        // Step 2: Build manifest
-        const manifest = new MantarayNode()
-        const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
+          // Step 2: Build manifest
+          const manifest = new MantarayNode()
+          const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
 
-        manifest.addFork(fileName, contentReferenceBytes, {
-          "Content-Type": "application/octet-stream",
-          Filename: fileName,
-        })
-        manifest.addFork("/", NULL_ADDRESS, {
-          "website-index-document": fileName,
-        })
+          manifest.addFork(fileName, contentReferenceBytes, {
+            "Content-Type": "application/octet-stream",
+            Filename: fileName,
+          })
+          manifest.addFork("/", NULL_ADDRESS, {
+            "website-index-document": fileName,
+          })
 
-        // Step 3: Upload manifest tree
-        let result: { rootReference: string; tagUid?: number }
+          // Step 3: Upload manifest tree
+          let result: { rootReference: string; tagUid?: number }
 
-        const shouldEncryptManifest = options?.encryptManifest === true
+          const shouldEncryptManifest = options?.encryptManifest === true
 
-        if (shouldEncryptManifest) {
-          result = await saveMantarayTreeRecursivelyEncrypted(
-            manifest,
-            async (encryptedData, _address, isRoot) => {
-              await uploadChunk(target, encryptedData, {
-                pin: options?.pin,
-                deferred: options?.deferred,
-                tag: uploadTag,
-                requestOptions,
-              })
-              return {
-                tagUid: isRoot ? uploadTag : undefined,
-              }
-            },
-          )
-        } else {
-          // Use uploadManifestChunk helper for non-encrypted manifest
-          result = await saveMantarayTreeRecursively(
-            manifest,
-            async (nodeData) => {
-              const uploadResult = await this.uploadManifestChunk(
-                target,
-                nodeData,
-                { ...options, tag: uploadTag },
-                requestOptions,
-              )
-              return { reference: uploadResult.reference }
-            },
-          )
-          if (uploadTag !== undefined) {
-            result = { ...result, tagUid: uploadTag }
+          if (shouldEncryptManifest) {
+            result = await saveMantarayTreeRecursivelyEncrypted(
+              manifest,
+              async (encryptedData, _address, isRoot) => {
+                await uploadChunk(target, encryptedData, {
+                  pin: options?.pin,
+                  deferred: options?.deferred,
+                  tag: uploadTag,
+                  requestOptions,
+                })
+                return {
+                  tagUid: isRoot ? uploadTag : undefined,
+                }
+              },
+            )
+          } else {
+            // Use uploadManifestChunk helper for non-encrypted manifest
+            result = await saveMantarayTreeRecursively(
+              manifest,
+              async (nodeData) => {
+                const uploadResult = await this.uploadManifestChunk(
+                  target,
+                  nodeData,
+                  { ...options, tag: uploadTag },
+                  requestOptions,
+                )
+                return { reference: uploadResult.reference }
+              },
+            )
+            if (uploadTag !== undefined) {
+              result = { ...result, tagUid: uploadTag }
+            }
           }
-        }
 
-        return result
-      })
+          return result
+        },
+      )
 
       // Send response
       this.postMessage(event, {
@@ -1924,14 +1927,11 @@ export class SwarmIdProxy {
         )
       }
 
-      // Get mode-appropriate upload target
-      const target = await this.getUploadTarget()
-
       // Create content-addressed chunk from raw payload
       const chunk = makeContentAddressedChunk(data)
 
       // Execute upload with mode-aware locking
-      await this.withModeAwareWriteLock(async () => {
+      await this.withModeAwareWriteLock(undefined, async (target) => {
         await uploadChunk(target, chunk.data, {
           pin: options?.pin,
           deferred: options?.deferred ?? false,
