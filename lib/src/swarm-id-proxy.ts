@@ -1179,6 +1179,9 @@ export class SwarmIdProxy {
   }
 
   private ensureCanUpload(): void {
+    if (!this.authenticated || !this.appSecret) {
+      throw new Error("Not authenticated. Please login first.")
+    }
     // Allow uploads if subsidised mode is active (gateway handles stamping)
     if (this.isSubsidisedModeActive()) {
       return
@@ -1630,9 +1633,6 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
 
       // Create progress callback if enabled (works in both modes)
@@ -1729,9 +1729,6 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
 
       // Create progress callback if enabled
@@ -1915,9 +1912,6 @@ export class SwarmIdProxy {
     const { requestId, data, options, requestOptions } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
 
       // Validate chunk size (must be between 1 and 4096 bytes)
@@ -2013,10 +2007,6 @@ export class SwarmIdProxy {
     const { requestId, signer, identifier, data, options } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
       const signerKey = new PrivateKey(signer)
@@ -2059,13 +2049,9 @@ export class SwarmIdProxy {
     const { requestId, identifier, data, signer, options } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
@@ -2107,13 +2093,9 @@ export class SwarmIdProxy {
     const { requestId, identifier, data, signer, options } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
@@ -2422,13 +2404,9 @@ export class SwarmIdProxy {
       message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const topicObj = new Topic(hexToUint8Array(topic))
       const ownerHex = signerKeyObj.publicKey().address().toHex()
@@ -3012,12 +2990,9 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const ownerAddress = signerKeyObj.publicKey().address()
       const topicBytes = hexToUint8Array(topic)
@@ -3160,12 +3135,9 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const ownerAddress = signerKeyObj.publicKey().address()
       const topicBytes = hexToUint8Array(topic)
@@ -3308,12 +3280,9 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const ownerAddress = signerKeyObj.publicKey().address()
       const topicBytes = hexToUint8Array(topic)
@@ -3466,10 +3435,6 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
       // Parse grantee public keys from compressed hex
@@ -3485,7 +3450,7 @@ export class SwarmIdProxy {
       )
 
       // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
 
       // Handle subsidised gateway mode - gateway handles stamping server-side
       if (this.isSubsidisedModeActive()) {
@@ -3816,14 +3781,10 @@ export class SwarmIdProxy {
     const { requestId, historyReference, grantees, requestOptions } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
       // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
 
       // Parse grantee public keys from compressed hex
       const newGranteePublicKeys = grantees.map((hex) =>
@@ -3925,14 +3886,10 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
       // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
 
       // Parse grantee public keys from compressed hex
       const revokePublicKeys = revokeGrantees.map((hex) =>
