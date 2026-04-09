@@ -11,14 +11,8 @@
  * - History manifest (tracks ACT versions over time)
  */
 
-import type {
-  Bee,
-  BeeRequestOptions,
-  Stamper,
-  UploadOptions,
-} from "@ethersphere/bee-js"
+import type { Bee, BeeRequestOptions, UploadOptions } from "@ethersphere/bee-js"
 import type { UploadProgress } from "../types"
-import type { StampWorkerPool } from "../stamp-worker-pool"
 import { uploadData, type UploadTarget } from "../upload"
 import { downloadDataWithChunkAPI } from "../download-data"
 import { hexToUint8Array, uint8ArrayToHex } from "../../utils/hex"
@@ -33,65 +27,6 @@ import {
 } from "./crypto"
 
 type ActUploadOptions = UploadOptions & { beeCompatible?: boolean }
-
-// ============================================================================
-// ACT Upload Configuration (discriminated union)
-// ============================================================================
-
-/**
- * Stamper-based upload configuration (user has postage batch)
- */
-export interface ActUploadStamperConfig {
-  bee: Bee
-  stamper: Stamper
-  workerPool: StampWorkerPool
-}
-
-/**
- * Subsidised gateway configuration (gateway handles stamping)
- */
-export interface ActUploadSubsidisedConfig {
-  bee: Bee
-  subsidisedGatewayUrl: string
-}
-
-/**
- * Union type - exactly one mode must be specified
- */
-export type ActUploadConfig = ActUploadStamperConfig | ActUploadSubsidisedConfig
-
-/**
- * Type guard for stamper mode
- */
-export function isStamperConfig(
-  config: ActUploadConfig,
-): config is ActUploadStamperConfig {
-  return "stamper" in config
-}
-
-/**
- * Type guard for subsidised mode
- */
-export function isSubsidisedConfig(
-  config: ActUploadConfig,
-): config is ActUploadSubsidisedConfig {
-  return "subsidisedGatewayUrl" in config
-}
-
-/**
- * Create UploadTarget from ActUploadConfig
- */
-function toUploadTarget(config: ActUploadConfig): UploadTarget {
-  if (isSubsidisedConfig(config)) {
-    return { mode: "subsidised", gatewayUrl: config.subsidisedGatewayUrl }
-  }
-  return {
-    mode: "stamper",
-    bee: config.bee,
-    stamper: config.stamper,
-    workerPool: config.workerPool,
-  }
-}
 
 import {
   serializeAct,
@@ -184,7 +119,7 @@ function formatDecryptedReference(decryptedRef: Uint8Array): string {
  * @returns Multiple references for ACT
  */
 export async function createActForContent(
-  config: ActUploadConfig,
+  target: UploadTarget,
   contentReference: Uint8Array,
   publisherPrivateKey: Uint8Array,
   granteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
@@ -239,7 +174,6 @@ export async function createActForContent(
   const actJson = serializeAct(entries)
 
   const beeCompatible = options?.beeCompatible === true
-  const target = toUploadTarget(config)
 
   const actResult = await uploadData(target, actJson, {
     encryptionKey: beeCompatible ? undefined : true,
@@ -428,7 +362,8 @@ export async function decryptActReference(
  * Add grantees to an existing ACT
  */
 export async function addGranteesToAct(
-  config: ActUploadConfig,
+  target: UploadTarget,
+  bee: Bee,
   historyReference: string,
   publisherPrivateKey: Uint8Array,
   newGranteePublicKeys: Array<{ x: Uint8Array; y: Uint8Array }>,
@@ -436,7 +371,6 @@ export async function addGranteesToAct(
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActGranteeModifyResult> {
-  const { bee } = config
   const beeCompatible = historyReference.length === 64
 
   // Download history manifest
@@ -533,7 +467,6 @@ export async function addGranteesToAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const target = toUploadTarget(config)
 
   const actResult = await uploadData(target, newActJson, {
     encryptionKey: beeCompatible ? undefined : true,
@@ -594,7 +527,8 @@ export async function addGranteesToAct(
  * Revoke grantees from an ACT (performs key rotation)
  */
 export async function revokeGranteesFromAct(
-  config: ActUploadConfig,
+  target: UploadTarget,
+  bee: Bee,
   historyReference: string,
   encryptedReference: string,
   publisherPrivateKey: Uint8Array,
@@ -603,7 +537,6 @@ export async function revokeGranteesFromAct(
   requestOptions?: BeeRequestOptions,
   onProgress?: (progress: UploadProgress) => void,
 ): Promise<ActRevocationResult> {
-  const { bee } = config
   const beeCompatible = historyReference.length === 64
 
   // Download history manifest
@@ -726,7 +659,6 @@ export async function revokeGranteesFromAct(
 
   // Upload new ACT manifest (JSON Simple Manifest format)
   const newActJson = serializeAct(newEntries)
-  const target = toUploadTarget(config)
 
   const actResult = await uploadData(target, newActJson, {
     encryptionKey: beeCompatible ? undefined : true,

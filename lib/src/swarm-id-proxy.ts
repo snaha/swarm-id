@@ -122,7 +122,6 @@ import {
   parseCompressedPublicKey,
   publicKeyFromPrivate,
   compressPublicKey,
-  type ActUploadConfig,
 } from "./proxy/act"
 
 const DEFAULT_ACT_FILENAME = "index.bin"
@@ -3029,71 +3028,18 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        // Upload encrypted SOC with auto-generated key
-        const result = await uploadSOC(
-          subsidisedTarget,
-          signerKeyObj,
-          identifier,
-          payload,
-          {
-            encryptionKey: true,
-            pin: options?.pin,
-            deferred: options?.deferred,
-          },
-        )
-
-        this.postMessage(event, {
-          type: "seqFeedUploadPayloadResponse",
-          requestId,
-          reference: uint8ArrayToHex(result.socAddress),
-          feedIndex: resolvedIndex.toString(),
-          owner: ownerAddress.toHex(),
-          encryptionKey: result.encryptionKey
-            ? uint8ArrayToHex(result.encryptionKey)
-            : undefined,
-          tagUid: result.tagUid,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        const stamperTarget: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-        }
-
-        // Upload encrypted SOC with auto-generated key
-        const uploadResult = await uploadSOC(
-          stamperTarget,
-          signerKeyObj,
-          identifier,
-          payload,
-          {
+      // Upload encrypted SOC with auto-generated key
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: true,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
-          },
-        )
-
-        return uploadResult
-      })
+          })
+        },
+      )
 
       this.postMessage(event, {
         type: "seqFeedUploadPayloadResponse",
@@ -3101,8 +3047,9 @@ export class SwarmIdProxy {
         reference: uint8ArrayToHex(result.socAddress),
         feedIndex: resolvedIndex.toString(),
         owner: ownerAddress.toHex(),
-        // encryptionKey always present when using encryptionKey: true
-        encryptionKey: uint8ArrayToHex(result.encryptionKey!),
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
         tagUid: result.tagUid,
       })
     } catch (error) {
@@ -3174,73 +3121,20 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        const result = await uploadSOC(
-          subsidisedTarget,
-          signerKeyObj,
-          identifier,
-          payload,
-          {
-            encryptionKey: encryptionKey
-              ? hexToUint8Array(encryptionKey)
-              : undefined,
-            pin: options?.pin,
-            deferred: options?.deferred,
-          },
-        )
-
-        this.postMessage(event, {
-          type: "seqFeedUploadRawPayloadResponse",
-          requestId,
-          reference: uint8ArrayToHex(result.socAddress),
-          feedIndex: resolvedIndex.toString(),
-          owner: ownerAddress.toHex(),
-          encryptionKey: encryptionKey ? encryptionKey : undefined,
-          tagUid: result.tagUid,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
       // Upload SOC - use encryption if key provided, otherwise plain SOC
-      // The unified uploadSOC handles /soc endpoint properly for v1 format
-      const result = await this.withWriteLock(async () => {
-        const stamperTarget: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-        }
-
-        const uploadResult = await uploadSOC(
-          stamperTarget,
-          signerKeyObj,
-          identifier,
-          payload,
-          {
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: encryptionKey
               ? hexToUint8Array(encryptionKey)
               : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
-          },
-        )
-
-        return uploadResult
-      })
+          })
+        },
+      )
 
       this.postMessage(event, {
         type: "seqFeedUploadRawPayloadResponse",
@@ -3324,76 +3218,16 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        // uploadReference always uses encryption with auto-generated key
-        const result = await uploadSOC(
-          subsidisedTarget,
-          signerKeyObj,
-          identifier,
-          payload,
-          {
+      // uploadReference always uses encryption with auto-generated key
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, identifier, payload, {
             encryptionKey: true,
             pin: options?.pin,
             deferred: options?.deferred,
-          },
-        )
-
-        this.postMessage(event, {
-          type: "seqFeedUploadReferenceResponse",
-          requestId,
-          reference: uint8ArrayToHex(result.socAddress),
-          feedIndex: resolvedIndex.toString(),
-          owner: ownerAddress.toHex(),
-          encryptionKey: result.encryptionKey
-            ? uint8ArrayToHex(result.encryptionKey)
-            : undefined,
-          tagUid: result.tagUid,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const { result, encryptionKeyResult } = await this.withWriteLock(
-        async () => {
-          const stamperTarget: UploadTarget = {
-            mode: "stamper",
-            bee: this.bee,
-            stamper: this.stamper!,
-          }
-
-          // uploadReference always uses encryption with auto-generated key
-          const encResult = await uploadSOC(
-            stamperTarget,
-            signerKeyObj,
-            identifier,
-            payload,
-            {
-              encryptionKey: true,
-              pin: options?.pin,
-              deferred: options?.deferred,
-              tag: options?.tag,
-            },
-          )
-
-          return {
-            result: encResult,
-            encryptionKeyResult: encResult.encryptionKey
-              ? uint8ArrayToHex(encResult.encryptionKey)
-              : undefined,
-          }
+            tag: options?.tag,
+          })
         },
       )
 
@@ -3403,7 +3237,9 @@ export class SwarmIdProxy {
         reference: uint8ArrayToHex(result.socAddress),
         feedIndex: resolvedIndex.toString(),
         owner: ownerAddress.toHex(),
-        encryptionKey: encryptionKeyResult,
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
         tagUid: result.tagUid,
       })
     } catch (error) {
@@ -3451,116 +3287,13 @@ export class SwarmIdProxy {
 
       // Use appSecret as publisher private key (user's identity key for this app)
       const publisherPrivateKey = hexToUint8Array(this.appSecret!)
+      const beeCompatible = options?.beeCompatible === true
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedGatewayUrl = this.subsidisedGatewayUrl!
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: subsidisedGatewayUrl,
-        }
-        const beeCompatible = options?.beeCompatible === true
-
-        // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
-        const contentUploadResult = await uploadData(subsidisedTarget, data, {
-          encryptionKey: true, // generate random encryption key
-          pin: options?.pin,
-          deferred: options?.deferred,
-          onProgress,
-        })
-
-        // Step 2: Create Mantaray manifest wrapping the content
-        const manifest = new MantarayNode()
-        const contentReferenceBytes = hexToUint8Array(
-          contentUploadResult.reference,
-        ) // 64 bytes
-        manifest.addFork(DEFAULT_ACT_FILENAME, contentReferenceBytes, {
-          "Content-Type": DEFAULT_ACT_CONTENT_TYPE,
-          Filename: DEFAULT_ACT_FILENAME,
-        })
-        manifest.addFork("/", NULL_ADDRESS, {
-          "website-index-document": DEFAULT_ACT_FILENAME,
-        })
-
-        // Step 3: Upload the Mantaray manifest via subsidised gateway
-        const manifestResult = beeCompatible
-          ? await saveMantarayTreeRecursively(manifest, async (chunkData) => {
-              const chunk = makeContentAddressedChunk(chunkData)
-              await uploadChunk(subsidisedTarget, chunk.data, {
-                pin: options?.pin,
-                deferred: options?.deferred,
-              })
-              return { reference: chunk.address.toHex() }
-            })
-          : await saveMantarayTreeRecursivelyEncrypted(
-              manifest,
-              async (encryptedData) => {
-                await uploadChunk(subsidisedTarget, encryptedData, {
-                  pin: options?.pin,
-                  deferred: options?.deferred,
-                })
-                return {}
-              },
-            )
-
-        // Step 4: Use manifest reference for ACT encryption
-        const manifestReferenceBytes = hexToUint8Array(
-          manifestResult.rootReference,
-        )
-
-        // Build ACT config for subsidised mode
-        const actConfig: ActUploadConfig = {
-          bee: this.bee,
-          subsidisedGatewayUrl,
-        }
-
-        // Create ACT for the manifest (which points to the content)
-        const actResult = await createActForContent(
-          actConfig,
-          manifestReferenceBytes,
-          publisherPrivateKey,
-          granteePublicKeys,
-          options,
-          requestOptions,
-        )
-
-        // Send final response
-        this.postMessage(event, {
-          type: "actUploadDataResponse",
-          requestId,
-          encryptedReference: actResult.encryptedReference,
-          historyReference: actResult.historyReference,
-          granteeListReference: actResult.granteeListReference,
-          publisherPubKey: actResult.publisherPubKey,
-          actReference: actResult.actReference,
-          tagUid: contentUploadResult.tagUid,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Prepare upload target
-      const stamperTarget: UploadTarget = {
-        mode: "stamper",
-        bee: this.bee,
-        stamper: this.stamper,
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const { actResult, contentUpload } = await this.withWriteLock(
-        async () => {
+      const { actResult, contentUpload } = await this.withModeAwareWriteLock(
+        { useWorkers: true },
+        async (target) => {
           // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
-          const contentUploadResult = await uploadData(stamperTarget, data, {
+          const contentUploadResult = await uploadData(target, data, {
             encryptionKey: true, // generate random encryption key
             pin: options?.pin,
             deferred: options?.deferred,
@@ -3570,12 +3303,11 @@ export class SwarmIdProxy {
           })
 
           // Step 2: Create Mantaray manifest wrapping the content
-          // Content reference is now 64 bytes (encrypted reference: address + encryption key)
-          // This is needed because Bee's /bzz/ endpoint expects a default (Mantaray) manifest
+          // Content reference is 64 bytes (encrypted reference: address + encryption key)
           const manifest = new MantarayNode()
           const contentReferenceBytes = hexToUint8Array(
             contentUploadResult.reference,
-          ) // 64 bytes
+          )
           manifest.addFork(DEFAULT_ACT_FILENAME, contentReferenceBytes, {
             "Content-Type": DEFAULT_ACT_CONTENT_TYPE,
             Filename: DEFAULT_ACT_FILENAME,
@@ -3584,55 +3316,26 @@ export class SwarmIdProxy {
             "website-index-document": DEFAULT_ACT_FILENAME,
           })
 
-          // Create a tag for the manifest uploads (required for dev mode)
-          const manifestTag = options?.tag ?? (await tryCreateTag(this.bee))
-
-          const beeCompatible = options?.beeCompatible === true
-
           // Step 3: Upload the Mantaray manifest
           const manifestResult = beeCompatible
-            ? await saveMantarayTreeRecursively(
-                manifest,
-                async (chunkData, isRoot) => {
-                  const chunk = makeContentAddressedChunk(chunkData)
-                  const envelope = this.stamper!.stamp({
-                    hash: () => chunk.address.toUint8Array(),
-                    build: () => chunk.data,
-                    span: 0n,
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    writer: undefined as any,
-                  })
-                  await this.bee.uploadChunk(
-                    envelope,
-                    chunk.data,
-                    { ...options, tag: manifestTag, deferred: false },
-                    requestOptions,
-                  )
-                  return {
-                    reference: chunk.address.toHex(),
-                    tagUid: isRoot ? manifestTag : undefined,
-                  }
-                },
-              )
+            ? await saveMantarayTreeRecursively(manifest, async (chunkData) => {
+                const chunk = makeContentAddressedChunk(chunkData)
+                await uploadChunk(target, chunk.data, {
+                  pin: options?.pin,
+                  deferred: options?.deferred,
+                  tag: options?.tag,
+                })
+                return { reference: chunk.address.toHex() }
+              })
             : await saveMantarayTreeRecursivelyEncrypted(
                 manifest,
-                async (encryptedData, address, isRoot) => {
-                  const envelope = this.stamper!.stamp({
-                    hash: () => address,
-                    build: () => encryptedData,
-                    span: 0n,
-                    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                    writer: undefined as any,
+                async (encryptedData) => {
+                  await uploadChunk(target, encryptedData, {
+                    pin: options?.pin,
+                    deferred: options?.deferred,
+                    tag: options?.tag,
                   })
-                  await this.bee.uploadChunk(
-                    envelope,
-                    encryptedData,
-                    { ...options, tag: manifestTag, deferred: false },
-                    requestOptions,
-                  )
-                  return {
-                    tagUid: isRoot ? manifestTag : undefined,
-                  }
+                  return {}
                 },
               )
 
@@ -3641,22 +3344,9 @@ export class SwarmIdProxy {
             manifestResult.rootReference,
           )
 
-          // Create worker pool for parallel stamping
-          const workerPool = await this.getOrCreateWorkerPool()
-          if (!workerPool) {
-            throw new Error("Failed to create stamp worker pool")
-          }
-
-          // Build ACT config for stamper mode
-          const actConfig: ActUploadConfig = {
-            bee: this.bee,
-            stamper: this.stamper!,
-            workerPool,
-          }
-
           // Create ACT for the manifest (which points to the content)
           const actResultValue = await createActForContent(
-            actConfig,
+            target,
             manifestReferenceBytes,
             publisherPrivateKey,
             granteePublicKeys,
@@ -3791,71 +3481,21 @@ export class SwarmIdProxy {
         parseCompressedPublicKey(hex),
       )
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const actConfig: ActUploadConfig = {
-          bee: this.bee,
-          subsidisedGatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        // Add grantees to ACT
-        const result = await addGranteesToAct(
-          actConfig,
-          historyReference,
-          publisherPrivateKey,
-          newGranteePublicKeys,
-          undefined,
-          requestOptions,
-        )
-
-        this.postMessage(event, {
-          type: "actAddGranteesResponse",
-          requestId,
-          historyReference: result.historyReference,
-          granteeListReference: result.granteeListReference,
-          actReference: result.actReference,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Create worker pool for parallel stamping
-      const workerPool = await this.getOrCreateWorkerPool()
-      if (!workerPool) {
-        throw new Error("Failed to create stamp worker pool")
-      }
-
-      // Build ACT config for stamper mode
-      const actConfig: ActUploadConfig = {
-        bee: this.bee,
-        stamper: this.stamper,
-        workerPool,
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        // Add grantees to ACT
-        const addResult = await addGranteesToAct(
-          actConfig,
-          historyReference,
-          publisherPrivateKey,
-          newGranteePublicKeys,
-          undefined,
-          requestOptions,
-        )
-
-        return addResult
-      })
+      // Add grantees to ACT
+      const result = await this.withModeAwareWriteLock(
+        { useWorkers: true },
+        async (target) => {
+          return await addGranteesToAct(
+            target,
+            this.bee,
+            historyReference,
+            publisherPrivateKey,
+            newGranteePublicKeys,
+            undefined,
+            requestOptions,
+          )
+        },
+      )
 
       this.postMessage(event, {
         type: "actAddGranteesResponse",
@@ -3896,74 +3536,22 @@ export class SwarmIdProxy {
         parseCompressedPublicKey(hex),
       )
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const actConfig: ActUploadConfig = {
-          bee: this.bee,
-          subsidisedGatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        // Revoke grantees from ACT (performs key rotation)
-        const result = await revokeGranteesFromAct(
-          actConfig,
-          historyReference,
-          encryptedReference,
-          publisherPrivateKey,
-          revokePublicKeys,
-          undefined,
-          requestOptions,
-        )
-
-        this.postMessage(event, {
-          type: "actRevokeGranteesResponse",
-          requestId,
-          encryptedReference: result.encryptedReference,
-          historyReference: result.historyReference,
-          granteeListReference: result.granteeListReference,
-          actReference: result.actReference,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Create worker pool for parallel stamping
-      const workerPool = await this.getOrCreateWorkerPool()
-      if (!workerPool) {
-        throw new Error("Failed to create stamp worker pool")
-      }
-
-      // Build ACT config for stamper mode
-      const actConfig: ActUploadConfig = {
-        bee: this.bee,
-        stamper: this.stamper,
-        workerPool,
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        // Revoke grantees from ACT (performs key rotation)
-        const revokeResult = await revokeGranteesFromAct(
-          actConfig,
-          historyReference,
-          encryptedReference,
-          publisherPrivateKey,
-          revokePublicKeys,
-          undefined,
-          requestOptions,
-        )
-
-        return revokeResult
-      })
+      // Revoke grantees from ACT (performs key rotation)
+      const result = await this.withModeAwareWriteLock(
+        { useWorkers: true },
+        async (target) => {
+          return await revokeGranteesFromAct(
+            target,
+            this.bee,
+            historyReference,
+            encryptedReference,
+            publisherPrivateKey,
+            revokePublicKeys,
+            undefined,
+            requestOptions,
+          )
+        },
+      )
 
       this.postMessage(event, {
         type: "actRevokeGranteesResponse",
