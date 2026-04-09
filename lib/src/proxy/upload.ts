@@ -985,7 +985,7 @@ export async function uploadChunk(
       stamp,
       chunkData,
       address.toUint8Array(),
-      { deferred: false, pin: options?.pin },
+      { deferred: false, pin: options?.pin, tag: options?.tag },
       options?.requestOptions,
     )
 

@@ -533,6 +533,88 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Build mode-appropriate upload target.
+   * Encapsulates mode detection and validation logic.
+   */
+  private async getUploadTarget(options?: {
+    useWorkers?: boolean
+    workerCount?: number
+  }): Promise<UploadTarget> {
+    if (this.isSubsidisedModeActive()) {
+      return {
+        mode: "subsidised",
+        gatewayUrl: this.subsidisedGatewayUrl!,
+      }
+    }
+
+    // Validate user-stamp mode requirements
+    if (!this.signerKey || !this.postageBatchId) {
+      throw new Error(
+        "Signer key and postage batch ID required. Please login first.",
+      )
+    }
+    if (!this.stamper) {
+      throw new Error("Stamper not initialized. Please login first.")
+    }
+
+    const workerPool = options?.useWorkers
+      ? await this.getOrCreateWorkerPool(options.workerCount)
+      : undefined
+
+    return {
+      mode: "stamper",
+      bee: this.bee,
+      stamper: this.stamper,
+      workerPool,
+    }
+  }
+
+  /**
+   * Execute operation with write lock only in stamper mode.
+   * In subsidised mode, skip locking (no local stamp state to protect).
+   */
+  private async withModeAwareWriteLock<T>(
+    operation: () => Promise<T>,
+  ): Promise<T> {
+    if (this.isSubsidisedModeActive()) {
+      return operation()
+    }
+    return this.withWriteLock(operation)
+  }
+
+  /**
+   * Save stamper state only in stamper mode.
+   * In subsidised mode, there's no local stamp state to persist.
+   */
+  private async saveStamperStateIfNeeded(): Promise<void> {
+    if (!this.isSubsidisedModeActive()) {
+      await this.saveStamperState()
+    }
+  }
+
+  /**
+   * Upload a manifest chunk with mode-appropriate stamping.
+   * Used by handleUploadFile for manifest tree uploads.
+   */
+  private async uploadManifestChunk(
+    target: UploadTarget,
+    chunkData: Uint8Array,
+    options?: { pin?: boolean; deferred?: boolean; tag?: number },
+    requestOptions?: BeeRequestOptions,
+  ): Promise<{ reference: string }> {
+    const chunk = makeContentAddressedChunk(chunkData)
+
+    await uploadChunk(target, chunk.data, {
+      pin: options?.pin,
+      deferred: options?.deferred,
+      tag: options?.tag,
+      requestOptions,
+    })
+
+    return { reference: chunk.address.toHex() }
+  }
+
+  /**
    * Setup message listener for parent and popup messages
    */
   private setupMessageListener(): void {
@@ -1547,48 +1629,12 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
-
       this.ensureCanUpload()
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      // Note: encrypt option not supported with subsidised gateway - must encrypt client-side
-      if (this.isSubsidisedModeActive()) {
-        const target: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
+      // Get mode-appropriate upload target
+      const target = await this.getUploadTarget({ useWorkers, workerCount })
 
-        const result = await uploadData(target, data, {
-          pin: options?.pin,
-          deferred: options?.deferred,
-        })
-
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "uploadDataResponse",
-              requestId,
-              reference: result.reference,
-              tagUid: result.tagUid,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
-        return
-      }
-
-      // User stamp mode - validate stamp and signer are available
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Progress callback (if enabled)
+      // Create progress callback if enabled (works in both modes)
       const onProgress = enableProgress
         ? (progress: UploadProgress) => {
             if (event.source) {
@@ -1605,40 +1651,23 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      const wsOptions = useWebSocket ? { concurrency } : undefined
-      const workerPool = useWorkers
-        ? await this.getOrCreateWorkerPool(workerCount)
-        : undefined
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const uploadResult = await this.withWriteLock(async () => {
-        // Prepare upload target
-        const target: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-          workerPool,
-        }
-
-        // Client-side chunking and signing
+      // Execute upload with mode-aware locking
+      const uploadResult = await this.withModeAwareWriteLock(async () => {
         const result = await uploadData(target, data, {
           encryptionKey: options?.encrypt ? true : undefined,
           pin: options?.pin,
           deferred: options?.deferred,
           tag: options?.tag,
-          webSocket: wsOptions,
+          webSocket: useWebSocket ? { concurrency } : undefined,
           httpConcurrency: concurrency,
           onProgress,
           requestOptions,
         })
-
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
+        await this.saveStamperStateIfNeeded()
         return result
       })
 
-      // Send final response
+      // Send response
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
@@ -1720,75 +1749,12 @@ export class SwarmIdProxy {
       if (!this.authenticated || !this.appSecret) {
         throw new Error("Not authenticated. Please login first.")
       }
-
       this.ensureCanUpload()
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      // Note: encrypt option not supported with subsidised gateway - must encrypt client-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
+      // Get mode-appropriate upload target
+      const target = await this.getUploadTarget({ useWorkers, workerCount })
 
-        // 1. Upload file content
-        const contentResult = await uploadData(subsidisedTarget, data, {
-          pin: options?.pin,
-          deferred: options?.deferred,
-        })
-        const contentRefBytes = hexToUint8Array(contentResult.reference)
-
-        // 2. Build manifest with fileName
-        const fileManifest = new MantarayNode()
-
-        fileManifest.addFork(fileName, contentRefBytes, {
-          "Content-Type": "application/octet-stream",
-          Filename: fileName,
-        })
-
-        fileManifest.addFork("/", NULL_ADDRESS, {
-          "website-index-document": fileName,
-        })
-
-        // 3. Upload manifest tree
-        const manifestResult = await saveMantarayTreeRecursively(
-          fileManifest,
-          async (nodeData) => {
-            const chunk = makeContentAddressedChunk(nodeData)
-            await uploadChunk(subsidisedTarget, chunk.data, {
-              pin: options?.pin,
-              deferred: options?.deferred,
-            })
-            return { reference: chunk.address.toHex() }
-          },
-        )
-
-        if (event.source) {
-          ;(event.source as WindowProxy).postMessage(
-            {
-              type: "uploadFileResponse",
-              requestId,
-              reference: manifestResult.rootReference,
-              tagUid: undefined,
-            } satisfies IframeToParentMessage,
-            { targetOrigin: event.origin },
-          )
-        }
-        return
-      }
-
-      // User stamp mode - validate stamp is available
-      if (!this.postageBatchId) {
-        throw new Error(
-          "No postage batch ID available. Please authenticate with a valid batch ID.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Progress callback (if enabled)
+      // Create progress callback if enabled
       const onProgress = enableProgress
         ? (progress: UploadProgress) => {
             if (event.source) {
@@ -1805,111 +1771,82 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      const wsOptions = useWebSocket ? { concurrency } : undefined
-      const workerPool = useWorkers
-        ? await this.getOrCreateWorkerPool(workerCount)
-        : undefined
+      // Execute upload with mode-aware locking
+      const manifestResult = await this.withModeAwareWriteLock(async () => {
+        // Create or use provided tag for the entire upload operation
+        const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const manifestResult = await this.withWriteLock(async () => {
-        // Prepare upload target
-        const stamperTarget: UploadTarget = {
-          mode: "stamper",
-          bee: this.bee,
-          stamper: this.stamper!,
-          workerPool,
-        }
-
-        // Step 1: Upload file data (encrypted by default, unless encrypt=false)
+        // Step 1: Upload file content
+        // Encrypted by default (unless encrypt=false) - encryption is client-side
         const shouldEncryptContent = options?.encrypt !== false
 
-        const contentUpload = await uploadData(stamperTarget, data, {
+        const contentUpload = await uploadData(target, data, {
           encryptionKey: shouldEncryptContent ? true : undefined,
           pin: options?.pin,
           deferred: options?.deferred,
-          tag: options?.tag,
-          webSocket: wsOptions,
+          tag: uploadTag,
+          webSocket: useWebSocket ? { concurrency } : undefined,
           httpConcurrency: concurrency,
           onProgress,
           requestOptions,
         })
 
-        // Step 2: Create Mantaray manifest wrapping the content
+        // Step 2: Build manifest
         const manifest = new MantarayNode()
         const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
 
-        // Add file fork with metadata
         manifest.addFork(fileName, contentReferenceBytes, {
           "Content-Type": "application/octet-stream",
           Filename: fileName,
         })
-
-        // Add "/" fork with website-index-document pointing to the file
         manifest.addFork("/", NULL_ADDRESS, {
           "website-index-document": fileName,
         })
 
-        // Step 3: Upload manifest (encrypted only if encryptManifest=true)
-        const manifestTag = options?.tag ?? (await tryCreateTag(this.bee))
+        // Step 3: Upload manifest tree
+        let result: { rootReference: string; tagUid?: number }
 
         const shouldEncryptManifest = options?.encryptManifest === true
-        let result: { rootReference: string; tagUid?: number }
 
         if (shouldEncryptManifest) {
           result = await saveMantarayTreeRecursivelyEncrypted(
             manifest,
-            async (encryptedData, address, isRoot) => {
-              const envelope = this.stamper!.stamp({
-                hash: () => address,
-                build: () => encryptedData,
-                span: 0n,
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                writer: undefined as any,
-              })
-              await this.bee.uploadChunk(
-                envelope,
-                encryptedData,
-                { ...options, tag: manifestTag, deferred: false },
+            async (encryptedData, _address, isRoot) => {
+              await uploadChunk(target, encryptedData, {
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: uploadTag,
                 requestOptions,
-              )
+              })
               return {
-                tagUid: isRoot ? manifestTag : undefined,
+                tagUid: isRoot ? uploadTag : undefined,
               }
             },
           )
         } else {
+          // Use uploadManifestChunk helper for non-encrypted manifest
           result = await saveMantarayTreeRecursively(
             manifest,
-            async (chunkData, isRoot) => {
-              const chunk = makeContentAddressedChunk(chunkData)
-              const envelope = this.stamper!.stamp({
-                hash: () => chunk.address.toUint8Array(),
-                build: () => chunk.data,
-                span: chunk.span.toBigInt(),
-                // eslint-disable-next-line @typescript-eslint/no-explicit-any
-                writer: undefined as any,
-              })
-              const uploadResult = await this.bee.uploadChunk(
-                envelope,
-                chunk.data,
-                { ...options, tag: manifestTag, deferred: false },
+            async (nodeData) => {
+              const uploadResult = await this.uploadManifestChunk(
+                target,
+                nodeData,
+                { ...options, tag: uploadTag },
                 requestOptions,
               )
-              return {
-                reference: uploadResult.reference.toHex(),
-                tagUid: isRoot ? manifestTag : undefined,
-              }
+              return { reference: uploadResult.reference }
             },
           )
+          if (uploadTag !== undefined) {
+            result = { ...result, tagUid: uploadTag }
+          }
         }
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
+        await this.saveStamperStateIfNeeded()
         return result
       })
 
-      // Return 128-char encrypted manifest reference (accessible via /bzz/)
+      // Send response
       if (event.source) {
         ;(event.source as WindowProxy).postMessage(
           {
