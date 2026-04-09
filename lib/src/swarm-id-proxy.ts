@@ -103,9 +103,6 @@ import {
 import {
   createAsyncEpochFinder,
   createEpochUpdater,
-  EpochIndex,
-  MAX_LEVEL,
-  AsyncEpochFinder,
 } from "./proxy/feeds/epochs"
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
@@ -2408,8 +2405,7 @@ export class SwarmIdProxy {
       const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const topicObj = new Topic(hexToUint8Array(topic))
-      const ownerHex = signerKeyObj.publicKey().address().toHex()
-      const ownerAddress = new EthAddress(ownerHex)
+      const ownerAddress = signerKeyObj.publicKey().address()
       const atValue = this.parseFeedTimestamp(at)
       const epochEncryptionKey = encryptionKey
         ? hexToUint8Array(encryptionKey)
@@ -2428,84 +2424,15 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      // Calculate epoch based on hints or by looking up current state
-      const epoch = await this.calculateEpochForUpdate(
-        topicObj,
-        ownerAddress,
-        atValue,
-        epochHints,
-        epochEncryptionKey,
-      )
-
-      // Build identifier: Keccak256(topic || Keccak256(start || level))
-      const epochHash = await epoch.marshalBinary()
-      const identifier = new Identifier(
-        Binary.keccak256(
-          Binary.concatBytes(topicObj.toUint8Array(), epochHash),
-        ),
-      )
-
-      // Build payload: timestamp (8 bytes big-endian) + reference
+      // Validate reference length
       const referenceBytes = hexToUint8Array(reference)
       if (referenceBytes.length !== 32 && referenceBytes.length !== 64) {
         throw new Error(
           `Reference must be 32 or 64 bytes, got ${referenceBytes.length}`,
         )
       }
-      const timestamp = new Uint8Array(8)
-      const tsView = new DataView(timestamp.buffer)
-      tsView.setBigUint64(0, atValue, false) // big-endian
-      const payload = Binary.concatBytes(timestamp, referenceBytes)
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const subsidisedTarget: UploadTarget = {
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        }
-
-        const result = await uploadSOC(
-          subsidisedTarget,
-          signerKeyObj,
-          identifier,
-          payload,
-          {
-            encryptionKey: epochEncryptionKey,
-            deferred: false,
-          },
-        )
-        const socAddress = result.socAddress
-
-        // Verify upload with read-back
-        const readBackFinder = createAsyncEpochFinder({
-          bee: this.bee,
-          topic: topicObj,
-          owner: ownerAddress,
-          encryptionKey: epochEncryptionKey,
-        })
-        await readBackFinder.findAt(atValue, atValue)
-
-        this.postMessage(event, {
-          type: "epochFeedUploadReferenceResponse",
-          requestId,
-          socAddress: uint8ArrayToHex(socAddress),
-          encryptionKey: encryptionKey ? encryptionKey : undefined,
-          epoch: {
-            start: epoch.start.toString(),
-            level: epoch.level,
-          },
-          timestamp: atValue.toString(),
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
+      // Create updater - works with both stamper and subsidised modes
       const updater = createEpochUpdater({
         bee: this.bee,
         topic: topicObj,
@@ -2513,28 +2440,32 @@ export class SwarmIdProxy {
         signer: signerKeyObj,
       })
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const updateResult = await this.withWriteLock(async () => {
-        const result = await updater.update(
-          atValue,
-          referenceBytes,
-          this.stamper!,
-          epochEncryptionKey,
-          epochHints,
-        )
+      // Use mode-aware write lock for the upload operation
+      const updateResult = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          const result = await updater.update(
+            atValue,
+            referenceBytes,
+            target,
+            epochEncryptionKey,
+            epochHints,
+          )
 
-        const readBackFinder = createAsyncEpochFinder({
-          bee: this.bee,
-          topic: topicObj,
-          owner: ownerAddress,
-          encryptionKey: epochEncryptionKey,
-        })
-        // Upload read-back should verify the exact timestamp write and avoid
-        // broad fallback scans over historical leaves on poisoned networks.
-        await readBackFinder.findAt(atValue, atValue)
+          // Verify upload with read-back
+          const readBackFinder = createAsyncEpochFinder({
+            bee: this.bee,
+            topic: topicObj,
+            owner: ownerAddress,
+            encryptionKey: epochEncryptionKey,
+          })
+          // Upload read-back should verify the exact timestamp write and avoid
+          // broad fallback scans over historical leaves on poisoned networks.
+          await readBackFinder.findAt(atValue, atValue)
 
-        return result
-      })
+          return result
+        },
+      )
 
       this.postMessage(event, {
         type: "epochFeedUploadReferenceResponse",
@@ -2556,44 +2487,6 @@ export class SwarmIdProxy {
           : "Epoch feed upload reference failed",
       )
     }
-  }
-
-  /**
-   * Calculate epoch for an update based on hints or by looking up current state
-   */
-  private async calculateEpochForUpdate(
-    topic: Topic,
-    owner: EthAddress,
-    at: bigint,
-    hints?: {
-      lastEpoch: { start: bigint; level: number }
-      lastTimestamp?: bigint
-    },
-    encryptionKey?: Uint8Array,
-  ): Promise<EpochIndex> {
-    // Fast path: use provided hints
-    if (hints?.lastEpoch && hints.lastTimestamp !== undefined) {
-      const prevEpoch = new EpochIndex(
-        hints.lastEpoch.start,
-        hints.lastEpoch.level,
-      )
-      return prevEpoch.next(hints.lastTimestamp, at)
-    }
-
-    // Slow path: lookup current state using AsyncEpochFinder directly
-    // (not the interface) to access findAtWithMetadata
-    const finder = new AsyncEpochFinder(this.bee, topic, owner, encryptionKey)
-
-    // Use findAtWithMetadata to get both reference AND epoch info
-    const current = await finder.findAtWithMetadata(at)
-
-    if (!current) {
-      // First update ever - use root epoch
-      return new EpochIndex(0n, MAX_LEVEL)
-    }
-
-    // Calculate next epoch based on found state
-    return current.epoch.next(current.timestamp, at)
   }
 
   private async handleSequentialFeedGetOwner(

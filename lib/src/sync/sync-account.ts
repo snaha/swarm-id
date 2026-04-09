@@ -384,10 +384,12 @@ export function createSyncAccount(
       // Convert 128-char hex reference to 64-byte Uint8Array
       const refBytes = new Reference(uploadResult.reference).toUint8Array()
 
+      // Create upload target for epoch feed update
+      const feedTarget: UploadTarget = { mode: "stamper", bee, stamper }
       const updateResult = await updater.update(
         feedTimestamp,
         refBytes,
-        stamper,
+        feedTarget,
       )
 
       // Add SOC chunk to tracked addresses
