@@ -2449,20 +2449,21 @@ export class SwarmIdProxy {
             epochHints,
           )
 
-          // Verify upload with read-back
-          const readBackFinder = createAsyncEpochFinder({
-            bee: this.bee,
-            topic: topicObj,
-            owner: ownerAddress,
-            encryptionKey: epochEncryptionKey,
-          })
-          // Upload read-back should verify the exact timestamp write and avoid
-          // broad fallback scans over historical leaves on poisoned networks.
-          await readBackFinder.findAt(atValue, atValue)
-
           return result
         },
       )
+
+      // Verify upload with read-back
+      const readBackFinder = createAsyncEpochFinder({
+        bee: this.bee,
+        topic: topicObj,
+        owner: ownerAddress,
+        encryptionKey: epochEncryptionKey,
+      })
+
+      // Upload read-back should verify the exact timestamp write and avoid
+      // broad fallback scans over historical leaves on poisoned networks.
+      await readBackFinder.findAt(atValue, atValue)
 
       this.postMessage(event, {
         type: "epochFeedUploadReferenceResponse",
