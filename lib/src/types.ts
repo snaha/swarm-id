@@ -131,7 +131,7 @@ export const UploadResultSchema = z.object({
 })
 
 export const SocUploadResultSchema = UploadResultSchema.extend({
-  encryptionKey: z.string(),
+  encryptionKey: z.string().optional(),
   owner: AddressSchema,
 })
 
@@ -1276,7 +1276,7 @@ export const SocUploadResponseMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
-  encryptionKey: z.string(),
+  encryptionKey: z.string().optional(),
   owner: AddressSchema,
 })
 

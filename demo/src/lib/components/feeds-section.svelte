@@ -20,9 +20,15 @@
   import FeedDownload from './feed-download.svelte'
   import FeedManifest from './feed-manifest.svelte'
 
-  const DEFAULT_TOPIC = '0000000000000000000000000000000000000000000000000000000000000000'
+  function generateRandomTopic(): string {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
 
-  let topic = $state(DEFAULT_TOPIC)
+  let topic = $state(generateRandomTopic())
   let feedIndex = $state('')
   let feedAt = $state('')
   let isEpoch = $state(false)

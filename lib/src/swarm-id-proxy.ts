@@ -2055,7 +2055,7 @@ export class SwarmIdProxy {
         undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, id, data, {
-            encryptionKey: true,
+            encryptionKey: options?.encrypt !== false ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
@@ -2063,14 +2063,14 @@ export class SwarmIdProxy {
         },
       )
 
-      const encKeyHex = uint8ArrayToHex(result.encryptionKey!)
-
       this.postMessage(event, {
         type: "socUploadResponse",
         requestId,
         reference: uint8ArrayToHex(result.socAddress),
         tagUid: result.tagUid,
-        encryptionKey: encKeyHex,
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
         owner: signerKeyObj.publicKey().address().toHex(),
       })
     } catch (error) {
@@ -2921,12 +2921,12 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Upload encrypted SOC with auto-generated key
+      // Upload SOC with optional encryption (enabled by default)
       const result = await this.withModeAwareWriteLock(
         undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
-            encryptionKey: true,
+            encryptionKey: options?.encrypt !== false ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
@@ -3185,9 +3185,9 @@ export class SwarmIdProxy {
       const { actResult, contentUpload } = await this.withModeAwareWriteLock(
         { useWorkers: true },
         async (target) => {
-          // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
+          // Step 1: Upload raw content data (encrypted by default for 64-byte reference)
           const contentUploadResult = await uploadData(target, data, {
-            encryptionKey: true, // generate random encryption key
+            encryptionKey: options?.encrypt !== false ? true : undefined,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
