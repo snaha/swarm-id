@@ -1634,10 +1634,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, options, requestOptions } = message
 
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
     try {
       // Download data using chunk API only (supports both regular and encrypted references)
       const data = await downloadDataWithChunkAPI(
@@ -1765,10 +1761,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, path, options, requestOptions } = message
 
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
     try {
       // Always load the manifest first - file uploads create manifests
       const manifest = await loadMantarayTreeWithChunkAPI(
@@ -1881,10 +1873,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, reference, options, requestOptions } = message
-
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
 
     try {
       // Download chunk using bee-js (returns Uint8Array directly)
