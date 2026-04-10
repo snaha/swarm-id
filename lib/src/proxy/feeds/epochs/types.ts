@@ -5,13 +5,8 @@
  * Types for Epoch-Based Feeds
  */
 
-import type {
-  Bee,
-  EthAddress,
-  Topic,
-  PrivateKey,
-  Stamper,
-} from "@ethersphere/bee-js"
+import type { Bee, EthAddress, Topic, PrivateKey } from "@ethersphere/bee-js"
+import type { UploadTarget } from "../../upload"
 import type { EpochIndex } from "./epoch"
 
 /**
@@ -111,7 +106,7 @@ export interface EpochUpdater {
    *
    * @param at - Unix timestamp for this update (seconds)
    * @param reference - 32 or 64-byte Swarm reference to store
-   * @param stamper - Stamper object for stamping
+   * @param target - Upload target (stamper or subsidised gateway)
    * @param encryptionKey - Optional encryption key for the update
    * @param hints - Optional hints from previous update for calculating epoch
    * @returns Update result with SOC address and epoch info for next update
@@ -119,7 +114,7 @@ export interface EpochUpdater {
   update(
     at: bigint,
     reference: Uint8Array,
-    stamper: Stamper,
+    target: UploadTarget,
     encryptionKey?: Uint8Array,
     hints?: EpochUpdateHints,
   ): Promise<EpochUpdateResult>

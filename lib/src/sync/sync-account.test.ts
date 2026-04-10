@@ -100,15 +100,15 @@ let capturedEpochReference: Uint8Array | undefined
 const FAKE_UPLOAD_REFERENCE = "ab".repeat(32)
 const FAKE_SOC_ADDRESS = new Uint8Array(32).fill(0xee)
 
-vi.mock("../proxy/upload-encrypted-data", () => ({
-  uploadEncryptedDataWithSigning: vi.fn(
+vi.mock("../proxy/upload", () => ({
+  uploadData: vi.fn(
     async (
-      _context: unknown,
+      _target: unknown,
       data: Uint8Array,
-      encryptionKey: Uint8Array | undefined,
+      options?: { encryptionKey?: Uint8Array | boolean },
     ) => {
       capturedUploadData = data
-      capturedEncryptionKey = encryptionKey
+      capturedEncryptionKey = options?.encryptionKey as Uint8Array | undefined
       uploadCallCount++
       return {
         reference: FAKE_UPLOAD_REFERENCE,

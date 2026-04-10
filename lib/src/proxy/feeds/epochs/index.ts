@@ -67,7 +67,7 @@ export function createAsyncEpochFinder(options: EpochFeedOptions): EpochFinder {
 export function createEpochUpdater(
   options: EpochFeedWriterOptions,
 ): EpochUpdater {
-  return new BasicEpochUpdater(options.bee, options.topic, options.signer)
+  return new BasicEpochUpdater(options.topic, options.signer)
 }
 
 /**

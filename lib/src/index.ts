@@ -425,11 +425,16 @@ export type {
 
 // Mantaray tree utilities for recursive upload/download
 export {
+  saveMantarayTree,
   saveMantarayTreeRecursively,
   loadMantarayTreeWithChunkAPI,
 } from "./proxy/mantaray"
 
-export type { UploadCallback } from "./proxy/mantaray"
+export type {
+  MantarayUploadCallback,
+  SaveMantarayOptions,
+  UploadCallback,
+} from "./proxy/mantaray"
 
 // Time and session constants
 export {

@@ -10,7 +10,7 @@
 import { Binary } from "cafe-utility"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
-import { uploadEncryptedSOC, uploadSOC } from "../../upload-encrypted-data"
+import { uploadSOC, type UploadTarget } from "../../upload"
 import type { SequentialUpdater } from "./types"
 
 export class BasicSequentialUpdater implements SequentialUpdater {
@@ -29,19 +29,16 @@ export class BasicSequentialUpdater implements SequentialUpdater {
   ): Promise<Uint8Array> {
     const identifier = this.makeIdentifier(this.nextIndex)
 
-    const result = encryptionKey
-      ? await uploadEncryptedSOC(
-          this.bee,
-          stamper,
-          this.signer,
-          identifier,
-          payload,
-          encryptionKey,
-          { deferred: false },
-        )
-      : await uploadSOC(this.bee, stamper, this.signer, identifier, payload, {
-          deferred: false,
-        })
+    const target: UploadTarget = {
+      mode: "stamper",
+      bee: this.bee,
+      stamper,
+    }
+
+    const result = await uploadSOC(target, this.signer, identifier, payload, {
+      encryptionKey,
+      deferred: false,
+    })
 
     this.nextIndex += 1n
 

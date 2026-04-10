@@ -3,6 +3,22 @@
 
 export * from "./types"
 export * from "./chunking"
-export * from "./upload-data"
+
+// Unified upload API
+export {
+  uploadData,
+  uploadSOC,
+  uploadChunk,
+  isStamperTarget,
+  isSubsidisedTarget,
+  type UploadTarget,
+  type UploadDataOptions,
+  type UploadDataResult,
+  type UploadSOCOptions,
+  type UploadSOCResult,
+  type UploadChunkOptions,
+  type UploadChunkResult,
+} from "./upload"
+
 export * from "./feeds"
 export * from "./act"

@@ -81,13 +81,20 @@ export class MockBee {
   }
 
   async uploadChunk(
-    data: Uint8Array,
-    _postageBatchId: string,
-  ): Promise<{ reference: string }> {
+    envelopeOrData: unknown,
+    dataOrBatchId: Uint8Array | string,
+    _options?: unknown,
+    _requestOptions?: unknown,
+  ): Promise<{ reference: { toHex(): string } }> {
+    // Support both new signature (envelope, data) and legacy (data, batchId)
+    const data =
+      dataOrBatchId instanceof Uint8Array
+        ? dataOrBatchId
+        : (envelopeOrData as Uint8Array)
     const address = Binary.keccak256(data)
     const reference = Binary.uint8ArrayToHex(address)
     await this.store.put(reference, data)
-    return { reference }
+    return { reference: { toHex: () => reference } }
   }
 
   getStore(): MockChunkStore {

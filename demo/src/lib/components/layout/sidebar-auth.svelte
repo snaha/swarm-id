@@ -13,7 +13,11 @@
   import { clientStore } from '$lib/stores/client.svelte'
 
   let agentSignup = $state(false)
+  let useSubsidisedGateway = $state(false)
   let popoverOpen = $state(false)
+
+  // Derive whether custom Bee API URL is set
+  const hasCustomBeeApiUrl = $derived(clientStore.hasCustomBeeApiUrl)
 
   // Close popover when auth state changes (covers iframe button connect/disconnect)
   let prevAuth = $state(clientStore.authenticated)
@@ -105,7 +109,7 @@
       </div>
       <Button
         onclick={() => {
-          clientStore.connect({ agent: agentSignup })
+          clientStore.connect({ agent: agentSignup, useSubsidisedGateway })
           popoverOpen = false
         }}
         size="sm"
@@ -141,6 +145,26 @@
         <Checkbox bind:checked={agentSignup} id="popover-agent-signup" />
         <Label for="popover-agent-signup" class="cursor-pointer text-xs text-muted-foreground">
           Agent sign-up
+        </Label>
+      </div>
+
+      <!-- Subsidised gateway -->
+      <div class="flex items-center gap-2">
+        <Checkbox
+          bind:checked={useSubsidisedGateway}
+          id="popover-subsidised-gateway"
+          disabled={hasCustomBeeApiUrl}
+        />
+        <Label
+          for="popover-subsidised-gateway"
+          class="text-xs text-muted-foreground {hasCustomBeeApiUrl
+            ? 'opacity-50'
+            : 'cursor-pointer'}"
+        >
+          Use subsidised gateway
+          {#if hasCustomBeeApiUrl}
+            (custom Bee node)
+          {/if}
         </Label>
       </div>
     {/if}

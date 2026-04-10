@@ -9,13 +9,9 @@
  */
 
 import { Binary } from "cafe-utility"
-import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
-import {
-  uploadEncryptedSOC,
-  uploadSOCViaSocEndpoint,
-} from "../../upload-encrypted-data"
+import { uploadSOC, isStamperTarget, type UploadTarget } from "../../upload"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
 
@@ -35,7 +31,6 @@ import { AsyncEpochFinder } from "./async-finder"
  */
 export class BasicEpochUpdater implements EpochUpdater {
   constructor(
-    private readonly bee: Bee,
     private readonly topic: Topic,
     private readonly signer: PrivateKey,
   ) {}
@@ -45,7 +40,7 @@ export class BasicEpochUpdater implements EpochUpdater {
    *
    * @param at - Unix timestamp for this update (seconds)
    * @param reference - 32 or 64-byte Swarm reference to store
-   * @param stamper - Stamper object for stamping
+   * @param target - Upload target (stamper or subsidised gateway)
    * @param encryptionKey - Optional encryption key for the update
    * @param hints - Optional hints from previous update for calculating epoch
    * @returns Update result with SOC address and epoch info for next update
@@ -53,7 +48,7 @@ export class BasicEpochUpdater implements EpochUpdater {
   async update(
     at: bigint,
     reference: Uint8Array,
-    stamper: Stamper,
+    target: UploadTarget,
     encryptionKey?: Uint8Array,
     hints?: EpochUpdateHints,
   ): Promise<EpochUpdateResult> {
@@ -64,14 +59,15 @@ export class BasicEpochUpdater implements EpochUpdater {
     }
 
     // Calculate epoch - auto-lookup if no hints provided
-    const epoch = await this.calculateEpoch(at, hints, encryptionKey)
+    // For subsidised mode, we can't auto-lookup (no bee instance), so hints are required
+    const epoch = await this.calculateEpoch(at, hints, encryptionKey, target)
 
     // Upload the chunk with timestamp + reference
     const socAddress = await this.uploadEpochChunk(
       epoch,
       at,
       reference,
-      stamper,
+      target,
       encryptionKey,
     )
 
@@ -87,18 +83,21 @@ export class BasicEpochUpdater implements EpochUpdater {
    * Calculate the epoch for this update based on hints or auto-lookup
    *
    * When hints are provided, uses them for fast epoch calculation.
-   * When no hints are provided, looks up the current feed state to calculate
-   * the next epoch, preventing overwrites of previous updates.
+   * When no hints are provided and using stamper mode, looks up the current
+   * feed state to calculate the next epoch, preventing overwrites.
+   * In subsidised mode without hints, uses root epoch (first update).
    *
    * @param at - Timestamp for this update
    * @param hints - Optional hints from previous update
    * @param encryptionKey - Optional encryption key for looking up encrypted feeds
+   * @param target - Upload target for determining if auto-lookup is possible
    * @returns Epoch to use for this update
    */
   private async calculateEpoch(
     at: bigint,
     hints?: EpochUpdateHints,
     encryptionKey?: Uint8Array,
+    target?: UploadTarget,
   ): Promise<EpochIndex> {
     // Fast path: use provided hints
     if (hints?.lastEpoch && hints.lastTimestamp !== undefined) {
@@ -109,10 +108,16 @@ export class BasicEpochUpdater implements EpochUpdater {
       return prevEpoch.next(hints.lastTimestamp, at)
     }
 
-    // Slow path: lookup current state
+    // Auto-lookup is only possible in stamper mode (we have a bee instance)
+    // In subsidised mode without hints, use root epoch (first update)
+    if (!target || !isStamperTarget(target)) {
+      return new EpochIndex(0n, MAX_LEVEL)
+    }
+
+    // Slow path: lookup current state using stamper's bee instance
     const owner = this.signer.publicKey().address()
     const finder = new AsyncEpochFinder(
-      this.bee,
+      target.bee,
       this.topic,
       owner,
       encryptionKey,
@@ -143,14 +148,14 @@ export class BasicEpochUpdater implements EpochUpdater {
    * @param epoch - Epoch to upload to
    * @param at - Timestamp of this update
    * @param reference - 32 or 64-byte reference to store
-   * @param stamper - Stamper object for stamping
+   * @param target - Upload target (stamper or subsidised gateway)
    * @returns SOC chunk address for utilization tracking
    */
   private async uploadEpochChunk(
     epoch: EpochIndex,
     at: bigint,
     reference: Uint8Array,
-    stamper: Stamper,
+    target: UploadTarget,
     encryptionKey?: Uint8Array,
   ): Promise<Uint8Array> {
     // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
@@ -171,24 +176,10 @@ export class BasicEpochUpdater implements EpochUpdater {
     // which is the v1 format Bee expects for /bzz/ compatibility
     const payload = Binary.concatBytes(timestamp, reference)
 
-    const result = encryptionKey
-      ? await uploadEncryptedSOC(
-          this.bee,
-          stamper,
-          this.signer,
-          identifier,
-          payload,
-          encryptionKey,
-          { deferred: false }, // deferred setting is NOT the cause of /bzz/ timeout
-        )
-      : await uploadSOCViaSocEndpoint(
-          this.bee,
-          stamper,
-          this.signer,
-          identifier,
-          payload,
-          { deferred: false }, // deferred setting is NOT the cause of /bzz/ timeout
-        )
+    const result = await uploadSOC(target, this.signer, identifier, payload, {
+      encryptionKey,
+      deferred: false, // deferred setting is NOT the cause of /bzz/ timeout
+    })
 
     return result.socAddress
   }

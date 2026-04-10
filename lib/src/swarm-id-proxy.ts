@@ -6,7 +6,6 @@ import type {
   IframeToParentMessage,
   ButtonStyles,
   ButtonConfig,
-  RequestAuthMessage,
   UploadDataMessage,
   DownloadDataMessage,
   UploadFileMessage,
@@ -63,25 +62,23 @@ import {
 } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "./chunk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
-import { uploadDataWithSigning } from "./proxy/upload-data"
 import {
-  uploadEncryptedDataWithSigning,
-  uploadEncryptedSOC,
+  uploadData,
   uploadSOC,
-  uploadSOCViaSocEndpoint,
-} from "./proxy/upload-encrypted-data"
+  uploadChunk,
+  type UploadTarget,
+} from "./proxy/upload"
 import {
   downloadDataWithChunkAPI,
   downloadSOC,
   downloadEncryptedSOC,
 } from "./proxy/download-data"
-import type { UploadContext, UploadProgress } from "./proxy/types"
+import type { UploadProgress } from "./proxy/types"
 import { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
-  saveMantarayTreeRecursively,
+  saveMantarayTree,
 } from "./proxy/mantaray"
-import { saveMantarayTreeRecursivelyEncrypted } from "./proxy/mantaray-encrypted"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -161,6 +158,7 @@ export class SwarmIdProxy {
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
   private utilizationChannel: BroadcastChannel
+  private subsidisedGatewayUrl: string | undefined
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -385,9 +383,30 @@ export class SwarmIdProxy {
         try {
           return await operation()
         } finally {
+          await this.saveStamperStateIfNeeded()
         }
       },
     )
+  }
+
+  /**
+   * Create an onProgress callback for upload operations.
+   * Returns undefined if progress reporting is disabled.
+   */
+  private createProgressCallback(
+    event: MessageEvent,
+    requestId: string,
+    enableProgress: boolean | undefined,
+  ): ((progress: UploadProgress) => void) | undefined {
+    if (!enableProgress) return undefined
+    return (progress: UploadProgress) => {
+      this.postMessage(event, {
+        type: "uploadProgress",
+        requestId,
+        total: progress.total,
+        processed: progress.processed,
+      })
+    }
   }
 
   /**
@@ -526,6 +545,69 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Build mode-appropriate upload target.
+   * Encapsulates mode detection and validation logic.
+   */
+  private async getUploadTarget(options?: {
+    useWorkers?: boolean
+    workerCount?: number
+  }): Promise<UploadTarget> {
+    if (this.isSubsidisedModeActive()) {
+      return {
+        mode: "subsidised",
+        gatewayUrl: this.subsidisedGatewayUrl!,
+      }
+    }
+
+    // Validate user-stamp mode requirements
+    if (!this.signerKey || !this.postageBatchId) {
+      throw new Error(
+        "Signer key and postage batch ID required. Please login first.",
+      )
+    }
+    if (!this.stamper) {
+      throw new Error("Stamper not initialized. Please login first.")
+    }
+
+    const workerPool = options?.useWorkers
+      ? await this.getOrCreateWorkerPool(options.workerCount)
+      : undefined
+
+    return {
+      mode: "stamper",
+      bee: this.bee,
+      stamper: this.stamper,
+      workerPool,
+    }
+  }
+
+  /**
+   * Execute operation with write lock only in stamper mode.
+   * In subsidised mode, skip locking (no local stamp state to protect).
+   * Also handles getting the upload target based on mode.
+   */
+  private async withModeAwareWriteLock<T>(
+    targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
+    operation: (target: UploadTarget) => Promise<T>,
+  ): Promise<T> {
+    const target = await this.getUploadTarget(targetOptions)
+    if (this.isSubsidisedModeActive()) {
+      return operation(target)
+    }
+    return this.withWriteLock(() => operation(target))
+  }
+
+  /**
+   * Save stamper state only in stamper mode.
+   * In subsidised mode, there's no local stamp state to persist.
+   */
+  private async saveStamperStateIfNeeded(): Promise<void> {
+    if (!this.isSubsidisedModeActive()) {
+      await this.saveStamperState()
+    }
+  }
+
+  /**
    * Setup message listener for parent and popup messages
    */
   private setupMessageListener(): void {
@@ -586,7 +668,7 @@ export class SwarmIdProxy {
         console.error("[Proxy] Error handling parent message:", error)
         this.sendErrorToParent(
           event,
-          (message as { requestId?: string }).requestId,
+          message.requestId,
           error instanceof Error ? error.message : "Unknown error",
         )
       }
@@ -632,20 +714,32 @@ export class SwarmIdProxy {
       this.buttonConfig = parentButtonConfig
     }
 
+    // Store subsidised gateway URL from parent
+    const parentSubsidisedGatewayUrl = message.subsidisedGatewayUrl
+    if (parentSubsidisedGatewayUrl) {
+      this.subsidisedGatewayUrl = parentSubsidisedGatewayUrl
+    }
+
+    // Override: disable subsidised gateway when using custom Bee API URL
+    if (this.beeApiUrl !== DEFAULT_BEE_NODE_URL && this.subsidisedGatewayUrl) {
+      this.subsidisedGatewayUrl = undefined
+    }
+
     // Load existing secret if available
     await this.loadAuthData()
 
-    // Acknowledge receipt
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "proxyReady",
-          authenticated: this.authenticated,
-          parentOrigin: this.parentOrigin,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
+    // Update this.bee to use subsidised gateway URL when in subsidised mode
+    // This ensures downloads use the same endpoint as uploads
+    if (this.isSubsidisedModeActive()) {
+      this.bee = new Bee(this.subsidisedGatewayUrl!)
     }
+
+    // Acknowledge receipt
+    this.postMessage(event, {
+      type: "proxyReady",
+      authenticated: this.authenticated,
+      parentOrigin: this.parentOrigin,
+    })
   }
 
   /**
@@ -666,10 +760,6 @@ export class SwarmIdProxy {
 
       case "disconnect":
         this.handleDisconnect(message, event)
-        break
-
-      case "requestAuth":
-        this.handleRequestAuth(message, event)
         break
 
       case "uploadData":
@@ -1050,24 +1140,42 @@ export class SwarmIdProxy {
     requestId: string | undefined,
     error: string,
   ): void {
-    if (event.source && requestId) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "error",
-          requestId,
-          error,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
+    if (requestId) {
+      this.postMessage(event, {
+        type: "error",
+        requestId,
+        error,
+      })
     }
   }
 
   private ensureCanUpload(): void {
+    if (!this.authenticated || !this.appSecret) {
+      throw new Error("Not authenticated. Please login first.")
+    }
+    // Allow uploads if subsidised mode is active (gateway handles stamping)
+    if (this.isSubsidisedModeActive()) {
+      return
+    }
     if (this.storagePartitioned) {
       throw new Error(
         "Uploads are unavailable in download-only mode due to browser storage partitioning.",
       )
     }
+  }
+
+  /**
+   * Check if subsidised upload mode is active.
+   * Subsidised mode is active when:
+   * - User has no postage stamp OR no signer key, OR storage is partitioned
+   *   (can't access stamp when partitioned)
+   * - AND a subsidised gateway URL is configured
+   */
+  private isSubsidisedModeActive(): boolean {
+    return (
+      (!this.postageBatchId || !this.signerKey || this.storagePartitioned) &&
+      !!this.subsidisedGatewayUrl
+    )
   }
 
   /**
@@ -1084,6 +1192,22 @@ export class SwarmIdProxy {
     this.parentWindow.postMessage(message, this.parentOrigin)
   }
 
+  /**
+   * Send message to the event source (parent window that sent the request)
+   */
+  private postMessage(
+    event: MessageEvent,
+    message: IframeToParentMessage,
+  ): void {
+    if (!event.source) {
+      console.warn("[Proxy] Cannot send message - no event source")
+      return
+    }
+    ;(event.source as WindowProxy).postMessage(message, {
+      targetOrigin: event.origin,
+    })
+  }
+
   // ============================================================================
   // Message Handlers
   // ============================================================================
@@ -1092,17 +1216,13 @@ export class SwarmIdProxy {
     message: { type: "checkAuth"; requestId: string },
     event: MessageEvent,
   ): void {
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "authStatusResponse",
-          requestId: message.requestId,
-          authenticated: this.authenticated,
-          origin: this.authenticated ? this.parentOrigin : undefined,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "authStatusResponse",
+      requestId: message.requestId,
+      authenticated: this.authenticated,
+      origin: this.authenticated ? this.parentOrigin : undefined,
+      beeApiUrl: this.beeApiUrl,
+    })
   }
 
   private handleGetConnectionInfo(
@@ -1160,23 +1280,28 @@ export class SwarmIdProxy {
       }
     }
 
-    // canUpload is true if we have stamps and storage is not partitioned
-    const canUpload =
-      !!(this.postageBatchId && this.signerKey) && !this.storagePartitioned
-
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "connectionInfoResponse",
-          requestId: message.requestId,
-          canUpload,
-          storagePartitioned: this.storagePartitioned || undefined,
-          identity,
-          appKey,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
+    // Determine upload mode
+    // User-stamp mode only available when storage is NOT partitioned (can access stamp)
+    // Subsidised mode takes precedence when storage is partitioned (can't access stamp)
+    let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
+    if (this.postageBatchId && this.signerKey && !this.storagePartitioned) {
+      uploadMode = "user-stamp"
+    } else if (this.subsidisedGatewayUrl) {
+      uploadMode = "subsidised"
     }
+
+    // canUpload is true if user has stamps, or subsidised gateway is configured
+    const canUpload = uploadMode !== "unavailable"
+
+    this.postMessage(event, {
+      type: "connectionInfoResponse",
+      requestId: message.requestId,
+      canUpload,
+      storagePartitioned: this.storagePartitioned || undefined,
+      uploadMode,
+      identity,
+      appKey,
+    })
   }
 
   private async handleIsConnected(
@@ -1185,16 +1310,11 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const connected = await this.bee.isConnected()
 
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "isConnectedResponse",
-          requestId: message.requestId,
-          connected,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "isConnectedResponse",
+      requestId: message.requestId,
+      connected,
+    })
   }
 
   private async handleGetNodeInfo(
@@ -1204,18 +1324,13 @@ export class SwarmIdProxy {
     try {
       const nodeInfo = await this.bee.getNodeInfo()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "getNodeInfoResponse",
-            requestId: message.requestId,
-            beeMode: nodeInfo.beeMode,
-            chequebookEnabled: nodeInfo.chequebookEnabled,
-            swapEnabled: nodeInfo.swapEnabled,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "getNodeInfoResponse",
+        requestId: message.requestId,
+        beeMode: nodeInfo.beeMode,
+        chequebookEnabled: nodeInfo.chequebookEnabled,
+        swapEnabled: nodeInfo.swapEnabled,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1233,29 +1348,11 @@ export class SwarmIdProxy {
     this.clearAuthData()
 
     // Send response
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "disconnectResponse",
-          requestId: message.requestId,
-          success: true,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
-  }
-
-  private handleRequestAuth(
-    message: RequestAuthMessage,
-    _event: MessageEvent,
-  ): void {
-    // Store styles for button creation
-    this.currentStyles = message.styles
-
-    // If container is set, show the button
-    if (this.authButtonContainer) {
-      this.showAuthButton()
-    }
+    this.postMessage(event, {
+      type: "disconnectResponse",
+      requestId: message.requestId,
+      success: true,
+    })
   }
 
   /**
@@ -1348,14 +1445,11 @@ export class SwarmIdProxy {
       agent: message.agent,
       popupMode: message.popupMode,
     })
-    ;(event.source as WindowProxy).postMessage(
-      {
-        type: "connectResponse",
-        requestId: message.requestId,
-        success,
-      },
-      { targetOrigin: event.origin },
-    )
+    this.postMessage(event, {
+      type: "connectResponse",
+      requestId: message.requestId,
+      success,
+    })
   }
 
   /**
@@ -1497,94 +1591,40 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
+      // Create progress callback if enabled (works in both modes)
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
 
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Progress callback (if enabled)
-      const onProgress = enableProgress
-        ? (progress: UploadProgress) => {
-            if (event.source) {
-              ;(event.source as WindowProxy).postMessage(
-                {
-                  type: "uploadProgress",
-                  requestId,
-                  total: progress.total,
-                  processed: progress.processed,
-                } satisfies IframeToParentMessage,
-                { targetOrigin: event.origin },
-              )
-            }
-          }
-        : undefined
-
-      const wsOptions = useWebSocket ? { concurrency } : undefined
-      const workerPool = useWorkers
-        ? await this.getOrCreateWorkerPool(workerCount)
-        : undefined
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const uploadResult = await this.withWriteLock(async () => {
-        // Prepare upload context
-        const context: UploadContext = {
-          bee: this.bee,
-          stamper: this.stamper!,
-          workerPool,
-        }
-
-        // Client-side chunking and signing
-        let result
-        if (options?.encrypt) {
-          result = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // encryption key (auto-generated)
-            options,
+      // Execute upload with mode-aware locking
+      const uploadResult = await this.withModeAwareWriteLock(
+        { useWorkers, workerCount },
+        async (target) => {
+          const result = await uploadData(target, data, {
+            encryptionKey: options?.encrypt ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+            webSocket: useWebSocket ? { concurrency } : undefined,
+            httpConcurrency: concurrency,
             onProgress,
             requestOptions,
-            wsOptions,
-            concurrency,
-          )
-        } else {
-          result = await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            onProgress,
-            requestOptions,
-          )
-        }
+          })
+          return result
+        },
+      )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
-        return result
+      // Send response
+      this.postMessage(event, {
+        type: "uploadDataResponse",
+        requestId,
+        reference: uploadResult.reference,
+        tagUid: uploadResult.tagUid,
       })
-
-      // Send final response
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "uploadDataResponse",
-            requestId,
-            reference: uploadResult.reference,
-            tagUid: uploadResult.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1600,10 +1640,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, options, requestOptions } = message
 
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
     try {
       // Download data using chunk API only (supports both regular and encrypted references)
       const data = await downloadDataWithChunkAPI(
@@ -1614,16 +1650,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "downloadDataResponse",
-            requestId,
-            data: data as Uint8Array,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "downloadDataResponse",
+        requestId,
+        data: data as Uint8Array,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1652,163 +1683,75 @@ export class SwarmIdProxy {
     const fileName = name || "index.bin"
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.postageBatchId) {
-        throw new Error(
-          "No postage batch ID available. Please authenticate with a valid batch ID.",
-        )
-      }
+      // Create progress callback if enabled
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
 
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
+      // Create or use provided tag for the entire upload operation
+      const uploadTag = options?.tag ?? (await tryCreateTag(this.bee))
 
-      // Progress callback (if enabled)
-      const onProgress = enableProgress
-        ? (progress: UploadProgress) => {
-            if (event.source) {
-              ;(event.source as WindowProxy).postMessage(
-                {
-                  type: "uploadProgress",
-                  requestId,
-                  total: progress.total,
-                  processed: progress.processed,
-                } satisfies IframeToParentMessage,
-                { targetOrigin: event.origin },
-              )
-            }
-          }
-        : undefined
+      // Execute upload with mode-aware locking
+      const manifestResult = await this.withModeAwareWriteLock(
+        { useWorkers, workerCount },
+        async (target) => {
+          // Step 1: Upload file content
+          // Encrypted by default (unless encrypt=false) - encryption is client-side
+          const shouldEncryptContent = options?.encrypt !== false
 
-      const wsOptions = useWebSocket ? { concurrency } : undefined
-      const workerPool = useWorkers
-        ? await this.getOrCreateWorkerPool(workerCount)
-        : undefined
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const manifestResult = await this.withWriteLock(async () => {
-        // Prepare upload context
-        const context: UploadContext = {
-          bee: this.bee,
-          stamper: this.stamper!,
-          workerPool,
-        }
-
-        // Step 1: Upload file data (encrypted by default, unless encrypt=false)
-        const shouldEncryptContent = options?.encrypt !== false
-        let contentUpload: { reference: string; tagUid?: number }
-
-        if (shouldEncryptContent) {
-          contentUpload = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // generate random encryption key
-            options,
+          const contentUpload = await uploadData(target, data, {
+            encryptionKey: shouldEncryptContent ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: uploadTag,
+            webSocket: useWebSocket ? { concurrency } : undefined,
+            httpConcurrency: concurrency,
             onProgress,
             requestOptions,
-            wsOptions,
-            concurrency,
-          )
-        } else {
-          contentUpload = await uploadDataWithSigning(
-            context,
-            data,
-            options,
-            onProgress,
-            requestOptions,
-          )
-        }
+          })
 
-        // Step 2: Create Mantaray manifest wrapping the content
-        const manifest = new MantarayNode()
-        const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
+          // Step 2: Build manifest
+          const manifest = new MantarayNode()
+          const contentReferenceBytes = hexToUint8Array(contentUpload.reference)
 
-        // Add file fork with metadata
-        manifest.addFork(fileName, contentReferenceBytes, {
-          "Content-Type": "application/octet-stream",
-          Filename: fileName,
-        })
+          manifest.addFork(fileName, contentReferenceBytes, {
+            "Content-Type": "application/octet-stream",
+            Filename: fileName,
+          })
+          manifest.addFork("/", NULL_ADDRESS, {
+            "website-index-document": fileName,
+          })
 
-        // Add "/" fork with website-index-document pointing to the file
-        manifest.addFork("/", NULL_ADDRESS, {
-          "website-index-document": fileName,
-        })
-
-        // Step 3: Upload manifest (encrypted only if encryptManifest=true)
-        const manifestTag = options?.tag ?? (await tryCreateTag(context.bee))
-
-        const shouldEncryptManifest = options?.encryptManifest === true
-        let result: { rootReference: string; tagUid?: number }
-
-        if (shouldEncryptManifest) {
-          result = await saveMantarayTreeRecursivelyEncrypted(
-            manifest,
-            async (encryptedData, address, isRoot) => {
-              const envelope = context.stamper.stamp({
-                hash: () => address,
-                build: () => encryptedData,
-                span: 0n,
-                writer: undefined as any,
-              })
-              await context.bee.uploadChunk(
-                envelope,
-                encryptedData,
-                { ...options, tag: manifestTag, deferred: false },
-                requestOptions,
-              )
-              return {
-                tagUid: isRoot ? manifestTag : undefined,
-              }
-            },
-          )
-        } else {
-          result = await saveMantarayTreeRecursively(
+          // Step 3: Upload manifest tree
+          const result = await saveMantarayTree(
             manifest,
             async (chunkData, isRoot) => {
-              const chunk = makeContentAddressedChunk(chunkData)
-              const envelope = context.stamper.stamp({
-                hash: () => chunk.address.toUint8Array(),
-                build: () => chunk.data,
-                span: chunk.span.toBigInt(),
-                writer: undefined as any,
-              })
-              const uploadResult = await context.bee.uploadChunk(
-                envelope,
-                chunk.data,
-                { ...options, tag: manifestTag, deferred: false },
+              await uploadChunk(target, chunkData, {
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: uploadTag,
                 requestOptions,
-              )
-              return {
-                reference: uploadResult.reference.toHex(),
-                tagUid: isRoot ? manifestTag : undefined,
-              }
+              })
+              return { tagUid: isRoot ? uploadTag : undefined }
             },
+            { encrypt: options?.encryptManifest === true },
           )
-        }
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
+          return result
+        },
+      )
 
-        return result
+      // Send response
+      this.postMessage(event, {
+        type: "uploadFileResponse",
+        requestId,
+        reference: manifestResult.rootReference,
+        tagUid: manifestResult.tagUid,
       })
-
-      // Return 128-char encrypted manifest reference (accessible via /bzz/)
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "uploadFileResponse",
-            requestId,
-            reference: manifestResult.rootReference,
-            tagUid: manifestResult.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1823,10 +1766,6 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     const { requestId, reference, path, options, requestOptions } = message
-
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
 
     try {
       // Always load the manifest first - file uploads create manifests
@@ -1877,17 +1816,12 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "downloadFileResponse",
-            requestId,
-            name,
-            data,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "downloadFileResponse",
+        requestId,
+        name,
+        data,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1904,17 +1838,8 @@ export class SwarmIdProxy {
     const { requestId, data, options, requestOptions } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please authenticate.",
-        )
-      }
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
         throw new Error(
@@ -1922,60 +1847,24 @@ export class SwarmIdProxy {
         )
       }
 
-      if (!this.stamper) {
-        await this.initializeStamper()
-      }
+      // Create content-addressed chunk from raw payload
+      const chunk = makeContentAddressedChunk(data)
 
-      if (!this.stamper) {
-        throw new Error("Failed to initialize stamper for signing")
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const uploadResult = await this.withWriteLock(async () => {
-        // Create content-addressed chunk
-        const chunk = makeContentAddressedChunk(data)
-
-        // Create adapter for cafe-utility Chunk interface
-        const chunkAdapter = {
-          hash: () => chunk.address.toUint8Array(),
-          build: () => chunk.data,
-          span: 0n, // not used by stamper.stamp
-          writer: undefined as any, // not used by stamper.stamp
-        }
-
-        // Sign the chunk to create envelope
-        const envelope = this.stamper!.stamp(chunkAdapter)
-
-        // Create a tag if not provided (required for dev mode)
-        const tag = options?.tag ?? (await tryCreateTag(this.bee))
-
-        // Use non-deferred mode for faster uploads (returns immediately)
-        const uploadOptions = { ...options, tag, deferred: false }
-
-        // Upload with envelope signature
-        const result = await this.bee.uploadChunk(
-          envelope,
-          chunk.data,
-          uploadOptions,
+      // Execute upload with mode-aware locking
+      await this.withModeAwareWriteLock(undefined, async (target) => {
+        await uploadChunk(target, chunk.data, {
+          pin: options?.pin,
+          deferred: options?.deferred ?? false,
+          tag: options?.tag,
           requestOptions,
-        )
-
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
-        return result
+        })
       })
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "uploadChunkResponse",
-            requestId,
-            reference: uploadResult.reference.toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "uploadChunkResponse",
+        requestId,
+        reference: chunk.address.toHex(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -1991,10 +1880,6 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const { requestId, reference, options, requestOptions } = message
 
-    if (!this.authenticated || !this.appSecret) {
-      throw new Error("Not authenticated. Please login first.")
-    }
-
     try {
       // Download chunk using bee-js (returns Uint8Array directly)
       const data = await this.bee.downloadChunk(
@@ -2003,16 +1888,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "downloadChunkResponse",
-            requestId,
-            data: data as Uint8Array,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "downloadChunkResponse",
+        requestId,
+        data: data as Uint8Array,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2028,16 +1908,11 @@ export class SwarmIdProxy {
     try {
       const signer = this.bee.gsocMine(targetOverlay, identifier, proximity)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "gsocMineResponse",
-            requestId,
-            signer: signer.toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "gsocMineResponse",
+        requestId,
+        signer: signer.toHex(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2054,49 +1929,28 @@ export class SwarmIdProxy {
     const { requestId, signer, identifier, data, options } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
-
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
 
       const signerKey = new PrivateKey(signer)
       const id = new Identifier(identifier)
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      // Use client-side SOC upload (same as handleSocRawUpload) to work with gateways
-      const result = await this.withWriteLock(async () => {
-        const uploadResult = await uploadSOC(
-          this.bee,
-          this.stamper!,
-          signerKey,
-          id,
-          data,
-          options,
-        )
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKey, id, data, {
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          })
+        },
+      )
 
-        await this.saveStamperState()
-
-        return uploadResult
+      this.postMessage(event, {
+        type: "gsocSendResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        tagUid: result.tagUid,
       })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "gsocSendResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2117,52 +1971,34 @@ export class SwarmIdProxy {
     const { requestId, identifier, data, signer, options } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        const uploadResult = await uploadEncryptedSOC(
-          this.bee,
-          this.stamper!,
-          signerKeyObj,
-          id,
-          data,
-          undefined,
-          options,
-        )
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, id, data, {
+            encryptionKey: options?.encrypt !== false ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          })
+        },
+      )
 
-        await this.saveStamperState()
-
-        return uploadResult
+      this.postMessage(event, {
+        type: "socUploadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        tagUid: result.tagUid,
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
+        owner: signerKeyObj.publicKey().address().toHex(),
       })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socUploadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            tagUid: result.tagUid,
-            encryptionKey: uint8ArrayToHex(result.encryptionKey),
-            owner: signerKeyObj.publicKey().address().toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2179,51 +2015,31 @@ export class SwarmIdProxy {
     const { requestId, identifier, data, signer, options } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const id = new Identifier(identifier)
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        const uploadResult = await uploadSOC(
-          this.bee,
-          this.stamper!,
-          signerKeyObj,
-          id,
-          data,
-          options,
-        )
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, id, data, {
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          })
+        },
+      )
 
-        await this.saveStamperState()
-
-        return uploadResult
+      this.postMessage(event, {
+        type: "socRawUploadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        tagUid: result.tagUid,
+        encryptionKey: undefined,
+        owner: signerKeyObj.publicKey().address().toHex(),
       })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socRawUploadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            tagUid: result.tagUid,
-            encryptionKey: undefined,
-            owner: signerKeyObj.publicKey().address().toHex(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2260,22 +2076,17 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socDownloadResponse",
-            requestId,
-            data: soc.data,
-            identifier: soc.identifier,
-            signature: soc.signature,
-            span: soc.span,
-            payload: soc.payload,
-            address: soc.address,
-            owner: soc.owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socDownloadResponse",
+        requestId,
+        data: soc.data,
+        identifier: soc.identifier,
+        signature: soc.signature,
+        span: soc.span,
+        payload: soc.payload,
+        address: soc.address,
+        owner: soc.owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2314,22 +2125,17 @@ export class SwarmIdProxy {
           )
         : await downloadSOC(this.bee, resolvedOwner, identifier, requestOptions)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socRawDownloadResponse",
-            requestId,
-            data: soc.data,
-            identifier: soc.identifier,
-            signature: soc.signature,
-            span: soc.span,
-            payload: soc.payload,
-            address: soc.address,
-            owner: soc.owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socRawDownloadResponse",
+        requestId,
+        data: soc.data,
+        identifier: soc.identifier,
+        signature: soc.signature,
+        span: soc.span,
+        payload: soc.payload,
+        address: soc.address,
+        owner: soc.owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2352,16 +2158,11 @@ export class SwarmIdProxy {
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "socGetOwnerResponse",
-            requestId,
-            owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "socGetOwnerResponse",
+        requestId,
+        owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2442,16 +2243,11 @@ export class SwarmIdProxy {
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "feedGetOwnerResponse",
-            requestId,
-            owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "feedGetOwnerResponse",
+        requestId,
+        owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2506,16 +2302,11 @@ export class SwarmIdProxy {
         reference = await plainFinder.findAt(atValue, afterValue)
       }
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "epochFeedDownloadReferenceResponse",
-            requestId,
-            reference: reference ? uint8ArrayToHex(reference) : undefined,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "epochFeedDownloadReferenceResponse",
+        requestId,
+        reference: reference ? uint8ArrayToHex(reference) : undefined,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2535,29 +2326,12 @@ export class SwarmIdProxy {
       message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const topicObj = new Topic(hexToUint8Array(topic))
-      const ownerHex = signerKeyObj.publicKey().address().toHex()
-      const ownerAddress = new EthAddress(ownerHex)
-      const updater = createEpochUpdater({
-        bee: this.bee,
-        topic: topicObj,
-        owner: ownerAddress,
-        signer: signerKeyObj,
-      })
+      const ownerAddress = signerKeyObj.publicKey().address()
       const atValue = this.parseFeedTimestamp(at)
       const epochEncryptionKey = encryptionKey
         ? hexToUint8Array(encryptionKey)
@@ -2576,48 +2350,61 @@ export class SwarmIdProxy {
           }
         : undefined
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const updateResult = await this.withWriteLock(async () => {
-        const referenceBytes = hexToUint8Array(reference)
-        const result = await updater.update(
-          atValue,
-          referenceBytes,
-          this.stamper!,
-          epochEncryptionKey,
-          epochHints,
-        )
-
-        const readBackFinder = createAsyncEpochFinder({
-          bee: this.bee,
-          topic: topicObj,
-          owner: ownerAddress,
-          encryptionKey: epochEncryptionKey,
-        })
-        // Upload read-back should verify the exact timestamp write and avoid
-        // broad fallback scans over historical leaves on poisoned networks.
-        await readBackFinder.findAt(atValue, atValue)
-
-        await this.saveStamperState()
-
-        return result
-      })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "epochFeedUploadReferenceResponse",
-            requestId,
-            socAddress: uint8ArrayToHex(updateResult.socAddress),
-            encryptionKey: encryptionKey ? encryptionKey : undefined,
-            epoch: {
-              start: updateResult.epoch.start.toString(),
-              level: updateResult.epoch.level,
-            },
-            timestamp: updateResult.timestamp.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
+      // Validate reference length
+      const referenceBytes = hexToUint8Array(reference)
+      if (referenceBytes.length !== 32 && referenceBytes.length !== 64) {
+        throw new Error(
+          `Reference must be 32 or 64 bytes, got ${referenceBytes.length}`,
         )
       }
+
+      // Create updater - works with both stamper and subsidised modes
+      const updater = createEpochUpdater({
+        bee: this.bee,
+        topic: topicObj,
+        owner: ownerAddress,
+        signer: signerKeyObj,
+      })
+
+      // Use mode-aware write lock for the upload operation
+      const updateResult = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          const result = await updater.update(
+            atValue,
+            referenceBytes,
+            target,
+            epochEncryptionKey,
+            epochHints,
+          )
+
+          return result
+        },
+      )
+
+      // Verify upload with read-back
+      const readBackFinder = createAsyncEpochFinder({
+        bee: this.bee,
+        topic: topicObj,
+        owner: ownerAddress,
+        encryptionKey: epochEncryptionKey,
+      })
+
+      // Upload read-back should verify the exact timestamp write and avoid
+      // broad fallback scans over historical leaves on poisoned networks.
+      await readBackFinder.findAt(atValue, atValue)
+
+      this.postMessage(event, {
+        type: "epochFeedUploadReferenceResponse",
+        requestId,
+        socAddress: uint8ArrayToHex(updateResult.socAddress),
+        encryptionKey: encryptionKey ? encryptionKey : undefined,
+        epoch: {
+          start: updateResult.epoch.start.toString(),
+          level: updateResult.epoch.level,
+        },
+        timestamp: updateResult.timestamp.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2642,16 +2429,11 @@ export class SwarmIdProxy {
 
       const owner = new PrivateKey(this.appSecret).publicKey().address().toHex()
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedGetOwnerResponse",
-            requestId,
-            owner,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedGetOwnerResponse",
+        requestId,
+        owner,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2829,19 +2611,14 @@ export class SwarmIdProxy {
       const parsed = this.parseSequentialPayload(soc.payload, useTimestamp)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedDownloadPayloadResponse",
-            requestId,
-            payload: parsed.payload,
-            timestamp: parsed.timestamp,
-            feedIndex: resolvedIndex.toString(),
-            feedIndexNext: nextIndex.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedDownloadPayloadResponse",
+        requestId,
+        payload: parsed.payload,
+        timestamp: parsed.timestamp,
+        feedIndex: resolvedIndex.toString(),
+        feedIndexNext: nextIndex.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2904,19 +2681,14 @@ export class SwarmIdProxy {
       const parsed = this.parseSequentialPayload(soc.payload, useTimestamp)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedDownloadRawPayloadResponse",
-            requestId,
-            payload: parsed.payload,
-            timestamp: parsed.timestamp,
-            feedIndex: resolvedIndex.toString(),
-            feedIndexNext: nextIndex.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedDownloadRawPayloadResponse",
+        requestId,
+        payload: parsed.payload,
+        timestamp: parsed.timestamp,
+        feedIndex: resolvedIndex.toString(),
+        feedIndexNext: nextIndex.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -2987,18 +2759,13 @@ export class SwarmIdProxy {
       const referenceHex = uint8ArrayToHex(parsed.payload)
       const nextIndex = this.sequentialNextIndex(resolvedIndex)
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedDownloadReferenceResponse",
-            requestId,
-            reference: referenceHex,
-            feedIndex: resolvedIndex.toString(),
-            feedIndexNext: nextIndex.toString(),
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedDownloadReferenceResponse",
+        requestId,
+        reference: referenceHex,
+        feedIndex: resolvedIndex.toString(),
+        feedIndexNext: nextIndex.toString(),
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3042,124 +2809,9 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
 
-      const signerKey = signer ?? this.appSecret
-      const signerKeyObj = new PrivateKey(signerKey)
-      const ownerAddress = signerKeyObj.publicKey().address()
-      const topicBytes = hexToUint8Array(topic)
-
-      const useTimestamp = hasTimestamp !== false
-      const atValue =
-        at !== undefined
-          ? this.parseFeedTimestamp(at)
-          : BigInt(Math.floor(Date.now() / 1000))
-      let resolvedIndex: bigint
-      if (index !== undefined) {
-        resolvedIndex = this.parseFeedIndex(index)
-      } else {
-        const latest = await this.findLatestSequentialIndex(
-          topicBytes,
-          ownerAddress,
-          requestOptions,
-          lookupTimeoutMs,
-        )
-        resolvedIndex =
-          latest === undefined ? 0n : this.sequentialNextIndex(latest)
-      }
-
-      const payload = this.buildSequentialPayload(data, useTimestamp, atValue)
-      if (payload.length < 1 || payload.length > 4096) {
-        throw new Error(
-          `Invalid payload length: ${payload.length} (expected 1-4096)`,
-        )
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        const identifierBytes = this.makeSequentialFeedIdentifier(
-          topicBytes,
-          resolvedIndex,
-        )
-        const identifier = new Identifier(identifierBytes)
-        const uploadResult = await uploadEncryptedSOC(
-          this.bee,
-          this.stamper!,
-          signerKeyObj,
-          identifier,
-          payload,
-          undefined,
-          options,
-        )
-
-        await this.saveStamperState()
-
-        return uploadResult
-      })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedUploadPayloadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            feedIndex: resolvedIndex.toString(),
-            owner: ownerAddress.toHex(),
-            encryptionKey: uint8ArrayToHex(result.encryptionKey),
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
-    } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload payload failed",
-      )
-    }
-  }
-
-  private async handleSequentialFeedUploadRawPayload(
-    message: SequentialFeedUploadRawPayloadMessage,
-    event: MessageEvent,
-  ): Promise<void> {
-    const {
-      requestId,
-      topic,
-      signer,
-      data,
-      index,
-      at,
-      hasTimestamp,
-      encryptionKey,
-      lookupTimeoutMs,
-      options,
-      requestOptions,
-    } = message
-
-    try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-      this.ensureCanUpload()
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
-
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const ownerAddress = signerKeyObj.publicKey().address()
       const topicBytes = hexToUint8Array(topic)
@@ -3196,59 +2848,123 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Debug: log the values used for SOC address computation
+      // Upload SOC with optional encryption (enabled by default)
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, identifier, payload, {
+            encryptionKey: options?.encrypt !== false ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          })
+        },
+      )
 
-      // DEBUG: Log payload details for /bzz/ compatibility analysis
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      // Upload SOC - use encryption if key provided, otherwise use /soc endpoint
-      // The /soc endpoint is needed for non-encrypted uploads because:
-      // - Small SOCs (< 4104 bytes) are misidentified as CAC by /chunks endpoint
-      // - /soc endpoint explicitly handles SOC without size-based detection
-      // - Preserves v1 format (48-byte CAC) required for /bzz/ compatibility
-      const result = await this.withWriteLock(async () => {
-        let uploadResult
-        if (encryptionKey) {
-          uploadResult = await uploadEncryptedSOC(
-            this.bee,
-            this.stamper!,
-            signerKeyObj,
-            identifier,
-            payload,
-            hexToUint8Array(encryptionKey),
-            options,
-          )
-        } else {
-          // Use /soc endpoint for non-encrypted uploads (v1 format for /bzz/ compat)
-          uploadResult = await uploadSOCViaSocEndpoint(
-            this.bee,
-            this.stamper!,
-            signerKeyObj,
-            identifier,
-            payload,
-            options,
-          )
-        }
-
-        await this.saveStamperState()
-
-        return uploadResult
+      this.postMessage(event, {
+        type: "seqFeedUploadPayloadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: resolvedIndex.toString(),
+        owner: ownerAddress.toHex(),
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
+        tagUid: result.tagUid,
       })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error
+          ? error.message
+          : "Sequential feed upload payload failed",
+      )
+    }
+  }
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedUploadRawPayloadResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            feedIndex: resolvedIndex.toString(),
-            owner: ownerAddress.toHex(),
-            encryptionKey: encryptionKey ? encryptionKey : undefined,
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
+  private async handleSequentialFeedUploadRawPayload(
+    message: SequentialFeedUploadRawPayloadMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const {
+      requestId,
+      topic,
+      signer,
+      data,
+      index,
+      at,
+      hasTimestamp,
+      encryptionKey,
+      lookupTimeoutMs,
+      options,
+      requestOptions,
+    } = message
+
+    try {
+      this.ensureCanUpload()
+
+      const signerKey = signer ?? this.appSecret!
+      const signerKeyObj = new PrivateKey(signerKey)
+      const ownerAddress = signerKeyObj.publicKey().address()
+      const topicBytes = hexToUint8Array(topic)
+
+      const useTimestamp = hasTimestamp !== false
+      const atValue =
+        at !== undefined
+          ? this.parseFeedTimestamp(at)
+          : BigInt(Math.floor(Date.now() / 1000))
+      let resolvedIndex: bigint
+      if (index !== undefined) {
+        resolvedIndex = this.parseFeedIndex(index)
+      } else {
+        const latest = await this.findLatestSequentialIndex(
+          topicBytes,
+          ownerAddress,
+          requestOptions,
+          lookupTimeoutMs,
+        )
+        resolvedIndex =
+          latest === undefined ? 0n : this.sequentialNextIndex(latest)
+      }
+
+      const payload = this.buildSequentialPayload(data, useTimestamp, atValue)
+      if (payload.length < 1 || payload.length > 4096) {
+        throw new Error(
+          `Invalid payload length: ${payload.length} (expected 1-4096)`,
         )
       }
+
+      const identifierBytes = this.makeSequentialFeedIdentifier(
+        topicBytes,
+        resolvedIndex,
+      )
+      const identifier = new Identifier(identifierBytes)
+
+      // Upload SOC - use encryption if key provided, otherwise plain SOC
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, identifier, payload, {
+            encryptionKey: encryptionKey
+              ? hexToUint8Array(encryptionKey)
+              : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          })
+        },
+      )
+
+      this.postMessage(event, {
+        type: "seqFeedUploadRawPayloadResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: resolvedIndex.toString(),
+        owner: ownerAddress.toHex(),
+        encryptionKey: encryptionKey ? encryptionKey : undefined,
+        tagUid: result.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3278,17 +2994,9 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
       this.ensureCanUpload()
-      if (!this.postageBatchId || !this.stamper) {
-        throw new Error(
-          "Postage batch ID and stamper required. Please login first.",
-        )
-      }
 
-      const signerKey = signer ?? this.appSecret
+      const signerKey = signer ?? this.appSecret!
       const signerKeyObj = new PrivateKey(signerKey)
       const ownerAddress = signerKeyObj.publicKey().address()
       const topicBytes = hexToUint8Array(topic)
@@ -3324,49 +3032,36 @@ export class SwarmIdProxy {
         )
       }
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const { result, encryptionKeyResult } = await this.withWriteLock(
-        async () => {
-          const identifierBytes = this.makeSequentialFeedIdentifier(
-            topicBytes,
-            resolvedIndex,
-          )
-          const identifier = new Identifier(identifierBytes)
+      const identifierBytes = this.makeSequentialFeedIdentifier(
+        topicBytes,
+        resolvedIndex,
+      )
+      const identifier = new Identifier(identifierBytes)
 
-          // uploadReference always uses encryption
-          const encResult = await uploadEncryptedSOC(
-            this.bee,
-            this.stamper!,
-            signerKeyObj,
-            identifier,
-            payload,
-            undefined,
-            options,
-          )
-
-          await this.saveStamperState()
-
-          return {
-            result: encResult,
-            encryptionKeyResult: uint8ArrayToHex(encResult.encryptionKey),
-          }
+      // uploadReference always uses encryption with auto-generated key
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await uploadSOC(target, signerKeyObj, identifier, payload, {
+            encryptionKey: true,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
+          })
         },
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "seqFeedUploadReferenceResponse",
-            requestId,
-            reference: uint8ArrayToHex(result.socAddress),
-            feedIndex: resolvedIndex.toString(),
-            owner: ownerAddress.toHex(),
-            encryptionKey: encryptionKeyResult,
-            tagUid: result.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "seqFeedUploadReferenceResponse",
+        requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: resolvedIndex.toString(),
+        owner: ownerAddress.toHex(),
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
+        tagUid: result.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3396,27 +3091,7 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
-
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Prepare upload context
-      const context: UploadContext = {
-        bee: this.bee,
-        stamper: this.stamper,
-      }
 
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
@@ -3424,45 +3099,35 @@ export class SwarmIdProxy {
       )
 
       // Progress callback (if enabled)
-      const onProgress = enableProgress
-        ? (progress: UploadProgress) => {
-            if (event.source) {
-              ;(event.source as WindowProxy).postMessage(
-                {
-                  type: "uploadProgress",
-                  requestId,
-                  total: progress.total,
-                  processed: progress.processed,
-                } satisfies IframeToParentMessage,
-                { targetOrigin: event.origin },
-              )
-            }
-          }
-        : undefined
+      const onProgress = this.createProgressCallback(
+        event,
+        requestId,
+        enableProgress,
+      )
 
       // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
+      const beeCompatible = options?.beeCompatible === true
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const { actResult, contentUpload } = await this.withWriteLock(
-        async () => {
-          // Step 1: Upload raw content data - ENCRYPTED (64-byte reference)
-          const contentUploadResult = await uploadEncryptedDataWithSigning(
-            context,
-            data,
-            undefined, // generate random encryption key
-            options,
+      const { actResult, contentUpload } = await this.withModeAwareWriteLock(
+        { useWorkers: true },
+        async (target) => {
+          // Step 1: Upload raw content data (encrypted by default for 64-byte reference)
+          const contentUploadResult = await uploadData(target, data, {
+            encryptionKey: options?.encrypt !== false ? true : undefined,
+            pin: options?.pin,
+            deferred: options?.deferred,
+            tag: options?.tag,
             onProgress,
             requestOptions,
-          )
+          })
 
           // Step 2: Create Mantaray manifest wrapping the content
-          // Content reference is now 64 bytes (encrypted reference: address + encryption key)
-          // This is needed because Bee's /bzz/ endpoint expects a default (Mantaray) manifest
+          // Content reference is 64 bytes (encrypted reference: address + encryption key)
           const manifest = new MantarayNode()
           const contentReferenceBytes = hexToUint8Array(
             contentUploadResult.reference,
-          ) // 64 bytes
+          )
           manifest.addFork(DEFAULT_ACT_FILENAME, contentReferenceBytes, {
             "Content-Type": DEFAULT_ACT_CONTENT_TYPE,
             Filename: DEFAULT_ACT_FILENAME,
@@ -3471,55 +3136,19 @@ export class SwarmIdProxy {
             "website-index-document": DEFAULT_ACT_FILENAME,
           })
 
-          // Create a tag for the manifest uploads (required for dev mode)
-          const manifestTag = options?.tag ?? (await tryCreateTag(context.bee))
-
-          const beeCompatible = options?.beeCompatible === true
-
           // Step 3: Upload the Mantaray manifest
-          const manifestResult = beeCompatible
-            ? await saveMantarayTreeRecursively(
-                manifest,
-                async (chunkData, isRoot) => {
-                  const chunk = makeContentAddressedChunk(chunkData)
-                  const envelope = context.stamper.stamp({
-                    hash: () => chunk.address.toUint8Array(),
-                    build: () => chunk.data,
-                    span: 0n,
-                    writer: undefined as any,
-                  })
-                  await context.bee.uploadChunk(
-                    envelope,
-                    chunk.data,
-                    { ...options, tag: manifestTag, deferred: false },
-                    requestOptions,
-                  )
-                  return {
-                    reference: chunk.address.toHex(),
-                    tagUid: isRoot ? manifestTag : undefined,
-                  }
-                },
-              )
-            : await saveMantarayTreeRecursivelyEncrypted(
-                manifest,
-                async (encryptedData, address, isRoot) => {
-                  const envelope = context.stamper.stamp({
-                    hash: () => address,
-                    build: () => encryptedData,
-                    span: 0n,
-                    writer: undefined as any,
-                  })
-                  await context.bee.uploadChunk(
-                    envelope,
-                    encryptedData,
-                    { ...options, tag: manifestTag, deferred: false },
-                    requestOptions,
-                  )
-                  return {
-                    tagUid: isRoot ? manifestTag : undefined,
-                  }
-                },
-              )
+          const manifestResult = await saveMantarayTree(
+            manifest,
+            async (chunkData) => {
+              await uploadChunk(target, chunkData, {
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: options?.tag,
+              })
+              return {}
+            },
+            { encrypt: !beeCompatible },
+          )
 
           // Step 4: Use manifest reference for ACT encryption
           const manifestReferenceBytes = hexToUint8Array(
@@ -3528,16 +3157,13 @@ export class SwarmIdProxy {
 
           // Create ACT for the manifest (which points to the content)
           const actResultValue = await createActForContent(
-            context,
+            target,
             manifestReferenceBytes,
             publisherPrivateKey,
             granteePublicKeys,
             options,
             requestOptions,
           )
-
-          // Save stamper state after successful upload
-          await this.saveStamperState()
 
           return {
             actResult: actResultValue,
@@ -3547,21 +3173,16 @@ export class SwarmIdProxy {
       )
 
       // Send final response
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actUploadDataResponse",
-            requestId,
-            encryptedReference: actResult.encryptedReference,
-            historyReference: actResult.historyReference,
-            granteeListReference: actResult.granteeListReference,
-            publisherPubKey: actResult.publisherPubKey,
-            actReference: actResult.actReference,
-            tagUid: contentUpload.tagUid,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actUploadDataResponse",
+        requestId,
+        encryptedReference: actResult.encryptedReference,
+        historyReference: actResult.historyReference,
+        granteeListReference: actResult.granteeListReference,
+        publisherPubKey: actResult.publisherPubKey,
+        actReference: actResult.actReference,
+        tagUid: contentUpload.tagUid,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3640,16 +3261,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actDownloadDataResponse",
-            requestId,
-            data: data as Uint8Array,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actDownloadDataResponse",
+        requestId,
+        data: data as Uint8Array,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3666,66 +3282,39 @@ export class SwarmIdProxy {
     const { requestId, historyReference, grantees, requestOptions } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Prepare upload context
-      const context: UploadContext = {
-        bee: this.bee,
-        stamper: this.stamper,
-      }
-
       // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
 
       // Parse grantee public keys from compressed hex
       const newGranteePublicKeys = grantees.map((hex) =>
         parseCompressedPublicKey(hex),
       )
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        // Add grantees to ACT
-        const addResult = await addGranteesToAct(
-          context,
-          historyReference,
-          publisherPrivateKey,
-          newGranteePublicKeys,
-          undefined,
-          requestOptions,
-        )
+      // Add grantees to ACT
+      const result = await this.withModeAwareWriteLock(
+        { useWorkers: true },
+        async (target) => {
+          return await addGranteesToAct(
+            target,
+            this.bee,
+            historyReference,
+            publisherPrivateKey,
+            newGranteePublicKeys,
+            undefined,
+            requestOptions,
+          )
+        },
+      )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
-        return addResult
+      this.postMessage(event, {
+        type: "actAddGranteesResponse",
+        requestId,
+        historyReference: result.historyReference,
+        granteeListReference: result.granteeListReference,
+        actReference: result.actReference,
       })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actAddGranteesResponse",
-            requestId,
-            historyReference: result.historyReference,
-            granteeListReference: result.granteeListReference,
-            actReference: result.actReference,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3748,68 +3337,41 @@ export class SwarmIdProxy {
     } = message
 
     try {
-      if (!this.authenticated || !this.appSecret) {
-        throw new Error("Not authenticated. Please login first.")
-      }
-
       this.ensureCanUpload()
 
-      if (!this.signerKey || !this.postageBatchId) {
-        throw new Error(
-          "Signer key and postage batch ID required. Please login first.",
-        )
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Prepare upload context
-      const context: UploadContext = {
-        bee: this.bee,
-        stamper: this.stamper,
-      }
-
       // Use appSecret as publisher private key (user's identity key for this app)
-      const publisherPrivateKey = hexToUint8Array(this.appSecret)
+      const publisherPrivateKey = hexToUint8Array(this.appSecret!)
 
       // Parse grantee public keys from compressed hex
       const revokePublicKeys = revokeGrantees.map((hex) =>
         parseCompressedPublicKey(hex),
       )
 
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        // Revoke grantees from ACT (performs key rotation)
-        const revokeResult = await revokeGranteesFromAct(
-          context,
-          historyReference,
-          encryptedReference,
-          publisherPrivateKey,
-          revokePublicKeys,
-          undefined,
-          requestOptions,
-        )
+      // Revoke grantees from ACT (performs key rotation)
+      const result = await this.withModeAwareWriteLock(
+        { useWorkers: true },
+        async (target) => {
+          return await revokeGranteesFromAct(
+            target,
+            this.bee,
+            historyReference,
+            encryptedReference,
+            publisherPrivateKey,
+            revokePublicKeys,
+            undefined,
+            requestOptions,
+          )
+        },
+      )
 
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
-        return revokeResult
+      this.postMessage(event, {
+        type: "actRevokeGranteesResponse",
+        requestId,
+        encryptedReference: result.encryptedReference,
+        historyReference: result.historyReference,
+        granteeListReference: result.granteeListReference,
+        actReference: result.actReference,
       })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actRevokeGranteesResponse",
-            requestId,
-            encryptedReference: result.encryptedReference,
-            historyReference: result.historyReference,
-            granteeListReference: result.granteeListReference,
-            actReference: result.actReference,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3842,16 +3404,11 @@ export class SwarmIdProxy {
         requestOptions,
       )
 
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "actGetGranteesResponse",
-            requestId,
-            grantees,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "actGetGranteesResponse",
+        requestId,
+        grantees,
+      })
     } catch (error) {
       this.sendErrorToParent(
         event,
@@ -3868,16 +3425,11 @@ export class SwarmIdProxy {
     const stamp = this.lookupPostageStampForApp()
 
     if (!stamp) {
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "getPostageBatchResponse",
-            requestId: message.requestId,
-            postageBatch: undefined,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
+      this.postMessage(event, {
+        type: "getPostageBatchResponse",
+        requestId: message.requestId,
+        postageBatch: undefined,
+      })
       return
     }
 
@@ -3905,16 +3457,11 @@ export class SwarmIdProxy {
       batchTTL,
     }
 
-    if (event.source) {
-      ;(event.source as WindowProxy).postMessage(
-        {
-          type: "getPostageBatchResponse",
-          requestId: message.requestId,
-          postageBatch,
-        } satisfies IframeToParentMessage,
-        { targetOrigin: event.origin },
-      )
-    }
+    this.postMessage(event, {
+      type: "getPostageBatchResponse",
+      requestId: message.requestId,
+      postageBatch,
+    })
   }
 
   /**
@@ -3925,7 +3472,7 @@ export class SwarmIdProxy {
     message: CreateFeedManifestMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { topic, owner, feedType, uploadOptions, requestOptions } = message
+    const { topic, owner, feedType, uploadOptions } = message
 
     // Resolve owner - use provided or fall back to app signer
     let resolvedOwner = owner
@@ -3946,48 +3493,27 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload()
 
-      if (!this.postageBatchId) {
-        throw new Error("No postage batch configured")
-      }
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await createFeedManifestDirect(
+            target,
+            topic,
+            resolvedOwner,
+            {
+              encrypt: uploadOptions?.encrypt !== false,
+              feedType,
+            },
+            uploadOptions,
+          )
+        },
+      )
 
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-      // DEBUG: Log manifest creation details for /bzz/ compatibility analysis
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        // Use createFeedManifestDirect to build and upload the manifest locally
-        // instead of calling bee.createFeedManifest (which uses /feeds endpoint)
-        const createResult = await createFeedManifestDirect(
-          this.bee,
-          this.stamper!,
-          topic,
-          resolvedOwner,
-          {
-            encrypt: uploadOptions?.encrypt !== false, // Default encrypted
-            feedType: feedType, // "Sequence" or "Epoch"
-          },
-          uploadOptions,
-          requestOptions,
-        )
-
-        // Save stamper state after successful upload
-        await this.saveStamperState()
-
-        return createResult
+      this.postMessage(event, {
+        type: "createFeedManifestResponse",
+        requestId: message.requestId,
+        reference: result.reference,
       })
-
-      if (event.source) {
-        ;(event.source as WindowProxy).postMessage(
-          {
-            type: "createFeedManifestResponse",
-            requestId: message.requestId,
-            reference: result.reference,
-          } satisfies IframeToParentMessage,
-          { targetOrigin: event.origin },
-        )
-      }
     } catch (error) {
       this.sendErrorToParent(
         event,

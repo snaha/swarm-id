@@ -8,7 +8,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { MerkleTree } from "@ethersphere/bee-js"
-import type { UploadContext } from "../types"
+import type { UploadTarget } from "../upload"
 import {
   createActForContent,
   decryptActReference,
@@ -27,15 +27,15 @@ import { collectActEntriesFromJson, findActEntryByKey } from "./act"
 import { decryptAndDeserializeGranteeList } from "./grantee-list"
 
 // Mock the upload/download functions
-vi.mock("../upload-encrypted-data", () => ({
-  uploadEncryptedDataWithSigning: vi.fn(),
+vi.mock("../upload", () => ({
+  uploadData: vi.fn(),
 }))
 
 vi.mock("../download-data", () => ({
   downloadDataWithChunkAPI: vi.fn(),
 }))
 
-import { uploadEncryptedDataWithSigning } from "../upload-encrypted-data"
+import { uploadData } from "../upload"
 import { downloadDataWithChunkAPI } from "../download-data"
 
 // Helper to create a random 32-byte array
@@ -61,10 +61,14 @@ function fromHex(hex: string): Uint8Array {
   return bytes
 }
 
-// Create mock context
-function createMockContext(): UploadContext {
+// Create mock Bee instance for download operations
+const mockBee = {} as Bee
+
+// Create mock upload target
+function createMockTarget(): UploadTarget {
   return {
-    bee: {} as Bee,
+    mode: "stamper",
+    bee: mockBee,
     stamper: {} as Stamper,
   }
 }
@@ -87,17 +91,20 @@ async function computeContentHash(data: Uint8Array): Promise<string> {
 function createContentAddressedUploadMock() {
   const storage: Map<string, Uint8Array> = new Map()
 
+  // Mock for the new unified uploadData API
   const uploadMock = async (
-    _ctx: UploadContext,
+    _target: unknown,
     data: Uint8Array,
+    options?: { encryptionKey?: Uint8Array | boolean },
   ): Promise<{
     reference: string
     tagUid?: number
-    chunkAddresses: Uint8Array[]
+    chunkAddresses?: Uint8Array[]
   }> => {
     const address = await computeContentHash(data)
-    // Fake 64-byte encrypted reference: address + address
-    const ref = `${address}${address}`
+    // If encryption is requested, return 64-byte reference; otherwise 32-byte
+    const isEncrypted = options?.encryptionKey !== undefined
+    const ref = isEncrypted ? `${address}${address}` : address
     storage.set(ref, data)
     return { reference: ref, chunkAddresses: [] }
   }
@@ -163,7 +170,7 @@ describe("createActForContent", () => {
   })
 
   it("should create ACT with publisher and grantees", async () => {
-    const context = createMockContext()
+    const target = createMockTarget()
     const publisher = createTestKeyPair(10)
     const grantee1 = createTestKeyPair(11)
     const grantee2 = createTestKeyPair(12)
@@ -172,10 +179,10 @@ describe("createActForContent", () => {
 
     // Use content-addressed storage mock
     const { storage, uploadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const result = await createActForContent(
-      context,
+      target,
       contentRef,
       publisher.privateKey,
       [grantee1.publicKey, grantee2.publicKey],
@@ -205,7 +212,7 @@ describe("createActForContent", () => {
   })
 
   it("should create ACT that publisher can decrypt", async () => {
-    const context = createMockContext()
+    const target = createMockTarget()
     const publisher = createTestKeyPair(20)
     const grantee = createTestKeyPair(21)
 
@@ -213,10 +220,10 @@ describe("createActForContent", () => {
 
     // Use content-addressed storage mock
     const { storage, uploadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const result = await createActForContent(
-      context,
+      target,
       contentRef,
       publisher.privateKey,
       [grantee.publicKey],
@@ -254,7 +261,7 @@ describe("createActForContent", () => {
   })
 
   it("should create ACT that grantee can decrypt", async () => {
-    const context = createMockContext()
+    const target = createMockTarget()
     const publisher = createTestKeyPair(30)
     const grantee = createTestKeyPair(31)
 
@@ -262,10 +269,10 @@ describe("createActForContent", () => {
 
     // Use content-addressed storage mock
     const { storage, uploadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     const result = await createActForContent(
-      context,
+      target,
       contentRef,
       publisher.privateKey,
       [grantee.publicKey],
@@ -315,11 +322,11 @@ describe("decryptActReference", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       originalContentRef,
       publisher.privateKey,
       [grantee.publicKey],
@@ -350,11 +357,11 @@ describe("decryptActReference", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       originalContentRef,
       publisher.privateKey,
       [grantee.publicKey],
@@ -384,11 +391,11 @@ describe("decryptActReference", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       originalContentRef,
       publisher.privateKey,
       [grantee.publicKey],
@@ -424,11 +431,11 @@ describe("addGranteesToAct", () => {
     // Use content-addressed storage mock
     const { storage, uploadMock, downloadMock } =
       createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       originalContentRef,
       publisher.privateKey,
       [grantee1.publicKey],
@@ -447,7 +454,8 @@ describe("addGranteesToAct", () => {
 
     // Add new grantee
     const result = await addGranteesToAct(
-      context,
+      target,
+      mockBee,
       createResult.historyReference,
       publisher.privateKey,
       [grantee2.publicKey],
@@ -496,11 +504,11 @@ describe("revokeGranteesFromAct", () => {
     // Use content-addressed storage mock
     const { storage, uploadMock, downloadMock } =
       createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       originalContentRef,
       publisher.privateKey,
       [grantee1.publicKey, grantee2.publicKey],
@@ -519,7 +527,8 @@ describe("revokeGranteesFromAct", () => {
 
     // Revoke grantee2
     const result = await revokeGranteesFromAct(
-      context,
+      target,
+      mockBee,
       createResult.historyReference,
       createResult.encryptedReference,
       publisher.privateKey,
@@ -576,11 +585,11 @@ describe("getGranteesFromAct", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       randomBytes(32),
       publisher.privateKey,
       [grantee1.publicKey, grantee2.publicKey],
@@ -607,11 +616,11 @@ describe("getGranteesFromAct", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
-    const context = createMockContext()
+    const target = createMockTarget()
     const createResult = await createActForContent(
-      context,
+      target,
       randomBytes(32),
       publisher.privateKey,
       [],
@@ -636,7 +645,7 @@ describe("ACT end-to-end flow", () => {
 
   it("should support full upload/download/manage lifecycle", async () => {
     const bee = {} as Bee
-    const context = createMockContext()
+    const target = createMockTarget()
 
     // Setup participants
     const publisher = createTestKeyPair(110)
@@ -649,11 +658,11 @@ describe("ACT end-to-end flow", () => {
 
     // Use content-addressed storage mock
     const { uploadMock, downloadMock } = createContentAddressedUploadMock()
-    vi.mocked(uploadEncryptedDataWithSigning).mockImplementation(uploadMock)
+    vi.mocked(uploadData).mockImplementation(uploadMock)
 
     // Step 1: Publisher creates ACT with Alice and Bob
     const createResult = await createActForContent(
-      context,
+      target,
       secretData,
       publisher.privateKey,
       [alice.publicKey, bob.publicKey],
@@ -686,7 +695,8 @@ describe("ACT end-to-end flow", () => {
 
     // Step 4: Publisher adds Charlie
     const addResult = await addGranteesToAct(
-      context,
+      target,
+      mockBee,
       createResult.historyReference,
       publisher.privateKey,
       [charlie.publicKey],
@@ -706,7 +716,8 @@ describe("ACT end-to-end flow", () => {
 
     // Step 5: Publisher revokes Bob
     const revokeResult = await revokeGranteesFromAct(
-      context,
+      target,
+      mockBee,
       addResult.historyReference,
       createResult.encryptedReference,
       publisher.privateKey,

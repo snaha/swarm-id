@@ -1,0 +1,124 @@
+---
+title: Subsidised Gateway
+description: Enable uploads for users without their own postage stamps
+---
+
+A subsidised gateway allows dApps to provide postage stamps on behalf of their users, enabling uploads even when users don't have their own stamps.
+
+## Overview
+
+Normally, uploading to Swarm requires a postage stamp — a cryptographic proof of payment for storage. Users must purchase stamps using BZZ tokens, which creates friction for new users.
+
+With a subsidised gateway:
+
+- The dApp operator runs a gateway that provides stamps for uploads
+- Users can upload without owning stamps
+- The dApp operator pays for storage on behalf of users
+
+This is useful for:
+
+- **Onboarding new users** who don't have BZZ tokens yet
+- **Free-tier applications** where the operator covers storage costs
+- **Safari users** who can't access their stamps due to storage partitioning
+
+## Configuration
+
+Pass the `subsidisedGatewayUrl` option when creating the client:
+
+```typescript
+const client = new SwarmIdClient({
+  iframeOrigin: 'https://swarm-id.snaha.net',
+  subsidisedGatewayUrl: 'https://gateway.my-dapp.com',
+  metadata: {
+    name: 'My App',
+    description: 'A decentralized application',
+  },
+})
+```
+
+The subsidised gateway URL should point to a Bee node that has a postage stamp configured for public use.
+
+## Upload Availability Truth Table
+
+Upload availability depends on several factors. The `uploadMode` field in `getConnectionInfo()` indicates which mode is active:
+
+| Storage Partitioned | Has User Stamp | Custom Node | Subsidised Configured | Can Upload | Upload Mode   |
+| ------------------- | -------------- | ----------- | --------------------- | ---------- | ------------- |
+| Yes                 | —              | —           | Yes                   | Yes        | `subsidised`  |
+| Yes                 | —              | —           | No                    | No         | `unavailable` |
+| No                  | Yes            | —           | —                     | Yes        | `user-stamp`  |
+| No                  | No             | Yes         | —                     | No         | `unavailable` |
+| No                  | No             | No          | Yes                   | Yes        | `subsidised`  |
+| No                  | No             | No          | No                    | No         | `unavailable` |
+
+### Understanding the Table
+
+**Storage Partitioned (Yes)**
+
+When the browser partitions storage (Safari ITP), the proxy iframe cannot access:
+
+- The user's postage stamps from localStorage
+- The custom Bee node URL setting
+
+In this case, only the `subsidisedGatewayUrl` (passed by the dApp at initialization) determines upload capability. This is why subsidised gateways are especially important for Safari support.
+
+**Has User Stamp**
+
+The user has configured a postage stamp in the identity provider. User stamps always take priority over subsidised gateways when available.
+
+**Custom Node**
+
+The user has configured a custom Bee node URL in the identity provider's network settings. When a custom node is set, the subsidised gateway is automatically disabled to ensure uploads go to the user's chosen node.
+
+**Subsidised Configured**
+
+The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
+
+## Checking Upload Mode
+
+Use `getConnectionInfo()` to check the current upload mode:
+
+```typescript
+const info = await client.getConnectionInfo()
+if (info.canUpload) {
+  if (info.uploadMode === 'subsidised') {
+    console.log('Uploads will use the subsidised gateway')
+  } else {
+    console.log('Uploads will use your postage stamp')
+  }
+} else if (info.storagePartitioned) {
+  console.log('Storage partitioned — downloads only')
+} else {
+  console.log('No upload capability available')
+}
+```
+
+## Priority Rules
+
+1. **User's own stamp** — When available and storage is not partitioned, the user's configured stamp is always used
+2. **Custom Bee node** — If the user has configured a custom Bee node, the subsidised gateway is disabled (even if configured)
+3. **Subsidised gateway** — Used as a fallback when no user stamp is available
+
+This ensures users retain control over their uploads while providing a fallback for those without stamps.
+
+## Running a Subsidised Gateway
+
+To provide a subsidised gateway for your dApp:
+
+1. Run a Bee node with a funded wallet
+2. Purchase a postage stamp with sufficient depth and amount for your expected usage
+3. Deploy a gateway proxy (such as [swarm-gateway](https://github.com/ethersphere/swarm-gateway)) in front of your Bee node that automatically injects the postage stamp header for uploads
+4. Expose the gateway via HTTPS
+
+The gateway proxy intercepts upload requests and adds the required postage stamp header, so clients can upload without providing their own stamp.
+
+:::caution
+Monitor your stamp's utilization and balance. When a stamp is depleted, uploads will fail. Consider automating stamp top-ups based on usage.
+:::
+
+## Security Considerations
+
+- The subsidised gateway only provides stamps — it doesn't have access to user data or keys
+- Uploads are still signed by the user's app key for feeds and SOCs
+- Consider rate limiting on your gateway to prevent abuse
+- The gateway URL is visible in the client configuration

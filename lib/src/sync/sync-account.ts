@@ -37,7 +37,7 @@ import type {
   PostageStampsStoreInterface,
 } from "./store-interfaces"
 import { BasicEpochUpdater } from "../proxy/feeds/epochs"
-import { uploadEncryptedDataWithSigning } from "../proxy/upload-encrypted-data"
+import { uploadData, type UploadTarget } from "../proxy/upload"
 import { serializeAccountState } from "./serialization"
 import type { SyncResult } from "./types"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
@@ -346,45 +346,50 @@ export function createSyncAccount(
       }
 
       // 4. Upload encrypted data to Swarm
-      const uploadResult = await uploadEncryptedDataWithSigning(
-        {
-          bee,
-          stamper,
-        },
-        jsonData,
-        hexToUint8Array(encryptionKey),
-        undefined,
-      )
+      const target: UploadTarget = {
+        mode: "stamper",
+        bee,
+        stamper,
+      }
+
+      const uploadResult = await uploadData(target, jsonData, {
+        encryptionKey: hexToUint8Array(encryptionKey),
+      })
 
       // Collect chunk addresses for utilization tracking
-      const allChunkAddresses = uploadResult.chunkAddresses
+      // chunkAddresses is always present when using encryption
+      const allChunkAddresses = uploadResult.chunkAddresses ?? []
 
       // 5. Handle utilization tracking
 
-      try {
-        await handleUtilizationUpdate(accountId, allChunkAddresses)
-      } catch (error) {
-        // Don't fail sync if utilization fails - continue with feed update
-        console.error(
-          `[SyncCoordinator ${timestamp()}] Utilization upload failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
-          error,
-        )
+      if (allChunkAddresses.length > 0) {
+        try {
+          await handleUtilizationUpdate(accountId, allChunkAddresses)
+        } catch (error) {
+          // Don't fail sync if utilization fails - continue with feed update
+          console.error(
+            `[SyncCoordinator ${timestamp()}] Utilization upload failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
+            error,
+          )
+        }
       }
 
       // 6. Update epoch feed (after utilization completes)
       const topic = Topic.fromString(
         `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
       )
-      const updater = new BasicEpochUpdater(bee, topic, accountKey)
+      const updater = new BasicEpochUpdater(topic, accountKey)
       const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
 
       // Convert 128-char hex reference to 64-byte Uint8Array
       const refBytes = new Reference(uploadResult.reference).toUint8Array()
 
+      // Create upload target for epoch feed update
+      const feedTarget: UploadTarget = { mode: "stamper", bee, stamper }
       const updateResult = await updater.update(
         feedTimestamp,
         refBytes,
-        stamper,
+        feedTarget,
       )
 
       // Add SOC chunk to tracked addresses

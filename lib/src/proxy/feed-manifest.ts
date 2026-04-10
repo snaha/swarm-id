@@ -2,19 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
-import type {
-  Bee,
-  Stamper,
-  UploadOptions,
-  BeeRequestOptions,
-} from "@ethersphere/bee-js"
+import type { UploadOptions } from "@ethersphere/bee-js"
 import {
   makeEncryptedContentAddressedChunk,
   makeContentAddressedChunk,
 } from "../chunk"
 import { uint8ArrayToHex } from "../utils/hex"
-import { uploadSingleChunk } from "./upload-data"
-import { uploadSingleEncryptedChunk } from "./upload-encrypted-data"
+import { uploadChunk, type UploadTarget } from "./upload"
 import { tryCreateTag } from "../utils/tag"
 
 /**
@@ -69,32 +63,33 @@ export interface CreateFeedManifestResult {
  * Without this, Bee's /bzz/ endpoint returns 404 because the "/" child chunk
  * doesn't exist (only its calculated hash was stored in the root manifest).
  *
- * @param bee - Bee client instance
- * @param stamper - Stamper for client-side signing
+ * @param target - Upload target (stamper or subsidised mode)
  * @param topic - Topic hex string (64 chars)
  * @param owner - Owner hex string (40 chars, no 0x prefix)
  * @param options - Options for creating the manifest (encrypt, etc.)
  * @param uploadOptions - Upload options (tag, deferred, etc.)
- * @param requestOptions - Bee request options
  * @returns Reference to the feed manifest
  */
 export async function createFeedManifestDirect(
-  bee: Bee,
-  stamper: Stamper,
+  target: UploadTarget,
   topic: string,
   owner: string,
   options?: CreateFeedManifestOptions,
   uploadOptions?: UploadOptions,
-  requestOptions?: BeeRequestOptions,
 ): Promise<CreateFeedManifestResult> {
   // Normalize owner (remove 0x prefix if present)
   const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
 
-  // DEBUG: Log what Bee will use for feed lookup
-
-  // 1. Create tag for upload if not provided
-  const tag = uploadOptions?.tag ?? (await tryCreateTag(bee))
-  const uploadOptionsWithTag = { ...uploadOptions, tag }
+  // Create tag for upload if in stamper mode (subsidised mode doesn't support tags)
+  const tag =
+    target.mode === "stamper"
+      ? (uploadOptions?.tag ?? (await tryCreateTag(target.bee)))
+      : undefined
+  const chunkOptions = {
+    pin: uploadOptions?.pin,
+    deferred: uploadOptions?.deferred,
+    tag,
+  }
 
   // 2. Create root MantarayNode with "/" fork containing feed metadata
   const rootNode = new MantarayNode()
@@ -117,13 +112,7 @@ export async function createFeedManifestDirect(
   const slashNodeData = await slashNode.marshal()
   const slashChunk = makeContentAddressedChunk(slashNodeData)
 
-  await uploadSingleChunk(
-    bee,
-    stamper,
-    slashChunk,
-    uploadOptionsWithTag,
-    requestOptions,
-  )
+  await uploadChunk(target, slashChunk.data, chunkOptions)
 
   // 5. Set the child's selfAddress to the uploaded chunk address
   // This is used when marshaling the root node
@@ -139,13 +128,7 @@ export async function createFeedManifestDirect(
     // Encrypted upload for root
     const encryptedChunk = makeEncryptedContentAddressedChunk(rootNodeData)
 
-    await uploadSingleEncryptedChunk(
-      bee,
-      stamper,
-      encryptedChunk,
-      uploadOptionsWithTag,
-      requestOptions,
-    )
+    await uploadChunk(target, encryptedChunk.data, chunkOptions)
 
     // Return 64-byte reference (address + key)
     const ref = new Uint8Array(64)
@@ -158,13 +141,7 @@ export async function createFeedManifestDirect(
     // Unencrypted upload for root
     const rootChunk = makeContentAddressedChunk(rootNodeData)
 
-    await uploadSingleChunk(
-      bee,
-      stamper,
-      rootChunk,
-      uploadOptionsWithTag,
-      requestOptions,
-    )
+    await uploadChunk(target, rootChunk.data, chunkOptions)
 
     // Return 32-byte reference
     const reference = rootChunk.address.toHex()

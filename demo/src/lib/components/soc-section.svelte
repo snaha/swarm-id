@@ -20,12 +20,19 @@
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
 
-  const DEFAULT_IDENTIFIER = '0000000000000000000000000000000000000000000000000000000000000000'
   const IDENTIFIER_LENGTH = 64
   const OWNER_LENGTH = 40
   const KEY_LENGTH = 64
 
-  let identifier = $state(DEFAULT_IDENTIFIER)
+  function generateRandomIdentifier(): string {
+    const bytes = new Uint8Array(32)
+    crypto.getRandomValues(bytes)
+    return Array.from(bytes)
+      .map((b) => b.toString(16).padStart(2, '0'))
+      .join('')
+  }
+
+  let identifier = $state(generateRandomIdentifier())
   let uploadData = $state('Hello SOC!')
   let uploadResult = $state<ResultData | undefined>(undefined)
   let uploadError = $state<string | undefined>(undefined)

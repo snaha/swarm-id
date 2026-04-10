@@ -131,7 +131,7 @@ export const UploadResultSchema = z.object({
 })
 
 export const SocUploadResultSchema = UploadResultSchema.extend({
-  encryptionKey: z.string(),
+  encryptionKey: z.string().optional(),
   owner: AddressSchema,
 })
 
@@ -542,6 +542,7 @@ export interface SequentialFeedWriter extends SequentialFeedReader {
 export const AuthStatusSchema = z.object({
   authenticated: z.boolean(),
   origin: z.string().optional(),
+  beeApiUrl: z.string().url().optional(),
 })
 
 export type AuthStatus = z.infer<typeof AuthStatusSchema>
@@ -550,11 +551,21 @@ export type AuthStatus = z.infer<typeof AuthStatusSchema>
 // Connection Info
 // ============================================================================
 
+export const UploadModeSchema = z.enum([
+  "user-stamp",
+  "subsidised",
+  "unavailable",
+])
+
+export type UploadMode = z.infer<typeof UploadModeSchema>
+
 export const ConnectionInfoSchema = z.object({
-  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned) */
+  /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned, or subsidised gateway configured) */
   canUpload: z.boolean(),
   /** Whether browser storage partitioning prevents access to stamps/signer keys (e.g. Safari ITP, strict privacy settings) */
   storagePartitioned: z.boolean().optional(),
+  /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
+  uploadMode: UploadModeSchema.optional(),
   identity: z
     .object({
       id: z.string(),
@@ -655,10 +666,12 @@ export interface ButtonConfig {
 
 export const ParentIdentifyMessageSchema = z.object({
   type: z.literal("parentIdentify"),
+  requestId: z.string(),
   beeApiUrl: z.string().url().optional(),
   popupMode: z.enum(["popup", "window"]).optional(),
   metadata: AppMetadataSchema,
   buttonConfig: ButtonConfigSchema,
+  subsidisedGatewayUrl: z.string().url().optional(),
 })
 
 export const CheckAuthMessageSchema = z.object({
@@ -669,11 +682,6 @@ export const CheckAuthMessageSchema = z.object({
 export const DisconnectMessageSchema = z.object({
   type: z.literal("disconnect"),
   requestId: z.string(),
-})
-
-export const RequestAuthMessageSchema = z.object({
-  type: z.literal("requestAuth"),
-  styles: ButtonStylesSchema,
 })
 
 export const UploadDataMessageSchema = z.object({
@@ -1013,7 +1021,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
   DisconnectMessageSchema,
-  RequestAuthMessageSchema,
   UploadDataMessageSchema,
   DownloadDataMessageSchema,
   UploadFileMessageSchema,
@@ -1053,7 +1060,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
 export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>
 export type DisconnectMessage = z.infer<typeof DisconnectMessageSchema>
-export type RequestAuthMessage = z.infer<typeof RequestAuthMessageSchema>
 export type UploadDataMessage = z.infer<typeof UploadDataMessageSchema>
 export type DownloadDataMessage = z.infer<typeof DownloadDataMessageSchema>
 export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
@@ -1138,6 +1144,7 @@ export const AuthStatusResponseMessageSchema = z.object({
   requestId: z.string(),
   authenticated: z.boolean(),
   origin: z.string().optional(),
+  beeApiUrl: z.string().url().optional(),
 })
 
 export const DisconnectResponseMessageSchema = z.object({
@@ -1208,6 +1215,7 @@ export const ConnectionInfoResponseMessageSchema = z.object({
   requestId: z.string(),
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
+  uploadMode: UploadModeSchema.optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1262,7 +1270,7 @@ export const SocUploadResponseMessageSchema = z.object({
   requestId: z.string(),
   reference: ReferenceSchema,
   tagUid: z.number().optional(),
-  encryptionKey: z.string(),
+  encryptionKey: z.string().optional(),
   owner: AddressSchema,
 })
 
@@ -1651,6 +1659,8 @@ export interface ClientOptions {
   metadata: AppMetadata
   buttonConfig?: ButtonConfig
   containerId?: string // ID of container element to place iframe in (optional)
+  /** URL of a subsidised gateway for users without postage stamps. Gateway handles stamping server-side. */
+  subsidisedGatewayUrl?: string
 }
 
 export interface AuthOptions {

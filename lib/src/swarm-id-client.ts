@@ -82,7 +82,7 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
-import { uint8ArrayToHex } from "./utils/key-derivation"
+import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
 
@@ -130,6 +130,7 @@ export class SwarmIdClient {
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
   private containerId?: string
+  private subsidisedGatewayUrl?: string
   private ready: boolean = false
   private readyPromise: Promise<void>
   private readyResolve?: () => void
@@ -183,6 +184,7 @@ export class SwarmIdClient {
     this.metadata = options.metadata
     this.buttonConfig = options.buttonConfig
     this.containerId = options.containerId
+    this.subsidisedGatewayUrl = options.subsidisedGatewayUrl
 
     // Validate metadata
     try {
@@ -310,9 +312,11 @@ export class SwarmIdClient {
     // Identify ourselves to the iframe
     this.sendMessage({
       type: "parentIdentify",
+      requestId: this.generateRequestId(),
       popupMode: this.popupMode,
       metadata: this.metadata,
       buttonConfig: this.buttonConfig,
+      subsidisedGatewayUrl: this.subsidisedGatewayUrl,
     })
 
     // Wait for iframe to be ready
@@ -680,6 +684,7 @@ export class SwarmIdClient {
       requestId: string
       authenticated: boolean
       origin?: string
+      beeApiUrl?: string
     }>({
       type: "checkAuth",
       requestId,
@@ -688,6 +693,7 @@ export class SwarmIdClient {
     return {
       authenticated: response.authenticated,
       origin: response.origin,
+      beeApiUrl: response.beeApiUrl,
     }
   }
 
@@ -883,6 +889,7 @@ export class SwarmIdClient {
       requestId: string
       canUpload: boolean
       storagePartitioned?: boolean
+      uploadMode?: "user-stamp" | "subsidised" | "unavailable"
       identity?: {
         id: string
         name: string
@@ -901,6 +908,7 @@ export class SwarmIdClient {
     return {
       canUpload: response.canUpload,
       storagePartitioned: response.storagePartitioned,
+      uploadMode: response.uploadMode,
       identity: response.identity,
       appKey: response.appKey,
     }

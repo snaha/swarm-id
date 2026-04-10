@@ -56,11 +56,18 @@ class CountingMockBee extends MockBee {
   }
 
   override async uploadChunk(
-    data: Uint8Array,
-    postageBatchId: string,
-  ): Promise<{ reference: string }> {
+    envelopeOrData: unknown,
+    dataOrBatchId: Uint8Array | string,
+    options?: unknown,
+    requestOptions?: unknown,
+  ): Promise<{ reference: { toHex(): string } }> {
     this.uploadCalls++
-    return super.uploadChunk(data, postageBatchId)
+    return super.uploadChunk(
+      envelopeOrData,
+      dataOrBatchId,
+      options,
+      requestOptions,
+    )
   }
 }
 
@@ -113,21 +120,24 @@ class MixedErrorMockBee extends CountingMockBee {
 
 /**
  * Mock uploadSOC to store SOC data in the mock store.
+ * The unified API uses uploadSOC(target, signer, identifier, data, options?)
  */
-vi.mock("../../upload-encrypted-data", async (importOriginal) => {
-  const mod =
-    await importOriginal<typeof import("../../upload-encrypted-data")>()
+vi.mock("../../upload", async (importOriginal) => {
+  const mod = await importOriginal<typeof import("../../upload")>()
   const { Binary } = await import("cafe-utility")
 
   return {
     ...mod,
     uploadSOC: async (
-      bee: any,
-      _stamper: any,
+      target: any,
       signer: any,
       identifier: any,
       data: Uint8Array,
+      _options?: any,
     ) => {
+      // Extract bee from target
+      const bee = target.bee
+
       // Validate data size (1-4096 bytes) - matching real uploadSOC
       if (data.length < 1 || data.length > 4096) {
         throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
@@ -164,53 +174,7 @@ vi.mock("../../upload-encrypted-data", async (importOriginal) => {
 
       return {
         socAddress,
-        tagUid: 0,
-      }
-    },
-    uploadEncryptedSOC: async (
-      bee: any,
-      _stamper: any,
-      signer: any,
-      identifier: any,
-      data: Uint8Array,
-    ) => {
-      // Validate data size (1-4096 bytes) - matching real uploadEncryptedSOC
-      if (data.length < 1 || data.length > 4096) {
-        throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
-      }
-
-      // Create span (little-endian uint64 of data length)
-      const span = new Uint8Array(SPAN_SIZE)
-      const spanView = new DataView(span.buffer)
-      spanView.setBigUint64(0, BigInt(data.length), true)
-
-      // Sign: hash(identifier + hash(span + data))
-      const contentHash = Binary.keccak256(Binary.concatBytes(span, data))
-      const toSign = Binary.concatBytes(identifier.toUint8Array(), contentHash)
-      const signature = signer.sign(toSign)
-
-      // Build SOC data: identifier(32) + signature(65) + span(8) + payload
-      const socData = Binary.concatBytes(
-        identifier.toUint8Array(),
-        signature.toUint8Array(),
-        span,
-        data,
-      )
-
-      // Calculate SOC address: Keccak256(identifier + owner)
-      const owner = signer.publicKey().address()
-      const socAddress = Binary.keccak256(
-        Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-      )
-
-      // Store directly in mock store (bypassing fetch/encryption)
-      const store = bee.getStore()
-      const reference = Binary.uint8ArrayToHex(socAddress)
-      await store.put(reference, socData)
-
-      return {
-        socAddress,
-        encryptionKey: new Uint8Array(32),
+        encryptionKey: undefined,
         tagUid: 0,
       }
     },
