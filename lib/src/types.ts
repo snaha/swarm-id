@@ -666,6 +666,7 @@ export interface ButtonConfig {
 
 export const ParentIdentifyMessageSchema = z.object({
   type: z.literal("parentIdentify"),
+  requestId: z.string(),
   beeApiUrl: z.string().url().optional(),
   popupMode: z.enum(["popup", "window"]).optional(),
   metadata: AppMetadataSchema,
@@ -685,6 +686,7 @@ export const DisconnectMessageSchema = z.object({
 
 export const RequestAuthMessageSchema = z.object({
   type: z.literal("requestAuth"),
+  requestId: z.string(),
   styles: ButtonStylesSchema,
 })
 

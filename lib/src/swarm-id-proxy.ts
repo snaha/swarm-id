@@ -669,7 +669,7 @@ export class SwarmIdProxy {
         console.error("[Proxy] Error handling parent message:", error)
         this.sendErrorToParent(
           event,
-          (message as { requestId?: string }).requestId,
+          message.requestId,
           error instanceof Error ? error.message : "Unknown error",
         )
       }

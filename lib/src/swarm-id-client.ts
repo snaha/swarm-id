@@ -312,6 +312,7 @@ export class SwarmIdClient {
     // Identify ourselves to the iframe
     this.sendMessage({
       type: "parentIdentify",
+      requestId: this.generateRequestId(),
       popupMode: this.popupMode,
       metadata: this.metadata,
       buttonConfig: this.buttonConfig,
