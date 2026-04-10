@@ -728,6 +728,12 @@ export class SwarmIdProxy {
     // Load existing secret if available
     await this.loadAuthData()
 
+    // Update this.bee to use subsidised gateway URL when in subsidised mode
+    // This ensures downloads use the same endpoint as uploads
+    if (this.isSubsidisedModeActive()) {
+      this.bee = new Bee(this.subsidisedGatewayUrl!)
+    }
+
     // Acknowledge receipt
     this.postMessage(event, {
       type: "proxyReady",
