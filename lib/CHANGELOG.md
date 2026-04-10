@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.3](https://github.com/snaha/swarm-id/compare/v0.1.2...v0.1.3) (2026-04-10)
+
+
+### Features
+
+* subsidised gateway ([#298](https://github.com/snaha/swarm-id/issues/298)) ([99f83a4](https://github.com/snaha/swarm-id/commit/99f83a449a75ec0d84a69a06971a68a60cfea4fd))
+
 ## [0.1.2](https://github.com/snaha/swarm-id/compare/v0.1.1...v0.1.2) (2026-04-01)
 
 
