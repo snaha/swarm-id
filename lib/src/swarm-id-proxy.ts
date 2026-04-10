@@ -61,10 +61,7 @@ import {
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
-import {
-  makeContentAddressedChunk,
-  makeEncryptedContentAddressedChunk,
-} from "./chunk"
+import { makeContentAddressedChunk } from "./chunk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -3554,7 +3551,7 @@ export class SwarmIdProxy {
     message: CreateFeedManifestMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { topic, owner, feedType, uploadOptions, requestOptions } = message
+    const { topic, owner, feedType, uploadOptions } = message
 
     // Resolve owner - use provided or fall back to app signer
     let resolvedOwner = owner
@@ -3575,51 +3572,21 @@ export class SwarmIdProxy {
     try {
       this.ensureCanUpload()
 
-      // Handle subsidised gateway mode - gateway handles stamping server-side
-      if (this.isSubsidisedModeActive()) {
-        const reference = await this.createFeedManifestSubsidised(
-          topic,
-          resolvedOwner,
-          feedType,
-          uploadOptions?.encrypt !== false, // Default encrypted
-        )
-
-        this.postMessage(event, {
-          type: "createFeedManifestResponse",
-          requestId: message.requestId,
-          reference,
-        })
-        return
-      }
-
-      // User stamp mode - validate stamp and stamper
-      if (!this.postageBatchId) {
-        throw new Error("No postage batch configured")
-      }
-
-      if (!this.stamper) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-
-      // Serialize write through Web Locks API to prevent concurrent uploads
-      const result = await this.withWriteLock(async () => {
-        // Use createFeedManifestDirect to build and upload the manifest locally
-        // instead of calling bee.createFeedManifest (which uses /feeds endpoint)
-        const createResult = await createFeedManifestDirect(
-          this.bee,
-          this.stamper!,
-          topic,
-          resolvedOwner,
-          {
-            encrypt: uploadOptions?.encrypt !== false, // Default encrypted
-            feedType: feedType, // "Sequence" or "Epoch"
-          },
-          uploadOptions,
-          requestOptions,
-        )
-
-        return createResult
-      })
+      const result = await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          return await createFeedManifestDirect(
+            target,
+            topic,
+            resolvedOwner,
+            {
+              encrypt: uploadOptions?.encrypt !== false,
+              feedType,
+            },
+            uploadOptions,
+          )
+        },
+      )
 
       this.postMessage(event, {
         type: "createFeedManifestResponse",
@@ -3632,74 +3599,6 @@ export class SwarmIdProxy {
         message.requestId,
         error instanceof Error ? error.message : "Create feed manifest failed",
       )
-    }
-  }
-
-  /**
-   * Create a feed manifest via subsidised gateway
-   * Builds manifest locally and uploads chunks via /chunks endpoint
-   */
-  private async createFeedManifestSubsidised(
-    topic: string,
-    owner: string,
-    feedType?: "Sequence" | "Epoch",
-    encrypt: boolean = true,
-  ): Promise<string> {
-    const subsidisedTarget: UploadTarget = {
-      mode: "subsidised",
-      gatewayUrl: this.subsidisedGatewayUrl!,
-    }
-
-    // Normalize owner (remove 0x prefix if present)
-    const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
-
-    // Create root MantarayNode with "/" fork containing feed metadata
-    const rootNode = new MantarayNode()
-    rootNode.addFork("/", NULL_ADDRESS, {
-      "swarm-feed-owner": normalizedOwner,
-      "swarm-feed-topic": topic,
-      "swarm-feed-type": feedType ?? "Sequence",
-    })
-
-    // Get the "/" child node (addFork created it)
-    // 47 is ASCII code for '/'
-    const slashFork = rootNode.forks.get(47)
-    if (!slashFork) {
-      throw new Error("Failed to create '/' fork")
-    }
-    const slashNode = slashFork.node
-
-    // Marshal and upload the "/" child node FIRST (saveRecursively pattern)
-    const slashNodeData = await slashNode.marshal()
-    const slashChunk = makeContentAddressedChunk(slashNodeData)
-
-    await uploadChunk(subsidisedTarget, slashChunk.data)
-
-    // Set the child's selfAddress to the uploaded chunk address
-    slashNode.selfAddress = slashChunk.address.toUint8Array()
-
-    // Marshal the root node
-    const rootNodeData = await rootNode.marshal()
-
-    if (encrypt) {
-      // Encrypted upload for root
-      const encryptedChunk = makeEncryptedContentAddressedChunk(rootNodeData)
-
-      await uploadChunk(subsidisedTarget, encryptedChunk.data)
-
-      // Return 64-byte reference (address + key)
-      const ref = new Uint8Array(64)
-      ref.set(encryptedChunk.address.toUint8Array(), 0)
-      ref.set(encryptedChunk.encryptionKey, 32)
-      return uint8ArrayToHex(ref)
-    } else {
-      // Unencrypted upload for root
-      const rootChunk = makeContentAddressedChunk(rootNodeData)
-
-      await uploadChunk(subsidisedTarget, rootChunk.data)
-
-      // Return 32-byte reference
-      return rootChunk.address.toHex()
     }
   }
 }

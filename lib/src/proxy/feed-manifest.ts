@@ -2,12 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { MantarayNode, NULL_ADDRESS } from "@ethersphere/bee-js"
-import type {
-  Bee,
-  Stamper,
-  UploadOptions,
-  BeeRequestOptions,
-} from "@ethersphere/bee-js"
+import type { UploadOptions } from "@ethersphere/bee-js"
 import {
   makeEncryptedContentAddressedChunk,
   makeContentAddressedChunk,
@@ -68,36 +63,28 @@ export interface CreateFeedManifestResult {
  * Without this, Bee's /bzz/ endpoint returns 404 because the "/" child chunk
  * doesn't exist (only its calculated hash was stored in the root manifest).
  *
- * @param bee - Bee client instance
- * @param stamper - Stamper for client-side signing
+ * @param target - Upload target (stamper or subsidised mode)
  * @param topic - Topic hex string (64 chars)
  * @param owner - Owner hex string (40 chars, no 0x prefix)
  * @param options - Options for creating the manifest (encrypt, etc.)
  * @param uploadOptions - Upload options (tag, deferred, etc.)
- * @param requestOptions - Bee request options
  * @returns Reference to the feed manifest
  */
 export async function createFeedManifestDirect(
-  bee: Bee,
-  stamper: Stamper,
+  target: UploadTarget,
   topic: string,
   owner: string,
   options?: CreateFeedManifestOptions,
   uploadOptions?: UploadOptions,
-  _requestOptions?: BeeRequestOptions,
 ): Promise<CreateFeedManifestResult> {
   // Normalize owner (remove 0x prefix if present)
   const normalizedOwner = owner.startsWith("0x") ? owner.slice(2) : owner
 
-  // Create upload target
-  const target: UploadTarget = {
-    mode: "stamper",
-    bee,
-    stamper,
-  }
-
-  // 1. Create tag for upload if not provided
-  const tag = uploadOptions?.tag ?? (await tryCreateTag(bee))
+  // Create tag for upload if in stamper mode (subsidised mode doesn't support tags)
+  const tag =
+    target.mode === "stamper"
+      ? (uploadOptions?.tag ?? (await tryCreateTag(target.bee)))
+      : undefined
   const chunkOptions = {
     pin: uploadOptions?.pin,
     deferred: uploadOptions?.deferred,
