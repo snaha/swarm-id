@@ -3,6 +3,10 @@
 
 import { MantarayNode } from "@ethersphere/bee-js"
 import type { Bee, BeeRequestOptions } from "@ethersphere/bee-js"
+import {
+  makeContentAddressedChunk,
+  makeEncryptedContentAddressedChunk,
+} from "../chunk"
 import { hexToUint8Array, uint8ArrayToHex } from "../utils/hex"
 import { downloadDataWithChunkAPI } from "./download-data"
 
@@ -43,6 +47,82 @@ export async function saveMantarayTreeRecursively(
 
   return {
     rootReference: result.reference,
+    tagUid: result.tagUid,
+  }
+}
+
+/**
+ * Options for saveMantarayTree
+ */
+export interface SaveMantarayOptions {
+  /** Encrypt manifest chunks (64-byte references with address + key) */
+  encrypt?: boolean
+}
+
+/**
+ * Upload callback for saveMantarayTree
+ *
+ * @param chunkData - The ready-to-upload chunk data
+ * @param isRoot - Whether this is the root node
+ * @returns Upload result with optional tag UID
+ */
+export type MantarayUploadCallback = (
+  chunkData: Uint8Array,
+  isRoot: boolean,
+) => Promise<{ tagUid?: number }>
+
+/**
+ * Save a Mantaray tree by uploading bottom-up with unified encryption support
+ *
+ * Creates CAC or encrypted CAC internally based on encrypt option.
+ * Returns 64-byte reference (address + key) when encrypted, 32-byte otherwise.
+ *
+ * @param node - Root Mantaray node to save
+ * @param uploadFn - Callback to upload each chunk (receives ready-to-upload data)
+ * @param options - Optional settings (encrypt: boolean)
+ * @returns Root reference and optional tag UID
+ */
+export async function saveMantarayTree(
+  node: MantarayNode,
+  uploadFn: MantarayUploadCallback,
+  options?: SaveMantarayOptions,
+): Promise<{ rootReference: string; tagUid?: number }> {
+  const shouldEncrypt = options?.encrypt === true
+
+  async function saveRecursively(
+    current: MantarayNode,
+    isRoot: boolean,
+  ): Promise<{ tagUid?: number }> {
+    // Process children first (bottom-up)
+    for (const fork of current.forks.values()) {
+      await saveRecursively(fork.node, false)
+    }
+
+    const data = await current.marshal()
+
+    if (shouldEncrypt) {
+      const encryptedChunk = makeEncryptedContentAddressedChunk(data)
+      const result = await uploadFn(encryptedChunk.data, isRoot)
+
+      // 64-byte reference: address + encryption key
+      const encryptedRef = new Uint8Array(64)
+      encryptedRef.set(encryptedChunk.address.toUint8Array(), 0)
+      encryptedRef.set(encryptedChunk.encryptionKey, 32)
+      current.selfAddress = encryptedRef
+
+      return result
+    } else {
+      const chunk = makeContentAddressedChunk(data)
+      const result = await uploadFn(chunk.data, isRoot)
+      current.selfAddress = chunk.address.toUint8Array()
+      return result
+    }
+  }
+
+  const result = await saveRecursively(node, true)
+
+  return {
+    rootReference: uint8ArrayToHex(node.selfAddress!),
     tagUid: result.tagUid,
   }
 }

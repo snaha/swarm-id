@@ -78,9 +78,8 @@ import type { UploadProgress } from "./proxy/types"
 import { StampWorkerPool } from "./proxy/stamp-worker-pool"
 import {
   loadMantarayTreeWithChunkAPI,
-  saveMantarayTreeRecursively,
+  saveMantarayTree,
 } from "./proxy/mantaray"
-import { saveMantarayTreeRecursivelyEncrypted } from "./proxy/mantaray-encrypted"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -607,28 +606,6 @@ export class SwarmIdProxy {
     if (!this.isSubsidisedModeActive()) {
       await this.saveStamperState()
     }
-  }
-
-  /**
-   * Upload a manifest chunk with mode-appropriate stamping.
-   * Used by handleUploadFile for manifest tree uploads.
-   */
-  private async uploadManifestChunk(
-    target: UploadTarget,
-    chunkData: Uint8Array,
-    options?: { pin?: boolean; deferred?: boolean; tag?: number },
-    requestOptions?: BeeRequestOptions,
-  ): Promise<{ reference: string }> {
-    const chunk = makeContentAddressedChunk(chunkData)
-
-    await uploadChunk(target, chunk.data, {
-      pin: options?.pin,
-      deferred: options?.deferred,
-      tag: options?.tag,
-      requestOptions,
-    })
-
-    return { reference: chunk.address.toHex() }
   }
 
   /**
@@ -1766,43 +1743,19 @@ export class SwarmIdProxy {
           })
 
           // Step 3: Upload manifest tree
-          let result: { rootReference: string; tagUid?: number }
-
-          const shouldEncryptManifest = options?.encryptManifest === true
-
-          if (shouldEncryptManifest) {
-            result = await saveMantarayTreeRecursivelyEncrypted(
-              manifest,
-              async (encryptedData, _address, isRoot) => {
-                await uploadChunk(target, encryptedData, {
-                  pin: options?.pin,
-                  deferred: options?.deferred,
-                  tag: uploadTag,
-                  requestOptions,
-                })
-                return {
-                  tagUid: isRoot ? uploadTag : undefined,
-                }
-              },
-            )
-          } else {
-            // Use uploadManifestChunk helper for non-encrypted manifest
-            result = await saveMantarayTreeRecursively(
-              manifest,
-              async (nodeData) => {
-                const uploadResult = await this.uploadManifestChunk(
-                  target,
-                  nodeData,
-                  { ...options, tag: uploadTag },
-                  requestOptions,
-                )
-                return { reference: uploadResult.reference }
-              },
-            )
-            if (uploadTag !== undefined) {
-              result = { ...result, tagUid: uploadTag }
-            }
-          }
+          const result = await saveMantarayTree(
+            manifest,
+            async (chunkData, isRoot) => {
+              await uploadChunk(target, chunkData, {
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: uploadTag,
+                requestOptions,
+              })
+              return { tagUid: isRoot ? uploadTag : undefined }
+            },
+            { encrypt: options?.encryptManifest === true },
+          )
 
           return result
         },
@@ -3208,27 +3161,18 @@ export class SwarmIdProxy {
           })
 
           // Step 3: Upload the Mantaray manifest
-          const manifestResult = beeCompatible
-            ? await saveMantarayTreeRecursively(manifest, async (chunkData) => {
-                const chunk = makeContentAddressedChunk(chunkData)
-                await uploadChunk(target, chunk.data, {
-                  pin: options?.pin,
-                  deferred: options?.deferred,
-                  tag: options?.tag,
-                })
-                return { reference: chunk.address.toHex() }
+          const manifestResult = await saveMantarayTree(
+            manifest,
+            async (chunkData) => {
+              await uploadChunk(target, chunkData, {
+                pin: options?.pin,
+                deferred: options?.deferred,
+                tag: options?.tag,
               })
-            : await saveMantarayTreeRecursivelyEncrypted(
-                manifest,
-                async (encryptedData) => {
-                  await uploadChunk(target, encryptedData, {
-                    pin: options?.pin,
-                    deferred: options?.deferred,
-                    tag: options?.tag,
-                  })
-                  return {}
-                },
-              )
+              return {}
+            },
+            { encrypt: !beeCompatible },
+          )
 
           // Step 4: Use manifest reference for ACT encryption
           const manifestReferenceBytes = hexToUint8Array(
