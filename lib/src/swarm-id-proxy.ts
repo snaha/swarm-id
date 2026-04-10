@@ -6,7 +6,6 @@ import type {
   IframeToParentMessage,
   ButtonStyles,
   ButtonConfig,
-  RequestAuthMessage,
   UploadDataMessage,
   DownloadDataMessage,
   UploadFileMessage,
@@ -757,10 +756,6 @@ export class SwarmIdProxy {
         this.handleDisconnect(message, event)
         break
 
-      case "requestAuth":
-        this.handleRequestAuth(message, event)
-        break
-
       case "uploadData":
         await this.handleUploadData(message, event)
         break
@@ -1352,19 +1347,6 @@ export class SwarmIdProxy {
       requestId: message.requestId,
       success: true,
     })
-  }
-
-  private handleRequestAuth(
-    message: RequestAuthMessage,
-    _event: MessageEvent,
-  ): void {
-    // Store styles for button creation
-    this.currentStyles = message.styles
-
-    // If container is set, show the button
-    if (this.authButtonContainer) {
-      this.showAuthButton()
-    }
   }
 
   /**

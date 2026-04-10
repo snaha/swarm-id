@@ -684,12 +684,6 @@ export const DisconnectMessageSchema = z.object({
   requestId: z.string(),
 })
 
-export const RequestAuthMessageSchema = z.object({
-  type: z.literal("requestAuth"),
-  requestId: z.string(),
-  styles: ButtonStylesSchema,
-})
-
 export const UploadDataMessageSchema = z.object({
   type: z.literal("uploadData"),
   requestId: z.string(),
@@ -1027,7 +1021,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ParentIdentifyMessageSchema,
   CheckAuthMessageSchema,
   DisconnectMessageSchema,
-  RequestAuthMessageSchema,
   UploadDataMessageSchema,
   DownloadDataMessageSchema,
   UploadFileMessageSchema,
@@ -1067,7 +1060,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
 export type ParentIdentifyMessage = z.infer<typeof ParentIdentifyMessageSchema>
 export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>
 export type DisconnectMessage = z.infer<typeof DisconnectMessageSchema>
-export type RequestAuthMessage = z.infer<typeof RequestAuthMessageSchema>
 export type UploadDataMessage = z.infer<typeof UploadDataMessageSchema>
 export type DownloadDataMessage = z.infer<typeof DownloadDataMessageSchema>
 export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
