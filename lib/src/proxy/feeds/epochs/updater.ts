@@ -31,7 +31,6 @@ import { AsyncEpochFinder } from "./async-finder"
  */
 export class BasicEpochUpdater implements EpochUpdater {
   constructor(
-    _bee: unknown, // Deprecated: no longer used, kept for backward compatibility
     private readonly topic: Topic,
     private readonly signer: PrivateKey,
   ) {}

@@ -206,7 +206,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should store and retrieve first update", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -228,7 +228,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should find update at any timestamp via root epoch", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -245,7 +245,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should not find update before it was created", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -260,7 +260,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should return epoch hints for stateless operation", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const at = 100n
       const reference = createTestReference(1)
 
@@ -277,7 +277,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Multiple Updates (Stateless Epoch Calculation)", () => {
     it("should use different epochs when hints are provided", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -304,7 +304,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should find correct update at each timestamp with hints", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -347,7 +347,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should handle sparse updates with hints", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -377,7 +377,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should overwrite at root epoch when no hints provided", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -396,7 +396,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Auto-Lookup (No Hints Required)", () => {
     it("should auto-lookup and use different epochs for sequential updates", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -421,7 +421,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should preserve all updates with auto-lookup at fixed intervals", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -445,7 +445,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should auto-lookup with sparse timestamps", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -465,7 +465,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should have different SOC addresses for each update with auto-lookup", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
 
       const ref1 = createTestReference(1)
       const ref2 = createTestReference(2)
@@ -487,7 +487,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should work correctly when first update is at timestamp 0", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -504,7 +504,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should work with 64-byte references and auto-lookup", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -528,7 +528,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Fixed Intervals (With Hints)", () => {
     it("should preserve all updates at fixed intervals when hints used", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -565,7 +565,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Random Intervals (With Hints)", () => {
     it("should preserve all updates at random intervals when hints used", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new SyncEpochFinder(bee as any, topic, owner)
 
@@ -601,7 +601,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Async Finder (With Hints)", () => {
     it("should work with async finder (basic)", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -617,7 +617,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should work with async finder (multiple updates with hints)", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -650,7 +650,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("should work with async finder (sparse updates with hints)", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const finder = new AsyncEpochFinder(bee as any, topic, owner)
 
@@ -677,7 +677,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Error Handling", () => {
     it("should reject reference with wrong length", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
 
       const wrongRef = new Uint8Array(16) // Wrong size
       await expect(updater.update(100n, wrongRef, target)).rejects.toThrow(
@@ -688,7 +688,7 @@ describe("Epoch Feeds Integration", () => {
 
   describe("Correctness Core Regression Matrix", () => {
     it("finds all updates with hints for sync and async finders", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const ref100 = createTestReference(100)
       const ref200 = createTestReference(200)
@@ -721,7 +721,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("returns consistent results regardless of after hint", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const ref100 = createTestReference(100)
       const ref200 = createTestReference(200)
@@ -748,7 +748,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("handles boundary timestamps 0 and 1 with hints", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const ref0 = createTestReference(10)
       const ref1 = createTestReference(11)
@@ -771,7 +771,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("uses deterministic last-write-wins for same timestamp updates without hints", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       await updater.update(100n, createTestReference(1), target)
       const ref2 = createTestReference(2)
       await updater.update(100n, ref2, target) // No hints - overwrites
@@ -786,8 +786,8 @@ describe("Epoch Feeds Integration", () => {
     it("isolates by topic for same owner", async () => {
       const topicA = createTestTopic("topic-a")
       const topicB = createTestTopic("topic-b")
-      const updaterA = new BasicEpochUpdater(bee as any, topicA, signer)
-      const updaterB = new BasicEpochUpdater(bee as any, topicB, signer)
+      const updaterA = new BasicEpochUpdater(topicA, signer)
+      const updaterB = new BasicEpochUpdater(topicB, signer)
       const owner = signer.publicKey().address()
       const refA = createTestReference(9001)
       const refB = createTestReference(9002)
@@ -833,7 +833,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("roundtrips 64-byte references without truncation", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const ref64 = createTestReference64(42)
 
@@ -847,7 +847,7 @@ describe("Epoch Feeds Integration", () => {
 
       // Test 32-byte reference on separate topic
       const topic32 = createTestTopic("topic-32")
-      const updater32 = new BasicEpochUpdater(bee as any, topic32, signer)
+      const updater32 = new BasicEpochUpdater(topic32, signer)
       const ref32 = createTestReference(24)
       await updater32.update(200n, ref32, target)
 
@@ -859,7 +859,7 @@ describe("Epoch Feeds Integration", () => {
     })
 
     it("latest update findable at any future timestamp with hints", async () => {
-      const updater = new BasicEpochUpdater(bee as any, topic, signer)
+      const updater = new BasicEpochUpdater(topic, signer)
       const owner = updater.getOwner()
       const ref100 = createTestReference(100)
       const ref150 = createTestReference(150)

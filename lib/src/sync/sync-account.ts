@@ -378,7 +378,7 @@ export function createSyncAccount(
       const topic = Topic.fromString(
         `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
       )
-      const updater = new BasicEpochUpdater(bee, topic, accountKey)
+      const updater = new BasicEpochUpdater(topic, accountKey)
       const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
 
       // Convert 128-char hex reference to 64-byte Uint8Array
