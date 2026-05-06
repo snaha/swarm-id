@@ -93,12 +93,12 @@ pnpm dev:demo        # Demo on port 3000
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
 ```
 
-### Local Bee Cluster (FDP Play)
+### Local Bee Cluster (bee-compose)
 
-For local development with postage stamps and uploads, use FDP Play to run a local Bee cluster with blockchain. Requires Docker.
+For local development with postage stamps and uploads, use [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) to run a local Bee cluster with blockchain. Requires Docker.
 
 ```bash
-# Start cluster (queen + 1 worker node)
+# Start cluster (queen + 1 light worker)
 pnpm dev:bee:detach
 
 # View logs
@@ -116,7 +116,7 @@ pnpm dev:bee:fresh
 | Service        | URL                      |
 | -------------- | ------------------------ |
 | Queen Bee API  | `http://localhost:1633`  |
-| Worker 1 API   | `http://localhost:11633` |
+| Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
 **Buying a Postage Stamp:**

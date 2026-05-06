@@ -6,11 +6,11 @@
   "type": "module",
   "scripts": {
     "dev": "concurrently -n ui,demo -c blue,green \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
-    "dev:bee": "fdp-play start -w 1",
-    "dev:bee:detach": "fdp-play start -w 1 --detach",
-    "dev:bee:stop": "fdp-play stop",
-    "dev:bee:logs": "fdp-play logs queen --follow",
-    "dev:bee:fresh": "fdp-play start -w 1 --fresh --pull",
+    "dev:bee": "bee-compose start --light 1 --no-detach",
+    "dev:bee:detach": "bee-compose start --light 1",
+    "dev:bee:stop": "bee-compose stop",
+    "dev:bee:logs": "bee-compose logs queen --follow",
+    "dev:bee:fresh": "bee-compose start --light 1 --fresh --pull",
     "dev:demo": "pnpm --filter @swarm-id/demo dev",
     "dev:lib": "pnpm --filter @snaha/swarm-id build:watch",
     "dev:swarm-ui": "pnpm --filter swarm-identity dev",
@@ -30,7 +30,7 @@
     "format:lib": "pnpm --filter @snaha/swarm-id format"
   },
   "devDependencies": {
-    "@fairdatasociety/fdp-play": "^3.3.0",
+    "@snaha/bee-compose": "^0.1.1",
     "concurrently": "^9.1.2",
     "prettier": "^3.8.1",
     "serve": "^14.2.4"
@@ -51,14 +51,8 @@
   "pnpm": {
     "onlyBuiltDependencies": [
       "@tailwindcss/oxide",
-      "bufferutil",
-      "cpu-features",
-      "es5-ext",
       "esbuild",
-      "protobufjs",
-      "sharp",
-      "ssh2",
-      "utf-8-validate"
+      "sharp"
     ]
   }
 }
