@@ -11,7 +11,7 @@ const config: KnipConfig = {
     '$lib/*': ['src/lib/*'],
   },
   ignore: ['playwright/index.ts', 'src/lib/time.ts', 'src/lib/schemas.ts'],
-  ignoreDependencies: ['@snaha/swarm-id', '@ethersphere/bee-js'],
+  ignoreDependencies: ['@snaha/swarm-id'],
   ignoreExportsUsedInFile: true,
   'playwright-ct': false,
 }
