@@ -72,7 +72,7 @@
   let beeStampsError = $state('')
   let lastBeeUrl = $state('')
 
-  // FDP Play known signers (pre-funded with ETH + BZZ)
+  // Known dev signers (pre-funded with ETH + BZZ in the local Bee cluster)
   const KNOWN_SIGNERS = [
     {
       value: '566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9',
@@ -494,14 +494,14 @@ Check console logs for details:
           <CopyButton text="http://localhost:1633" />
         </Horizontal>
         <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
-          <StatusDot endpoint="http://localhost:11633" />
+          <StatusDot endpoint="http://localhost:16331" />
           <Typography variant="small" font="mono">Worker API:</Typography>
-          <a href="http://localhost:11633" target="_blank" rel="noopener">
+          <a href="http://localhost:16331" target="_blank" rel="noopener">
             <Typography variant="small" font="mono" style="color: var(--colors-link);"
-              >http://localhost:11633</Typography
+              >http://localhost:16331</Typography
             >
           </a>
-          <CopyButton text="http://localhost:11633" />
+          <CopyButton text="http://localhost:16331" />
         </Horizontal>
         <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
           <StatusDot endpoint="http://localhost:9545" method="json-rpc" />

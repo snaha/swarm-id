@@ -15,12 +15,10 @@
     "knip": "knip",
     "clean": "rm -rf build .svelte-kit"
   },
-  "dependencies": {
-    "@ethersphere/bee-js": "^11.1.1",
-    "@snaha/swarm-id": "workspace:*"
-  },
   "devDependencies": {
     "@eslint/js": "9.39.1",
+    "@ethersphere/bee-js": "^11.1.1",
+    "@snaha/swarm-id": "workspace:*",
     "@sveltejs/adapter-static": "3.0.10",
     "@sveltejs/kit": "2.50.1",
     "@sveltejs/vite-plugin-svelte": "6.2.1",

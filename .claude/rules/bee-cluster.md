@@ -5,12 +5,12 @@ paths:
   - 'lib/**'
 ---
 
-# Local Bee Development Cluster (FDP Play)
+# Local Bee Development Cluster (bee-compose)
 
-Docker-based local Bee cluster for development with postage stamps.
+Docker-based local Bee cluster for development with postage stamps. Uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose).
 
 ```bash
-pnpm dev:bee          # Start cluster (queen + 1 worker)
+pnpm dev:bee          # Start cluster (queen + 1 light worker), foreground
 pnpm dev:bee:detach   # Start in background
 pnpm dev:bee:stop     # Stop cluster
 pnpm dev:bee:fresh    # Fresh start (pull latest, purge data)
@@ -19,7 +19,7 @@ pnpm dev:bee:fresh    # Fresh start (pull latest, purge data)
 | Service        | URL                      |
 | -------------- | ------------------------ |
 | Queen Bee API  | `http://localhost:1633`  |
-| Worker 1 API   | `http://localhost:11633` |
+| Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
 Developer Tools at http://localhost:5174/dev provide stamp buying and sync testing.
