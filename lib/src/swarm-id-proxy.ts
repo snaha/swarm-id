@@ -219,31 +219,43 @@ export class SwarmIdProxy {
       return
     }
 
+    const logRejection = (where: string) => (error: unknown) => {
+      console.error(`[Proxy] ${where} failed:`, error)
+    }
+
     const connectedAppsManager = createConnectedAppsStorageManager()
     this.unsubscribeStorageListeners.push(
       connectedAppsManager.subscribe((connectedApps) => {
-        this.handleConnectedAppsChange(connectedApps)
+        this.handleConnectedAppsChange(connectedApps).catch(
+          logRejection("handleConnectedAppsChange"),
+        )
       }),
     )
 
     const identitiesManager = createIdentitiesStorageManager()
     this.unsubscribeStorageListeners.push(
       identitiesManager.subscribe(() => {
-        this.handleAuxiliaryStorageChange()
+        this.handleAuxiliaryStorageChange().catch(
+          logRejection("handleAuxiliaryStorageChange"),
+        )
       }),
     )
 
     const accountsManager = createAccountsStorageManager()
     this.unsubscribeStorageListeners.push(
       accountsManager.subscribe(() => {
-        this.handleAuxiliaryStorageChange()
+        this.handleAuxiliaryStorageChange().catch(
+          logRejection("handleAuxiliaryStorageChange"),
+        )
       }),
     )
 
     const postageStampsManager = createPostageStampsStorageManager()
     this.unsubscribeStorageListeners.push(
       postageStampsManager.subscribe(() => {
-        this.handleAuxiliaryStorageChange()
+        this.handleAuxiliaryStorageChange().catch(
+          logRejection("handleAuxiliaryStorageChange"),
+        )
       }),
     )
   }
@@ -1373,13 +1385,19 @@ export class SwarmIdProxy {
       }
     }
 
-    // User-stamp mode only available when storage is NOT partitioned.
-    // Subsidised mode is the fallback when no user stamp is usable.
+    // Upload mode is only meaningful when authenticated — `ensureCanUpload`
+    // throws on missing auth, so reporting `canUpload=true` here without an
+    // app secret would mislead the dApp into attempting uploads that always
+    // fail.
+    // - User-stamp mode requires a stamp + signer key and non-partitioned storage.
+    // - Subsidised mode is the fallback when no user stamp is usable.
     let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
-    if (this.postageBatchId && this.signerKey && !this.storagePartitioned) {
-      uploadMode = "user-stamp"
-    } else if (this.subsidisedGatewayUrl) {
-      uploadMode = "subsidised"
+    if (this.authenticated && this.appSecret) {
+      if (this.postageBatchId && this.signerKey && !this.storagePartitioned) {
+        uploadMode = "user-stamp"
+      } else if (this.subsidisedGatewayUrl) {
+        uploadMode = "subsidised"
+      }
     }
 
     return {
