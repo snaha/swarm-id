@@ -128,6 +128,7 @@ export class SwarmIdClient {
   private lastConnectionInfo: ConnectionInfo | undefined
   private firstConnectionInfoPromise: Promise<void>
   private firstConnectionInfoResolve?: () => void
+  private firstConnectionInfoReject?: (error: Error) => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
@@ -213,8 +214,21 @@ export class SwarmIdClient {
     // Resolved by the first `connectionInfoChanged` message from the proxy,
     // which the proxy emits unconditionally right after `proxyReady`. Allows
     // `initialize()` to guarantee `client.connectionInfo` is populated.
-    this.firstConnectionInfoPromise = new Promise<void>((resolve) => {
+    // Rejected on `initializationTimeout` so a buggy or mismatched proxy can't
+    // wedge `initialize()` indefinitely.
+    this.firstConnectionInfoPromise = new Promise<void>((resolve, reject) => {
       this.firstConnectionInfoResolve = resolve
+      this.firstConnectionInfoReject = reject
+
+      setTimeout(() => {
+        if (this.firstConnectionInfoReject) {
+          this.firstConnectionInfoReject(
+            new Error(
+              `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
+            ),
+          )
+        }
+      }, this.initializationTimeout)
     })
 
     // Create promise for proxyInitialized message
@@ -438,6 +452,7 @@ export class SwarmIdClient {
         if (this.firstConnectionInfoResolve) {
           this.firstConnectionInfoResolve()
           this.firstConnectionInfoResolve = undefined
+          this.firstConnectionInfoReject = undefined
         }
         if (this.onConnectionChange) {
           this.onConnectionChange(info)

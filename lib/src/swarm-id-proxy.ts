@@ -174,6 +174,7 @@ export class SwarmIdProxy {
   private appMetadata: AppMetadata | undefined
   private bee: Bee
   private unsubscribeStorageListeners: Array<() => void> = []
+  private storageWorkQueue: Promise<void> = Promise.resolve()
   private lastConnectionInfo: ConnectionInfo | undefined
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
@@ -219,15 +220,24 @@ export class SwarmIdProxy {
       return
     }
 
-    const logRejection = (where: string) => (error: unknown) => {
-      console.error(`[Proxy] ${where} failed:`, error)
+    // Serialize handler invocations so rapid storage events (or concurrent
+    // events across stores) don't interleave `refreshStampFromStorage` /
+    // `initializeStamper` runs — those mutate shared `stamper`/`postageBatchId`
+    // state and races would produce inconsistent ConnectionInfo emissions.
+    // Rejections are caught and logged so one failure doesn't break the chain.
+    const enqueue = (where: string, work: () => Promise<void>): void => {
+      this.storageWorkQueue = this.storageWorkQueue.then(() =>
+        work().catch((error: unknown) => {
+          console.error(`[Proxy] ${where} failed:`, error)
+        }),
+      )
     }
 
     const connectedAppsManager = createConnectedAppsStorageManager()
     this.unsubscribeStorageListeners.push(
       connectedAppsManager.subscribe((connectedApps) => {
-        this.handleConnectedAppsChange(connectedApps).catch(
-          logRejection("handleConnectedAppsChange"),
+        enqueue("handleConnectedAppsChange", () =>
+          this.handleConnectedAppsChange(connectedApps),
         )
       }),
     )
@@ -235,8 +245,8 @@ export class SwarmIdProxy {
     const identitiesManager = createIdentitiesStorageManager()
     this.unsubscribeStorageListeners.push(
       identitiesManager.subscribe(() => {
-        this.handleAuxiliaryStorageChange().catch(
-          logRejection("handleAuxiliaryStorageChange"),
+        enqueue("handleAuxiliaryStorageChange", () =>
+          this.handleAuxiliaryStorageChange(),
         )
       }),
     )
@@ -244,8 +254,8 @@ export class SwarmIdProxy {
     const accountsManager = createAccountsStorageManager()
     this.unsubscribeStorageListeners.push(
       accountsManager.subscribe(() => {
-        this.handleAuxiliaryStorageChange().catch(
-          logRejection("handleAuxiliaryStorageChange"),
+        enqueue("handleAuxiliaryStorageChange", () =>
+          this.handleAuxiliaryStorageChange(),
         )
       }),
     )
@@ -253,8 +263,8 @@ export class SwarmIdProxy {
     const postageStampsManager = createPostageStampsStorageManager()
     this.unsubscribeStorageListeners.push(
       postageStampsManager.subscribe(() => {
-        this.handleAuxiliaryStorageChange().catch(
-          logRejection("handleAuxiliaryStorageChange"),
+        enqueue("handleAuxiliaryStorageChange", () =>
+          this.handleAuxiliaryStorageChange(),
         )
       }),
     )
