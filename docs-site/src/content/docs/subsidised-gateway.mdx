@@ -79,7 +79,7 @@ The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
 Read `client.connectionInfo` to check the current upload mode (synchronous, populated as soon as `initialize()` resolves):
 
 ```typescript
-const info = client.connectionInfo!
+const info = client.connectionInfo
 if (info.canUpload) {
   if (info.uploadMode === 'subsidised') {
     console.log('Uploads will use the subsidised gateway')

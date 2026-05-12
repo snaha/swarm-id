@@ -874,20 +874,26 @@ export class SwarmIdClient {
    * Current dApp-visible {@link ConnectionInfo} snapshot — identity, app key,
    * upload capability, and upload mode. Populated by the proxy as soon as it
    * is ready and refreshed whenever any of those derived fields change.
+   * Subscribe to {@link ClientOptions.onConnectionChange} to react to updates.
    *
-   * Guaranteed to be defined after {@link initialize} resolves. Subscribe to
-   * {@link ClientOptions.onConnectionChange} to react to later updates.
+   * @throws {Error} If {@link initialize} has not been called yet
    *
    * @example
    * ```typescript
    * await client.initialize()
-   * const info = client.connectionInfo!
+   * const info = client.connectionInfo
    * if (info.canUpload) {
    *   console.log('Ready to upload as:', info.identity?.name)
    * }
    * ```
    */
-  get connectionInfo(): ConnectionInfo | undefined {
+  get connectionInfo(): ConnectionInfo {
+    this.ensureReady()
+    if (!this.lastConnectionInfo) {
+      // Unreachable: initialize() awaits firstConnectionInfoPromise, which is
+      // resolved by the proxy's eager emit after proxyReady.
+      throw new Error("SwarmIdClient connectionInfo not yet available.")
+    }
     return this.lastConnectionInfo
   }
 

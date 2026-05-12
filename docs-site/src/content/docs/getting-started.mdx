@@ -47,7 +47,7 @@ const authUrl = client.connect()
 console.log('Authentication opened at:', authUrl)
 
 // 4. Read current connection state synchronously
-const info = client.connectionInfo!
+const info = client.connectionInfo
 
 // 5. Upload data (after authentication)
 if (info.identity) {

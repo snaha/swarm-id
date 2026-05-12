@@ -371,9 +371,9 @@ console.log('User logged out')
 
 Synchronous accessor for the current connection state. Populated by the proxy as soon as it is ready and refreshed automatically whenever any of the derived fields change (identity rename, default-stamp change, account migration, postage stamp purchased, auth transitions). Subscribe to `onConnectionChange` to react to updates.
 
-Guaranteed to be defined after `initialize()` resolves.
+**Type:** `ConnectionInfo`
 
-**Type:** `ConnectionInfo | undefined`
+**Throws:** `Error` if `initialize()` has not been called yet.
 
 | Property             | Type                                            | Description                                                                                                 |
 | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -392,7 +392,7 @@ Guaranteed to be defined after `initialize()` resolves.
 **Example:**
 
 ```typescript
-const info = client.connectionInfo!
+const info = client.connectionInfo
 if (info.canUpload) {
   if (info.uploadMode === 'subsidised') {
     console.log('Uploads will use the subsidised gateway')
