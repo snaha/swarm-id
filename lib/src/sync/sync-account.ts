@@ -42,6 +42,7 @@ import { uploadData, type UploadTarget } from "../proxy/upload"
 import { serializeAccountState } from "./serialization"
 import type { SyncResult } from "./types"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
+import { rejectAfter } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
 
 // Timeout for utilization upload in milliseconds
@@ -220,20 +221,13 @@ export function createSyncAccount(
         },
       )
 
-      // Add timeout to prevent hanging
-      const timeoutPromise = new Promise<void>((_, reject) => {
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Utilization upload timeout (${UTILIZATION_UPLOAD_TIMEOUT_MS}ms)`,
-              ),
-            ),
+      return Promise.race([
+        uploadPromise,
+        rejectAfter(
           UTILIZATION_UPLOAD_TIMEOUT_MS,
-        )
-      })
-
-      return Promise.race([uploadPromise, timeoutPromise])
+          `Utilization upload timeout (${UTILIZATION_UPLOAD_TIMEOUT_MS}ms)`,
+        ),
+      ])
     }
   }
 

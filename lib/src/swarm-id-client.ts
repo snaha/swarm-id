@@ -85,6 +85,7 @@ import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
+import { rejectAfter } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -218,16 +219,9 @@ export class SwarmIdClient {
       new Promise<void>((resolve) => {
         this.firstConnectionInfoResolve = resolve
       }),
-      new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new Error(
-                `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
-              ),
-            ),
-          this.initializationTimeout,
-        ),
+      rejectAfter(
+        this.initializationTimeout,
+        `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
       ),
     ])
 
