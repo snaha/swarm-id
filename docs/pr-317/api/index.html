@@ -403,7 +403,7 @@
 <hr>
 <h3 id="disconnect"><code dir="auto">disconnect()</code></h3>
 <p>Disconnects the current session and clears authentication data.</p>
-<p>After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The <code dir="auto">onConnectionChange</code> callback will fire with an un-authenticated snapshot (no <code dir="auto">identity</code>, <code dir="auto">canUpload: false</code> unless a subsidised gateway is configured).</p>
+<p>After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The <code dir="auto">onConnectionChange</code> callback will fire with an un-authenticated snapshot (no <code dir="auto">identity</code>, <code dir="auto">canUpload: false</code>, <code dir="auto">uploadMode: "unavailable"</code>). Note that <code dir="auto">canUpload</code> is reported as <code dir="auto">false</code> even when a subsidised gateway is configured, because uploads still require an authenticated app secret.</p>
 <p><strong>Returns:</strong> <code dir="auto">Promise&#x3C;void></code> - Resolves when disconnection is complete</p>
 <p><strong>Throws:</strong></p>
 <ul>
