@@ -105,15 +105,14 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
  *     name: 'My App',
  *     description: 'A decentralized application'
  *   },
- *   onAuthChange: (authenticated) => {
- *     console.log('Auth status changed:', authenticated)
+ *   onConnectionChange: (info) => {
+ *     console.log('Connection changed:', info.identity?.name, info.canUpload)
  *   }
  * })
  *
  * await client.initialize()
  *
- * const status = await client.checkAuthStatus()
- * if (status.authenticated) {
+ * if (client.connectionInfo?.identity) {
  *   const result = await client.uploadData(new Uint8Array([1, 2, 3]))
  *   console.log('Uploaded with reference:', result.reference)
  * }
@@ -125,9 +124,10 @@ export class SwarmIdClient {
   private iframePath: string
   private timeout: number
   private initializationTimeout: number
-  private onAuthChange?: (authenticated: boolean) => void
   private onConnectionChange?: (info: ConnectionInfo) => void
   private lastConnectionInfo: ConnectionInfo | undefined
+  private firstConnectionInfoPromise: Promise<void>
+  private firstConnectionInfoResolve?: () => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
@@ -159,7 +159,6 @@ export class SwarmIdClient {
    * @param options.iframeOrigin - The origin URL where the Swarm ID proxy iframe is hosted
    * @param options.iframePath - The path to the proxy iframe (defaults to "/proxy")
    * @param options.timeout - Request timeout in milliseconds (defaults to 30000)
-   * @param options.onAuthChange - Callback function invoked when authentication status changes
    * @param options.onConnectionChange - Callback invoked when the dApp-visible ConnectionInfo changes (identity, stamp, account type, auth)
    * @param options.popupMode - How to display the authentication popup: "popup" or "window" (defaults to "window")
    * @param options.metadata - Application metadata shown to users during authentication
@@ -182,7 +181,6 @@ export class SwarmIdClient {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
     this.initializationTimeout =
       options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
-    this.onAuthChange = options.onAuthChange
     this.onConnectionChange = options.onConnectionChange
     this.popupMode = options.popupMode || "window"
     this.metadata = options.metadata
@@ -210,6 +208,13 @@ export class SwarmIdClient {
           ),
         )
       }, this.initializationTimeout)
+    })
+
+    // Resolved by the first `connectionInfoChanged` message from the proxy,
+    // which the proxy emits unconditionally right after `proxyReady`. Allows
+    // `initialize()` to guarantee `client.connectionInfo` is populated.
+    this.firstConnectionInfoPromise = new Promise<void>((resolve) => {
+      this.firstConnectionInfoResolve = resolve
     })
 
     // Create promise for proxyInitialized message
@@ -325,6 +330,10 @@ export class SwarmIdClient {
 
     // Wait for iframe to be ready
     await this.readyPromise
+
+    // Wait for the initial ConnectionInfo snapshot (sent right after proxyReady)
+    // so `client.connectionInfo` is populated by the time `initialize()` resolves.
+    await this.firstConnectionInfoPromise
   }
 
   /**
@@ -392,18 +401,12 @@ export class SwarmIdClient {
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
-        if (this.onAuthChange) {
-          this.onAuthChange(message.authenticated)
-        }
         break
 
       case "authStatusResponse":
         // Always show iframe - it will display login or disconnect button
         if (this.iframe) {
           this.iframe.style.display = "block"
-        }
-        if (this.onAuthChange) {
-          this.onAuthChange(message.authenticated)
         }
         // Handle as response if there's a matching request
         if ("requestId" in message) {
@@ -421,9 +424,6 @@ export class SwarmIdClient {
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
-        if (this.onAuthChange) {
-          this.onAuthChange(true)
-        }
         break
 
       case "connectionInfoChanged": {
@@ -435,6 +435,10 @@ export class SwarmIdClient {
           appKey: message.appKey,
         }
         this.lastConnectionInfo = info
+        if (this.firstConnectionInfoResolve) {
+          this.firstConnectionInfoResolve()
+          this.firstConnectionInfoResolve = undefined
+        }
         if (this.onConnectionChange) {
           this.onConnectionChange(info)
         }
@@ -453,10 +457,6 @@ export class SwarmIdClient {
         break
 
       case "disconnectResponse":
-        // Handle disconnect response
-        if (this.onAuthChange) {
-          this.onAuthChange(false)
-        }
         // Handle as response if there's a matching request
         if ("requestId" in message) {
           const pending = this.pendingRequests.get(message.requestId)
@@ -764,8 +764,9 @@ export class SwarmIdClient {
    * Disconnects the current session and clears authentication data.
    *
    * After disconnection, the user will need to re-authenticate to perform
-   * uploads or access identity-related features. The {@link onAuthChange}
-   * callback will be invoked with `false`.
+   * uploads or access identity-related features. The
+   * {@link ClientOptions.onConnectionChange} callback will fire with an
+   * un-authenticated snapshot.
    *
    * @returns A promise that resolves when disconnection is complete
    * @throws {Error} If the client is not initialized
@@ -793,11 +794,6 @@ export class SwarmIdClient {
 
     if (!response.success) {
       throw new Error("Failed to disconnect")
-    }
-
-    // Notify via auth change callback
-    if (this.onAuthChange) {
-      this.onAuthChange(false)
     }
   }
 
@@ -875,71 +871,21 @@ export class SwarmIdClient {
   }
 
   /**
-   * Retrieves connection information including upload capability and identity details.
+   * Current dApp-visible {@link ConnectionInfo} snapshot — identity, app key,
+   * upload capability, and upload mode. Populated by the proxy as soon as it
+   * is ready and refreshed whenever any of those derived fields change.
    *
-   * Use this method to check if the user can upload data and to get
-   * information about the currently connected identity.
-   *
-   * @returns A promise resolving to the connection info object
-   * @returns return.canUpload - Whether the user can upload data (has valid postage stamp)
-   * @returns return.identity - The connected identity details (if authenticated)
-   * @returns return.identity.id - Unique identifier for the identity
-   * @returns return.identity.name - Display name of the identity
-   * @returns return.identity.address - Ethereum address associated with the identity
-   * @throws {Error} If the client is not initialized
-   * @throws {Error} If the request times out
+   * Guaranteed to be defined after {@link initialize} resolves. Subscribe to
+   * {@link ClientOptions.onConnectionChange} to react to later updates.
    *
    * @example
    * ```typescript
-   * const info = await client.getConnectionInfo()
+   * await client.initialize()
+   * const info = client.connectionInfo!
    * if (info.canUpload) {
    *   console.log('Ready to upload as:', info.identity?.name)
-   * } else {
-   *   console.log('No postage stamp available')
    * }
    * ```
-   */
-  async getConnectionInfo(): Promise<ConnectionInfo> {
-    this.ensureReady()
-    const requestId = this.generateRequestId()
-
-    const response = await this.sendRequest<{
-      type: "connectionInfoResponse"
-      requestId: string
-      canUpload: boolean
-      storagePartitioned?: boolean
-      uploadMode?: "user-stamp" | "subsidised" | "unavailable"
-      identity?: {
-        id: string
-        name: string
-        address: string
-        publicKey?: string
-      }
-      appKey?: {
-        address: string
-        publicKey: string
-      }
-    }>({
-      type: "getConnectionInfo",
-      requestId,
-    })
-
-    const info: ConnectionInfo = {
-      canUpload: response.canUpload,
-      storagePartitioned: response.storagePartitioned,
-      uploadMode: response.uploadMode,
-      identity: response.identity,
-      appKey: response.appKey,
-    }
-    this.lastConnectionInfo = info
-    return info
-  }
-
-  /**
-   * Returns the most recently observed {@link ConnectionInfo} without making
-   * a round-trip to the iframe. Returns `undefined` before the first
-   * {@link getConnectionInfo} call or {@link ClientOptions.onConnectionChange}
-   * notification.
    */
   get connectionInfo(): ConnectionInfo | undefined {
     return this.lastConnectionInfo

@@ -12,7 +12,6 @@ import type {
   DownloadFileMessage,
   UploadChunkMessage,
   DownloadChunkMessage,
-  GetConnectionInfoMessage,
   IsConnectedMessage,
   GetNodeInfoMessage,
   GsocMineMessage,
@@ -843,8 +842,8 @@ export class SwarmIdProxy {
       parentOrigin: this.parentOrigin,
     })
 
-    // Send the initial ConnectionInfo snapshot so dApps using onConnectionChange
-    // receive state without an extra getConnectionInfo round trip.
+    // Send the initial ConnectionInfo snapshot. The client awaits this before
+    // resolving `initialize()`, so `client.connectionInfo` is populated by then.
     this.emitConnectionInfoIfChanged()
   }
 
@@ -890,10 +889,6 @@ export class SwarmIdProxy {
 
       case "downloadChunk":
         await this.handleDownloadChunk(message, event)
-        break
-
-      case "getConnectionInfo":
-        this.handleGetConnectionInfo(message, event)
         break
 
       case "isConnected":
@@ -1327,23 +1322,6 @@ export class SwarmIdProxy {
       origin: this.authenticated ? this.parentOrigin : undefined,
       beeApiUrl: this.beeApiUrl,
     })
-  }
-
-  private handleGetConnectionInfo(
-    message: GetConnectionInfoMessage,
-    event: MessageEvent,
-  ): void {
-    const info = this.buildConnectionInfo()
-    this.postMessage(event, {
-      type: "connectionInfoResponse",
-      requestId: message.requestId,
-      canUpload: info.canUpload,
-      storagePartitioned: info.storagePartitioned,
-      uploadMode: info.uploadMode,
-      identity: info.identity,
-      appKey: info.appKey,
-    })
-    this.lastConnectionInfo = info
   }
 
   /**

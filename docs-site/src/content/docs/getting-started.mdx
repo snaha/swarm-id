@@ -30,12 +30,12 @@ const client = new SwarmIdClient({
     name: 'My dApp',
     description: 'A demo Swarm application',
   },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status:', authenticated)
+  onConnectionChange: (info) => {
+    console.log('Connection changed:', info.identity?.name, 'canUpload=', info.canUpload)
   },
 })
 
-// 2. Initialize (creates hidden iframe)
+// 2. Initialize (creates hidden iframe; populates client.connectionInfo)
 await client.initialize()
 
 // 3a. Option A: Use iframe authentication button
@@ -46,11 +46,11 @@ await client.initialize()
 const authUrl = client.connect()
 console.log('Authentication opened at:', authUrl)
 
-// 4. Check if user is authenticated
-const status = await client.checkAuthStatus()
+// 4. Read current connection state synchronously
+const info = client.connectionInfo!
 
 // 5. Upload data (after authentication)
-if (status.authenticated) {
+if (info.identity) {
   const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
   console.log('Uploaded:', result.reference)
 }
@@ -69,7 +69,7 @@ The `SwarmIdClient` constructor accepts the following options:
 | `metadata`             | `object`   | No       | App metadata shown during authentication                           |
 | `metadata.name`        | `string`   | No       | Your app's name                                                    |
 | `metadata.description` | `string`   | No       | Brief description of your app                                      |
-| `onAuthChange`         | `function` | No       | Callback when authentication status changes                        |
+| `onConnectionChange`   | `function` | No       | Callback when the dApp-visible connection state changes (identity, stamp, account, auth) |
 
 ## Data Operations
 

@@ -744,11 +744,6 @@ export const DownloadChunkMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
-export const GetConnectionInfoMessageSchema = z.object({
-  type: z.literal("getConnectionInfo"),
-  requestId: z.string(),
-})
-
 export const IsConnectedMessageSchema = z.object({
   type: z.literal("isConnected"),
   requestId: z.string(),
@@ -1027,7 +1022,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DownloadFileMessageSchema,
   UploadChunkMessageSchema,
   DownloadChunkMessageSchema,
-  GetConnectionInfoMessageSchema,
   IsConnectedMessageSchema,
   GetNodeInfoMessageSchema,
   GsocMineMessageSchema,
@@ -1066,9 +1060,6 @@ export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
 export type DownloadFileMessage = z.infer<typeof DownloadFileMessageSchema>
 export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>
 export type DownloadChunkMessage = z.infer<typeof DownloadChunkMessageSchema>
-export type GetConnectionInfoMessage = z.infer<
-  typeof GetConnectionInfoMessageSchema
->
 export type IsConnectedMessage = z.infer<typeof IsConnectedMessageSchema>
 export type GetNodeInfoMessage = z.infer<typeof GetNodeInfoMessageSchema>
 export type GsocMineMessage = z.infer<typeof GsocMineMessageSchema>
@@ -1208,28 +1199,6 @@ export const ErrorMessageSchema = z.object({
   type: z.literal("error"),
   requestId: z.string(),
   error: z.string(),
-})
-
-export const ConnectionInfoResponseMessageSchema = z.object({
-  type: z.literal("connectionInfoResponse"),
-  requestId: z.string(),
-  canUpload: z.boolean(),
-  storagePartitioned: z.boolean().optional(),
-  uploadMode: UploadModeSchema.optional(),
-  identity: z
-    .object({
-      id: z.string(),
-      name: z.string(),
-      address: AddressSchema,
-      publicKey: CompressedPublicKeySchema.optional(),
-    })
-    .optional(),
-  appKey: z
-    .object({
-      address: AddressSchema,
-      publicKey: CompressedPublicKeySchema,
-    })
-    .optional(),
 })
 
 export const ConnectionInfoChangedMessageSchema = z.object({
@@ -1490,7 +1459,6 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   DownloadChunkResponseMessageSchema,
   UploadProgressMessageSchema,
   ErrorMessageSchema,
-  ConnectionInfoResponseMessageSchema,
   ConnectionInfoChangedMessageSchema,
   ConnectResponseMessageSchema,
   IsConnectedResponseMessageSchema,
@@ -1550,9 +1518,6 @@ export type DownloadChunkResponseMessage = z.infer<
 >
 export type UploadProgressMessage = z.infer<typeof UploadProgressMessageSchema>
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
-export type ConnectionInfoResponseMessage = z.infer<
-  typeof ConnectionInfoResponseMessageSchema
->
 export type ConnectionInfoChangedMessage = z.infer<
   typeof ConnectionInfoChangedMessageSchema
 >
@@ -1679,13 +1644,12 @@ export interface ClientOptions {
   iframePath?: string
   timeout?: number
   initializationTimeout?: number
-  onAuthChange?: (authenticated: boolean) => void
   /**
    * Invoked whenever the dApp-visible ConnectionInfo changes (identity rename,
    * default-stamp change, local↔synced account migration, postage stamp added,
    * auth transitions, etc.). Fires once on initial auth check, then on every
-   * effective change. Use this to refresh derived UI; prefer it over polling
-   * `getConnectionInfo()` from the dApp.
+   * effective change. The current snapshot is also available synchronously
+   * via `client.connectionInfo`.
    */
   onConnectionChange?: (info: ConnectionInfo) => void
   popupMode?: "popup" | "window" // Default: 'window'

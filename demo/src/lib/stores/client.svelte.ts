@@ -195,9 +195,6 @@ export const clientStore = {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      onAuthChange: (auth: boolean) => {
-        logStore.log(`Auth status changed: ${auth}`)
-      },
       onConnectionChange: (info) => {
         void handleConnectionChange(info)
       },
