@@ -50,6 +50,9 @@ envs:
   - key: CI
     value: 'true'
 
+  - key: EXCLUDE_DEV_ROUTE
+    value: 'true'
+
 # Deployment alerts
 alerts:
   - rule: DEPLOYMENT_FAILED
