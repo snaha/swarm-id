@@ -127,7 +127,7 @@ export class SwarmIdClient {
   private initializationTimeout: number
   private onConnectionChange?: (info: ConnectionInfo) => void
   private lastConnectionInfo: ConnectionInfo | undefined
-  private firstConnectionInfoPromise: Promise<void>
+  private firstConnectionInfoPromise: Promise<void> | undefined
   private firstConnectionInfoResolve?: () => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
@@ -211,24 +211,10 @@ export class SwarmIdClient {
       }, this.initializationTimeout)
     })
 
-    // `initialize()` awaits the first `connectionInfoChanged` from the proxy,
-    // which is emitted unconditionally right after `proxyReady`. Race it
-    // against a timeout so a buggy or version-mismatched proxy can't wedge
-    // initialization indefinitely.
-    //
-    // The `resolve` callback is stashed in an instance field (deferred-style)
-    // because it has to be called later, from `handleIframeMessage` when the
-    // `connectionInfoChanged` arrives — not from this executor. ES2024's
-    // `Promise.withResolvers()` would express the same shape more directly.
-    this.firstConnectionInfoPromise = Promise.race([
-      new Promise<void>((resolve) => {
-        this.firstConnectionInfoResolve = resolve
-      }),
-      rejectAfter(
-        this.initializationTimeout,
-        `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
-      ),
-    ])
+    // Note: `firstConnectionInfoPromise` (and its timeout) is created in
+    // `initialize()`, not here — starting the timer at construction would
+    // make it expire on consumers that instantiate the client and call
+    // `initialize()` later (or never, in tests).
 
     // Create promise for proxyInitialized message
     this.proxyInitializedPromise = new Promise<void>((resolve, reject) => {
@@ -279,6 +265,28 @@ export class SwarmIdClient {
     if (this.iframe) {
       throw new Error("SwarmIdClient already initialized")
     }
+
+    // Set up the first-snapshot wait now (not in the constructor) so the
+    // timeout starts when initialization actually begins, not when the
+    // client object is created. The proxy emits `connectionInfoChanged`
+    // unconditionally right after `proxyReady`; we race that against the
+    // initializationTimeout so a buggy or version-mismatched proxy can't
+    // wedge initialization indefinitely.
+    //
+    // The `resolve` callback is stashed in an instance field
+    // (deferred-style) because it has to be called later, from
+    // `handleIframeMessage` when the `connectionInfoChanged` arrives — not
+    // from this executor. ES2024's `Promise.withResolvers()` would express
+    // the same shape more directly.
+    this.firstConnectionInfoPromise = Promise.race([
+      new Promise<void>((resolve) => {
+        this.firstConnectionInfoResolve = resolve
+      }),
+      rejectAfter(
+        this.initializationTimeout,
+        `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
+      ),
+    ])
 
     // Create iframe for proxy
     this.iframe = document.createElement("iframe")

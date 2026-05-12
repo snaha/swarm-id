@@ -348,7 +348,7 @@ await client.connect({ agent: true })
 
 Disconnects the current session and clears authentication data.
 
-After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The `onConnectionChange` callback will fire with an un-authenticated snapshot (no `identity`, `canUpload: false` unless a subsidised gateway is configured).
+After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The `onConnectionChange` callback will fire with an un-authenticated snapshot (no `identity`, `canUpload: false`, `uploadMode: "unavailable"`). Note that `canUpload` is reported as `false` even when a subsidised gateway is configured, because uploads still require an authenticated app secret.
 
 **Returns:** `Promise<void>` - Resolves when disconnection is complete
 
