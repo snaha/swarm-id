@@ -89,7 +89,7 @@ async function updatePostageStampInfo() {
   }
 }
 
-async function handleConnectionChange(info: ConnectionInfo) {
+async function onConnectionChange(info: ConnectionInfo) {
   const isAuthenticated = info.identity !== undefined
   authenticated = isAuthenticated
   canUpload = info.canUpload
@@ -195,9 +195,7 @@ export const clientStore = {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      onConnectionChange: (info) => {
-        void handleConnectionChange(info)
-      },
+      onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',
         description: 'Demo application showcasing Swarm ID authentication and Bee API operations',
