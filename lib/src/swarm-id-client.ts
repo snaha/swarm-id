@@ -215,6 +215,11 @@ export class SwarmIdClient {
     // which is emitted unconditionally right after `proxyReady`. Race it
     // against a timeout so a buggy or version-mismatched proxy can't wedge
     // initialization indefinitely.
+    //
+    // The `resolve` callback is stashed in an instance field (deferred-style)
+    // because it has to be called later, from `handleIframeMessage` when the
+    // `connectionInfoChanged` arrives — not from this executor. ES2024's
+    // `Promise.withResolvers()` would express the same shape more directly.
     this.firstConnectionInfoPromise = Promise.race([
       new Promise<void>((resolve) => {
         this.firstConnectionInfoResolve = resolve
