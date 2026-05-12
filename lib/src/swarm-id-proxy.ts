@@ -43,6 +43,7 @@ import type {
   PostageStamp,
   PostageBatch,
   ConnectedApp,
+  ConnectionInfo,
 } from "./types"
 import {
   ParentToIframeMessageSchema,
@@ -121,6 +122,24 @@ const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
 
+function connectionInfoEqual(
+  a: ConnectionInfo | undefined,
+  b: ConnectionInfo,
+): boolean {
+  if (!a) return false
+  return (
+    a.canUpload === b.canUpload &&
+    a.storagePartitioned === b.storagePartitioned &&
+    a.uploadMode === b.uploadMode &&
+    a.identity?.id === b.identity?.id &&
+    a.identity?.name === b.identity?.name &&
+    a.identity?.address === b.identity?.address &&
+    a.identity?.publicKey === b.identity?.publicKey &&
+    a.appKey?.address === b.appKey?.address &&
+    a.appKey?.publicKey === b.appKey?.publicKey
+  )
+}
+
 /**
  * Swarm ID Proxy - Runs inside the iframe
  *
@@ -155,7 +174,8 @@ export class SwarmIdProxy {
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
   private bee: Bee
-  private unsubscribeConnectedApps: (() => void) | undefined
+  private unsubscribeStorageListeners: Array<() => void> = []
+  private lastConnectionInfo: ConnectionInfo | undefined
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
   private utilizationChannel: BroadcastChannel
@@ -167,7 +187,7 @@ export class SwarmIdProxy {
     this.beeApiUrl = networkSettings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
-    this.setupConnectedAppsListener()
+    this.setupStorageListeners()
 
     // Initialize multi-tab coordination via BroadcastChannel
     this.utilizationChannel = new BroadcastChannel("swarm-id-utilization")
@@ -179,28 +199,53 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Subscribe to connected apps storage changes for direct mode authentication.
-   * When a user completes authentication in the /connect popup (direct mode),
-   * the popup writes to localStorage. This storage event notifies the proxy
-   * to check for a new valid connection and send authSuccess to the parent.
-   * Also handles disconnection when the connection is removed or invalidated.
+   * Subscribe to shared localStorage changes that can affect the dApp-visible
+   * ConnectionInfo (auth state, identity, postage stamps, account type).
    *
-   * Note: We always set up this listener, even when storage might be partitioned.
+   * - `connectedApps` drives auth transitions (new connection / identity switch /
+   *   disconnect) and triggers `authSuccess` / `disconnectResponse` to the parent.
+   * - `identities`, `accounts`, `postageStamps` may change the derived
+   *   ConnectionInfo without flipping auth state (e.g. rename, default-stamp
+   *   change, local→synced migration). On change we re-derive ConnectionInfo
+   *   and emit `connectionInfoChanged` if it actually differs.
+   *
+   * Note: We always set up these listeners, even when storage might be partitioned.
    * In some browsers/configurations (like localhost development), storage events
    * work between same-origin windows even in iframes. If storage IS partitioned,
-   * the listener simply won't fire, and we fall back to postMessage from the popup.
+   * the listeners simply won't fire, and we fall back to postMessage from the popup.
    */
-  private setupConnectedAppsListener(): void {
+  private setupStorageListeners(): void {
     // Avoid duplicate subscriptions
-    if (this.unsubscribeConnectedApps) {
+    if (this.unsubscribeStorageListeners.length > 0) {
       return
     }
 
     const connectedAppsManager = createConnectedAppsStorageManager()
-    this.unsubscribeConnectedApps = connectedAppsManager.subscribe(
-      (connectedApps) => {
+    this.unsubscribeStorageListeners.push(
+      connectedAppsManager.subscribe((connectedApps) => {
         this.handleConnectedAppsChange(connectedApps)
-      },
+      }),
+    )
+
+    const identitiesManager = createIdentitiesStorageManager()
+    this.unsubscribeStorageListeners.push(
+      identitiesManager.subscribe(() => {
+        this.handleAuxiliaryStorageChange()
+      }),
+    )
+
+    const accountsManager = createAccountsStorageManager()
+    this.unsubscribeStorageListeners.push(
+      accountsManager.subscribe(() => {
+        this.handleAuxiliaryStorageChange()
+      }),
+    )
+
+    const postageStampsManager = createPostageStampsStorageManager()
+    this.unsubscribeStorageListeners.push(
+      postageStampsManager.subscribe(() => {
+        this.handleAuxiliaryStorageChange()
+      }),
     )
   }
 
@@ -224,8 +269,12 @@ export class SwarmIdProxy {
       } else if (connectedApp.appSecret !== this.appSecret) {
         // Identity changed - update to new identity
         await this.authenticateFromStorage(connectedApp)
+      } else {
+        // Same connection — but related metadata (e.g. defaultPostageStampBatchID
+        // on the ConnectedApp record) may have changed.
+        await this.refreshStampFromStorage()
+        this.emitConnectionInfoIfChanged()
       }
-      // If already authenticated with same secret, nothing to do
     } else if (this.authenticated && !this.storagePartitioned) {
       // No valid connection in storage, but we're authenticated - disconnect.
       // Skip when storage is partitioned: the iframe
@@ -236,6 +285,56 @@ export class SwarmIdProxy {
         requestId: "storage-event",
         success: true,
       })
+      this.emitConnectionInfoIfChanged()
+    }
+  }
+
+  /**
+   * Handle changes to identities/accounts/postageStamps storage.
+   * These don't flip auth state but can change the derived ConnectionInfo
+   * (e.g. identity rename, default stamp change, local→synced migration,
+   * new stamp purchased that should become canUpload=true).
+   */
+  private async handleAuxiliaryStorageChange(): Promise<void> {
+    if (!this.parentOrigin || !this.authenticated) {
+      return
+    }
+
+    // Re-resolve postage stamp in case the default changed or a new one was added.
+    if (!this.storagePartitioned) {
+      await this.refreshStampFromStorage()
+    }
+
+    this.emitConnectionInfoIfChanged()
+  }
+
+  /**
+   * Re-resolve postage stamp for the current connection from shared storage.
+   * Reinitializes the stamper if the batch or signer key changed.
+   */
+  private async refreshStampFromStorage(): Promise<void> {
+    if (this.storagePartitioned) {
+      return
+    }
+
+    const stamp = this.lookupPostageStampForApp()
+    const nextBatchId = stamp?.batchID.toHex()
+    const nextSignerKey = stamp?.signerKey.toHex()
+
+    if (
+      nextBatchId === this.postageBatchId &&
+      nextSignerKey === this.signerKey
+    ) {
+      return
+    }
+
+    this.postageBatchId = nextBatchId
+    this.signerKey = nextSignerKey
+    this.stamperDepth = stamp?.depth ?? this.stamperDepth
+    this.stamper = undefined
+
+    if (stamp) {
+      await this.initializeStamper()
     }
   }
 
@@ -266,6 +365,7 @@ export class SwarmIdProxy {
       type: "authSuccess",
       origin: this.parentOrigin!,
     })
+    this.emitConnectionInfoIfChanged()
   }
 
   /**
@@ -330,6 +430,7 @@ export class SwarmIdProxy {
         type: "authSuccess",
         origin: this.parentOrigin!,
       })
+      this.emitConnectionInfoIfChanged()
     }
   }
 
@@ -338,10 +439,10 @@ export class SwarmIdProxy {
    * Call this method when the proxy iframe is being unloaded.
    */
   destroy(): void {
-    if (this.unsubscribeConnectedApps) {
-      this.unsubscribeConnectedApps()
-      this.unsubscribeConnectedApps = undefined
+    for (const unsubscribe of this.unsubscribeStorageListeners) {
+      unsubscribe()
     }
+    this.unsubscribeStorageListeners = []
 
     // Clean up utilization channel
     this.utilizationChannel.close()
@@ -741,6 +842,10 @@ export class SwarmIdProxy {
       authenticated: this.authenticated,
       parentOrigin: this.parentOrigin,
     })
+
+    // Send the initial ConnectionInfo snapshot so dApps using onConnectionChange
+    // receive state without an extra getConnectionInfo round trip.
+    this.emitConnectionInfoIfChanged()
   }
 
   /**
@@ -1125,6 +1230,8 @@ export class SwarmIdProxy {
     this.storagePartitionedIdentity = undefined
     this.pendingChallenge = undefined
 
+    this.emitConnectionInfoIfChanged()
+
     // Show login button
     this.showAuthButton()
   }
@@ -1226,15 +1333,28 @@ export class SwarmIdProxy {
     message: GetConnectionInfoMessage,
     event: MessageEvent,
   ): void {
-    let identity:
-      | { id: string; name: string; address: string; publicKey?: string }
-      | undefined = undefined
+    const info = this.buildConnectionInfo()
+    this.postMessage(event, {
+      type: "connectionInfoResponse",
+      requestId: message.requestId,
+      canUpload: info.canUpload,
+      storagePartitioned: info.storagePartitioned,
+      uploadMode: info.uploadMode,
+      identity: info.identity,
+      appKey: info.appKey,
+    })
+    this.lastConnectionInfo = info
+  }
 
-    // Look up identity info if authenticated
+  /**
+   * Build the current ConnectionInfo snapshot from in-memory auth state and
+   * shared localStorage. Pure — does not send anything.
+   */
+  private buildConnectionInfo(): ConnectionInfo {
+    let identity: ConnectionInfo["identity"] = undefined
+
     if (this.authenticated && this.parentOrigin) {
       if (this.storagePartitioned && this.storagePartitionedIdentity) {
-        // Storage is partitioned, use identity info from the setSecret message
-        // (localStorage is partitioned, can't read connected apps)
         identity = this.storagePartitionedIdentity
       } else {
         try {
@@ -1264,9 +1384,7 @@ export class SwarmIdProxy {
       }
     }
 
-    // Derive app-specific key from appSecret when authenticated
-    let appKey: { address: string; publicKey: string } | undefined = undefined
-
+    let appKey: ConnectionInfo["appKey"] = undefined
     if (this.authenticated && this.appSecret) {
       const privKeyBytes = hexToUint8Array(this.appSecret)
       const { x, y } = publicKeyFromPrivate(privKeyBytes)
@@ -1277,9 +1395,8 @@ export class SwarmIdProxy {
       }
     }
 
-    // Determine upload mode
-    // User-stamp mode only available when storage is NOT partitioned (can access stamp)
-    // Subsidised mode takes precedence when storage is partitioned (can't access stamp)
+    // User-stamp mode only available when storage is NOT partitioned.
+    // Subsidised mode is the fallback when no user stamp is usable.
     let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
     if (this.postageBatchId && this.signerKey && !this.storagePartitioned) {
       uploadMode = "user-stamp"
@@ -1287,17 +1404,36 @@ export class SwarmIdProxy {
       uploadMode = "subsidised"
     }
 
-    // canUpload is true if user has stamps, or subsidised gateway is configured
-    const canUpload = uploadMode !== "unavailable"
-
-    this.postMessage(event, {
-      type: "connectionInfoResponse",
-      requestId: message.requestId,
-      canUpload,
+    return {
+      canUpload: uploadMode !== "unavailable",
       storagePartitioned: this.storagePartitioned || undefined,
       uploadMode,
       identity,
       appKey,
+    }
+  }
+
+  /**
+   * Recompute ConnectionInfo and send `connectionInfoChanged` to the parent
+   * if it actually differs from the last value we sent. Used both on auth
+   * transitions and on storage events that affect derived fields.
+   */
+  private emitConnectionInfoIfChanged(): void {
+    if (!this.parentOrigin) {
+      return
+    }
+    const info = this.buildConnectionInfo()
+    if (connectionInfoEqual(this.lastConnectionInfo, info)) {
+      return
+    }
+    this.lastConnectionInfo = info
+    this.sendToParent({
+      type: "connectionInfoChanged",
+      canUpload: info.canUpload,
+      storagePartitioned: info.storagePartitioned,
+      uploadMode: info.uploadMode,
+      identity: info.identity,
+      appKey: info.appKey,
     })
   }
 

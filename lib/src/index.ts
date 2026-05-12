@@ -242,6 +242,7 @@ export type {
   ActAddGranteesResponseMessage,
   ActRevokeGranteesResponseMessage,
   ActGetGranteesResponseMessage,
+  ConnectionInfoChangedMessage,
   SocUploadMessage,
   SocRawUploadMessage,
   SocDownloadMessage,

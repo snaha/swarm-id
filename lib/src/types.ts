@@ -1232,6 +1232,27 @@ export const ConnectionInfoResponseMessageSchema = z.object({
     .optional(),
 })
 
+export const ConnectionInfoChangedMessageSchema = z.object({
+  type: z.literal("connectionInfoChanged"),
+  canUpload: z.boolean(),
+  storagePartitioned: z.boolean().optional(),
+  uploadMode: UploadModeSchema.optional(),
+  identity: z
+    .object({
+      id: z.string(),
+      name: z.string(),
+      address: AddressSchema,
+      publicKey: CompressedPublicKeySchema.optional(),
+    })
+    .optional(),
+  appKey: z
+    .object({
+      address: AddressSchema,
+      publicKey: CompressedPublicKeySchema,
+    })
+    .optional(),
+})
+
 export const ConnectResponseMessageSchema = z.object({
   type: z.literal("connectResponse"),
   requestId: z.string(),
@@ -1470,6 +1491,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   UploadProgressMessageSchema,
   ErrorMessageSchema,
   ConnectionInfoResponseMessageSchema,
+  ConnectionInfoChangedMessageSchema,
   ConnectResponseMessageSchema,
   IsConnectedResponseMessageSchema,
   GetNodeInfoResponseMessageSchema,
@@ -1530,6 +1552,9 @@ export type UploadProgressMessage = z.infer<typeof UploadProgressMessageSchema>
 export type ErrorMessage = z.infer<typeof ErrorMessageSchema>
 export type ConnectionInfoResponseMessage = z.infer<
   typeof ConnectionInfoResponseMessageSchema
+>
+export type ConnectionInfoChangedMessage = z.infer<
+  typeof ConnectionInfoChangedMessageSchema
 >
 export type ConnectResponseMessage = z.infer<
   typeof ConnectResponseMessageSchema
@@ -1655,6 +1680,14 @@ export interface ClientOptions {
   timeout?: number
   initializationTimeout?: number
   onAuthChange?: (authenticated: boolean) => void
+  /**
+   * Invoked whenever the dApp-visible ConnectionInfo changes (identity rename,
+   * default-stamp change, local↔synced account migration, postage stamp added,
+   * auth transitions, etc.). Fires once on initial auth check, then on every
+   * effective change. Use this to refresh derived UI; prefer it over polling
+   * `getConnectionInfo()` from the dApp.
+   */
+  onConnectionChange?: (info: ConnectionInfo) => void
   popupMode?: "popup" | "window" // Default: 'window'
   metadata: AppMetadata
   buttonConfig?: ButtonConfig

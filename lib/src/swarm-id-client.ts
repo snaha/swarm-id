@@ -126,6 +126,8 @@ export class SwarmIdClient {
   private timeout: number
   private initializationTimeout: number
   private onAuthChange?: (authenticated: boolean) => void
+  private onConnectionChange?: (info: ConnectionInfo) => void
+  private lastConnectionInfo: ConnectionInfo | undefined
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
@@ -158,6 +160,7 @@ export class SwarmIdClient {
    * @param options.iframePath - The path to the proxy iframe (defaults to "/proxy")
    * @param options.timeout - Request timeout in milliseconds (defaults to 30000)
    * @param options.onAuthChange - Callback function invoked when authentication status changes
+   * @param options.onConnectionChange - Callback invoked when the dApp-visible ConnectionInfo changes (identity, stamp, account type, auth)
    * @param options.popupMode - How to display the authentication popup: "popup" or "window" (defaults to "window")
    * @param options.metadata - Application metadata shown to users during authentication
    * @param options.metadata.name - Application name (1-100 characters)
@@ -180,6 +183,7 @@ export class SwarmIdClient {
     this.initializationTimeout =
       options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
     this.onAuthChange = options.onAuthChange
+    this.onConnectionChange = options.onConnectionChange
     this.popupMode = options.popupMode || "window"
     this.metadata = options.metadata
     this.buttonConfig = options.buttonConfig
@@ -421,6 +425,21 @@ export class SwarmIdClient {
           this.onAuthChange(true)
         }
         break
+
+      case "connectionInfoChanged": {
+        const info: ConnectionInfo = {
+          canUpload: message.canUpload,
+          storagePartitioned: message.storagePartitioned,
+          uploadMode: message.uploadMode,
+          identity: message.identity,
+          appKey: message.appKey,
+        }
+        this.lastConnectionInfo = info
+        if (this.onConnectionChange) {
+          this.onConnectionChange(info)
+        }
+        break
+      }
 
       case "initError":
         // Initialization error from proxy (e.g., origin validation failed)
@@ -905,13 +924,25 @@ export class SwarmIdClient {
       requestId,
     })
 
-    return {
+    const info: ConnectionInfo = {
       canUpload: response.canUpload,
       storagePartitioned: response.storagePartitioned,
       uploadMode: response.uploadMode,
       identity: response.identity,
       appKey: response.appKey,
     }
+    this.lastConnectionInfo = info
+    return info
+  }
+
+  /**
+   * Returns the most recently observed {@link ConnectionInfo} without making
+   * a round-trip to the iframe. Returns `undefined` before the first
+   * {@link getConnectionInfo} call or {@link ClientOptions.onConnectionChange}
+   * notification.
+   */
+  get connectionInfo(): ConnectionInfo | undefined {
+    return this.lastConnectionInfo
   }
 
   // ============================================================================
