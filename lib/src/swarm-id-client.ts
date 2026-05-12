@@ -128,7 +128,6 @@ export class SwarmIdClient {
   private lastConnectionInfo: ConnectionInfo | undefined
   private firstConnectionInfoPromise: Promise<void>
   private firstConnectionInfoResolve?: () => void
-  private firstConnectionInfoReject?: (error: Error) => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
@@ -211,25 +210,26 @@ export class SwarmIdClient {
       }, this.initializationTimeout)
     })
 
-    // Resolved by the first `connectionInfoChanged` message from the proxy,
-    // which the proxy emits unconditionally right after `proxyReady`. Allows
-    // `initialize()` to guarantee `client.connectionInfo` is populated.
-    // Rejected on `initializationTimeout` so a buggy or mismatched proxy can't
-    // wedge `initialize()` indefinitely.
-    this.firstConnectionInfoPromise = new Promise<void>((resolve, reject) => {
-      this.firstConnectionInfoResolve = resolve
-      this.firstConnectionInfoReject = reject
-
-      setTimeout(() => {
-        if (this.firstConnectionInfoReject) {
-          this.firstConnectionInfoReject(
-            new Error(
-              `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
+    // `initialize()` awaits the first `connectionInfoChanged` from the proxy,
+    // which is emitted unconditionally right after `proxyReady`. Race it
+    // against a timeout so a buggy or version-mismatched proxy can't wedge
+    // initialization indefinitely.
+    this.firstConnectionInfoPromise = Promise.race([
+      new Promise<void>((resolve) => {
+        this.firstConnectionInfoResolve = resolve
+      }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
+              ),
             ),
-          )
-        }
-      }, this.initializationTimeout)
-    })
+          this.initializationTimeout,
+        ),
+      ),
+    ])
 
     // Create promise for proxyInitialized message
     this.proxyInitializedPromise = new Promise<void>((resolve, reject) => {
@@ -452,7 +452,6 @@ export class SwarmIdClient {
         if (this.firstConnectionInfoResolve) {
           this.firstConnectionInfoResolve()
           this.firstConnectionInfoResolve = undefined
-          this.firstConnectionInfoReject = undefined
         }
         if (this.onConnectionChange) {
           this.onConnectionChange(info)
