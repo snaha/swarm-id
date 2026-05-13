@@ -16,6 +16,7 @@
     text: string
     buttonTitle: string
     cancelTitle?: string
+    error?: string
   }
   let {
     oncancel,
@@ -25,6 +26,7 @@
     text,
     buttonTitle,
     cancelTitle = "Don't delete",
+    error,
     ...restProps
   }: ModalProps & Props = $props()
 </script>
@@ -39,6 +41,9 @@
 
     {#if text}
       <Typography>{text}</Typography>
+    {/if}
+    {#if error}
+      <Typography style="color: var(--colors-red)">{error}</Typography>
     {/if}
     <section class="buttons">
       <LoaderButton variant="strong" dimension="compact" onclick={confirm} class="danger-button"
