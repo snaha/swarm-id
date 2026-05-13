@@ -96,6 +96,7 @@ import {
   uint8ArrayToHex,
   deriveSwarmEncryptionKey,
 } from "./utils/key-derivation"
+import { connectionInfoEqual } from "./utils/connection-info"
 import {
   createAsyncEpochFinder,
   createEpochUpdater,
@@ -121,24 +122,6 @@ const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
 
-function connectionInfoEqual(
-  a: ConnectionInfo | undefined,
-  b: ConnectionInfo,
-): boolean {
-  if (!a) return false
-  return (
-    a.canUpload === b.canUpload &&
-    a.storagePartitioned === b.storagePartitioned &&
-    a.uploadMode === b.uploadMode &&
-    a.identity?.id === b.identity?.id &&
-    a.identity?.name === b.identity?.name &&
-    a.identity?.address === b.identity?.address &&
-    a.identity?.publicKey === b.identity?.publicKey &&
-    a.appKey?.address === b.appKey?.address &&
-    a.appKey?.publicKey === b.appKey?.publicKey
-  )
-}
-
 /**
  * Swarm ID Proxy - Runs inside the iframe
  *
@@ -158,6 +141,14 @@ export class SwarmIdProxy {
   private postageBatchId: string | undefined
   private signerKey: string | undefined
   private stamper: UtilizationAwareStamper | undefined
+  /**
+   * Hash of `<owner>-<encryptionKey>` that the current `stamper` was built
+   * with. Account-level inputs are baked into `UtilizationAwareStamper` at
+   * construction, so when the underlying account changes (e.g. a local
+   * account migrates to a synced one) we need to detect that even if the
+   * postage stamp's batch/signer didn't change, and rebuild the stamper.
+   */
+  private stamperAccountFingerprint: string | undefined
   private stampWorkerPool: StampWorkerPool | undefined
   private stamperDepth: number = 23 // Default depth
   private storagePartitioned: boolean = false
@@ -300,13 +291,13 @@ export class SwarmIdProxy {
       // No valid connection in storage, but we're authenticated - disconnect.
       // Skip when storage is partitioned: the iframe
       // can't see connected apps, but auth was established via postMessage.
+      // `clearAuthData` emits the ConnectionInfo update; no need to do so again.
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
         requestId: "storage-event",
         success: true,
       })
-      this.emitConnectionInfoIfChanged()
     }
   }
 
@@ -330,8 +321,11 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Re-resolve postage stamp for the current connection from shared storage.
-   * Reinitializes the stamper if the batch or signer key changed.
+   * Re-resolve postage stamp and account inputs for the current connection
+   * from shared storage. Reinitializes the stamper if the batch, signer
+   * key, or account-level inputs (owner / encryption key) changed — the
+   * last case handles e.g. local→synced account migration where the
+   * postage stamp is unchanged but the underlying account isn't.
    */
   private async refreshStampFromStorage(): Promise<void> {
     if (this.storagePartitioned) {
@@ -341,10 +335,15 @@ export class SwarmIdProxy {
     const stamp = this.lookupPostageStampForApp()
     const nextBatchId = stamp?.batchID.toHex()
     const nextSignerKey = stamp?.signerKey.toHex()
+    const account = stamp ? await this.lookupAccountForApp() : undefined
+    const nextAccountFingerprint = account
+      ? `${account.owner.toHex()}-${uint8ArrayToHex(account.encryptionKey)}`
+      : undefined
 
     if (
       nextBatchId === this.postageBatchId &&
-      nextSignerKey === this.signerKey
+      nextSignerKey === this.signerKey &&
+      nextAccountFingerprint === this.stamperAccountFingerprint
     ) {
       return
     }
@@ -353,6 +352,7 @@ export class SwarmIdProxy {
     this.signerKey = nextSignerKey
     this.stamperDepth = stamp?.depth ?? this.stamperDepth
     this.stamper = undefined
+    this.stamperAccountFingerprint = undefined
 
     if (stamp) {
       await this.initializeStamper()
@@ -594,9 +594,11 @@ export class SwarmIdProxy {
         accountInfo.owner,
         accountInfo.encryptionKey,
       )
+      this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
     } catch (error) {
       console.error("[Proxy] Failed to initialize stamper:", error)
       this.stamper = undefined
+      this.stamperAccountFingerprint = undefined
     }
   }
 
@@ -1243,6 +1245,7 @@ export class SwarmIdProxy {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
+    this.stamperAccountFingerprint = undefined
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
     this.pendingChallenge = undefined
@@ -1399,11 +1402,18 @@ export class SwarmIdProxy {
     // throws on missing auth, so reporting `canUpload=true` here without an
     // app secret would mislead the dApp into attempting uploads that always
     // fail.
-    // - User-stamp mode requires a stamp + signer key and non-partitioned storage.
+    // - User-stamp mode also requires a fully constructed `stamper`;
+    //   `initializeStamper` can swallow errors and leave it `undefined`,
+    //   in which case uploads via user stamp will fail.
     // - Subsidised mode is the fallback when no user stamp is usable.
     let uploadMode: "user-stamp" | "subsidised" | "unavailable" = "unavailable"
     if (this.authenticated && this.appSecret) {
-      if (this.postageBatchId && this.signerKey && !this.storagePartitioned) {
+      if (
+        this.postageBatchId &&
+        this.signerKey &&
+        this.stamper &&
+        !this.storagePartitioned
+      ) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
         uploadMode = "subsidised"
