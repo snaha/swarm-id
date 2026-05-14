@@ -24,7 +24,7 @@
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
   import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
-  import { getBlockTimestamp } from '@snaha/swarm-id'
+  import { getBlockTimestamp, fetchBatchTTL } from '@snaha/swarm-id'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const BATCH_ID_PREVIEW_LENGTH = 8
@@ -70,6 +70,10 @@
 
   let pricePerGBPerMonth = $state<number | undefined>(undefined)
   const blockTimestamps = new SvelteMap<number, number>()
+  // Map of batchID hex → { expiry timestamp in ms, sourced from Bee node /stamps/{id} }.
+  // The Bee node computes batchTTL from current chain state, so it accounts for
+  // price changes since stamp creation that the Swarmscan approximation cannot.
+  const beeExpiryMs = new SvelteMap<string, number>()
 
   async function fetchBlockTimestamp(blockNumber: number): Promise<number | undefined> {
     if (blockTimestamps.has(blockNumber)) {
@@ -88,6 +92,13 @@
     }
   }
 
+  async function fetchStampExpiryFromBee(stamp: PostageStamp): Promise<void> {
+    const ttlSeconds = await fetchBatchTTL(networkSettingsStore.beeNodeUrl, stamp.batchID.toHex())
+    if (ttlSeconds !== undefined) {
+      beeExpiryMs.set(stamp.batchID.toHex(), Date.now() + ttlSeconds * MS_PER_SECOND)
+    }
+  }
+
   onMount(async () => {
     // Fetch Swarmscan price
     try {
@@ -98,12 +109,13 @@
       // Silently fail — expiry date just won't render
     }
 
-    // Fetch block timestamps for stamps
+    // Fetch block timestamps and authoritative batchTTL for stamps
     const stamps = [accountStamp, identityStamp].filter(Boolean) as PostageStamp[]
     for (const stamp of stamps) {
       if (stamp.blockNumber > 0) {
         fetchBlockTimestamp(stamp.blockNumber)
       }
+      fetchStampExpiryFromBee(stamp)
     }
   })
 
@@ -126,39 +138,53 @@
     return batchId.toHex().slice(0, BATCH_ID_PREVIEW_LENGTH)
   }
 
-  function formatExpiryDate(
+  /**
+   * Resolves a stamp's expiry timestamp in ms.
+   * Prefers the Bee node's batchTTL (which uses live chain state) over the
+   * Swarmscan-price approximation, which assumes price has been constant since
+   * stamp creation and produces dates in the past once the chain price rises.
+   */
+  function getExpiryMs(
     stamp: PostageStamp,
-    price: number,
+    price: number | undefined,
     blockTimestamp: number | undefined,
-  ): string {
+    beeExpiry: number | undefined,
+  ): number | undefined {
+    if (beeExpiry !== undefined) {
+      return beeExpiry
+    }
+    if (price === undefined) {
+      return undefined
+    }
     const durationSeconds = calculateBatchDurationSeconds(stamp.amount, price)
-
-    // Use block timestamp if available, otherwise fall back to createdAt
     const startTimeMs =
       blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
+    return startTimeMs + durationSeconds * MS_PER_SECOND
+  }
 
-    return new Date(startTimeMs + durationSeconds * MS_PER_SECOND).toLocaleDateString()
+  function formatExpiryDate(expiryMs: number): string {
+    return new Date(expiryMs).toLocaleDateString()
+  }
+
+  function isExpired(expiryMs: number): boolean {
+    return expiryMs <= Date.now()
   }
 
   function isExpiringSoon(
     stamp: PostageStamp,
-    price: number,
-    blockTimestamp: number | undefined,
+    expiryMs: number,
+    price: number | undefined,
   ): boolean {
-    const totalLifetimeMs = calculateBatchDurationSeconds(stamp.amount, price) * MS_PER_SECOND
+    const remainingMs = expiryMs - Date.now()
+    if (remainingMs <= 0) return false
 
-    // Use block timestamp if available, otherwise fall back to createdAt
-    const startTimeMs =
-      blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
-
-    const expiryTimestamp = startTimeMs + totalLifetimeMs
-    const remainingMs = expiryTimestamp - Date.now()
     const oneMonthMs = Number(SECONDS_PER_MONTH) * MS_PER_SECOND
+    if (remainingMs < oneMonthMs) return true
 
-    return (
-      remainingMs > 0 &&
-      (remainingMs < oneMonthMs || remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION)
-    )
+    // If we have a price, also flag stamps in the last 10% of their estimated lifetime.
+    if (price === undefined) return false
+    const totalLifetimeMs = calculateBatchDurationSeconds(stamp.amount, price) * MS_PER_SECOND
+    return totalLifetimeMs > 0 && remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION
   }
 </script>
 
@@ -210,19 +236,33 @@
         </div>
       </Horizontal>
 
-      {#if pricePerGBPerMonth}
-        {@const stampBlockTimestamp = blockTimestamps.get(stamp.blockNumber)}
-        {@const expiringSoon = isExpiringSoon(stamp, pricePerGBPerMonth, stampBlockTimestamp)}
+      {@const stampBlockTimestamp = blockTimestamps.get(stamp.blockNumber)}
+      {@const stampBeeExpiry = beeExpiryMs.get(stamp.batchID.toHex())}
+      {@const expiryMs = getExpiryMs(
+        stamp,
+        pricePerGBPerMonth,
+        stampBlockTimestamp,
+        stampBeeExpiry,
+      )}
+      {#if expiryMs !== undefined}
+        {@const expired = isExpired(expiryMs)}
+        {@const expiringSoon = !expired && isExpiringSoon(stamp, expiryMs, pricePerGBPerMonth)}
         <Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
           <Typography>Expiry date</Typography>
           <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
-            <Typography --typography-color={expiringSoon ? 'var(--colors-red)' : undefined}>
-              {formatExpiryDate(stamp, pricePerGBPerMonth, stampBlockTimestamp)}
+            <Typography
+              --typography-color={expired || expiringSoon ? 'var(--colors-red)' : undefined}
+            >
+              {formatExpiryDate(expiryMs)}
             </Typography>
-            {#if expiringSoon}
-              <Badge variant="error" dimension="small"
-                ><WarningAltFilled size={16} />Expires soon</Badge
-              >
+            {#if expired}
+              <Badge variant="error" dimension="small">
+                <WarningAltFilled size={16} />Expired
+              </Badge>
+            {:else if expiringSoon}
+              <Badge variant="error" dimension="small">
+                <WarningAltFilled size={16} />Expires soon
+              </Badge>
             {/if}
           </Horizontal>
         </Horizontal>

@@ -463,6 +463,7 @@ export {
   fetchSwarmPrice,
   fetchChainState,
   calculateStampAmountForDays,
+  fetchBatchTTL,
   SWARMSCAN_STATS_URL,
   GNOSIS_BLOCK_TIME,
   BLOCKS_PER_DAY,

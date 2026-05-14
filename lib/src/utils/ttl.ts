@@ -211,3 +211,41 @@ export function calculateStampAmountForDays(
   }
   return currentPrice * BLOCKS_PER_DAY * BigInt(days)
 }
+
+/**
+ * Fetches the remaining batchTTL (in seconds) for a stamp directly from a Bee
+ * node's `/stamps/{batchId}` endpoint. The Bee node computes this from current
+ * chain state (per-block price and cumulative outpayment), so it is more
+ * accurate than the constant-price approximation in {@link calculateTTLSeconds}.
+ *
+ * @param beeUrl - Bee node URL
+ * @param batchId - Hex-encoded batch ID (without `0x` prefix)
+ * @returns Remaining TTL in seconds, or `undefined` if the Bee node does not
+ *          know about this batch or the request fails. Negative values from
+ *          the Bee API are normalised to `0` (expired).
+ */
+export async function fetchBatchTTL(
+  beeUrl: string,
+  batchId: string,
+): Promise<number | undefined> {
+  try {
+    const base = beeUrl.replace(/\/$/, "")
+    const response = await fetch(`${base}/stamps/${batchId}`)
+    if (!response.ok) {
+      return undefined
+    }
+    const data: unknown = await response.json()
+    if (
+      typeof data !== "object" ||
+      data === null ||
+      !("batchTTL" in data) ||
+      typeof (data as { batchTTL: unknown }).batchTTL !== "number"
+    ) {
+      return undefined
+    }
+    const ttl = (data as { batchTTL: number }).batchTTL
+    return ttl < 0 ? 0 : ttl
+  } catch {
+    return undefined
+  }
+}

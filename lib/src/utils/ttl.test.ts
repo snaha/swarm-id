@@ -2,7 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { calculateStampAmountForDays, fetchChainState } from "./ttl"
+import {
+  calculateStampAmountForDays,
+  fetchChainState,
+  fetchBatchTTL,
+} from "./ttl"
+
+const BATCH_ID =
+  "b88a934e78c793bde43abcb7d2e41dc87de06ad18a747bdd672b0e32f23c687e"
+
+function mockResponse(body: unknown, ok = true, status = 200): Response {
+  return {
+    ok,
+    status,
+    json: () => Promise.resolve(body),
+  } as Response
+}
 
 describe("calculateStampAmountForDays", () => {
   // bee-compose default PriceOracle floor: 24_000 PLUR/chunk/block
@@ -47,14 +62,6 @@ describe("fetchChainState", () => {
   afterEach(() => {
     fetchSpy.mockRestore()
   })
-
-  function mockResponse(body: unknown, ok = true, status = 200): Response {
-    return {
-      ok,
-      status,
-      json: () => Promise.resolve(body),
-    } as Response
-  }
 
   it("parses block and currentPrice from /chainstate", async () => {
     fetchSpy.mockResolvedValue(
@@ -109,5 +116,99 @@ describe("fetchChainState", () => {
     await expect(fetchChainState("http://localhost:1633")).rejects.toThrow(
       /block/,
     )
+  })
+})
+
+describe("fetchBatchTTL", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch")
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  it("returns batchTTL from Bee /stamps/{id} response", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: 86400 }))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBe(86400)
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `https://bee.example.com/stamps/${BATCH_ID}`,
+    )
+  })
+
+  it("strips a trailing slash from the Bee URL", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: 123 }))
+
+    await fetchBatchTTL("https://bee.example.com/", BATCH_ID)
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `https://bee.example.com/stamps/${BATCH_ID}`,
+    )
+  })
+
+  it("returns undefined when the stamp is not found (404)", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({}, false, 404))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBeUndefined()
+  })
+
+  it("returns undefined when the response is missing batchTTL", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ amount: "100" }))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBeUndefined()
+  })
+
+  it("returns undefined when the response body is not an object", async () => {
+    fetchSpy.mockResolvedValue(mockResponse(null))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBeUndefined()
+  })
+
+  it("returns undefined when batchTTL is not a number", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: "86400" }))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBeUndefined()
+  })
+
+  it("normalises negative TTL values to 0", async () => {
+    // Bee returns negative batchTTL for expired stamps in some versions.
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: -1 }))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBe(0)
+  })
+
+  it("returns undefined when fetch rejects", async () => {
+    fetchSpy.mockRejectedValue(new Error("network error"))
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBeUndefined()
+  })
+
+  it("returns undefined when JSON parsing fails", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new Error("invalid json")),
+    } as unknown as Response)
+
+    const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
+
+    expect(ttl).toBeUndefined()
   })
 })
