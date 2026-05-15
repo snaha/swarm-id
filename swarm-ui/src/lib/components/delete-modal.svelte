@@ -50,8 +50,12 @@
       <Typography style="color: var(--colors-red)">{error}</Typography>
     {/if}
     <section class="buttons">
-      <LoaderButton variant="strong" dimension="compact" onclick={confirm} class="danger-button"
-        >{buttonTitle}</LoaderButton
+      <LoaderButton
+        variant="strong"
+        dimension="compact"
+        onclick={confirm}
+        stayActive={false}
+        class="danger-button">{buttonTitle}</LoaderButton
       >
       <Button variant="ghost" dimension="compact" onclick={oncancel} disabled={disableCancel}
         >{cancelTitle}</Button
