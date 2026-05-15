@@ -43,6 +43,8 @@ export {
   assignChunksToBuckets,
   serializeUint32Array,
   deserializeUint32Array,
+  serializeUint16Array,
+  deserializeUint16Array,
   splitIntoChunks,
   reconstructFromChunks,
   calculateMaxSlotsPerBucket,
@@ -50,12 +52,14 @@ export {
   createStamper,
   prepareBucketState,
   UtilizationAwareStamper,
+  getChunkLayout,
   NUM_BUCKETS,
   BUCKET_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
   DATA_COUNTER_START,
   CHUNK_SIZE,
   DEFAULT_BATCH_DEPTH,
+  UINT16_COUNTER_MAX_DEPTH,
 } from "./utils/batch-utilization"
 
 // Utilization storage (IndexedDB cache)
@@ -327,6 +331,7 @@ export {
 // Batch utilization types
 export type {
   BatchUtilizationState,
+  ChunkLayout,
   ChunkWithBucket,
   UtilizationUpdate,
 } from "./utils/batch-utilization"

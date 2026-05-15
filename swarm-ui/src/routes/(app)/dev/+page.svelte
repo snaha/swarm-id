@@ -22,7 +22,7 @@
   import StatusDot from './status-dot.svelte'
   import Divider from '$lib/components/ui/divider.svelte'
   import routes from '$lib/routes'
-  import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
+  import { BatchId, EthAddress, PrivateKey, Utils } from '@ethersphere/bee-js'
   import { SvelteMap } from 'svelte/reactivity'
 
   // Tab state
@@ -353,7 +353,11 @@ Check console logs for details:
           {
             batchID: batchId,
             signerKey: signerKeyToUse,
-            utilization: beeStamp.utilization,
+            utilization: Utils.getStampUsage(
+              beeStamp.utilization,
+              beeStamp.depth,
+              beeStamp.bucketDepth,
+            ),
             usable: beeStamp.usable,
             depth: beeStamp.depth,
             amount: BigInt(beeStamp.amount),
@@ -426,7 +430,11 @@ Check console logs for details:
           {
             batchID: batchId,
             signerKey: signerKeyToUse,
-            utilization: beeStamp.utilization,
+            utilization: Utils.getStampUsage(
+              beeStamp.utilization,
+              beeStamp.depth,
+              beeStamp.bucketDepth,
+            ),
             usable: beeStamp.usable,
             depth: beeStamp.depth,
             amount: BigInt(beeStamp.amount),

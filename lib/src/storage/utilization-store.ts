@@ -52,7 +52,13 @@ export interface BatchMetadata {
 // ============================================================================
 
 const DB_NAME = "swarm-utilization-store"
-const DB_VERSION = 1
+/**
+ * v2: switch on-disk counter codec from uint32 to uint16 for depth ≤ 31.
+ * Upgrade drops legacy chunks/metadata — counters rebuild on first save.
+ *
+ * Issue: https://github.com/snaha/swarm-id/issues/243
+ */
+const DB_VERSION = 2
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
 
@@ -83,25 +89,29 @@ export class UtilizationStoreDB {
       request.onupgradeneeded = (event) => {
         const db = (event.target as IDBOpenDBRequest).result
 
-        // Create chunks store with compound key
-        if (!db.objectStoreNames.contains(CHUNKS_STORE)) {
-          const chunksStore = db.createObjectStore(CHUNKS_STORE, {
-            keyPath: ["batchId", "chunkIndex"],
-          })
-
-          // Index for querying by batchId
-          chunksStore.createIndex("batchId", "batchId", { unique: false })
-
-          // Index for eviction by lastAccess
-          chunksStore.createIndex("lastAccess", "lastAccess", {
-            unique: false,
-          })
+        // v1 → v2: chunk layout changed (uint32 → uint16 for depth ≤ 31).
+        // Drop and recreate both stores; counters will rebuild on next save.
+        if (db.objectStoreNames.contains(CHUNKS_STORE)) {
+          db.deleteObjectStore(CHUNKS_STORE)
+        }
+        if (db.objectStoreNames.contains(METADATA_STORE)) {
+          db.deleteObjectStore(METADATA_STORE)
         }
 
-        // Create metadata store
-        if (!db.objectStoreNames.contains(METADATA_STORE)) {
-          db.createObjectStore(METADATA_STORE, { keyPath: "batchId" })
-        }
+        const chunksStore = db.createObjectStore(CHUNKS_STORE, {
+          keyPath: ["batchId", "chunkIndex"],
+        })
+
+        // Index for querying by batchId
+        chunksStore.createIndex("batchId", "batchId", { unique: false })
+
+        // Index for eviction by lastAccess
+        chunksStore.createIndex("lastAccess", "lastAccess", {
+          unique: false,
+        })
+
+        // Metadata store
+        db.createObjectStore(METADATA_STORE, { keyPath: "batchId" })
       }
     })
   }
