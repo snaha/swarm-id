@@ -79,6 +79,11 @@
   let showDeleteModal = $state(false)
   let showDeleteSeedModal = $state(false)
   let deleteError = $state<string | undefined>(undefined)
+  let isDeleteAuthInProgress = $state(false)
+  // Non-reactive flag set when the user cancels mid-auth. Checked before
+  // performing deletion so a late-resolving auth promise can't override the
+  // user's intent (e.g. reflexive biometric touch after clicking Cancel).
+  let deleteCancelled = false
 
   // Generation details state
   let isUnmasked = $state(false)
@@ -134,19 +139,29 @@
 
   async function handleDeleteAccount() {
     deleteError = undefined
+    deleteCancelled = false
+    isDeleteAuthInProgress = true
     try {
-      await getMasterKeyFromAccount(account)
-    } catch (err) {
-      if (err instanceof SeedPhraseRequiredError) {
-        showDeleteModal = false
-        showDeleteSeedModal = true
+      try {
+        await getMasterKeyFromAccount(account)
+      } catch (err) {
+        if (err instanceof SeedPhraseRequiredError) {
+          showDeleteModal = false
+          showDeleteSeedModal = true
+          return
+        }
+        deleteError = err instanceof Error ? err.message : 'Authentication failed'
+        console.error('Authentication failed:', err)
         return
       }
-      deleteError = err instanceof Error ? err.message : 'Authentication failed'
-      console.error('Authentication failed:', err)
-      return
+      if (deleteCancelled) {
+        // User dismissed the modal while auth was pending — honor that.
+        return
+      }
+      await performAccountDeletion()
+    } finally {
+      isDeleteAuthInProgress = false
     }
-    await performAccountDeletion()
   }
 
   async function handleDeleteSeedPhraseProvided(seedPhrase: string) {
@@ -755,7 +770,13 @@
   buttonTitle="Delete account"
   confirm={handleDeleteAccount}
   error={deleteError}
+  disableCancel={isDeleteAuthInProgress}
   oncancel={() => {
+    if (isDeleteAuthInProgress) {
+      // Late cancel paths (Esc, click-outside) can still fire while auth is
+      // pending; mark cancelled so the resolved auth doesn't trigger deletion.
+      deleteCancelled = true
+    }
     showDeleteModal = false
     deleteError = undefined
   }}
