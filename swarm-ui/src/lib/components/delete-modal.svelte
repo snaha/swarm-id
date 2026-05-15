@@ -16,6 +16,8 @@
     text: string
     buttonTitle: string
     cancelTitle?: string
+    error?: string
+    disableCancel?: boolean
   }
   let {
     oncancel,
@@ -25,6 +27,8 @@
     text,
     buttonTitle,
     cancelTitle = "Don't delete",
+    error,
+    disableCancel = false,
     ...restProps
   }: ModalProps & Props = $props()
 </script>
@@ -34,17 +38,28 @@
     <header class="horizontal">
       <Typography variant="h5">{title}</Typography>
       <div class="grower"></div>
-      <Button variant="ghost" dimension="compact" onclick={oncancel}><Close size={24} /></Button>
+      <Button variant="ghost" dimension="compact" onclick={oncancel} disabled={disableCancel}
+        ><Close size={24} /></Button
+      >
     </header>
 
     {#if text}
       <Typography>{text}</Typography>
     {/if}
+    {#if error}
+      <Typography style="color: var(--colors-red)">{error}</Typography>
+    {/if}
     <section class="buttons">
-      <LoaderButton variant="strong" dimension="compact" onclick={confirm} class="danger-button"
-        >{buttonTitle}</LoaderButton
+      <LoaderButton
+        variant="strong"
+        dimension="compact"
+        onclick={confirm}
+        stayActive={false}
+        class="danger-button">{buttonTitle}</LoaderButton
       >
-      <Button variant="ghost" dimension="compact" onclick={oncancel}>{cancelTitle}</Button>
+      <Button variant="ghost" dimension="compact" onclick={oncancel} disabled={disableCancel}
+        >{cancelTitle}</Button
+      >
       <div class="grower"></div>
     </section>
   </section>

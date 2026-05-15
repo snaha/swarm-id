@@ -46,7 +46,11 @@
   import type { Account, Identity } from '$lib/types'
   import type { Bytes } from '@ethersphere/bee-js'
   import { deriveSecretSeedEncryptionKey, decryptSecretSeed } from '$lib/utils/encryption'
-  import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
+  import {
+    getMasterKeyFromAccount,
+    SeedPhraseRequiredError,
+    getMasterKeyFromAgentAccount,
+  } from '$lib/utils/account-auth'
   import EthereumLogo from './ethereum-logo.svelte'
   import PasskeyLogo from './passkey-logo.svelte'
   import Input from './ui/input/input.svelte'
@@ -54,6 +58,7 @@
   import CopyButton from './copy-button.svelte'
   import Tooltip from './ui/tooltip.svelte'
   import DeleteModal from './delete-modal.svelte'
+  import EnterSeedModal from './enter-seed-modal.svelte'
   import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
 
   type Props = {
@@ -72,6 +77,13 @@
   let showExportTooltip = $state(false)
   let networkSettingsModalOpen = $state(false)
   let showDeleteModal = $state(false)
+  let showDeleteSeedModal = $state(false)
+  let deleteError = $state<string | undefined>(undefined)
+  let isDeleteAuthInProgress = $state(false)
+  // Non-reactive flag set when the user cancels mid-auth. Checked before
+  // performing deletion so a late-resolving auth promise can't override the
+  // user's intent (e.g. reflexive biometric touch after clicking Cancel).
+  let deleteCancelled = false
 
   // Generation details state
   let isUnmasked = $state(false)
@@ -110,7 +122,7 @@
     accountsStore.setAccountName(account.id, accountName)
   }
 
-  async function handleDeleteAccount() {
+  async function performAccountDeletion() {
     const accountId = account.id
     const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
     for (const identity of accountIdentities) {
@@ -120,8 +132,52 @@
     postageStampsStore.removeStampsByAccount(accountId.toHex())
     accountsStore.removeAccount(accountId)
     sessionStore.clearAccount()
+    showDeleteModal = false
     drawerOpen = false
     await goto(resolve(routes.HOME))
+  }
+
+  async function handleDeleteAccount() {
+    deleteError = undefined
+    deleteCancelled = false
+    isDeleteAuthInProgress = true
+    try {
+      try {
+        await getMasterKeyFromAccount(account)
+      } catch (err) {
+        if (err instanceof SeedPhraseRequiredError) {
+          showDeleteModal = false
+          showDeleteSeedModal = true
+          return
+        }
+        deleteError = err instanceof Error ? err.message : 'Authentication failed'
+        console.error('Authentication failed:', err)
+        return
+      }
+      if (deleteCancelled) {
+        // User dismissed the modal while auth was pending — honor that.
+        return
+      }
+      await performAccountDeletion()
+    } finally {
+      isDeleteAuthInProgress = false
+    }
+  }
+
+  async function handleDeleteSeedPhraseProvided(seedPhrase: string) {
+    try {
+      getMasterKeyFromAgentAccount(account, seedPhrase)
+    } catch (err) {
+      deleteError = err instanceof Error ? err.message : 'Invalid seed phrase'
+      showDeleteModal = true
+      console.error('Invalid seed phrase:', err)
+      return
+    }
+    await performAccountDeletion()
+  }
+
+  function handleDeleteSeedModalCancel() {
+    showDeleteSeedModal = false
   }
 
   let showPasskeyExportWarning = $state(false)
@@ -608,7 +664,10 @@
             dimension="compact"
             danger
             leftAlign
-            onclick={() => (showDeleteModal = true)}
+            onclick={() => {
+              deleteError = undefined
+              showDeleteModal = true
+            }}
           >
             <TrashCan size={20} />
             Delete account
@@ -707,10 +766,26 @@
 <DeleteModal
   bind:open={showDeleteModal}
   title="Delete account?"
-  text="This will permanently delete your account and all associated data. This action cannot be undone."
+  text="This will permanently delete your account and all associated data. This action cannot be undone. You'll be asked to authenticate before the account is deleted."
   buttonTitle="Delete account"
   confirm={handleDeleteAccount}
-  oncancel={() => (showDeleteModal = false)}
+  error={deleteError}
+  disableCancel={isDeleteAuthInProgress}
+  oncancel={() => {
+    if (isDeleteAuthInProgress) {
+      // Late cancel paths (Esc, click-outside) can still fire while auth is
+      // pending; mark cancelled so the resolved auth doesn't trigger deletion.
+      deleteCancelled = true
+    }
+    showDeleteModal = false
+    deleteError = undefined
+  }}
+/>
+
+<EnterSeedModal
+  bind:open={showDeleteSeedModal}
+  onUnlock={handleDeleteSeedPhraseProvided}
+  onCancel={handleDeleteSeedModalCancel}
 />
 
 <style>
