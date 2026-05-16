@@ -57,11 +57,17 @@ let currentIdentityName: string | undefined
 let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
 let currentSubsidisedGatewayUrl: string | undefined = DEFAULT_BEE_NODE_URL
 
-async function updatePostageStampInfo() {
+// Monotonic generation counter for connection-change handler runs. Used to
+// drop stale results from in-flight `getPostageBatch()` calls when the user
+// switches identity or disconnects while a fetch is pending.
+let connectionGeneration = 0
+
+async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
   try {
     const batch = await client.getPostageBatch()
+    if (generation !== connectionGeneration) return
     if (batch) {
       const batchIdStr = String(batch.batchID)
       stamp = {
@@ -81,6 +87,7 @@ async function updatePostageStampInfo() {
       logStore.log('No postage stamp configured')
     }
   } catch (error) {
+    if (generation !== connectionGeneration) return
     stamp = undefined
     logStore.log(
       `Failed to get postage stamp: ${error instanceof Error ? error.message : String(error)}`,
@@ -90,6 +97,10 @@ async function updatePostageStampInfo() {
 }
 
 async function onConnectionChange(info: ConnectionInfo) {
+  // Bump the generation so any in-flight `getPostageBatch` from the previous
+  // snapshot (e.g. a different identity or pre-disconnect state) is dropped
+  // when it resolves instead of overwriting current state.
+  const generation = ++connectionGeneration
   const isAuthenticated = info.identity !== undefined
   authenticated = isAuthenticated
   canUpload = info.canUpload
@@ -129,7 +140,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   appKey = info.appKey
 
   if (isAuthenticated) {
-    await updatePostageStampInfo()
+    await updatePostageStampInfo(generation)
   } else {
     stamp = undefined
   }

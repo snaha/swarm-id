@@ -32,8 +32,10 @@ await client.initialize()
 // Option 1: Open authentication page manually
 await client.connect()
 
-// Option 2: Read current connection state and upload if authenticated
-if (client.connectionInfo?.identity) {
+// Option 2: Read current connection state and upload if authenticated.
+// Check `canUpload` too — an authenticated user can still lack upload
+// capability (no postage stamp, no subsidised gateway).
+if (client.connectionInfo?.identity && client.connectionInfo.canUpload) {
   const result = await client.uploadData(new Uint8Array([1, 2, 3]))
   console.log('Uploaded with reference:', result.reference)
 }

@@ -372,13 +372,21 @@ export class SwarmIdProxy {
     this.authLoading = false
     this.isConnecting = false
 
-    // Look up postage stamp
+    // Look up postage stamp. When switching identities, the new identity may
+    // not have a stamp at all — explicitly clear any prior stamper state so
+    // we don't emit a snapshot claiming `user-stamp` mode with the previous
+    // identity's stamp.
     const stamp = this.lookupPostageStampForApp()
     if (stamp) {
       this.postageBatchId = stamp.batchID.toHex()
       this.signerKey = stamp.signerKey.toHex()
       this.stamperDepth = stamp.depth
       await this.initializeStamper()
+    } else {
+      this.postageBatchId = undefined
+      this.signerKey = undefined
+      this.stamper = undefined
+      this.stamperAccountFingerprint = undefined
     }
 
     this.showAuthButton()

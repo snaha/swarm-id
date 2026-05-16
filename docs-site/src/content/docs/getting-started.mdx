@@ -49,8 +49,10 @@ console.log('Authentication opened at:', authUrl)
 // 4. Read current connection state synchronously
 const info = client.connectionInfo
 
-// 5. Upload data (after authentication)
-if (info.identity) {
+// 5. Upload data (requires authentication AND upload capability — a connected
+//    user can still have canUpload=false if they have no postage stamp and no
+//    subsidised gateway is configured)
+if (info.identity && info.canUpload) {
   const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
   console.log('Uploaded:', result.reference)
 }

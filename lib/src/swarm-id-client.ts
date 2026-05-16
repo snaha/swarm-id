@@ -113,7 +113,9 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
  *
  * await client.initialize()
  *
- * if (client.connectionInfo?.identity) {
+ * // Check canUpload — an authenticated user can still lack upload capability
+ * // when they have no postage stamp and no subsidised gateway is configured.
+ * if (client.connectionInfo.identity && client.connectionInfo.canUpload) {
  *   const result = await client.uploadData(new Uint8Array([1, 2, 3]))
  *   console.log('Uploaded with reference:', result.reference)
  * }
@@ -385,6 +387,17 @@ export class SwarmIdClient {
         console.warn(
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
+        )
+        return
+      }
+
+      // Security: also verify the source is OUR iframe, not a sibling/parent
+      // frame served from the same origin. Without this check, push events
+      // like `connectionInfoChanged` / `authSuccess` could be spoofed by any
+      // co-origin window.
+      if (this.iframe && event.source !== this.iframe.contentWindow) {
+        console.warn(
+          "[SwarmIdClient] Rejected message from unexpected source window",
         )
         return
       }
