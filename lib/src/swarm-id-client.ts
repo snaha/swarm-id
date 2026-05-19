@@ -289,6 +289,12 @@ export class SwarmIdClient {
         `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
       ),
     ])
+    // Attach a no-op handler so the rejection isn't surfaced as
+    // "unhandled" if the timeout fires before we reach the awaiting line
+    // below (e.g. because an earlier `await` in this method hung first).
+    // The original promise is still rejected; the `await` on line 359 will
+    // re-throw it normally.
+    this.firstConnectionInfoPromise.catch(() => {})
 
     // Create iframe for proxy
     this.iframe = document.createElement("iframe")
