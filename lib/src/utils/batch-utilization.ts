@@ -29,7 +29,6 @@ import {
 } from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import { calculateContentHash } from "../storage/utilization-store"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 
@@ -1205,6 +1204,7 @@ export class UtilizationAwareStamper implements Stamper {
   private stamper: Stamper
   private utilizationState: BatchUtilizationState
   private cache: UtilizationStoreDB
+  private readonly encryptionKey: Uint8Array
   private dirty: boolean = false
   private dirtyBuckets: Set<number> = new Set()
 
@@ -1227,12 +1227,14 @@ export class UtilizationAwareStamper implements Stamper {
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
+    encryptionKey: Uint8Array,
     utilizationState: BatchUtilizationState,
   ) {
     this.stamper = stamper
     this.batchId = batchId
     this.depth = depth
     this.cache = cache
+    this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
   }
 
@@ -1244,7 +1246,7 @@ export class UtilizationAwareStamper implements Stamper {
    * @param depth - Batch depth
    * @param cache - Utilization cache database
    * @param _owner - Owner address (required for validation, reserved for future Swarm upload)
-   * @param _encryptionKey - Encryption key (required for validation, reserved for future Swarm upload)
+   * @param encryptionKey - Encryption key used to compute the canonical Swarm chunk address on local flush. Both call sites already pass the account's encryption key; "anything stable" works for now, will be tied to multi-device collision avoidance later.
    * @returns New UtilizationAwareStamper instance
    */
   static async create(
@@ -1253,7 +1255,7 @@ export class UtilizationAwareStamper implements Stamper {
     depth: number,
     cache: UtilizationStoreDB,
     _owner: EthAddress,
-    _encryptionKey: Uint8Array,
+    encryptionKey: Uint8Array,
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
@@ -1292,6 +1294,7 @@ export class UtilizationAwareStamper implements Stamper {
       batchId,
       depth,
       cache,
+      encryptionKey,
       utilizationState,
     )
   }
@@ -1352,11 +1355,13 @@ export class UtilizationAwareStamper implements Stamper {
       this.utilizationState.chunks[chunkIndex].dirty = true
     }
 
-    // Save dirty chunks to cache
+    // Save dirty chunks to cache. We do not upload here, but we still record
+    // the contentHash that an upload *would* assign — i.e. the BMT address of
+    // the encrypted chunk for this plaintext + encryptionKey. That is what the
+    // upload-path dedup at saveUtilizationState compares against, so storing
+    // anything else (e.g. keccak of plaintext) would force a redundant
+    // re-upload of every flushed chunk on the next sync.
     try {
-      // Note: This requires owner and encryptionKey which we don't have here
-      // The caller should use saveUtilizationState directly if they want to upload to Swarm
-      // For now, just update the cache
       for (const chunkIndex of dirtyChunkIndexes) {
         const chunkData = extractChunk(
           this.utilizationState.dataCounters,
@@ -1364,13 +1369,22 @@ export class UtilizationAwareStamper implements Stamper {
           this.depth,
         )
 
+        const encryptedChunk = makeEncryptedContentAddressedChunk(
+          chunkData,
+          this.encryptionKey,
+        )
+        const contentHash = Binary.uint8ArrayToHex(
+          encryptedChunk.address.toUint8Array(),
+        )
+
         await this.cache.putChunk({
           batchId: this.batchId.toHex(),
           chunkIndex,
           data: chunkData,
-          contentHash: calculateContentHash(chunkData),
+          contentHash,
           lastAccess: Date.now(),
         })
+        this.utilizationState.chunks[chunkIndex].contentHash = contentHash
         this.utilizationState.chunks[chunkIndex].dirty = false
       }
 

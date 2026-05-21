@@ -3,7 +3,11 @@
 
 import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk } from "../chunk"
+import { Binary } from "cafe-utility"
+import {
+  makeContentAddressedChunk,
+  makeEncryptedContentAddressedChunk,
+} from "../chunk"
 import {
   CHUNK_SIZE,
   DATA_COUNTER_START,
@@ -235,5 +239,51 @@ describe("regression: serializeUint32Array round-trip", () => {
     expect(bytes.byteLength).toBe(source.length * 4)
     const decoded = deserializeUint32Array(bytes)
     expect(Array.from(decoded)).toEqual(Array.from(source))
+  })
+})
+
+/**
+ * `UtilizationAwareStamper.flush()` writes `contentHash` as the hex of the BMT
+ * address of the encrypted chunk for the dirty plaintext + the stamper's
+ * encryption key. The upload-path dedup at `saveUtilizationState` compares
+ * against the same value, so these tests pin the underlying property: for a
+ * given (plaintext, key) pair the BMT-of-encrypted address is deterministic,
+ * and any change to either input produces a different address.
+ */
+describe("BMT-of-encrypted chunk address (contentHash invariant)", () => {
+  const KEY_A = new Uint8Array(32).map((_, i) => i + 1)
+  const KEY_B = new Uint8Array(32).map((_, i) => 255 - i)
+
+  function bmtHex(data: Uint8Array, key: Uint8Array): string {
+    return Binary.uint8ArrayToHex(
+      makeEncryptedContentAddressedChunk(data, key).address.toUint8Array(),
+    )
+  }
+
+  it("is deterministic for the same plaintext + key", () => {
+    const data = new Uint8Array(CHUNK_SIZE)
+    for (let i = 0; i < data.length; i++) data[i] = (i * 31) & 0xff
+    expect(bmtHex(data, KEY_A)).toBe(bmtHex(data, KEY_A))
+  })
+
+  it("changes when a single counter byte flips", () => {
+    const data = new Uint8Array(CHUNK_SIZE)
+    for (let i = 0; i < data.length; i++) data[i] = (i * 31) & 0xff
+    const before = bmtHex(data, KEY_A)
+    data[1234] ^= 0x01
+    const after = bmtHex(data, KEY_A)
+    expect(after).not.toBe(before)
+  })
+
+  it("changes when the encryption key changes", () => {
+    const data = new Uint8Array(CHUNK_SIZE)
+    for (let i = 0; i < data.length; i++) data[i] = (i * 17) & 0xff
+    expect(bmtHex(data, KEY_A)).not.toBe(bmtHex(data, KEY_B))
+  })
+
+  it("returns a 64-hex-char (32-byte) address", () => {
+    const data = new Uint8Array(CHUNK_SIZE)
+    const hash = bmtHex(data, KEY_A)
+    expect(hash).toMatch(/^[0-9a-f]{64}$/)
   })
 })

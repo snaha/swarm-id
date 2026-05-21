@@ -66,7 +66,6 @@ export {
 export {
   UtilizationStoreDB,
   evictOldEntries,
-  calculateContentHash,
 } from "./storage/utilization-store"
 
 export type {
