@@ -72,6 +72,9 @@ const COUNTER_BYTES_UINT16 = 2
 /** uint32 serialization size in bytes */
 const COUNTER_BYTES_UINT32 = 4
 
+/** Largest value representable in an unsigned 16-bit integer */
+const UINT16_MAX = 0xffff
+
 /**
  * Per-batch-depth chunk layout for the utilization state.
  *
@@ -111,7 +114,7 @@ export function getChunkLayout(batchDepth: number): ChunkLayout {
  * Metadata for a single utilization chunk
  */
 export interface ChunkMetadata {
-  /** Chunk index (0-63) */
+  /** Chunk index within the depth-dependent layout */
   index: number
 
   /**
@@ -130,8 +133,9 @@ export interface ChunkMetadata {
 /**
  * Utilization state for a postage batch
  *
- * This new version stores utilization data as 64 chunks on Swarm
- * with IndexedDB caching for performance.
+ * Utilization data is stored as 32 chunks (uint16 codec, depth ≤ 31) or
+ * 64 chunks (uint32 codec, depth ≥ 32) on Swarm, with IndexedDB caching
+ * for performance.
  */
 export interface BatchUtilizationState {
   /** Batch ID this state belongs to */
@@ -241,26 +245,6 @@ export function getChunkIndexForBucket(
 }
 
 /**
- * Calculate the offset of a bucket within its chunk.
- *
- * @param bucketIndex - Bucket index (0-65535)
- * @param batchDepth - Batch depth, drives the chunk layout
- * @returns Offset within chunk, in counters (not bytes)
- */
-export function getBucketOffsetInChunk(
-  bucketIndex: number,
-  batchDepth: number,
-): number {
-  if (bucketIndex < 0 || bucketIndex >= NUM_BUCKETS) {
-    throw new Error(
-      `Invalid bucket index: ${bucketIndex} (must be 0-${NUM_BUCKETS - 1})`,
-    )
-  }
-  const { bucketsPerChunk } = getChunkLayout(batchDepth)
-  return bucketIndex % bucketsPerChunk
-}
-
-/**
  * Extract a CHUNK_SIZE-byte chunk from the dataCounters array using the
  * codec implied by the batch depth.
  *
@@ -365,7 +349,7 @@ export class DirtyChunkTracker {
 
   /**
    * Mark a chunk as clean (uploaded successfully)
-   * @param chunkIndex - Chunk index (0-63)
+   * @param chunkIndex - Chunk index
    */
   markClean(chunkIndex: number): void {
     this.dirtyChunks.delete(chunkIndex)
@@ -466,7 +450,7 @@ export function makeChunkIdentifier(
  *
  * @param bee - Bee client instance
  * @param stamper - Stamper for signing
- * @param chunkIndex - Chunk index (0-63)
+ * @param chunkIndex - Chunk index
  * @param data - Chunk data to upload (4KB)
  * @param encryptionKey - Encryption key (32 bytes)
  * @returns CAC reference
@@ -629,7 +613,7 @@ export function serializeUint16Array(arr: Uint32Array): Uint8Array {
 
   for (let i = 0; i < arr.length; i++) {
     const v = arr[i]
-    if (v > 0xffff) {
+    if (v > UINT16_MAX) {
       throw new Error(
         `Counter at index ${i} (${v}) exceeds uint16 range; use uint32 codec`,
       )
@@ -914,7 +898,7 @@ export function utilizationToBucketState(
  * Load utilization state with cache hierarchy
  *
  * Load order:
- * 1. Try IndexedDB cache (all 64 chunks)
+ * 1. Try IndexedDB cache (all chunks for the depth's layout)
  * 2. If incomplete, download missing chunks from Swarm
  * 3. If not found, initialize new state
  * 4. Cache downloaded chunks in IndexedDB
@@ -937,7 +921,8 @@ export async function loadUtilizationState(
   // TODO: Use bee, owner, encryptionKey when state feed is implemented
   const { bee: _bee, owner: _owner, encryptionKey: _encryptionKey } = options
 
-  const { bucketsPerChunk, numUtilizationChunks } = getChunkLayout(batchDepth)
+  const { counterByteSize, bucketsPerChunk, numUtilizationChunks } =
+    getChunkLayout(batchDepth)
 
   // Step 1: Try loading from IndexedDB cache
   const cachedChunks = await cache.getAllChunks(batchId.toHex())
@@ -984,7 +969,6 @@ export async function loadUtilizationState(
   // Seed a default chunk's worth of counters once; reused via mergeChunk
   const defaultCounters = new Uint32Array(bucketsPerChunk)
   defaultCounters.fill(DATA_COUNTER_START)
-  const { counterByteSize } = getChunkLayout(batchDepth)
   const defaultChunkData =
     counterByteSize === COUNTER_BYTES_UINT16
       ? serializeUint16Array(defaultCounters)

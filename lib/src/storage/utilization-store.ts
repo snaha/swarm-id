@@ -5,8 +5,8 @@
  * IndexedDB Cache for Batch Utilization Chunks
  *
  * Provides fast local caching of 4KB utilization chunks to avoid
- * repeated Swarm downloads. Each chunk is 4096 bytes containing
- * 1024 bucket counters (uint32).
+ * repeated Swarm downloads. Each chunk is 4096 bytes containing either
+ * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
  */
 
 import { Binary } from "cafe-utility"
@@ -22,7 +22,7 @@ export interface ChunkCacheEntry {
   /** Batch ID (hex string) */
   batchId: string
 
-  /** Chunk index (0-63) */
+  /** Chunk index within the depth-dependent layout */
   chunkIndex: number
 
   /** Serialized chunk data (4KB) */
@@ -54,7 +54,9 @@ export interface BatchMetadata {
 const DB_NAME = "swarm-utilization-store"
 /**
  * v2: switch on-disk counter codec from uint32 to uint16 for depth ≤ 31.
- * Upgrade drops legacy chunks/metadata — counters rebuild on first save.
+ * The chunk layout (count and byte width) changed, so legacy rows cannot
+ * be reinterpreted — the upgrade drops both stores. Cached utilization
+ * tracking is lost and re-initialized to defaults on next use.
  *
  * Issue: https://github.com/snaha/swarm-id/issues/243
  */
@@ -81,8 +83,22 @@ export class UtilizationStoreDB {
         reject(new Error(`Failed to open IndexedDB: ${request.error}`))
       }
 
+      // Fires when an upgrade is held up by another open connection (e.g.
+      // a second tab on the trusted domain). The upgrade proceeds once that
+      // connection closes — see the onversionchange handler below.
+      request.onblocked = () => {
+        console.warn(
+          "[UtilizationStore] IndexedDB upgrade blocked by another open connection; waiting for it to close",
+        )
+      }
+
       request.onsuccess = () => {
         this.db = request.result
+        // Release this connection if another tab needs to upgrade, so its
+        // open() does not block indefinitely on us.
+        this.db.onversionchange = () => {
+          this.close()
+        }
         resolve()
       }
 
@@ -90,7 +106,9 @@ export class UtilizationStoreDB {
         const db = (event.target as IDBOpenDBRequest).result
 
         // v1 → v2: chunk layout changed (uint32 → uint16 for depth ≤ 31).
-        // Drop and recreate both stores; counters will rebuild on next save.
+        // Legacy rows are unreadable under the new layout, so drop and
+        // recreate both stores; utilization tracking re-initializes to
+        // defaults on next use.
         if (db.objectStoreNames.contains(CHUNKS_STORE)) {
           db.deleteObjectStore(CHUNKS_STORE)
         }
@@ -119,7 +137,7 @@ export class UtilizationStoreDB {
   /**
    * Get a chunk from cache
    * @param batchId - Batch ID (hex string)
-   * @param chunkIndex - Chunk index (0-63)
+   * @param chunkIndex - Chunk index
    * @returns Cache entry or undefined if not found
    */
   async getChunk(
@@ -245,7 +263,7 @@ export class UtilizationStoreDB {
   /**
    * Update lastAccess timestamp for a chunk
    * @param batchId - Batch ID (hex string)
-   * @param chunkIndex - Chunk index (0-63)
+   * @param chunkIndex - Chunk index
    */
   private async touchChunk(batchId: string, chunkIndex: number): Promise<void> {
     await this.open()
@@ -332,7 +350,7 @@ export interface CacheEvictionPolicy {
   /** Maximum age in milliseconds (default: 7 days) */
   maxAge?: number
 
-  /** Maximum number of chunks to keep (default: 640 = 10 batches) */
+  /** Maximum number of chunks to keep (default: 640) */
   maxChunks?: number
 }
 
@@ -346,7 +364,7 @@ export async function evictOldEntries(
   policy: CacheEvictionPolicy = {},
 ): Promise<void> {
   const maxAge = policy.maxAge ?? 7 * 24 * 60 * 60 * 1000 // 7 days
-  const maxChunks = policy.maxChunks ?? 640 // 10 batches × 64 chunks
+  const maxChunks = policy.maxChunks ?? 640 // ≈10–20 batches depending on depth
 
   await cache.open()
 
