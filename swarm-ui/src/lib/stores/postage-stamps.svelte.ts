@@ -57,7 +57,7 @@ export const postageStampsStore = {
     return postageStamps
   },
 
-  addStamp(stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {
+  addStamp(stamp: Omit<PostageStamp, 'createdAt'>, accountId: string): PostageStamp {
     // Check for duplicate batch ID
     const existingStamp = postageStamps.find((s) => s.batchID.equals(stamp.batchID))
     if (existingStamp) {
@@ -69,7 +69,7 @@ export const postageStampsStore = {
       createdAt: Date.now(),
     }
     postageStamps = [...postageStamps, newStamp]
-    savePostageStamps(postageStamps, false, stamp.accountId)
+    savePostageStamps(postageStamps, false, accountId)
     return newStamp
   },
 
@@ -78,17 +78,8 @@ export const postageStampsStore = {
     savePostageStamps(postageStamps, false, accountId)
   },
 
-  removeStampsByAccount(accountId: string) {
-    postageStamps = postageStamps.filter((s) => s.accountId !== accountId)
-    savePostageStamps(postageStamps)
-  },
-
   getStamp(batchID: BatchId): PostageStamp | undefined {
     return postageStamps.find((s) => s.batchID.equals(batchID))
-  },
-
-  getStampsByAccount(accountId: string): PostageStamp[] {
-    return postageStamps.filter((s) => s.accountId === accountId)
   },
 
   async getStamper(

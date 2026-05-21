@@ -97,8 +97,8 @@ Postage stamps are required for uploading data to Swarm. In development, you can
 ### Using the API
 
 ```bash
-# Buy a stamp with amount 10000000 and depth 17
-curl -X POST "http://localhost:1633/stamps/10000000/17"
+# Buy a stamp with amount 500000000 and depth 20
+curl -X POST "http://localhost:1633/stamps/500000000/20"
 ```
 
 ### Understanding Stamp Parameters
@@ -108,7 +108,7 @@ curl -X POST "http://localhost:1633/stamps/10000000/17"
 | **Amount** | How much BZZ to allocate (affects storage duration)     |
 | **Depth**  | Determines how much data can be stored (2^depth chunks) |
 
-For local development, the defaults (amount: 10000000, depth: 17) are sufficient for testing.
+For local development, the defaults (amount: 500000000, depth: 20) are sufficient for testing. The amount must exceed roughly `414720000` — the local chain's postage price (`24000`) multiplied by Bee's 17280-block (~24h) minimum validity period. Smaller amounts are rejected with an HTTP 400 error.
 
 :::caution
 After purchasing a stamp, you must wait approximately 30 seconds before it becomes usable. The Developer Tools page will show "Usable: No" until the stamp is ready.

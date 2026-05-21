@@ -109,7 +109,6 @@ export function createPostageStamp(
   overrides?: Partial<PostageStamp>,
 ): PostageStamp {
   return {
-    accountId: TEST_ETH_ADDRESS_HEX,
     batchID: new BatchId(TEST_BATCH_ID_HEX),
     signerKey: new PrivateKey(TEST_PRIVATE_KEY_HEX),
     utilization: 0,

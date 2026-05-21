@@ -28,6 +28,7 @@ import {
   saveUtilizationState,
   calculateUtilization,
 } from "../utils/batch-utilization"
+import { collectAccountStampBatchIds } from "../utils/postage-stamp-association"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import type {
@@ -283,7 +284,9 @@ export function createSyncAccount(
     const apps = identities.flatMap((identity) =>
       connectedAppsStore.getAppsByIdentityId(identity.id),
     )
-    const stamps = postageStampsStore.getStampsByAccount(accountId)
+    const stamps = collectAccountStampBatchIds(account, identities)
+      .map((batchId) => postageStampsStore.getStamp(batchId))
+      .filter((stamp): stamp is PostageStamp => stamp !== undefined)
 
     const snapshot: AccountStateSnapshot = {
       version: 1,
