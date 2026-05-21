@@ -80,6 +80,7 @@ import {
   saveMantarayTree,
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
+import { resolveStampForIdentity } from "./utils/postage-stamp-association"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import {
@@ -952,26 +953,22 @@ export class SwarmIdProxy {
         return undefined
       }
 
-      // Load postage stamps and find one for this account
+      // Load the account so we can fall back to its default stamp
+      const accountsManager = createAccountsStorageManager()
+      const accounts = accountsManager.load()
+      const account = accounts.find((a) => a.id.equals(identity.accountId))
+
+      if (!account) {
+        return undefined
+      }
+
+      // Resolve the stamp this identity should use: its own stamp if set,
+      // otherwise the account default — skipping a pointer whose stamp is
+      // missing so a stale pointer falls through instead of failing.
       const postageStampsManager = createPostageStampsStorageManager()
       const stamps = postageStampsManager.load()
 
-      // First try identity's default stamp, then fall back to any account stamp
-      let stamp: PostageStamp | undefined
-      if (identity.defaultPostageStampBatchID) {
-        stamp = stamps.find((s) =>
-          s.batchID.equals(identity.defaultPostageStampBatchID!),
-        )
-      }
-
-      if (!stamp) {
-        stamp = stamps.find((s) => s.accountId === identity.accountId.toHex())
-      }
-
-      if (stamp) {
-      }
-
-      return stamp
+      return resolveStampForIdentity(identity, account, stamps)
     } catch (error) {
       console.error("[Proxy] Error looking up postage stamp:", error)
       return undefined
@@ -3442,7 +3439,7 @@ export class SwarmIdProxy {
       console.warn("[Proxy] Failed to calculate TTL:", error)
     }
 
-    // Map PostageStamp to public PostageBatch (exclude signerKey, accountId)
+    // Map PostageStamp to public PostageBatch (exclude signerKey)
     const postageBatch: PostageBatch = {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,

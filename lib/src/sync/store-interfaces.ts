@@ -56,7 +56,6 @@ export interface ConnectedAppsStoreInterface {
  */
 export interface PostageStampsStoreInterface {
   getStamp(batchID: BatchId): PostageStamp | undefined
-  getStampsByAccount(accountId: string): PostageStamp[]
   getStamper(
     batchID: BatchId,
     options?: StamperOptions,

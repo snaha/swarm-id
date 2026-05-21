@@ -130,8 +130,10 @@ The easiest way is to use the Developer Tools page in the Identity UI:
 Or use the Bee API directly:
 
 ```bash
-# Buy stamp (amount=10000000, depth=17)
-curl -X POST "http://localhost:1633/stamps/10000000/17"
+# Buy stamp (amount=500000000, depth=20)
+# The amount must exceed ~414720000 — the local chain's price (24000)
+# times Bee's 17280-block (~24h) minimum validity.
+curl -X POST "http://localhost:1633/stamps/500000000/20"
 
 # Wait ~30 seconds, then verify it's usable:
 curl "http://localhost:1633/stamps/<batchID>"

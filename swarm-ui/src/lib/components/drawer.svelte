@@ -40,10 +40,11 @@
     createEncryptedExport,
     deriveSwarmEncryptionKey,
     SWARM_SECRET_PREFIX,
+    collectAccountStampBatchIds,
   } from '@snaha/swarm-id'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-  import type { Account, Identity } from '$lib/types'
+  import type { Account, Identity, PostageStamp } from '$lib/types'
   import type { Bytes } from '@ethersphere/bee-js'
   import { deriveSecretSeedEncryptionKey, decryptSecretSeed } from '$lib/utils/encryption'
   import {
@@ -125,11 +126,16 @@
   async function performAccountDeletion() {
     const accountId = account.id
     const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
+    // Collect stamp batch ids before removing identities, since the
+    // association is derived from the account/identity pointers.
+    const stampBatchIds = collectAccountStampBatchIds(account, accountIdentities)
     for (const identity of accountIdentities) {
       connectedAppsStore.removeAppsByIdentityId(identity.id)
       identitiesStore.removeIdentity(identity.id)
     }
-    postageStampsStore.removeStampsByAccount(accountId.toHex())
+    for (const batchId of stampBatchIds) {
+      postageStampsStore.removeStamp(batchId, accountId.toHex())
+    }
     accountsStore.removeAccount(accountId)
     sessionStore.clearAccount()
     showDeleteModal = false
@@ -189,7 +195,9 @@
       const connectedApps = accountIdentities.flatMap((identity) =>
         connectedAppsStore.getAppsByIdentityId(identity.id),
       )
-      const postageStamps = postageStampsStore.getStampsByAccount(account.id.toHex())
+      const postageStamps = collectAccountStampBatchIds(account, accountIdentities)
+        .map((batchId) => postageStampsStore.getStamp(batchId))
+        .filter((stamp): stamp is PostageStamp => stamp !== undefined)
       const encrypted = await createEncryptedExport(
         account,
         accountIdentities,
@@ -233,6 +241,9 @@
   async function handleSignOut() {
     const accountId = account.id
     const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
+    // Collect stamp batch ids before removing identities, since the
+    // association is derived from the account/identity pointers.
+    const stampBatchIds = collectAccountStampBatchIds(account, accountIdentities)
 
     for (const identity of accountIdentities) {
       const apps = connectedAppsStore.getAppsByIdentityId(identity.id)
@@ -242,7 +253,9 @@
       connectedAppsStore.removeAppsByIdentityId(identity.id)
       identitiesStore.removeIdentity(identity.id)
     }
-    postageStampsStore.removeStampsByAccount(accountId.toHex())
+    for (const batchId of stampBatchIds) {
+      postageStampsStore.removeStamp(batchId, accountId.toHex())
+    }
     accountsStore.removeAccount(accountId)
 
     sessionStore.clearAccount()

@@ -166,7 +166,6 @@ export function serializePostageStamp(
   stamp: PostageStamp,
 ): Record<string, unknown> {
   return {
-    accountId: stamp.accountId,
     batchID: stamp.batchID.toString(),
     signerKey: stamp.signerKey.toString(),
     utilization: stamp.utilization,

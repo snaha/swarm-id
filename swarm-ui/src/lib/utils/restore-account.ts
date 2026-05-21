@@ -33,7 +33,7 @@ export function restoreAccountToStores(data: RestoreData): Account {
 
   for (const stamp of data.postageStamps) {
     try {
-      postageStampsStore.addStamp(stamp)
+      postageStampsStore.addStamp(stamp, data.account.id.toHex())
     } catch (err) {
       console.warn('Skipping duplicate stamp:', err)
     }

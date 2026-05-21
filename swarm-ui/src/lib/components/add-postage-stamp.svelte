@@ -87,19 +87,21 @@
     submitError = undefined
 
     try {
-      const stamp = postageStampsStore.addStamp({
+      const stamp = postageStampsStore.addStamp(
+        {
+          batchID: new BatchId(batchID),
+          signerKey: new PrivateKey(signerKey),
+          utilization: 0,
+          usable: true,
+          depth,
+          amount,
+          bucketDepth: 16,
+          blockNumber,
+          immutableFlag: false,
+          exists: true,
+        },
         accountId,
-        batchID: new BatchId(batchID),
-        signerKey: new PrivateKey(signerKey),
-        utilization: 0,
-        usable: true,
-        depth,
-        amount,
-        bucketDepth: 16,
-        blockNumber,
-        immutableFlag: false,
-        exists: true,
-      })
+      )
 
       onSuccess(stamp)
     } catch (error) {
@@ -145,19 +147,21 @@
 
     try {
       // Create postage stamp from widget response
-      const stamp = postageStampsStore.addStamp({
+      const stamp = postageStampsStore.addStamp(
+        {
+          batchID: new BatchId(batch.batchId),
+          signerKey: new PrivateKey(signerKeyBytes),
+          depth: batch.depth,
+          amount: BigInt(batch.amount),
+          blockNumber: parseInt(batch.blockNumber, HEX_BASE),
+          utilization: 0,
+          usable: true,
+          bucketDepth: 16,
+          immutableFlag: false,
+          exists: true,
+        },
         accountId,
-        batchID: new BatchId(batch.batchId),
-        signerKey: new PrivateKey(signerKeyBytes),
-        depth: batch.depth,
-        amount: BigInt(batch.amount),
-        blockNumber: parseInt(batch.blockNumber, HEX_BASE),
-        utilization: 0,
-        usable: true,
-        bucketDepth: 16,
-        immutableFlag: false,
-        exists: true,
-      })
+      )
 
       // In auto-navigate mode, call onSuccess immediately (skip success screen)
       if (autoNavigateOnSuccess) {

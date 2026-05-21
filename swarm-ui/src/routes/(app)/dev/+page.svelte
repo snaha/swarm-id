@@ -43,7 +43,7 @@
 
   // Stamp buying state
   let beeUrl = $state('http://localhost:1633')
-  let stampAmount = $state('10000000')
+  let stampAmount = $state('500000000')
   let stampDepth = $state('20')
   let buying = $state(false)
   let stampResult = $state<{ batchID: string; txHash: string } | undefined>(undefined)
@@ -349,19 +349,21 @@ Check console logs for details:
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        postageStampsStore.addStamp({
-          accountId: selectedAccountId,
-          batchID: batchId,
-          signerKey: signerKeyToUse,
-          utilization: beeStamp.utilization,
-          usable: beeStamp.usable,
-          depth: beeStamp.depth,
-          amount: BigInt(beeStamp.amount),
-          bucketDepth: beeStamp.bucketDepth,
-          blockNumber: beeStamp.blockNumber,
-          immutableFlag: beeStamp.immutableFlag,
-          exists: beeStamp.exists,
-        })
+        postageStampsStore.addStamp(
+          {
+            batchID: batchId,
+            signerKey: signerKeyToUse,
+            utilization: beeStamp.utilization,
+            usable: beeStamp.usable,
+            depth: beeStamp.depth,
+            amount: BigInt(beeStamp.amount),
+            bucketDepth: beeStamp.bucketDepth,
+            blockNumber: beeStamp.blockNumber,
+            immutableFlag: beeStamp.immutableFlag,
+            exists: beeStamp.exists,
+          },
+          selectedAccountId,
+        )
       } else if (useCustomSigner) {
         const beeStamp = postageStampsStore.getStamp(batchId)
         if (!beeStamp) {
@@ -369,11 +371,14 @@ Check console logs for details:
           return
         }
         if (beeStamp.signerKey !== signerKeyToUse) {
-          postageStampsStore.removeStamp(batchId, beeStamp.accountId)
-          postageStampsStore.addStamp({
-            ...beeStamp,
-            signerKey: signerKeyToUse,
-          })
+          postageStampsStore.removeStamp(batchId, selectedAccountId)
+          postageStampsStore.addStamp(
+            {
+              ...beeStamp,
+              signerKey: signerKeyToUse,
+            },
+            selectedAccountId,
+          )
         }
       }
 
@@ -417,19 +422,21 @@ Check console logs for details:
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        postageStampsStore.addStamp({
-          accountId: selectedAccountId,
-          batchID: batchId,
-          signerKey: signerKeyToUse,
-          utilization: beeStamp.utilization,
-          usable: beeStamp.usable,
-          depth: beeStamp.depth,
-          amount: BigInt(beeStamp.amount),
-          bucketDepth: beeStamp.bucketDepth,
-          blockNumber: beeStamp.blockNumber,
-          immutableFlag: beeStamp.immutableFlag,
-          exists: beeStamp.exists,
-        })
+        postageStampsStore.addStamp(
+          {
+            batchID: batchId,
+            signerKey: signerKeyToUse,
+            utilization: beeStamp.utilization,
+            usable: beeStamp.usable,
+            depth: beeStamp.depth,
+            amount: BigInt(beeStamp.amount),
+            bucketDepth: beeStamp.bucketDepth,
+            blockNumber: beeStamp.blockNumber,
+            immutableFlag: beeStamp.immutableFlag,
+            exists: beeStamp.exists,
+          },
+          selectedAccountId,
+        )
       }
 
       identitiesStore.setDefaultStamp(selectedIdentityId, batchId)

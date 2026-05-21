@@ -70,9 +70,6 @@ function createMockStores() {
     getStamp: vi.fn((batchID: BatchId) =>
       batchID.toHex() === TEST_BATCH_ID_HEX ? stamp : undefined,
     ),
-    getStampsByAccount: vi.fn((accountId: string) =>
-      accountId === TEST_ETH_ADDRESS_HEX ? [stamp] : [],
-    ),
     getStamper: vi.fn().mockResolvedValue(mockStamper),
     updateStampUtilization: vi.fn(),
   }

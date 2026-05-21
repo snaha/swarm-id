@@ -215,7 +215,6 @@ export const ConnectedAppSchemaV1 = z.object({
  * Postage Stamp Schema V1
  */
 export const PostageStampSchemaV1 = z.object({
-  accountId: z.string().length(40), // CHANGED: was identityId
   batchID: StoredBatchId,
   signerKey: StoredPrivateKey,
   utilization: z.number(),

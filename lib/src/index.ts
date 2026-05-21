@@ -455,3 +455,9 @@ export {
   SWARMSCAN_STATS_URL,
   GNOSIS_BLOCK_TIME,
 } from "./utils/ttl"
+
+// Postage stamp <-> account/identity association
+export {
+  resolveStampForIdentity,
+  collectAccountStampBatchIds,
+} from "./utils/postage-stamp-association"

@@ -469,7 +469,6 @@ describe("invalid data rejection", () => {
       connectedApps: [],
       postageStamps: [
         {
-          accountId: TEST_ETH_ADDRESS_HEX,
           batchID: "short",
           signerKey: TEST_PRIVATE_KEY_HEX,
           utilization: 0,
@@ -503,7 +502,6 @@ describe("invalid data rejection", () => {
       connectedApps: [],
       postageStamps: [
         {
-          accountId: TEST_ETH_ADDRESS_HEX,
           batchID: TEST_BATCH_ID_HEX,
           signerKey: "short",
           utilization: 0,
@@ -606,7 +604,6 @@ describe("bee-js type conversions", () => {
       connectedApps: [],
       postageStamps: [
         {
-          accountId: TEST_ETH_ADDRESS_HEX,
           batchID: TEST_BATCH_ID_HEX,
           signerKey: TEST_PRIVATE_KEY_HEX,
           utilization: 0,
