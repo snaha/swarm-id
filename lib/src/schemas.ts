@@ -113,6 +113,7 @@ export const DeviceSchemaV1 = z.object({
   deviceId: z.string(),
   createdAt: z.number(),
   lastSignedInAt: z.number(),
+  name: z.string().optional(),
 })
 
 /**

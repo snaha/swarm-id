@@ -3,7 +3,12 @@
 
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import { createAccountsStorageManager, type Account, type Device } from '@snaha/swarm-id'
+import {
+  createAccountsStorageManager,
+  STORAGE_KEY_ACCOUNTS,
+  type Account,
+  type Device,
+} from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
@@ -26,6 +31,14 @@ function saveAccounts(data: Account[]): void {
 // ============================================================================
 
 let accounts = $state<Account[]>(loadAccounts())
+
+if (browser) {
+  window.addEventListener('storage', (e) => {
+    if (e.key === STORAGE_KEY_ACCOUNTS) {
+      accounts = loadAccounts()
+    }
+  })
+}
 
 export const accountsStore = {
   get accounts() {

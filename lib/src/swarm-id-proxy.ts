@@ -48,7 +48,9 @@ import {
   ParentToIframeMessageSchema,
   PopupToIframeMessageSchema,
   STORAGE_CHALLENGE_KEY,
+  leaseStateStorageKey,
 } from "./types"
+import type { LeaseState } from "./types"
 import type { PopupToIframeMessage } from "./types"
 import {
   Bee,
@@ -82,6 +84,7 @@ import {
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForIdentity } from "./utils/postage-stamp-association"
 import {
+  LEASE_TTL_MS,
   LEASE_REFRESH_MS,
   UtilizationAwareStamper,
 } from "./utils/batch-utilization"
@@ -174,6 +177,7 @@ export class SwarmIdProxy {
   private partitionLease: PartitionLease | undefined
   private partitionRefreshTimer: ReturnType<typeof setInterval> | undefined
   private isReadOnly: boolean = false
+  private leaseAccountId: string | undefined
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -524,11 +528,14 @@ export class SwarmIdProxy {
       return
     }
 
+    this.leaseAccountId = accountInfo.accountId
+
     try {
+      const deviceId = getOrCreateDeviceId()
       const lease = await PartitionLease.fromSwarmEncryptionKey({
         bee: this.bee,
         accountId: accountInfo.accountId,
-        deviceId: getOrCreateDeviceId(),
+        deviceId,
         batchId: new BatchId(this.postageBatchId),
         batchDepth: this.stamperDepth,
         swarmEncryptionKey: accountInfo.encryptionKey,
@@ -549,6 +556,13 @@ export class SwarmIdProxy {
           console.warn(
             "[Proxy] All partitions held; entering read-only mode until a peer releases.",
           )
+          this.writeLeaseState(accountInfo.accountId, {
+            deviceId,
+            partition: undefined,
+            leasedUntil: undefined,
+            acquiredAt: undefined,
+            isReadOnly: true,
+          })
         }
         return
       }
@@ -565,11 +579,32 @@ export class SwarmIdProxy {
       // triggers — see `swarm-ui/src/lib/utils/sync-hooks.ts:triggerSync`.
       this.persistActiveDevices(accountInfo.accountId, result.activeDevices)
 
+      // Publish lease state so the UI's Devices screen can display it.
+      const acquiredAt = Date.now()
+      const leasedUntil = acquiredAt + LEASE_TTL_MS
+      this.writeLeaseState(accountInfo.accountId, {
+        deviceId,
+        partition: result.partition,
+        leasedUntil,
+        acquiredAt,
+        isReadOnly: false,
+      })
+
       // Schedule periodic refresh so the lease doesn't expire mid-session.
       // Refresh runs at LEASE_REFRESH_MS = LEASE_TTL_MS / 4.
       this.partitionRefreshTimer = setInterval(() => {
+        const refreshedAt = Date.now()
         lease
           .refresh()
+          .then(() => {
+            this.writeLeaseState(accountInfo.accountId, {
+              deviceId,
+              partition: result.partition,
+              leasedUntil: refreshedAt + LEASE_TTL_MS,
+              acquiredAt,
+              isReadOnly: false,
+            })
+          })
           .catch((err) =>
             console.error("[Proxy] Partition lease refresh failed:", err),
           )
@@ -628,6 +663,19 @@ export class SwarmIdProxy {
     }
     this.partitionLease = undefined
     this.isReadOnly = false
+    if (this.leaseAccountId) {
+      this.writeLeaseState(this.leaseAccountId, null)
+      this.leaseAccountId = undefined
+    }
+  }
+
+  private writeLeaseState(accountId: string, state: LeaseState | null): void {
+    const key = leaseStateStorageKey(accountId)
+    if (state === null) {
+      localStorage.removeItem(key)
+    } else {
+      localStorage.setItem(key, JSON.stringify(state))
+    }
   }
 
   /**

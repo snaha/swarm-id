@@ -29,6 +29,7 @@
     deriveAccountDerivationKey,
     getOrCreateDeviceId,
     mergeDevices,
+    detectDeviceName,
     PARTITION_COUNT,
   } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
@@ -104,7 +105,7 @@
         createdAt: account.createdAt,
         type: 'agent',
         derivationKey,
-        devices: mergeDevices([], deviceId),
+        devices: mergeDevices([], deviceId, detectDeviceName()),
         // Multi-device partition lease: opt new accounts into K=2 sharing
         // from day one.
         activeDevices: [{ deviceId, partition: 0 }],

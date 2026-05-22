@@ -69,6 +69,18 @@ export {
 } from "./utils/batch-utilization"
 export type { UtilizationChunkKey } from "./utils/batch-utilization"
 
+// Storage key constants (for cross-frame localStorage listeners)
+export {
+  STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_IDENTITIES,
+  STORAGE_KEY_CONNECTED_APPS,
+  STORAGE_KEY_POSTAGE_STAMPS,
+  STORAGE_KEY_NETWORK_SETTINGS,
+  STORAGE_KEY_LEASE_PREFIX,
+  leaseStateStorageKey,
+} from "./types"
+export type { LeaseState } from "./types"
+
 // Partition-lease orchestrator and feeds
 export { PartitionLease } from "./sync/partition-lease"
 export type {
@@ -351,6 +363,7 @@ export {
   getOrCreateDeviceId,
   getDeviceId,
   mergeDevices,
+  detectDeviceName,
 } from "./utils/device-id"
 
 // Batch utilization types

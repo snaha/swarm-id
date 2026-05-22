@@ -51,6 +51,19 @@ export const STORAGE_KEY_CONNECTED_APPS = "swarm-id-connected-apps"
 export const STORAGE_KEY_POSTAGE_STAMPS = "swarm-id-postage-stamps"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
+export const STORAGE_KEY_LEASE_PREFIX = "swarm-id-lease-v1"
+
+export function leaseStateStorageKey(accountId: string): string {
+  return `${STORAGE_KEY_LEASE_PREFIX}:${accountId.toLowerCase()}`
+}
+
+export interface LeaseState {
+  deviceId: string
+  partition: number | undefined
+  leasedUntil: number | undefined
+  acquiredAt: number | undefined
+  isReadOnly: boolean
+}
 
 // ============================================================================
 // Upload/Download Options

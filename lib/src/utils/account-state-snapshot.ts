@@ -70,6 +70,8 @@ export function serializeAccountStateSnapshot(input: {
       createdAt: input.metadata.createdAt,
       lastModified: input.metadata.lastModified,
       devices: input.metadata.devices,
+      activeDevices: input.metadata.activeDevices,
+      partitionCount: input.metadata.partitionCount,
     },
     identities: input.identities.map(serializeIdentity),
     connectedApps: input.connectedApps.map(serializeConnectedApp),

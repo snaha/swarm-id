@@ -30,6 +30,7 @@ import {
   NetworkSettingsSchemaV1,
   type NetworkSettings,
 } from "../schemas"
+import { PARTITION_COUNT } from "./batch-utilization"
 
 // ============================================================================
 // Parsers (Zod transforms handle primitive → bee-js conversion)
@@ -46,7 +47,16 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
     return []
   }
 
-  return result.data
+  return result.data.map((account) => {
+    if (account.partitionCount === undefined && account.devices.length > 0) {
+      return {
+        ...account,
+        partitionCount: PARTITION_COUNT,
+        activeDevices: account.activeDevices ?? [],
+      }
+    }
+    return account
+  })
 }
 
 /**
@@ -107,6 +117,8 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     derivationKey: account.derivationKey,
     defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toString(),
     devices: account.devices,
+    activeDevices: account.activeDevices,
+    partitionCount: account.partitionCount,
   }
 
   if (account.type === "passkey") {
