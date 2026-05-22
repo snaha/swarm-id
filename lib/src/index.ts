@@ -242,6 +242,7 @@ export type {
   ActAddGranteesResponseMessage,
   ActRevokeGranteesResponseMessage,
   ActGetGranteesResponseMessage,
+  ConnectionInfoChangedMessage,
   SocUploadMessage,
   SocRawUploadMessage,
   SocDownloadMessage,
@@ -410,6 +411,9 @@ export { buildAuthUrl } from "./utils/url"
 
 // Browser detection utilities
 export { isWebKit } from "./utils/browser"
+
+// Promise utilities
+export { rejectAfter } from "./utils/promise"
 
 // Manifest builder utilities for /bzz/ feed compatibility
 export {

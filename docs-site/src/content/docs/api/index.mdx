@@ -22,8 +22,8 @@ const client = new SwarmIdClient({
     name: 'My App',
     description: 'A decentralized application',
   },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status changed:', authenticated)
+  onConnectionChange: (info) => {
+    console.log('Connection changed:', info.identity?.name, 'canUpload=', info.canUpload)
   },
 })
 
@@ -32,9 +32,10 @@ await client.initialize()
 // Option 1: Open authentication page manually
 await client.connect()
 
-// Option 2: Check authentication status and upload if authenticated
-const status = await client.checkAuthStatus()
-if (status.authenticated) {
+// Option 2: Read current connection state and upload if authenticated.
+// Check `canUpload` too — an authenticated user can still lack upload
+// capability (no postage stamp, no subsidised gateway).
+if (client.connectionInfo?.identity && client.connectionInfo.canUpload) {
   const result = await client.uploadData(new Uint8Array([1, 2, 3]))
   console.log('Uploaded with reference:', result.reference)
 }
@@ -48,21 +49,21 @@ Creates a new SwarmIdClient instance.
 
 **Parameters:**
 
-| Parameter                       | Type                               | Required | Description                                                                                                                      |
-| ------------------------------- | ---------------------------------- | -------- | -------------------------------------------------------------------------------------------------------------------------------- |
-| `options.iframeOrigin`          | `string`                           | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                         |
-| `options.iframePath`            | `string`                           | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                            |
-| `options.timeout`               | `number`                           | No       | Request timeout in milliseconds (defaults to `30000`)                                                                            |
-| `options.initializationTimeout` | `number`                           | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                     |
-| `options.onAuthChange`          | `(authenticated: boolean) => void` | No       | Callback function invoked when authentication status changes                                                                     |
-| `options.popupMode`             | `"popup" \| "window"`              | No       | How to display the authentication popup (defaults to `"window"`)                                                                 |
-| `options.metadata`              | `AppMetadata`                      | Yes      | Application metadata shown to users during authentication                                                                        |
-| `options.metadata.name`         | `string`                           | Yes      | Application name (1-100 characters)                                                                                              |
-| `options.metadata.description`  | `string`                           | No       | Application description (max 500 characters)                                                                                     |
-| `options.metadata.icon`         | `string`                           | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                             |
-| `options.buttonConfig`          | `ButtonConfig`                     | No       | Button configuration for the authentication UI                                                                                   |
-| `options.containerId`           | `string`                           | No       | ID of container element to place iframe in (optional)                                                                            |
-| `options.subsidisedGatewayUrl`  | `string`                           | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](/subsidised-gateway) for details. |
+| Parameter                       | Type                             | Required | Description                                                                                                                                                                                          |
+| ------------------------------- | -------------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `options.iframeOrigin`          | `string`                         | Yes      | The origin URL where the Swarm ID proxy iframe is hosted                                                                                                                                             |
+| `options.iframePath`            | `string`                         | No       | The path to the proxy iframe (defaults to `"/proxy"`)                                                                                                                                                |
+| `options.timeout`               | `number`                         | No       | Request timeout in milliseconds (defaults to `30000`)                                                                                                                                                |
+| `options.initializationTimeout` | `number`                         | No       | Initialization timeout in milliseconds (defaults to `30000`)                                                                                                                                         |
+| `options.onConnectionChange`    | `(info: ConnectionInfo) => void` | No       | Callback invoked when the dApp-visible connection state changes (identity, app key, postage stamp, account, auth). The current snapshot is also available synchronously via `client.connectionInfo`. |
+| `options.popupMode`             | `"popup" \| "window"`            | No       | How to display the authentication popup (defaults to `"window"`)                                                                                                                                     |
+| `options.metadata`              | `AppMetadata`                    | Yes      | Application metadata shown to users during authentication                                                                                                                                            |
+| `options.metadata.name`         | `string`                         | Yes      | Application name (1-100 characters)                                                                                                                                                                  |
+| `options.metadata.description`  | `string`                         | No       | Application description (max 500 characters)                                                                                                                                                         |
+| `options.metadata.icon`         | `string`                         | No       | Application icon as a data URL (SVG or PNG, max 4KB)                                                                                                                                                 |
+| `options.buttonConfig`          | `ButtonConfig`                   | No       | Button configuration for the authentication UI                                                                                                                                                       |
+| `options.containerId`           | `string`                         | No       | ID of container element to place iframe in (optional)                                                                                                                                                |
+| `options.subsidisedGatewayUrl`  | `string`                         | No       | URL of a subsidised gateway for uploads without user's postage stamp. See [Subsidised Gateway](/subsidised-gateway) for details.                                                                     |
 
 **Throws:** `Error` if the provided app metadata is invalid
 
@@ -77,8 +78,8 @@ const client = new SwarmIdClient({
     description: 'A decentralized application built on Swarm',
     icon: 'data:image/svg+xml;base64,...',
   },
-  onAuthChange: (authenticated) => {
-    updateUI(authenticated)
+  onConnectionChange: (info) => {
+    updateUI(info)
   },
 })
 ```
@@ -210,8 +211,8 @@ const client = new SwarmIdClient({
     color: 'white',
     borderRadius: '8px',
   },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status changed:', authenticated)
+  onConnectionChange: (info) => {
+    console.log('Connection changed:', info.identity?.name, 'canUpload=', info.canUpload)
   },
 })
 
@@ -265,7 +266,7 @@ await client.connect({ agent: true })
 2. Authentication page opens with the app metadata
 3. User authenticates with their Swarm ID
 4. Authentication state is shared with the iframe proxy
-5. `onAuthChange` callback is invoked with `true`
+5. `onConnectionChange` callback fires with the new connection snapshot
 
 ---
 
@@ -349,7 +350,7 @@ await client.connect({ agent: true })
 
 Disconnects the current session and clears authentication data.
 
-After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The `onAuthChange` callback will be invoked with `false`.
+After disconnection, the user will need to re-authenticate to perform uploads or access identity-related features. The `onConnectionChange` callback will fire with an un-authenticated snapshot (no `identity`, `canUpload: false`, `uploadMode: "unavailable"`). Note that `canUpload` is reported as `false` even when a subsidised gateway is configured, because uploads still require an authenticated app secret.
 
 **Returns:** `Promise<void>` - Resolves when disconnection is complete
 
@@ -368,13 +369,13 @@ console.log('User logged out')
 
 ---
 
-### `getConnectionInfo()`
+### `connectionInfo` (property)
 
-Retrieves connection information including upload capability and identity details.
+Synchronous accessor for the current connection state. Populated by the proxy as soon as it is ready and refreshed automatically whenever any of the derived fields change (identity rename, default-stamp change, account migration, postage stamp purchased, auth transitions). Subscribe to `onConnectionChange` to react to updates.
 
-Use this method to check if the user can upload data and to get information about the currently connected identity.
+**Type:** `ConnectionInfo`
 
-**Returns:** `Promise<ConnectionInfo>` - The connection info object
+**Throws:** `Error` if `initialize()` has not been called yet.
 
 | Property             | Type                                            | Description                                                                                                 |
 | -------------------- | ----------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
@@ -390,15 +391,10 @@ Use this method to check if the user can upload data and to get information abou
 | `appKey.address`     | `string`                                        | Ethereum address of the app key                                                                             |
 | `appKey.publicKey`   | `string`                                        | Public key of the app key                                                                                   |
 
-**Throws:**
-
-- `Error` if the client is not initialized
-- `Error` if the request times out
-
 **Example:**
 
 ```typescript
-const info = await client.getConnectionInfo()
+const info = client.connectionInfo
 if (info.canUpload) {
   if (info.uploadMode === 'subsidised') {
     console.log('Uploads will use the subsidised gateway')

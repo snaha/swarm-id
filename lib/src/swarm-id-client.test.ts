@@ -137,3 +137,111 @@ describe("SwarmIdClient connect()", () => {
     )
   })
 })
+
+describe("SwarmIdClient connectionInfo", () => {
+  let client: SwarmIdClient
+  let onConnectionChange: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://localhost" },
+      open: vi.fn(),
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn().mockReturnValue({
+        style: {},
+        onload: null,
+        onerror: null,
+        src: "",
+        contentWindow: { postMessage: vi.fn() },
+      }),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+
+    onConnectionChange = vi.fn()
+    client = new SwarmIdClient({
+      iframeOrigin: "https://swarm-id.example.com",
+      metadata: { name: "Test App", description: "A test application" },
+      onConnectionChange,
+    })
+  })
+
+  it("invokes onConnectionChange with the pushed snapshot and caches it", () => {
+    const snapshot = {
+      type: "connectionInfoChanged" as const,
+      canUpload: true,
+      storagePartitioned: undefined,
+      uploadMode: "user-stamp" as const,
+      identity: {
+        id: "0x1111111111111111111111111111111111111111",
+        name: "alice",
+        address: "0x1111111111111111111111111111111111111111",
+        publicKey: "0x02" + "ab".repeat(32),
+      },
+      appKey: {
+        address: "0x2222222222222222222222222222222222222222",
+        publicKey: "0x03" + "cd".repeat(32),
+      },
+    }
+
+    ;(client as never)["handleIframeMessage"](snapshot)
+
+    expect(onConnectionChange).toHaveBeenCalledTimes(1)
+    expect(onConnectionChange).toHaveBeenCalledWith({
+      canUpload: snapshot.canUpload,
+      storagePartitioned: snapshot.storagePartitioned,
+      uploadMode: snapshot.uploadMode,
+      identity: snapshot.identity,
+      appKey: snapshot.appKey,
+    })
+
+    // `connectionInfo` getter calls ensureReady — mark client as ready for the read
+    ;(client as never)["ready"] = true
+    expect(client.connectionInfo).toEqual({
+      canUpload: snapshot.canUpload,
+      storagePartitioned: snapshot.storagePartitioned,
+      uploadMode: snapshot.uploadMode,
+      identity: snapshot.identity,
+      appKey: snapshot.appKey,
+    })
+  })
+
+  it("replaces the cached snapshot on subsequent pushes", () => {
+    const first = {
+      type: "connectionInfoChanged" as const,
+      canUpload: false,
+      uploadMode: "unavailable" as const,
+      identity: undefined,
+      appKey: undefined,
+    }
+    const second = {
+      type: "connectionInfoChanged" as const,
+      canUpload: true,
+      uploadMode: "subsidised" as const,
+      identity: {
+        id: "0x3333333333333333333333333333333333333333",
+        name: "bob",
+        address: "0x3333333333333333333333333333333333333333",
+      },
+      appKey: undefined,
+    }
+
+    ;(client as never)["handleIframeMessage"](first)
+    ;(client as never)["handleIframeMessage"](second)
+    ;(client as never)["ready"] = true
+
+    expect(onConnectionChange).toHaveBeenCalledTimes(2)
+    expect(client.connectionInfo.identity?.name).toBe("bob")
+    expect(client.connectionInfo.canUpload).toBe(true)
+  })
+
+  it("throws from connectionInfo getter before initialize()", () => {
+    expect(() => client.connectionInfo).toThrow(
+      "SwarmIdClient not initialized. Call initialize() first.",
+    )
+  })
+})

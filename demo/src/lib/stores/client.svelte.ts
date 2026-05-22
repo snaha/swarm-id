@@ -1,7 +1,12 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { SwarmIdClient, formatTTL, DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
+import {
+  SwarmIdClient,
+  formatTTL,
+  DEFAULT_BEE_NODE_URL,
+  type ConnectionInfo,
+} from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
 
@@ -52,11 +57,17 @@ let currentIdentityName: string | undefined
 let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
 let currentSubsidisedGatewayUrl: string | undefined = DEFAULT_BEE_NODE_URL
 
-async function updatePostageStampInfo() {
+// Monotonic generation counter for connection-change handler runs. Used to
+// drop stale results from in-flight `getPostageBatch()` calls when the user
+// switches identity or disconnects while a fetch is pending.
+let connectionGeneration = 0
+
+async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
   try {
     const batch = await client.getPostageBatch()
+    if (generation !== connectionGeneration) return
     if (batch) {
       const batchIdStr = String(batch.batchID)
       stamp = {
@@ -76,6 +87,7 @@ async function updatePostageStampInfo() {
       logStore.log('No postage stamp configured')
     }
   } catch (error) {
+    if (generation !== connectionGeneration) return
     stamp = undefined
     logStore.log(
       `Failed to get postage stamp: ${error instanceof Error ? error.message : String(error)}`,
@@ -84,60 +96,53 @@ async function updatePostageStampInfo() {
   }
 }
 
-async function updateAuthStatus(isAuthenticated: boolean) {
+async function onConnectionChange(info: ConnectionInfo) {
+  // Bump the generation so any in-flight `getPostageBatch` from the previous
+  // snapshot (e.g. a different identity or pre-disconnect state) is dropped
+  // when it resolves instead of overwriting current state.
+  const generation = ++connectionGeneration
+  const isAuthenticated = info.identity !== undefined
   authenticated = isAuthenticated
+  canUpload = info.canUpload
+  storagePartitioned = info.storagePartitioned ?? false
+  uploadMode = info.uploadMode ?? 'unavailable'
 
-  if (isAuthenticated) {
-    try {
-      const connectionInfo = await client!.getConnectionInfo()
-      logStore.log(
-        `Connection info: canUpload=${connectionInfo.canUpload}, identity=${JSON.stringify(connectionInfo.identity)}`,
-      )
-      canUpload = connectionInfo.canUpload
-      storagePartitioned = connectionInfo.storagePartitioned ?? false
-      uploadMode = connectionInfo.uploadMode ?? 'unavailable'
-      if (connectionInfo.storagePartitioned) {
-        logStore.log(
-          'Read-only mode: browser storage partitioning limits this session to downloads only',
-          'warn',
-        )
-      } else if (!connectionInfo.canUpload) {
-        logStore.log('Upload disabled: no postage stamp available', 'warn')
-      }
+  logStore.log(
+    `Connection info: canUpload=${info.canUpload}, identity=${JSON.stringify(info.identity)}`,
+  )
 
-      if (connectionInfo.identity) {
-        const { id, name, address, publicKey } = connectionInfo.identity
-        if (currentIdentityId && currentIdentityId !== id) {
-          logStore.log(`Identity switched from "${currentIdentityName}" to "${name}"`)
-        }
-        currentIdentityId = id
-        currentIdentityName = name
-        identity = { id, name, address, publicKey }
-      }
+  if (info.storagePartitioned) {
+    logStore.log(
+      'Read-only mode: browser storage partitioning limits this session to downloads only',
+      'warn',
+    )
+  } else if (isAuthenticated && !info.canUpload) {
+    logStore.log('Upload disabled: no postage stamp available', 'warn')
+  }
 
-      appKey = connectionInfo.appKey
-    } catch (error) {
-      logStore.log(
-        `Failed to get connection info: ${error instanceof Error ? error.message : String(error)}`,
-        'error',
-      )
-      canUpload = false
+  if (info.identity) {
+    const { id, name, address, publicKey } = info.identity
+    if (currentIdentityId && currentIdentityId !== id) {
+      logStore.log(`Identity switched from "${currentIdentityName}" to "${name}"`)
     }
-
-    await updatePostageStampInfo()
+    currentIdentityId = id
+    currentIdentityName = name
+    identity = { id, name, address, publicKey }
   } else {
-    canUpload = false
-    storagePartitioned = false
-    uploadMode = 'unavailable'
-    stamp = undefined
-
     if (currentIdentityId) {
       logStore.log(`Disconnected from identity "${currentIdentityName}"`)
       currentIdentityId = undefined
       currentIdentityName = undefined
     }
     identity = undefined
-    appKey = undefined
+  }
+
+  appKey = info.appKey
+
+  if (isAuthenticated) {
+    await updatePostageStampInfo(generation)
+  } else {
+    stamp = undefined
   }
 }
 
@@ -201,10 +206,7 @@ export const clientStore = {
       iframePath: PROXY_PATH,
       timeout: CLIENT_TIMEOUT,
       subsidisedGatewayUrl: currentSubsidisedGatewayUrl,
-      onAuthChange: async (auth: boolean) => {
-        logStore.log(`Auth status changed: ${auth}`)
-        await updateAuthStatus(auth)
-      },
+      onConnectionChange,
       metadata: {
         name: 'Swarm ID Demo',
         description: 'Demo application showcasing Swarm ID authentication and Bee API operations',
@@ -243,7 +245,7 @@ export const clientStore = {
       const status = await client.checkAuthStatus()
       beeApiUrl = status.beeApiUrl
       logStore.log(`Auth status: ${status.authenticated ? 'authenticated' : 'not authenticated'}`)
-      await updateAuthStatus(status.authenticated)
+      // Connection state (identity/stamp/canUpload) flows in via onConnectionChange.
     } catch (error) {
       logStore.log(
         `Initialization failed: ${error instanceof Error ? error.message : String(error)}`,

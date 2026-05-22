@@ -40,7 +40,7 @@ The subsidised gateway URL should point to a Bee node that has a postage stamp c
 
 ## Upload Availability Truth Table
 
-Upload availability depends on several factors. The `uploadMode` field in `getConnectionInfo()` indicates which mode is active:
+Upload availability depends on several factors. The `uploadMode` field in `client.connectionInfo` indicates which mode is active:
 
 | Storage Partitioned | Has User Stamp | Custom Node | Subsidised Configured | Can Upload | Upload Mode   |
 | ------------------- | -------------- | ----------- | --------------------- | ---------- | ------------- |
@@ -76,10 +76,10 @@ The dApp passed a `subsidisedGatewayUrl` when creating the SwarmIdClient.
 
 ## Checking Upload Mode
 
-Use `getConnectionInfo()` to check the current upload mode:
+Read `client.connectionInfo` to check the current upload mode (synchronous, populated as soon as `initialize()` resolves):
 
 ```typescript
-const info = await client.getConnectionInfo()
+const info = client.connectionInfo
 if (info.canUpload) {
   if (info.uploadMode === 'subsidised') {
     console.log('Uploads will use the subsidised gateway')

@@ -85,6 +85,7 @@ import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
+import { rejectAfter } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -105,15 +106,16 @@ const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
  *     name: 'My App',
  *     description: 'A decentralized application'
  *   },
- *   onAuthChange: (authenticated) => {
- *     console.log('Auth status changed:', authenticated)
+ *   onConnectionChange: (info) => {
+ *     console.log('Connection changed:', info.identity?.name, info.canUpload)
  *   }
  * })
  *
  * await client.initialize()
  *
- * const status = await client.checkAuthStatus()
- * if (status.authenticated) {
+ * // Check canUpload — an authenticated user can still lack upload capability
+ * // when they have no postage stamp and no subsidised gateway is configured.
+ * if (client.connectionInfo.identity && client.connectionInfo.canUpload) {
  *   const result = await client.uploadData(new Uint8Array([1, 2, 3]))
  *   console.log('Uploaded with reference:', result.reference)
  * }
@@ -125,7 +127,10 @@ export class SwarmIdClient {
   private iframePath: string
   private timeout: number
   private initializationTimeout: number
-  private onAuthChange?: (authenticated: boolean) => void
+  private onConnectionChange?: (info: ConnectionInfo) => void
+  private lastConnectionInfo: ConnectionInfo | undefined
+  private firstConnectionInfoPromise: Promise<void> | undefined
+  private firstConnectionInfoResolve?: () => void
   private popupMode: "popup" | "window"
   private metadata: AppMetadata
   private buttonConfig?: ButtonConfig
@@ -157,7 +162,7 @@ export class SwarmIdClient {
    * @param options.iframeOrigin - The origin URL where the Swarm ID proxy iframe is hosted
    * @param options.iframePath - The path to the proxy iframe (defaults to "/proxy")
    * @param options.timeout - Request timeout in milliseconds (defaults to 30000)
-   * @param options.onAuthChange - Callback function invoked when authentication status changes
+   * @param options.onConnectionChange - Callback invoked when the dApp-visible ConnectionInfo changes (identity, stamp, account type, auth)
    * @param options.popupMode - How to display the authentication popup: "popup" or "window" (defaults to "window")
    * @param options.metadata - Application metadata shown to users during authentication
    * @param options.metadata.name - Application name (1-100 characters)
@@ -179,7 +184,7 @@ export class SwarmIdClient {
     this.timeout = options.timeout ?? DEFAULT_TIMEOUT_MS
     this.initializationTimeout =
       options.initializationTimeout ?? DEFAULT_INITIALIZATION_TIMEOUT_MS
-    this.onAuthChange = options.onAuthChange
+    this.onConnectionChange = options.onConnectionChange
     this.popupMode = options.popupMode || "window"
     this.metadata = options.metadata
     this.buttonConfig = options.buttonConfig
@@ -207,6 +212,11 @@ export class SwarmIdClient {
         )
       }, this.initializationTimeout)
     })
+
+    // Note: `firstConnectionInfoPromise` (and its timeout) is created in
+    // `initialize()`, not here — starting the timer at construction would
+    // make it expire on consumers that instantiate the client and call
+    // `initialize()` later (or never, in tests).
 
     // Create promise for proxyInitialized message
     this.proxyInitializedPromise = new Promise<void>((resolve, reject) => {
@@ -257,6 +267,34 @@ export class SwarmIdClient {
     if (this.iframe) {
       throw new Error("SwarmIdClient already initialized")
     }
+
+    // Set up the first-snapshot wait now (not in the constructor) so the
+    // timeout starts when initialization actually begins, not when the
+    // client object is created. The proxy emits `connectionInfoChanged`
+    // unconditionally right after `proxyReady`; we race that against the
+    // initializationTimeout so a buggy or version-mismatched proxy can't
+    // wedge initialization indefinitely.
+    //
+    // The `resolve` callback is stashed in an instance field
+    // (deferred-style) because it has to be called later, from
+    // `handleIframeMessage` when the `connectionInfoChanged` arrives — not
+    // from this executor. ES2024's `Promise.withResolvers()` would express
+    // the same shape more directly.
+    this.firstConnectionInfoPromise = Promise.race([
+      new Promise<void>((resolve) => {
+        this.firstConnectionInfoResolve = resolve
+      }),
+      rejectAfter(
+        this.initializationTimeout,
+        `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
+      ),
+    ])
+    // Attach a no-op handler so the rejection isn't surfaced as
+    // "unhandled" if the timeout fires before we reach the awaiting line
+    // below (e.g. because an earlier `await` in this method hung first).
+    // The original promise is still rejected; the `await` on line 359 will
+    // re-throw it normally.
+    this.firstConnectionInfoPromise.catch(() => {})
 
     // Create iframe for proxy
     this.iframe = document.createElement("iframe")
@@ -321,6 +359,10 @@ export class SwarmIdClient {
 
     // Wait for iframe to be ready
     await this.readyPromise
+
+    // Wait for the initial ConnectionInfo snapshot (sent right after proxyReady)
+    // so `client.connectionInfo` is populated by the time `initialize()` resolves.
+    await this.firstConnectionInfoPromise
   }
 
   /**
@@ -351,6 +393,17 @@ export class SwarmIdClient {
         console.warn(
           "[SwarmIdClient] Rejected message from unauthorized origin:",
           event.origin,
+        )
+        return
+      }
+
+      // Security: also verify the source is OUR iframe, not a sibling/parent
+      // frame served from the same origin. Without this check, push events
+      // like `connectionInfoChanged` / `authSuccess` could be spoofed by any
+      // co-origin window.
+      if (this.iframe && event.source !== this.iframe.contentWindow) {
+        console.warn(
+          "[SwarmIdClient] Rejected message from unexpected source window",
         )
         return
       }
@@ -388,18 +441,12 @@ export class SwarmIdClient {
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
-        if (this.onAuthChange) {
-          this.onAuthChange(message.authenticated)
-        }
         break
 
       case "authStatusResponse":
         // Always show iframe - it will display login or disconnect button
         if (this.iframe) {
           this.iframe.style.display = "block"
-        }
-        if (this.onAuthChange) {
-          this.onAuthChange(message.authenticated)
         }
         // Handle as response if there's a matching request
         if ("requestId" in message) {
@@ -417,10 +464,26 @@ export class SwarmIdClient {
         if (this.iframe) {
           this.iframe.style.display = "block"
         }
-        if (this.onAuthChange) {
-          this.onAuthChange(true)
+        break
+
+      case "connectionInfoChanged": {
+        const info: ConnectionInfo = {
+          canUpload: message.canUpload,
+          storagePartitioned: message.storagePartitioned,
+          uploadMode: message.uploadMode,
+          identity: message.identity,
+          appKey: message.appKey,
+        }
+        this.lastConnectionInfo = info
+        if (this.firstConnectionInfoResolve) {
+          this.firstConnectionInfoResolve()
+          this.firstConnectionInfoResolve = undefined
+        }
+        if (this.onConnectionChange) {
+          this.onConnectionChange(info)
         }
         break
+      }
 
       case "initError":
         // Initialization error from proxy (e.g., origin validation failed)
@@ -434,10 +497,6 @@ export class SwarmIdClient {
         break
 
       case "disconnectResponse":
-        // Handle disconnect response
-        if (this.onAuthChange) {
-          this.onAuthChange(false)
-        }
         // Handle as response if there's a matching request
         if ("requestId" in message) {
           const pending = this.pendingRequests.get(message.requestId)
@@ -745,8 +804,9 @@ export class SwarmIdClient {
    * Disconnects the current session and clears authentication data.
    *
    * After disconnection, the user will need to re-authenticate to perform
-   * uploads or access identity-related features. The {@link onAuthChange}
-   * callback will be invoked with `false`.
+   * uploads or access identity-related features. The
+   * {@link ClientOptions.onConnectionChange} callback will fire with an
+   * un-authenticated snapshot.
    *
    * @returns A promise that resolves when disconnection is complete
    * @throws {Error} If the client is not initialized
@@ -774,11 +834,6 @@ export class SwarmIdClient {
 
     if (!response.success) {
       throw new Error("Failed to disconnect")
-    }
-
-    // Notify via auth change callback
-    if (this.onAuthChange) {
-      this.onAuthChange(false)
     }
   }
 
@@ -856,62 +911,30 @@ export class SwarmIdClient {
   }
 
   /**
-   * Retrieves connection information including upload capability and identity details.
+   * Current dApp-visible {@link ConnectionInfo} snapshot — identity, app key,
+   * upload capability, and upload mode. Populated by the proxy as soon as it
+   * is ready and refreshed whenever any of those derived fields change.
+   * Subscribe to {@link ClientOptions.onConnectionChange} to react to updates.
    *
-   * Use this method to check if the user can upload data and to get
-   * information about the currently connected identity.
-   *
-   * @returns A promise resolving to the connection info object
-   * @returns return.canUpload - Whether the user can upload data (has valid postage stamp)
-   * @returns return.identity - The connected identity details (if authenticated)
-   * @returns return.identity.id - Unique identifier for the identity
-   * @returns return.identity.name - Display name of the identity
-   * @returns return.identity.address - Ethereum address associated with the identity
-   * @throws {Error} If the client is not initialized
-   * @throws {Error} If the request times out
+   * @throws {Error} If {@link initialize} has not been called yet
    *
    * @example
    * ```typescript
-   * const info = await client.getConnectionInfo()
+   * await client.initialize()
+   * const info = client.connectionInfo
    * if (info.canUpload) {
    *   console.log('Ready to upload as:', info.identity?.name)
-   * } else {
-   *   console.log('No postage stamp available')
    * }
    * ```
    */
-  async getConnectionInfo(): Promise<ConnectionInfo> {
+  get connectionInfo(): ConnectionInfo {
     this.ensureReady()
-    const requestId = this.generateRequestId()
-
-    const response = await this.sendRequest<{
-      type: "connectionInfoResponse"
-      requestId: string
-      canUpload: boolean
-      storagePartitioned?: boolean
-      uploadMode?: "user-stamp" | "subsidised" | "unavailable"
-      identity?: {
-        id: string
-        name: string
-        address: string
-        publicKey?: string
-      }
-      appKey?: {
-        address: string
-        publicKey: string
-      }
-    }>({
-      type: "getConnectionInfo",
-      requestId,
-    })
-
-    return {
-      canUpload: response.canUpload,
-      storagePartitioned: response.storagePartitioned,
-      uploadMode: response.uploadMode,
-      identity: response.identity,
-      appKey: response.appKey,
+    if (!this.lastConnectionInfo) {
+      // Unreachable: initialize() awaits firstConnectionInfoPromise, which is
+      // resolved by the proxy's eager emit after proxyReady.
+      throw new Error("SwarmIdClient connectionInfo not yet available.")
     }
+    return this.lastConnectionInfo
   }
 
   // ============================================================================
