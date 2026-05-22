@@ -4,13 +4,18 @@
 /**
  * Batch Utilization Tracking for Swarm Storage
  *
- * This module implements utilization tracking for mutable postage batches.
- * It manages two counter arrays:
- * - Utilization counters (local, uint8): Track slots 0-255 per bucket for utilization chunks
- * - Data counters (on-chain, uint32): Track slots 256+ per bucket for data chunks
+ * Tracks slot usage for mutable postage batches. Each of the 65,536 buckets
+ * has a uint32 in-memory counter (`dataCounters[bucket]`) representing the
+ * next free slot. The counter is initialised at `DATA_COUNTER_START` so the
+ * first slots of every bucket are reserved as headroom for utilisation
+ * chunks that may incidentally land there — utilisation and data chunks
+ * share the same slot space via the underlying stamper.
  *
- * The system uses pre-calculation to handle the circular dependency of storing
- * utilization data that tracks the storage of itself.
+ * Per-chunk encryption keys are derived deterministically from the account's
+ * `swarmEncryptionKey` plus the chunk index and a small nonce. The nonce is
+ * bumped only when an upload would land in the same bucket as a lower-index
+ * chunk in the same save, so the on-chain placement of utilisation chunks is
+ * tidy and dedup stays stable across re-saves.
  */
 
 import {
@@ -42,11 +47,18 @@ export const NUM_BUCKETS = 65536
 /** Bucket depth parameter (determines bucket count) */
 export const BUCKET_DEPTH = 16
 
-/** Number of slots reserved per bucket for utilization chunks (0-3) */
-export const UTILIZATION_SLOTS_PER_BUCKET = 4
+/**
+ * Per-bucket slot headroom carried by `DATA_COUNTER_START`. Sized so that
+ * the rare case of two utilisation chunks landing in the same bucket cannot
+ * push a stamp past the headroom; with ~32 chunks into 65,536 buckets even a
+ * 3-way collision is below 10⁻⁷ per save, so 2 is comfortably enough.
+ * Choosing an even value keeps remainders even under a future K=2
+ * multi-device partitioning so per-bucket slot allocation splits cleanly.
+ */
+export const UTILIZATION_SLOTS_PER_BUCKET = 2
 
 /** Starting slot index for data chunks */
-export const DATA_COUNTER_START = 4
+export const DATA_COUNTER_START = 2
 
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
@@ -127,6 +139,13 @@ export interface ChunkMetadata {
 
   /** Whether this chunk needs uploading */
   dirty: boolean
+
+  /**
+   * Encryption-key nonce that produced this chunk's `contentHash`. Used as
+   * the starting point for the next save's bucket-collision search so
+   * unchanged plaintexts reuse the same key (and skip re-upload).
+   */
+  nonce: number
 }
 
 /**
@@ -439,6 +458,177 @@ export function makeChunkIdentifier(
 }
 
 // ============================================================================
+// Per-chunk Encryption Key Derivation
+// ============================================================================
+
+/** Domain-separation tag for utilisation-chunk key derivation. */
+const UTIL_CHUNK_KEY_DOMAIN = "swarm-id-util-chunk-v1"
+
+/** Length of the SHA-256 HMAC output in bytes (also the chunk key length). */
+const KEY_LENGTH = 32
+
+/** Bytes to encode `chunkIndex` and `nonce` (each big-endian uint32). */
+const UINT32_BYTES = 4
+
+/**
+ * Resolved per-chunk-index encryption material.
+ *
+ * `nonce` is the smallest non-negative integer that placed the chunk in a
+ * bucket distinct from every chunk with a lower `chunkIndex` during the
+ * current save. `key` is the HMAC-derived 32-byte key used to produce the
+ * encrypted-CAC address (and therefore the chunk's bucket).
+ */
+export interface UtilizationChunkKey {
+  key: Uint8Array
+  nonce: number
+}
+
+/**
+ * Derive the per-chunk encryption key used for utilisation chunks.
+ *
+ * `chunkKey = HMAC-SHA256(swarmEncryptionKey, "swarm-id-util-chunk-v1" || batchId || chunkIndex || nonce)`
+ *
+ * Same inputs → same key, so dedup at the upload path stays stable across
+ * re-saves whenever neither the plaintext nor the chosen nonce changes.
+ */
+export async function deriveUtilizationChunkKey(
+  swarmEncryptionKey: Uint8Array,
+  batchId: BatchId,
+  chunkIndex: number,
+  nonce: number,
+): Promise<Uint8Array> {
+  if (swarmEncryptionKey.length !== KEY_LENGTH) {
+    throw new Error(
+      `Invalid swarmEncryptionKey length: ${swarmEncryptionKey.length} (expected ${KEY_LENGTH})`,
+    )
+  }
+
+  const domain = new TextEncoder().encode(UTIL_CHUNK_KEY_DOMAIN)
+  const batchIdBytes = batchId.toUint8Array()
+  const indexBytes = new Uint8Array(UINT32_BYTES)
+  new DataView(indexBytes.buffer).setUint32(0, chunkIndex, false)
+  const nonceBytes = new Uint8Array(UINT32_BYTES)
+  new DataView(nonceBytes.buffer).setUint32(0, nonce, false)
+  const message = Binary.concatBytes(
+    domain,
+    batchIdBytes,
+    indexBytes,
+    nonceBytes,
+  )
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    swarmEncryptionKey,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
+  return new Uint8Array(signature)
+}
+
+/**
+ * Choose per-chunk encryption keys so each utilisation chunk lands in a
+ * bucket distinct from every other chunk in the same save.
+ *
+ * Stability rule (matters for upload dedup): chunks are processed in
+ * ascending `chunkIndex` order, and the first chunk to claim a bucket
+ * keeps it. Each chunk starts its search from `priorNonces[i] ?? 0`, so
+ * unchanged plaintexts whose previously-chosen nonce still produces a
+ * distinct bucket reuse the same key (and therefore the same CAC address)
+ * across saves — dedup at `saveUtilizationState` then skips the upload.
+ *
+ * In practice almost every save finds zero collisions: with 32 chunks over
+ * 65,536 buckets the expected number of bumps per save is ≈ 0.008.
+ */
+export async function resolveUtilizationChunkKeys(
+  plaintexts: Uint8Array[],
+  options: {
+    swarmEncryptionKey: Uint8Array
+    batchId: BatchId
+    priorNonces?: Record<number, number>
+  },
+): Promise<{
+  keys: UtilizationChunkKey[]
+  buckets: number[]
+}> {
+  const { swarmEncryptionKey, batchId, priorNonces } = options
+  const keys: UtilizationChunkKey[] = new Array(plaintexts.length)
+  const buckets: number[] = new Array(plaintexts.length)
+  const claimedBuckets = new Set<number>()
+
+  for (let i = 0; i < plaintexts.length; i++) {
+    const resolved = await chooseUtilizationChunkKey({
+      swarmEncryptionKey,
+      batchId,
+      chunkIndex: i,
+      plaintext: plaintexts[i],
+      priorNonce: priorNonces?.[i] ?? 0,
+      claimedBuckets,
+    })
+    keys[i] = { key: resolved.key, nonce: resolved.nonce }
+    buckets[i] = resolved.bucket
+  }
+
+  return { keys, buckets }
+}
+
+/**
+ * Resolve the encryption key for a single chunk index against a set of
+ * already-claimed buckets. Mutates `claimedBuckets` to add the chosen one.
+ */
+async function chooseUtilizationChunkKey(args: {
+  swarmEncryptionKey: Uint8Array
+  batchId: BatchId
+  chunkIndex: number
+  plaintext: Uint8Array
+  priorNonce: number
+  claimedBuckets: Set<number>
+}): Promise<{
+  key: Uint8Array
+  nonce: number
+  bucket: number
+  address: Uint8Array
+}> {
+  const { swarmEncryptionKey, batchId, chunkIndex, plaintext, claimedBuckets } =
+    args
+  let nonce = args.priorNonce
+  while (true) {
+    const key = await deriveUtilizationChunkKey(
+      swarmEncryptionKey,
+      batchId,
+      chunkIndex,
+      nonce,
+    )
+    const encrypted = makeEncryptedContentAddressedChunk(plaintext, key)
+    const address = encrypted.address.toUint8Array()
+    const bucket = toBucket(address)
+    if (!claimedBuckets.has(bucket)) {
+      claimedBuckets.add(bucket)
+      return { key, nonce, bucket, address }
+    }
+    nonce++
+  }
+}
+
+/**
+ * Collect the set of buckets currently claimed by clean utilisation chunks
+ * (those whose `contentHash` already reflects the upload). Dirty chunks
+ * must steer clear of these buckets when picking a key.
+ */
+function claimedBucketsForCleanChunks(
+  state: BatchUtilizationState,
+): Set<number> {
+  const claimed = new Set<number>()
+  for (const meta of state.chunks) {
+    if (!meta.dirty && meta.contentHash) {
+      claimed.add(toBucket(Binary.hexToUint8Array(meta.contentHash)))
+    }
+  }
+  return claimed
+}
+
+// ============================================================================
 // Chunk Upload/Download for Swarm Storage
 // ============================================================================
 
@@ -467,9 +657,9 @@ export async function uploadUtilizationChunk(
   if (data.length < 1 || data.length > 4096) {
     throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
   }
-  if (encryptionKey.length !== 32) {
+  if (encryptionKey.length !== KEY_LENGTH) {
     throw new Error(
-      `Invalid encryption key length: ${encryptionKey.length} (expected 32)`,
+      `Invalid encryption key length: ${encryptionKey.length} (expected ${KEY_LENGTH})`,
     )
   }
 
@@ -692,11 +882,12 @@ export function reconstructFromChunks(
 /**
  * Initialize a new batch utilization state
  *
- * Reserves slots 0-3 per bucket for utilization metadata chunks,
- * and starts data chunks at slot 4 (DATA_COUNTER_START).
+ * Seeds `dataCounters[bucket]` at `DATA_COUNTER_START` for every bucket so
+ * the first stamping operations naturally skip the headroom slots.
  *
- * With 65,536 buckets and ~64 utilization chunks, the probability
- * of any bucket getting 4+ utilization chunks is negligible (< 0.0000001%).
+ * With 65,536 buckets and ~32–64 utilization chunks per save, the
+ * probability of any bucket getting 3+ utilisation chunks in one save is
+ * < 10⁻⁷, so a headroom of 2 leaves ample margin.
  */
 export function initializeBatchUtilization(
   batchId: BatchId,
@@ -704,8 +895,9 @@ export function initializeBatchUtilization(
 ): BatchUtilizationState {
   const dataCounters = new Uint32Array(NUM_BUCKETS)
 
-  // Initialize data counters to start at slot 4
-  // Slots 0-3 are reserved for utilization metadata chunks
+  // Initialize data counters to start at slot DATA_COUNTER_START.
+  // The first `DATA_COUNTER_START` slots of every bucket act as headroom
+  // for utilisation chunks that incidentally land there.
   dataCounters.fill(DATA_COUNTER_START)
 
   const { numUtilizationChunks } = getChunkLayout(batchDepth)
@@ -718,6 +910,7 @@ export function initializeBatchUtilization(
       contentHash: "", // Will be set on first upload
       lastUpload: 0, // Never uploaded
       dirty: true, // Mark as dirty for initial upload
+      nonce: 0,
     })
   }
 
@@ -941,6 +1134,7 @@ export async function loadUtilizationState(
           contentHash: cached.contentHash,
           lastUpload: cached.lastAccess, // Use lastAccess as lastUpload
           dirty: false, // Not dirty if loaded from cache
+          nonce: cached.nonce ?? 0,
         })
       }
 
@@ -986,6 +1180,7 @@ export async function loadUtilizationState(
         contentHash: cached.contentHash,
         lastUpload: cached.lastAccess,
         dirty: false,
+        nonce: cached.nonce ?? 0,
       })
       continue
     }
@@ -999,6 +1194,7 @@ export async function loadUtilizationState(
       contentHash: "", // Will be set on first upload
       lastUpload: 0,
       dirty: true, // Mark as dirty for upload
+      nonce: 0,
     })
   }
 
@@ -1042,6 +1238,11 @@ export async function saveUtilizationState(
     return
   }
 
+  // Treat the buckets currently occupied by clean utilisation chunks as
+  // already claimed — dirty chunks must avoid them so utilisation chunks
+  // land in distinct buckets within a save.
+  const claimedBuckets = claimedBucketsForCleanChunks(state)
+
   for (const chunkIndex of dirtyChunkIndices) {
     const chunkMetadata = state.chunks[chunkIndex]
 
@@ -1052,20 +1253,35 @@ export async function saveUtilizationState(
       state.batchDepth,
     )
 
+    // Search for a derived key whose bucket isn't already claimed. Start
+    // from the previously-chosen nonce so unchanged plaintexts reuse their
+    // key (and skip upload via dedup below).
+    const resolved = await chooseUtilizationChunkKey({
+      swarmEncryptionKey: encryptionKey,
+      batchId: state.batchId,
+      chunkIndex,
+      plaintext: chunkData,
+      priorNonce: chunkMetadata.nonce,
+      claimedBuckets,
+    })
+
     try {
-      // Upload to Swarm as encrypted CAC
+      // Upload to Swarm as encrypted CAC with the per-chunk derived key
       const cacReference = await uploadUtilizationChunk(
         bee,
         stamper,
         chunkIndex,
         chunkData,
-        encryptionKey,
+        resolved.key,
       )
 
       const cacReferenceHex = Binary.uint8ArrayToHex(cacReference)
 
       // Skip if reference unchanged (deduplication)
-      if (chunkMetadata.contentHash === cacReferenceHex) {
+      if (
+        chunkMetadata.contentHash === cacReferenceHex &&
+        chunkMetadata.nonce === resolved.nonce
+      ) {
         tracker.markClean(chunkIndex)
         continue
       }
@@ -1074,6 +1290,7 @@ export async function saveUtilizationState(
       chunkMetadata.contentHash = cacReferenceHex
       chunkMetadata.lastUpload = Date.now()
       chunkMetadata.dirty = false
+      chunkMetadata.nonce = resolved.nonce
 
       // Update IndexedDB cache
       await cache.putChunk({
@@ -1081,6 +1298,7 @@ export async function saveUtilizationState(
         chunkIndex,
         data: chunkData,
         contentHash: cacReferenceHex,
+        nonce: resolved.nonce,
         lastAccess: Date.now(),
       })
 
@@ -1357,34 +1575,42 @@ export class UtilizationAwareStamper implements Stamper {
 
     // Save dirty chunks to cache. We do not upload here, but we still record
     // the contentHash that an upload *would* assign — i.e. the BMT address of
-    // the encrypted chunk for this plaintext + encryptionKey. That is what the
-    // upload-path dedup at saveUtilizationState compares against, so storing
-    // anything else (e.g. keccak of plaintext) would force a redundant
-    // re-upload of every flushed chunk on the next sync.
+    // the encrypted chunk for this plaintext + the per-chunk derived key. That
+    // is what the upload-path dedup at saveUtilizationState compares against,
+    // so storing anything else (or using a different key) would force a
+    // redundant re-upload of every flushed chunk on the next sync.
     try {
-      for (const chunkIndex of dirtyChunkIndexes) {
+      const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
+      const sortedDirtyChunkIndexes = Array.from(dirtyChunkIndexes).sort(
+        (a, b) => a - b,
+      )
+      for (const chunkIndex of sortedDirtyChunkIndexes) {
         const chunkData = extractChunk(
           this.utilizationState.dataCounters,
           chunkIndex,
           this.depth,
         )
 
-        const encryptedChunk = makeEncryptedContentAddressedChunk(
-          chunkData,
-          this.encryptionKey,
-        )
-        const contentHash = Binary.uint8ArrayToHex(
-          encryptedChunk.address.toUint8Array(),
-        )
+        const resolved = await chooseUtilizationChunkKey({
+          swarmEncryptionKey: this.encryptionKey,
+          batchId: this.batchId,
+          chunkIndex,
+          plaintext: chunkData,
+          priorNonce: this.utilizationState.chunks[chunkIndex].nonce,
+          claimedBuckets,
+        })
+        const contentHash = Binary.uint8ArrayToHex(resolved.address)
 
         await this.cache.putChunk({
           batchId: this.batchId.toHex(),
           chunkIndex,
           data: chunkData,
           contentHash,
+          nonce: resolved.nonce,
           lastAccess: Date.now(),
         })
         this.utilizationState.chunks[chunkIndex].contentHash = contentHash
+        this.utilizationState.chunks[chunkIndex].nonce = resolved.nonce
         this.utilizationState.chunks[chunkIndex].dirty = false
       }
 

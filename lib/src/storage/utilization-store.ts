@@ -32,6 +32,17 @@ export interface ChunkCacheEntry {
   /** SOC reference if uploaded to Swarm */
   socReference?: string
 
+  /**
+   * Per-chunk-index encryption nonce that was used to derive this chunk's
+   * encryption key. Lets a re-save start its bucket-collision search from
+   * the previously-chosen value, so unchanged plaintexts keep the same
+   * derived key (and therefore the same `contentHash`) across saves.
+   *
+   * Optional for backward compatibility — entries written before this field
+   * existed are treated as `nonce = 0`.
+   */
+  nonce?: number
+
   /** Last access timestamp (for eviction) */
   lastAccess: number
 }

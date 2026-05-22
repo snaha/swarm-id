@@ -53,6 +53,8 @@ export {
   prepareBucketState,
   UtilizationAwareStamper,
   getChunkLayout,
+  deriveUtilizationChunkKey,
+  resolveUtilizationChunkKeys,
   NUM_BUCKETS,
   BUCKET_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
@@ -61,6 +63,7 @@ export {
   DEFAULT_BATCH_DEPTH,
   UINT16_COUNTER_MAX_DEPTH,
 } from "./utils/batch-utilization"
+export type { UtilizationChunkKey } from "./utils/batch-utilization"
 
 // Utilization storage (IndexedDB cache)
 export {
