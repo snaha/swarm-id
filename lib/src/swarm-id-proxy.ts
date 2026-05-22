@@ -81,8 +81,14 @@ import {
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForIdentity } from "./utils/postage-stamp-association"
-import { UtilizationAwareStamper } from "./utils/batch-utilization"
+import {
+  LEASE_REFRESH_MS,
+  UtilizationAwareStamper,
+} from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
+import { PartitionLease } from "./sync/partition-lease"
+import type { ActiveDevice } from "./schemas"
+import { getOrCreateDeviceId } from "./utils/device-id"
 import {
   createConnectedAppsStorageManager,
   createIdentitiesStorageManager,
@@ -160,6 +166,14 @@ export class SwarmIdProxy {
   private parentWindow: WindowProxy | undefined
   private utilizationChannel: BroadcastChannel
   private subsidisedGatewayUrl: string | undefined
+  /**
+   * Active partition-lease for the current account+batch combination.
+   * Undefined when no lease is held (single-device legacy mode, or the
+   * device is in read-only mode because all partitions are taken).
+   */
+  private partitionLease: PartitionLease | undefined
+  private partitionRefreshTimer: ReturnType<typeof setInterval> | undefined
+  private isReadOnly: boolean = false
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -343,6 +357,10 @@ export class SwarmIdProxy {
       this.unsubscribeConnectedApps = undefined
     }
 
+    // Release the partition lease (best-effort) so peers see this device
+    // vacate its partition promptly.
+    this.tearDownPartitionLease()
+
     // Clean up utilization channel
     this.utilizationChannel.close()
   }
@@ -472,10 +490,144 @@ export class SwarmIdProxy {
         accountInfo.owner,
         accountInfo.encryptionKey,
       )
+
+      // Multi-device partition lease. Only runs for accounts that opted
+      // in (partitionCount > 1 in their snapshot); legacy single-device
+      // accounts fall through and the stamper stays in its existing mode.
+      await this.acquirePartitionLease(accountInfo)
     } catch (error) {
       console.error("[Proxy] Failed to initialize stamper:", error)
       this.stamper = undefined
+      this.tearDownPartitionLease()
     }
+  }
+
+  /**
+   * Dispatch the partition lease's Acquire (Cases A/B/D) and bind the
+   * resulting partition to the stamper. Sets up a periodic refresh so the
+   * lease doesn't expire mid-session.
+   *
+   * On `accountInfo.partitionCount <= 1` this is a no-op — the stamper
+   * stays in single-device mode and no claim/state feed traffic happens.
+   */
+  private async acquirePartitionLease(accountInfo: {
+    owner: EthAddress
+    encryptionKey: Uint8Array
+    accountId: string
+    activeDevices: ActiveDevice[]
+    partitionCount: number
+  }): Promise<void> {
+    if (!this.stamper || !this.postageBatchId) return
+    if (accountInfo.partitionCount <= 1) {
+      // Legacy single-device account → nothing to do.
+      this.isReadOnly = false
+      return
+    }
+
+    try {
+      const lease = await PartitionLease.fromSwarmEncryptionKey({
+        bee: this.bee,
+        accountId: accountInfo.accountId,
+        deviceId: getOrCreateDeviceId(),
+        batchId: new BatchId(this.postageBatchId),
+        batchDepth: this.stamperDepth,
+        swarmEncryptionKey: accountInfo.encryptionKey,
+        stamper: this.stamper,
+      })
+
+      const result = await lease.acquire({
+        activeDevices: accountInfo.activeDevices,
+        partitionCount: accountInfo.partitionCount,
+      })
+
+      this.partitionLease = lease
+      this.isReadOnly = result.isReadOnly
+
+      if (result.partition === undefined) {
+        // Legacy fall-through or read-only.
+        if (result.isReadOnly) {
+          console.warn(
+            "[Proxy] All partitions held; entering read-only mode until a peer releases.",
+          )
+        }
+        return
+      }
+
+      this.stamper.bindPartition({
+        partition: result.partition,
+        partitionCount: result.partitionCount,
+        localCounter: result.localCounter,
+      })
+
+      // If acquire updated the activeDevices list (Case B or D added/replaced
+      // an entry), persist locally so subsequent flows see the new state.
+      // The Swarm-side snapshot sync happens via the existing UI sync
+      // triggers — see `swarm-ui/src/lib/utils/sync-hooks.ts:triggerSync`.
+      this.persistActiveDevices(accountInfo.accountId, result.activeDevices)
+
+      // Schedule periodic refresh so the lease doesn't expire mid-session.
+      // Refresh runs at LEASE_REFRESH_MS = LEASE_TTL_MS / 4.
+      this.partitionRefreshTimer = setInterval(() => {
+        lease
+          .refresh()
+          .catch((err) =>
+            console.error("[Proxy] Partition lease refresh failed:", err),
+          )
+      }, LEASE_REFRESH_MS)
+    } catch (error) {
+      console.error("[Proxy] Failed to acquire partition lease:", error)
+      this.partitionLease = undefined
+      this.isReadOnly = false
+    }
+  }
+
+  /**
+   * Persist the lease's view of `activeDevices` to the local account so
+   * the next snapshot sync picks it up. The Swarm-side sync is triggered
+   * later via the existing UI flows.
+   */
+  private persistActiveDevices(
+    accountId: string,
+    activeDevices: ActiveDevice[],
+  ): void {
+    try {
+      const accountsManager = createAccountsStorageManager()
+      const accounts = accountsManager.load()
+      const targetId = accountId.toLowerCase()
+      const updated = accounts.map((a) =>
+        a.id.toHex().toLowerCase() === targetId ? { ...a, activeDevices } : a,
+      )
+      accountsManager.save(updated)
+    } catch (error) {
+      console.error("[Proxy] Failed to persist updated activeDevices:", error)
+    }
+  }
+
+  /**
+   * Tear down lease-related background work. Called from the same code
+   * paths that reset the stamper (sign-out, disconnect, etc.).
+   */
+  private tearDownPartitionLease(): void {
+    if (this.partitionRefreshTimer !== undefined) {
+      clearInterval(this.partitionRefreshTimer)
+      this.partitionRefreshTimer = undefined
+    }
+    // Best-effort: publish the partition state + write a release claim.
+    // Fire-and-forget so we don't block teardown if Bee is unreachable.
+    const lease = this.partitionLease
+    const stamper = this.stamper
+    if (lease && stamper) {
+      const localCounter = stamper.getLocalCounter()
+      if (localCounter !== undefined) {
+        void lease
+          .release(localCounter)
+          .catch((err) =>
+            console.warn("[Proxy] Partition lease release failed:", err),
+          )
+      }
+    }
+    this.partitionLease = undefined
+    this.isReadOnly = false
   }
 
   /**
@@ -982,7 +1134,14 @@ export class SwarmIdProxy {
    * @returns Account info with owner address and encryption key, or undefined if not found
    */
   private async lookupAccountForApp(): Promise<
-    { owner: EthAddress; encryptionKey: Uint8Array } | undefined
+    | {
+        owner: EthAddress
+        encryptionKey: Uint8Array
+        accountId: string
+        activeDevices: ActiveDevice[]
+        partitionCount: number
+      }
+    | undefined
   > {
     if (!this.parentOrigin) {
       return undefined
@@ -1024,6 +1183,9 @@ export class SwarmIdProxy {
       return {
         owner: account.id,
         encryptionKey: hexToUint8Array(swarmEncryptionKey),
+        accountId: account.id.toHex(),
+        activeDevices: account.activeDevices ?? [],
+        partitionCount: account.partitionCount ?? 1,
       }
     } catch (error) {
       console.error("[Proxy] Error looking up account:", error)
@@ -1120,6 +1282,7 @@ export class SwarmIdProxy {
     this.appSecret = undefined
     this.postageBatchId = undefined
     this.signerKey = undefined
+    this.tearDownPartitionLease()
     this.stamper = undefined
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
@@ -1157,6 +1320,15 @@ export class SwarmIdProxy {
     if (this.storagePartitioned) {
       throw new Error(
         "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+      )
+    }
+    if (this.isReadOnly) {
+      // Multi-device partition lease: all partitions are held by other
+      // devices with live leases. Phase 2 will queue uploads and show a UI
+      // hint; for now we surface a structured error.
+      throw new Error(
+        "Uploads are unavailable: the postage batch is fully leased by other devices. " +
+          "Sign out of another device or wait for its lease to expire.",
       )
     }
   }

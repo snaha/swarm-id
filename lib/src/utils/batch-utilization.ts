@@ -60,6 +60,38 @@ export const UTILIZATION_SLOTS_PER_BUCKET = 2
 /** Starting slot index for data chunks */
 export const DATA_COUNTER_START = 2
 
+/**
+ * Number of partitions the per-bucket slot space is divided into for
+ * multi-device sharing of a single postage batch. With K=2, device 0
+ * uses slots `{DATA_COUNTER_START + 0, DATA_COUNTER_START + 2, …}` and
+ * device 1 uses `{DATA_COUNTER_START + 1, DATA_COUNTER_START + 3, …}`.
+ */
+export const PARTITION_COUNT = 2
+
+/**
+ * Partition-lease lifetime. A device holds its partition for this long
+ * before the lease must be refreshed; if it crashes without refreshing,
+ * peers can reclaim the partition via Case D.
+ */
+export const LEASE_TTL_MS = 60 * 60 * 1000 // 1 hour
+
+/**
+ * How often the holder bumps `leasedUntil` on its own claim feed. One
+ * quarter of the TTL gives three "safety net" refresh attempts before a
+ * peer would consider the lease expired.
+ */
+export const LEASE_REFRESH_MS = LEASE_TTL_MS / 4 // 15 minutes
+
+/**
+ * Counter-skew divisor for `RESUME_COUNTER_SKEW = ceil(slotsPerBucket /
+ * PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR)`. Applied when seeding
+ * `localCounter` from a peer's partition-state snapshot — skips a small
+ * slot range that the previous holder may have used between its last
+ * published snapshot and a crash. Cheap defence; loses a sliver of
+ * capacity per handover/recovery.
+ */
+export const RESUME_COUNTER_SKEW_DIVISOR = 4
+
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
 
@@ -1426,6 +1458,31 @@ export class UtilizationAwareStamper implements Stamper {
   private dirty: boolean = false
   private dirtyBuckets: Set<number> = new Set()
 
+  /**
+   * Partition this device holds within the shared postage batch. `undefined`
+   * means the legacy single-device path: slot picking is delegated to the
+   * inner bee-js stamper without any per-call coercion, which is the
+   * behaviour for every account created before the partition-lease shipped.
+   */
+  private partition: number | undefined = undefined
+
+  /**
+   * Number of partitions the slot space is divided into. `1` is the
+   * legacy/no-partitioning value and goes hand-in-hand with `partition`
+   * being `undefined`.
+   */
+  private partitionCountValue: number = 1
+
+  /**
+   * Per-bucket "how many chunks have I stamped here" — the `j` in the
+   * doc's slot formula `slot = DATA_COUNTER_START + p + K·j`. Each
+   * `stamp()` reads this to compute the next slot for its partition,
+   * then increments it. Separate from `dataCounters` (which is the
+   * batch-wide total, including peers' contributions seeded from the
+   * partition-state feed).
+   */
+  private partitionLocalCounter: Uint32Array | undefined = undefined
+
   readonly batchId: BatchId
   readonly depth: number
 
@@ -1438,6 +1495,46 @@ export class UtilizationAwareStamper implements Stamper {
   }
   get maxSlot() {
     return this.stamper.maxSlot
+  }
+
+  /** Current partition (undefined in single-device legacy mode). */
+  get currentPartition(): number | undefined {
+    return this.partition
+  }
+
+  /** Total partition count (1 in legacy mode). */
+  get partitionCount(): number {
+    return this.partitionCountValue
+  }
+
+  /**
+   * Per-bucket local stamping counter, exposed so the lease orchestrator
+   * can publish it to the partition-state feed on release. Returns
+   * undefined in legacy mode.
+   */
+  getLocalCounter(): Uint32Array | undefined {
+    return this.partitionLocalCounter
+  }
+
+  /**
+   * Bind this stamper to a leased partition. Called once by the lease
+   * orchestrator after `acquire()` succeeds. `localCounter` is the
+   * starting per-bucket count for THIS device — fresh zeros for Case A,
+   * seeded-from-state-feed-with-skew for Cases B/D.
+   */
+  bindPartition(opts: {
+    partition: number
+    partitionCount: number
+    localCounter: Uint32Array
+  }): void {
+    if (opts.localCounter.length !== NUM_BUCKETS) {
+      throw new Error(
+        `localCounter must have ${NUM_BUCKETS} entries, got ${opts.localCounter.length}`,
+      )
+    }
+    this.partition = opts.partition
+    this.partitionCountValue = opts.partitionCount
+    this.partitionLocalCounter = opts.localCounter
   }
 
   private constructor(
@@ -1526,6 +1623,23 @@ export class UtilizationAwareStamper implements Stamper {
    * @returns Envelope with batch ID and signature
    */
   stamp(chunk: CafeChunk): EnvelopeWithBatchId {
+    // When holding a partition lease, coerce the bee-js stamper to use this
+    // device's next partition slot instead of the next "any" slot. The bee-js
+    // `Stamper.buckets` is a public mutable Uint32Array (bee-js/src/stamper/stamper.ts:8,20,46),
+    // held by reference — overwriting before each stamp is sufficient.
+    if (
+      this.partition !== undefined &&
+      this.partitionLocalCounter !== undefined
+    ) {
+      const address = chunk.hash()
+      const bucket = (address[0] << 8) | address[1]
+      const slot =
+        DATA_COUNTER_START +
+        this.partition +
+        this.partitionCountValue * this.partitionLocalCounter[bucket]
+      this.stamper.buckets[bucket] = slot
+    }
+
     const envelope = this.stamper.stamp(chunk)
 
     // Extract bucket from envelope index
@@ -1536,6 +1650,13 @@ export class UtilizationAwareStamper implements Stamper {
       envelope.index.byteLength,
     )
     const bucket = view.getUint32(0, false) // false = big-endian
+
+    // Update partition-local counter so the next stamp into this bucket lands
+    // on the partition's next slot. (Legacy single-device path leaves this
+    // counter alone — slot picking falls through to the bee-js stamper.)
+    if (this.partitionLocalCounter !== undefined) {
+      this.partitionLocalCounter[bucket]++
+    }
 
     // Update utilization state (increment counter for this bucket)
     this.utilizationState.dataCounters[bucket]++

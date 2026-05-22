@@ -79,6 +79,11 @@
             ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
             : undefined,
           devices: [],
+          // Carry forward multi-device partition-lease state from the snapshot
+          // so the proxy's PartitionLease.acquire can find this device's
+          // partition (or auto-acquire a free one).
+          activeDevices: result.snapshot.metadata.activeDevices,
+          partitionCount: result.snapshot.metadata.partitionCount,
         },
         identities: result.snapshot.identities,
         connectedApps: result.snapshot.connectedApps,

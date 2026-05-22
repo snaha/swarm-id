@@ -62,8 +62,31 @@ export {
   CHUNK_SIZE,
   DEFAULT_BATCH_DEPTH,
   UINT16_COUNTER_MAX_DEPTH,
+  PARTITION_COUNT,
+  LEASE_TTL_MS,
+  LEASE_REFRESH_MS,
+  RESUME_COUNTER_SKEW_DIVISOR,
 } from "./utils/batch-utilization"
 export type { UtilizationChunkKey } from "./utils/batch-utilization"
+
+// Partition-lease orchestrator and feeds
+export { PartitionLease } from "./sync/partition-lease"
+export type {
+  AcquireResult,
+  PartitionLeaseSnapshotInputs,
+} from "./sync/partition-lease"
+export {
+  makeDeviceClaimTopic,
+  readDeviceClaim,
+  writeDeviceClaim,
+  NO_CLAIM_PARTITION,
+} from "./sync/partition-claim"
+export {
+  makePartitionStateTopic,
+  readPartitionState,
+  writePartitionState,
+  computeResumeCounterSkew,
+} from "./sync/partition-state"
 
 // Utilization storage (IndexedDB cache)
 export {

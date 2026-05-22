@@ -36,7 +36,12 @@
   import { WarningAlt } from 'carbon-icons-svelte'
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
-  import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
+  import {
+    deriveAccountDerivationKey,
+    getOrCreateDeviceId,
+    mergeDevices,
+    PARTITION_COUNT,
+  } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -108,6 +113,7 @@
       const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
 
       // Store account with encrypted masterKey and encrypted secret seed
+      const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
         id: masterAddress,
         createdAt: Date.now(),
@@ -118,7 +124,11 @@
         encryptionSalt: encryptionSalt,
         encryptedSecretSeed: encryptedSecretSeed,
         derivationKey,
-        devices: mergeDevices([], getOrCreateDeviceId()),
+        devices: mergeDevices([], deviceId),
+        // Multi-device partition lease: opt new accounts into K=2 sharing
+        // from day one.
+        activeDevices: [{ deviceId, partition: 0 }],
+        partitionCount: PARTITION_COUNT,
       })
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')

@@ -298,6 +298,8 @@ export function createSyncAccount(
         createdAt: account.createdAt,
         lastModified: Date.now(),
         devices: account.devices,
+        activeDevices: account.activeDevices ?? [],
+        partitionCount: account.partitionCount ?? 1,
       },
       identities,
       connectedApps: apps,

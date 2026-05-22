@@ -12,8 +12,10 @@ import {
   CHUNK_SIZE,
   DATA_COUNTER_START,
   NUM_BUCKETS,
+  PARTITION_COUNT,
   UINT16_COUNTER_MAX_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
+  UtilizationAwareStamper,
   calculateUtilizationUpdate,
   deriveUtilizationChunkKey,
   deserializeUint16Array,
@@ -30,6 +32,9 @@ import {
   serializeUint32Array,
   toBucket,
 } from "./batch-utilization"
+import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
+import type { Chunk as CafeChunk } from "cafe-utility"
+import type { UtilizationStoreDB } from "../storage/utilization-store"
 
 const TEST_BATCH_ID = new BatchId("00".repeat(32))
 
@@ -448,5 +453,219 @@ describe("resolveUtilizationChunkKeys", () => {
       ).address.toUint8Array()
       expect(toBucket(encryptedAddress)).toBe(buckets[i])
     }
+  })
+})
+
+/**
+ * The partition-aware stamper is the load-bearing piece of the multi-device
+ * partition-lease feature: when two devices stamp into the same shared
+ * postage batch, their per-bucket slot picks MUST be drawn from disjoint
+ * residue classes mod K so that no two chunks ever share a `(bucket, slot)`
+ * pair. These tests pin that property.
+ */
+describe("UtilizationAwareStamper partition awareness", () => {
+  // A throwaway 32-byte private key — only used for envelope signing, not
+  // for anything we verify cryptographically.
+  const TEST_SIGNER_KEY = new PrivateKey(
+    new Uint8Array(32).map((_, i) => (i + 1) & 0xff),
+  ).toHex()
+  const TEST_OWNER = new EthAddress("00".repeat(20))
+  const TEST_ENC_KEY = new Uint8Array(32).map((_, i) => (i * 5 + 2) & 0xff)
+  // Depth 24 → maxSlot per bucket = 256, comfortably above the 50 stamps
+  // per device the tests below push into a single bucket.
+  const TEST_DEPTH = 24
+
+  /**
+   * Mock the parts of `UtilizationStoreDB` that `UtilizationAwareStamper.create`
+   * touches at construction time. Returning an empty array of cached chunks
+   * forces the stamper to start from a fresh `dataCounters` (filled with
+   * `DATA_COUNTER_START`), which is what we want for a clean two-device
+   * scenario.
+   */
+  function makeEmptyCache(): UtilizationStoreDB {
+    return {
+      getAllChunks: async () => [],
+      putChunk: async () => undefined,
+    } as unknown as UtilizationStoreDB
+  }
+
+  /**
+   * Build a CafeChunk whose first two bytes pin it to a known bucket. The
+   * stamper only reads `hash()` to derive the bucket; the other CafeChunk
+   * fields are stubbed because we never inspect the signed payload.
+   *
+   * We pin the bucket so we can deterministically alternate two devices
+   * stamping into the SAME bucket — the case that would explode under
+   * the legacy single-counter approach.
+   */
+  function makeChunkInBucket(bucket: number, indexSeed: number): CafeChunk {
+    // Synthesise an "address" whose first two bytes pin the bucket. We
+    // skip the real BMT computation because the stamper only reads the
+    // first two bytes to derive the bucket and we want deterministic
+    // control over WHICH bucket each chunk hits.
+    const address = new Uint8Array(32)
+    address[0] = (bucket >> 8) & 0xff
+    address[1] = bucket & 0xff
+    for (let i = 2; i < 32; i++) {
+      address[i] = ((indexSeed + 1) * (i + 1)) & 0xff
+    }
+    return {
+      hash: () => address,
+      build: () => new Uint8Array(CHUNK_SIZE),
+      span: 0n,
+      writer: { write: () => undefined },
+    } as unknown as CafeChunk
+  }
+
+  function decodeIndex(index: Uint8Array): { bucket: number; slot: number } {
+    const view = new DataView(index.buffer, index.byteOffset, index.byteLength)
+    return {
+      bucket: view.getUint32(0, false),
+      slot: view.getUint32(4, false),
+    }
+  }
+
+  it("two partitions stamping the same bucket produce disjoint slots", async () => {
+    const device0 = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    const device1 = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+
+    device0.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    device1.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    // 20 × 2 = 40 stamps; ECDSA signing dominates wall time in this test
+    // (the bee-js Stamper signs every envelope), so we keep the count low
+    // enough for the default vitest 5 s timeout.
+    const STAMPS_PER_DEVICE = 20
+    const BUCKET = 0x1234
+    const seen = new Set<string>()
+
+    for (let i = 0; i < STAMPS_PER_DEVICE; i++) {
+      const chunk0 = makeChunkInBucket(BUCKET, i * 2)
+      const chunk1 = makeChunkInBucket(BUCKET, i * 2 + 1)
+      const env0 = decodeIndex(device0.stamp(chunk0).index)
+      const env1 = decodeIndex(device1.stamp(chunk1).index)
+
+      // Both stamps landed in the targeted bucket.
+      expect(env0.bucket).toBe(BUCKET)
+      expect(env1.bucket).toBe(BUCKET)
+
+      // Device 0 uses even slot offsets, device 1 odd — both offset by
+      // DATA_COUNTER_START.
+      const expectedSlot0 = DATA_COUNTER_START + 0 + PARTITION_COUNT * i
+      const expectedSlot1 = DATA_COUNTER_START + 1 + PARTITION_COUNT * i
+      expect(env0.slot).toBe(expectedSlot0)
+      expect(env1.slot).toBe(expectedSlot1)
+
+      const key0 = `${env0.bucket}:${env0.slot}`
+      const key1 = `${env1.bucket}:${env1.slot}`
+      expect(seen.has(key0)).toBe(false)
+      expect(seen.has(key1)).toBe(false)
+      seen.add(key0)
+      seen.add(key1)
+    }
+
+    // 2 devices * 50 stamps = 100 distinct (bucket, slot) pairs.
+    expect(seen.size).toBe(STAMPS_PER_DEVICE * 2)
+  })
+
+  it("legacy mode (no partition bound) preserves the old slot-picking", async () => {
+    // Without `bindPartition`, the stamper should delegate to the inner
+    // bee-js stamper without any coercion. Two un-partitioned stampers
+    // stamping the same bucket will collide on slot — sanity check that
+    // we haven't accidentally enabled partitioning by default.
+    const a = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    const b = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+
+    const BUCKET = 0x4321
+    const envA = decodeIndex(a.stamp(makeChunkInBucket(BUCKET, 0)).index)
+    const envB = decodeIndex(b.stamp(makeChunkInBucket(BUCKET, 1)).index)
+    expect(envA.bucket).toBe(BUCKET)
+    expect(envB.bucket).toBe(BUCKET)
+    // Without partitioning, both devices start from the same DATA_COUNTER_START
+    // and pick the same slot. This is the bug partition-lease fixes.
+    expect(envA.slot).toBe(DATA_COUNTER_START)
+    expect(envB.slot).toBe(DATA_COUNTER_START)
+  })
+
+  it("rejects a localCounter of the wrong length on bindPartition", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    expect(() =>
+      stamper.bindPartition({
+        partition: 0,
+        partitionCount: PARTITION_COUNT,
+        localCounter: new Uint32Array(NUM_BUCKETS - 1),
+      }),
+    ).toThrow(/localCounter must have/)
+  })
+
+  it("seeds the local counter from the caller (Case B resume scenario)", async () => {
+    // Simulates Case B: device 1 acquires partition 1 after device 0 has
+    // already stamped in some bucket. Device 1's local counter starts at
+    // a non-zero value because of RESUME_COUNTER_SKEW.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    const BUCKET = 0xa5a5
+    const SKEW = 3
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[BUCKET] = SKEW
+
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter,
+    })
+
+    const env = decodeIndex(stamper.stamp(makeChunkInBucket(BUCKET, 0)).index)
+    expect(env.bucket).toBe(BUCKET)
+    expect(env.slot).toBe(DATA_COUNTER_START + 1 + PARTITION_COUNT * SKEW)
   })
 })
