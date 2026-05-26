@@ -89,6 +89,10 @@
 
       logStore.log(`Upload successful! Reference: ${uploadResult.reference}`)
 
+      // Surface any partition the proxy just claimed during the lease
+      // bootstrap so the stamp panel transitions from "Inactive" → "N".
+      void clientStore.refreshConnectionInfo()
+
       const encryptionLabel = enableEncryption ? 'Encrypted' : 'Not Encrypted'
 
       result = {

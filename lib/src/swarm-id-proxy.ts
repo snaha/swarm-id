@@ -1843,6 +1843,7 @@ export class SwarmIdProxy {
       uploadMode,
       identity,
       appKey,
+      partition: this.partitionLease?.currentPartition,
     })
   }
 

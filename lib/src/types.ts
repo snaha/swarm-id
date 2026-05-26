@@ -601,6 +601,12 @@ export const ConnectionInfoSchema = z.object({
   storagePartitioned: z.boolean().optional(),
   /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
   uploadMode: UploadModeSchema.optional(),
+  /**
+   * Partition number this device currently holds in the postage batch's
+   * partition-lease. `undefined` when no lease is held (sign-in only,
+   * pre-first-upload) or for legacy single-device accounts.
+   */
+  partition: z.number().int().min(0).optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1265,6 +1271,7 @@ export const ConnectionInfoResponseMessageSchema = z.object({
       publicKey: CompressedPublicKeySchema,
     })
     .optional(),
+  partition: z.number().int().min(0).optional(),
 })
 
 export const ConnectResponseMessageSchema = z.object({

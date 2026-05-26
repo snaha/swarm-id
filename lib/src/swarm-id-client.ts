@@ -900,6 +900,7 @@ export class SwarmIdClient {
         address: string
         publicKey: string
       }
+      partition?: number
     }>({
       type: "getConnectionInfo",
       requestId,
@@ -911,6 +912,7 @@ export class SwarmIdClient {
       uploadMode: response.uploadMode,
       identity: response.identity,
       appKey: response.appKey,
+      partition: response.partition,
     }
   }
 

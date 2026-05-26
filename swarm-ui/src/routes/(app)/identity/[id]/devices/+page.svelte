@@ -17,9 +17,11 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { getOrCreateDeviceId, leaseStateStorageKey, type LeaseState } from '@snaha/swarm-id'
+  import { refreshAccountFromSwarm } from '$lib/utils/refresh-account-from-swarm'
   import routes from '$lib/routes'
   import Laptop from 'carbon-icons-svelte/lib/Laptop.svelte'
   import CheckmarkFilled from 'carbon-icons-svelte/lib/CheckmarkFilled.svelte'
+  import Renew from 'carbon-icons-svelte/lib/Renew.svelte'
 
   const identityId = $derived(page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -45,6 +47,87 @@
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   })
+
+  // Refresh state — pull the snapshot from Swarm so peers added on other
+  // browsers show up here.
+  let refreshing = $state(false)
+  let refreshedAt = $state<number | undefined>(undefined)
+  let refreshError = $state<string | undefined>(undefined)
+
+  // Skip a refresh if the previous one finished within this many ms.
+  // Coalesces the visibilitychange trigger fired alongside a fresh mount.
+  const REFRESH_THROTTLE_MS = 5_000
+  const AUTO_REFRESH_INTERVAL_MS = 15_000
+
+  async function doRefresh(opts: { force?: boolean } = {}) {
+    if (!account || refreshing) return
+    if (
+      !opts.force &&
+      refreshedAt !== undefined &&
+      Date.now() - refreshedAt < REFRESH_THROTTLE_MS
+    ) {
+      return
+    }
+    refreshing = true
+    refreshError = undefined
+    try {
+      const result = await refreshAccountFromSwarm(account.id.toHex())
+      if (result.ok) {
+        refreshedAt = result.refreshedAt
+      } else {
+        refreshError = result.error
+      }
+    } finally {
+      refreshing = false
+    }
+  }
+
+  // Refresh once on every mount (always — no per-accountId dedupe).
+  $effect(() => {
+    if (!browser || !account) return
+    void doRefresh({ force: true })
+  })
+
+  // Poll while the page is mounted so a peer's activity surfaces here
+  // even when nothing else triggers a refresh.
+  $effect(() => {
+    if (!browser) return
+    const timer = setInterval(() => {
+      if (document.visibilityState === 'visible') {
+        void doRefresh()
+      }
+    }, AUTO_REFRESH_INTERVAL_MS)
+    return () => clearInterval(timer)
+  })
+
+  // Refresh whenever the tab returns to the foreground.
+  $effect(() => {
+    if (!browser) return
+    const onVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        void doRefresh()
+      }
+    }
+    document.addEventListener('visibilitychange', onVisibility)
+    return () => document.removeEventListener('visibilitychange', onVisibility)
+  })
+
+  let _tick = $state(0)
+  $effect(() => {
+    if (!browser) return
+    // Re-render the relative timestamp every 30 s.
+    const timer = setInterval(() => (_tick = _tick + 1), 30_000)
+    return () => clearInterval(timer)
+  })
+
+  function formatRelative(ms: number): string {
+    void _tick // depend on tick so the formatted string stays fresh
+    const ago = Date.now() - ms
+    if (ago < 5_000) return 'just now'
+    if (ago < 60_000) return `${Math.floor(ago / 1_000)}s ago`
+    if (ago < 3_600_000) return `${Math.floor(ago / 60_000)}m ago`
+    return `${Math.floor(ago / 3_600_000)}h ago`
+  }
 
   const deviceRows = $derived(
     (account?.devices ?? []).map((d) => {
@@ -100,10 +183,36 @@
     </Horizontal>
   {:else}
     <Vertical --vertical-gap="var(--half-padding)">
-      <Typography>Devices</Typography>
+      <Horizontal
+        --horizontal-gap="var(--half-padding)"
+        --horizontal-align-items="center"
+        --horizontal-justify-content="space-between"
+      >
+        <Typography>Devices</Typography>
+        <Button
+          variant="ghost"
+          dimension="compact"
+          onclick={() => doRefresh({ force: true })}
+          disabled={refreshing}
+        >
+          <Horizontal --horizontal-gap="4px" --horizontal-align-items="center">
+            <Renew size={14} />
+            {refreshing ? 'Refreshing…' : 'Refresh'}
+          </Horizontal>
+        </Button>
+      </Horizontal>
       <Typography variant="small">
         Devices registered to this account. At most {account?.partitionCount ?? 1} can upload simultaneously.
       </Typography>
+      {#if refreshError}
+        <Typography variant="small" --typography-color="var(--colors-danger, #da1e28)">
+          Refresh failed: {refreshError}
+        </Typography>
+      {:else if refreshedAt}
+        <Typography variant="small">
+          Last refreshed {formatRelative(refreshedAt)}
+        </Typography>
+      {/if}
     </Vertical>
 
     {#if deviceRows.length === 0}

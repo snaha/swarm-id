@@ -37,12 +37,15 @@ import type {
   ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
 } from "./store-interfaces"
-import { BasicEpochUpdater } from "../proxy/feeds/epochs"
+import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
 import { uploadData, type UploadTarget } from "../proxy/upload"
-import { serializeAccountState } from "./serialization"
+import { downloadDataWithChunkAPI } from "../proxy/download-data"
+import { serializeAccountState, deserializeAccountState } from "./serialization"
 import type { SyncResult } from "./types"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type { PostageStamp } from "../schemas"
+import { mergeSnapshotWithRemote } from "./merge-snapshot"
+import { getOrCreateDeviceId } from "../utils/device-id"
 
 // Timeout for utilization upload in milliseconds
 const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
@@ -60,6 +63,31 @@ const VERIFY_PROBE_TIMEOUT_MS = 5000
 
 // Topic prefix for sync feeds
 export const ACCOUNT_SYNC_TOPIC_PREFIX = "swarm-id-backup-v1:account"
+
+/**
+ * Read the latest on-Swarm snapshot for an account's sync feed, returning
+ * `undefined` when the feed is empty or the chunks aren't retrievable.
+ *
+ * Best-effort: the caller treats `undefined` as "no remote, use local only".
+ * Errors propagate so the caller's catch can log them.
+ */
+async function tryFetchLatestSnapshot(opts: {
+  bee: Bee
+  topic: Topic
+  owner: EthAddress
+}): Promise<AccountStateSnapshot | undefined> {
+  const { bee, topic, owner } = opts
+  // Feed SOCs are uploaded unencrypted (no encryptionKey passed to
+  // updater.update below); the finder must not use one either.
+  const finder = new AsyncEpochFinder(bee, topic, owner)
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  const refBytes = await finder.findAt(now)
+  if (!refBytes) return undefined
+
+  const reference = new Reference(refBytes)
+  const data = await downloadDataWithChunkAPI(bee, reference.toHex())
+  return deserializeAccountState(data)
+}
 
 /**
  * Options for creating a sync account function
@@ -338,6 +366,23 @@ export function createSyncAccount(
 
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
 
+    // Safety gate: inactive devices must not write to Swarm. A device is
+    // "active" iff it holds a partition lease (entry in activeDevices).
+    // Without that, any stamp it places risks colliding with an active
+    // peer's slot. The proxy's partition-lease bootstrap publishes the
+    // self entry on the first upload — that's when sync becomes legal.
+    const selfDeviceId = getOrCreateDeviceId()
+    const partitionCount = state.metadata.partitionCount ?? 1
+    const selfActiveEntry = state.metadata.activeDevices.find(
+      (a) => a.deviceId === selfDeviceId,
+    )
+    if (partitionCount > 1 && !selfActiveEntry) {
+      console.warn(
+        `[SyncCoordinator] Refusing to sync ${accountId}: device ${selfDeviceId} is not active (no partition lease). The next upload via the proxy will claim a partition, after which sync is allowed.`,
+      )
+      return undefined
+    }
+
     console.log(
       `[SyncCoordinator ${timestamp()}] Starting sync for ${accountId} bee.url=${bee.url}`,
     )
@@ -347,9 +392,38 @@ export function createSyncAccount(
       const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
       const accountKey = new PrivateKey(backupKeyHex)
       const owner = accountKey.publicKey().address()
+      const topic = Topic.fromString(
+        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
+      )
 
-      // 2. Serialize account state
-      const jsonData = serializeAccountState(state)
+      // 1a. Fetch the latest on-Swarm snapshot (best effort) and merge
+      // it with our local state. This prevents the local-write-stomps-peer
+      // race: a device writing here doesn't lose other devices' additions
+      // that were published since our last refresh.
+      let mergedState = state
+      try {
+        const latestRemote = await tryFetchLatestSnapshot({
+          bee,
+          topic,
+          owner,
+        })
+        if (latestRemote) {
+          mergedState = mergeSnapshotWithRemote(state, latestRemote, {
+            selfDeviceId: getOrCreateDeviceId(),
+          })
+          console.log(
+            `[SyncCoordinator ${timestamp()}] Merged remote snapshot (remote devices=${latestRemote.metadata.devices.length}, merged devices=${mergedState.metadata.devices.length})`,
+          )
+        }
+      } catch (err) {
+        console.warn(
+          `[SyncCoordinator ${timestamp()}] Pre-write remote-snapshot fetch failed; proceeding with local state only:`,
+          err,
+        )
+      }
+
+      // 2. Serialize merged state
+      const jsonData = serializeAccountState(mergedState)
 
       // 3. Get stamper from store
       const stamper = await postageStampsStore.getStamper(
@@ -359,6 +433,22 @@ export function createSyncAccount(
           encryptionKey: hexToUint8Array(encryptionKey),
         },
       )
+      if (
+        stamper &&
+        selfActiveEntry !== undefined &&
+        partitionCount > 1 &&
+        stamper.bindPartition &&
+        stamper.buildLeaseLocalCounter
+      ) {
+        // Bind the stamper to this device's partition so chunk-stamping
+        // picks slots from our partition's slice instead of the "any"
+        // pool — prevents collisions with peers sharing the batch.
+        stamper.bindPartition({
+          partition: selfActiveEntry.partition,
+          partitionCount,
+          localCounter: stamper.buildLeaseLocalCounter(),
+        })
+      }
       if (!stamper) {
         throw new Error(
           `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`,
@@ -396,9 +486,7 @@ export function createSyncAccount(
       }
 
       // 6. Update epoch feed (after utilization completes)
-      const topic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
-      )
+      // `topic` already declared above with the same construction.
       const updater = new BasicEpochUpdater(topic, accountKey)
       const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
 

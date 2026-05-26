@@ -63,6 +63,9 @@
         footnote: `${uploadResult.reference.length} hex chars (${uploadResult.reference.length / 2} bytes)`,
       }
       onUploadResult?.(uploadResult.reference)
+      // Surface any partition that was acquired during this upload's
+      // lease bootstrap (transitions stamp panel from "Inactive" → "N").
+      void clientStore.refreshConnectionInfo()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       logStore.log(`Upload failed: ${msg}`, 'error')

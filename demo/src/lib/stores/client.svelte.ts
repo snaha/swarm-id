@@ -43,6 +43,7 @@ let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailabl
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
+let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
 let beeApiUrl = $state<string | undefined>(undefined)
@@ -96,6 +97,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
       canUpload = connectionInfo.canUpload
       storagePartitioned = connectionInfo.storagePartitioned ?? false
       uploadMode = connectionInfo.uploadMode ?? 'unavailable'
+      partition = connectionInfo.partition
       if (connectionInfo.storagePartitioned) {
         logStore.log(
           'Read-only mode: browser storage partitioning limits this session to downloads only',
@@ -130,6 +132,7 @@ async function updateAuthStatus(isAuthenticated: boolean) {
     storagePartitioned = false
     uploadMode = 'unavailable'
     stamp = undefined
+    partition = undefined
 
     if (currentIdentityId) {
       logStore.log(`Disconnected from identity "${currentIdentityName}"`)
@@ -165,6 +168,9 @@ export const clientStore = {
   },
   get stamp() {
     return stamp
+  },
+  get partition() {
+    return partition
   },
   get deferred() {
     return deferred
@@ -254,6 +260,28 @@ export const clientStore = {
     }
   },
 
+  /**
+   * Re-fetch the proxy's `connectionInfo` and update the reactive fields
+   * (`canUpload`, `partition`, `uploadMode`, …). Call this after an upload
+   * succeeds so the UI reflects the partition the proxy just acquired
+   * during its first-upload lease bootstrap.
+   */
+  async refreshConnectionInfo() {
+    if (!client || !authenticated) return
+    try {
+      const info = await client.getConnectionInfo()
+      canUpload = info.canUpload
+      storagePartitioned = info.storagePartitioned ?? false
+      uploadMode = info.uploadMode ?? 'unavailable'
+      partition = info.partition
+    } catch (error) {
+      logStore.log(
+        `Failed to refresh connection info: ${error instanceof Error ? error.message : String(error)}`,
+        'warn',
+      )
+    }
+  },
+
   async connect(options?: { agent?: boolean; useSubsidisedGateway?: boolean }) {
     const useSubsidised = options?.useSubsidisedGateway ?? true
     const subsidisedUrl = useSubsidised ? DEFAULT_BEE_NODE_URL : undefined
@@ -288,6 +316,7 @@ export const clientStore = {
     identity = undefined
     appKey = undefined
     stamp = undefined
+    partition = undefined
     socWriterInstance = undefined
   },
 }

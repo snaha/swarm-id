@@ -329,6 +329,7 @@ export type {
 // Entity types from schemas
 export type {
   Device,
+  ActiveDevice,
   Account,
   PasskeyAccount,
   EthereumAccount,
