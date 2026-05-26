@@ -17,6 +17,7 @@ import {
   UTILIZATION_SLOTS_PER_BUCKET,
   UtilizationAwareStamper,
   calculateUtilizationUpdate,
+  computeResumeCounterSkew,
   deriveUtilizationChunkKey,
   deserializeUint16Array,
   deserializeUint32Array,
@@ -24,6 +25,7 @@ import {
   getChunkIndexForBucket,
   getChunkLayout,
   initializeBatchUtilization,
+  leaseChunkIndex,
   makeBatchUtilizationTopic,
   makeChunkIdentifier,
   mergeChunk,
@@ -34,9 +36,27 @@ import {
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import type { Chunk as CafeChunk } from "cafe-utility"
-import type { UtilizationStoreDB } from "../storage/utilization-store"
+import type {
+  ChunkCacheEntry,
+  UtilizationStoreDB,
+} from "../storage/utilization-store"
 
 const TEST_BATCH_ID = new BatchId("00".repeat(32))
+
+function makeChunkInBucket(bucket: number, indexSeed: number): CafeChunk {
+  const address = new Uint8Array(32)
+  address[0] = (bucket >> 8) & 0xff
+  address[1] = bucket & 0xff
+  for (let i = 2; i < 32; i++) {
+    address[i] = ((indexSeed + 1) * (i + 1)) & 0xff
+  }
+  return {
+    hash: () => address,
+    build: () => new Uint8Array(CHUNK_SIZE),
+    span: 0n,
+    writer: { write: () => undefined },
+  } as unknown as CafeChunk
+}
 
 describe("getChunkLayout", () => {
   it("uses uint16 codec for depth <= UINT16_COUNTER_MAX_DEPTH", () => {
@@ -489,34 +509,6 @@ describe("UtilizationAwareStamper partition awareness", () => {
     } as unknown as UtilizationStoreDB
   }
 
-  /**
-   * Build a CafeChunk whose first two bytes pin it to a known bucket. The
-   * stamper only reads `hash()` to derive the bucket; the other CafeChunk
-   * fields are stubbed because we never inspect the signed payload.
-   *
-   * We pin the bucket so we can deterministically alternate two devices
-   * stamping into the SAME bucket — the case that would explode under
-   * the legacy single-counter approach.
-   */
-  function makeChunkInBucket(bucket: number, indexSeed: number): CafeChunk {
-    // Synthesise an "address" whose first two bytes pin the bucket. We
-    // skip the real BMT computation because the stamper only reads the
-    // first two bytes to derive the bucket and we want deterministic
-    // control over WHICH bucket each chunk hits.
-    const address = new Uint8Array(32)
-    address[0] = (bucket >> 8) & 0xff
-    address[1] = bucket & 0xff
-    for (let i = 2; i < 32; i++) {
-      address[i] = ((indexSeed + 1) * (i + 1)) & 0xff
-    }
-    return {
-      hash: () => address,
-      build: () => new Uint8Array(CHUNK_SIZE),
-      span: 0n,
-      writer: { write: () => undefined },
-    } as unknown as CafeChunk
-  }
-
   function decodeIndex(index: Uint8Array): { bucket: number; slot: number } {
     const view = new DataView(index.buffer, index.byteOffset, index.byteLength)
     return {
@@ -667,5 +659,225 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const env = decodeIndex(stamper.stamp(makeChunkInBucket(BUCKET, 0)).index)
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(DATA_COUNTER_START + 1 + PARTITION_COUNT * SKEW)
+  })
+})
+
+describe("leaseChunkIndex", () => {
+  it("returns numUtilizationChunks + partition for depth 24", () => {
+    const { numUtilizationChunks } = getChunkLayout(24)
+    expect(numUtilizationChunks).toBe(32)
+    expect(leaseChunkIndex(24, 0)).toBe(32)
+    expect(leaseChunkIndex(24, 1)).toBe(33)
+  })
+
+  it("returns numUtilizationChunks + partition for depth 32", () => {
+    const { numUtilizationChunks } = getChunkLayout(32)
+    expect(numUtilizationChunks).toBe(64)
+    expect(leaseChunkIndex(32, 0)).toBe(64)
+    expect(leaseChunkIndex(32, 1)).toBe(65)
+  })
+})
+
+describe("computeResumeCounterSkew", () => {
+  it("returns ceil(slotsPerBucket / PARTITION_COUNT / DIVISOR) for depth 24", () => {
+    // slotsPerBucket = 2^(24-16) = 256; 256 / 2 / 4 = 32
+    expect(computeResumeCounterSkew(24)).toBe(32)
+  })
+
+  it("increases with depth", () => {
+    expect(computeResumeCounterSkew(20)).toBeLessThan(
+      computeResumeCounterSkew(24),
+    )
+  })
+})
+
+describe("UtilizationAwareStamper lease metadata", () => {
+  const TEST_SIGNER_KEY_LM = new PrivateKey(
+    new Uint8Array(32).map((_, i) => (i + 7) & 0xff),
+  ).toHex()
+  const TEST_OWNER_LM = new EthAddress("11".repeat(20))
+  const TEST_ENC_KEY_LM = new Uint8Array(32).fill(0x42)
+  const TEST_DEPTH_LM = 24
+
+  function makeRecordingCache(): UtilizationStoreDB {
+    const store = new Map<string, ChunkCacheEntry>()
+    return {
+      getAllChunks: async () => {
+        const entries: ChunkCacheEntry[] = []
+        for (const entry of store.values()) entries.push(entry)
+        return entries.sort((a, b) => a.chunkIndex - b.chunkIndex)
+      },
+      putChunk: async (entry: ChunkCacheEntry) => {
+        store.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
+      },
+      getChunk: async (batchId: string, chunkIndex: number) =>
+        store.get(`${batchId}:${chunkIndex}`),
+    } as unknown as UtilizationStoreDB
+  }
+
+  async function makeStamper(
+    cache: UtilizationStoreDB,
+  ): Promise<UtilizationAwareStamper> {
+    return UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY_LM,
+      TEST_BATCH_ID,
+      TEST_DEPTH_LM,
+      cache,
+      TEST_OWNER_LM,
+      TEST_ENC_KEY_LM,
+    )
+  }
+
+  it("setLeaseMetadata persists a chunk at leaseChunkIndex(depth, partition)", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    await stamper.setLeaseMetadata(0, 42, {
+      lastEpoch: { start: 1748000000000n, level: 32 },
+      lastTimestamp: 1748000000n,
+    })
+
+    const idx = leaseChunkIndex(TEST_DEPTH_LM, 0)
+    const entry = await cache.getChunk(TEST_BATCH_ID.toHex(), idx)
+    expect(entry).toBeDefined()
+    const payload = JSON.parse(new TextDecoder().decode(entry!.data))
+    expect(payload.generation).toBe(42)
+    expect(payload.claimHints.lastEpoch.start).toBe("1748000000000")
+    expect(payload.claimHints.lastTimestamp).toBe("1748000000")
+  })
+
+  it("setLeaseMetadata for partition 0 and 1 are independent chunks", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    await stamper.setLeaseMetadata(0, 10, {})
+    await stamper.setLeaseMetadata(1, 20, {})
+
+    const idx0 = leaseChunkIndex(TEST_DEPTH_LM, 0)
+    const idx1 = leaseChunkIndex(TEST_DEPTH_LM, 1)
+    expect(idx0).not.toBe(idx1)
+
+    const entry0 = await cache.getChunk(TEST_BATCH_ID.toHex(), idx0)
+    const entry1 = await cache.getChunk(TEST_BATCH_ID.toHex(), idx1)
+    expect(JSON.parse(new TextDecoder().decode(entry0!.data)).generation).toBe(
+      10,
+    )
+    expect(JSON.parse(new TextDecoder().decode(entry1!.data)).generation).toBe(
+      20,
+    )
+  })
+
+  it("readCachedLease returns undefined when no metadata chunk exists", async () => {
+    const stamper = await makeStamper(makeRecordingCache())
+    const result = await stamper.readCachedLease(0)
+    expect(result).toBeUndefined()
+  })
+
+  it("readCachedLease returns generation and claimHints after setLeaseMetadata", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    const hints = {
+      lastEpoch: { start: 9999000000000n, level: 16 },
+      lastTimestamp: 9999000n,
+    }
+    await stamper.setLeaseMetadata(1, 77, hints)
+
+    const result = await stamper.readCachedLease(1)
+    expect(result).toBeDefined()
+    expect(result!.partition).toBe(1)
+    expect(result!.generation).toBe(77)
+    expect(result!.claimHints.lastEpoch?.start).toBe(9999000000000n)
+    expect(result!.claimHints.lastEpoch?.level).toBe(16)
+    expect(result!.claimHints.lastTimestamp).toBe(9999000n)
+  })
+
+  it("readCachedLease returns localCounter = dataCounters + RESUME_COUNTER_SKEW", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    // Manually poke a specific dataCounters value by stamping a chunk in a
+    // known bucket, then use a recording cache that stores the raw data.
+    // Simpler: since dataCounters starts at DATA_COUNTER_START and we haven't
+    // stamped anything, all counters equal DATA_COUNTER_START.
+    await stamper.setLeaseMetadata(0, 1, {})
+
+    const skew = computeResumeCounterSkew(TEST_DEPTH_LM)
+    const result = await stamper.readCachedLease(0)
+    expect(result).toBeDefined()
+
+    // Each bucket: localCounter[i] = dataCounters[i] + skew
+    // Fresh stamper: dataCounters[i] = DATA_COUNTER_START for all i.
+    expect(result!.localCounter[0]).toBe(DATA_COUNTER_START + skew)
+    expect(result!.localCounter[1000]).toBe(DATA_COUNTER_START + skew)
+  })
+
+  it("readCachedLease counter reflects stamps made before setLeaseMetadata", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const BUCKET = 0x1111
+    const NUM_STAMPS = 5
+    for (let i = 0; i < NUM_STAMPS; i++) {
+      stamper.stamp(makeChunkInBucket(BUCKET, i))
+    }
+
+    await stamper.setLeaseMetadata(0, 1, {})
+
+    const skew = computeResumeCounterSkew(TEST_DEPTH_LM)
+    const result = await stamper.readCachedLease(0)
+    // dataCounters[BUCKET] = DATA_COUNTER_START + NUM_STAMPS
+    expect(result!.localCounter[BUCKET]).toBe(
+      DATA_COUNTER_START + NUM_STAMPS + skew,
+    )
+  })
+
+  it("updateLeaseMetadata is a no-op when no partition is bound", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    // No bindPartition call — updateLeaseMetadata should do nothing.
+    await stamper.updateLeaseMetadata(99, {})
+
+    const idx = leaseChunkIndex(TEST_DEPTH_LM, 0)
+    const entry = await cache.getChunk(TEST_BATCH_ID.toHex(), idx)
+    expect(entry).toBeUndefined()
+  })
+
+  it("updateLeaseMetadata overwrites the chunk for the bound partition", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    await stamper.setLeaseMetadata(1, 10, {})
+    await stamper.updateLeaseMetadata(11, { lastTimestamp: 42n })
+
+    const idx = leaseChunkIndex(TEST_DEPTH_LM, 1)
+    const entry = await cache.getChunk(TEST_BATCH_ID.toHex(), idx)
+    const payload = JSON.parse(new TextDecoder().decode(entry!.data))
+    expect(payload.generation).toBe(11)
+    expect(payload.claimHints.lastTimestamp).toBe("42")
+  })
+
+  it("leaseChunkIndex is beyond numUtilizationChunks so create() ignores it", async () => {
+    // Verify that the lease chunk index falls outside the range that
+    // UtilizationAwareStamper.create() merges into dataCounters.
+    const { numUtilizationChunks } = getChunkLayout(TEST_DEPTH_LM)
+    expect(leaseChunkIndex(TEST_DEPTH_LM, 0)).toBeGreaterThanOrEqual(
+      numUtilizationChunks,
+    )
+    expect(leaseChunkIndex(TEST_DEPTH_LM, 1)).toBeGreaterThanOrEqual(
+      numUtilizationChunks,
+    )
   })
 })

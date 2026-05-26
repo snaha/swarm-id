@@ -66,6 +66,7 @@ export {
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,
   RESUME_COUNTER_SKEW_DIVISOR,
+  computeResumeCounterSkew,
 } from "./utils/batch-utilization"
 export type { UtilizationChunkKey } from "./utils/batch-utilization"
 
@@ -79,7 +80,7 @@ export {
   STORAGE_KEY_LEASE_PREFIX,
   leaseStateStorageKey,
 } from "./types"
-export type { LeaseState } from "./types"
+export type { LeaseState, SerialisedClaimHints } from "./types"
 
 // Partition-lease orchestrator and feeds
 export { PartitionLease } from "./sync/partition-lease"
@@ -97,8 +98,21 @@ export {
   makePartitionStateTopic,
   readPartitionState,
   writePartitionState,
-  computeResumeCounterSkew,
 } from "./sync/partition-state"
+export {
+  acquirePartitionLock,
+  compareGenerations,
+  makeDeviceTiebreaker,
+  makePartitionLockIdentifier,
+  readPartitionLock,
+  writePartitionLock,
+  NO_HOLDER_DEVICE_ID,
+} from "./sync/partition-lock"
+export type {
+  AcquirePartitionLockResult,
+  PartitionLockGeneration,
+  PartitionLockPayload,
+} from "./sync/partition-lock"
 
 // Utilization storage (IndexedDB cache)
 export {
@@ -210,6 +224,7 @@ export {
   ACCOUNT_SYNC_TOPIC_PREFIX,
   // Restore account from Swarm
   restoreAccountFromSwarm,
+  SnapshotDataUnavailableError,
 } from "./sync"
 
 // State sync types

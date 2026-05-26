@@ -18,7 +18,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { authenticateWithPasskey } from '$lib/passkey'
-  import { restoreAccountFromSwarm } from '@snaha/swarm-id'
+  import { restoreAccountFromSwarm, SnapshotDataUnavailableError } from '@snaha/swarm-id'
   import { Bee, BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
 
@@ -54,7 +54,12 @@
         )
       } catch (err) {
         console.error('🔑 Swarm restore failed:', err)
-        error = 'Could not reach the Swarm network. Please check your connection and try again.'
+        if (err instanceof SnapshotDataUnavailableError) {
+          const refPreview = err.reference.slice(0, 8)
+          error = `Found your account backup but couldn't retrieve it from Swarm. The Bee node may not have the data yet, or you may be connected to a different node than where it was uploaded. (ref: ${refPreview}…)`
+        } else {
+          error = 'Could not reach the Swarm network. Please check your connection and try again.'
+        }
         isProcessing = false
         return
       }

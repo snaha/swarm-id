@@ -4,6 +4,7 @@
 import {
   createSyncAccount,
   type SyncAccountFunction,
+  type SyncResult,
   UtilizationStoreDB,
   DebouncedUtilizationUploader,
 } from '@snaha/swarm-id'
@@ -18,20 +19,6 @@ import { browser } from '$app/environment'
 // ============================================================================
 // Lazy Initialization (Browser Only)
 // ============================================================================
-
-// Lazy Bee client initialization
-let bee: Bee | undefined
-
-const getBeeClient = () => {
-  if (!browser) return undefined
-
-  if (!bee) {
-    const beeApiUrl = networkSettingsStore.beeNodeUrl
-    bee = new Bee(beeApiUrl)
-  }
-
-  return bee
-}
 
 // Lazy utilization store initialization
 let utilizationStore: UtilizationStoreDB | undefined
@@ -59,24 +46,30 @@ const getUtilizationUploader = () => {
   return utilizationUploader
 }
 
-// Lazy sync account function initialization
+// Sync account function — recreated whenever the Bee node URL changes,
+// since createSyncAccount closes over a specific Bee client instance.
 let syncAccountFn: SyncAccountFunction | undefined
+let lastBeeUrl: string | undefined
 
 const getSyncAccount = () => {
   if (!browser) return undefined
 
-  const beeClient = getBeeClient()
-  if (!beeClient) return undefined
+  const currentUrl = networkSettingsStore.beeNodeUrl
 
-  if (!syncAccountFn) {
+  if (!syncAccountFn || currentUrl !== lastBeeUrl) {
+    const utilStore = getUtilizationStore()
+    const utilUploader = getUtilizationUploader()
+    if (!utilStore || !utilUploader) return undefined
+
+    lastBeeUrl = currentUrl
     syncAccountFn = createSyncAccount({
-      bee: beeClient,
+      bee: new Bee(currentUrl),
       accountsStore,
       identitiesStore,
       connectedAppsStore,
       postageStampsStore,
-      utilizationStore: getUtilizationStore()!,
-      utilizationUploader: getUtilizationUploader()!,
+      utilizationStore: utilStore,
+      utilizationUploader: utilUploader,
     })
   }
 
@@ -92,18 +85,18 @@ export const syncStore = {
    * Trigger sync for an account
    * Called by store hooks when state changes
    */
-  async syncAccount(accountId: string): Promise<void> {
+  async syncAccount(accountId: string): Promise<SyncResult | undefined> {
     if (!browser) {
       console.warn('[StateSync] Sync disabled - not in browser')
-      return
+      return undefined
     }
 
     const syncAccount = getSyncAccount()
     if (!syncAccount) {
       console.warn('[StateSync] Sync function not available')
-      return
+      return undefined
     }
 
-    await syncAccount(accountId)
+    return syncAccount(accountId)
   },
 }

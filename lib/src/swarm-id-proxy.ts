@@ -50,7 +50,7 @@ import {
   STORAGE_CHALLENGE_KEY,
   leaseStateStorageKey,
 } from "./types"
-import type { LeaseState } from "./types"
+import type { LeaseState, SerialisedClaimHints } from "./types"
 import type { PopupToIframeMessage } from "./types"
 import {
   Bee,
@@ -90,6 +90,7 @@ import {
 } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import { PartitionLease } from "./sync/partition-lease"
+import type { EpochUpdateHints } from "./proxy/feeds/epochs/types"
 import type { ActiveDevice } from "./schemas"
 import { getOrCreateDeviceId } from "./utils/device-id"
 import {
@@ -178,6 +179,15 @@ export class SwarmIdProxy {
   private partitionRefreshTimer: ReturnType<typeof setInterval> | undefined
   private isReadOnly: boolean = false
   private leaseAccountId: string | undefined
+  private pendingLeaseAccountInfo:
+    | {
+        owner: EthAddress
+        encryptionKey: Uint8Array
+        accountId: string
+        activeDevices: ActiveDevice[]
+        partitionCount: number
+      }
+    | undefined
 
   constructor() {
     // Load Bee API URL from network settings, falling back to default
@@ -478,14 +488,13 @@ export class SwarmIdProxy {
       return
     }
 
-    try {
-      // Initialize utilization cache if not already done
-      if (!this.utilizationStore) {
-        this.utilizationStore = new UtilizationStoreDB()
-      }
+    // Initialize utilization cache if not already done
+    if (!this.utilizationStore) {
+      this.utilizationStore = new UtilizationStoreDB()
+    }
 
-      // Create utilization-aware stamper with owner and encryption key
-      // This enables proper utilization tracking and persistence
+    // Create utilization-aware stamper with owner and encryption key
+    try {
       this.stamper = await UtilizationAwareStamper.create(
         this.signerKey,
         new BatchId(this.postageBatchId),
@@ -494,15 +503,18 @@ export class SwarmIdProxy {
         accountInfo.owner,
         accountInfo.encryptionKey,
       )
-
-      // Multi-device partition lease. Only runs for accounts that opted
-      // in (partitionCount > 1 in their snapshot); legacy single-device
-      // accounts fall through and the stamper stays in its existing mode.
-      await this.acquirePartitionLease(accountInfo)
     } catch (error) {
-      console.error("[Proxy] Failed to initialize stamper:", error)
+      console.error("[Proxy] Failed to create stamper:", error)
       this.stamper = undefined
-      this.tearDownPartitionLease()
+      return
+    }
+
+    // Defer partition lease acquisition to the first upload so init never
+    // writes to Bee. The batch stored in localStorage may not exist on the
+    // current Bee node (e.g. after a fresh cluster restart), and a hanging
+    // uploadChunk call here would block proxyReady for 30 seconds.
+    if (accountInfo.partitionCount > 1) {
+      this.pendingLeaseAccountInfo = accountInfo
     }
   }
 
@@ -542,10 +554,155 @@ export class SwarmIdProxy {
         stamper: this.stamper,
       })
 
-      const result = await lease.acquire({
-        activeDevices: accountInfo.activeDevices,
-        partitionCount: accountInfo.partitionCount,
-      })
+      // localStorage shortcut: if `LeaseState` says this device already
+      // holds a valid lease for this batch, hydrate the lease from local
+      // state and skip every Swarm read. The periodic refresh below still
+      // writes a fresh claim in the background to keep the on-Swarm lease
+      // alive.
+      const stored = this.readLeaseState(accountInfo.accountId)
+      const storedHints = this.deserialiseClaimHints(stored?.claimHints)
+      const nowMs = Date.now()
+      if (
+        stored &&
+        stored.batchId === this.postageBatchId &&
+        stored.partition !== undefined &&
+        stored.generation !== undefined &&
+        storedHints &&
+        stored.acquiredAt !== undefined &&
+        (stored.leasedUntil ?? 0) > nowMs &&
+        accountInfo.partitionCount > 1
+      ) {
+        this.partitionLease = lease
+        this.isReadOnly = false
+        lease.hydrate({
+          partition: stored.partition,
+          generation: stored.generation,
+          acquiredAt: stored.acquiredAt,
+          leasedUntil: stored.leasedUntil!,
+          claimHints: storedHints,
+        })
+        const localCounter = this.stamper.buildLeaseLocalCounter()
+        this.stamper.bindPartition({
+          partition: stored.partition,
+          partitionCount: accountInfo.partitionCount,
+          localCounter,
+        })
+        // Refresh LeaseState's leasedUntil view immediately so the UI
+        // doesn't show a stale countdown; the next refresh tick re-writes
+        // it with the new generation + claimHints from a real claim write.
+        this.scheduleLeaseRefresh({
+          accountId: accountInfo.accountId,
+          deviceId,
+          partition: stored.partition,
+          lease,
+          acquiredAt: stored.acquiredAt,
+        })
+        return
+      }
+
+      // Local-bootstrap path: trust the account snapshot to know which
+      // partition this device owns (or pick a free one). We hydrate the
+      // lease synchronously and let the *write* of the claim happen in
+      // the background — uploads never wait for Swarm to confirm
+      // something local state already knows.
+      const selfEntry = accountInfo.activeDevices.find(
+        (d) => d.deviceId === deviceId,
+      )
+      const localBootstrapPartition = selfEntry
+        ? selfEntry.partition
+        : this.pickFreePartition(
+            accountInfo.activeDevices,
+            accountInfo.partitionCount,
+          )
+
+      if (localBootstrapPartition !== undefined) {
+        this.partitionLease = lease
+        this.isReadOnly = false
+        const acquiredAt = Date.now()
+        const leasedUntil = acquiredAt + LEASE_TTL_MS
+        lease.hydrate({
+          partition: localBootstrapPartition,
+          generation: acquiredAt, // unix ms, monotonically increasing
+          acquiredAt,
+          leasedUntil,
+        })
+        this.stamper.bindPartition({
+          partition: localBootstrapPartition,
+          partitionCount: accountInfo.partitionCount,
+          localCounter: this.stamper.buildLeaseLocalCounter(),
+        })
+        // If we just picked a free partition, mirror that into the
+        // account snapshot so subsequent reloads find selfEntry.
+        if (!selfEntry) {
+          const updatedActiveDevices = [
+            ...accountInfo.activeDevices,
+            { deviceId, partition: localBootstrapPartition },
+          ]
+          this.persistActiveDevices(accountInfo.accountId, updatedActiveDevices)
+        }
+        this.writeLeaseState(accountInfo.accountId, {
+          deviceId,
+          partition: localBootstrapPartition,
+          leasedUntil,
+          acquiredAt,
+          isReadOnly: false,
+          batchId: this.postageBatchId,
+        })
+        this.scheduleLeaseRefresh({
+          accountId: accountInfo.accountId,
+          deviceId,
+          partition: localBootstrapPartition,
+          lease,
+          acquiredAt,
+        })
+        // Kick off one immediate background refresh so the device-claim
+        // feed gets populated (and `LeaseState` + IndexedDB pick up the
+        // hints) without waiting LEASE_REFRESH_MS.
+        void lease
+          .refresh()
+          .then(async (refreshed) => {
+            if (!refreshed || !this.stamper) return
+            this.writeLeaseState(accountInfo.accountId, {
+              deviceId,
+              partition: localBootstrapPartition,
+              leasedUntil: Date.now() + LEASE_TTL_MS,
+              acquiredAt,
+              isReadOnly: false,
+              batchId: this.postageBatchId,
+              generation: refreshed.generation,
+              claimHints: this.serialiseClaimHints(refreshed.claimHints),
+            })
+            if (refreshed.claimHints) {
+              await this.stamper.updateLeaseMetadata(
+                refreshed.generation,
+                refreshed.claimHints,
+              )
+            }
+          })
+          .catch((err) =>
+            console.warn(
+              "[Proxy] Initial partition-claim publish failed; the periodic refresh will retry:",
+              err,
+            ),
+          )
+        return
+      }
+
+      // No free partition locally — fall back to the original cold path
+      // (Case D takeover). This branch should be rare; it only matters
+      // when activeDevices is at capacity and we genuinely need to
+      // reclaim an expired lease.
+      const cachedLease = selfEntry
+        ? await this.stamper.readCachedLease(selfEntry.partition)
+        : undefined
+
+      const result = await lease.acquire(
+        {
+          activeDevices: accountInfo.activeDevices,
+          partitionCount: accountInfo.partitionCount,
+        },
+        cachedLease,
+      )
 
       this.partitionLease = lease
       this.isReadOnly = result.isReadOnly
@@ -573,13 +730,26 @@ export class SwarmIdProxy {
         localCounter: result.localCounter,
       })
 
+      // Persist lease metadata for the next session's fast-path acquire.
+      // `result.generation` and `result.claimHints` are set whenever the
+      // partition was actually claimed (cold or cache path) — they're only
+      // undefined in legacy / read-only branches that returned earlier.
+      if (result.generation !== undefined && result.claimHints) {
+        await this.stamper.setLeaseMetadata(
+          result.partition,
+          result.generation,
+          result.claimHints,
+        )
+      }
+
       // If acquire updated the activeDevices list (Case B or D added/replaced
       // an entry), persist locally so subsequent flows see the new state.
       // The Swarm-side snapshot sync happens via the existing UI sync
       // triggers — see `swarm-ui/src/lib/utils/sync-hooks.ts:triggerSync`.
       this.persistActiveDevices(accountInfo.accountId, result.activeDevices)
 
-      // Publish lease state so the UI's Devices screen can display it.
+      // Publish lease state so the UI's Devices screen can display it AND
+      // so the next session can take the localStorage shortcut.
       const acquiredAt = Date.now()
       const leasedUntil = acquiredAt + LEASE_TTL_MS
       this.writeLeaseState(accountInfo.accountId, {
@@ -588,27 +758,18 @@ export class SwarmIdProxy {
         leasedUntil,
         acquiredAt,
         isReadOnly: false,
+        batchId: this.postageBatchId,
+        generation: result.generation,
+        claimHints: this.serialiseClaimHints(result.claimHints),
       })
 
-      // Schedule periodic refresh so the lease doesn't expire mid-session.
-      // Refresh runs at LEASE_REFRESH_MS = LEASE_TTL_MS / 4.
-      this.partitionRefreshTimer = setInterval(() => {
-        const refreshedAt = Date.now()
-        lease
-          .refresh()
-          .then(() => {
-            this.writeLeaseState(accountInfo.accountId, {
-              deviceId,
-              partition: result.partition,
-              leasedUntil: refreshedAt + LEASE_TTL_MS,
-              acquiredAt,
-              isReadOnly: false,
-            })
-          })
-          .catch((err) =>
-            console.error("[Proxy] Partition lease refresh failed:", err),
-          )
-      }, LEASE_REFRESH_MS)
+      this.scheduleLeaseRefresh({
+        accountId: accountInfo.accountId,
+        deviceId,
+        partition: result.partition,
+        lease,
+        acquiredAt,
+      })
     } catch (error) {
       console.error("[Proxy] Failed to acquire partition lease:", error)
       this.partitionLease = undefined
@@ -636,6 +797,40 @@ export class SwarmIdProxy {
     } catch (error) {
       console.error("[Proxy] Failed to persist updated activeDevices:", error)
     }
+  }
+
+  /**
+   * Pick the lowest free partition in `[0, partitionCount)` that no
+   * entry in `activeDevices` already holds. Returns `undefined` when
+   * all partitions are taken.
+   */
+  private pickFreePartition(
+    activeDevices: ActiveDevice[],
+    partitionCount: number,
+  ): number | undefined {
+    const occupied = new Set(activeDevices.map((d) => d.partition))
+    for (let p = 0; p < partitionCount; p++) {
+      if (!occupied.has(p)) return p
+    }
+    return undefined
+  }
+
+  /**
+   * Pause lease background work without wiping the persisted LeaseState.
+   *
+   * Used when `ensurePartitionLease` hits its safety-net timeout: the
+   * Swarm claim publish didn't complete in time, but the *locally
+   * bootstrapped* lease assignment is still valid and should survive
+   * across reloads. Sign-out / disconnect uses `tearDownPartitionLease`
+   * instead, which fully clears state.
+   */
+  private pauseLeaseBackgroundWork(): void {
+    if (this.partitionRefreshTimer !== undefined) {
+      clearInterval(this.partitionRefreshTimer)
+      this.partitionRefreshTimer = undefined
+    }
+    this.partitionLease = undefined
+    this.isReadOnly = false
   }
 
   /**
@@ -669,12 +864,138 @@ export class SwarmIdProxy {
     }
   }
 
+  private static readonly PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 10000
+
+  /**
+   * Acquire the partition lease if one is pending (deferred from initializeStamper).
+   * Called from withModeAwareWriteLock so it runs under the write lock — at most
+   * one acquisition attempt can be in-flight at a time.
+   */
+  private async ensurePartitionLease(): Promise<void> {
+    if (!this.pendingLeaseAccountInfo) return
+    const accountInfo = this.pendingLeaseAccountInfo
+    this.pendingLeaseAccountInfo = undefined
+
+    const timeout = new Promise<void>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `Partition lease timed out after ${SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
+            ),
+          ),
+        SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
+      ),
+    )
+    try {
+      await Promise.race([this.acquirePartitionLease(accountInfo), timeout])
+    } catch (error) {
+      console.warn(
+        "[Proxy] Partition lease acquisition failed, falling back to single-device mode:",
+        error,
+      )
+      // Pause background work but keep the persisted LeaseState — a
+      // locally-bootstrapped lease is still valid local state, even if
+      // Swarm's claim publish hasn't completed yet.
+      this.pauseLeaseBackgroundWork()
+    }
+  }
+
   private writeLeaseState(accountId: string, state: LeaseState | null): void {
     const key = leaseStateStorageKey(accountId)
     if (state === null) {
       localStorage.removeItem(key)
     } else {
       localStorage.setItem(key, JSON.stringify(state))
+    }
+  }
+
+  /**
+   * Schedule the periodic claim-refresh `setInterval`. Each tick writes a
+   * fresh claim with the next generation, then mirrors the new hints to
+   * both localStorage `LeaseState` and IndexedDB `setLeaseMetadata` so a
+   * subsequent reload still hits the shortcut.
+   */
+  private scheduleLeaseRefresh(args: {
+    accountId: string
+    deviceId: string
+    partition: number
+    lease: PartitionLease
+    acquiredAt: number
+  }): void {
+    const { accountId, deviceId, partition, lease, acquiredAt } = args
+    if (this.partitionRefreshTimer !== undefined) {
+      clearInterval(this.partitionRefreshTimer)
+    }
+    this.partitionRefreshTimer = setInterval(() => {
+      const refreshedAt = Date.now()
+      lease
+        .refresh()
+        .then(async (refreshed) => {
+          this.writeLeaseState(accountId, {
+            deviceId,
+            partition,
+            leasedUntil: refreshedAt + LEASE_TTL_MS,
+            acquiredAt,
+            isReadOnly: false,
+            batchId: this.postageBatchId,
+            generation: refreshed?.generation,
+            claimHints: this.serialiseClaimHints(refreshed?.claimHints),
+          })
+          if (refreshed?.claimHints && this.stamper) {
+            await this.stamper.updateLeaseMetadata(
+              refreshed.generation,
+              refreshed.claimHints,
+            )
+          }
+        })
+        .catch((err) =>
+          console.error("[Proxy] Partition lease refresh failed:", err),
+        )
+    }, LEASE_REFRESH_MS)
+  }
+
+  private readLeaseState(accountId: string): LeaseState | undefined {
+    const raw = localStorage.getItem(leaseStateStorageKey(accountId))
+    if (!raw) return undefined
+    try {
+      return JSON.parse(raw) as LeaseState
+    } catch {
+      return undefined
+    }
+  }
+
+  /**
+   * `EpochUpdateHints` carries `bigint` fields that don't round-trip
+   * through JSON. Convert to decimal strings for storage.
+   */
+  private serialiseClaimHints(
+    hints: EpochUpdateHints | undefined,
+  ): SerialisedClaimHints | undefined {
+    if (!hints?.lastEpoch || hints.lastTimestamp === undefined) return undefined
+    return {
+      lastEpoch: {
+        start: hints.lastEpoch.start.toString(),
+        level: hints.lastEpoch.level,
+      },
+      lastTimestamp: hints.lastTimestamp.toString(),
+    }
+  }
+
+  private deserialiseClaimHints(
+    serialised: SerialisedClaimHints | undefined,
+  ): EpochUpdateHints | undefined {
+    if (!serialised) return undefined
+    try {
+      return {
+        lastEpoch: {
+          start: BigInt(serialised.lastEpoch.start),
+          level: serialised.lastEpoch.level,
+        },
+        lastTimestamp: BigInt(serialised.lastTimestamp),
+      }
+    } catch {
+      return undefined
     }
   }
 
@@ -795,7 +1116,10 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return operation(target)
     }
-    return this.withWriteLock(() => operation(target))
+    return this.withWriteLock(async () => {
+      await this.ensurePartitionLease()
+      return operation(target)
+    })
   }
 
   /**
@@ -1330,6 +1654,7 @@ export class SwarmIdProxy {
     this.appSecret = undefined
     this.postageBatchId = undefined
     this.signerKey = undefined
+    this.pendingLeaseAccountInfo = undefined
     this.tearDownPartitionLease()
     this.stamper = undefined
     this.storagePartitioned = false

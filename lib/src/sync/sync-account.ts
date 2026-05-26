@@ -47,6 +47,17 @@ import type { PostageStamp } from "../schemas"
 // Timeout for utilization upload in milliseconds
 const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
 
+// Timeout for the full sync (upload + feed update) in milliseconds.
+// Bee client requests use bare fetch with no timeout, so a non-responding
+// node would otherwise hang forever.
+const SYNC_TIMEOUT_MS = 60000
+
+// Inner timeout for the post-upload verification probe.
+// The probe is a best-effort diagnostic — if it can't answer quickly we
+// move on to "success-unverified" rather than letting bee-js retries
+// consume the outer SYNC_TIMEOUT_MS budget.
+const VERIFY_PROBE_TIMEOUT_MS = 5000
+
 // Topic prefix for sync feeds
 export const ACCOUNT_SYNC_TOPIC_PREFIX = "swarm-id-backup-v1:account"
 
@@ -327,7 +338,11 @@ export function createSyncAccount(
 
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
 
-    try {
+    console.log(
+      `[SyncCoordinator ${timestamp()}] Starting sync for ${accountId} bee.url=${bee.url}`,
+    )
+
+    const runSync = async (): Promise<SyncResult> => {
       // 1. Derive account signing key for feed
       const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
       const accountKey = new PrivateKey(backupKeyHex)
@@ -357,6 +372,7 @@ export function createSyncAccount(
         stamper,
       }
 
+      console.log(`[SyncCoordinator ${timestamp()}] Uploading data…`)
       const uploadResult = await uploadData(target, jsonData, {
         encryptionKey: hexToUint8Array(encryptionKey),
       })
@@ -391,21 +407,105 @@ export function createSyncAccount(
 
       // Create upload target for epoch feed update
       const feedTarget: UploadTarget = { mode: "stamper", bee, stamper }
+      console.log(`[SyncCoordinator ${timestamp()}] Updating feed…`)
       const updateResult = await updater.update(
         feedTimestamp,
         refBytes,
         feedTarget,
       )
+      console.log(
+        `[SyncCoordinator ${timestamp()}] Feed updated (+${(performance.now() - startTime).toFixed(2)}ms), verifying root chunk…`,
+      )
 
       // Add SOC chunk to tracked addresses
       allChunkAddresses.push(updateResult.socAddress)
 
+      // 7. Verify the root chunk is retrievable immediately after upload.
+      // This catches the case where Bee accepts the write but doesn't
+      // actually retain the data — the upload reports success, the feed
+      // points at a reference, but downstream restores would fail.
+      // refBytes is the snapshot reference: 32 bytes (plain) or 64 bytes
+      // (encrypted = 32-byte address + 32-byte key). Probe the address only.
+      const rootChunkAddress = refBytes.slice(0, 32)
+      const rootChunkAddressHex = Array.from(rootChunkAddress)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      // Bound the probe with its own timeout + per-request timeout so bee-js
+      // can't retry the 500 response indefinitely.
+      let probeTimer: ReturnType<typeof setTimeout> | undefined
+      const probeTimeoutPromise = new Promise<"timeout">((resolve) => {
+        probeTimer = setTimeout(
+          () => resolve("timeout"),
+          VERIFY_PROBE_TIMEOUT_MS,
+        )
+      })
+      const probePromise = bee
+        .downloadChunk(rootChunkAddressHex, undefined, {
+          timeout: VERIFY_PROBE_TIMEOUT_MS,
+        })
+        .then(() => "ok" as const)
+        .catch((err) => err as Error)
+
+      let probeOutcome: "ok" | "timeout" | Error
+      try {
+        probeOutcome = await Promise.race([probePromise, probeTimeoutPromise])
+      } finally {
+        if (probeTimer !== undefined) clearTimeout(probeTimer)
+      }
+
+      if (probeOutcome === "ok") {
+        console.log(
+          `[SyncCoordinator ${timestamp()}] Verified root chunk retrievable addr=${rootChunkAddressHex}`,
+        )
+        return {
+          status: "success",
+          reference: uploadResult.reference,
+          timestamp: feedTimestamp,
+          chunkAddresses: allChunkAddresses,
+        }
+      }
+
+      const reason =
+        probeOutcome === "timeout"
+          ? `probe timed out after ${VERIFY_PROBE_TIMEOUT_MS}ms`
+          : probeOutcome instanceof Error
+            ? probeOutcome.message
+            : String(probeOutcome)
+      const warning = `Root chunk ${rootChunkAddressHex} not retrievable immediately after upload from ${bee.url}: ${reason}`
+      console.warn(`[SyncCoordinator ${timestamp()}] ${warning}`)
       return {
-        status: "success",
+        status: "success-unverified",
         reference: uploadResult.reference,
         timestamp: feedTimestamp,
         chunkAddresses: allChunkAddresses,
+        warning,
       }
+    }
+
+    // Race the sync against a timeout. Bee client requests have no built-in
+    // timeout, so a non-responding node would otherwise hang the UI forever.
+    // Note: this surfaces the timeout to the caller but does NOT cancel the
+    // underlying fetch (would require AbortSignal propagation through bee-js).
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeoutPromise = new Promise<SyncResult>((resolve) => {
+      timer = setTimeout(() => {
+        resolve({
+          status: "error",
+          error: `Sync timed out after ${SYNC_TIMEOUT_MS}ms`,
+        })
+      }, SYNC_TIMEOUT_MS)
+    })
+
+    try {
+      const result = await Promise.race([runSync(), timeoutPromise])
+      if (result.status === "error") {
+        console.error(
+          `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
+          result.error,
+        )
+      }
+      return result
     } catch (error) {
       console.error(
         `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
@@ -415,6 +515,8 @@ export function createSyncAccount(
         status: "error",
         error: error instanceof Error ? error.message : String(error),
       }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 }

@@ -30,9 +30,7 @@ import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import {
   NUM_BUCKETS,
-  PARTITION_COUNT,
-  RESUME_COUNTER_SKEW_DIVISOR,
-  BUCKET_DEPTH,
+  computeResumeCounterSkew,
   deserializeUint32Array,
   serializeUint32Array,
 } from "../utils/batch-utilization"
@@ -64,19 +62,6 @@ export function makePartitionStateTopic(
     ),
   )
   return new Topic(hash)
-}
-
-/**
- * Counter-skew applied when seeding `localCounter` from a peer's
- * partition-state snapshot. The previous holder may have stamped chunks
- * after its last published snapshot before crashing; skipping a small
- * slot range eliminates the residual collision risk.
- */
-export function computeResumeCounterSkew(batchDepth: number): number {
-  const slotsPerBucket = Math.pow(2, batchDepth - BUCKET_DEPTH)
-  return Math.ceil(
-    slotsPerBucket / PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR,
-  )
 }
 
 /**
@@ -118,13 +103,14 @@ export async function readPartitionState(opts: {
 
   const reference = new Reference(refBytes)
   const payloadJson = await downloadDataWithChunkAPI(bee, reference.toHex())
-  const parsed = PartitionStateSchemaV1.parse(
-    JSON.parse(new TextDecoder().decode(payloadJson)),
-  )
-  // The schema stores `bucketCounters` as Uint8Array via z.instanceof; after
-  // JSON round-trip we re-receive it as a plain object {0: …, 1: …}. Coerce.
-  const bytes = coerceUint8Array(parsed.bucketCounters)
-  const decoded = deserializeUint32Array(bytes)
+  const rawObject = JSON.parse(new TextDecoder().decode(payloadJson))
+  // JSON round-trip delivers `bucketCounters` as a plain number array; coerce
+  // to Uint8Array before Zod sees it so z.instanceof(Uint8Array) passes.
+  const parsed = PartitionStateSchemaV1.parse({
+    ...rawObject,
+    bucketCounters: coerceUint8Array(rawObject.bucketCounters),
+  })
+  const decoded = deserializeUint32Array(parsed.bucketCounters)
   if (decoded.length !== NUM_BUCKETS) {
     throw new Error(
       `Partition-state payload has ${decoded.length} counters, expected ${NUM_BUCKETS}`,

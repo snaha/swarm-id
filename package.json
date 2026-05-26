@@ -5,7 +5,7 @@
   "description": "Swarm Identity Management - Monorepo",
   "type": "module",
   "scripts": {
-    "dev": "concurrently -n ui,demo -c blue,green \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
+    "dev": "concurrently -n lib,ui,demo -c yellow,blue,green \"pnpm dev:lib\" \"pnpm dev:swarm-ui\" \"pnpm dev:demo\"",
     "dev:bee": "bee-compose start --light 1 --no-detach",
     "dev:bee:detach": "bee-compose start --light 1",
     "dev:bee:stop": "bee-compose stop",

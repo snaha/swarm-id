@@ -38,6 +38,28 @@ export interface RestoreAccountResult {
 }
 
 /**
+ * Thrown when the epoch feed contains a snapshot reference but the chunks
+ * backing that reference cannot be downloaded — i.e. the backup exists in
+ * the feed but the data is not reachable from this Bee endpoint.
+ *
+ * Distinct from a generic network error so the UI can show a more useful
+ * message ("backup found but not retrievable" vs. "could not reach Swarm").
+ */
+export class SnapshotDataUnavailableError extends Error {
+  readonly reference: string
+  readonly cause: unknown
+
+  constructor(reference: string, cause: unknown) {
+    const message =
+      cause instanceof Error ? cause.message : String(cause ?? "unknown")
+    super(`Snapshot data unavailable for ref ${reference}: ${message}`)
+    this.name = "SnapshotDataUnavailableError"
+    this.reference = reference
+    this.cause = cause
+  }
+}
+
+/**
  * Restore account state from Swarm using passkey authentication result
  *
  * @param bee - Bee client instance
@@ -53,6 +75,8 @@ export async function restoreAccountFromSwarm(
   credentialId: string,
 ): Promise<RestoreAccountResult | undefined> {
   const accountId = ethereumAddress.toHex()
+
+  console.log(`[RestoreAccount] bee.url=${bee.url} accountId=${accountId}`)
 
   // 1. Derive the derivation key and swarm encryption key from the master key
   const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
@@ -80,7 +104,12 @@ export async function restoreAccountFromSwarm(
 
   // 5. Download and decrypt the account snapshot
   const reference = new Reference(refBytes)
-  const data = await downloadDataWithChunkAPI(bee, reference.toHex())
+  let data: Uint8Array
+  try {
+    data = await downloadDataWithChunkAPI(bee, reference.toHex())
+  } catch (error) {
+    throw new SnapshotDataUnavailableError(reference.toHex(), error)
+  }
 
   // 6. Deserialize the snapshot
   const snapshot = deserializeAccountState(data)

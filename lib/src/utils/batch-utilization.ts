@@ -36,6 +36,7 @@ import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
+import type { EpochUpdateHints } from "../proxy/feeds/epochs/types"
 
 // ============================================================================
 // Constants
@@ -134,6 +135,48 @@ export interface ChunkLayout {
   bucketsPerChunk: number
   /** Total number of utilization chunks for one batch */
   numUtilizationChunks: number
+}
+
+/**
+ * Counter-skew applied when seeding `localCounter` from a cached state on
+ * reconnect. Skips a small slot range that the previous session may have
+ * used after its last flush but before a crash, eliminating residual
+ * collision risk.
+ */
+export function computeResumeCounterSkew(batchDepth: number): number {
+  const slotsPerBucket = Math.pow(2, batchDepth - BUCKET_DEPTH)
+  return Math.ceil(
+    slotsPerBucket / PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR,
+  )
+}
+
+/**
+ * IndexedDB chunk index for the per-partition lease metadata chunk.
+ * Lease metadata is stored at indices `N + p` where N = numUtilizationChunks.
+ */
+export function leaseChunkIndex(batchDepth: number, partition: number): number {
+  const { numUtilizationChunks } = getChunkLayout(batchDepth)
+  return numUtilizationChunks + partition
+}
+
+/**
+ * Cached lease input for the 0-reads fast-path in `PartitionLease.acquire()`.
+ *
+ * A returning device that still holds a valid lease can bypass `readPartitionState`
+ * and `readDeviceClaim(self)` by passing this struct — the stamper's local
+ * IndexedDB data is sufficient to reconstruct the partition state.
+ */
+export interface CachedLeaseInput {
+  partition: number
+  /** Last known generation; next claim uses `generation + 1`. */
+  generation: number
+  /**
+   * Per-bucket local counter to pass to `bindPartition`. The skew has
+   * already been applied (`dataCounters + RESUME_COUNTER_SKEW`).
+   */
+  localCounter: Uint32Array
+  /** Epoch hints for `writeDeviceClaim`, skips epoch-tree traversal. */
+  claimHints: EpochUpdateHints
 }
 
 /**
@@ -1436,6 +1479,42 @@ export function calculateUtilization(
 }
 
 // ============================================================================
+// Lease Metadata Serialization
+// ============================================================================
+
+interface ClaimHintsJson {
+  lastEpoch?: { start: string; level: number }
+  lastTimestamp?: string
+}
+
+interface LeaseMetadataPayload {
+  generation: number
+  claimHints: ClaimHintsJson
+}
+
+function serializeClaimHints(hints: EpochUpdateHints): ClaimHintsJson {
+  return {
+    lastEpoch: hints.lastEpoch
+      ? {
+          start: hints.lastEpoch.start.toString(),
+          level: hints.lastEpoch.level,
+        }
+      : undefined,
+    lastTimestamp: hints.lastTimestamp?.toString(),
+  }
+}
+
+function deserializeClaimHints(json: ClaimHintsJson): EpochUpdateHints {
+  return {
+    lastEpoch: json.lastEpoch
+      ? { start: BigInt(json.lastEpoch.start), level: json.lastEpoch.level }
+      : undefined,
+    lastTimestamp:
+      json.lastTimestamp !== undefined ? BigInt(json.lastTimestamp) : undefined,
+  }
+}
+
+// ============================================================================
 // Utilization-Aware Stamper (Wrapper with Auto-Tracking)
 // ============================================================================
 
@@ -1790,6 +1869,92 @@ export class UtilizationAwareStamper implements Stamper {
 
     // Note: Do NOT clear dirtyBuckets here - those represent local writes
     // that still need to be flushed. Only flush() should clear them.
+  }
+
+  /**
+   * Build the partition-local counter from the stamper's current
+   * `dataCounters` + `RESUME_COUNTER_SKEW`.
+   *
+   * Same derivation `readCachedLease` does internally, exposed standalone
+   * for callers that already have lease state from somewhere else (e.g.
+   * `LeaseState` in localStorage) and just need the seed counter to pass
+   * into `bindPartition`.
+   */
+  buildLeaseLocalCounter(): Uint32Array {
+    const skew = computeResumeCounterSkew(this.depth)
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    for (let i = 0; i < NUM_BUCKETS; i++) {
+      localCounter[i] = this.utilizationState.dataCounters[i] + skew
+    }
+    return localCounter
+  }
+
+  /**
+   * Persist lease metadata (generation + claimHints) for partition `p` in
+   * the local IndexedDB cache at chunk index `N + p`.
+   * Called after a successful cold acquire so subsequent reloads can skip
+   * `readPartitionState` and `readDeviceClaim(self)` entirely.
+   */
+  async setLeaseMetadata(
+    partition: number,
+    generation: number,
+    claimHints: EpochUpdateHints,
+  ): Promise<void> {
+    const payload: LeaseMetadataPayload = {
+      generation,
+      claimHints: serializeClaimHints(claimHints),
+    }
+    const data = new TextEncoder().encode(JSON.stringify(payload))
+    await this.cache.putChunk({
+      batchId: this.batchId.toHex(),
+      chunkIndex: leaseChunkIndex(this.depth, partition),
+      data,
+      contentHash: "",
+      lastAccess: Date.now(),
+    })
+  }
+
+  /**
+   * Update lease metadata for the currently held partition (after refresh).
+   * No-op when no partition is bound.
+   */
+  async updateLeaseMetadata(
+    generation: number,
+    claimHints: EpochUpdateHints,
+  ): Promise<void> {
+    if (this.partition === undefined) return
+    await this.setLeaseMetadata(this.partition, generation, claimHints)
+  }
+
+  /**
+   * Read cached lease metadata for partition `p` and derive the local
+   * counter from the current `dataCounters` + `RESUME_COUNTER_SKEW`.
+   * Returns `undefined` when no metadata chunk is present in the cache.
+   */
+  async readCachedLease(
+    partition: number,
+  ): Promise<CachedLeaseInput | undefined> {
+    const cached = await this.cache.getChunk(
+      this.batchId.toHex(),
+      leaseChunkIndex(this.depth, partition),
+    )
+    if (!cached) return undefined
+
+    const payload: LeaseMetadataPayload = JSON.parse(
+      new TextDecoder().decode(cached.data),
+    )
+    const claimHints = deserializeClaimHints(payload.claimHints)
+    const skew = computeResumeCounterSkew(this.depth)
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    for (let i = 0; i < NUM_BUCKETS; i++) {
+      localCounter[i] = this.utilizationState.dataCounters[i] + skew
+    }
+    return {
+      partition,
+      generation: payload.generation,
+      localCounter,
+      claimHints,
+    }
   }
 
   /**

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { EthAddress, BatchId } from "@ethersphere/bee-js"
+import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
 import { deserializeAccountState } from "./serialization"
 import type {
@@ -81,6 +81,16 @@ function createMockStores() {
     postageStampsStore,
     mockStamper,
   }
+}
+
+// Bee mock with a downloadChunk that succeeds, so the post-upload verification
+// probe in syncAccount sees the root chunk as retrievable and returns status
+// "success" rather than "success-unverified".
+function createMockBee(): Bee {
+  return {
+    url: "http://mock-bee",
+    downloadChunk: vi.fn().mockResolvedValue(new Uint8Array(105)),
+  } as unknown as Bee
 }
 
 // ============================================================================
@@ -167,7 +177,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -199,7 +209,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -235,7 +245,7 @@ describe("createSyncAccount", () => {
     ).mockReturnValue(undefined)
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -266,7 +276,7 @@ describe("createSyncAccount", () => {
     ])
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -292,7 +302,7 @@ describe("createSyncAccount", () => {
     )
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -313,7 +323,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {

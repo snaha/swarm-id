@@ -463,6 +463,14 @@ async function buildEncryptedMerkleTree(
       Math.min(i + ENCRYPTED_REFS_PER_CHUNK, refs.length),
     )
 
+    // Pass through single-ref batches without wrapping in an intermediate.
+    // A ghost intermediate with span ≤ 4096 would be misidentified as a leaf
+    // by the download path's span-based leaf check.
+    if (batch.length === 1) {
+      intermediateChunks.push(batch[0])
+      continue
+    }
+
     // Calculate total span from all children
     const totalSpan = batch.reduce((sum, ref) => sum + ref.span, 0n)
 

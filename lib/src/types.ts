@@ -57,12 +57,34 @@ export function leaseStateStorageKey(accountId: string): string {
   return `${STORAGE_KEY_LEASE_PREFIX}:${accountId.toLowerCase()}`
 }
 
+/**
+ * Serialised epoch hints stored in `LeaseState`.
+ *
+ * `EpochUpdateHints` uses `bigint` which doesn't survive JSON, so we
+ * persist the bigints as decimal strings and convert at read/write time.
+ */
+export interface SerialisedClaimHints {
+  lastEpoch: { start: string; level: number }
+  lastTimestamp: string
+}
+
 export interface LeaseState {
   deviceId: string
   partition: number | undefined
   leasedUntil: number | undefined
   acquiredAt: number | undefined
   isReadOnly: boolean
+  /**
+   * Postage batch ID (hex, no 0x) this lease applies to. When the user
+   * rotates stamps we want to invalidate the stored hints since the
+   * `partition-state` feed is per-batch; `batchId !== current` triggers a
+   * cold re-acquire.
+   */
+  batchId?: string
+  /** Last written claim generation; next refresh writes `generation + 1`. */
+  generation?: number
+  /** Epoch hints from the most recent successful claim write. */
+  claimHints?: SerialisedClaimHints
 }
 
 // ============================================================================

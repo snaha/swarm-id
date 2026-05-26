@@ -50,7 +50,7 @@ let beeApiUrl = $state<string | undefined>(undefined)
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
 let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
-let currentSubsidisedGatewayUrl: string | undefined = DEFAULT_BEE_NODE_URL
+let currentSubsidisedGatewayUrl: string | undefined = undefined
 
 async function updatePostageStampInfo() {
   if (!client) return

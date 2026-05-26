@@ -198,11 +198,16 @@ async function downloadAndProcessChunk(
   requestOptions?: BeeRequestOptions,
 ): Promise<{ span: number; payload: Uint8Array }> {
   const addressHex = Binary.uint8ArrayToHex(ref.address)
-  const rawChunk = await bee.downloadChunk(
-    addressHex,
-    undefined,
-    requestOptions,
-  )
+  let rawChunk: Uint8Array
+  try {
+    rawChunk = await bee.downloadChunk(addressHex, undefined, requestOptions)
+  } catch (error) {
+    console.error(
+      `[DownloadData] chunk fetch failed addr=${addressHex} encrypted=${ref.encryptionKey !== undefined} bee.url=${bee.url}:`,
+      error,
+    )
+    throw error
+  }
 
   let chunkData: Uint8Array
   if (ref.encryptionKey) {
@@ -328,6 +333,10 @@ export async function downloadDataWithChunkAPI(
 ): Promise<Uint8Array> {
   const rootRef = parseReference(reference)
   const isEncrypted = rootRef.encryptionKey !== undefined
+
+  console.log(
+    `[DownloadData] start ref=${reference} encrypted=${isEncrypted} bee.url=${bee.url}`,
+  )
 
   // First, download root chunk to get span for progress estimation
   const { span, payload } = await downloadAndProcessChunk(
