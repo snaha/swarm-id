@@ -8,6 +8,7 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
   import { page } from '$app/state'
+  import { onMount } from 'svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
@@ -54,20 +55,8 @@
   let refreshedAt = $state<number | undefined>(undefined)
   let refreshError = $state<string | undefined>(undefined)
 
-  // Skip a refresh if the previous one finished within this many ms.
-  // Coalesces the visibilitychange trigger fired alongside a fresh mount.
-  const REFRESH_THROTTLE_MS = 5_000
-  const AUTO_REFRESH_INTERVAL_MS = 15_000
-
-  async function doRefresh(opts: { force?: boolean } = {}) {
+  async function doRefresh() {
     if (!account || refreshing) return
-    if (
-      !opts.force &&
-      refreshedAt !== undefined &&
-      Date.now() - refreshedAt < REFRESH_THROTTLE_MS
-    ) {
-      return
-    }
     refreshing = true
     refreshError = undefined
     try {
@@ -82,34 +71,15 @@
     }
   }
 
-  // Refresh once on every mount (always — no per-accountId dedupe).
-  $effect(() => {
-    if (!browser || !account) return
-    void doRefresh({ force: true })
-  })
-
-  // Poll while the page is mounted so a peer's activity surfaces here
-  // even when nothing else triggers a refresh.
-  $effect(() => {
-    if (!browser) return
-    const timer = setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        void doRefresh()
-      }
-    }, AUTO_REFRESH_INTERVAL_MS)
-    return () => clearInterval(timer)
-  })
-
-  // Refresh whenever the tab returns to the foreground.
-  $effect(() => {
-    if (!browser) return
-    const onVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        void doRefresh()
-      }
-    }
-    document.addEventListener('visibilitychange', onVisibility)
-    return () => document.removeEventListener('visibilitychange', onVisibility)
+  // Refresh exactly once when the component mounts. No $effect — that
+  // re-fires whenever any tracked dependency changes (which happens every
+  // time `applyRefreshedSnapshot` mutates the account), producing a loop.
+  // onMount runs after initial render with no reactive subscriptions, so
+  // it fires once per fresh mount and never again. Switching to another
+  // tab and back creates a new component instance, which re-fires onMount
+  // — that's how "re-visit the tab to refresh" still works.
+  onMount(() => {
+    if (browser) void doRefresh()
   })
 
   let _tick = $state(0)
@@ -192,7 +162,7 @@
         <Button
           variant="ghost"
           dimension="compact"
-          onclick={() => doRefresh({ force: true })}
+          onclick={() => doRefresh()}
           disabled={refreshing}
         >
           <Horizontal --horizontal-gap="4px" --horizontal-align-items="center">
