@@ -24,7 +24,7 @@
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
   import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
-  import { getBlockTimestamp, fetchBatchTTL } from '@snaha/swarm-id'
+  import { calculateTTLSeconds, fetchBatchTTL, getBlockTimestamp } from '@snaha/swarm-id'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const BATCH_ID_PREVIEW_LENGTH = 8
@@ -33,26 +33,11 @@
   const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
   const BYTES_PER_GB = BYTES_PER_MB * BYTES_PER_KB
   const MS_PER_SECOND = 1000
+  const SECONDS_PER_MONTH = 2592000
   const MAX_UTILIZATION_PERCENT = 100
   const SWARMSCAN_STATS_URL = 'https://api.swarmscan.io/v1/postage-stamps/stats'
-  const CHUNKS_PER_GB = 262144n
-  const SECONDS_PER_MONTH = 2592000n
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
-  const PLUR_DECIMALS = 16
   const BEEPORT_TOPUP_URL = 'https://beeport.eth.limo/?topup='
-
-  function bzzToPlur(bzz: number): bigint {
-    const str = bzz.toFixed(PLUR_DECIMALS)
-    const [intPart, decPart = ''] = str.split('.')
-    const paddedDec = decPart.padEnd(PLUR_DECIMALS, '0').slice(0, PLUR_DECIMALS)
-    return BigInt(intPart + paddedDec)
-  }
-
-  function calculateBatchDurationSeconds(amount: bigint, pricePerGBPerMonth: number): number {
-    const perChunkPerMonthCost = bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB
-    if (perChunkPerMonthCost === 0n) return 0
-    return Number((amount * SECONDS_PER_MONTH) / perChunkPerMonthCost)
-  }
 
   const identityId = $derived(page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -156,7 +141,7 @@
     if (price === undefined) {
       return undefined
     }
-    const durationSeconds = calculateBatchDurationSeconds(stamp.amount, price)
+    const durationSeconds = calculateTTLSeconds(stamp.amount, price)
     const startTimeMs =
       blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
     return startTimeMs + durationSeconds * MS_PER_SECOND
@@ -178,12 +163,12 @@
     const remainingMs = expiryMs - Date.now()
     if (remainingMs <= 0) return false
 
-    const oneMonthMs = Number(SECONDS_PER_MONTH) * MS_PER_SECOND
+    const oneMonthMs = SECONDS_PER_MONTH * MS_PER_SECOND
     if (remainingMs < oneMonthMs) return true
 
     // If we have a price, also flag stamps in the last 10% of their estimated lifetime.
     if (price === undefined) return false
-    const totalLifetimeMs = calculateBatchDurationSeconds(stamp.amount, price) * MS_PER_SECOND
+    const totalLifetimeMs = calculateTTLSeconds(stamp.amount, price) * MS_PER_SECOND
     return totalLifetimeMs > 0 && remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION
   }
 </script>

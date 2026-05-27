@@ -28,10 +28,29 @@ const SECONDS_PER_MONTH = 30 * SECONDS_PER_DAY // 2,592,000
 /**
  * Swarm constants
  */
-const PLUR_PER_BZZ = 1e16
+const PLUR_DECIMALS = 16 // 1 BZZ = 1e16 PLUR
 const CHUNK_SIZE_BYTES = 4096
 const BYTES_PER_GB = 1024 * 1024 * 1024
 const CHUNKS_PER_GB = Math.floor(BYTES_PER_GB / CHUNK_SIZE_BYTES) // 262144
+const CHUNKS_PER_GB_BIGINT = BigInt(CHUNKS_PER_GB)
+const SECONDS_PER_MONTH_BIGINT = BigInt(SECONDS_PER_MONTH)
+
+/**
+ * Converts a BZZ amount (possibly fractional) to PLUR as a BigInt.
+ *
+ * Goes through a fixed-decimal string instead of `bzz * 1e16` to preserve
+ * precision: `1e16` exceeds `Number.MAX_SAFE_INTEGER` (2^53), so direct
+ * multiplication loses low-order digits for any non-trivial price.
+ */
+function bzzToPlur(bzz: number): bigint {
+  const str = bzz.toFixed(PLUR_DECIMALS)
+  const negative = str.startsWith("-")
+  const unsigned = negative ? str.slice(1) : str
+  const [intPart, decPart = ""] = unsigned.split(".")
+  const paddedDec = decPart.padEnd(PLUR_DECIMALS, "0").slice(0, PLUR_DECIMALS)
+  const magnitude = BigInt(intPart + paddedDec)
+  return negative ? -magnitude : magnitude
+}
 
 /**
  * Swarmscan API URL for price data
@@ -53,24 +72,43 @@ export async function fetchSwarmPrice(): Promise<number> {
 }
 
 /**
- * Calculates TTL in seconds from stamp amount and Swarmscan price.
+ * Approximates the lifetime of a postage stamp deposit in seconds, assuming
+ * the chain's per-block price stays constant at `pricePerGBPerMonth` for the
+ * full lifetime. This is the answer to "how long would a stamp with this
+ * deposit last at the current price" — not the remaining TTL of an existing
+ * stamp (for that, prefer {@link fetchBatchTTL}, which uses live chain state).
  *
- * @param amount - Stamp amount in PLUR (smallest BZZ unit)
- * @param pricePerGBPerMonth - Price from Swarmscan (in BZZ)
- * @returns TTL in seconds
+ * Uses BigInt math throughout. `pricePerGBPerMonth * 1e16` (PLUR conversion)
+ * silently loses precision in Number, since `1e16 > Number.MAX_SAFE_INTEGER`.
+ *
+ * @param amount - Stamp amount in PLUR (per-chunk)
+ * @param pricePerGBPerMonth - Price in BZZ per GiB per month (from Swarmscan)
+ * @returns Lifetime in seconds. Returns `0` if the amount or price is
+ *          non-positive or the price is not finite — a 0-price chain
+ *          technically never expires stamps, but returning 0 keeps callers
+ *          inside safe Number range and is the conservative display choice.
  */
 export function calculateTTLSeconds(
   amount: bigint | number | string,
   pricePerGBPerMonth: number,
 ): number {
+  if (!Number.isFinite(pricePerGBPerMonth) || pricePerGBPerMonth <= 0) {
+    return 0
+  }
   const amountBigInt = BigInt(amount)
-  // Cost per chunk per month in PLUR
+  if (amountBigInt <= 0n) {
+    return 0
+  }
+  // Cost per chunk per month in PLUR. BigInt division truncates toward zero;
+  // CHUNKS_PER_GB_BIGINT is small enough that this rounding is sub-second.
   const perChunkPerMonthCost =
-    (pricePerGBPerMonth * PLUR_PER_BZZ) / CHUNKS_PER_GB
-  // TTL in months
-  const ttlMonths = Number(amountBigInt) / perChunkPerMonthCost
-  // TTL in seconds
-  return ttlMonths * SECONDS_PER_MONTH
+    bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB_BIGINT
+  if (perChunkPerMonthCost <= 0n) {
+    return 0
+  }
+  return Number(
+    (amountBigInt * SECONDS_PER_MONTH_BIGINT) / perChunkPerMonthCost,
+  )
 }
 
 /**

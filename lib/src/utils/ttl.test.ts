@@ -4,6 +4,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 import {
   calculateStampAmountForDays,
+  calculateTTLSeconds,
   fetchChainState,
   fetchBatchTTL,
 } from "./ttl"
@@ -49,6 +50,68 @@ describe("calculateStampAmountForDays", () => {
   it("returns 0n for non-positive price", () => {
     expect(calculateStampAmountForDays(0n, 1)).toBe(0n)
     expect(calculateStampAmountForDays(-1n, 1)).toBe(0n)
+  })
+})
+
+describe("calculateTTLSeconds", () => {
+  // Reference figures from the bug report on issue #279:
+  //   amount = 13_737_600_001 PLUR (per chunk)
+  //   pricePerGBPerMonth ≈ 0.7025 BZZ/GiB/month  → ≈ 15.4 days lifetime
+  const ISSUE_279_AMOUNT = 13_737_600_001n
+  const ISSUE_279_PRICE = 0.70253870579712
+  const ISSUE_279_TTL_SECONDS_LOWER = 13 * 86_400 // 13d
+  const ISSUE_279_TTL_SECONDS_UPPER = 17 * 86_400 // 17d
+
+  it("returns a plausible lifetime for the issue #279 values", () => {
+    const ttl = calculateTTLSeconds(ISSUE_279_AMOUNT, ISSUE_279_PRICE)
+    expect(ttl).toBeGreaterThan(ISSUE_279_TTL_SECONDS_LOWER)
+    expect(ttl).toBeLessThan(ISSUE_279_TTL_SECONDS_UPPER)
+  })
+
+  it("accepts string and number amounts equivalently to bigint", () => {
+    const fromBigint = calculateTTLSeconds(ISSUE_279_AMOUNT, ISSUE_279_PRICE)
+    const fromString = calculateTTLSeconds("13737600001", ISSUE_279_PRICE)
+    const fromNumber = calculateTTLSeconds(13_737_600_001, ISSUE_279_PRICE)
+    expect(fromString).toBe(fromBigint)
+    expect(fromNumber).toBe(fromBigint)
+  })
+
+  it("returns 0 when the price is 0 (e.g. local dev chain)", () => {
+    expect(calculateTTLSeconds(ISSUE_279_AMOUNT, 0)).toBe(0)
+  })
+
+  it("returns 0 when the price is negative", () => {
+    expect(calculateTTLSeconds(ISSUE_279_AMOUNT, -1)).toBe(0)
+  })
+
+  it("returns 0 when the price is not finite", () => {
+    expect(calculateTTLSeconds(ISSUE_279_AMOUNT, NaN)).toBe(0)
+    expect(calculateTTLSeconds(ISSUE_279_AMOUNT, Infinity)).toBe(0)
+  })
+
+  it("returns 0 when the amount is 0", () => {
+    expect(calculateTTLSeconds(0n, ISSUE_279_PRICE)).toBe(0)
+  })
+
+  it("returns 0 when the amount is negative", () => {
+    expect(calculateTTLSeconds(-1n, ISSUE_279_PRICE)).toBe(0)
+  })
+
+  it("scales linearly with amount", () => {
+    const single = calculateTTLSeconds(ISSUE_279_AMOUNT, ISSUE_279_PRICE)
+    const double = calculateTTLSeconds(ISSUE_279_AMOUNT * 2n, ISSUE_279_PRICE)
+    // Linear within BigInt truncation noise (well under 1%).
+    expect(double).toBeGreaterThan(single * 2 - 1)
+    expect(double).toBeLessThan(single * 2 + 1)
+  })
+
+  it("preserves precision past Number.MAX_SAFE_INTEGER", () => {
+    // 1e18 PLUR per chunk would overflow `Number(amountBigInt) * 1e16` math.
+    // BigInt path stays accurate, so the result is finite and positive.
+    const huge = 1_000_000_000_000_000_000n
+    const ttl = calculateTTLSeconds(huge, ISSUE_279_PRICE)
+    expect(Number.isFinite(ttl)).toBe(true)
+    expect(ttl).toBeGreaterThan(0)
   })
 })
 
