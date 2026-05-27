@@ -3607,7 +3607,6 @@ export class SwarmIdProxy {
         batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
       } catch (error) {
         console.warn("[Proxy] Failed to calculate TTL:", error)
-        batchTTL = stamp.batchTTL
       }
     }
 

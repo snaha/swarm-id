@@ -24,7 +24,12 @@
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
   import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
-  import { calculateTTLSeconds, fetchBatchTTL, getBlockTimestamp } from '@snaha/swarm-id'
+  import {
+    calculateTTLSeconds,
+    fetchBatchTTL,
+    fetchSwarmPrice,
+    getBlockTimestamp,
+  } from '@snaha/swarm-id'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const BATCH_ID_PREVIEW_LENGTH = 8
@@ -35,7 +40,6 @@
   const MS_PER_SECOND = 1000
   const SECONDS_PER_MONTH = 2592000
   const MAX_UTILIZATION_PERCENT = 100
-  const SWARMSCAN_STATS_URL = 'https://api.swarmscan.io/v1/postage-stamps/stats'
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
   const BEEPORT_TOPUP_URL = 'https://beeport.eth.limo/?topup='
 
@@ -88,9 +92,7 @@
   onMount(async () => {
     // Fetch Swarmscan price
     try {
-      const res = await fetch(SWARMSCAN_STATS_URL)
-      const data: { pricePerGBPerMonth: number } = await res.json()
-      pricePerGBPerMonth = data.pricePerGBPerMonth
+      pricePerGBPerMonth = await fetchSwarmPrice()
     } catch {
       // Silently fail — only the constant-price fallback and the "expires
       // soon" heuristic become unavailable. The Bee batchTTL path can still

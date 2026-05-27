@@ -97,10 +97,11 @@ export function calculateTTLSeconds(
   if (amountBigInt <= 0n) {
     return 0
   }
-  // Cost per chunk per month in PLUR. BigInt division truncates toward zero;
-  // CHUNKS_PER_GB is small enough that this rounding is sub-second.
   const perChunkPerMonthCost = bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB
   if (perChunkPerMonthCost <= 0n) {
+    // Sub-attoBZZ prices (under ~2.6e-11 BZZ/GiB/month) truncate to 0 under
+    // BigInt division. Return 0 instead of letting the next line throw on
+    // divide-by-zero — there's no meaningful lifetime to report.
     return 0
   }
   return Number((amountBigInt * SECONDS_PER_MONTH) / perChunkPerMonthCost)
@@ -268,15 +269,13 @@ export async function fetchBatchTTL(
       return undefined
     }
     const data: unknown = await response.json()
-    if (
-      typeof data !== "object" ||
-      data === null ||
-      !("batchTTL" in data) ||
-      typeof (data as { batchTTL: unknown }).batchTTL !== "number"
-    ) {
+    if (typeof data !== "object" || data === null) {
       return undefined
     }
-    const ttl = (data as { batchTTL: number }).batchTTL
+    const ttl = (data as { batchTTL?: unknown }).batchTTL
+    if (typeof ttl !== "number") {
+      return undefined
+    }
     return ttl < 0 ? 0 : ttl
   } catch {
     return undefined
