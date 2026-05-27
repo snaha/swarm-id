@@ -5,6 +5,7 @@ import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import {
   createAccountsStorageManager,
+  getOrCreateDeviceId,
   STORAGE_KEY_ACCOUNTS,
   type Account,
   type ActiveDevice,
@@ -46,6 +47,7 @@ function sameActiveDevices(a: ActiveDevice[] | undefined, b: ActiveDevice[] | un
 }
 
 if (browser) {
+  const selfDeviceId = getOrCreateDeviceId()
   window.addEventListener('storage', (e) => {
     if (e.key !== STORAGE_KEY_ACCOUNTS) return
     const previous = accounts
@@ -55,11 +57,20 @@ if (browser) {
     // after a successful partition-lease bootstrap), publish the new
     // snapshot to Swarm. The merge-before-write step in sync-account
     // prevents this from stomping any peer's recent write.
+    //
+    // Only trigger sync when THIS device is in the updated activeDevices —
+    // otherwise the publish in sync-account refuses (a device without a
+    // partition lease shouldn't write to Swarm) and we'd just log a noisy
+    // "Refusing to sync" warning for every demote / yield-on-close /
+    // cross-tab snapshot refresh.
     for (const updated of next) {
       const before = previous.find((a) => a.id.equals(updated.id))
       if (!before) continue // new account — sign-in handles its own bootstrap
       if (!sameActiveDevices(before.activeDevices, updated.activeDevices)) {
-        triggerSync(updated.id.toHex())
+        const selfNowActive = (updated.activeDevices ?? []).some((d) => d.deviceId === selfDeviceId)
+        if (selfNowActive) {
+          triggerSync(updated.id.toHex())
+        }
       }
     }
   })
