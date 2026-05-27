@@ -175,11 +175,17 @@ export async function fetchChainState(beeUrl: string): Promise<ChainState> {
   if (typeof obj.block !== "number") {
     throw new Error("chainstate response missing block")
   }
-  if (
-    typeof obj.currentPrice !== "string" &&
-    typeof obj.currentPrice !== "number"
-  ) {
-    throw new Error("chainstate response missing currentPrice")
+  // Require a string. Bee always serialises currentPrice as a decimal string
+  // because high-traffic chains can exceed Number.MAX_SAFE_INTEGER (2^53), and
+  // JSON.parse rounds anything above that *before* we get a chance to widen it
+  // to BigInt — so accepting a `number` here would silently corrupt the price
+  // and defeat the precision the rest of this module guarantees.
+  if (typeof obj.currentPrice !== "string") {
+    throw new Error(
+      "chainstate response missing or non-string currentPrice (got " +
+        typeof obj.currentPrice +
+        ")",
+    )
   }
   return {
     block: obj.block,

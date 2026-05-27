@@ -91,6 +91,18 @@ describe("fetchChainState", () => {
     )
   })
 
+  it("throws when currentPrice is a number, not a string", async () => {
+    // Bee always serialises currentPrice as a string. If a non-Bee server
+    // returns a JSON number, JSON.parse may have already rounded it past
+    // Number.MAX_SAFE_INTEGER, so we refuse it rather than silently widening
+    // a corrupted value to BigInt.
+    fetchSpy.mockResolvedValue(mockResponse({ block: 1, currentPrice: 24_000 }))
+
+    await expect(fetchChainState("http://localhost:1633")).rejects.toThrow(
+      /currentPrice/,
+    )
+  })
+
   it("throws when block is missing", async () => {
     fetchSpy.mockResolvedValue(mockResponse({ currentPrice: "24000" }))
 
