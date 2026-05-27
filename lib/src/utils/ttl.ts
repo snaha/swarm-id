@@ -11,6 +11,13 @@
 export const GNOSIS_BLOCK_TIME = 5
 
 /**
+ * Blocks per day on Gnosis Chain (24h / 5s block time = 17280). BigInt so it
+ * composes with the PLUR-denominated price math in
+ * {@link calculateStampAmountForDays} without precision loss.
+ */
+export const BLOCKS_PER_DAY = (24n * 60n * 60n) / BigInt(GNOSIS_BLOCK_TIME)
+
+/**
  * Time constants
  */
 const SECONDS_PER_MINUTE = 60
@@ -129,4 +136,72 @@ export function calculateExpiryTimestamp(
   ttlSeconds: number,
 ): number {
   return blockTimestamp + ttlSeconds
+}
+
+/**
+ * Snapshot of Bee's view of the chain, from `GET /chainstate`.
+ *
+ * `currentPrice` is PLUR per chunk per block — the per-block storage rent rate
+ * Bee charges against a stamp's deposit. Bee returns it as a decimal string
+ * because Gnosis prices can exceed `Number.MAX_SAFE_INTEGER` on high-traffic
+ * chains, so we keep it BigInt all the way through to the stamp-amount math.
+ */
+export interface ChainState {
+  block: number
+  currentPrice: bigint
+}
+
+/**
+ * Fetches the current chain state (block + per-chunk-per-block price) from a
+ * Bee node. Used to size new stamp amounts: Bee rejects `POST /stamps` calls
+ * whose amount does not cover at least 24h of storage at `currentPrice`.
+ *
+ * @param beeUrl - Bee node URL
+ * @returns Parsed chain state with `currentPrice` as BigInt
+ * @throws if the request fails, returns non-OK, or omits required fields.
+ *         Callers (e.g. the dev page) surface this directly to the user.
+ */
+export async function fetchChainState(beeUrl: string): Promise<ChainState> {
+  const base = beeUrl.replace(/\/$/, "")
+  const response = await fetch(`${base}/chainstate`)
+  if (!response.ok) {
+    throw new Error(`Failed to fetch chainstate: HTTP ${response.status}`)
+  }
+  const data: unknown = await response.json()
+  if (typeof data !== "object" || data === null) {
+    throw new Error("Invalid chainstate response")
+  }
+  const obj = data as { block?: unknown; currentPrice?: unknown }
+  if (typeof obj.block !== "number") {
+    throw new Error("chainstate response missing block")
+  }
+  if (
+    typeof obj.currentPrice !== "string" &&
+    typeof obj.currentPrice !== "number"
+  ) {
+    throw new Error("chainstate response missing currentPrice")
+  }
+  return {
+    block: obj.block,
+    currentPrice: BigInt(obj.currentPrice),
+  }
+}
+
+/**
+ * Minimum stamp amount (PLUR per chunk) that covers `days` days of validity
+ * at the given per-block price. Bee enforces a 24h floor on `POST /stamps`, so
+ * passing `days = 1` returns the exact minimum that will be accepted.
+ *
+ * @param currentPrice - Per-chunk-per-block price in PLUR (from {@link fetchChainState})
+ * @param days - Positive integer number of days of validity to fund
+ * @returns Amount in PLUR per chunk, or `0n` for non-positive / non-integer inputs
+ */
+export function calculateStampAmountForDays(
+  currentPrice: bigint,
+  days: number,
+): bigint {
+  if (currentPrice <= 0n || !Number.isInteger(days) || days <= 0) {
+    return 0n
+  }
+  return currentPrice * BLOCKS_PER_DAY * BigInt(days)
 }
