@@ -18,22 +18,20 @@ export const GNOSIS_BLOCK_TIME = 5
 export const BLOCKS_PER_DAY = (24n * 60n * 60n) / BigInt(GNOSIS_BLOCK_TIME)
 
 /**
- * Time constants
+ * Time constants. `SECONDS_PER_MONTH` is BigInt because its only consumer is
+ * the BigInt math in {@link calculateTTLSeconds}; the others stay Number
+ * because {@link formatTTL} uses them with `Math.floor` / modulo.
  */
 const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
-const SECONDS_PER_MONTH = 30 * SECONDS_PER_DAY // 2,592,000
+const SECONDS_PER_MONTH = 2_592_000n // 30 * 24 * 60 * 60
 
 /**
- * Swarm constants
+ * Swarm constants. `CHUNKS_PER_GB = 1 GiB / 4 KiB chunk`.
  */
 const PLUR_DECIMALS = 16 // 1 BZZ = 1e16 PLUR
-const CHUNK_SIZE_BYTES = 4096
-const BYTES_PER_GB = 1024 * 1024 * 1024
-const CHUNKS_PER_GB = Math.floor(BYTES_PER_GB / CHUNK_SIZE_BYTES) // 262144
-const CHUNKS_PER_GB_BIGINT = BigInt(CHUNKS_PER_GB)
-const SECONDS_PER_MONTH_BIGINT = BigInt(SECONDS_PER_MONTH)
+const CHUNKS_PER_GB = 262_144n // (1024 * 1024 * 1024) / 4096
 
 /**
  * Converts a BZZ amount (possibly fractional) to PLUR as a BigInt.
@@ -100,15 +98,12 @@ export function calculateTTLSeconds(
     return 0
   }
   // Cost per chunk per month in PLUR. BigInt division truncates toward zero;
-  // CHUNKS_PER_GB_BIGINT is small enough that this rounding is sub-second.
-  const perChunkPerMonthCost =
-    bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB_BIGINT
+  // CHUNKS_PER_GB is small enough that this rounding is sub-second.
+  const perChunkPerMonthCost = bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB
   if (perChunkPerMonthCost <= 0n) {
     return 0
   }
-  return Number(
-    (amountBigInt * SECONDS_PER_MONTH_BIGINT) / perChunkPerMonthCost,
-  )
+  return Number((amountBigInt * SECONDS_PER_MONTH) / perChunkPerMonthCost)
 }
 
 /**
