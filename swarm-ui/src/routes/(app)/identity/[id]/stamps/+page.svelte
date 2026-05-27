@@ -89,17 +89,9 @@
     }
   }
 
-  onMount(async () => {
-    // Fetch Swarmscan price
-    try {
-      pricePerGBPerMonth = await fetchSwarmPrice()
-    } catch {
-      // Silently fail — only the constant-price fallback and the "expires
-      // soon" heuristic become unavailable. The Bee batchTTL path can still
-      // render an accurate expiry date without it.
-    }
-
-    // Fetch block timestamps and authoritative batchTTL for stamps
+  onMount(() => {
+    // Start the authoritative Bee batchTTL + block-timestamp fetches first;
+    // they don't depend on the Swarmscan price and shouldn't wait on it.
     const stamps = [accountStamp, identityStamp].filter(Boolean) as PostageStamp[]
     for (const stamp of stamps) {
       if (stamp.blockNumber > 0) {
@@ -107,6 +99,15 @@
       }
       fetchStampExpiryFromBee(stamp)
     }
+
+    // Swarmscan price feeds only the constant-price fallback and the
+    // "expires soon" heuristic, so run it in parallel and let it fail
+    // silently — the Bee batchTTL path can still render an accurate date.
+    fetchSwarmPrice()
+      .then((price) => {
+        pricePerGBPerMonth = price
+      })
+      .catch(() => {})
   })
 
   function formatBytes(bytes: number): string {
