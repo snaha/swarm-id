@@ -47,7 +47,6 @@ import {
 const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 const TEST_BATCH_DEPTH = 24
 const TEST_ENC_KEY = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff)
-const ACCOUNT_ID = "aabb".padEnd(40, "0")
 const DEVICE_A = "device-alpha-111"
 const DEVICE_B = "device-beta-222"
 
@@ -67,7 +66,6 @@ function makeLease(opts: {
 }): PartitionLease {
   return new PartitionLease({
     bee: opts.bee,
-    accountId: ACCOUNT_ID,
     deviceId: opts.deviceId,
     batchId: TEST_BATCH_ID,
     batchDepth: TEST_BATCH_DEPTH,
@@ -169,7 +167,6 @@ describe("PartitionLease.acquire — fresh device (no selfEntry)", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -183,7 +180,6 @@ describe("PartitionLease.acquire — fresh device (no selfEntry)", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -218,7 +214,6 @@ describe("PartitionLease.acquire — fresh device (no selfEntry)", () => {
       stamper: createMockStamper() as unknown as Stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -250,7 +245,6 @@ describe("PartitionLease.acquire — fresh device (no selfEntry)", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -265,7 +259,6 @@ describe("PartitionLease.acquire — fresh device (no selfEntry)", () => {
         stamper,
         backupSigner: BACKUP_SIGNER,
         swarmEncryptionKey: TEST_ENC_KEY,
-        accountId: ACCOUNT_ID,
         partition: p,
         payload: {
           holderDeviceId: DEVICE_B,
@@ -378,7 +371,6 @@ describe("PartitionLease.refresh", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -409,7 +401,6 @@ describe("PartitionLease.release", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
@@ -473,7 +464,6 @@ describe("PartitionLease.hydrate + refresh", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)

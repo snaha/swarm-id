@@ -93,7 +93,6 @@ export class PartitionLease {
   private acquired:
     | {
         partition: number
-        accountId: string
         deviceId: string
         batchId: BatchId
         acquiredAt: number
@@ -105,7 +104,6 @@ export class PartitionLease {
   constructor(
     private readonly opts: {
       bee: Bee
-      accountId: string
       deviceId: string
       batchId: BatchId
       batchDepth: number
@@ -132,7 +130,6 @@ export class PartitionLease {
    */
   static async fromSwarmEncryptionKey(opts: {
     bee: Bee
-    accountId: string
     deviceId: string
     batchId: BatchId
     batchDepth: number
@@ -191,7 +188,6 @@ export class PartitionLease {
           bee: this.opts.bee,
           backupSigner: this.opts.backupSigner,
           swarmEncryptionKey: this.opts.swarmEncryptionKey,
-          accountId: this.opts.accountId,
           partition: p,
         })
         if (
@@ -251,7 +247,6 @@ export class PartitionLease {
       stamper: this.opts.stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
-      accountId: this.opts.accountId,
       partition,
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
@@ -275,7 +270,6 @@ export class PartitionLease {
     const lockPayload = lockResult.payload
     this.acquired = {
       partition,
-      accountId: this.opts.accountId,
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId,
       acquiredAt: lockPayload.acquiredAt,
@@ -321,7 +315,6 @@ export class PartitionLease {
       stamper: this.opts.stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
-      accountId: this.acquired.accountId,
       partition: this.acquired.partition,
       deviceId: this.acquired.deviceId,
       ttlMs: LEASE_TTL_MS,
@@ -375,7 +368,6 @@ export class PartitionLease {
       stamper: this.opts.stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
-      accountId: this.acquired.accountId,
       partition: this.acquired.partition,
       payload: releasePayload,
     })
@@ -404,7 +396,6 @@ export class PartitionLease {
   }): void {
     this.acquired = {
       partition: state.partition,
-      accountId: this.opts.accountId,
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId,
       acquiredAt: state.acquiredAt,

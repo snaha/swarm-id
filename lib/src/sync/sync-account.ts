@@ -27,6 +27,7 @@ import {
   updateAfterWrite,
   saveUtilizationState,
   calculateUtilization,
+  UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { collectAccountStampBatchIds } from "../utils/postage-stamp-association"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
@@ -250,6 +251,10 @@ export function createSyncAccount(
             encryptionKey: hexToUint8Array(swarmEncryptionKey),
             cache: utilizationStore,
             tracker,
+            reservedBuckets:
+              stamper instanceof UtilizationAwareStamper
+                ? stamper.getLockSocBuckets()
+                : undefined,
           })
 
           // Flush stamper bucket state updates to cache (if supported)

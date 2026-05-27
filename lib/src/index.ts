@@ -52,6 +52,7 @@ export {
   createStamper,
   prepareBucketState,
   UtilizationAwareStamper,
+  PartitionLeaseLostError,
   getChunkLayout,
   deriveUtilizationChunkKey,
   resolveUtilizationChunkKeys,
@@ -104,15 +105,27 @@ export {
   compareGenerations,
   makeDeviceTiebreaker,
   makePartitionLockIdentifier,
+  readPartitionHolders,
   readPartitionLock,
   writePartitionLock,
+  lockSocAddress,
+  lockSocBucket,
   NO_HOLDER_DEVICE_ID,
 } from "./sync/partition-lock"
 export type {
   AcquirePartitionLockResult,
+  PartitionHolder,
   PartitionLockGeneration,
   PartitionLockPayload,
 } from "./sync/partition-lock"
+export {
+  claimPartitionEagerly,
+  DEFAULT_CLAIM_TIMEOUT_MS,
+} from "./sync/claim-partition-eagerly"
+export type {
+  ClaimPartitionEagerlyOpts,
+  ClaimPartitionResult,
+} from "./sync/claim-partition-eagerly"
 
 // Utilization storage (IndexedDB cache)
 export {

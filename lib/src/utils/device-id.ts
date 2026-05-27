@@ -64,6 +64,31 @@ export function mergeDevices(
 }
 
 /**
+ * Probe `navigator.userAgentData.brands` for a recognisable browser brand.
+ * Returns `undefined` when Client Hints aren't exposed (Firefox, Safari),
+ * letting the caller fall back to UA sniffing.
+ *
+ * Order matters: Brave, Edge, and Opera all also publish `Chromium` and
+ * `Google Chrome` brands alongside their own, so check the most-specific
+ * brand first. Plain Chrome publishes `Google Chrome` + `Chromium` only.
+ */
+function detectBrowserFromUAData(): string | undefined {
+  const data = (
+    navigator as Navigator & {
+      userAgentData?: { brands?: Array<{ brand: string }> }
+    }
+  ).userAgentData
+  const brands = data?.brands?.map((b) => b.brand)
+  if (!brands || brands.length === 0) return undefined
+  if (brands.includes("Brave")) return "Brave"
+  if (brands.includes("Microsoft Edge")) return "Edge"
+  if (brands.includes("Opera")) return "Opera"
+  if (brands.includes("Google Chrome")) return "Chrome"
+  if (brands.includes("Chromium")) return "Chromium"
+  return undefined
+}
+
+/**
  * Detect a human-readable name for the current device and browser.
  * Returns a string like "Chrome on Linux Desktop" or "Safari on iPhone".
  */
@@ -81,7 +106,14 @@ export function detectDeviceName(): string {
   else if (/Linux/.test(ua)) device = "Linux Desktop"
   else device = "Unknown Device"
 
-  // Order matters: Edge and Chrome both contain "Chrome"; OPR is Opera.
+  // Prefer UA Client Hints — Brave masks itself in the UA string for
+  // privacy, so UA sniffing alone reports it as Chrome. Chromium-derived
+  // browsers expose their identity via `navigator.userAgentData.brands`.
+  const brandedBrowser = detectBrowserFromUAData()
+  if (brandedBrowser) return `${brandedBrowser} on ${device}`
+
+  // Fallback: UA sniffing. Order matters: Edge and Chrome both contain
+  // "Chrome"; OPR is Opera. Brave is indistinguishable from Chrome here.
   let browser: string
   if (/Edg\//.test(ua)) browser = "Edge"
   else if (/OPR\/|Opera/.test(ua)) browser = "Opera"

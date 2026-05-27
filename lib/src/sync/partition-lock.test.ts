@@ -9,19 +9,38 @@
  * `downloadEncryptedSOC`) against an in-memory store.
  */
 
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import { PrivateKey, type Bee, type Stamper } from "@ethersphere/bee-js"
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest"
+import {
+  EthAddress,
+  PrivateKey,
+  type Bee,
+  type Stamper,
+} from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import {
   acquirePartitionLock,
   compareGenerations,
+  lockSocAddress,
+  lockSocBucket,
   makeDeviceTiebreaker,
   makePartitionLockIdentifier,
+  readPartitionHolders,
   readPartitionLock,
   writePartitionLock,
   NO_HOLDER_DEVICE_ID,
   type PartitionLockPayload,
 } from "./partition-lock"
+import { toBucket } from "../utils/batch-utilization"
+import { deriveSecret, deriveSwarmEncryptionKey } from "../utils/key-derivation"
+import { hexToUint8Array } from "../utils/hex"
 import {
   MockBee,
   MockChunkStore,
@@ -34,7 +53,6 @@ import {
 // Fixtures
 // ============================================================================
 
-const ACCOUNT_ID = "aabb".padEnd(40, "0")
 const DEVICE_A = "device-alpha-111"
 const DEVICE_B = "device-beta-222"
 const DEVICE_C = "device-gamma-333"
@@ -101,7 +119,6 @@ function commonOpts(deviceId: string, overrides?: { now?: () => number }) {
     stamper,
     backupSigner: BACKUP_SIGNER,
     swarmEncryptionKey: TEST_ENC_KEY,
-    accountId: ACCOUNT_ID,
     partition: PARTITION,
     deviceId,
     ttlMs: TTL_MS,
@@ -116,22 +133,16 @@ function commonOpts(deviceId: string, overrides?: { now?: () => number }) {
 // ============================================================================
 
 describe("makePartitionLockIdentifier", () => {
-  it("is deterministic for the same (accountId, partition)", () => {
-    const a = makePartitionLockIdentifier(ACCOUNT_ID, 0)
-    const b = makePartitionLockIdentifier(ACCOUNT_ID, 0)
+  it("is deterministic for the same partition", () => {
+    const a = makePartitionLockIdentifier(0)
+    const b = makePartitionLockIdentifier(0)
     expect(a.toHex()).toBe(b.toHex())
   })
 
   it("differs across partitions", () => {
-    const p0 = makePartitionLockIdentifier(ACCOUNT_ID, 0)
-    const p1 = makePartitionLockIdentifier(ACCOUNT_ID, 1)
+    const p0 = makePartitionLockIdentifier(0)
+    const p1 = makePartitionLockIdentifier(1)
     expect(p0.toHex()).not.toBe(p1.toHex())
-  })
-
-  it("differs across accountIds", () => {
-    const a1 = makePartitionLockIdentifier(ACCOUNT_ID, 0)
-    const a2 = makePartitionLockIdentifier("ccdd".padEnd(40, "0"), 0)
-    expect(a1.toHex()).not.toBe(a2.toHex())
   })
 })
 
@@ -178,7 +189,6 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
     })
     expect(lock).toBeUndefined()
@@ -199,7 +209,6 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload,
     })
@@ -207,7 +216,6 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
     })
     expect(read).toEqual(payload)
@@ -219,7 +227,6 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
     }
     const first: PartitionLockPayload = {
@@ -248,7 +255,6 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
     })
     expect(read?.holderDeviceId).toBe(DEVICE_B)
@@ -276,7 +282,6 @@ describe("acquirePartitionLock — single device", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
@@ -319,7 +324,6 @@ describe("acquirePartitionLock — single device", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: NO_HOLDER_DEVICE_ID,
@@ -447,7 +451,6 @@ describe("acquirePartitionLock — verify-after-write", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -506,7 +509,7 @@ describe("acquirePartitionLock — known failure modes", () => {
    * underlying mock store directly (used to simulate gossip-delay scenarios).
    */
   function lockSocAddress(): string {
-    const identifier = makePartitionLockIdentifier(ACCOUNT_ID, PARTITION)
+    const identifier = makePartitionLockIdentifier(PARTITION)
     const addr = Binary.keccak256(
       Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
     )
@@ -528,7 +531,6 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -597,7 +599,6 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -654,7 +655,6 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -686,7 +686,6 @@ describe("acquirePartitionLock — known failure modes", () => {
       bee: bee as unknown as Bee,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
     })
     expect(converged?.holderDeviceId).toBe(DEVICE_B)
@@ -721,7 +720,6 @@ describe("acquirePartitionLock — known failure modes", () => {
       stamper,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
-      accountId: ACCOUNT_ID,
       partition: PARTITION,
       payload: {
         holderDeviceId: DEVICE_B,
@@ -738,5 +736,211 @@ describe("acquirePartitionLock — known failure modes", () => {
     waitA.release()
     const rA = await pA
     expect(rA.outcome).toBe("acquired") // wrong answer
+  })
+})
+
+describe("lockSocAddress / lockSocBucket", () => {
+  it("lockSocAddress is deterministic and matches the SOC address formula", () => {
+    const addr1 = lockSocAddress(0, OWNER)
+    const addr2 = lockSocAddress(0, OWNER)
+    expect(addr1).toEqual(addr2)
+
+    // Spec: keccak256(identifier || owner).
+    const identifier = makePartitionLockIdentifier(0)
+    const expected = Binary.keccak256(
+      Binary.concatBytes(identifier.toUint8Array(), OWNER.toUint8Array()),
+    )
+    expect(addr1).toEqual(expected)
+  })
+
+  it("different partitions produce different lock-SOC addresses", () => {
+    const a = lockSocAddress(0, OWNER)
+    const b = lockSocAddress(1, OWNER)
+    expect(a).not.toEqual(b)
+  })
+
+  it("different owners produce different lock-SOC addresses (cross-account separation)", () => {
+    const otherOwner = new PrivateKey(
+      new Uint8Array(32).map((_, i) => (i * 11 + 7) & 0xff),
+    )
+      .publicKey()
+      .address()
+    expect(lockSocAddress(0, OWNER)).not.toEqual(lockSocAddress(0, otherOwner))
+  })
+
+  it("lockSocBucket extracts the bucket from the lock-SOC address", () => {
+    const bucket = lockSocBucket(0, OWNER)
+    const addr = lockSocAddress(0, OWNER)
+    expect(bucket).toBe(toBucket(addr))
+    expect(bucket).toBeGreaterThanOrEqual(0)
+    expect(bucket).toBeLessThan(65536)
+  })
+})
+
+// ============================================================================
+// readPartitionHolders
+// ============================================================================
+
+describe("readPartitionHolders", () => {
+  // Pick an arbitrary derivationKey. Derive the matching backup signer the
+  // same way the helper does internally, so the mock-store fetch routing
+  // (which keys on owner) matches what the helper will look up.
+  const TEST_DERIVATION_KEY = "ab".repeat(32)
+  let testBackupSigner: PrivateKey
+  let testOwner: EthAddress
+  let testSwarmEncryptionKey: Uint8Array
+
+  beforeAll(async () => {
+    const swarmEncryptionKeyHex =
+      await deriveSwarmEncryptionKey(TEST_DERIVATION_KEY)
+    testSwarmEncryptionKey = hexToUint8Array(swarmEncryptionKeyHex)
+    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    testBackupSigner = new PrivateKey(backupKeyHex)
+    testOwner = testBackupSigner.publicKey().address()
+  })
+
+  let h_store: MockChunkStore
+  let h_bee: MockBee
+  let h_stamper: Stamper
+
+  beforeEach(() => {
+    h_store = new MockChunkStore()
+    h_bee = new MockBee(h_store)
+    h_stamper = createMockStamper() as unknown as Stamper
+    mockFetch(h_store, testOwner)
+  })
+
+  async function writeHolder(
+    partition: number,
+    payload: PartitionLockPayload,
+  ): Promise<void> {
+    await writePartitionLock({
+      bee: h_bee as unknown as Bee,
+      stamper: h_stamper,
+      backupSigner: testBackupSigner,
+      swarmEncryptionKey: testSwarmEncryptionKey,
+      partition,
+      payload,
+    })
+  }
+
+  it("returns an empty list when no partition has a lock SOC", async () => {
+    const holders = await readPartitionHolders({
+      bee: h_bee as unknown as Bee,
+      derivationKey: TEST_DERIVATION_KEY,
+      partitionCount: 2,
+    })
+    expect(holders).toEqual([])
+  })
+
+  it("returns all live holders", async () => {
+    const now = 5_000_000
+    await writeHolder(0, {
+      holderDeviceId: DEVICE_A,
+      generation: {
+        timestampMs: now,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+      },
+      acquiredAt: now,
+      leasedUntil: now + TTL_MS,
+    })
+    await writeHolder(1, {
+      holderDeviceId: DEVICE_B,
+      generation: {
+        timestampMs: now,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+      acquiredAt: now,
+      leasedUntil: now + TTL_MS,
+    })
+
+    const holders = await readPartitionHolders({
+      bee: h_bee as unknown as Bee,
+      derivationKey: TEST_DERIVATION_KEY,
+      partitionCount: 2,
+      now: () => now,
+    })
+    expect(holders).toHaveLength(2)
+    expect(holders.find((h) => h.partition === 0)?.deviceId).toBe(DEVICE_A)
+    expect(holders.find((h) => h.partition === 1)?.deviceId).toBe(DEVICE_B)
+  })
+
+  it("filters out expired holders", async () => {
+    const now = 5_000_000
+    await writeHolder(0, {
+      holderDeviceId: DEVICE_A,
+      generation: {
+        timestampMs: now - 1000,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+      },
+      acquiredAt: now - 1000,
+      leasedUntil: now + TTL_MS, // live
+    })
+    await writeHolder(1, {
+      holderDeviceId: DEVICE_B,
+      generation: {
+        timestampMs: now - 100_000,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+      acquiredAt: now - 100_000,
+      leasedUntil: now - 1000, // expired
+    })
+
+    const holders = await readPartitionHolders({
+      bee: h_bee as unknown as Bee,
+      derivationKey: TEST_DERIVATION_KEY,
+      partitionCount: 2,
+      now: () => now,
+    })
+    expect(holders).toHaveLength(1)
+    expect(holders[0]).toEqual({
+      partition: 0,
+      deviceId: DEVICE_A,
+      leasedUntil: now + TTL_MS,
+    })
+  })
+
+  it("filters out the NO_HOLDER sentinel (released slot)", async () => {
+    const now = 5_000_000
+    await writeHolder(0, {
+      holderDeviceId: NO_HOLDER_DEVICE_ID,
+      generation: {
+        timestampMs: now,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+      },
+      acquiredAt: now,
+      leasedUntil: now + TTL_MS, // even with future leasedUntil, sentinel wins
+    })
+
+    const holders = await readPartitionHolders({
+      bee: h_bee as unknown as Bee,
+      derivationKey: TEST_DERIVATION_KEY,
+      partitionCount: 2,
+      now: () => now,
+    })
+    expect(holders).toEqual([])
+  })
+
+  it("includes partition 0 but not partition 1 when only one is written", async () => {
+    const now = 5_000_000
+    await writeHolder(1, {
+      holderDeviceId: DEVICE_C,
+      generation: {
+        timestampMs: now,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_C),
+      },
+      acquiredAt: now,
+      leasedUntil: now + TTL_MS,
+    })
+
+    const holders = await readPartitionHolders({
+      bee: h_bee as unknown as Bee,
+      derivationKey: TEST_DERIVATION_KEY,
+      partitionCount: 2,
+      now: () => now,
+    })
+    expect(holders).toHaveLength(1)
+    expect(holders[0].partition).toBe(1)
+    expect(holders[0].deviceId).toBe(DEVICE_C)
   })
 })

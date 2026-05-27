@@ -23,6 +23,7 @@
   import { restoreAccountFromSwarm, deriveAccountDerivationKey } from '@snaha/swarm-id'
   import { Bee, BatchId, EthAddress } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
+  import { claimPartitionDuringSignin } from '$lib/utils/claim-partition-during-signin'
   import {
     generateEncryptionSalt,
     deriveEncryptionKey,
@@ -114,6 +115,12 @@
 
       sessionStore.setAccount(account)
       sessionStore.setTemporaryMasterKey(masterKey)
+      // Fire-and-forget: try to claim a partition now so the first upload
+      // doesn't pay the full TTL wait. On failure the proxy's upload-time
+      // flow handles it. Aborted by the unload of the current page.
+      const claimAbort = new AbortController()
+      window.addEventListener('beforeunload', () => claimAbort.abort(), { once: true })
+      void claimPartitionDuringSignin(account, claimAbort.signal)
       navigateToConnectOrHome()
     } catch (err) {
       console.error('🔑 Ethereum sign-in failed:', err)

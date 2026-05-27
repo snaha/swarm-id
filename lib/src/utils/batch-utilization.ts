@@ -25,6 +25,7 @@ import {
   Identifier,
   type Bee,
   EthAddress,
+  PrivateKey,
   type EnvelopeWithBatchId,
 } from "@ethersphere/bee-js"
 import {
@@ -37,6 +38,27 @@ import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import type { EpochUpdateHints } from "../proxy/feeds/epochs/types"
+import { lockSocAddress } from "./lock-soc"
+import { deriveSecret } from "./key-derivation"
+import { uint8ArrayToHex } from "./hex"
+
+// ============================================================================
+// Errors
+// ============================================================================
+
+/**
+ * Thrown by `UtilizationAwareStamper.stamp()` when the partition lease was
+ * invalidated (peer took over the partition) between binding and stamping.
+ * Callers should surface this as "your partition was reclaimed" — the
+ * upload cannot complete and any in-flight chunks would silently overwrite
+ * the peer's data if stamped anyway.
+ */
+export class PartitionLeaseLostError extends Error {
+  constructor(message = "Partition lease was reclaimed by another device.") {
+    super(message)
+    this.name = "PartitionLeaseLostError"
+  }
+}
 
 // ============================================================================
 // Constants
@@ -74,14 +96,14 @@ export const PARTITION_COUNT = 2
  * before the lease must be refreshed; if it crashes without refreshing,
  * peers can reclaim the partition via Case D.
  */
-export const LEASE_TTL_MS = 60 * 60 * 1000 // 1 hour
+export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
 
 /**
  * How often the holder bumps `leasedUntil` on its own claim feed. One
- * quarter of the TTL gives three "safety net" refresh attempts before a
+ * third of the TTL gives three "safety net" refresh attempts before a
  * peer would consider the lease expired.
  */
-export const LEASE_REFRESH_MS = LEASE_TTL_MS / 4 // 15 minutes
+export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
 
 /**
  * Counter-skew divisor for `RESUME_COUNTER_SKEW = ceil(slotsPerBucket /
@@ -1302,9 +1324,11 @@ export async function saveUtilizationState(
     encryptionKey: Uint8Array
     cache: UtilizationStoreDB
     tracker: DirtyChunkTracker
+    reservedBuckets?: ReadonlySet<number>
   },
 ): Promise<void> {
-  const { bee, stamper, encryptionKey, cache, tracker } = options
+  const { bee, stamper, encryptionKey, cache, tracker, reservedBuckets } =
+    options
 
   // Get dirty chunks from tracker
   const dirtyChunkIndices = tracker.getDirtyChunks()
@@ -1315,8 +1339,15 @@ export async function saveUtilizationState(
 
   // Treat the buckets currently occupied by clean utilisation chunks as
   // already claimed — dirty chunks must avoid them so utilisation chunks
-  // land in distinct buckets within a save.
+  // land in distinct buckets within a save. Also avoid `reservedBuckets`
+  // (e.g. per-partition lock SOCs) so utilisation chunks don't land on a
+  // slot the lock SOC overstamps every refresh.
   const claimedBuckets = claimedBucketsForCleanChunks(state)
+  if (reservedBuckets) {
+    for (const bucket of reservedBuckets) {
+      claimedBuckets.add(bucket)
+    }
+  }
 
   for (const chunkIndex of dirtyChunkIndices) {
     const chunkMetadata = state.chunks[chunkIndex]
@@ -1562,6 +1593,31 @@ export class UtilizationAwareStamper implements Stamper {
    */
   private partitionLocalCounter: Uint32Array | undefined = undefined
 
+  /**
+   * Per-account lock-SOC addresses (one per partition). When `stamp()` sees
+   * a chunk whose address matches one of these, it routes the write to the
+   * lock SOC's reserved slot (= the partition index) within the same bucket,
+   * bypassing the partition data-slot formula and the local counter bump.
+   * Overstamping the same SOC at the same slot does not consume new slot
+   * budget, so the heartbeat cadence is sustainable.
+   *
+   * Populated by `bindLockSocs()` once per stamper lifetime (deterministic
+   * from accountId + partitionCount + owner). Independent of `partition`
+   * binding so lock-SOC writes work both before and after `bindPartition`.
+   */
+  private lockSocs:
+    | ReadonlyArray<{ partition: number; address: Uint8Array }>
+    | undefined = undefined
+
+  /**
+   * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
+   * detects displacement on a refresh tick (or upload-start lease check);
+   * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
+   * to abort the upload cleanly instead of silently corrupting the peer's
+   * slot space.
+   */
+  private leaseStale: boolean = false
+
   readonly batchId: BatchId
   readonly depth: number
 
@@ -1596,6 +1652,20 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
+   * Buckets that contain a per-partition lock SOC. External callers that
+   * persist utilisation chunks (e.g. `saveUtilizationState` from the sync
+   * path) should treat these as already claimed so utilisation-chunk key
+   * search avoids dropping a chunk on the lock SOC's bucket.
+   */
+  getLockSocBuckets(): ReadonlySet<number> {
+    const set = new Set<number>()
+    for (const soc of this.lockSocs ?? []) {
+      set.add(toBucket(soc.address))
+    }
+    return set
+  }
+
+  /**
    * Bind this stamper to a leased partition. Called once by the lease
    * orchestrator after `acquire()` succeeds. `localCounter` is the
    * starting per-bucket count for THIS device — fresh zeros for Case A,
@@ -1614,6 +1684,44 @@ export class UtilizationAwareStamper implements Stamper {
     this.partition = opts.partition
     this.partitionCountValue = opts.partitionCount
     this.partitionLocalCounter = opts.localCounter
+    this.leaseStale = false
+  }
+
+  /**
+   * Bind the per-partition lock-SOC addresses. Called once per stamper
+   * lifetime (the addresses are deterministic from the account). Routes
+   * lock-SOC overstamps to a fixed reserved slot per partition so the tight
+   * heartbeat cadence doesn't consume new slot budget every refresh.
+   *
+   * Independent of `bindPartition` — can be called before the partition
+   * lease is acquired (the first lock-SOC write inside `acquirePartitionLock`
+   * needs this routing to already be in place).
+   */
+  bindLockSocs(
+    socs: ReadonlyArray<{ partition: number; address: Uint8Array }>,
+  ): void {
+    this.lockSocs = socs
+  }
+
+  /**
+   * Inverse of `bindPartition` — clears partition slot state on demote.
+   * Leaves `lockSocs` intact (still valid for the account; refresh/yield
+   * writes may need them) and clears the lease-stale flag.
+   */
+  unbindPartition(): void {
+    this.partition = undefined
+    this.partitionCountValue = 1
+    this.partitionLocalCounter = undefined
+    this.leaseStale = false
+  }
+
+  /**
+   * Circuit-break: mark the bound lease as stale. The next partition-bound
+   * `stamp()` call will throw `PartitionLeaseLostError` so an in-flight
+   * upload aborts cleanly mid-stream when a peer takes our partition.
+   */
+  invalidateLease(): void {
+    this.leaseStale = true
   }
 
   private constructor(
@@ -1648,7 +1756,7 @@ export class UtilizationAwareStamper implements Stamper {
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
-    _owner: EthAddress,
+    owner: EthAddress,
     encryptionKey: Uint8Array,
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
@@ -1683,7 +1791,7 @@ export class UtilizationAwareStamper implements Stamper {
     // Create underlying stamper with bucket state
     const stamper = Stamper.fromState(privateKey, batchId, bucketState, depth)
 
-    return new UtilizationAwareStamper(
+    const instance = new UtilizationAwareStamper(
       stamper,
       batchId,
       depth,
@@ -1691,6 +1799,25 @@ export class UtilizationAwareStamper implements Stamper {
       encryptionKey,
       utilizationState,
     )
+
+    // Auto-bind lock SOCs for all partitions. The lock-SOC owner is the
+    // BACKUP signer's address — same value `writePartitionLock` derives
+    // internally — NOT the `owner` parameter callers pass (which is the
+    // account / postage-signer address depending on call site). Deriving
+    // here from `encryptionKey` (= swarmEncryptionKey at every call site)
+    // makes the routing self-consistent regardless of caller. Harmless for
+    // single-device legacy accounts (the lock SOCs are never written).
+    void owner // currently unused; reserved for a future Swarm upload path.
+    const swarmEncryptionKeyHex = uint8ArrayToHex(encryptionKey)
+    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    const backupSigner = new PrivateKey(backupKeyHex)
+    const backupOwner = backupSigner.publicKey().address()
+    instance.lockSocs = Array.from({ length: PARTITION_COUNT }, (_, p) => ({
+      partition: p,
+      address: lockSocAddress(p, backupOwner),
+    }))
+
+    return instance
   }
 
   /**
@@ -1702,6 +1829,29 @@ export class UtilizationAwareStamper implements Stamper {
    * @returns Envelope with batch ID and signature
    */
   stamp(chunk: CafeChunk): EnvelopeWithBatchId {
+    const chunkAddress = chunk.hash()
+
+    // Lock-SOC short-circuit: when stamping our own per-partition lock SOC,
+    // overstamp the fixed reserved slot (= partition index, 0 or 1) within
+    // its bucket. Doesn't consume new slot budget, doesn't bump our local
+    // counter — the SOC address is the same on every refresh, so the slot
+    // it occupies stays the same too.
+    const lockSoc = this.lockSocs?.find((soc) =>
+      Binary.equals(soc.address, chunkAddress),
+    )
+    if (lockSoc) {
+      const bucket = toBucket(chunkAddress)
+      this.stamper.buckets[bucket] = lockSoc.partition
+      return this.stamper.stamp(chunk)
+    }
+
+    // Partition lease was reclaimed — abort cleanly before the stamp lands
+    // in slot space the peer now controls. Only meaningful when a partition
+    // is bound (single-device legacy mode has no lease to invalidate).
+    if (this.partition !== undefined && this.leaseStale) {
+      throw new PartitionLeaseLostError()
+    }
+
     // When holding a partition lease, coerce the bee-js stamper to use this
     // device's next partition slot instead of the next "any" slot. The bee-js
     // `Stamper.buckets` is a public mutable Uint32Array (bee-js/src/stamper/stamper.ts:8,20,46),
@@ -1710,8 +1860,7 @@ export class UtilizationAwareStamper implements Stamper {
       this.partition !== undefined &&
       this.partitionLocalCounter !== undefined
     ) {
-      const address = chunk.hash()
-      const bucket = (address[0] << 8) | address[1]
+      const bucket = (chunkAddress[0] << 8) | chunkAddress[1]
       const slot =
         DATA_COUNTER_START +
         this.partition +
@@ -1781,6 +1930,13 @@ export class UtilizationAwareStamper implements Stamper {
     // redundant re-upload of every flushed chunk on the next sync.
     try {
       const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
+      // Reserve each partition's lock-SOC bucket so utilisation-chunk key
+      // search picks a different nonce. Otherwise a utilisation chunk could
+      // land in the same bucket and try to claim slot 0/1 — the slot the
+      // lock SOC overstamps every refresh.
+      for (const soc of this.lockSocs ?? []) {
+        claimedBuckets.add(toBucket(soc.address))
+      }
       const sortedDirtyChunkIndexes = Array.from(dirtyChunkIndexes).sort(
         (a, b) => a - b,
       )

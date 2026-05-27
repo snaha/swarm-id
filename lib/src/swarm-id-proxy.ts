@@ -90,6 +90,12 @@ import {
 } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import { PartitionLease } from "./sync/partition-lease"
+import {
+  makeDeviceTiebreaker,
+  readPartitionLock,
+  writePartitionLock,
+  NO_HOLDER_DEVICE_ID,
+} from "./sync/partition-lock"
 import type { EpochUpdateHints } from "./proxy/feeds/epochs/types"
 import type { ActiveDevice } from "./schemas"
 import { getOrCreateDeviceId } from "./utils/device-id"
@@ -104,6 +110,7 @@ import {
 import {
   hexToUint8Array,
   uint8ArrayToHex,
+  deriveSecret,
   deriveSwarmEncryptionKey,
 } from "./utils/key-derivation"
 import {
@@ -179,6 +186,34 @@ export class SwarmIdProxy {
   private partitionRefreshTimer: ReturnType<typeof setInterval> | undefined
   private isReadOnly: boolean = false
   private leaseAccountId: string | undefined
+  /**
+   * Wall-clock ms of the last time we verified the lock SOC still names us
+   * as holder. Updated on successful acquire, successful refresh, and the
+   * throttled `ensureLeaseStillValid` upload-entry check. Drives the
+   * upload-time freshness check so a write burst pays at most one extra
+   * lock-SOC read per refresh interval.
+   */
+  private lastLeaseValidatedAt: number = 0
+  /**
+   * `beforeunload` handler that writes the `NO_HOLDER_DEVICE_ID` sentinel
+   * to our partition's lock SOC so peers see the slot free immediately on
+   * tab close, without waiting out the TTL. Best-effort — Safari background,
+   * force-quit, and crashes bypass it; TTL still bounds the worst case.
+   */
+  private yieldOnCloseHandler: ((event: BeforeUnloadEvent) => void) | undefined
+  /**
+   * Backup signer + account context bound alongside lock SOCs. Held so
+   * the yield-on-close handler can write the release sentinel without
+   * re-deriving the signer at unload time (page is about to die).
+   */
+  private leaseContext:
+    | {
+        accountId: string
+        backupSigner: PrivateKey
+        swarmEncryptionKey: Uint8Array
+        partitionCount: number
+      }
+    | undefined
   private pendingLeaseAccountInfo:
     | {
         owner: EthAddress
@@ -515,6 +550,33 @@ export class SwarmIdProxy {
     // uploadChunk call here would block proxyReady for 30 seconds.
     if (accountInfo.partitionCount > 1) {
       this.pendingLeaseAccountInfo = accountInfo
+      // Lock-SOC routing on the stamper was auto-bound inside
+      // `UtilizationAwareStamper.create` (from `(partition, owner)`); we
+      // only need to stash the lease context for the yield-on-close handler
+      // and the throttled freshness check.
+      await this.captureLeaseContext(accountInfo)
+      this.installYieldOnClose()
+    }
+  }
+
+  /**
+   * Stash the backup signer + account context so the yield-on-close handler
+   * and `ensureLeaseStillValid` can write/read the lock SOC without re-
+   * deriving the signer each time (and without needing to do it at unload).
+   */
+  private async captureLeaseContext(accountInfo: {
+    accountId: string
+    encryptionKey: Uint8Array
+    partitionCount: number
+  }): Promise<void> {
+    const swarmEncryptionKeyHex = uint8ArrayToHex(accountInfo.encryptionKey)
+    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    const backupSigner = new PrivateKey(backupKeyHex)
+    this.leaseContext = {
+      accountId: accountInfo.accountId,
+      backupSigner,
+      swarmEncryptionKey: accountInfo.encryptionKey,
+      partitionCount: accountInfo.partitionCount,
     }
   }
 
@@ -546,7 +608,6 @@ export class SwarmIdProxy {
       const deviceId = getOrCreateDeviceId()
       const lease = await PartitionLease.fromSwarmEncryptionKey({
         bee: this.bee,
-        accountId: accountInfo.accountId,
         deviceId,
         batchId: new BatchId(this.postageBatchId),
         batchDepth: this.stamperDepth,
@@ -597,6 +658,7 @@ export class SwarmIdProxy {
           lease,
           acquiredAt: stored.acquiredAt,
         })
+        this.lastLeaseValidatedAt = Date.now()
         return
       }
 
@@ -655,6 +717,7 @@ export class SwarmIdProxy {
           lease,
           acquiredAt,
         })
+        this.lastLeaseValidatedAt = acquiredAt
         // Kick off one immediate background refresh so the device-claim
         // feed gets populated (and `LeaseState` + IndexedDB pick up the
         // hints) without waiting LEASE_REFRESH_MS.
@@ -770,6 +833,7 @@ export class SwarmIdProxy {
         lease,
         acquiredAt,
       })
+      this.lastLeaseValidatedAt = acquiredAt
     } catch (error) {
       console.error("[Proxy] Failed to acquire partition lease:", error)
       this.partitionLease = undefined
@@ -855,50 +919,302 @@ export class SwarmIdProxy {
             console.warn("[Proxy] Partition lease release failed:", err),
           )
       }
+      stamper.unbindPartition()
     }
     this.partitionLease = undefined
     this.isReadOnly = false
+    this.lastLeaseValidatedAt = 0
     if (this.leaseAccountId) {
       this.writeLeaseState(this.leaseAccountId, null)
       this.leaseAccountId = undefined
     }
+    if (this.yieldOnCloseHandler && typeof window !== "undefined") {
+      window.removeEventListener("beforeunload", this.yieldOnCloseHandler)
+      this.yieldOnCloseHandler = undefined
+    }
+    this.leaseContext = undefined
   }
 
-  private static readonly PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 10000
+  /**
+   * Hard cap on `ensurePartitionLease` (including any wait-for-slot retry).
+   * Must comfortably exceed `SLOT_WAIT_TIMEOUT_MS + LEASE_REFRESH_MS` so the
+   * inner retry loop can run its full course without the outer race
+   * cancelling it mid-attempt.
+   */
+  private static readonly PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 45000
 
   /**
-   * Acquire the partition lease if one is pending (deferred from initializeStamper).
-   * Called from withModeAwareWriteLock so it runs under the write lock — at most
-   * one acquisition attempt can be in-flight at a time.
+   * Maximum time `ensurePartitionLease` will spend polling for a slot when
+   * every partition is held by a live foreign holder. Matches the
+   * user-facing SLA for a 3rd device's first upload.
+   */
+  private static readonly SLOT_WAIT_TIMEOUT_MS = 30000
+
+  /**
+   * Acquire the partition lease if one is pending (deferred from
+   * initializeStamper), OR run the throttled lock-SOC freshness check on an
+   * already-held lease. Called from withModeAwareWriteLock so it runs under
+   * the write lock — at most one acquisition attempt can be in-flight at a
+   * time.
    */
   private async ensurePartitionLease(): Promise<void> {
-    if (!this.pendingLeaseAccountInfo) return
-    const accountInfo = this.pendingLeaseAccountInfo
-    this.pendingLeaseAccountInfo = undefined
+    if (this.pendingLeaseAccountInfo) {
+      const accountInfo = this.pendingLeaseAccountInfo
+      this.pendingLeaseAccountInfo = undefined
 
-    const timeout = new Promise<void>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              `Partition lease timed out after ${SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
+      const timeout = new Promise<void>((_, reject) =>
+        setTimeout(
+          () =>
+            reject(
+              new Error(
+                `Partition lease timed out after ${SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
+              ),
             ),
-          ),
-        SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
-      ),
-    )
+          SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
+        ),
+      )
+      try {
+        await Promise.race([
+          this.acquirePartitionLeaseWithSlotWait(accountInfo),
+          timeout,
+        ])
+      } catch (error) {
+        console.warn(
+          "[Proxy] Partition lease acquisition failed, falling back to single-device mode:",
+          error,
+        )
+        // Pause background work but keep the persisted LeaseState — a
+        // locally-bootstrapped lease is still valid local state, even if
+        // Swarm's claim publish hasn't completed yet.
+        this.pauseLeaseBackgroundWork()
+      }
+      return
+    }
+
+    await this.ensureLeaseStillValid()
+  }
+
+  /**
+   * Wait-for-slot wrapper around `acquirePartitionLease`. When the initial
+   * acquire returns read-only (every partition is held by a live foreign
+   * holder), poll every `LEASE_REFRESH_MS` up to `SLOT_WAIT_TIMEOUT_MS`. If
+   * still no slot at the cap, throw a clear error rather than silently
+   * uploading into a peer's slot space.
+   */
+  private async acquirePartitionLeaseWithSlotWait(accountInfo: {
+    owner: EthAddress
+    encryptionKey: Uint8Array
+    accountId: string
+    activeDevices: ActiveDevice[]
+    partitionCount: number
+  }): Promise<void> {
+    const deadline = Date.now() + SwarmIdProxy.SLOT_WAIT_TIMEOUT_MS
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      await this.acquirePartitionLease(accountInfo)
+      if (!this.isReadOnly) return
+      if (Date.now() + LEASE_REFRESH_MS > deadline) {
+        throw new Error(
+          "No partition available — all slots are held by other devices.",
+        )
+      }
+      await new Promise<void>((resolve) =>
+        setTimeout(resolve, LEASE_REFRESH_MS),
+      )
+    }
+  }
+
+  /**
+   * Throttled lock-SOC freshness check. Skips when the previous check is
+   * less than `LEASE_REFRESH_MS` old, so a write burst pays at most one
+   * extra SOC read per refresh interval. Demotes silently and throws if a
+   * peer now holds our partition (catches displacement the refresh tick
+   * hasn't observed yet — e.g. the machine slept and we missed our own
+   * refresh window).
+   */
+  private async ensureLeaseStillValid(): Promise<void> {
+    if (!this.partitionLease || this.isReadOnly) return
+    if (!this.leaseContext || !this.leaseAccountId) return
+    const partition = this.partitionLease.currentPartition
+    if (partition === undefined) return
+    if (Date.now() - this.lastLeaseValidatedAt < LEASE_REFRESH_MS) return
+
+    const deviceId = getOrCreateDeviceId()
+    let payload
     try {
-      await Promise.race([this.acquirePartitionLease(accountInfo), timeout])
+      payload = await readPartitionLock({
+        bee: this.bee,
+        backupSigner: this.leaseContext.backupSigner,
+        swarmEncryptionKey: this.leaseContext.swarmEncryptionKey,
+        partition,
+      })
+    } catch (err) {
+      // Treat a read failure as inconclusive — don't demote on transient
+      // Bee errors. The next refresh tick will retry and either succeed or
+      // detect real displacement.
+      console.warn("[Proxy] Lease freshness check read failed:", err)
+      return
+    }
+
+    if (payload && payload.holderDeviceId === deviceId) {
+      this.lastLeaseValidatedAt = Date.now()
+      return
+    }
+
+    // Either no payload (lock disappeared somehow) or a peer is now the
+    // holder. Either way: we no longer hold this partition.
+    console.warn(
+      `[Proxy] Lease freshness check found partition ${partition} held by ${
+        payload?.holderDeviceId || "<empty>"
+      }; demoting.`,
+    )
+    this.demoteSilently(this.leaseAccountId)
+    throw new Error("Partition lease was reclaimed by another device.")
+  }
+
+  /**
+   * Drop our claim on the current partition without writing a release (the
+   * peer already wrote a higher-generation lock). Clears stamper partition
+   * binding, kills the refresh timer, removes our entry from local
+   * `activeDevices` (the swarm-ui storage listener picks that up and
+   * republishes the snapshot via `triggerSync`), and trips the stamper's
+   * lease-stale circuit breaker so any in-flight upload aborts at the next
+   * `stamp()` call instead of silently corrupting peer data.
+   */
+  private demoteSilently(accountId: string): void {
+    if (this.stamper) {
+      // Order matters: flip stale flag first so any concurrent stamp() sees
+      // the still-bound partition + stale flag → throws PartitionLeaseLostError.
+      // Then unbind so subsequent stamps fall to the re-acquire path via
+      // pendingLeaseAccountInfo below.
+      this.stamper.invalidateLease()
+      this.stamper.unbindPartition()
+    }
+    if (this.partitionRefreshTimer !== undefined) {
+      clearInterval(this.partitionRefreshTimer)
+      this.partitionRefreshTimer = undefined
+    }
+    this.partitionLease = undefined
+    this.isReadOnly = true
+    this.lastLeaseValidatedAt = 0
+    this.writeLeaseState(accountId, null)
+    this.leaseAccountId = undefined
+    this.removeSelfFromActiveDevices(accountId)
+    // Queue a fresh acquire so the next upload runs the wait-for-slot path
+    // (rather than silently using an unbound stamper in single-device mode,
+    // which for a multi-device account would collide with peers).
+    if (this.leaseContext) {
+      const owner = this.leaseContext.backupSigner.publicKey().address()
+      this.pendingLeaseAccountInfo = {
+        owner,
+        encryptionKey: this.leaseContext.swarmEncryptionKey,
+        accountId: this.leaseContext.accountId,
+        activeDevices: this.readActiveDevicesForAccount(accountId),
+        partitionCount: this.leaseContext.partitionCount,
+      }
+    }
+  }
+
+  /**
+   * Fresh read of an account's `activeDevices` from local storage. Used by
+   * `demoteSilently` to repopulate `pendingLeaseAccountInfo` without
+   * re-deriving anything; the snapshot may not have re-synced yet (the
+   * storage listener's `triggerSync` is debounced 2 s), but the cold
+   * acquire path does an authoritative Swarm scan anyway.
+   */
+  private readActiveDevicesForAccount(accountId: string): ActiveDevice[] {
+    try {
+      const accountsManager = createAccountsStorageManager()
+      const accounts = accountsManager.load()
+      const targetId = accountId.toLowerCase()
+      const found = accounts.find(
+        (a) => a.id.toHex().toLowerCase() === targetId,
+      )
+      return found?.activeDevices ?? []
+    } catch {
+      return []
+    }
+  }
+
+  /**
+   * Filter our deviceId out of the account's `activeDevices` in
+   * localStorage. The swarm-ui storage listener diffs activeDevices and
+   * fires `triggerSync`, which republishes the snapshot to Swarm with this
+   * device demoted — peers then see the slot free.
+   */
+  private removeSelfFromActiveDevices(accountId: string): void {
+    try {
+      const accountsManager = createAccountsStorageManager()
+      const accounts = accountsManager.load()
+      const targetId = accountId.toLowerCase()
+      const deviceId = getOrCreateDeviceId()
+      const updated = accounts.map((a) =>
+        a.id.toHex().toLowerCase() === targetId
+          ? {
+              ...a,
+              activeDevices: (a.activeDevices ?? []).filter(
+                (d) => d.deviceId !== deviceId,
+              ),
+            }
+          : a,
+      )
+      accountsManager.save(updated)
     } catch (error) {
-      console.warn(
-        "[Proxy] Partition lease acquisition failed, falling back to single-device mode:",
+      console.error(
+        "[Proxy] Failed to remove self from activeDevices on demote:",
         error,
       )
-      // Pause background work but keep the persisted LeaseState — a
-      // locally-bootstrapped lease is still valid local state, even if
-      // Swarm's claim publish hasn't completed yet.
-      this.pauseLeaseBackgroundWork()
     }
+  }
+
+  /**
+   * Install a `beforeunload` listener that writes the
+   * `NO_HOLDER_DEVICE_ID` sentinel to our partition's lock SOC so peers
+   * see the slot free immediately on tab close, without waiting out the
+   * TTL. Idempotent. Best-effort: the browser may flush the in-flight
+   * request, but Safari background / force-quit / crashes bypass it —
+   * TTL bounds the worst case either way.
+   */
+  private installYieldOnClose(): void {
+    if (this.yieldOnCloseHandler) return
+    if (typeof window === "undefined") return
+    this.yieldOnCloseHandler = () => {
+      if (!this.partitionLease || !this.leaseContext || !this.stamper) return
+      const partition = this.partitionLease.currentPartition
+      if (partition === undefined) return
+      const accountId = this.leaseContext.accountId
+      const deviceId = getOrCreateDeviceId()
+      const now = Date.now()
+      // Clear local state synchronously first — these always complete before
+      // the page dies. The Swarm sentinel write below is best-effort.
+      // Clearing locally means a reload doesn't show the stale "Lease
+      // expires in expired" line in the Devices UI, and peers see this
+      // device removed from `activeDevices` immediately (via the storage
+      // event the localStorage write triggers in other windows).
+      this.writeLeaseState(accountId, null)
+      this.removeSelfFromActiveDevices(accountId)
+      // Fire-and-forget. Most browsers flush in-flight fetch requests on
+      // unload; we won't await the response because the page is dying.
+      void writePartitionLock({
+        bee: this.bee,
+        stamper: this.stamper,
+        backupSigner: this.leaseContext.backupSigner,
+        swarmEncryptionKey: this.leaseContext.swarmEncryptionKey,
+        partition,
+        payload: {
+          holderDeviceId: NO_HOLDER_DEVICE_ID,
+          generation: {
+            timestampMs: now,
+            tiebreaker: makeDeviceTiebreaker(deviceId),
+          },
+          acquiredAt: now,
+          leasedUntil: now,
+        },
+      }).catch(() => {
+        // Swallow — page is unloading, nothing we can do.
+      })
+    }
+    window.addEventListener("beforeunload", this.yieldOnCloseHandler)
   }
 
   private writeLeaseState(accountId: string, state: LeaseState | null): void {
@@ -932,6 +1248,15 @@ export class SwarmIdProxy {
       lease
         .refresh()
         .then(async (refreshed) => {
+          if (!refreshed) {
+            // `blocked` or `lost-race` from acquirePartitionLock — a peer
+            // now holds this partition. Demote silently so the next upload
+            // either waits for a slot to open or fails with a clear error,
+            // instead of stamping into peer slot space.
+            this.demoteSilently(accountId)
+            return
+          }
+          this.lastLeaseValidatedAt = refreshedAt
           this.writeLeaseState(accountId, {
             deviceId,
             partition,
@@ -939,10 +1264,10 @@ export class SwarmIdProxy {
             acquiredAt,
             isReadOnly: false,
             batchId: this.postageBatchId,
-            generation: refreshed?.generation,
-            claimHints: this.serialiseClaimHints(refreshed?.claimHints),
+            generation: refreshed.generation,
+            claimHints: this.serialiseClaimHints(refreshed.claimHints),
           })
-          if (refreshed?.claimHints && this.stamper) {
+          if (refreshed.claimHints && this.stamper) {
             await this.stamper.updateLeaseMetadata(
               refreshed.generation,
               refreshed.claimHints,

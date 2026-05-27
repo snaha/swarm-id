@@ -21,6 +21,7 @@
   import { restoreAccountFromSwarm, SnapshotDataUnavailableError } from '@snaha/swarm-id'
   import { Bee, BatchId } from '@ethersphere/bee-js'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
+  import { claimPartitionDuringSignin } from '$lib/utils/claim-partition-during-signin'
 
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
@@ -98,6 +99,12 @@
 
       sessionStore.setAccount(restoredAccount)
       sessionStore.setTemporaryMasterKey(passkeyAccount.masterKey)
+      // Fire-and-forget: try to claim a partition now so the first upload
+      // doesn't pay the full TTL wait. On failure the proxy's upload-time
+      // flow handles it. Aborted by the unload of the current page.
+      const claimAbort = new AbortController()
+      window.addEventListener('beforeunload', () => claimAbort.abort(), { once: true })
+      void claimPartitionDuringSignin(restoredAccount, claimAbort.signal)
       navigateToConnectOrHome()
     } catch (err) {
       console.error('🔑 Passkey sign-in failed:', err)

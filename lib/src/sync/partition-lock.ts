@@ -9,9 +9,14 @@
  * write the SOC; concurrent writers are ordered deterministically by a
  * (timestampMs, tiebreaker) fencing token.
  *
- *   identifier = keccak256("swarm-id-partition-lock-v1:" || accountId || ":" || partition)
+ *   identifier = keccak256("swarm-id-partition-lock-v1:" || partition)
  *   owner       = backup signer (shared across the account's devices)
  *   encryption  = swarmEncryptionKey (same as iteration-1 feeds)
+ *
+ * The identifier only carries the partition number — domain separation
+ * across accounts comes from the per-account `owner` (derived from each
+ * account's `derivationKey`), so the SOC address still differs per account
+ * without needing accountId in the identifier hash.
  *
  * Protocol (acquire / takeover / refresh):
  *   1. Read the lock SOC.
@@ -23,13 +28,22 @@
  * See: docs/Multi-Device-Partition-Lease-iteration-2.md
  */
 
-import { Bee, Identifier, PrivateKey, type Stamper } from "@ethersphere/bee-js"
+import { Bee, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
+import { makePartitionLockIdentifier } from "../utils/lock-soc"
+import { deriveSecret, deriveSwarmEncryptionKey } from "../utils/key-derivation"
+import { hexToUint8Array } from "../utils/hex"
 
-/** Domain separation tag for the lock-SOC identifier. */
-const PARTITION_LOCK_DOMAIN = "swarm-id-partition-lock-v1"
+// Re-export so external callers continue to import these from the
+// partition-lock module (the implementations live in utils/lock-soc.ts to
+// avoid a circular dependency with batch-utilization.ts).
+export {
+  lockSocAddress,
+  lockSocBucket,
+  makePartitionLockIdentifier,
+} from "../utils/lock-soc"
 
 /** Number of bytes from `keccak256(deviceId)` to use as the tiebreaker. */
 const TIEBREAKER_BYTES = 8
@@ -76,21 +90,6 @@ export interface AcquirePartitionLockResult {
 }
 
 /**
- * Build the per-partition lock-SOC identifier.
- */
-export function makePartitionLockIdentifier(
-  accountId: string,
-  partition: number,
-): Identifier {
-  const hash = Binary.keccak256(
-    new TextEncoder().encode(
-      `${PARTITION_LOCK_DOMAIN}:${accountId}:${partition}`,
-    ),
-  )
-  return new Identifier(hash)
-}
-
-/**
  * Compute the per-device tiebreaker: first 8 bytes of `keccak256(deviceId)`
  * as a hex string. Two different deviceIds collide with probability 2⁻⁶⁴.
  */
@@ -124,11 +123,10 @@ export async function readPartitionLock(opts: {
   bee: Bee
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
-  accountId: string
   partition: number
 }): Promise<PartitionLockPayload | undefined> {
-  const { bee, backupSigner, swarmEncryptionKey, accountId, partition } = opts
-  const identifier = makePartitionLockIdentifier(accountId, partition)
+  const { bee, backupSigner, swarmEncryptionKey, partition } = opts
+  const identifier = makePartitionLockIdentifier(partition)
   const owner = backupSigner.publicKey().address()
   try {
     const soc = await downloadEncryptedSOC(
@@ -158,20 +156,12 @@ export async function writePartitionLock(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
-  accountId: string
   partition: number
   payload: PartitionLockPayload
 }): Promise<void> {
-  const {
-    bee,
-    stamper,
-    backupSigner,
-    swarmEncryptionKey,
-    accountId,
-    partition,
-    payload,
-  } = opts
-  const identifier = makePartitionLockIdentifier(accountId, partition)
+  const { bee, stamper, backupSigner, swarmEncryptionKey, partition, payload } =
+    opts
+  const identifier = makePartitionLockIdentifier(partition)
   const data = new TextEncoder().encode(JSON.stringify(payload))
   const target: UploadTarget = { mode: "stamper", bee, stamper }
   await uploadSOC(target, backupSigner, identifier, data, {
@@ -192,7 +182,6 @@ export async function acquirePartitionLock(opts: {
   stamper: Stamper
   backupSigner: PrivateKey
   swarmEncryptionKey: Uint8Array
-  accountId: string
   partition: number
   deviceId: string
   ttlMs: number
@@ -243,4 +232,70 @@ export async function acquirePartitionLock(opts: {
     return { outcome: "lost-race", payload: verified }
   }
   return { outcome: "acquired", payload: verified }
+}
+
+/** A live (unexpired, non-released) partition holder observed on Swarm. */
+export interface PartitionHolder {
+  partition: number
+  deviceId: string
+  leasedUntil: number
+}
+
+/**
+ * Authoritative view of who currently holds each partition. Reads the lock
+ * SOC for every partition in `[0, partitionCount)` and returns the entries
+ * whose holder is live (lease unexpired, not released via the sentinel).
+ *
+ * Per-partition read failures are swallowed — that partition contributes
+ * nothing to the result rather than failing the whole call.
+ *
+ * Use this when the metadata view in `activeDevices` may be stale (e.g.
+ * the UI needs the "real" Active/Inactive state across peers).
+ */
+export async function readPartitionHolders(opts: {
+  bee: Bee
+  /** Same `derivationKey` stored on the account in localStorage. */
+  derivationKey: string
+  partitionCount: number
+  /** Test seam; defaults to `Date.now`. */
+  now?: () => number
+}): Promise<PartitionHolder[]> {
+  const now = opts.now ?? Date.now
+  const swarmEncryptionKeyHex = await deriveSwarmEncryptionKey(
+    opts.derivationKey,
+  )
+  const swarmEncryptionKey = hexToUint8Array(swarmEncryptionKeyHex)
+  const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+  const backupSigner = new PrivateKey(backupKeyHex)
+
+  const partitions = Array.from({ length: opts.partitionCount }, (_, p) => p)
+  const reads = await Promise.all(
+    partitions.map(async (partition) => {
+      try {
+        const payload = await readPartitionLock({
+          bee: opts.bee,
+          backupSigner,
+          swarmEncryptionKey,
+          partition,
+        })
+        return { partition, payload }
+      } catch {
+        return { partition, payload: undefined }
+      }
+    }),
+  )
+
+  const t = now()
+  const holders: PartitionHolder[] = []
+  for (const { partition, payload } of reads) {
+    if (!payload) continue
+    if (payload.holderDeviceId === NO_HOLDER_DEVICE_ID) continue
+    if (payload.leasedUntil <= t) continue
+    holders.push({
+      partition,
+      deviceId: payload.holderDeviceId,
+      leasedUntil: payload.leasedUntil,
+    })
+  }
+  return holders
 }

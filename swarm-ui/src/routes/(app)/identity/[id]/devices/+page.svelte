@@ -17,7 +17,15 @@
   import CopyButton from '$lib/components/copy-button.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
-  import { getOrCreateDeviceId, leaseStateStorageKey, type LeaseState } from '@snaha/swarm-id'
+  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
+  import {
+    getOrCreateDeviceId,
+    leaseStateStorageKey,
+    readPartitionHolders,
+    type LeaseState,
+    type PartitionHolder,
+  } from '@snaha/swarm-id'
+  import { Bee } from '@ethersphere/bee-js'
   import { refreshAccountFromSwarm } from '$lib/utils/refresh-account-from-swarm'
   import routes from '$lib/routes'
   import Laptop from 'carbon-icons-svelte/lib/Laptop.svelte'
@@ -54,6 +62,11 @@
   let refreshing = $state(false)
   let refreshedAt = $state<number | undefined>(undefined)
   let refreshError = $state<string | undefined>(undefined)
+  // Live partition holders, read from the on-chain lock SOCs. Authoritative
+  // for "who actually holds each partition right now" — `activeDevices` on
+  // the account is just metadata and can lag (e.g. a peer's tab backgrounded,
+  // refresh tick throttled, lease quietly expired without a demote).
+  let liveHolders = $state<PartitionHolder[]>([])
 
   async function doRefresh() {
     if (!account || refreshing) return
@@ -65,6 +78,23 @@
         refreshedAt = result.refreshedAt
       } else {
         refreshError = result.error
+      }
+      // Always probe the lock SOCs even if the snapshot refresh failed —
+      // they're an independent source of truth for the active-state badge.
+      const partitionCount = account.partitionCount ?? 1
+      if (partitionCount > 1 && account.derivationKey) {
+        try {
+          const bee = new Bee(networkSettingsStore.beeNodeUrl)
+          liveHolders = await readPartitionHolders({
+            bee,
+            derivationKey: account.derivationKey,
+            partitionCount,
+          })
+        } catch (err) {
+          console.warn('[devices] readPartitionHolders failed:', err)
+        }
+      } else {
+        liveHolders = []
       }
     } finally {
       refreshing = false
@@ -99,16 +129,38 @@
     return `${Math.floor(ago / 3_600_000)}h ago`
   }
 
-  const deviceRows = $derived(
-    (account?.devices ?? []).map((d) => {
+  const deviceRows = $derived.by(() => {
+    // Reference `_tick` so the lease-expiry check re-evaluates as time
+    // passes — the existing 30 s interval bumps `_tick`.
+    void _tick
+    const now = Date.now()
+    return (account?.devices ?? []).map((d) => {
       const isThis = d.deviceId === thisDeviceId
-      const activeEntry = (account?.activeDevices ?? []).find((a) => a.deviceId === d.deviceId)
-      const isActive = activeEntry !== undefined
-      const partition = activeEntry?.partition
-      const thisLease = isThis ? leaseState : undefined
-      return { ...d, isThis, isActive, partition, thisLease }
-    }),
-  )
+      let isActive: boolean
+      let partition: number | undefined
+      if (isThis) {
+        // Authoritative for self: our own LeaseState. The proxy bumps
+        // `leasedUntil` on every successful refresh tick; if it's still in
+        // the future, we're holding a valid lease. We deliberately do NOT
+        // also require the device to appear in `account.activeDevices` —
+        // that metadata can lag or never reach the main UI under third-
+        // party iframe storage partitioning, which would make us flash
+        // Inactive while the proxy is happily refreshing the lock SOC.
+        const leaseValid =
+          leaseState !== undefined &&
+          leaseState.leasedUntil !== undefined &&
+          leaseState.leasedUntil > now
+        isActive = leaseValid
+        partition = leaseValid ? leaseState!.partition : undefined
+      } else {
+        // Authoritative for peers: read from the on-chain lock SOCs.
+        const holderEntry = liveHolders.find((h) => h.deviceId === d.deviceId)
+        isActive = holderEntry !== undefined
+        partition = holderEntry?.partition
+      }
+      return { ...d, isThis, isActive, partition }
+    })
+  })
 
   function formatDate(ms: number): string {
     return new Date(ms).toLocaleDateString(undefined, {
@@ -116,15 +168,6 @@
       month: 'short',
       day: 'numeric',
     })
-  }
-
-  function formatLeaseExpiry(leasedUntil: number): string {
-    const remainingMs = leasedUntil - Date.now()
-    if (remainingMs <= 0) return 'expired'
-    const minutes = Math.floor(remainingMs / 60_000)
-    if (minutes < 60) return `${minutes} min`
-    const hours = Math.floor(remainingMs / 3_600_000)
-    return `${hours} h`
   }
 
   function truncate(id: string): string {
@@ -222,15 +265,6 @@
             </Horizontal>
 
             <Horizontal --horizontal-gap="var(--padding)" style="padding-left: 24px;">
-              {#if row.thisLease}
-                {#if row.thisLease.isReadOnly}
-                  <Typography variant="small">Read-only — all slots occupied</Typography>
-                {:else if row.thisLease.leasedUntil !== undefined}
-                  <Typography variant="small">
-                    Lease expires in {formatLeaseExpiry(row.thisLease.leasedUntil)}
-                  </Typography>
-                {/if}
-              {/if}
               {#if row.createdAt}
                 <Typography variant="small">Added {formatDate(row.createdAt)}</Typography>
               {/if}
