@@ -25,7 +25,7 @@ export const BLOCKS_PER_DAY = (24n * 60n * 60n) / BigInt(GNOSIS_BLOCK_TIME)
 const SECONDS_PER_MINUTE = 60
 const SECONDS_PER_HOUR = 60 * SECONDS_PER_MINUTE
 const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
-const SECONDS_PER_MONTH = 2_592_000n // 30 * 24 * 60 * 60
+const SECONDS_PER_MONTH = 30n * BigInt(SECONDS_PER_DAY)
 
 /**
  * Swarm constants. `CHUNKS_PER_GB = 1 GiB / 4 KiB chunk`.
