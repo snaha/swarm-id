@@ -99,9 +99,11 @@ export function calculateTTLSeconds(
   }
   const perChunkPerMonthCost = bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB
   if (perChunkPerMonthCost <= 0n) {
-    // Sub-attoBZZ prices (under ~2.6e-11 BZZ/GiB/month) truncate to 0 under
-    // BigInt division. Return 0 instead of letting the next line throw on
-    // divide-by-zero — there's no meaningful lifetime to report.
+    // Defensive: the chain's PriceOracle enforces a floor of 24_000 PLUR per
+    // chunk per block (≈ 0.33 BZZ/GiB/month), so any real Swarmscan response
+    // is ~10^10× above the BigInt-truncates-to-zero threshold. This guard
+    // only fires for pathological caller input — without it the next line
+    // would throw on divide-by-zero.
     return 0
   }
   return Number((amountBigInt * SECONDS_PER_MONTH) / perChunkPerMonthCost)
