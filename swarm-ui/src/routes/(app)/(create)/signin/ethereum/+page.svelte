@@ -102,6 +102,7 @@
               ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
               : undefined,
             devices: [],
+            partitionCount: result.snapshot.metadata.partitionCount,
           },
           identities: result.snapshot.identities,
           connectedApps: result.snapshot.connectedApps,
@@ -112,6 +113,8 @@
 
       sessionStore.setAccount(account)
       sessionStore.setTemporaryMasterKey(masterKey)
+      // The proxy claims a partition on demand (and eagerly on auth) — no
+      // lease management in the UI.
       navigateToConnectOrHome()
     } catch (err) {
       console.error('🔑 Ethereum sign-in failed:', err)

@@ -13,7 +13,7 @@
   } from '$lib/components/ui/card'
   import { Textarea } from '$lib/components/ui/textarea'
   import { Input } from '$lib/components/ui/input'
-  import { Button } from '$lib/components/ui/button'
+  import AsyncButton from './async-button.svelte'
   import { Checkbox } from '$lib/components/ui/checkbox'
   import { Label } from '$lib/components/ui/label'
   import type { ResultData } from './result-types'
@@ -146,7 +146,9 @@
       </Label>
     </div>
 
-    <Button onclick={handleUpload} disabled={!clientStore.canUpload}>Upload with ACT</Button>
+    <AsyncButton onclick={handleUpload} disabled={!clientStore.canUpload} loadingText="Uploading…">
+      Upload with ACT
+    </AsyncButton>
     <ResultDisplay {result} {error} />
   </CardContent>
 </Card>

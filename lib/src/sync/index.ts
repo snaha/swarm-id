@@ -17,7 +17,10 @@ export { createSyncAccount, ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
 export type { SyncAccountOptions, SyncAccountFunction } from "./sync-account"
 
 // Restore account from Swarm
-export { restoreAccountFromSwarm } from "./restore-account"
+export {
+  restoreAccountFromSwarm,
+  SnapshotDataUnavailableError,
+} from "./restore-account"
 export type { RestoreAccountResult } from "./restore-account"
 
 // Store interfaces

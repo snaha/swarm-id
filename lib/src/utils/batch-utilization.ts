@@ -4,13 +4,18 @@
 /**
  * Batch Utilization Tracking for Swarm Storage
  *
- * This module implements utilization tracking for mutable postage batches.
- * It manages two counter arrays:
- * - Utilization counters (local, uint8): Track slots 0-255 per bucket for utilization chunks
- * - Data counters (on-chain, uint32): Track slots 256+ per bucket for data chunks
+ * Tracks slot usage for mutable postage batches. Each of the 65,536 buckets
+ * has a uint32 in-memory counter (`dataCounters[bucket]`) representing the
+ * next free slot. The counter is initialised at `DATA_COUNTER_START` so the
+ * first slots of every bucket are reserved as headroom for utilisation
+ * chunks that may incidentally land there — utilisation and data chunks
+ * share the same slot space via the underlying stamper.
  *
- * The system uses pre-calculation to handle the circular dependency of storing
- * utilization data that tracks the storage of itself.
+ * Per-chunk encryption keys are derived deterministically from the account's
+ * `swarmEncryptionKey` plus the chunk index and a small nonce. The nonce is
+ * bumped only when an upload would land in the same bucket as a lower-index
+ * chunk in the same save, so the on-chain placement of utilisation chunks is
+ * tidy and dedup stays stable across re-saves.
  */
 
 import {
@@ -20,6 +25,7 @@ import {
   Identifier,
   type Bee,
   EthAddress,
+  PrivateKey,
   type EnvelopeWithBatchId,
 } from "@ethersphere/bee-js"
 import {
@@ -29,9 +35,30 @@ import {
 } from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import { calculateContentHash } from "../storage/utilization-store"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
+import type { EpochUpdateHints } from "../proxy/feeds/epochs/types"
+import { lockSocAddress } from "./lock-soc"
+import { deriveSecret } from "./key-derivation"
+import { uint8ArrayToHex } from "./hex"
+
+// ============================================================================
+// Errors
+// ============================================================================
+
+/**
+ * Thrown by `UtilizationAwareStamper.stamp()` when the partition lease was
+ * invalidated (peer took over the partition) between binding and stamping.
+ * Callers should surface this as "your partition was reclaimed" — the
+ * upload cannot complete and any in-flight chunks would silently overwrite
+ * the peer's data if stamped anyway.
+ */
+export class PartitionLeaseLostError extends Error {
+  constructor(message = "Partition lease was reclaimed by another device.") {
+    super(message)
+    this.name = "PartitionLeaseLostError"
+  }
+}
 
 // ============================================================================
 // Constants
@@ -43,11 +70,50 @@ export const NUM_BUCKETS = 65536
 /** Bucket depth parameter (determines bucket count) */
 export const BUCKET_DEPTH = 16
 
-/** Number of slots reserved per bucket for utilization chunks (0-3) */
-export const UTILIZATION_SLOTS_PER_BUCKET = 4
+/**
+ * Per-bucket slot headroom carried by `DATA_COUNTER_START`. Sized so that
+ * the rare case of two utilisation chunks landing in the same bucket cannot
+ * push a stamp past the headroom; with ~32 chunks into 65,536 buckets even a
+ * 3-way collision is below 10⁻⁷ per save, so 2 is comfortably enough.
+ * Choosing an even value keeps remainders even under a future K=2
+ * multi-device partitioning so per-bucket slot allocation splits cleanly.
+ */
+export const UTILIZATION_SLOTS_PER_BUCKET = 2
 
 /** Starting slot index for data chunks */
-export const DATA_COUNTER_START = 4
+export const DATA_COUNTER_START = 2
+
+/**
+ * Number of partitions the per-bucket slot space is divided into for
+ * multi-device sharing of a single postage batch. With K=2, device 0
+ * uses slots `{DATA_COUNTER_START + 0, DATA_COUNTER_START + 2, …}` and
+ * device 1 uses `{DATA_COUNTER_START + 1, DATA_COUNTER_START + 3, …}`.
+ */
+export const PARTITION_COUNT = 2
+
+/**
+ * Partition-lease lifetime. A device holds its partition for this long
+ * before the lease must be refreshed; if it crashes without refreshing,
+ * peers can reclaim the partition via Case D.
+ */
+export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
+
+/**
+ * How often the holder bumps `leasedUntil` on its own claim feed. One
+ * third of the TTL gives three "safety net" refresh attempts before a
+ * peer would consider the lease expired.
+ */
+export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
+
+/**
+ * Counter-skew divisor for `RESUME_COUNTER_SKEW = ceil(slotsPerBucket /
+ * PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR)`. Applied when seeding
+ * `localCounter` from a peer's partition-state snapshot — skips a small
+ * slot range that the previous holder may have used between its last
+ * published snapshot and a crash. Cheap defence; loses a sliver of
+ * capacity per handover/recovery.
+ */
+export const RESUME_COUNTER_SKEW_DIVISOR = 4
 
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
@@ -94,6 +160,48 @@ export interface ChunkLayout {
 }
 
 /**
+ * Counter-skew applied when seeding `localCounter` from a cached state on
+ * reconnect. Skips a small slot range that the previous session may have
+ * used after its last flush but before a crash, eliminating residual
+ * collision risk.
+ */
+export function computeResumeCounterSkew(batchDepth: number): number {
+  const slotsPerBucket = Math.pow(2, batchDepth - BUCKET_DEPTH)
+  return Math.ceil(
+    slotsPerBucket / PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR,
+  )
+}
+
+/**
+ * IndexedDB chunk index for the per-partition lease metadata chunk.
+ * Lease metadata is stored at indices `N + p` where N = numUtilizationChunks.
+ */
+export function leaseChunkIndex(batchDepth: number, partition: number): number {
+  const { numUtilizationChunks } = getChunkLayout(batchDepth)
+  return numUtilizationChunks + partition
+}
+
+/**
+ * Cached lease input for the 0-reads fast-path in `PartitionLease.acquire()`.
+ *
+ * A returning device that still holds a valid lease can bypass `readPartitionState`
+ * and `readDeviceClaim(self)` by passing this struct — the stamper's local
+ * IndexedDB data is sufficient to reconstruct the partition state.
+ */
+export interface CachedLeaseInput {
+  partition: number
+  /** Last known generation; next claim uses `generation + 1`. */
+  generation: number
+  /**
+   * Per-bucket local counter to pass to `bindPartition`. The skew has
+   * already been applied (`dataCounters + RESUME_COUNTER_SKEW`).
+   */
+  localCounter: Uint32Array
+  /** Epoch hints for `writeDeviceClaim`, skips epoch-tree traversal. */
+  claimHints: EpochUpdateHints
+}
+
+/**
  * Pick the on-disk chunk layout for a given batch depth.
  */
 export function getChunkLayout(batchDepth: number): ChunkLayout {
@@ -128,6 +236,13 @@ export interface ChunkMetadata {
 
   /** Whether this chunk needs uploading */
   dirty: boolean
+
+  /**
+   * Encryption-key nonce that produced this chunk's `contentHash`. Used as
+   * the starting point for the next save's bucket-collision search so
+   * unchanged plaintexts reuse the same key (and skip re-upload).
+   */
+  nonce: number
 }
 
 /**
@@ -440,6 +555,177 @@ export function makeChunkIdentifier(
 }
 
 // ============================================================================
+// Per-chunk Encryption Key Derivation
+// ============================================================================
+
+/** Domain-separation tag for utilisation-chunk key derivation. */
+const UTIL_CHUNK_KEY_DOMAIN = "swarm-id-util-chunk-v1"
+
+/** Length of the SHA-256 HMAC output in bytes (also the chunk key length). */
+const KEY_LENGTH = 32
+
+/** Bytes to encode `chunkIndex` and `nonce` (each big-endian uint32). */
+const UINT32_BYTES = 4
+
+/**
+ * Resolved per-chunk-index encryption material.
+ *
+ * `nonce` is the smallest non-negative integer that placed the chunk in a
+ * bucket distinct from every chunk with a lower `chunkIndex` during the
+ * current save. `key` is the HMAC-derived 32-byte key used to produce the
+ * encrypted-CAC address (and therefore the chunk's bucket).
+ */
+export interface UtilizationChunkKey {
+  key: Uint8Array
+  nonce: number
+}
+
+/**
+ * Derive the per-chunk encryption key used for utilisation chunks.
+ *
+ * `chunkKey = HMAC-SHA256(swarmEncryptionKey, "swarm-id-util-chunk-v1" || batchId || chunkIndex || nonce)`
+ *
+ * Same inputs → same key, so dedup at the upload path stays stable across
+ * re-saves whenever neither the plaintext nor the chosen nonce changes.
+ */
+export async function deriveUtilizationChunkKey(
+  swarmEncryptionKey: Uint8Array,
+  batchId: BatchId,
+  chunkIndex: number,
+  nonce: number,
+): Promise<Uint8Array> {
+  if (swarmEncryptionKey.length !== KEY_LENGTH) {
+    throw new Error(
+      `Invalid swarmEncryptionKey length: ${swarmEncryptionKey.length} (expected ${KEY_LENGTH})`,
+    )
+  }
+
+  const domain = new TextEncoder().encode(UTIL_CHUNK_KEY_DOMAIN)
+  const batchIdBytes = batchId.toUint8Array()
+  const indexBytes = new Uint8Array(UINT32_BYTES)
+  new DataView(indexBytes.buffer).setUint32(0, chunkIndex, false)
+  const nonceBytes = new Uint8Array(UINT32_BYTES)
+  new DataView(nonceBytes.buffer).setUint32(0, nonce, false)
+  const message = Binary.concatBytes(
+    domain,
+    batchIdBytes,
+    indexBytes,
+    nonceBytes,
+  )
+
+  const cryptoKey = await crypto.subtle.importKey(
+    "raw",
+    swarmEncryptionKey,
+    { name: "HMAC", hash: "SHA-256" },
+    false,
+    ["sign"],
+  )
+  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
+  return new Uint8Array(signature)
+}
+
+/**
+ * Choose per-chunk encryption keys so each utilisation chunk lands in a
+ * bucket distinct from every other chunk in the same save.
+ *
+ * Stability rule (matters for upload dedup): chunks are processed in
+ * ascending `chunkIndex` order, and the first chunk to claim a bucket
+ * keeps it. Each chunk starts its search from `priorNonces[i] ?? 0`, so
+ * unchanged plaintexts whose previously-chosen nonce still produces a
+ * distinct bucket reuse the same key (and therefore the same CAC address)
+ * across saves — dedup at `saveUtilizationState` then skips the upload.
+ *
+ * In practice almost every save finds zero collisions: with 32 chunks over
+ * 65,536 buckets the expected number of bumps per save is ≈ 0.008.
+ */
+export async function resolveUtilizationChunkKeys(
+  plaintexts: Uint8Array[],
+  options: {
+    swarmEncryptionKey: Uint8Array
+    batchId: BatchId
+    priorNonces?: Record<number, number>
+  },
+): Promise<{
+  keys: UtilizationChunkKey[]
+  buckets: number[]
+}> {
+  const { swarmEncryptionKey, batchId, priorNonces } = options
+  const keys: UtilizationChunkKey[] = new Array(plaintexts.length)
+  const buckets: number[] = new Array(plaintexts.length)
+  const claimedBuckets = new Set<number>()
+
+  for (let i = 0; i < plaintexts.length; i++) {
+    const resolved = await chooseUtilizationChunkKey({
+      swarmEncryptionKey,
+      batchId,
+      chunkIndex: i,
+      plaintext: plaintexts[i],
+      priorNonce: priorNonces?.[i] ?? 0,
+      claimedBuckets,
+    })
+    keys[i] = { key: resolved.key, nonce: resolved.nonce }
+    buckets[i] = resolved.bucket
+  }
+
+  return { keys, buckets }
+}
+
+/**
+ * Resolve the encryption key for a single chunk index against a set of
+ * already-claimed buckets. Mutates `claimedBuckets` to add the chosen one.
+ */
+async function chooseUtilizationChunkKey(args: {
+  swarmEncryptionKey: Uint8Array
+  batchId: BatchId
+  chunkIndex: number
+  plaintext: Uint8Array
+  priorNonce: number
+  claimedBuckets: Set<number>
+}): Promise<{
+  key: Uint8Array
+  nonce: number
+  bucket: number
+  address: Uint8Array
+}> {
+  const { swarmEncryptionKey, batchId, chunkIndex, plaintext, claimedBuckets } =
+    args
+  let nonce = args.priorNonce
+  while (true) {
+    const key = await deriveUtilizationChunkKey(
+      swarmEncryptionKey,
+      batchId,
+      chunkIndex,
+      nonce,
+    )
+    const encrypted = makeEncryptedContentAddressedChunk(plaintext, key)
+    const address = encrypted.address.toUint8Array()
+    const bucket = toBucket(address)
+    if (!claimedBuckets.has(bucket)) {
+      claimedBuckets.add(bucket)
+      return { key, nonce, bucket, address }
+    }
+    nonce++
+  }
+}
+
+/**
+ * Collect the set of buckets currently claimed by clean utilisation chunks
+ * (those whose `contentHash` already reflects the upload). Dirty chunks
+ * must steer clear of these buckets when picking a key.
+ */
+function claimedBucketsForCleanChunks(
+  state: BatchUtilizationState,
+): Set<number> {
+  const claimed = new Set<number>()
+  for (const meta of state.chunks) {
+    if (!meta.dirty && meta.contentHash) {
+      claimed.add(toBucket(Binary.hexToUint8Array(meta.contentHash)))
+    }
+  }
+  return claimed
+}
+
+// ============================================================================
 // Chunk Upload/Download for Swarm Storage
 // ============================================================================
 
@@ -468,9 +754,9 @@ export async function uploadUtilizationChunk(
   if (data.length < 1 || data.length > 4096) {
     throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
   }
-  if (encryptionKey.length !== 32) {
+  if (encryptionKey.length !== KEY_LENGTH) {
     throw new Error(
-      `Invalid encryption key length: ${encryptionKey.length} (expected 32)`,
+      `Invalid encryption key length: ${encryptionKey.length} (expected ${KEY_LENGTH})`,
     )
   }
 
@@ -693,11 +979,12 @@ export function reconstructFromChunks(
 /**
  * Initialize a new batch utilization state
  *
- * Reserves slots 0-3 per bucket for utilization metadata chunks,
- * and starts data chunks at slot 4 (DATA_COUNTER_START).
+ * Seeds `dataCounters[bucket]` at `DATA_COUNTER_START` for every bucket so
+ * the first stamping operations naturally skip the headroom slots.
  *
- * With 65,536 buckets and ~64 utilization chunks, the probability
- * of any bucket getting 4+ utilization chunks is negligible (< 0.0000001%).
+ * With 65,536 buckets and ~32–64 utilization chunks per save, the
+ * probability of any bucket getting 3+ utilisation chunks in one save is
+ * < 10⁻⁷, so a headroom of 2 leaves ample margin.
  */
 export function initializeBatchUtilization(
   batchId: BatchId,
@@ -705,8 +992,9 @@ export function initializeBatchUtilization(
 ): BatchUtilizationState {
   const dataCounters = new Uint32Array(NUM_BUCKETS)
 
-  // Initialize data counters to start at slot 4
-  // Slots 0-3 are reserved for utilization metadata chunks
+  // Initialize data counters to start at slot DATA_COUNTER_START.
+  // The first `DATA_COUNTER_START` slots of every bucket act as headroom
+  // for utilisation chunks that incidentally land there.
   dataCounters.fill(DATA_COUNTER_START)
 
   const { numUtilizationChunks } = getChunkLayout(batchDepth)
@@ -719,6 +1007,7 @@ export function initializeBatchUtilization(
       contentHash: "", // Will be set on first upload
       lastUpload: 0, // Never uploaded
       dirty: true, // Mark as dirty for initial upload
+      nonce: 0,
     })
   }
 
@@ -942,6 +1231,7 @@ export async function loadUtilizationState(
           contentHash: cached.contentHash,
           lastUpload: cached.lastAccess, // Use lastAccess as lastUpload
           dirty: false, // Not dirty if loaded from cache
+          nonce: cached.nonce ?? 0,
         })
       }
 
@@ -987,6 +1277,7 @@ export async function loadUtilizationState(
         contentHash: cached.contentHash,
         lastUpload: cached.lastAccess,
         dirty: false,
+        nonce: cached.nonce ?? 0,
       })
       continue
     }
@@ -1000,6 +1291,7 @@ export async function loadUtilizationState(
       contentHash: "", // Will be set on first upload
       lastUpload: 0,
       dirty: true, // Mark as dirty for upload
+      nonce: 0,
     })
   }
 
@@ -1032,15 +1324,29 @@ export async function saveUtilizationState(
     encryptionKey: Uint8Array
     cache: UtilizationStoreDB
     tracker: DirtyChunkTracker
+    reservedBuckets?: ReadonlySet<number>
   },
 ): Promise<void> {
-  const { bee, stamper, encryptionKey, cache, tracker } = options
+  const { bee, stamper, encryptionKey, cache, tracker, reservedBuckets } =
+    options
 
   // Get dirty chunks from tracker
   const dirtyChunkIndices = tracker.getDirtyChunks()
 
   if (dirtyChunkIndices.length === 0) {
     return
+  }
+
+  // Treat the buckets currently occupied by clean utilisation chunks as
+  // already claimed — dirty chunks must avoid them so utilisation chunks
+  // land in distinct buckets within a save. Also avoid `reservedBuckets`
+  // (e.g. per-partition lock SOCs) so utilisation chunks don't land on a
+  // slot the lock SOC overstamps every refresh.
+  const claimedBuckets = claimedBucketsForCleanChunks(state)
+  if (reservedBuckets) {
+    for (const bucket of reservedBuckets) {
+      claimedBuckets.add(bucket)
+    }
   }
 
   for (const chunkIndex of dirtyChunkIndices) {
@@ -1053,20 +1359,35 @@ export async function saveUtilizationState(
       state.batchDepth,
     )
 
+    // Search for a derived key whose bucket isn't already claimed. Start
+    // from the previously-chosen nonce so unchanged plaintexts reuse their
+    // key (and skip upload via dedup below).
+    const resolved = await chooseUtilizationChunkKey({
+      swarmEncryptionKey: encryptionKey,
+      batchId: state.batchId,
+      chunkIndex,
+      plaintext: chunkData,
+      priorNonce: chunkMetadata.nonce,
+      claimedBuckets,
+    })
+
     try {
-      // Upload to Swarm as encrypted CAC
+      // Upload to Swarm as encrypted CAC with the per-chunk derived key
       const cacReference = await uploadUtilizationChunk(
         bee,
         stamper,
         chunkIndex,
         chunkData,
-        encryptionKey,
+        resolved.key,
       )
 
       const cacReferenceHex = Binary.uint8ArrayToHex(cacReference)
 
       // Skip if reference unchanged (deduplication)
-      if (chunkMetadata.contentHash === cacReferenceHex) {
+      if (
+        chunkMetadata.contentHash === cacReferenceHex &&
+        chunkMetadata.nonce === resolved.nonce
+      ) {
         tracker.markClean(chunkIndex)
         continue
       }
@@ -1075,6 +1396,7 @@ export async function saveUtilizationState(
       chunkMetadata.contentHash = cacReferenceHex
       chunkMetadata.lastUpload = Date.now()
       chunkMetadata.dirty = false
+      chunkMetadata.nonce = resolved.nonce
 
       // Update IndexedDB cache
       await cache.putChunk({
@@ -1082,6 +1404,7 @@ export async function saveUtilizationState(
         chunkIndex,
         data: chunkData,
         contentHash: cacReferenceHex,
+        nonce: resolved.nonce,
         lastAccess: Date.now(),
       })
 
@@ -1187,6 +1510,42 @@ export function calculateUtilization(
 }
 
 // ============================================================================
+// Lease Metadata Serialization
+// ============================================================================
+
+interface ClaimHintsJson {
+  lastEpoch?: { start: string; level: number }
+  lastTimestamp?: string
+}
+
+interface LeaseMetadataPayload {
+  generation: number
+  claimHints: ClaimHintsJson
+}
+
+function serializeClaimHints(hints: EpochUpdateHints): ClaimHintsJson {
+  return {
+    lastEpoch: hints.lastEpoch
+      ? {
+          start: hints.lastEpoch.start.toString(),
+          level: hints.lastEpoch.level,
+        }
+      : undefined,
+    lastTimestamp: hints.lastTimestamp?.toString(),
+  }
+}
+
+function deserializeClaimHints(json: ClaimHintsJson): EpochUpdateHints {
+  return {
+    lastEpoch: json.lastEpoch
+      ? { start: BigInt(json.lastEpoch.start), level: json.lastEpoch.level }
+      : undefined,
+    lastTimestamp:
+      json.lastTimestamp !== undefined ? BigInt(json.lastTimestamp) : undefined,
+  }
+}
+
+// ============================================================================
 // Utilization-Aware Stamper (Wrapper with Auto-Tracking)
 // ============================================================================
 
@@ -1205,8 +1564,59 @@ export class UtilizationAwareStamper implements Stamper {
   private stamper: Stamper
   private utilizationState: BatchUtilizationState
   private cache: UtilizationStoreDB
+  private readonly encryptionKey: Uint8Array
   private dirty: boolean = false
   private dirtyBuckets: Set<number> = new Set()
+
+  /**
+   * Partition this device holds within the shared postage batch. `undefined`
+   * means the legacy single-device path: slot picking is delegated to the
+   * inner bee-js stamper without any per-call coercion, which is the
+   * behaviour for every account created before the partition-lease shipped.
+   */
+  private partition: number | undefined = undefined
+
+  /**
+   * Number of partitions the slot space is divided into. `1` is the
+   * legacy/no-partitioning value and goes hand-in-hand with `partition`
+   * being `undefined`.
+   */
+  private partitionCountValue: number = 1
+
+  /**
+   * Per-bucket "how many chunks have I stamped here" — the `j` in the
+   * doc's slot formula `slot = DATA_COUNTER_START + p + K·j`. Each
+   * `stamp()` reads this to compute the next slot for its partition,
+   * then increments it. Separate from `dataCounters` (which is the
+   * batch-wide total, including peers' contributions seeded from the
+   * partition-state feed).
+   */
+  private partitionLocalCounter: Uint32Array | undefined = undefined
+
+  /**
+   * Per-account lock-SOC addresses (one per partition). When `stamp()` sees
+   * a chunk whose address matches one of these, it routes the write to the
+   * lock SOC's reserved slot (= the partition index) within the same bucket,
+   * bypassing the partition data-slot formula and the local counter bump.
+   * Overstamping the same SOC at the same slot does not consume new slot
+   * budget, so the heartbeat cadence is sustainable.
+   *
+   * Populated by `bindLockSocs()` once per stamper lifetime (deterministic
+   * from accountId + partitionCount + owner). Independent of `partition`
+   * binding so lock-SOC writes work both before and after `bindPartition`.
+   */
+  private lockSocs:
+    | ReadonlyArray<{ partition: number; address: Uint8Array }>
+    | undefined = undefined
+
+  /**
+   * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
+   * detects displacement on a refresh tick (or upload-start lease check);
+   * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
+   * to abort the upload cleanly instead of silently corrupting the peer's
+   * slot space.
+   */
+  private leaseStale: boolean = false
 
   readonly batchId: BatchId
   readonly depth: number
@@ -1222,17 +1632,111 @@ export class UtilizationAwareStamper implements Stamper {
     return this.stamper.maxSlot
   }
 
+  /** Current partition (undefined in single-device legacy mode). */
+  get currentPartition(): number | undefined {
+    return this.partition
+  }
+
+  /** Total partition count (1 in legacy mode). */
+  get partitionCount(): number {
+    return this.partitionCountValue
+  }
+
+  /**
+   * Per-bucket local stamping counter, exposed so the lease orchestrator
+   * can publish it to the partition-state feed on release. Returns
+   * undefined in legacy mode.
+   */
+  getLocalCounter(): Uint32Array | undefined {
+    return this.partitionLocalCounter
+  }
+
+  /**
+   * Buckets that contain a per-partition lock SOC. External callers that
+   * persist utilisation chunks (e.g. `saveUtilizationState` from the sync
+   * path) should treat these as already claimed so utilisation-chunk key
+   * search avoids dropping a chunk on the lock SOC's bucket.
+   */
+  getLockSocBuckets(): ReadonlySet<number> {
+    const set = new Set<number>()
+    for (const soc of this.lockSocs ?? []) {
+      set.add(toBucket(soc.address))
+    }
+    return set
+  }
+
+  /**
+   * Bind this stamper to a leased partition. Called once by the lease
+   * orchestrator after `acquire()` succeeds. `localCounter` is the
+   * starting per-bucket count for THIS device — fresh zeros for Case A,
+   * seeded-from-state-feed-with-skew for Cases B/D.
+   */
+  bindPartition(opts: {
+    partition: number
+    partitionCount: number
+    localCounter: Uint32Array
+  }): void {
+    if (opts.localCounter.length !== NUM_BUCKETS) {
+      throw new Error(
+        `localCounter must have ${NUM_BUCKETS} entries, got ${opts.localCounter.length}`,
+      )
+    }
+    this.partition = opts.partition
+    this.partitionCountValue = opts.partitionCount
+    this.partitionLocalCounter = opts.localCounter
+    this.leaseStale = false
+  }
+
+  /**
+   * Bind the per-partition lock-SOC addresses. Called once per stamper
+   * lifetime (the addresses are deterministic from the account). Routes
+   * lock-SOC overstamps to a fixed reserved slot per partition so the tight
+   * heartbeat cadence doesn't consume new slot budget every refresh.
+   *
+   * Independent of `bindPartition` — can be called before the partition
+   * lease is acquired (the first lock-SOC write inside `acquirePartitionLock`
+   * needs this routing to already be in place).
+   */
+  bindLockSocs(
+    socs: ReadonlyArray<{ partition: number; address: Uint8Array }>,
+  ): void {
+    this.lockSocs = socs
+  }
+
+  /**
+   * Inverse of `bindPartition` — clears partition slot state on demote.
+   * Leaves `lockSocs` intact (still valid for the account; refresh/yield
+   * writes may need them) and clears the lease-stale flag.
+   */
+  unbindPartition(): void {
+    this.partition = undefined
+    this.partitionCountValue = 1
+    this.partitionLocalCounter = undefined
+    this.leaseStale = false
+  }
+
+  /**
+   * Circuit-break: mark the bound lease as stale. The next partition-bound
+   * `stamp()` call will throw `PartitionLeaseLostError` so an in-flight
+   * upload aborts cleanly mid-stream when a peer takes our partition.
+   */
+  invalidateLease(): void {
+    this.leaseStale = true
+  }
+
   private constructor(
     stamper: Stamper,
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
+    encryptionKey: Uint8Array,
     utilizationState: BatchUtilizationState,
   ) {
     this.stamper = stamper
     this.batchId = batchId
     this.depth = depth
     this.cache = cache
+    this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
   }
 
@@ -1244,7 +1748,7 @@ export class UtilizationAwareStamper implements Stamper {
    * @param depth - Batch depth
    * @param cache - Utilization cache database
    * @param _owner - Owner address (required for validation, reserved for future Swarm upload)
-   * @param _encryptionKey - Encryption key (required for validation, reserved for future Swarm upload)
+   * @param encryptionKey - Encryption key used to compute the canonical Swarm chunk address on local flush. Both call sites already pass the account's encryption key; "anything stable" works for now, will be tied to multi-device collision avoidance later.
    * @returns New UtilizationAwareStamper instance
    */
   static async create(
@@ -1252,8 +1756,8 @@ export class UtilizationAwareStamper implements Stamper {
     batchId: BatchId,
     depth: number,
     cache: UtilizationStoreDB,
-    _owner: EthAddress,
-    _encryptionKey: Uint8Array,
+    owner: EthAddress,
+    encryptionKey: Uint8Array,
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
@@ -1287,13 +1791,33 @@ export class UtilizationAwareStamper implements Stamper {
     // Create underlying stamper with bucket state
     const stamper = Stamper.fromState(privateKey, batchId, bucketState, depth)
 
-    return new UtilizationAwareStamper(
+    const instance = new UtilizationAwareStamper(
       stamper,
       batchId,
       depth,
       cache,
+      encryptionKey,
       utilizationState,
     )
+
+    // Auto-bind lock SOCs for all partitions. The lock-SOC owner is the
+    // BACKUP signer's address — same value `writePartitionLock` derives
+    // internally — NOT the `owner` parameter callers pass (which is the
+    // account / postage-signer address depending on call site). Deriving
+    // here from `encryptionKey` (= swarmEncryptionKey at every call site)
+    // makes the routing self-consistent regardless of caller. Harmless for
+    // single-device legacy accounts (the lock SOCs are never written).
+    void owner // currently unused; reserved for a future Swarm upload path.
+    const swarmEncryptionKeyHex = uint8ArrayToHex(encryptionKey)
+    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
+    const backupSigner = new PrivateKey(backupKeyHex)
+    const backupOwner = backupSigner.publicKey().address()
+    instance.lockSocs = Array.from({ length: PARTITION_COUNT }, (_, p) => ({
+      partition: p,
+      address: lockSocAddress(p, backupOwner),
+    }))
+
+    return instance
   }
 
   /**
@@ -1305,6 +1829,45 @@ export class UtilizationAwareStamper implements Stamper {
    * @returns Envelope with batch ID and signature
    */
   stamp(chunk: CafeChunk): EnvelopeWithBatchId {
+    const chunkAddress = chunk.hash()
+
+    // Lock-SOC short-circuit: when stamping our own per-partition lock SOC,
+    // overstamp the fixed reserved slot (= partition index, 0 or 1) within
+    // its bucket. Doesn't consume new slot budget, doesn't bump our local
+    // counter — the SOC address is the same on every refresh, so the slot
+    // it occupies stays the same too.
+    const lockSoc = this.lockSocs?.find((soc) =>
+      Binary.equals(soc.address, chunkAddress),
+    )
+    if (lockSoc) {
+      const bucket = toBucket(chunkAddress)
+      this.stamper.buckets[bucket] = lockSoc.partition
+      return this.stamper.stamp(chunk)
+    }
+
+    // Partition lease was reclaimed — abort cleanly before the stamp lands
+    // in slot space the peer now controls. Only meaningful when a partition
+    // is bound (single-device legacy mode has no lease to invalidate).
+    if (this.partition !== undefined && this.leaseStale) {
+      throw new PartitionLeaseLostError()
+    }
+
+    // When holding a partition lease, coerce the bee-js stamper to use this
+    // device's next partition slot instead of the next "any" slot. The bee-js
+    // `Stamper.buckets` is a public mutable Uint32Array (bee-js/src/stamper/stamper.ts:8,20,46),
+    // held by reference — overwriting before each stamp is sufficient.
+    if (
+      this.partition !== undefined &&
+      this.partitionLocalCounter !== undefined
+    ) {
+      const bucket = (chunkAddress[0] << 8) | chunkAddress[1]
+      const slot =
+        DATA_COUNTER_START +
+        this.partition +
+        this.partitionCountValue * this.partitionLocalCounter[bucket]
+      this.stamper.buckets[bucket] = slot
+    }
+
     const envelope = this.stamper.stamp(chunk)
 
     // Extract bucket from envelope index
@@ -1315,6 +1878,13 @@ export class UtilizationAwareStamper implements Stamper {
       envelope.index.byteLength,
     )
     const bucket = view.getUint32(0, false) // false = big-endian
+
+    // Update partition-local counter so the next stamp into this bucket lands
+    // on the partition's next slot. (Legacy single-device path leaves this
+    // counter alone — slot picking falls through to the bee-js stamper.)
+    if (this.partitionLocalCounter !== undefined) {
+      this.partitionLocalCounter[bucket]++
+    }
 
     // Update utilization state (increment counter for this bucket)
     this.utilizationState.dataCounters[bucket]++
@@ -1352,25 +1922,51 @@ export class UtilizationAwareStamper implements Stamper {
       this.utilizationState.chunks[chunkIndex].dirty = true
     }
 
-    // Save dirty chunks to cache
+    // Save dirty chunks to cache. We do not upload here, but we still record
+    // the contentHash that an upload *would* assign — i.e. the BMT address of
+    // the encrypted chunk for this plaintext + the per-chunk derived key. That
+    // is what the upload-path dedup at saveUtilizationState compares against,
+    // so storing anything else (or using a different key) would force a
+    // redundant re-upload of every flushed chunk on the next sync.
     try {
-      // Note: This requires owner and encryptionKey which we don't have here
-      // The caller should use saveUtilizationState directly if they want to upload to Swarm
-      // For now, just update the cache
-      for (const chunkIndex of dirtyChunkIndexes) {
+      const claimedBuckets = claimedBucketsForCleanChunks(this.utilizationState)
+      // Reserve each partition's lock-SOC bucket so utilisation-chunk key
+      // search picks a different nonce. Otherwise a utilisation chunk could
+      // land in the same bucket and try to claim slot 0/1 — the slot the
+      // lock SOC overstamps every refresh.
+      for (const soc of this.lockSocs ?? []) {
+        claimedBuckets.add(toBucket(soc.address))
+      }
+      const sortedDirtyChunkIndexes = Array.from(dirtyChunkIndexes).sort(
+        (a, b) => a - b,
+      )
+      for (const chunkIndex of sortedDirtyChunkIndexes) {
         const chunkData = extractChunk(
           this.utilizationState.dataCounters,
           chunkIndex,
           this.depth,
         )
 
+        const resolved = await chooseUtilizationChunkKey({
+          swarmEncryptionKey: this.encryptionKey,
+          batchId: this.batchId,
+          chunkIndex,
+          plaintext: chunkData,
+          priorNonce: this.utilizationState.chunks[chunkIndex].nonce,
+          claimedBuckets,
+        })
+        const contentHash = Binary.uint8ArrayToHex(resolved.address)
+
         await this.cache.putChunk({
           batchId: this.batchId.toHex(),
           chunkIndex,
           data: chunkData,
-          contentHash: calculateContentHash(chunkData),
+          contentHash,
+          nonce: resolved.nonce,
           lastAccess: Date.now(),
         })
+        this.utilizationState.chunks[chunkIndex].contentHash = contentHash
+        this.utilizationState.chunks[chunkIndex].nonce = resolved.nonce
         this.utilizationState.chunks[chunkIndex].dirty = false
       }
 
@@ -1429,6 +2025,92 @@ export class UtilizationAwareStamper implements Stamper {
 
     // Note: Do NOT clear dirtyBuckets here - those represent local writes
     // that still need to be flushed. Only flush() should clear them.
+  }
+
+  /**
+   * Build the partition-local counter from the stamper's current
+   * `dataCounters` + `RESUME_COUNTER_SKEW`.
+   *
+   * Same derivation `readCachedLease` does internally, exposed standalone
+   * for callers that already have lease state from somewhere else (e.g.
+   * `LeaseState` in localStorage) and just need the seed counter to pass
+   * into `bindPartition`.
+   */
+  buildLeaseLocalCounter(): Uint32Array {
+    const skew = computeResumeCounterSkew(this.depth)
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    for (let i = 0; i < NUM_BUCKETS; i++) {
+      localCounter[i] = this.utilizationState.dataCounters[i] + skew
+    }
+    return localCounter
+  }
+
+  /**
+   * Persist lease metadata (generation + claimHints) for partition `p` in
+   * the local IndexedDB cache at chunk index `N + p`.
+   * Called after a successful cold acquire so subsequent reloads can skip
+   * `readPartitionState` and `readDeviceClaim(self)` entirely.
+   */
+  async setLeaseMetadata(
+    partition: number,
+    generation: number,
+    claimHints: EpochUpdateHints,
+  ): Promise<void> {
+    const payload: LeaseMetadataPayload = {
+      generation,
+      claimHints: serializeClaimHints(claimHints),
+    }
+    const data = new TextEncoder().encode(JSON.stringify(payload))
+    await this.cache.putChunk({
+      batchId: this.batchId.toHex(),
+      chunkIndex: leaseChunkIndex(this.depth, partition),
+      data,
+      contentHash: "",
+      lastAccess: Date.now(),
+    })
+  }
+
+  /**
+   * Update lease metadata for the currently held partition (after refresh).
+   * No-op when no partition is bound.
+   */
+  async updateLeaseMetadata(
+    generation: number,
+    claimHints: EpochUpdateHints,
+  ): Promise<void> {
+    if (this.partition === undefined) return
+    await this.setLeaseMetadata(this.partition, generation, claimHints)
+  }
+
+  /**
+   * Read cached lease metadata for partition `p` and derive the local
+   * counter from the current `dataCounters` + `RESUME_COUNTER_SKEW`.
+   * Returns `undefined` when no metadata chunk is present in the cache.
+   */
+  async readCachedLease(
+    partition: number,
+  ): Promise<CachedLeaseInput | undefined> {
+    const cached = await this.cache.getChunk(
+      this.batchId.toHex(),
+      leaseChunkIndex(this.depth, partition),
+    )
+    if (!cached) return undefined
+
+    const payload: LeaseMetadataPayload = JSON.parse(
+      new TextDecoder().decode(cached.data),
+    )
+    const claimHints = deserializeClaimHints(payload.claimHints)
+    const skew = computeResumeCounterSkew(this.depth)
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    for (let i = 0; i < NUM_BUCKETS; i++) {
+      localCounter[i] = this.utilizationState.dataCounters[i] + skew
+    }
+    return {
+      partition,
+      generation: payload.generation,
+      localCounter,
+      claimHints,
+    }
   }
 
   /**

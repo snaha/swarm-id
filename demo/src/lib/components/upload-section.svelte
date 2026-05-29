@@ -6,7 +6,7 @@
 <script lang="ts">
   import { Card, CardContent, CardHeader, CardTitle } from '$lib/components/ui/card'
   import { Textarea } from '$lib/components/ui/textarea'
-  import { Button } from '$lib/components/ui/button'
+  import AsyncButton from './async-button.svelte'
   import { Checkbox } from '$lib/components/ui/checkbox'
   import { Label } from '$lib/components/ui/label'
   import ResultDisplay from './result-display.svelte'
@@ -147,7 +147,9 @@
       </div>
     </div>
 
-    <Button onclick={handleUpload} disabled={!clientStore.canUpload}>Upload Data</Button>
+    <AsyncButton onclick={handleUpload} disabled={!clientStore.canUpload} loadingText="Uploading…">
+      Upload Data
+    </AsyncButton>
 
     <ResultDisplay {result} {error} />
   </CardContent>

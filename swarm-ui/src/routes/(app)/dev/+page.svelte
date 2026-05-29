@@ -245,7 +245,19 @@
 
     for (const account of accountsToSync) {
       try {
-        await syncStore.syncAccount(account.id.toHex())
+        const result = await syncStore.syncAccount(account.id.toHex())
+
+        if (!result) {
+          results.push(`⚠️ ${account.name}: no snapshot captured (missing stamp?)`)
+          errorCount++
+          continue
+        }
+
+        if (result.status === 'error') {
+          results.push(`❌ ${account.name}: ${result.error}`)
+          errorCount++
+          continue
+        }
 
         // Get default stamp to show utilization
         const defaultStamp =
@@ -256,6 +268,15 @@
         const utilization = stamp ? stamp.utilization.toFixed(2) : 'unknown'
 
         const identityCount = identitiesStore.getIdentitiesByAccount(account.id).length
+
+        if (result.status === 'success-unverified') {
+          results.push(
+            `⚠️ ${account.name} (${identityCount} identities): synced, but root chunk not retrievable — ${result.warning}`,
+          )
+          errorCount++
+          continue
+        }
+
         results.push(
           `✅ ${account.name} (${identityCount} identities): ${utilization}% utilization`,
         )

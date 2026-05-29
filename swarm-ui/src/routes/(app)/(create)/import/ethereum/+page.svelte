@@ -109,6 +109,7 @@
             ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
             : undefined,
           devices: [],
+          partitionCount: result.data.metadata.partitionCount,
         },
         identities: result.data.identities,
         connectedApps: result.data.connectedApps,

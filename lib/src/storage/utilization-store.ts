@@ -9,8 +9,6 @@
  * 2048 uint16 or 1024 uint32 bucket counters, depending on batch depth.
  */
 
-import { Binary } from "cafe-utility"
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -33,6 +31,17 @@ export interface ChunkCacheEntry {
 
   /** SOC reference if uploaded to Swarm */
   socReference?: string
+
+  /**
+   * Per-chunk-index encryption nonce that was used to derive this chunk's
+   * encryption key. Lets a re-save start its bucket-collision search from
+   * the previously-chosen value, so unchanged plaintexts keep the same
+   * derived key (and therefore the same `contentHash`) across saves.
+   *
+   * Optional for backward compatibility — entries written before this field
+   * existed are treated as `nonce = 0`.
+   */
+  nonce?: number
 
   /** Last access timestamp (for eviction) */
   lastAccess: number
@@ -59,8 +68,12 @@ const DB_NAME = "swarm-utilization-store"
  * tracking is lost and re-initialized to defaults on next use.
  *
  * Issue: https://github.com/snaha/swarm-id/issues/243
+ *
+ * v3: contentHash now stores the BMT address of the encrypted chunk (the
+ * value Bee assigns), not keccak(plaintext). Drop legacy rows so dedup
+ * doesn't mismatch on the first post-upgrade upload of each chunk.
  */
-const DB_VERSION = 2
+const DB_VERSION = 3
 const CHUNKS_STORE = "chunks"
 const METADATA_STORE = "metadata"
 
@@ -415,14 +428,4 @@ export async function evictOldEntries(
       reject(new Error(`Failed to evict entries: ${transaction.error}`))
     }
   })
-}
-
-/**
- * Calculate content hash for chunk data
- * @param data - Chunk data (4KB)
- * @returns Hex string hash
- */
-export function calculateContentHash(data: Uint8Array): string {
-  const hash = Binary.keccak256(data)
-  return Binary.uint8ArrayToHex(hash)
 }

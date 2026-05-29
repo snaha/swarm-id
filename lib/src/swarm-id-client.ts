@@ -473,6 +473,7 @@ export class SwarmIdClient {
           uploadMode: message.uploadMode,
           identity: message.identity,
           appKey: message.appKey,
+          partition: message.partition,
         }
         this.lastConnectionInfo = info
         if (this.firstConnectionInfoResolve) {

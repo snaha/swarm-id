@@ -27,6 +27,7 @@ import {
   updateAfterWrite,
   saveUtilizationState,
   calculateUtilization,
+  UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { collectAccountStampBatchIds } from "../utils/postage-stamp-association"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
@@ -37,19 +38,59 @@ import type {
   ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
 } from "./store-interfaces"
-import { BasicEpochUpdater } from "../proxy/feeds/epochs"
+import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
 import { uploadData, type UploadTarget } from "../proxy/upload"
-import { serializeAccountState } from "./serialization"
+import { downloadDataWithChunkAPI } from "../proxy/download-data"
+import { serializeAccountState, deserializeAccountState } from "./serialization"
 import type { SyncResult } from "./types"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import { rejectAfter } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
+import { mergeSnapshotWithRemote } from "./merge-snapshot"
+import { readPartitionLock } from "./partition-lock"
+import { getOrCreateDeviceId } from "../utils/device-id"
 
 // Timeout for utilization upload in milliseconds
 const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
 
+// Timeout for the full sync (upload + feed update) in milliseconds.
+// Bee client requests use bare fetch with no timeout, so a non-responding
+// node would otherwise hang forever.
+const SYNC_TIMEOUT_MS = 60000
+
+// Inner timeout for the post-upload verification probe.
+// The probe is a best-effort diagnostic — if it can't answer quickly we
+// move on to "success-unverified" rather than letting bee-js retries
+// consume the outer SYNC_TIMEOUT_MS budget.
+const VERIFY_PROBE_TIMEOUT_MS = 5000
+
 // Topic prefix for sync feeds
 export const ACCOUNT_SYNC_TOPIC_PREFIX = "swarm-id-backup-v1:account"
+
+/**
+ * Read the latest on-Swarm snapshot for an account's sync feed, returning
+ * `undefined` when the feed is empty or the chunks aren't retrievable.
+ *
+ * Best-effort: the caller treats `undefined` as "no remote, use local only".
+ * Errors propagate so the caller's catch can log them.
+ */
+async function tryFetchLatestSnapshot(opts: {
+  bee: Bee
+  topic: Topic
+  owner: EthAddress
+}): Promise<AccountStateSnapshot | undefined> {
+  const { bee, topic, owner } = opts
+  // Feed SOCs are uploaded unencrypted (no encryptionKey passed to
+  // updater.update below); the finder must not use one either.
+  const finder = new AsyncEpochFinder(bee, topic, owner)
+  const now = BigInt(Math.floor(Date.now() / 1000))
+  const refBytes = await finder.findAt(now)
+  if (!refBytes) return undefined
+
+  const reference = new Reference(refBytes)
+  const data = await downloadDataWithChunkAPI(bee, reference.toHex())
+  return deserializeAccountState(data)
+}
 
 /**
  * Options for creating a sync account function
@@ -212,6 +253,10 @@ export function createSyncAccount(
             encryptionKey: hexToUint8Array(swarmEncryptionKey),
             cache: utilizationStore,
             tracker,
+            reservedBuckets:
+              stamper instanceof UtilizationAwareStamper
+                ? stamper.getLockSocBuckets()
+                : undefined,
           })
 
           // Flush stamper bucket state updates to cache (if supported)
@@ -292,6 +337,7 @@ export function createSyncAccount(
         createdAt: account.createdAt,
         lastModified: Date.now(),
         devices: account.devices,
+        partitionCount: account.partitionCount ?? 1,
       },
       identities,
       connectedApps: apps,
@@ -318,15 +364,83 @@ export function createSyncAccount(
     }
 
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
+    const partitionCount = state.metadata.partitionCount ?? 1
 
-    try {
+    // Safety gate: a device may only write to the shared batch when it
+    // actually holds a partition. The lock SOC is the single source of
+    // truth (no `activeDevices` mirror). Read it directly — this device's
+    // backup signer owns the lock SOCs. Inactive devices skip the publish;
+    // the proxy publishes under its own held lease.
+    let heldPartition: number | undefined
+    if (partitionCount > 1) {
+      const selfDeviceId = getOrCreateDeviceId()
+      const gateBackupKeyHex = await deriveSecret(encryptionKey, "backup-key")
+      const gateBackupSigner = new PrivateKey(gateBackupKeyHex)
+      const gateSwarmKey = hexToUint8Array(encryptionKey)
+      const now = Date.now()
+      for (let p = 0; p < partitionCount; p++) {
+        const lock = await readPartitionLock({
+          bee,
+          backupSigner: gateBackupSigner,
+          swarmEncryptionKey: gateSwarmKey,
+          partition: p,
+        })
+        if (
+          lock &&
+          lock.holderDeviceId === selfDeviceId &&
+          lock.leasedUntil > now
+        ) {
+          heldPartition = p
+          break
+        }
+      }
+      if (heldPartition === undefined) {
+        console.warn(
+          `[SyncCoordinator] Skipping sync ${accountId}: device ${selfDeviceId} holds no partition (per lock SOC).`,
+        )
+        return undefined
+      }
+    }
+
+    console.log(
+      `[SyncCoordinator ${timestamp()}] Starting sync for ${accountId} bee.url=${bee.url}`,
+    )
+
+    const runSync = async (): Promise<SyncResult> => {
       // 1. Derive account signing key for feed
       const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
       const accountKey = new PrivateKey(backupKeyHex)
       const owner = accountKey.publicKey().address()
+      const topic = Topic.fromString(
+        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
+      )
 
-      // 2. Serialize account state
-      const jsonData = serializeAccountState(state)
+      // 1a. Fetch the latest on-Swarm snapshot (best effort) and merge
+      // it with our local state. This prevents the local-write-stomps-peer
+      // race: a device writing here doesn't lose other devices' additions
+      // that were published since our last refresh.
+      let mergedState = state
+      try {
+        const latestRemote = await tryFetchLatestSnapshot({
+          bee,
+          topic,
+          owner,
+        })
+        if (latestRemote) {
+          mergedState = mergeSnapshotWithRemote(state, latestRemote)
+          console.log(
+            `[SyncCoordinator ${timestamp()}] Merged remote snapshot (remote devices=${latestRemote.metadata.devices.length}, merged devices=${mergedState.metadata.devices.length})`,
+          )
+        }
+      } catch (err) {
+        console.warn(
+          `[SyncCoordinator ${timestamp()}] Pre-write remote-snapshot fetch failed; proceeding with local state only:`,
+          err,
+        )
+      }
+
+      // 2. Serialize merged state
+      const jsonData = serializeAccountState(mergedState)
 
       // 3. Get stamper from store
       const stamper = await postageStampsStore.getStamper(
@@ -336,6 +450,22 @@ export function createSyncAccount(
           encryptionKey: hexToUint8Array(encryptionKey),
         },
       )
+      if (
+        stamper &&
+        heldPartition !== undefined &&
+        partitionCount > 1 &&
+        stamper.bindPartition &&
+        stamper.buildLeaseLocalCounter
+      ) {
+        // Bind the stamper to the partition this device holds (per the lock
+        // SOC) so chunk-stamping picks slots from our slice instead of the
+        // "any" pool — prevents collisions with peers sharing the batch.
+        stamper.bindPartition({
+          partition: heldPartition,
+          partitionCount,
+          localCounter: stamper.buildLeaseLocalCounter(),
+        })
+      }
       if (!stamper) {
         throw new Error(
           `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`,
@@ -349,6 +479,7 @@ export function createSyncAccount(
         stamper,
       }
 
+      console.log(`[SyncCoordinator ${timestamp()}] Uploading data…`)
       const uploadResult = await uploadData(target, jsonData, {
         encryptionKey: hexToUint8Array(encryptionKey),
       })
@@ -372,9 +503,7 @@ export function createSyncAccount(
       }
 
       // 6. Update epoch feed (after utilization completes)
-      const topic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
-      )
+      // `topic` already declared above with the same construction.
       const updater = new BasicEpochUpdater(topic, accountKey)
       const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
 
@@ -383,21 +512,105 @@ export function createSyncAccount(
 
       // Create upload target for epoch feed update
       const feedTarget: UploadTarget = { mode: "stamper", bee, stamper }
+      console.log(`[SyncCoordinator ${timestamp()}] Updating feed…`)
       const updateResult = await updater.update(
         feedTimestamp,
         refBytes,
         feedTarget,
       )
+      console.log(
+        `[SyncCoordinator ${timestamp()}] Feed updated (+${(performance.now() - startTime).toFixed(2)}ms), verifying root chunk…`,
+      )
 
       // Add SOC chunk to tracked addresses
       allChunkAddresses.push(updateResult.socAddress)
 
+      // 7. Verify the root chunk is retrievable immediately after upload.
+      // This catches the case where Bee accepts the write but doesn't
+      // actually retain the data — the upload reports success, the feed
+      // points at a reference, but downstream restores would fail.
+      // refBytes is the snapshot reference: 32 bytes (plain) or 64 bytes
+      // (encrypted = 32-byte address + 32-byte key). Probe the address only.
+      const rootChunkAddress = refBytes.slice(0, 32)
+      const rootChunkAddressHex = Array.from(rootChunkAddress)
+        .map((b) => b.toString(16).padStart(2, "0"))
+        .join("")
+
+      // Bound the probe with its own timeout + per-request timeout so bee-js
+      // can't retry the 500 response indefinitely.
+      let probeTimer: ReturnType<typeof setTimeout> | undefined
+      const probeTimeoutPromise = new Promise<"timeout">((resolve) => {
+        probeTimer = setTimeout(
+          () => resolve("timeout"),
+          VERIFY_PROBE_TIMEOUT_MS,
+        )
+      })
+      const probePromise = bee
+        .downloadChunk(rootChunkAddressHex, undefined, {
+          timeout: VERIFY_PROBE_TIMEOUT_MS,
+        })
+        .then(() => "ok" as const)
+        .catch((err) => err as Error)
+
+      let probeOutcome: "ok" | "timeout" | Error
+      try {
+        probeOutcome = await Promise.race([probePromise, probeTimeoutPromise])
+      } finally {
+        if (probeTimer !== undefined) clearTimeout(probeTimer)
+      }
+
+      if (probeOutcome === "ok") {
+        console.log(
+          `[SyncCoordinator ${timestamp()}] Verified root chunk retrievable addr=${rootChunkAddressHex}`,
+        )
+        return {
+          status: "success",
+          reference: uploadResult.reference,
+          timestamp: feedTimestamp,
+          chunkAddresses: allChunkAddresses,
+        }
+      }
+
+      const reason =
+        probeOutcome === "timeout"
+          ? `probe timed out after ${VERIFY_PROBE_TIMEOUT_MS}ms`
+          : probeOutcome instanceof Error
+            ? probeOutcome.message
+            : String(probeOutcome)
+      const warning = `Root chunk ${rootChunkAddressHex} not retrievable immediately after upload from ${bee.url}: ${reason}`
+      console.warn(`[SyncCoordinator ${timestamp()}] ${warning}`)
       return {
-        status: "success",
+        status: "success-unverified",
         reference: uploadResult.reference,
         timestamp: feedTimestamp,
         chunkAddresses: allChunkAddresses,
+        warning,
       }
+    }
+
+    // Race the sync against a timeout. Bee client requests have no built-in
+    // timeout, so a non-responding node would otherwise hang the UI forever.
+    // Note: this surfaces the timeout to the caller but does NOT cancel the
+    // underlying fetch (would require AbortSignal propagation through bee-js).
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const timeoutPromise = new Promise<SyncResult>((resolve) => {
+      timer = setTimeout(() => {
+        resolve({
+          status: "error",
+          error: `Sync timed out after ${SYNC_TIMEOUT_MS}ms`,
+        })
+      }, SYNC_TIMEOUT_MS)
+    })
+
+    try {
+      const result = await Promise.race([runSync(), timeoutPromise])
+      if (result.status === "error") {
+        console.error(
+          `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
+          result.error,
+        )
+      }
+      return result
     } catch (error) {
       console.error(
         `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
@@ -407,6 +620,8 @@ export function createSyncAccount(
         status: "error",
         error: error instanceof Error ? error.message : String(error),
       }
+    } finally {
+      if (timer !== undefined) clearTimeout(timer)
     }
   }
 }

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { EthAddress, BatchId } from "@ethersphere/bee-js"
+import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
 import { deserializeAccountState } from "./serialization"
 import type {
@@ -83,6 +83,16 @@ function createMockStores() {
   }
 }
 
+// Bee mock with a downloadChunk that succeeds, so the post-upload verification
+// probe in syncAccount sees the root chunk as retrievable and returns status
+// "success" rather than "success-unverified".
+function createMockBee(): Bee {
+  return {
+    url: "http://mock-bee",
+    downloadChunk: vi.fn().mockResolvedValue(new Uint8Array(105)),
+  } as unknown as Bee
+}
+
 // ============================================================================
 // Upload & Epoch Mock Setup
 // ============================================================================
@@ -124,6 +134,11 @@ vi.mock("../proxy/feeds/epochs", () => {
       update = mockUpdate
       getOwner = vi.fn(() => new EthAddress("a".repeat(40)))
     },
+    // Pre-write remote-snapshot fetch reads via AsyncEpochFinder; return
+    // empty so the merge sees no remote state and falls back to local.
+    AsyncEpochFinder: class MockAsyncEpochFinder {
+      findAt = vi.fn(async () => undefined)
+    },
   }
 })
 
@@ -135,6 +150,15 @@ vi.mock("../utils/batch-utilization", () => ({
   }),
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
+}))
+
+// device-id uses localStorage which isn't available in this test environment;
+// stub it out with a fixed value.
+vi.mock("../utils/device-id", () => ({
+  getOrCreateDeviceId: vi.fn(() => "test-device-self"),
+  getDeviceId: vi.fn(() => "test-device-self"),
+  mergeDevices: vi.fn((existing: unknown[]) => existing),
+  detectDeviceName: vi.fn(() => "Test Device"),
 }))
 
 // ============================================================================
@@ -167,7 +191,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -199,7 +223,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -235,7 +259,7 @@ describe("createSyncAccount", () => {
     ).mockReturnValue(undefined)
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -266,7 +290,7 @@ describe("createSyncAccount", () => {
     ])
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -292,7 +316,7 @@ describe("createSyncAccount", () => {
     )
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -313,7 +337,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -329,5 +353,35 @@ describe("createSyncAccount", () => {
     // Last address should be the SOC address from epoch feed update
     const lastAddress = result.chunkAddresses[result.chunkAddresses.length - 1]
     expect(lastAddress).toEqual(FAKE_SOC_ADDRESS)
+  })
+
+  it("skips sync when the device holds no partition (multi-device account)", async () => {
+    const stores = createMockStores()
+    // Multi-device account. The mock Bee can't serve a lock SOC, so the
+    // gate's lock-SOC scan finds no held partition for this device → skip.
+    const baseAccount = stores.accountsStore.getAccount(
+      new EthAddress(TEST_ETH_ADDRESS_HEX),
+    )!
+    const multiDeviceAccount = {
+      ...baseAccount,
+      partitionCount: 2,
+    }
+    stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
+      id.toHex() === TEST_ETH_ADDRESS_HEX ? multiDeviceAccount : undefined,
+    )
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+    expect(result).toBeUndefined()
+    expect(uploadCallCount).toBe(0)
+    expect(epochUpdateCallCount).toBe(0)
   })
 })

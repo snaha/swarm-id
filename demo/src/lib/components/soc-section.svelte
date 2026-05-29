@@ -14,6 +14,7 @@
   import { Input } from '$lib/components/ui/input'
   import { Textarea } from '$lib/components/ui/textarea'
   import { Button } from '$lib/components/ui/button'
+  import AsyncButton from './async-button.svelte'
   import { Separator } from '$lib/components/ui/separator'
   import ResultDisplay from './result-display.svelte'
   import type { ResultData } from './result-types'
@@ -222,10 +223,20 @@
     <Input bind:value={identifier} placeholder="Identifier (64 hex chars)" />
     <Textarea bind:value={uploadData} placeholder="Enter SOC payload..." rows={2} />
     <div class="flex gap-2">
-      <Button onclick={handleEncryptedUpload} disabled={!clientStore.canUpload}>
+      <AsyncButton
+        onclick={handleEncryptedUpload}
+        disabled={!clientStore.canUpload}
+        loadingText="Uploading…"
+      >
         Upload Encrypted SOC
-      </Button>
-      <Button onclick={handleRawUpload} disabled={!clientStore.canUpload}>Upload Raw SOC</Button>
+      </AsyncButton>
+      <AsyncButton
+        onclick={handleRawUpload}
+        disabled={!clientStore.canUpload}
+        loadingText="Uploading…"
+      >
+        Upload Raw SOC
+      </AsyncButton>
     </div>
     <ResultDisplay result={uploadResult} error={uploadError} />
 

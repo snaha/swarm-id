@@ -24,10 +24,16 @@ export interface StamperOptions {
  * Extended stamper interface with optional flush capability
  *
  * Some stampers (like UtilizationAwareStamper) support flushing
- * dirty bucket state to cache.
+ * dirty bucket state to cache and binding to a multi-device partition.
  */
 export interface FlushableStamper extends Stamper {
   flush?(): Promise<void>
+  bindPartition?(opts: {
+    partition: number
+    partitionCount: number
+    localCounter: Uint32Array
+  }): void
+  buildLeaseLocalCounter?(): Uint32Array
 }
 
 /**

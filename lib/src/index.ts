@@ -52,7 +52,10 @@ export {
   createStamper,
   prepareBucketState,
   UtilizationAwareStamper,
+  PartitionLeaseLostError,
   getChunkLayout,
+  deriveUtilizationChunkKey,
+  resolveUtilizationChunkKeys,
   NUM_BUCKETS,
   BUCKET_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
@@ -60,13 +63,66 @@ export {
   CHUNK_SIZE,
   DEFAULT_BATCH_DEPTH,
   UINT16_COUNTER_MAX_DEPTH,
+  PARTITION_COUNT,
+  LEASE_TTL_MS,
+  LEASE_REFRESH_MS,
+  RESUME_COUNTER_SKEW_DIVISOR,
+  computeResumeCounterSkew,
 } from "./utils/batch-utilization"
+export type { UtilizationChunkKey } from "./utils/batch-utilization"
+
+// Storage key constants (for cross-frame localStorage listeners)
+export {
+  STORAGE_KEY_ACCOUNTS,
+  STORAGE_KEY_IDENTITIES,
+  STORAGE_KEY_CONNECTED_APPS,
+  STORAGE_KEY_POSTAGE_STAMPS,
+  STORAGE_KEY_NETWORK_SETTINGS,
+  STORAGE_KEY_LEASE_CACHE_PREFIX,
+  leaseCacheStorageKey,
+} from "./types"
+
+// Partition-lease orchestrator and feeds
+export { PartitionLease } from "./sync/partition-lease"
+export type {
+  AcquireResult,
+  PartitionLeaseSnapshotInputs,
+  PartitionLeaseStateSnapshot,
+  SelfLease,
+  PartitionHolderEntry,
+} from "./sync/partition-lease"
+export {
+  makeDeviceClaimTopic,
+  readDeviceClaim,
+  writeDeviceClaim,
+  NO_CLAIM_PARTITION,
+} from "./sync/partition-claim"
+export {
+  makePartitionStateTopic,
+  readPartitionState,
+  writePartitionState,
+} from "./sync/partition-state"
+export {
+  acquirePartitionLock,
+  compareGenerations,
+  makeDeviceTiebreaker,
+  makePartitionLockIdentifier,
+  readPartitionLock,
+  writePartitionLock,
+  lockSocAddress,
+  lockSocBucket,
+  NO_HOLDER_DEVICE_ID,
+} from "./sync/partition-lock"
+export type {
+  AcquirePartitionLockResult,
+  PartitionLockGeneration,
+  PartitionLockPayload,
+} from "./sync/partition-lock"
 
 // Utilization storage (IndexedDB cache)
 export {
   UtilizationStoreDB,
   evictOldEntries,
-  calculateContentHash,
 } from "./storage/utilization-store"
 
 export type {
@@ -173,6 +229,7 @@ export {
   ACCOUNT_SYNC_TOPIC_PREFIX,
   // Restore account from Swarm
   restoreAccountFromSwarm,
+  SnapshotDataUnavailableError,
 } from "./sync"
 
 // State sync types
@@ -327,6 +384,7 @@ export {
   getOrCreateDeviceId,
   getDeviceId,
   mergeDevices,
+  detectDeviceName,
 } from "./utils/device-id"
 
 // Batch utilization types

@@ -113,6 +113,7 @@ export const DeviceSchemaV1 = z.object({
   deviceId: z.string(),
   createdAt: z.number(),
   lastSignedInAt: z.number(),
+  name: z.string().optional(),
 })
 
 // ============================================================================
@@ -129,6 +130,13 @@ const CommonAccountSchemaV1 = z.object({
   derivationKey: z.string().length(64), // derived key for deterministic sub-key generation (64-char hex)
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
+  /**
+   * Number of partitions the postage-batch slot space is divided into.
+   * Optional on the local account record (omitted → `1` = single-device
+   * legacy behaviour). New accounts set this to `PARTITION_COUNT` at
+   * creation time.
+   */
+  partitionCount: z.number().int().min(1).optional(),
 })
 
 /**
@@ -242,6 +250,13 @@ export const AccountMetadataSchemaV1 = z.object({
   createdAt: z.number(),
   lastModified: z.number(),
   devices: z.array(DeviceSchemaV1).default([]),
+  /**
+   * Number of partitions the postage-batch slot space is divided into.
+   * `1` means "no partitioning, single-device behaviour" — this is the
+   * default for snapshots from before the partition-lease shipped. New
+   * accounts write the current `PARTITION_COUNT` (2) here.
+   */
+  partitionCount: z.number().int().min(1).default(1),
 })
 
 const ACCOUNT_STATE_SNAPSHOT_VERSION = 1
@@ -274,6 +289,39 @@ export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
+
+// ============================================================================
+// Partition-Lease Feed Payloads
+// ============================================================================
+
+/**
+ * Per-device claim feed payload.
+ *
+ * `partition` is `-1` when the device explicitly released its lease. The
+ * "current claim" for a device is the latest entry on its claim feed.
+ */
+export const PartitionClaimSchemaV1 = z.object({
+  partition: z.number().int().min(-1),
+  leasedUntil: z.number(),
+  generation: z.number().int().min(0),
+  acquiredAt: z.number(),
+})
+export type PartitionClaim = z.infer<typeof PartitionClaimSchemaV1>
+
+/**
+ * Per-partition state feed payload.
+ *
+ * `bucketCounters` is a serialised `Uint32Array(NUM_BUCKETS)` (little-endian
+ * uint32 per bucket; the on-disk codec used for the utilisation chunks is
+ * not reused here because this payload is read whole, not chunked into the
+ * postage batch).
+ */
+export const PartitionStateSchemaV1 = z.object({
+  bucketCounters: z.instanceof(Uint8Array),
+  publishedBy: z.string(),
+  publishedAt: z.number(),
+})
+export type PartitionState = z.infer<typeof PartitionStateSchemaV1>
 
 // ============================================================================
 // Network Settings Schema

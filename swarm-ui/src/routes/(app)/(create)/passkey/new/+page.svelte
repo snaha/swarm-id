@@ -25,7 +25,13 @@
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import ErrorMessage from '$lib/components/ui/error-message.svelte'
-  import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
+  import {
+    deriveAccountDerivationKey,
+    getOrCreateDeviceId,
+    mergeDevices,
+    detectDeviceName,
+    PARTITION_COUNT,
+  } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let accountName = $state('Passkey')
@@ -76,6 +82,7 @@
       const derivationKey = await deriveAccountDerivationKey(account.masterKey.toHex())
 
       // Store account WITHOUT masterKey (passkey accounts never persist masterKey)
+      const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
         id: account.ethereumAddress,
         createdAt: Date.now(),
@@ -83,7 +90,10 @@
         type: 'passkey',
         credentialId: account.credentialId,
         derivationKey,
-        devices: mergeDevices([], getOrCreateDeviceId()),
+        devices: mergeDevices([], deviceId, detectDeviceName()),
+        // Multi-device partition lease: opt new accounts into K=2 sharing
+        // from day one. Lock SOCs are claimed on demand by the proxy.
+        partitionCount: PARTITION_COUNT,
       })
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')

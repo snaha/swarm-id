@@ -236,6 +236,7 @@ export async function createEncryptedExport(
       createdAt: account.createdAt,
       lastModified: now,
       devices: account.devices,
+      partitionCount: account.partitionCount ?? 1,
     },
     identities,
     connectedApps,

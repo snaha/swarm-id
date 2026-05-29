@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { Account, Identity, ConnectedApp, PostageStamp, Device } from '@snaha/swarm-id'
-import { mergeDevices, getOrCreateDeviceId } from '@snaha/swarm-id'
+import { mergeDevices, getOrCreateDeviceId, detectDeviceName } from '@snaha/swarm-id'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { identitiesStore } from '$lib/stores/identities.svelte'
 import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
@@ -17,7 +17,7 @@ interface RestoreData {
 }
 
 export function restoreAccountToStores(data: RestoreData): Account {
-  const devices = mergeDevices(data.devices ?? [], getOrCreateDeviceId())
+  const devices = mergeDevices(data.devices ?? [], getOrCreateDeviceId(), detectDeviceName())
   accountsStore.addAccount({ ...data.account, devices })
 
   for (const identity of data.identities) {
