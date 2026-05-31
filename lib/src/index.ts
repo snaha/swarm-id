@@ -461,9 +461,13 @@ export {
   getBlockTimestamp,
   calculateExpiryTimestamp,
   fetchSwarmPrice,
+  fetchChainState,
+  calculateStampAmountForDays,
   SWARMSCAN_STATS_URL,
   GNOSIS_BLOCK_TIME,
+  BLOCKS_PER_DAY,
 } from "./utils/ttl"
+export type { ChainState } from "./utils/ttl"
 
 // Postage stamp <-> account/identity association
 export {

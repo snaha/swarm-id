@@ -23,7 +23,14 @@
   import Divider from '$lib/components/ui/divider.svelte'
   import routes from '$lib/routes'
   import { BatchId, EthAddress, PrivateKey, Utils } from '@ethersphere/bee-js'
+  import { calculateStampAmountForDays, fetchChainState } from '@snaha/swarm-id'
   import { SvelteMap } from 'svelte/reactivity'
+
+  // How many days of validity to fund by default when auto-filling the
+  // stamp amount from current chain price. Bee enforces a 24h minimum on
+  // POST /stamps; 7 days gives comfortable headroom for dev testing without
+  // re-buying constantly.
+  const DEFAULT_STAMP_DAYS = 7
 
   // Tab state
   type Tab = 'overview' | 'stamps' | 'sync'
@@ -43,11 +50,17 @@
 
   // Stamp buying state
   let beeUrl = $state('http://localhost:1633')
-  let stampAmount = $state('500000000')
+  // Amount starts empty — autofilled from chain price on first chainstate
+  // load (see loadChainState). Hardcoding a default is fragile across chain
+  // configs: bee-compose's PriceOracle floor (24_000 PLUR/chunk/block) needs
+  // ≥ 414_720_000 PLUR/chunk for 24h, and other chains have different floors.
+  let stampAmount = $state('')
   let stampDepth = $state('20')
   let buying = $state(false)
   let stampResult = $state<{ batchID: string; txHash: string } | undefined>(undefined)
   let stampError = $state('')
+  let currentPrice = $state<bigint | undefined>(undefined)
+  let chainStateError = $state('')
   let assignMessage = $state('')
   let assignError = $state('')
   let selectedStampId = $state<string | undefined>(undefined)
@@ -313,9 +326,27 @@ Check console logs for details:
     }
   }
 
+  async function loadChainState() {
+    chainStateError = ''
+    try {
+      const state = await fetchChainState(beeUrl)
+      currentPrice = state.currentPrice
+      // Only autofill if the user hasn't typed (or pre-typed) a value yet.
+      // After the first fill, the user owns this field — switching bee URLs
+      // updates the displayed price but does not clobber their input.
+      if (stampAmount === '') {
+        stampAmount = calculateStampAmountForDays(state.currentPrice, DEFAULT_STAMP_DAYS).toString()
+      }
+    } catch (error) {
+      chainStateError = error instanceof Error ? error.message : String(error)
+      currentPrice = undefined
+    }
+  }
+
   $effect(() => {
     if (activeTab === 'stamps' && beeUrl && beeUrl !== lastBeeUrl && !beeStampsLoading) {
       loadBeeStamps()
+      loadChainState()
     }
   })
 
@@ -602,10 +633,21 @@ Check console logs for details:
           <Input label="Amount" bind:value={stampAmount} style="flex: 1;" />
           <Input label="Depth (17-40)" bind:value={stampDepth} style="width: 120px;" />
         </Horizontal>
+        {#if currentPrice !== undefined}
+          {@const minAmount = calculateStampAmountForDays(currentPrice, 1)}
+          <Typography variant="small" style="color: var(--colors-medium);">
+            Chain price: {currentPrice.toLocaleString()} PLUR/chunk/block · 24h min: {minAmount.toLocaleString()}
+            PLUR · default fills {DEFAULT_STAMP_DAYS}d validity
+          </Typography>
+        {:else if chainStateError}
+          <Typography variant="small" style="color: var(--colors-error);">
+            Could not fetch chainstate from Bee: {chainStateError}
+          </Typography>
+        {/if}
         <Select label="Signer Key" items={KNOWN_SIGNERS} bind:value={selectedSigner} />
       </Vertical>
 
-      <Button onclick={buyStamp} busy={buying} disabled={buying}>
+      <Button onclick={buyStamp} busy={buying} disabled={buying || !stampAmount}>
         {buying ? 'Buying...' : 'Buy Stamp'}
       </Button>
 
