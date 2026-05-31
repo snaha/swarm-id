@@ -22,7 +22,7 @@ static_sites:
 
     # Build using monorepo scripts.
     # Pin pnpm via corepack so DO doesn't fall back to its system pnpm.
-    build_command: git submodule update --init --recursive && corepack enable && corepack prepare pnpm@11.5.0 --activate && pnpm install --frozen-lockfile && pnpm build:swarm-demo
+    build_command: corepack enable && corepack prepare pnpm@11.5.0 --activate && pnpm install --frozen-lockfile && pnpm build:swarm-demo
 
     # SPA routing - all routes go to index.html
     catchall_document: index.html
