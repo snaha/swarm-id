@@ -54,7 +54,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=22",
+    "node": ">=24",
     "pnpm": "11.x"
   }
 }
