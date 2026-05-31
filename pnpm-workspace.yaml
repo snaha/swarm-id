@@ -3,3 +3,14 @@ packages:
   - 'demo'
   - 'swarm-ui'
   - 'docs-site'
+
+# pnpm 11 reads non-auth settings from this file, not .npmrc.
+autoInstallPeers: false
+engineStrict: true
+
+allowBuilds:
+  '@tailwindcss/oxide': true
+  esbuild: true
+  sharp: true
+  # es5-ext has a noisy postinstall (sponsorship message); not required to build.
+  es5-ext: false
