@@ -21,8 +21,8 @@ static_sites:
     output_dir: swarm-id-build
 
     # Build using monorepo scripts.
-    # Pin pnpm via corepack so DO doesn't fall back to its system pnpm.
-    build_command: corepack enable && corepack prepare pnpm@11.5.0 --activate && pnpm install --frozen-lockfile && pnpm build:swarm-id
+    # `corepack enable` reads the version from package.json's packageManager field.
+    build_command: corepack enable && pnpm install --frozen-lockfile && pnpm build:swarm-id
 
     # SPA routing - all routes go to index.html except /demo
     catchall_document: index.html
