@@ -32,12 +32,37 @@ The suite is **skipped automatically** when no cluster is reachable at
 - `cluster.ts` provides helpers: cluster reachability, buying/reusing a usable
   postage stamp, and building a bee-js `Stamper` from the queen's well-known
   dev key (uploads in Node without the browser-only proxy machinery).
-- A usable stamp is reused across the whole run when present, so one cluster
-  serves all tests. Each test uploads freshly randomised data, so tests are
-  independent.
+- `global-setup.ts` (Vitest `globalSetup`) buys (or reuses) **one** usable
+  postage stamp before any test file runs and shares its batch id with every
+  file via `provide`/`inject`. This makes the ~minute-long stamp warmup a
+  one-time cost for the whole run instead of per file.
+
+### Adding a new cluster test file
+
+Reuse the shared stamp — do not buy your own:
+
+```ts
+import { inject, beforeAll } from "vitest"
+import { isClusterReachable, createClusterContext } from "./cluster"
+
+const clusterReachable = await isClusterReachable()
+
+describe.skipIf(!clusterReachable)("my feature", () => {
+  let bee, target
+  beforeAll(() => {
+    ;({ bee, target } = createClusterContext(inject("clusterBatchId")))
+  })
+  // ...use uploadData/uploadSOC/etc. with `target`, download with `bee`
+})
+```
+
+Each test should use a unique data set (random or name-derived) so files stay
+independent and can run in any order against the shared cluster.
 
 ## Next steps
 
-This POC covers plain + encrypted data round-trips. Natural extensions:
-SOC, sequential/epoch feeds, ACT, manifests, subsidised-gateway mode, and
-error cases — plus wiring `test:cluster` into a CI job that boots bee-compose.
+Covered so far: plain + encrypted data round-trips and chunk-boundary sizes.
+Natural extensions: SOC, sequential/epoch feeds, ACT, manifests, and
+subsidised-gateway mode. (SOC/feed retrieval needs a multi-node cluster or
+deferred + local reads — the single-queen dev cluster stalls on network
+push/retrieval for those.)

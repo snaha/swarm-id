@@ -12,29 +12,18 @@
  * The whole suite is skipped automatically when no cluster is reachable, so it
  * never breaks the default unit-test run or CI.
  *
- * Each test uploads a freshly randomised payload, so tests share one cluster
- * and one stamp without depending on each other's data.
+ * The usable postage stamp is acquired once in global setup and shared with
+ * every test file via inject("clusterBatchId"); each test uploads a freshly
+ * randomised payload, so tests are independent.
  */
 
-import { describe, it, expect, beforeAll } from "vitest"
-import type { Bee, Stamper } from "@ethersphere/bee-js"
+import { describe, it, expect, beforeAll, inject } from "vitest"
+import type { Bee } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "../../src/proxy/upload"
 import { downloadDataWithChunkAPI } from "../../src/proxy/download-data"
-import {
-  isClusterReachable,
-  buyUsableStamp,
-  createQueenStamper,
-  createQueenBee,
-} from "./cluster"
+import { isClusterReachable, createClusterContext } from "./cluster"
 
 const clusterReachable = await isClusterReachable()
-
-if (!clusterReachable) {
-  // eslint-disable-next-line no-console
-  console.warn(
-    "[cluster] No local Bee cluster reachable at http://localhost:1633 — skipping cluster integration tests. Run `pnpm dev:bee:detach` to enable them.",
-  )
-}
 
 /** Generate a unique random payload so each test is independent. */
 function randomPayload(size: number): Uint8Array {
@@ -50,15 +39,11 @@ describe.skipIf(!clusterReachable)(
   "Swarm round-trip against live cluster",
   () => {
     let bee: Bee
-    let stamper: Stamper
     let target: UploadTarget
 
-    beforeAll(async () => {
-      bee = createQueenBee()
-      const batchId = await buyUsableStamp()
-      stamper = createQueenStamper(batchId)
-      target = { mode: "stamper", bee, stamper }
-    }, 120_000)
+    beforeAll(() => {
+      ;({ bee, target } = createClusterContext(inject("clusterBatchId")))
+    })
 
     it("uploads and downloads small plain data", async () => {
       const data = randomPayload(SMALL_PAYLOAD_SIZE)

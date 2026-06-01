@@ -13,6 +13,9 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["test/cluster/**/*.cluster.test.ts"],
+    // Buys one usable stamp before any file runs and shares it via inject(),
+    // so the stamp warmup is paid once for the whole suite.
+    globalSetup: ["./test/cluster/global-setup.ts"],
     // Cluster ops (stamp warmup, uploads) are slower than unit tests.
     testTimeout: 60_000,
     hookTimeout: 120_000,

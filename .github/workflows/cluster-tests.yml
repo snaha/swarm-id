@@ -87,11 +87,8 @@ jobs:
           echo "::error::Queen node did not become ready in time"
           exit 1
 
-      - name: Buy a postage stamp
-        # Buys and waits for on-chain settlement; the test reuses this usable
-        # stamp so its setup hook stays fast and deterministic.
-        run: pnpm exec bee-compose stamp
-
+      # The suite's global setup buys (or reuses) a single usable postage stamp
+      # and shares it across all test files, so there is no separate buy step.
       - name: Run cluster integration tests
         run: pnpm --filter @snaha/swarm-id test:cluster
 

@@ -34,8 +34,15 @@ export const TEST_STAMP_DEPTH = 20
 export const TEST_STAMP_AMOUNT = "500000000"
 
 const HTTP_OK = 200
+const HTTP_TOO_MANY_REQUESTS = 429
 const STAMP_USABLE_POLL_INTERVAL_MS = 1500
 const STAMP_USABLE_TIMEOUT_MS = 90_000
+const STAMP_BUY_RETRIES = 15
+const STAMP_BUY_RETRY_DELAY_MS = 2000
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
 
 /**
  * Check whether the local queen Bee node is reachable. Used to skip the
@@ -56,21 +63,35 @@ export async function isClusterReachable(
 
 /**
  * Buy a postage stamp on the queen node and return its batch id.
+ *
+ * Retries on HTTP 429, which Bee returns while another on-chain operation is
+ * in flight (e.g. the chequebook deploy that runs right after the node comes
+ * up). Bee serialises on-chain transactions, so a freshly started node can
+ * briefly reject the buy until the prior tx settles.
  */
 export async function buyStamp(
   url: string = QUEEN_URL,
   amount: string = TEST_STAMP_AMOUNT,
   depth: number = TEST_STAMP_DEPTH,
 ): Promise<string> {
-  const response = await fetch(`${url}/stamps/${amount}/${depth}`, {
-    method: "POST",
-  })
-  if (!response.ok) {
+  for (let attempt = 0; ; attempt++) {
+    const response = await fetch(`${url}/stamps/${amount}/${depth}`, {
+      method: "POST",
+    })
+    if (response.ok) {
+      const data = (await response.json()) as { batchID: string }
+      return data.batchID
+    }
     const body = await response.text()
+    if (
+      response.status === HTTP_TOO_MANY_REQUESTS &&
+      attempt < STAMP_BUY_RETRIES
+    ) {
+      await delay(STAMP_BUY_RETRY_DELAY_MS)
+      continue
+    }
     throw new Error(`Failed to buy stamp: HTTP ${response.status} ${body}`)
   }
-  const data = (await response.json()) as { batchID: string }
-  return data.batchID
 }
 
 /**
@@ -90,9 +111,7 @@ export async function waitForUsableStamp(
         return
       }
     }
-    await new Promise((resolve) =>
-      setTimeout(resolve, STAMP_USABLE_POLL_INTERVAL_MS),
-    )
+    await delay(STAMP_USABLE_POLL_INTERVAL_MS)
   }
   throw new Error(
     `Stamp ${batchId} did not become usable within ${timeoutMs}ms`,
@@ -150,4 +169,26 @@ export function createQueenStamper(
 /** A `Bee` client pointed at the local queen node. */
 export function createQueenBee(url: string = QUEEN_URL): Bee {
   return new Bee(url)
+}
+
+export interface ClusterContext {
+  bee: Bee
+  stamper: Stamper
+  /** Stamper-mode upload target ready to pass to uploadData/uploadSOC/etc. */
+  target: { mode: "stamper"; bee: Bee; stamper: Stamper }
+}
+
+/**
+ * Build the bee client + queen stamper + stamper-mode upload target for a
+ * shared batch id (typically obtained via `inject("clusterBatchId")`). This is
+ * synchronous and does no network I/O, so every test file can call it cheaply
+ * in `beforeAll` while reusing the single stamp acquired in global setup.
+ */
+export function createClusterContext(
+  batchId: string,
+  url: string = QUEEN_URL,
+): ClusterContext {
+  const bee = createQueenBee(url)
+  const stamper = createQueenStamper(batchId)
+  return { bee, stamper, target: { mode: "stamper", bee, stamper } }
 }
