@@ -4,11 +4,16 @@
 /**
  * Partition-state feed for multi-device postage-batch sharing.
  *
- * Each `(batchId, partition)` pair has its own epoch feed carrying the
- * device's `localCounter: Uint32Array(65536)`. The current holder publishes
- * the counter on release; the next holder reads it on acquire and seeds
- * its own local counter (with a defensive skew) so the two devices never
- * race for the same `(bucket, slot)` pair.
+ * Each `(batchId, partition)` pair has its own epoch feed. The current holder
+ * publishes its per-partition counter on release; the next holder reads it on
+ * acquire and seeds its own counter (with a defensive skew) so the two devices
+ * never race for the same `(bucket, slot)` pair.
+ *
+ * The counter is not a single blob: it is split into the same per-`chunkIndex`
+ * chunks the utilisation store uses, each uploaded with a random key to the
+ * partition's reserved slot (never a data slot), and a single "reference chunk"
+ * lists their 64-byte encrypted references (address‖key). The feed points at
+ * the reference chunk. See docs/Postage-Batch-Partitioning.md.
  *
  * Topic = keccak256("swarm-id-partition-state-v1" ‖ batchId ‖ uint32(partition))
  * Owner = backup signer (`deriveSecret(swarmEncryptionKey, "backup-key")`)
@@ -28,13 +33,20 @@ import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
 import { BasicEpochUpdater } from "../proxy/feeds/epochs/updater"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { uploadData, type UploadTarget } from "../proxy/upload"
+import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   NUM_BUCKETS,
+  UtilizationAwareStamper,
   computeResumeCounterSkew,
-  deserializeUint32Array,
-  serializeUint32Array,
+  extractChunk,
+  getChunkLayout,
+  mergeChunk,
+  toBucket,
 } from "../utils/batch-utilization"
-import { PartitionStateSchemaV1, type PartitionState } from "../schemas"
+import { lockSocBucket } from "../utils/lock-soc"
+
+/** Length of a Swarm encrypted reference: 32-byte address + 32-byte key. */
+const ENCRYPTED_REFERENCE_BYTES = 64
 
 /** Domain-separation tag for partition-state-feed topics. */
 const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v1"
@@ -79,11 +91,7 @@ export async function readPartitionState(opts: {
   batchId: BatchId
   partition: number
   batchDepth: number
-}): Promise<{
-  localCounter: Uint32Array
-  publishedBy?: string
-  publishedAt?: number
-}> {
+}): Promise<{ localCounter: Uint32Array }> {
   const { bee, owner, batchId, partition, batchDepth } = opts
   const topic = makePartitionStateTopic(batchId, partition)
   const finder = new AsyncEpochFinder(bee, topic, owner)
@@ -101,56 +109,60 @@ export async function readPartitionState(opts: {
     return { localCounter }
   }
 
-  const reference = new Reference(refBytes)
-  const payloadJson = await downloadDataWithChunkAPI(bee, reference.toHex())
-  const rawObject = JSON.parse(new TextDecoder().decode(payloadJson))
-  // JSON round-trip delivers `bucketCounters` as a plain number array; coerce
-  // to Uint8Array before Zod sees it so z.instanceof(Uint8Array) passes.
-  const parsed = PartitionStateSchemaV1.parse({
-    ...rawObject,
-    bucketCounters: coerceUint8Array(rawObject.bucketCounters),
-  })
-  const decoded = deserializeUint32Array(parsed.bucketCounters)
-  if (decoded.length !== NUM_BUCKETS) {
-    throw new Error(
-      `Partition-state payload has ${decoded.length} counters, expected ${NUM_BUCKETS}`,
+  // The feed points to the reference chunk: a single chunk holding the
+  // 64-byte encrypted references (address‖key) of this partition's counter
+  // chunks. Each reference carries its own decryption key, so no key
+  // derivation is needed — downloadDataWithChunkAPI decrypts from the ref.
+  const referenceChunk = await downloadDataWithChunkAPI(
+    bee,
+    new Reference(refBytes).toHex(),
+  )
+  const { numUtilizationChunks } = getChunkLayout(batchDepth)
+  for (let i = 0; i < numUtilizationChunks; i++) {
+    const ref = referenceChunk.slice(
+      i * ENCRYPTED_REFERENCE_BYTES,
+      (i + 1) * ENCRYPTED_REFERENCE_BYTES,
     )
+    const chunkData = await downloadDataWithChunkAPI(
+      bee,
+      Binary.uint8ArrayToHex(ref),
+    )
+    mergeChunk(localCounter, i, chunkData, batchDepth)
   }
-  for (let i = 0; i < NUM_BUCKETS; i++) {
-    localCounter[i] = decoded[i] + skew
-  }
-  return {
-    localCounter,
-    publishedBy: parsed.publishedBy,
-    publishedAt: parsed.publishedAt,
-  }
+
+  // Skew past where the previous holder stopped (defends against a crashed
+  // peer's un-published in-flight writes).
+  for (let i = 0; i < NUM_BUCKETS; i++) localCounter[i] += skew
+  return { localCounter }
 }
 
 /**
  * Publish the current `localCounter` to the partition-state feed.
  *
- * Called from `PartitionLease.release()` — the only path that writes
- * here, so the steady-state writer touches this feed zero times during a
- * long session.
+ * Called from `PartitionLease.release()`. The counter is split into the same
+ * per-`chunkIndex` chunks the utilisation store uses; each is uploaded with a
+ * random encryption key to this partition's reserved slot (so it never
+ * consumes a data slot), yielding a 64-byte encrypted reference (address‖key).
+ * A single "reference chunk" lists those references and is itself uploaded the
+ * same way; the feed points at it. A taking-over device follows the feed →
+ * reference chunk → counter chunks, decrypting each from the embedded key.
  */
 export async function writePartitionState(opts: {
   bee: Bee
   stamper: Stamper
   batchId: BatchId
+  batchDepth: number
   partition: number
   localCounter: Uint32Array
-  deviceId: string
-  swarmEncryptionKey: Uint8Array
   backupSigner: PrivateKey
 }): Promise<void> {
   const {
     bee,
     stamper,
     batchId,
+    batchDepth,
     partition,
     localCounter,
-    deviceId,
-    swarmEncryptionKey,
     backupSigner,
   } = opts
 
@@ -160,49 +172,69 @@ export async function writePartitionState(opts: {
     )
   }
 
-  const payload: PartitionState = {
-    bucketCounters: serializeUint32Array(localCounter),
-    publishedBy: deviceId,
-    publishedAt: Date.now(),
+  const { numUtilizationChunks } = getChunkLayout(batchDepth)
+  const target: UploadTarget = { mode: "stamper", bee, stamper }
+  const owner = backupSigner.publicKey().address()
+  // Every chunk below overstamps the partition's reserved slot, so they must
+  // land in distinct buckets and clear of the partition's lock-SOC bucket.
+  const claimedBuckets = new Set<number>([lockSocBucket(partition, owner)])
+  const reserve =
+    stamper instanceof UtilizationAwareStamper ? stamper : undefined
+
+  // 1. Upload each counter chunk → 64-byte encrypted reference.
+  const references: Uint8Array[] = []
+  for (let i = 0; i < numUtilizationChunks; i++) {
+    const plaintext = extractChunk(localCounter, i, batchDepth)
+    references.push(
+      await uploadReservedChunk(target, plaintext, claimedBuckets, reserve),
+    )
   }
-  const payloadJson = new TextEncoder().encode(
-    JSON.stringify({
-      ...payload,
-      // Serialise the Uint8Array as a plain number-array so JSON.parse on
-      // the read side can rebuild it. See `coerceUint8Array` above.
-      bucketCounters: Array.from(payload.bucketCounters),
-    }),
+
+  // 2. Upload the reference chunk listing those references (N·64 bytes; ≤ 4096
+  //    even at N=64, so a single chunk).
+  const referenceChunk = Binary.concatBytes(...references)
+  const referenceChunkRef = await uploadReservedChunk(
+    target,
+    referenceChunk,
+    claimedBuckets,
+    reserve,
   )
 
-  // 1. Upload the encrypted payload via the existing stamper.
-  const target: UploadTarget = { mode: "stamper", bee, stamper }
-  const uploadResult = await uploadData(target, payloadJson, {
-    encryptionKey: swarmEncryptionKey,
-  })
+  reserve?.clearReservedUtilizationChunks()
 
-  // 2. Point the partition-state feed at the new reference.
+  // 3. Point the partition-state feed at the reference chunk.
   const topic = makePartitionStateTopic(batchId, partition)
   const updater = new BasicEpochUpdater(topic, backupSigner)
-  const refBytes = new Reference(uploadResult.reference).toUint8Array()
-  const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
-  await updater.update(feedTimestamp, refBytes, target)
+  await updater.update(
+    BigInt(Math.floor(Date.now() / 1000)),
+    referenceChunkRef,
+    target,
+  )
 }
 
 /**
- * After a JSON round-trip a `Uint8Array` arrives as either a plain object
- * `{ 0: number, 1: number, … }` or a number array. Normalise to a real
- * `Uint8Array` so `deserializeUint32Array` can read it.
+ * Upload one chunk with a random encryption key to the partition's reserved
+ * slot, returning its 64-byte encrypted reference (address‖key). Retries the
+ * random key until the encrypted address lands in a bucket not yet claimed by
+ * another reserved chunk (they all share the same reserved slot, so each must
+ * occupy a distinct bucket).
  */
-function coerceUint8Array(value: unknown): Uint8Array {
-  if (value instanceof Uint8Array) return value
-  if (Array.isArray(value)) return new Uint8Array(value)
-  if (value && typeof value === "object") {
-    const entries = Object.entries(value as Record<string, number>)
-      .map(([k, v]) => [Number(k), v] as const)
-      .sort(([a], [b]) => a - b)
-    const arr = new Uint8Array(entries.length)
-    for (const [i, v] of entries) arr[i] = v
-    return arr
+async function uploadReservedChunk(
+  target: UploadTarget,
+  plaintext: Uint8Array,
+  claimedBuckets: Set<number>,
+  reserve: UtilizationAwareStamper | undefined,
+): Promise<Uint8Array> {
+  let encrypted = makeEncryptedContentAddressedChunk(plaintext)
+  while (claimedBuckets.has(toBucket(encrypted.address.toUint8Array()))) {
+    encrypted = makeEncryptedContentAddressedChunk(plaintext)
   }
-  throw new Error("Cannot coerce value to Uint8Array")
+  const address = encrypted.address.toUint8Array()
+  claimedBuckets.add(toBucket(address))
+  reserve?.markReservedUtilizationChunk(address)
+  await uploadData(target, plaintext, {
+    encryptionKey: encrypted.encryptionKey,
+    deferred: false,
+  })
+  return encrypted.reference.toUint8Array()
 }

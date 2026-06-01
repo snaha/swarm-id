@@ -376,16 +376,15 @@ export class PartitionLease {
   async release(localCounter: Uint32Array): Promise<void> {
     if (!this.self) return
     const partition = this.self.partition
-    const { stamper, batchId } = this.requireWriteContext()
+    const { stamper, batchId, batchDepth } = this.requireWriteContext()
 
     await writePartitionState({
       bee: this.opts.bee,
       stamper,
       batchId,
+      batchDepth,
       partition,
       localCounter,
-      deviceId: this.opts.deviceId,
-      swarmEncryptionKey: this.opts.swarmEncryptionKey,
       backupSigner: this.opts.backupSigner,
     })
 

@@ -111,10 +111,9 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       bee: bee as unknown as Bee,
       stamper,
       batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
       partition: 0,
       localCounter,
-      deviceId: DEVICE_A,
-      swarmEncryptionKey: TEST_ENC_KEY,
       backupSigner: BACKUP_SIGNER,
     })
 
