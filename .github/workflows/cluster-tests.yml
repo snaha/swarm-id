@@ -38,8 +38,34 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # Cache the locally-built cluster images (queen, worker, blockchain) so we
+      # skip rebuilding them and re-pulling the upstream bases each run. This
+      # caches IMAGES ONLY via docker save/load — never volumes, so the chain
+      # state (baked into the image as state.anvil.json) is always fresh.
+      # Keyed on the lockfile so a bee-compose bump invalidates it.
+      - name: Cache Bee cluster images
+        id: bee-images
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bee-images
+          key: bee-images-${{ hashFiles('pnpm-lock.yaml') }}-v1
+
+      - name: Load cached cluster images
+        if: steps.bee-images.outputs.cache-hit == 'true'
+        run: |
+          for f in /tmp/bee-images/*.tar; do docker load -i "$f"; done
+          docker images --filter 'reference=bee-compose:*'
+
       - name: Start Bee cluster
         run: pnpm dev:bee:detach
+
+      - name: Save cluster images to cache
+        if: steps.bee-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/bee-images
+          imgs=$(docker images --filter 'reference=bee-compose:*' --format '{{.Repository}}:{{.Tag}}')
+          echo "Saving images: $imgs"
+          docker save $imgs -o /tmp/bee-images/cluster.tar
 
       - name: Wait for queen node to be ready
         # The queen comes up in well under a minute; bail out early if it is
