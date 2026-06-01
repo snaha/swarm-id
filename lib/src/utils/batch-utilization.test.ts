@@ -15,6 +15,7 @@ import {
   UTILIZATION_SLOTS_PER_BUCKET,
   UtilizationAwareStamper,
   computeResumeCounterSkew,
+  dataSlot,
   deriveUtilizationChunkKey,
   deserializeUint16Array,
   deserializeUint32Array,
@@ -172,12 +173,14 @@ describe("extractChunk / mergeChunk", () => {
 })
 
 describe("initializeBatchUtilization", () => {
-  it("seeds dataCounters at DATA_COUNTER_START and matches the layout's chunk count", () => {
+  it("seeds the per-partition counter at 0 and matches the layout's chunk count", () => {
     const state = initializeBatchUtilization(TEST_BATCH_ID, 24)
     expect(state.batchDepth).toBe(24)
     expect(state.dataCounters.length).toBe(NUM_BUCKETS)
-    expect(state.dataCounters[0]).toBe(DATA_COUNTER_START)
-    expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(DATA_COUNTER_START)
+    // Counter is the 0-based per-partition `j`; reserved headroom lives in the
+    // slot formula (`dataSlot`), not in the counter.
+    expect(state.dataCounters[0]).toBe(0)
+    expect(state.dataCounters[NUM_BUCKETS - 1]).toBe(0)
     expect(state.chunks.length).toBe(32)
   })
 
@@ -552,11 +555,11 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(seen.size).toBe(STAMPS_PER_DEVICE * 2)
   })
 
-  it("legacy mode (no partition bound) preserves the old slot-picking", async () => {
-    // Without `bindPartition`, the stamper should delegate to the inner
-    // bee-js stamper without any coercion. Two un-partitioned stampers
-    // stamping the same bucket will collide on slot — sanity check that
-    // we haven't accidentally enabled partitioning by default.
+  it("legacy mode (no partition bound) collapses to partition 0, K=1", async () => {
+    // Without `bindPartition`, the stamper behaves as partition 0 with K=1:
+    // slot = dataSlot(0, j, 1) = 1 + j (reserved slot 0). Two un-partitioned
+    // stampers stamping the same bucket collide on the same slot — sanity
+    // check that we haven't accidentally enabled partitioning by default.
     const a = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -579,10 +582,10 @@ describe("UtilizationAwareStamper partition awareness", () => {
     const envB = decodeIndex(b.stamp(makeChunkInBucket(BUCKET, 1)).index)
     expect(envA.bucket).toBe(BUCKET)
     expect(envB.bucket).toBe(BUCKET)
-    // Without partitioning, both devices start from the same DATA_COUNTER_START
-    // and pick the same slot. This is the bug partition-lease fixes.
-    expect(envA.slot).toBe(DATA_COUNTER_START)
-    expect(envB.slot).toBe(DATA_COUNTER_START)
+    // Both behave as partition 0, K=1, j=0 → slot 1, so they collide. This is
+    // the bug partition-lease fixes.
+    expect(envA.slot).toBe(dataSlot(0, 0, 1))
+    expect(envB.slot).toBe(dataSlot(0, 0, 1))
   })
 
   it("rejects a localCounter of the wrong length on bindPartition", async () => {
@@ -626,11 +629,10 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(stamper.partitionCount).toBe(1)
     expect(stamper.getLocalCounter()).toBeUndefined()
 
-    // Subsequent stamps fall back to the legacy single-device path (no
-    // partition coercion). Confirm by stamping and observing the
-    // bee-js-default slot of DATA_COUNTER_START.
+    // Subsequent stamps fall back to the legacy single-device path
+    // (partition 0, K=1): a fresh bucket (j=0) lands at dataSlot(0, 0, 1) = 1.
     const env = decodeIndex(stamper.stamp(makeChunkInBucket(0x77, 0)).index)
-    expect(env.slot).toBe(DATA_COUNTER_START)
+    expect(env.slot).toBe(dataSlot(0, 0, 1))
   })
 
   it("invalidateLease causes the next partition-bound stamp to throw", async () => {
@@ -1015,24 +1017,20 @@ describe("UtilizationAwareStamper lease metadata", () => {
     expect(result!.claimHints.lastTimestamp).toBe(9999000n)
   })
 
-  it("readCachedLease returns localCounter = dataCounters + RESUME_COUNTER_SKEW", async () => {
+  it("readCachedLease returns localCounter = counter + RESUME_COUNTER_SKEW", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
 
-    // Manually poke a specific dataCounters value by stamping a chunk in a
-    // known bucket, then use a recording cache that stores the raw data.
-    // Simpler: since dataCounters starts at DATA_COUNTER_START and we haven't
-    // stamped anything, all counters equal DATA_COUNTER_START.
+    // Fresh stamper: the per-partition counter `j` is 0 everywhere (no stamps
+    // yet), so readCachedLease seeds localCounter = 0 + skew.
     await stamper.setLeaseMetadata(0, 1, {})
 
     const skew = computeResumeCounterSkew(TEST_DEPTH_LM)
     const result = await stamper.readCachedLease(0)
     expect(result).toBeDefined()
 
-    // Each bucket: localCounter[i] = dataCounters[i] + skew
-    // Fresh stamper: dataCounters[i] = DATA_COUNTER_START for all i.
-    expect(result!.localCounter[0]).toBe(DATA_COUNTER_START + skew)
-    expect(result!.localCounter[1000]).toBe(DATA_COUNTER_START + skew)
+    expect(result!.localCounter[0]).toBe(skew)
+    expect(result!.localCounter[1000]).toBe(skew)
   })
 
   it("readCachedLease counter reflects stamps made before setLeaseMetadata", async () => {
@@ -1055,10 +1053,9 @@ describe("UtilizationAwareStamper lease metadata", () => {
 
     const skew = computeResumeCounterSkew(TEST_DEPTH_LM)
     const result = await stamper.readCachedLease(0)
-    // dataCounters[BUCKET] = DATA_COUNTER_START + NUM_STAMPS
-    expect(result!.localCounter[BUCKET]).toBe(
-      DATA_COUNTER_START + NUM_STAMPS + skew,
-    )
+    // The per-partition counter is 0-based: after NUM_STAMPS into BUCKET,
+    // j = NUM_STAMPS, so localCounter = NUM_STAMPS + skew.
+    expect(result!.localCounter[BUCKET]).toBe(NUM_STAMPS + skew)
   })
 
   it("updateLeaseMetadata is a no-op when no partition is bound", async () => {

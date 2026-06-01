@@ -268,8 +268,13 @@ export interface BatchUtilizationState {
   batchDepth: number
 
   /**
-   * Data counters (65,536 entries). Always uint32 in memory regardless of
-   * the on-disk codec; narrowing happens at the serialize boundary.
+   * Per-partition local counter (65,536 entries) — the 0-based `j` in
+   * `slot = partitionCount + partition + partitionCount·j` for the partition
+   * this state represents (partition 0 in single-device mode). This is the
+   * single counter of record: slot selection, persistence, reporting, and
+   * cross-device handoff all derive from it. Always uint32 in memory
+   * regardless of the on-disk codec; narrowing happens at the serialize
+   * boundary.
    */
   dataCounters: Uint32Array // [65536]
 
@@ -987,12 +992,10 @@ export function initializeBatchUtilization(
   batchId: BatchId,
   batchDepth: number,
 ): BatchUtilizationState {
+  // Per-partition local counter `j`, 0-based. Slot = partitionCount +
+  // partition + partitionCount·j, so j=0 maps to the first data slot above
+  // the reserved range; no headroom offset is baked into the counter itself.
   const dataCounters = new Uint32Array(NUM_BUCKETS)
-
-  // Initialize data counters to start at slot DATA_COUNTER_START.
-  // The first `DATA_COUNTER_START` slots of every bucket act as headroom
-  // for utilisation chunks that incidentally land there.
-  dataCounters.fill(DATA_COUNTER_START)
 
   const { numUtilizationChunks } = getChunkLayout(batchDepth)
 
@@ -1041,9 +1044,12 @@ export function hasBucketCapacity(
 
 /**
  * Physical slot index for partition `partition`'s `j`-th data chunk in a
- * bucket: `DATA_COUNTER_START + partition + partitionCount·j`. The reserved
- * slots `[0, partitionCount)` sit below `DATA_COUNTER_START`, so the data
- * lanes of different partitions interleave without ever colliding.
+ * bucket: `partitionCount + partition + partitionCount·j`. The first
+ * `partitionCount` slots `[0, partitionCount)` are reserved (one per
+ * partition, index = partition) for that partition's lock SOC / counter
+ * chunk, so data starts at `partitionCount` and the partitions' data lanes
+ * interleave without ever colliding. Legacy single-device is `partitionCount
+ * = 1, partition = 0` (reserved slot 0, data from slot 1).
  * See docs/Postage-Batch-Partitioning.md.
  */
 export function dataSlot(
@@ -1051,7 +1057,7 @@ export function dataSlot(
   j: number,
   partitionCount: number,
 ): number {
-  return DATA_COUNTER_START + partition + partitionCount * j
+  return partitionCount + partition + partitionCount * j
 }
 
 /**
@@ -1189,9 +1195,10 @@ export async function loadUtilizationState(
   const dataCounters = new Uint32Array(NUM_BUCKETS)
   const chunks: ChunkMetadata[] = []
 
-  // Seed a default chunk's worth of counters once; reused via mergeChunk
+  // Seed a default chunk's worth of counters once; reused via mergeChunk.
+  // The per-partition counter is 0-based `j`, so a never-written bucket
+  // starts at 0.
   const defaultCounters = new Uint32Array(bucketsPerChunk)
-  defaultCounters.fill(DATA_COUNTER_START)
   const defaultChunkData =
     counterByteSize === COUNTER_BYTES_UINT16
       ? serializeUint16Array(defaultCounters)
@@ -1434,12 +1441,16 @@ export async function updateAfterWrite(
 export function calculateUtilization(
   state: BatchUtilizationState,
   batchDepth: number,
+  partitionCount: number = PARTITION_COUNT,
 ): number {
-  const maxSlots = calculateMaxSlotsPerBucket(batchDepth)
+  // dataCounters holds the per-partition 0-based `j`. A partition is full
+  // when `j` reaches its per-partition capacity, so fill is measured against
+  // that, not the raw slot count.
+  const capacity = partitionCapacity(batchDepth, partitionCount)
   const maxBucketUsage = Math.max(...Array.from(state.dataCounters))
 
-  // Utilization is based on the fullest bucket
-  return Math.min(1, maxBucketUsage / maxSlots)
+  // Utilization is based on the fullest bucket within the partition's lane.
+  return capacity <= 0 ? 1 : Math.min(1, maxBucketUsage / capacity)
 }
 
 // ============================================================================
@@ -1517,16 +1528,6 @@ export class UtilizationAwareStamper implements Stamper {
   private partitionCountValue: number = 1
 
   /**
-   * Per-bucket "how many chunks have I stamped here" — the `j` in the
-   * doc's slot formula `slot = DATA_COUNTER_START + p + K·j`. Each
-   * `stamp()` reads this to compute the next slot for its partition,
-   * then increments it. Separate from `dataCounters` (which is the
-   * batch-wide total, including peers' contributions seeded from the
-   * partition-state feed).
-   */
-  private partitionLocalCounter: Uint32Array | undefined = undefined
-
-  /**
    * Per-account lock-SOC addresses (one per partition). When `stamp()` sees
    * a chunk whose address matches one of these, it routes the write to the
    * lock SOC's reserved slot (= the partition index) within the same bucket,
@@ -1581,7 +1582,9 @@ export class UtilizationAwareStamper implements Stamper {
    * undefined in legacy mode.
    */
   getLocalCounter(): Uint32Array | undefined {
-    return this.partitionLocalCounter
+    return this.partition !== undefined
+      ? this.utilizationState.dataCounters
+      : undefined
   }
 
   /**
@@ -1616,7 +1619,9 @@ export class UtilizationAwareStamper implements Stamper {
     }
     this.partition = opts.partition
     this.partitionCountValue = opts.partitionCount
-    this.partitionLocalCounter = opts.localCounter
+    // The seeded per-partition counter (`j`, already skewed for Cases B/D)
+    // becomes the single counter of record for this held partition.
+    this.utilizationState.dataCounters = opts.localCounter
     this.leaseStale = false
   }
 
@@ -1644,7 +1649,6 @@ export class UtilizationAwareStamper implements Stamper {
   unbindPartition(): void {
     this.partition = undefined
     this.partitionCountValue = 1
-    this.partitionLocalCounter = undefined
     this.leaseStale = false
   }
 
@@ -1785,21 +1789,19 @@ export class UtilizationAwareStamper implements Stamper {
       throw new PartitionLeaseLostError()
     }
 
-    // When holding a partition lease, coerce the bee-js stamper to use this
-    // device's next partition slot instead of the next "any" slot. The bee-js
-    // `Stamper.buckets` is a public mutable Uint32Array (bee-js/src/stamper/stamper.ts:8,20,46),
-    // held by reference — overwriting before each stamp is sufficient.
-    if (
-      this.partition !== undefined &&
-      this.partitionLocalCounter !== undefined
-    ) {
+    // Coerce the bee-js stamper to this device's next slot in its partition's
+    // lane: slot = partitionCount + partition + partitionCount·j, where j is
+    // the per-partition counter. Legacy single-device is partition 0, K=1
+    // (data from slot 1, reserved slot 0). The bee-js `Stamper.buckets` is a
+    // public mutable Uint32Array held by reference — overwriting before each
+    // stamp is sufficient.
+    {
       const bucket = (chunkAddress[0] << 8) | chunkAddress[1]
-      const slot = dataSlot(
-        this.partition,
-        this.partitionLocalCounter[bucket],
+      this.stamper.buckets[bucket] = dataSlot(
+        this.partition ?? 0,
+        this.utilizationState.dataCounters[bucket],
         this.partitionCountValue,
       )
-      this.stamper.buckets[bucket] = slot
     }
 
     const envelope = this.stamper.stamp(chunk)
@@ -1813,14 +1815,8 @@ export class UtilizationAwareStamper implements Stamper {
     )
     const bucket = view.getUint32(0, false) // false = big-endian
 
-    // Update partition-local counter so the next stamp into this bucket lands
-    // on the partition's next slot. (Legacy single-device path leaves this
-    // counter alone — slot picking falls through to the bee-js stamper.)
-    if (this.partitionLocalCounter !== undefined) {
-      this.partitionLocalCounter[bucket]++
-    }
-
-    // Update utilization state (increment counter for this bucket)
+    // Advance the per-partition counter so the next stamp into this bucket
+    // lands on this partition's next slot.
     this.utilizationState.dataCounters[bucket]++
 
     // Mark bucket as dirty for eventual flush
