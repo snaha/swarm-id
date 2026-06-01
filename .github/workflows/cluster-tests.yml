@@ -42,14 +42,21 @@ jobs:
         run: pnpm dev:bee:detach
 
       - name: Wait for queen node to be ready
+        # The queen comes up in well under a minute; bail out early if it is
+        # crash-looping instead of waiting out the whole timeout.
         run: |
-          for i in $(seq 1 60); do
+          for i in $(seq 1 40); do
             if curl -fsS http://localhost:1633/readiness 2>/dev/null | grep -q '"status":"ready"'; then
               echo "Queen node is ready"
               exit 0
             fi
-            echo "Waiting for queen node... ($i/60)"
-            sleep 5
+            restarts=$(docker inspect -f '{{.RestartCount}}' bee-compose-queen 2>/dev/null || echo 0)
+            if [ "${restarts:-0}" -ge 3 ]; then
+              echo "::error::Queen node is crash-looping (RestartCount=$restarts)"
+              exit 1
+            fi
+            echo "Waiting for queen node... ($i/40, restarts=${restarts:-0})"
+            sleep 3
           done
           echo "::error::Queen node did not become ready in time"
           exit 1
@@ -62,9 +69,16 @@ jobs:
       - name: Run cluster integration tests
         run: pnpm --filter @snaha/swarm-id test:cluster
 
-      - name: Dump queen logs on failure
+      - name: Dump cluster logs on failure
         if: failure()
-        run: pnpm exec bee-compose logs queen --tail 300 || true
+        run: |
+          docker ps -a || true
+          echo "::group::blockchain logs"
+          pnpm exec bee-compose logs blockchain --tail 200 || true
+          echo "::endgroup::"
+          echo "::group::queen logs"
+          pnpm exec bee-compose logs queen --tail 300 || true
+          echo "::endgroup::"
 
       - name: Stop Bee cluster
         if: always()
