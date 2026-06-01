@@ -33,12 +33,14 @@ jobs:
             echo "✓ Demo app created and deployed successfully"
           else
             echo "Updating demo app (ID: $APP_ID)..."
-            doctl apps update $APP_ID --spec .do/swarm-demo-app.yaml --wait
-            echo "✓ Demo app spec updated successfully"
+            doctl apps update $APP_ID --spec .do/swarm-demo-app.yaml
+            echo "✓ Demo app spec updated"
 
-            echo "Triggering rebuild and deployment for demo app..."
-            doctl apps create-deployment $APP_ID --force-rebuild --wait
-            echo "✓ Demo app rebuild completed"
+            # Pulls and deploys the latest commit on main. Avoid --force-rebuild
+            # here: it redeploys the last built commit instead of the latest.
+            echo "Deploying latest commit for demo app..."
+            doctl apps create-deployment $APP_ID --wait
+            echo "✓ Demo app deployed"
           fi
 
       - name: Deploy Identity App
@@ -54,10 +56,12 @@ jobs:
             echo "✓ Identity app created and deployed successfully"
           else
             echo "Updating identity app (ID: $APP_ID)..."
-            doctl apps update $APP_ID --spec .do/swarm-id-app.yaml --wait
-            echo "✓ Identity app spec updated successfully"
+            doctl apps update $APP_ID --spec .do/swarm-id-app.yaml
+            echo "✓ Identity app spec updated"
 
-            echo "Triggering rebuild and deployment for identity app..."
-            doctl apps create-deployment $APP_ID --force-rebuild --wait
-            echo "✓ Identity app rebuild completed"
+            # Pulls and deploys the latest commit on main. Avoid --force-rebuild
+            # here: it redeploys the last built commit instead of the latest.
+            echo "Deploying latest commit for identity app..."
+            doctl apps create-deployment $APP_ID --wait
+            echo "✓ Identity app deployed"
           fi
