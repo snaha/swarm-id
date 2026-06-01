@@ -1289,6 +1289,11 @@ export async function saveUtilizationState(
     }
   }
 
+  // Counter chunks overstamp this partition's reserved slot rather than a data
+  // slot (see `UtilizationAwareStamper.stamp`). Their addresses are
+  // content-derived, so register each before uploading and clear them after.
+  const isUtilStamper = stamper instanceof UtilizationAwareStamper
+
   for (const chunkIndex of dirtyChunkIndices) {
     const chunkMetadata = state.chunks[chunkIndex]
 
@@ -1310,6 +1315,10 @@ export async function saveUtilizationState(
       priorNonce: chunkMetadata.nonce,
       claimedBuckets,
     })
+
+    if (isUtilStamper) {
+      stamper.markReservedUtilizationChunk(resolved.address)
+    }
 
     try {
       // Upload to Swarm as encrypted CAC with the per-chunk derived key
@@ -1352,10 +1361,13 @@ export async function saveUtilizationState(
       tracker.markClean(chunkIndex)
     } catch (error) {
       console.error(`[BatchUtil] Failed to upload chunk ${chunkIndex}:`, error)
+      if (isUtilStamper) stamper.clearReservedUtilizationChunks()
       // Keep it marked as dirty for retry
       throw error
     }
   }
+
+  if (isUtilStamper) stamper.clearReservedUtilizationChunks()
 
   // Update lastSync timestamp
   state.lastSync = Date.now()
@@ -1544,6 +1556,15 @@ export class UtilizationAwareStamper implements Stamper {
     | undefined = undefined
 
   /**
+   * Hex addresses of the utilisation (counter) chunks for the in-flight save.
+   * `stamp()` routes these to this partition's reserved slot instead of a data
+   * slot. Unlike the lock SOC, a counter chunk's address changes whenever the
+   * counter changes, so `saveUtilizationState` registers the current set via
+   * `markReservedUtilizationChunk` and clears it with `clearReservedUtilizationChunks`.
+   */
+  private reservedUtilizationChunks: Set<string> | undefined = undefined
+
+  /**
    * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
    * detects displacement on a refresh tick (or upload-start lease check);
    * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
@@ -1639,6 +1660,23 @@ export class UtilizationAwareStamper implements Stamper {
     socs: ReadonlyArray<{ partition: number; address: Uint8Array }>,
   ): void {
     this.lockSocs = socs
+  }
+
+  /**
+   * Register a utilisation (counter) chunk address so the next `stamp()` of it
+   * routes to this partition's reserved slot instead of a data slot. Called by
+   * `saveUtilizationState` for each chunk it is about to upload. Idempotent.
+   */
+  markReservedUtilizationChunk(address: Uint8Array): void {
+    if (!this.reservedUtilizationChunks) {
+      this.reservedUtilizationChunks = new Set()
+    }
+    this.reservedUtilizationChunks.add(uint8ArrayToHex(address))
+  }
+
+  /** Clear the registered utilisation-chunk addresses after a save. */
+  clearReservedUtilizationChunks(): void {
+    this.reservedUtilizationChunks = undefined
   }
 
   /**
@@ -1779,6 +1817,18 @@ export class UtilizationAwareStamper implements Stamper {
     if (lockSoc) {
       const bucket = toBucket(chunkAddress)
       this.stamper.buckets[bucket] = lockSoc.partition
+      return this.stamper.stamp(chunk)
+    }
+
+    // Utilisation-chunk short-circuit: a counter chunk for this partition
+    // overstamps its bucket's reserved slot (= partition index), just like the
+    // lock SOC. Persisting the counter therefore never consumes a data slot or
+    // bumps the counter. The addresses are content-derived (they change as the
+    // counter changes), so `saveUtilizationState` registers the current save's
+    // addresses via `markReservedUtilizationChunk` before uploading them.
+    if (this.reservedUtilizationChunks?.has(uint8ArrayToHex(chunkAddress))) {
+      const bucket = toBucket(chunkAddress)
+      this.stamper.buckets[bucket] = this.partition ?? 0
       return this.stamper.stamp(chunk)
     }
 

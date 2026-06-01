@@ -782,6 +782,37 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
   })
 
+  it("marked utilisation chunks land in the reserved slot (= partition) and don't bump the counter", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const BUCKET = 0x6789
+    const chunk = makeChunkInBucket(BUCKET, 3)
+    stamper.markReservedUtilizationChunk(chunk.hash())
+
+    const env = decodeIndex(stamper.stamp(chunk).index)
+    expect(env.bucket).toBe(BUCKET)
+    // Reserved slot = partition index, not a data slot; counter untouched.
+    expect(env.slot).toBe(1)
+    expect(stamper.getLocalCounter()![BUCKET]).toBe(0)
+
+    // After clearing, the same bucket's data chunk uses the data lane again.
+    stamper.clearReservedUtilizationChunks()
+    const env2 = decodeIndex(stamper.stamp(makeChunkInBucket(BUCKET, 4)).index)
+    expect(env2.slot).toBe(dataSlot(1, 0, PARTITION_COUNT))
+  })
+
   it("auto-bind uses the BACKUP-signer address (derived from encryptionKey), not the `owner` arg", async () => {
     // Regression: `writePartitionLock` writes the lock SOC to
     // `keccak256(identifier || backupSigner.publicKey().address())`, where
