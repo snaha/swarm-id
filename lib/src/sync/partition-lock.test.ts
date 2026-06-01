@@ -462,6 +462,31 @@ describe("acquirePartitionLock — verify-after-write", () => {
     expect(result.outcome).toBe("acquired")
     expect(result.payload?.holderDeviceId).toBe(DEVICE_A)
   })
+
+  it("acquires optimistically when the verify-read can't confirm the write", async () => {
+    const NOW = 1_000_000
+
+    const waitA = controlledWait()
+    const pA = acquirePartitionLock({
+      ...commonOpts(DEVICE_A, { now: () => NOW }),
+      wait: waitA.fn,
+    })
+
+    // A has read (empty), written its claim, and is now in the guard wait.
+    await waitA.triggered
+
+    // Simulate the Bee node being unable to serve the just-written chunk on
+    // the verify-read (transient 500 / not-yet-propagated): drop it so the
+    // verify-read returns undefined. A failed read is not proof of a race,
+    // so A optimistically holds and lets the periodic refresh reconcile.
+    store.clear()
+
+    waitA.release()
+    const result = await pA
+    expect(result.outcome).toBe("acquired")
+    expect(result.payload?.holderDeviceId).toBe(DEVICE_A)
+    expect(result.payload?.generation.timestampMs).toBe(NOW)
+  })
 })
 
 describe("acquirePartitionLock — third-party observation", () => {

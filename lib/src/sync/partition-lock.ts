@@ -222,9 +222,15 @@ export async function acquirePartitionLock(opts: {
 
   const verified = await readPartitionLock(opts)
   if (!verified) {
-    // Shouldn't normally happen — we just wrote. Treat conservatively
-    // as a lost race so the caller doesn't proceed under false belief.
-    return { outcome: "lost-race", payload: undefined }
+    // The verify-read couldn't confirm our write — e.g. the Bee node is
+    // transiently 500ing on the just-written chunk, or it hasn't propagated
+    // yet. We DID write our claim, and observed no live foreign holder before
+    // writing (a live one returns "blocked" above), so a failed read is not
+    // proof of a race. Optimistically hold; the periodic refresh reconciles
+    // and demotes only on a CONFIRMED live foreign holder. Without this, a
+    // read-path hiccup forces a false lost-race → read-only → slot-wait,
+    // delaying activation by ~a minute even for a single device.
+    return { outcome: "acquired", payload: ourPayload }
   }
   if (compareGenerations(verified.generation, ourGeneration) > 0) {
     return { outcome: "lost-race", payload: verified }

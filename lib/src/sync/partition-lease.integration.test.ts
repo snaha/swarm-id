@@ -308,6 +308,73 @@ describe("PartitionLease.acquire — two devices, disjoint partitions", () => {
   })
 })
 
+describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
+  it("is read-only while both partitions are live, then takes over a lapsed one", async () => {
+    const NOW = 5_000_000
+
+    // Devices A and B hold both partitions with live leases.
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    expect(
+      (await leaseA.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+    })
+    expect(
+      (await leaseB.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(1)
+
+    // 3rd device: one instance whose clock advances across attempts, mirroring
+    // the proxy holding a single lease and re-running the slot-wait acquire.
+    let cNow = NOW + 2000
+    const DEVICE_C = "device-gamma-333"
+    const leaseC = makeLease({
+      deviceId: DEVICE_C,
+      bee: bee as unknown as Bee,
+      now: () => cNow,
+    })
+
+    // Both partitions live → read-only, no slot.
+    const readOnly = await leaseC.acquire({ partitionCount: PARTITION_COUNT })
+    expect(readOnly.partition).toBeUndefined()
+    expect(readOnly.isReadOnly).toBe(true)
+
+    // B refreshes before its lease expires (while A is still live), extending
+    // p1 well past A's expiry. A goes idle and never refreshes → it lapses at
+    // NOW + LEASE_TTL_MS.
+    const leaseBRefresh = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + LEASE_TTL_MS - 5_000,
+    })
+    expect(
+      (await leaseBRefresh.acquire({ partitionCount: PARTITION_COUNT }))
+        .partition,
+    ).toBe(1)
+
+    // C retries after A's lease has lapsed but while B's refreshed lease is live.
+    cNow = NOW + LEASE_TTL_MS + 2_000
+    const tookOver = await leaseC.acquire({ partitionCount: PARTITION_COUNT })
+    expect(tookOver.partition).toBe(0) // A's freed slot
+    expect(tookOver.isReadOnly).toBe(false)
+
+    const p0 = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(p0?.holderDeviceId).toBe(DEVICE_C)
+  })
+})
+
 describe("PartitionLease.refresh", () => {
   it("returns true and extends leasedUntil", async () => {
     const NOW1 = 1_000_000

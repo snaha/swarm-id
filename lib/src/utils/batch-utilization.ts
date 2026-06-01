@@ -106,6 +106,15 @@ export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
 export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
 
 /**
+ * How long a holder may go without an upload before it voluntarily yields
+ * its partition (writes the release sentinel + publishes its final counter)
+ * so a waiting device can take the slot without waiting out the full TTL.
+ * The yielded device re-acquires transparently on its next upload. Enables
+ * turn-taking among 3+ devices sharing `PARTITION_COUNT` slots.
+ */
+export const IDLE_YIELD_MS = 30 * 1000 // 30 seconds
+
+/**
  * Counter-skew divisor for `RESUME_COUNTER_SKEW = ceil(slotsPerBucket /
  * PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR)`. Applied when seeding
  * `localCounter` from a peer's partition-state snapshot — skips a small
