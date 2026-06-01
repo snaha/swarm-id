@@ -20,8 +20,9 @@ static_sites:
     source_dir: /
     output_dir: demo/build
 
-    # Build using monorepo scripts
-    build_command: git submodule update --init --recursive && pnpm install && pnpm build:swarm-demo
+    # Build using monorepo scripts.
+    # `corepack enable` reads the version from package.json's packageManager field.
+    build_command: corepack enable && pnpm install --frozen-lockfile && pnpm build:swarm-demo
 
     # SPA routing - all routes go to index.html
     catchall_document: index.html
@@ -42,7 +43,7 @@ static_sites:
 # Environment variables
 envs:
   - key: NODE_VERSION
-    value: '22'
+    value: '24'
 
   - key: NODE_ENV
     value: production

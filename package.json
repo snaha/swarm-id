@@ -44,15 +44,9 @@
   ],
   "author": "",
   "license": "Apache-2.0",
+  "packageManager": "pnpm@11.5.0",
   "engines": {
-    "node": "22.x",
-    "pnpm": "10.x"
-  },
-  "pnpm": {
-    "onlyBuiltDependencies": [
-      "@tailwindcss/oxide",
-      "esbuild",
-      "sharp"
-    ]
+    "node": ">=22",
+    "pnpm": "11.x"
   }
 }
