@@ -1,1 +1,0 @@
-import{g as o}from"./B9N5k7Lk.js";import{r,a as e}from"./BDXATsVl.js";import{s as a}from"./Buv-2Ktk.js";function m(){a.data.appOrigin?o(r(e.CONNECT)):(a.clearTemporaryMasterKey(),o(r(e.HOME)))}export{m as n};
