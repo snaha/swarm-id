@@ -1,0 +1,71 @@
+name: Cluster Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/cluster-tests.yml'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: cluster-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  cluster-tests:
+    name: Cluster Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start Bee cluster
+        run: pnpm dev:bee:detach
+
+      - name: Wait for queen node to be ready
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:1633/readiness 2>/dev/null | grep -q '"status":"ready"'; then
+              echo "Queen node is ready"
+              exit 0
+            fi
+            echo "Waiting for queen node... ($i/60)"
+            sleep 5
+          done
+          echo "::error::Queen node did not become ready in time"
+          exit 1
+
+      - name: Buy a postage stamp
+        # Buys and waits for on-chain settlement; the test reuses this usable
+        # stamp so its setup hook stays fast and deterministic.
+        run: pnpm exec bee-compose stamp
+
+      - name: Run cluster integration tests
+        run: pnpm --filter @snaha/swarm-id test:cluster
+
+      - name: Dump queen logs on failure
+        if: failure()
+        run: pnpm exec bee-compose logs queen --tail 300 || true
+
+      - name: Stop Bee cluster
+        if: always()
+        run: pnpm dev:bee:stop || true
