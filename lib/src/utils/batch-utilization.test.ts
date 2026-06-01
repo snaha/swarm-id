@@ -16,6 +16,7 @@ import {
   UtilizationAwareStamper,
   computeResumeCounterSkew,
   dataSlot,
+  partitionCapacity,
   deriveUtilizationChunkKey,
   deserializeUint16Array,
   deserializeUint32Array,
@@ -553,6 +554,43 @@ describe("UtilizationAwareStamper partition awareness", () => {
 
     // 2 devices * 50 stamps = 100 distinct (bucket, slot) pairs.
     expect(seen.size).toBe(STAMPS_PER_DEVICE * 2)
+  })
+
+  it("a reserved counter chunk still stamps when the bucket's data lane is full (no 'Bucket is full')", async () => {
+    // Regression for the partition-state "Bucket is full" bug: counter chunks
+    // must overstamp the reserved slot, never a data slot. Small depth so the
+    // data lane fills fast: 2^(20-16)=16 slots/bucket → partitionCapacity=7.
+    const DEPTH = 20
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const BUCKET = 0x1234
+    const cap = partitionCapacity(DEPTH, PARTITION_COUNT)
+    for (let j = 0; j < cap; j++) {
+      stamper.stamp(makeChunkInBucket(BUCKET, j))
+    }
+    // One more DATA chunk in BUCKET overflows the partition's lane → the
+    // underlying bee-js stamper throws "Bucket is full".
+    expect(() => stamper.stamp(makeChunkInBucket(BUCKET, 9000))).toThrow()
+
+    // A counter chunk marked reserved overstamps slot 0 (the partition's
+    // reserved slot), which is free even though the data lane is full.
+    const counterChunk = makeChunkInBucket(BUCKET, 9999)
+    stamper.markReservedUtilizationChunk(counterChunk.hash())
+    const env = decodeIndex(stamper.stamp(counterChunk).index)
+    expect(env.bucket).toBe(BUCKET)
+    expect(env.slot).toBe(0)
   })
 
   it("legacy mode (no partition bound) collapses to partition 0, K=1", async () => {
