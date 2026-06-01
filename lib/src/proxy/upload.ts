@@ -428,8 +428,16 @@ async function buildPlainMerkleTree(
       payload.set(ref.address, idx * 32)
     })
 
-    const chunk = makeContentAddressedChunk(payload)
-    intermediateRefs.push({ address: chunk.address.toUint8Array() })
+    // An intermediate chunk's span is the total data length covered by its
+    // children, not the length of its references payload. The downloader
+    // relies on this to tell intermediate chunks from leaves.
+    const totalSpan = refs.reduce((sum, ref) => sum + (ref.span ?? 0n), 0n)
+
+    const chunk = makeContentAddressedChunk(payload, totalSpan)
+    intermediateRefs.push({
+      address: chunk.address.toUint8Array(),
+      span: totalSpan,
+    })
     await uploadIntermediate(chunk)
   }
 
@@ -554,7 +562,10 @@ async function uploadDataPlain(
   for (const payload of chunkPayloads) {
     const chunk = makeContentAddressedChunk(payload)
     chunks.push(chunk)
-    chunkRefs.push({ address: chunk.address.toUint8Array() })
+    chunkRefs.push({
+      address: chunk.address.toUint8Array(),
+      span: BigInt(payload.length),
+    })
   }
 
   // Progress tracking

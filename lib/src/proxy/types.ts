@@ -26,6 +26,7 @@ export interface UploadProgress {
  */
 export interface ChunkReference {
   address: Uint8Array // 32-byte chunk address
+  span?: bigint // total data length covered by this reference (bytes)
 }
 
 /**
