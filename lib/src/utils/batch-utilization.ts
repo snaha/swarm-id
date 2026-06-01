@@ -71,25 +71,24 @@ export const NUM_BUCKETS = 65536
 export const BUCKET_DEPTH = 16
 
 /**
- * Per-bucket slot headroom carried by `DATA_COUNTER_START`. Sized so that
- * the rare case of two utilisation chunks landing in the same bucket cannot
- * push a stamp past the headroom; with ~32 chunks into 65,536 buckets even a
- * 3-way collision is below 10⁻⁷ per save, so 2 is comfortably enough.
- * Choosing an even value keeps remainders even under a future K=2
- * multi-device partitioning so per-bucket slot allocation splits cleanly.
- */
-export const UTILIZATION_SLOTS_PER_BUCKET = 2
-
-/** Starting slot index for data chunks */
-export const DATA_COUNTER_START = 2
-
-/**
  * Number of partitions the per-bucket slot space is divided into for
- * multi-device sharing of a single postage batch. With K=2, device 0
- * uses slots `{DATA_COUNTER_START + 0, DATA_COUNTER_START + 2, …}` and
- * device 1 uses `{DATA_COUNTER_START + 1, DATA_COUNTER_START + 3, …}`.
+ * multi-device sharing of a single postage batch. With K=2, partition 0
+ * uses data slots `{DATA_COUNTER_START + 0, DATA_COUNTER_START + 2, …}` and
+ * partition 1 uses `{DATA_COUNTER_START + 1, DATA_COUNTER_START + 3, …}`.
+ * See docs/Postage-Batch-Partitioning.md.
  */
 export const PARTITION_COUNT = 2
+
+/**
+ * Reserved slots at the bottom of every bucket — one per partition, at
+ * index = partition. They hold the partition's lock SOC / utilisation
+ * (counter) chunk, are mutably overwritten, and do not count toward
+ * utilisation. Data slots begin above them at `DATA_COUNTER_START`.
+ */
+export const UTILIZATION_SLOTS_PER_BUCKET = PARTITION_COUNT
+
+/** First data slot index; reserved slots `[0, PARTITION_COUNT)` precede it. */
+export const DATA_COUNTER_START = PARTITION_COUNT
 
 /**
  * Partition-lease lifetime. A device holds its partition for this long
@@ -291,17 +290,6 @@ export interface ChunkWithBucket {
   chunk: ContentAddressedChunk
   bucket: number
   slot: number
-}
-
-/**
- * Result of calculating utilization update
- */
-export interface UtilizationUpdate {
-  /** Updated data counters */
-  dataCounters: Uint32Array
-
-  /** Utilization chunks to upload */
-  utilizationChunks: ChunkWithBucket[]
 }
 
 // ============================================================================
@@ -1051,77 +1039,33 @@ export function hasBucketCapacity(
   return dataCounter < maxSlots
 }
 
-// ============================================================================
-// Pre-calculation Algorithm
-// ============================================================================
+/**
+ * Physical slot index for partition `partition`'s `j`-th data chunk in a
+ * bucket: `DATA_COUNTER_START + partition + partitionCount·j`. The reserved
+ * slots `[0, partitionCount)` sit below `DATA_COUNTER_START`, so the data
+ * lanes of different partitions interleave without ever colliding.
+ * See docs/Postage-Batch-Partitioning.md.
+ */
+export function dataSlot(
+  partition: number,
+  j: number,
+  partitionCount: number,
+): number {
+  return DATA_COUNTER_START + partition + partitionCount * j
+}
 
 /**
- * Pre-calculate utilization update after writing data chunks.
- *
- * This solves the circular dependency problem:
- * 1. Assign buckets/slots to data chunks
- * 2. Update data counters
- * 3. Serialize data counters into utilization chunks
- * 4. Calculate where utilization chunks will land
- * 5. Assign slots 0-N to utilization chunks per bucket
- *
- * Note: Utilization chunks always start from slot 0 since mutable stamps
- * allow overwriting. No need to track previous positions.
- *
- * @param state - Current utilization state
- * @param dataChunks - Data chunks to be written
- * @param batchDepth - Batch depth parameter
- * @returns Updated state and utilization chunks to upload
+ * Number of data chunks a single partition may write into one bucket, i.e.
+ * the count of distinct `j` values: `floor(slotsPerBucket / partitionCount)
+ * - 1` (the `-1` is the partition's reserved slot). Each partition's data
+ * lane is independent, so this is the per-partition per-bucket capacity.
  */
-export function calculateUtilizationUpdate(
-  state: BatchUtilizationState,
-  dataChunks: ContentAddressedChunk[],
+export function partitionCapacity(
   batchDepth: number,
-): UtilizationUpdate {
-  // Step 1: Copy current data counters (immutable update)
-  const newDataCounters = new Uint32Array(state.dataCounters)
-
-  // Step 2: Assign buckets and slots to data chunks
-  const dataChunksWithBuckets: ChunkWithBucket[] = []
-
-  for (const chunk of dataChunks) {
-    const bucket = toBucket(chunk.address.toUint8Array())
-    const slot = newDataCounters[bucket]
-
-    // Check capacity
-    if (!hasBucketCapacity(slot, batchDepth)) {
-      throw new Error(`Bucket ${bucket} is full (slot ${slot})`)
-    }
-
-    dataChunksWithBuckets.push({ chunk, bucket, slot })
-    newDataCounters[bucket]++
-  }
-
-  // Step 3: Serialize updated data counters using the codec for this depth
-  const { counterByteSize } = getChunkLayout(batchDepth)
-  const serialized =
-    counterByteSize === COUNTER_BYTES_UINT16
-      ? serializeUint16Array(newDataCounters)
-      : serializeUint32Array(newDataCounters)
-  const utilizationChunksRaw = splitIntoChunks(serialized)
-
-  // Step 4: Calculate bucket assignments for utilization chunks
-  // Count chunks per bucket for THIS update only (start from 0)
-  const bucketChunkCount = new Uint32Array(NUM_BUCKETS)
-  const utilizationChunks: ChunkWithBucket[] = []
-
-  for (const chunk of utilizationChunksRaw) {
-    const bucket = toBucket(chunk.address.toUint8Array())
-    const slot = bucketChunkCount[bucket] // Start from 0 each time
-
-    utilizationChunks.push({ chunk, bucket, slot })
-    bucketChunkCount[bucket]++
-  }
-
-  return {
-    dataCounters: newDataCounters,
-    utilizationChunks,
-  }
+  partitionCount: number,
+): number {
+  const slotsPerBucket = calculateMaxSlotsPerBucket(batchDepth)
+  return Math.floor(slotsPerBucket / partitionCount) - 1
 }
 
 // ============================================================================
@@ -1143,26 +1087,6 @@ export function createStamper(
   batchDepth: number,
 ): Stamper {
   return Stamper.fromState(privateKey, batchId, bucketState, batchDepth)
-}
-
-/**
- * Prepare bucket state for stamping chunks with specific slots
- *
- * @param chunksWithBuckets - Chunks with assigned buckets and slots
- * @returns Bucket state array for Stamper
- */
-export function prepareBucketState(
-  chunksWithBuckets: ChunkWithBucket[],
-): Uint32Array {
-  const bucketState = new Uint32Array(NUM_BUCKETS)
-
-  // Set each bucket height to the slot we want to write to
-  for (const { bucket, slot } of chunksWithBuckets) {
-    // Use the highest slot we need for this bucket
-    bucketState[bucket] = Math.max(bucketState[bucket], slot)
-  }
-
-  return bucketState
 }
 
 /**
@@ -1870,10 +1794,11 @@ export class UtilizationAwareStamper implements Stamper {
       this.partitionLocalCounter !== undefined
     ) {
       const bucket = (chunkAddress[0] << 8) | chunkAddress[1]
-      const slot =
-        DATA_COUNTER_START +
-        this.partition +
-        this.partitionCountValue * this.partitionLocalCounter[bucket]
+      const slot = dataSlot(
+        this.partition,
+        this.partitionLocalCounter[bucket],
+        this.partitionCountValue,
+      )
       this.stamper.buckets[bucket] = slot
     }
 

@@ -34,7 +34,6 @@ export { StampWorkerPool } from "./proxy/stamp-worker-pool"
 // Batch utilization tracking
 export {
   initializeBatchUtilization,
-  calculateUtilizationUpdate,
   updateAfterWrite,
   saveUtilizationState,
   loadUtilizationState,
@@ -50,7 +49,6 @@ export {
   calculateMaxSlotsPerBucket,
   hasBucketCapacity,
   createStamper,
-  prepareBucketState,
   UtilizationAwareStamper,
   PartitionLeaseLostError,
   getChunkLayout,
@@ -392,7 +390,6 @@ export type {
   BatchUtilizationState,
   ChunkLayout,
   ChunkWithBucket,
-  UtilizationUpdate,
 } from "./utils/batch-utilization"
 
 // Versioned storage types

@@ -4,10 +4,7 @@
 import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
-import {
-  makeContentAddressedChunk,
-  makeEncryptedContentAddressedChunk,
-} from "../chunk"
+import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   CHUNK_SIZE,
   DATA_COUNTER_START,
@@ -17,7 +14,6 @@ import {
   UINT16_COUNTER_MAX_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
   UtilizationAwareStamper,
-  calculateUtilizationUpdate,
   computeResumeCounterSkew,
   deriveUtilizationChunkKey,
   deserializeUint16Array,
@@ -189,36 +185,6 @@ describe("initializeBatchUtilization", () => {
     const state = initializeBatchUtilization(TEST_BATCH_ID, 32)
     expect(state.batchDepth).toBe(32)
     expect(state.chunks.length).toBe(64)
-  })
-})
-
-describe("calculateUtilizationUpdate (chunk count by depth)", () => {
-  const dataChunks = [
-    makeContentAddressedChunk(new Uint8Array(4096).fill(1)),
-    makeContentAddressedChunk(new Uint8Array(4096).fill(2)),
-    makeContentAddressedChunk(new Uint8Array(4096).fill(3)),
-  ]
-
-  it("produces 32 utilization chunks at depth 24 (uint16 codec)", () => {
-    const depth = 24
-    const state = initializeBatchUtilization(TEST_BATCH_ID, depth)
-    const { utilizationChunks } = calculateUtilizationUpdate(
-      state,
-      dataChunks,
-      depth,
-    )
-    expect(utilizationChunks.length).toBe(32)
-  })
-
-  it("produces 64 utilization chunks at depth 32 (uint32 codec)", () => {
-    const depth = 32
-    const state = initializeBatchUtilization(TEST_BATCH_ID, depth)
-    const { utilizationChunks } = calculateUtilizationUpdate(
-      state,
-      dataChunks,
-      depth,
-    )
-    expect(utilizationChunks.length).toBe(64)
   })
 })
 
