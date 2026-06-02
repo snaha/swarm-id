@@ -36,7 +36,13 @@ export const TEST_STAMP_AMOUNT = "500000000"
 const HTTP_OK = 200
 const HTTP_TOO_MANY_REQUESTS = 429
 const STAMP_USABLE_POLL_INTERVAL_MS = 1500
-const STAMP_USABLE_TIMEOUT_MS = 90_000
+// A batch only reports `usable: true` once its creation tx is mined and Bee has
+// seen enough block confirmations. On a freshly started bee-compose chain that
+// settling can occasionally take well over a minute, so 90s was flaky in CI
+// (the stamp buy itself can also eat ~10s). This runs in globalSetup, which is
+// not bound by vitest's test/hook timeouts, and the CI job has a 20-min budget,
+// so a generous ceiling here just buys robustness without slowing the happy path.
+const STAMP_USABLE_TIMEOUT_MS = 240_000
 const STAMP_BUY_RETRIES = 15
 const STAMP_BUY_RETRY_DELAY_MS = 2000
 
