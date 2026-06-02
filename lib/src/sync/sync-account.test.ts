@@ -23,6 +23,7 @@ import {
   createPostageStamp,
   createDevice,
 } from "../test-fixtures"
+import { readPartitionLock, acquirePartitionLock } from "./partition-lock"
 
 // ============================================================================
 // Mock Factories
@@ -150,6 +151,15 @@ vi.mock("../utils/batch-utilization", () => ({
   }),
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
+  LEASE_TTL_MS: 30_000,
+}))
+
+// The multi-device gate reads/claims partition lock SOCs; mock both so each
+// test controls whether the device holds / can claim a partition.
+vi.mock("./partition-lock", () => ({
+  readPartitionLock: vi.fn(),
+  acquirePartitionLock: vi.fn(),
+  NO_HOLDER_DEVICE_ID: "",
 }))
 
 // device-id uses localStorage which isn't available in this test environment;
@@ -172,6 +182,9 @@ describe("createSyncAccount", () => {
     capturedEpochReference = undefined
     uploadCallCount = 0
     epochUpdateCallCount = 0
+
+    vi.mocked(readPartitionLock).mockReset()
+    vi.mocked(acquirePartitionLock).mockReset()
 
     mockUpdate.mockReset()
     mockUpdate.mockImplementation(
@@ -355,20 +368,65 @@ describe("createSyncAccount", () => {
     expect(lastAddress).toEqual(FAKE_SOC_ADDRESS)
   })
 
-  it("skips sync when the device holds no partition (multi-device account)", async () => {
+  it("claims a free partition and publishes when this device holds none (multi-device account)", async () => {
     const stores = createMockStores()
-    // Multi-device account. The mock Bee can't serve a lock SOC, so the
-    // gate's lock-SOC scan finds no held partition for this device → skip.
     const baseAccount = stores.accountsStore.getAccount(
       new EthAddress(TEST_ETH_ADDRESS_HEX),
     )!
-    const multiDeviceAccount = {
-      ...baseAccount,
-      partitionCount: 2,
-    }
     stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
-      id.toHex() === TEST_ETH_ADDRESS_HEX ? multiDeviceAccount : undefined,
+      id.toHex() === TEST_ETH_ADDRESS_HEX
+        ? { ...baseAccount, partitionCount: 2 }
+        : undefined,
     )
+
+    // No device holds either partition (all free), and the claim succeeds —
+    // so the SwarmID UI acquires partition 0 and publishes.
+    vi.mocked(readPartitionLock).mockResolvedValue(undefined)
+    vi.mocked(acquirePartitionLock).mockResolvedValue({
+      outcome: "acquired",
+      payload: {
+        holderDeviceId: "test-device-self",
+        generation: { timestampMs: 1, tiebreaker: "00" },
+        acquiredAt: 1,
+        leasedUntil: Date.now() + 60_000,
+      },
+    })
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+    expect(acquirePartitionLock).toHaveBeenCalledTimes(1)
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("success")
+    expect(uploadCallCount).toBe(1)
+  })
+
+  it("skips sync when all partitions are held by live foreign devices", async () => {
+    const stores = createMockStores()
+    const baseAccount = stores.accountsStore.getAccount(
+      new EthAddress(TEST_ETH_ADDRESS_HEX),
+    )!
+    stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
+      id.toHex() === TEST_ETH_ADDRESS_HEX
+        ? { ...baseAccount, partitionCount: 2 }
+        : undefined,
+    )
+
+    // Every partition is held by a *live* *foreign* device — nothing free to
+    // claim → skip; a peer (or the proxy) publishes instead.
+    vi.mocked(readPartitionLock).mockResolvedValue({
+      holderDeviceId: "some-other-device",
+      generation: { timestampMs: 1, tiebreaker: "00" },
+      acquiredAt: 1,
+      leasedUntil: Date.now() + 60_000,
+    })
 
     const syncAccount = createSyncAccount({
       bee: createMockBee(),
@@ -381,6 +439,7 @@ describe("createSyncAccount", () => {
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeUndefined()
+    expect(acquirePartitionLock).not.toHaveBeenCalled()
     expect(uploadCallCount).toBe(0)
     expect(epochUpdateCallCount).toBe(0)
   })

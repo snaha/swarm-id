@@ -6,8 +6,8 @@
  *
  * Each `(batchId, partition)` pair has its own epoch feed. The current holder
  * publishes its per-partition counter on release; the next holder reads it on
- * acquire and seeds its own counter (with a defensive skew) so the two devices
- * never race for the same `(bucket, slot)` pair.
+ * acquire and resumes from exactly that counter, so the two devices never race
+ * for the same `(bucket, slot)` pair during an orderly hand-off.
  *
  * The counter is not a single blob: it is split into the same per-`chunkIndex`
  * chunks the utilisation store uses, each uploaded with a random key to the
@@ -37,7 +37,6 @@ import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   NUM_BUCKETS,
   UtilizationAwareStamper,
-  computeResumeCounterSkew,
   extractChunk,
   getChunkLayout,
   mergeChunk,
@@ -78,12 +77,15 @@ export function makePartitionStateTopic(
 
 /**
  * Read the latest partition-state-feed entry and reconstruct the
- * `localCounter` array, defensively skewed by `RESUME_COUNTER_SKEW`.
+ * `localCounter` array — the previous holder's per-bucket high-water.
  *
- * Returns a fresh zero-filled-then-skewed array when no prior snapshot
- * exists — i.e. when a fresh partition is being seeded for the first time
- * (Case A on a brand-new account, or Case B when no peer has yet
- * published on the partition we're about to take).
+ * Returns a fresh zero-filled array when no prior snapshot exists — i.e.
+ * when a fresh partition is being seeded for the first time (Case A on a
+ * brand-new account, or Case B when no peer has yet published on the
+ * partition we're about to take). We resume at exactly the published
+ * counter: an unclean-crash window where a peer stamped past its last
+ * publish is not defended against — that data was never durably persisted
+ * anyway, so overwriting those slots loses nothing of value.
  */
 export async function readPartitionState(opts: {
   bee: Bee
@@ -99,13 +101,9 @@ export async function readPartitionState(opts: {
 
   const refBytes = await finder.findAt(now)
   const localCounter = new Uint32Array(NUM_BUCKETS)
-  const skew = computeResumeCounterSkew(batchDepth)
 
   if (!refBytes) {
-    // No prior state — start fresh (still apply the skew so peers that
-    // didn't yet publish but may have already stamped a few chunks under
-    // a crashed session can't collide with us).
-    localCounter.fill(skew)
+    // No prior state — start fresh from zero.
     return { localCounter }
   }
 
@@ -113,26 +111,37 @@ export async function readPartitionState(opts: {
   // 64-byte encrypted references (address‖key) of this partition's counter
   // chunks. Each reference carries its own decryption key, so no key
   // derivation is needed — downloadDataWithChunkAPI decrypts from the ref.
-  const referenceChunk = await downloadDataWithChunkAPI(
-    bee,
-    new Reference(refBytes).toHex(),
-  )
-  const { numUtilizationChunks } = getChunkLayout(batchDepth)
-  for (let i = 0; i < numUtilizationChunks; i++) {
-    const ref = referenceChunk.slice(
-      i * ENCRYPTED_REFERENCE_BYTES,
-      (i + 1) * ENCRYPTED_REFERENCE_BYTES,
-    )
-    const chunkData = await downloadDataWithChunkAPI(
+  //
+  // Resilience: any failure here (an unreadable/transient chunk, or a feed
+  // entry written in an older format) must NOT abort the caller's acquisition
+  // (`claimPartition` reads this *before* writing the lock SOC). Fall back to a
+  // fresh zero counter — the same as the no-entry path — and let the next
+  // `release` republish the current format.
+  try {
+    const referenceChunk = await downloadDataWithChunkAPI(
       bee,
-      Binary.uint8ArrayToHex(ref),
+      new Reference(refBytes).toHex(),
     )
-    mergeChunk(localCounter, i, chunkData, batchDepth)
+    const { numUtilizationChunks } = getChunkLayout(batchDepth)
+    for (let i = 0; i < numUtilizationChunks; i++) {
+      const ref = referenceChunk.slice(
+        i * ENCRYPTED_REFERENCE_BYTES,
+        (i + 1) * ENCRYPTED_REFERENCE_BYTES,
+      )
+      const chunkData = await downloadDataWithChunkAPI(
+        bee,
+        Binary.uint8ArrayToHex(ref),
+      )
+      mergeChunk(localCounter, i, chunkData, batchDepth)
+    }
+  } catch (err) {
+    console.warn(
+      `[partition-state] reading partition ${partition} counter failed; seeding a fresh counter:`,
+      err,
+    )
+    return { localCounter: new Uint32Array(NUM_BUCKETS) }
   }
 
-  // Skew past where the previous holder stopped (defends against a crashed
-  // peer's un-published in-flight writes).
-  for (let i = 0; i < NUM_BUCKETS; i++) localCounter[i] += skew
   return { localCounter }
 }
 

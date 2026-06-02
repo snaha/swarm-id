@@ -88,6 +88,7 @@ import {
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
 } from "./utils/batch-utilization"
+import { withBatchWriteLock } from "./utils/batch-write-lock"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import { PartitionLease } from "./sync/partition-lease"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
@@ -588,18 +589,13 @@ export class SwarmIdProxy {
    * Lock is scoped to the batch ID to allow different batches to write concurrently.
    */
   private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
-    const lockName = `swarm-write-${this.postageBatchId}`
-    return navigator.locks.request(
-      lockName,
-      { mode: "exclusive" },
-      async () => {
-        try {
-          return await operation()
-        } finally {
-          await this.saveStamperStateIfNeeded()
-        }
-      },
-    )
+    return withBatchWriteLock(this.postageBatchId, async () => {
+      try {
+        return await operation()
+      } finally {
+        await this.saveStamperStateIfNeeded()
+      }
+    })
   }
 
   /**

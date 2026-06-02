@@ -113,16 +113,6 @@ export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
  */
 export const IDLE_YIELD_MS = 30 * 1000 // 30 seconds
 
-/**
- * Counter-skew divisor for `RESUME_COUNTER_SKEW = ceil(slotsPerBucket /
- * PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR)`. Applied when seeding
- * `localCounter` from a peer's partition-state snapshot — skips a small
- * slot range that the previous holder may have used between its last
- * published snapshot and a crash. Cheap defence; loses a sliver of
- * capacity per handover/recovery.
- */
-export const RESUME_COUNTER_SKEW_DIVISOR = 4
-
 /** Size of each chunk in bytes */
 export const CHUNK_SIZE = 4096
 
@@ -168,19 +158,6 @@ export interface ChunkLayout {
 }
 
 /**
- * Counter-skew applied when seeding `localCounter` from a cached state on
- * reconnect. Skips a small slot range that the previous session may have
- * used after its last flush but before a crash, eliminating residual
- * collision risk.
- */
-export function computeResumeCounterSkew(batchDepth: number): number {
-  const slotsPerBucket = Math.pow(2, batchDepth - BUCKET_DEPTH)
-  return Math.ceil(
-    slotsPerBucket / PARTITION_COUNT / RESUME_COUNTER_SKEW_DIVISOR,
-  )
-}
-
-/**
  * IndexedDB chunk index for the per-partition lease metadata chunk.
  * Lease metadata is stored at indices `N + p` where N = numUtilizationChunks.
  */
@@ -201,8 +178,8 @@ export interface CachedLeaseInput {
   /** Last known generation; next claim uses `generation + 1`. */
   generation: number
   /**
-   * Per-bucket local counter to pass to `bindPartition`. The skew has
-   * already been applied (`dataCounters + RESUME_COUNTER_SKEW`).
+   * Per-bucket local counter to pass to `bindPartition` (the resumed
+   * high-water from the cache / partition-state feed).
    */
   localCounter: Uint32Array
   /** Epoch hints for `writeDeviceClaim`, skips epoch-tree traversal. */
@@ -1626,7 +1603,7 @@ export class UtilizationAwareStamper implements Stamper {
    * Bind this stamper to a leased partition. Called once by the lease
    * orchestrator after `acquire()` succeeds. `localCounter` is the
    * starting per-bucket count for THIS device — fresh zeros for Case A,
-   * seeded-from-state-feed-with-skew for Cases B/D.
+   * the resumed high-water from the state feed for Cases B/D.
    */
   bindPartition(opts: {
     partition: number
@@ -1640,8 +1617,8 @@ export class UtilizationAwareStamper implements Stamper {
     }
     this.partition = opts.partition
     this.partitionCountValue = opts.partitionCount
-    // The seeded per-partition counter (`j`, already skewed for Cases B/D)
-    // becomes the single counter of record for this held partition.
+    // The seeded per-partition counter (`j`, resumed high-water for Cases
+    // B/D) becomes the single counter of record for this held partition.
     this.utilizationState.dataCounters = opts.localCounter
     this.leaseStale = false
   }
@@ -2009,7 +1986,7 @@ export class UtilizationAwareStamper implements Stamper {
 
   /**
    * Build the partition-local counter from the stamper's current
-   * `dataCounters` + `RESUME_COUNTER_SKEW`.
+   * `dataCounters` — i.e. resume exactly where this device left off.
    *
    * Same derivation `readCachedLease` does internally, exposed standalone
    * for callers that already have lease state from somewhere else (e.g.
@@ -2017,12 +1994,7 @@ export class UtilizationAwareStamper implements Stamper {
    * into `bindPartition`.
    */
   buildLeaseLocalCounter(): Uint32Array {
-    const skew = computeResumeCounterSkew(this.depth)
-    const localCounter = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < NUM_BUCKETS; i++) {
-      localCounter[i] = this.utilizationState.dataCounters[i] + skew
-    }
-    return localCounter
+    return this.utilizationState.dataCounters.slice()
   }
 
   /**
@@ -2064,8 +2036,9 @@ export class UtilizationAwareStamper implements Stamper {
 
   /**
    * Read cached lease metadata for partition `p` and derive the local
-   * counter from the current `dataCounters` + `RESUME_COUNTER_SKEW`.
-   * Returns `undefined` when no metadata chunk is present in the cache.
+   * counter from the current `dataCounters` (resume exactly where this
+   * device left off). Returns `undefined` when no metadata chunk is present
+   * in the cache.
    */
   async readCachedLease(
     partition: number,
@@ -2080,11 +2053,7 @@ export class UtilizationAwareStamper implements Stamper {
       new TextDecoder().decode(cached.data),
     )
     const claimHints = deserializeClaimHints(payload.claimHints)
-    const skew = computeResumeCounterSkew(this.depth)
-    const localCounter = new Uint32Array(NUM_BUCKETS)
-    for (let i = 0; i < NUM_BUCKETS; i++) {
-      localCounter[i] = this.utilizationState.dataCounters[i] + skew
-    }
+    const localCounter = this.utilizationState.dataCounters.slice()
     return {
       partition,
       generation: payload.generation,

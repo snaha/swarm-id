@@ -29,7 +29,6 @@ import {
   LEASE_TTL_MS,
   PARTITION_COUNT,
   NUM_BUCKETS,
-  computeResumeCounterSkew,
 } from "../utils/batch-utilization"
 import {
   MockBee,
@@ -98,7 +97,7 @@ afterEach(() => {
 // ============================================================================
 
 describe("readPartitionState / writePartitionState round-trip", () => {
-  it("reads back counters with skew applied", async () => {
+  it("reads back the exact published counters", async () => {
     const { writePartitionState, readPartitionState } =
       await import("./partition-state")
 
@@ -125,10 +124,39 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       batchDepth: TEST_BATCH_DEPTH,
     })
 
-    const skew = computeResumeCounterSkew(TEST_BATCH_DEPTH)
-    expect(result.localCounter[100]).toBe(5 + skew)
-    expect(result.localCounter[200]).toBe(12 + skew)
-    expect(result.localCounter[0]).toBe(0 + skew)
+    expect(result.localCounter[100]).toBe(5)
+    expect(result.localCounter[200]).toBe(12)
+    expect(result.localCounter[0]).toBe(0)
+  })
+
+  it("returns a fresh zero counter when the feed entry is unreadable", async () => {
+    const { readPartitionState, makePartitionStateTopic } =
+      await import("./partition-state")
+    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
+
+    // Point the partition-state feed at a reference that resolves to nothing
+    // (e.g. an old-format or corrupt entry). The reference-chunk download then
+    // fails — readPartitionState must NOT throw (it would abort the caller's
+    // acquisition), but fall back to a fresh zero counter.
+    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
+    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
+    const danglingRef = new Uint8Array(64).fill(0x99)
+    await updater.update(BigInt(Math.floor(Date.now() / 1000)), danglingRef, {
+      mode: "stamper",
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+    })
+
+    const result = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+
+    expect(result.localCounter[0]).toBe(0)
+    expect(result.localCounter[1234]).toBe(0)
   })
 })
 

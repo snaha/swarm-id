@@ -28,7 +28,9 @@ import {
   saveUtilizationState,
   calculateUtilization,
   UtilizationAwareStamper,
+  LEASE_TTL_MS,
 } from "../utils/batch-utilization"
+import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { collectAccountStampBatchIds } from "../utils/postage-stamp-association"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
@@ -47,7 +49,12 @@ import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import { rejectAfter } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
 import { mergeSnapshotWithRemote } from "./merge-snapshot"
-import { readPartitionLock } from "./partition-lock"
+import {
+  readPartitionLock,
+  acquirePartitionLock,
+  NO_HOLDER_DEVICE_ID,
+} from "./partition-lock"
+import { PARTITION_LOCK_GUARD_MS } from "./partition-lease"
 import { getOrCreateDeviceId } from "../utils/device-id"
 
 // Timeout for utilization upload in milliseconds
@@ -378,6 +385,7 @@ export function createSyncAccount(
       const gateBackupSigner = new PrivateKey(gateBackupKeyHex)
       const gateSwarmKey = hexToUint8Array(encryptionKey)
       const now = Date.now()
+      let freePartition: number | undefined
       for (let p = 0; p < partitionCount; p++) {
         const lock = await readPartitionLock({
           bee,
@@ -393,10 +401,57 @@ export function createSyncAccount(
           heldPartition = p
           break
         }
+        if (
+          freePartition === undefined &&
+          (!lock ||
+            lock.holderDeviceId === NO_HOLDER_DEVICE_ID ||
+            lock.leasedUntil <= now)
+        ) {
+          freePartition = p
+        }
+      }
+      // The SwarmID UI must be able to publish its own account-state changes
+      // (the proxy is not the only writer). If we don't already hold a
+      // partition, claim a free/expired one so the publish can proceed. The
+      // lock-SOC protocol (generation fencing) makes the claim safe without the
+      // write lock. Skip only when every partition is held by a live foreign
+      // device — then a peer (or the proxy) publishes instead.
+      if (heldPartition === undefined && freePartition !== undefined) {
+        const gateStamper = await postageStampsStore.getStamper(
+          defaultStamp.batchID,
+          {
+            owner: gateBackupSigner.publicKey().address(),
+            encryptionKey: gateSwarmKey,
+          },
+        )
+        if (gateStamper) {
+          try {
+            const claim = await acquirePartitionLock({
+              bee,
+              stamper: gateStamper,
+              backupSigner: gateBackupSigner,
+              swarmEncryptionKey: gateSwarmKey,
+              partition: freePartition,
+              deviceId: selfDeviceId,
+              ttlMs: LEASE_TTL_MS,
+              guardMs: PARTITION_LOCK_GUARD_MS,
+            })
+            if (claim.outcome === "acquired") {
+              heldPartition = freePartition
+            }
+          } catch (err) {
+            // A transient claim failure must not crash the sync — skip the
+            // publish; a later trigger (or the proxy) retries.
+            console.warn(
+              `[SyncCoordinator] Partition claim for ${accountId} failed; skipping publish:`,
+              err,
+            )
+          }
+        }
       }
       if (heldPartition === undefined) {
         console.warn(
-          `[SyncCoordinator] Skipping sync ${accountId}: device ${selfDeviceId} holds no partition (per lock SOC).`,
+          `[SyncCoordinator] Skipping sync ${accountId}: all partitions are held by other devices.`,
         )
         return undefined
       }
@@ -603,7 +658,13 @@ export function createSyncAccount(
     })
 
     try {
-      const result = await Promise.race([runSync(), timeoutPromise])
+      // Serialize the publish against every other writer on this batch (proxy
+      // iframes and the SwarmID UI) via the shared cross-tab Web Lock, so the
+      // snapshot chunks never collide with a concurrent partition write.
+      const result = await Promise.race([
+        withBatchWriteLock(defaultStamp.batchID.toHex(), runSync),
+        timeoutPromise,
+      ])
       if (result.status === "error") {
         console.error(
           `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,

@@ -64,8 +64,6 @@ export {
   PARTITION_COUNT,
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,
-  RESUME_COUNTER_SKEW_DIVISOR,
-  computeResumeCounterSkew,
 } from "./utils/batch-utilization"
 export type { UtilizationChunkKey } from "./utils/batch-utilization"
 

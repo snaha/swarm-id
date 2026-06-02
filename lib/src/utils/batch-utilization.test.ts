@@ -14,7 +14,6 @@ import {
   UINT16_COUNTER_MAX_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,
   UtilizationAwareStamper,
-  computeResumeCounterSkew,
   dataSlot,
   partitionCapacity,
   deriveUtilizationChunkKey,
@@ -928,9 +927,8 @@ describe("UtilizationAwareStamper partition awareness", () => {
   })
 
   it("seeds the local counter from the caller (Case B resume scenario)", async () => {
-    // Simulates Case B: device 1 acquires partition 1 after device 0 has
-    // already stamped in some bucket. Device 1's local counter starts at
-    // a non-zero value because of RESUME_COUNTER_SKEW.
+    // Simulates Case B: device 1 acquires partition 1 and resumes from a
+    // non-zero per-bucket high-water published by a previous holder.
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
       TEST_BATCH_ID,
@@ -969,19 +967,6 @@ describe("leaseChunkIndex", () => {
     expect(numUtilizationChunks).toBe(64)
     expect(leaseChunkIndex(32, 0)).toBe(64)
     expect(leaseChunkIndex(32, 1)).toBe(65)
-  })
-})
-
-describe("computeResumeCounterSkew", () => {
-  it("returns ceil(slotsPerBucket / PARTITION_COUNT / DIVISOR) for depth 24", () => {
-    // slotsPerBucket = 2^(24-16) = 256; 256 / 2 / 4 = 32
-    expect(computeResumeCounterSkew(24)).toBe(32)
-  })
-
-  it("increases with depth", () => {
-    expect(computeResumeCounterSkew(20)).toBeLessThan(
-      computeResumeCounterSkew(24),
-    )
   })
 })
 
@@ -1086,20 +1071,19 @@ describe("UtilizationAwareStamper lease metadata", () => {
     expect(result!.claimHints.lastTimestamp).toBe(9999000n)
   })
 
-  it("readCachedLease returns localCounter = counter + RESUME_COUNTER_SKEW", async () => {
+  it("readCachedLease returns localCounter = current counter (no skew)", async () => {
     const cache = makeRecordingCache()
     const stamper = await makeStamper(cache)
 
     // Fresh stamper: the per-partition counter `j` is 0 everywhere (no stamps
-    // yet), so readCachedLease seeds localCounter = 0 + skew.
+    // yet), so readCachedLease seeds localCounter = 0.
     await stamper.setLeaseMetadata(0, 1, {})
 
-    const skew = computeResumeCounterSkew(TEST_DEPTH_LM)
     const result = await stamper.readCachedLease(0)
     expect(result).toBeDefined()
 
-    expect(result!.localCounter[0]).toBe(skew)
-    expect(result!.localCounter[1000]).toBe(skew)
+    expect(result!.localCounter[0]).toBe(0)
+    expect(result!.localCounter[1000]).toBe(0)
   })
 
   it("readCachedLease counter reflects stamps made before setLeaseMetadata", async () => {
@@ -1120,11 +1104,10 @@ describe("UtilizationAwareStamper lease metadata", () => {
 
     await stamper.setLeaseMetadata(0, 1, {})
 
-    const skew = computeResumeCounterSkew(TEST_DEPTH_LM)
     const result = await stamper.readCachedLease(0)
     // The per-partition counter is 0-based: after NUM_STAMPS into BUCKET,
-    // j = NUM_STAMPS, so localCounter = NUM_STAMPS + skew.
-    expect(result!.localCounter[BUCKET]).toBe(NUM_STAMPS + skew)
+    // j = NUM_STAMPS, so localCounter = NUM_STAMPS (resume exactly).
+    expect(result!.localCounter[BUCKET]).toBe(NUM_STAMPS)
   })
 
   it("updateLeaseMetadata is a no-op when no partition is bound", async () => {
