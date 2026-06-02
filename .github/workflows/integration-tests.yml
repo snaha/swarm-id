@@ -1,0 +1,108 @@
+name: Integration Tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    paths:
+      - 'lib/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/integration-tests.yml'
+
+# Cancel superseded runs on the same ref.
+concurrency:
+  group: integration-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  integration-tests:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # Cache the locally-built cluster images (queen, worker, blockchain) so we
+      # skip rebuilding them and re-pulling the upstream bases each run. This
+      # caches IMAGES ONLY via docker save/load — never volumes, so the chain
+      # state (baked into the image as state.anvil.json) is always fresh.
+      # Keyed on the lockfile so a bee-compose bump invalidates it.
+      - name: Cache Bee cluster images
+        id: bee-images
+        uses: actions/cache@v4
+        with:
+          path: /tmp/bee-images
+          key: bee-images-${{ hashFiles('pnpm-lock.yaml') }}-v1
+
+      - name: Load cached cluster images
+        if: steps.bee-images.outputs.cache-hit == 'true'
+        run: |
+          for f in /tmp/bee-images/*.tar; do docker load -i "$f"; done
+          docker images --filter 'reference=bee-compose:*'
+
+      - name: Start Bee cluster
+        run: pnpm dev:bee:detach
+
+      - name: Save cluster images to cache
+        if: steps.bee-images.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p /tmp/bee-images
+          imgs=$(docker images --filter 'reference=bee-compose:*' --format '{{.Repository}}:{{.Tag}}')
+          echo "Saving images: $imgs"
+          docker save $imgs -o /tmp/bee-images/cluster.tar
+
+      - name: Wait for queen node to be ready
+        # The queen comes up in well under a minute; bail out early if it is
+        # crash-looping instead of waiting out the whole timeout.
+        run: |
+          for i in $(seq 1 40); do
+            if curl -fsS http://localhost:1633/readiness 2>/dev/null | grep -q '"status":"ready"'; then
+              echo "Queen node is ready"
+              exit 0
+            fi
+            restarts=$(docker inspect -f '{{.RestartCount}}' bee-compose-queen 2>/dev/null || echo 0)
+            if [ "${restarts:-0}" -ge 3 ]; then
+              echo "::error::Queen node is crash-looping (RestartCount=$restarts)"
+              exit 1
+            fi
+            echo "Waiting for queen node... ($i/40, restarts=${restarts:-0})"
+            sleep 3
+          done
+          echo "::error::Queen node did not become ready in time"
+          exit 1
+
+      # The suite's global setup buys (or reuses) a single usable postage stamp
+      # and shares it across all test files, so there is no separate buy step.
+      - name: Run integration tests
+        run: pnpm --filter @snaha/swarm-id test:integration
+
+      - name: Dump cluster logs on failure
+        if: failure()
+        run: |
+          docker ps -a || true
+          echo "::group::blockchain logs"
+          pnpm exec bee-compose logs blockchain --tail 200 || true
+          echo "::endgroup::"
+          echo "::group::queen logs"
+          pnpm exec bee-compose logs queen --tail 300 || true
+          echo "::endgroup::"
+
+      - name: Stop Bee cluster
+        if: always()
+        run: pnpm dev:bee:stop || true

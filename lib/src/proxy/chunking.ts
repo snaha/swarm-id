@@ -48,10 +48,15 @@ export async function buildMerkleTree(
       payload.set(ref.address, idx * 32)
     })
 
+    // An intermediate chunk's span is the total data length covered by its
+    // children, not the length of its references payload.
+    const totalSpan = refs.reduce((sum, ref) => sum + (ref.span ?? 0n), 0n)
+
     // Create intermediate chunk
-    const chunk = makeContentAddressedChunk(payload)
+    const chunk = makeContentAddressedChunk(payload, totalSpan)
     intermediateRefs.push({
       address: chunk.address.toUint8Array(),
+      span: totalSpan,
     })
 
     // Upload intermediate chunk

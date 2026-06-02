@@ -30,7 +30,7 @@
     "format:lib": "pnpm --filter @snaha/swarm-id format"
   },
   "devDependencies": {
-    "@snaha/bee-compose": "^0.1.1",
+    "@snaha/bee-compose": "^0.1.3",
     "concurrently": "^9.1.2",
     "prettier": "^3.8.1",
     "serve": "^14.2.4"
