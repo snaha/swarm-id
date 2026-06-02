@@ -2,11 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Cluster integration test for data round-trips at chunk-boundary sizes.
+ * Integration test for data round-trips at chunk-boundary sizes.
  *
- * Lives in a separate file from round-trip.cluster.test.ts to prove the
- * postage stamp acquired in global setup is shared across files: this file
- * does NOT buy its own stamp — it reuses inject("clusterBatchId").
+ * Lives in a separate file from round-trip.test.ts to prove the postage stamp
+ * acquired in global setup is shared across files: this file does NOT buy its
+ * own stamp — it reuses inject("clusterBatchId").
  */
 
 import { describe, it, expect, beforeAll, inject } from "vitest"

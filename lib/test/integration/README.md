@@ -3,13 +3,18 @@ Copyright 2026 The Swarm Authors. All rights reserved.
 SPDX-License-Identifier: Apache-2.0
 -->
 
-# Cluster integration tests
+# Integration tests (live Bee)
 
-Integration tests that exercise the library's real Swarm operations
-(`uploadData`, `downloadDataWithChunkAPI`, …) against a **live local Bee
-cluster** started with [`@snaha/bee-compose`](https://www.npmjs.com/package/@snaha/bee-compose).
+Integration tests that exercise the **library's** real Swarm operations
+(`uploadData`, `downloadDataWithChunkAPI`, …) against a **live local Bee node**
+started with [`@snaha/bee-compose`](https://www.npmjs.com/package/@snaha/bee-compose).
 
-This is the POC for [#302](https://github.com/snaha/swarm-id/issues/302):
+These test the library only — they call its functions directly against a real
+Bee node. The full dApp → popup → iframe flow is covered separately by the
+browser E2E (Playwright) suite in `swarm-ui/`. Unit tests in `src/` mock Bee;
+these do not.
+
+Originated as the POC for [#302](https://github.com/snaha/swarm-id/issues/302):
 replacing manual testing with automated round-trips against a real node.
 
 ## Running
@@ -17,8 +22,8 @@ replacing manual testing with automated round-trips against a real node.
 From the repo root, start the cluster, then run the suite:
 
 ```bash
-pnpm dev:bee:detach                       # start queen + 1 worker (Docker)
-pnpm --filter @snaha/swarm-id test:cluster
+pnpm dev:bee:detach                            # start queen + 1 worker (Docker)
+pnpm --filter @snaha/swarm-id test:integration
 ```
 
 The suite is **skipped automatically** when no cluster is reachable at
@@ -27,8 +32,8 @@ The suite is **skipped automatically** when no cluster is reachable at
 
 ## How it works
 
-- Tests run under a dedicated config (`lib/vitest.cluster.config.ts`) and live
-  outside `src/`, so they are opt-in and excluded from build/typecheck/lint.
+- Tests run under a dedicated config (`lib/vitest.integration.config.ts`) and
+  live outside `src/`, so they are opt-in and excluded from build/typecheck/lint.
 - `cluster.ts` provides helpers: cluster reachability, buying/reusing a usable
   postage stamp, and building a bee-js `Stamper` from the queen's well-known
   dev key (uploads in Node without the browser-only proxy machinery).
@@ -37,7 +42,7 @@ The suite is **skipped automatically** when no cluster is reachable at
   file via `provide`/`inject`. This makes the ~minute-long stamp warmup a
   one-time cost for the whole run instead of per file.
 
-### Adding a new cluster test file
+### Adding a new integration test file
 
 Reuse the shared stamp — do not buy your own:
 
@@ -57,7 +62,7 @@ describe.skipIf(!clusterReachable)("my feature", () => {
 ```
 
 Each test should use a unique data set (random or name-derived) so files stay
-independent and can run in any order against the shared cluster.
+independent and can run in any order against the shared node.
 
 ## Next steps
 

@@ -1,4 +1,4 @@
-name: Cluster Integration Tests
+name: Integration Tests
 
 on:
   push:
@@ -7,16 +7,16 @@ on:
     paths:
       - 'lib/**'
       - 'pnpm-lock.yaml'
-      - '.github/workflows/cluster-tests.yml'
+      - '.github/workflows/integration-tests.yml'
 
 # Cancel superseded runs on the same ref.
 concurrency:
-  group: cluster-tests-${{ github.ref }}
+  group: integration-tests-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  cluster-tests:
-    name: Cluster Integration Tests
+  integration-tests:
+    name: Integration Tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -89,8 +89,8 @@ jobs:
 
       # The suite's global setup buys (or reuses) a single usable postage stamp
       # and shares it across all test files, so there is no separate buy step.
-      - name: Run cluster integration tests
-        run: pnpm --filter @snaha/swarm-id test:cluster
+      - name: Run integration tests
+        run: pnpm --filter @snaha/swarm-id test:integration
 
       - name: Dump cluster logs on failure
         if: failure()
