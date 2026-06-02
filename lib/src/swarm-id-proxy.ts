@@ -103,7 +103,11 @@ import {
 } from "./proxy/feeds/epochs"
 import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
-import { calculateTTLSeconds, fetchSwarmPrice } from "./utils/ttl"
+import {
+  calculateTTLSeconds,
+  fetchBatchTTL,
+  fetchSwarmPrice,
+} from "./utils/ttl"
 import { tryCreateTag } from "./utils/tag"
 import { DEFAULT_BEE_NODE_URL, UtilizationUpdateMessageSchema } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
@@ -3590,13 +3594,20 @@ export class SwarmIdProxy {
       return
     }
 
-    // Fetch current price from Swarmscan to calculate TTL
-    let batchTTL: number | undefined = stamp.batchTTL
-    try {
-      const pricePerGBPerMonth = await fetchSwarmPrice()
-      batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
-    } catch (error) {
-      console.warn("[Proxy] Failed to calculate TTL:", error)
+    // Prefer the Bee node's authoritative batchTTL (computed from live chain
+    // state). Fall back to the Swarmscan-price approximation when the Bee node
+    // does not know about this batch (e.g. public gateway).
+    let batchTTL: number | undefined = await fetchBatchTTL(
+      this.beeApiUrl,
+      stamp.batchID.toHex(),
+    )
+    if (batchTTL === undefined) {
+      try {
+        const pricePerGBPerMonth = await fetchSwarmPrice()
+        batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
+      } catch (error) {
+        console.warn("[Proxy] Failed to calculate TTL:", error)
+      }
     }
 
     // Map PostageStamp to public PostageBatch (exclude signerKey)

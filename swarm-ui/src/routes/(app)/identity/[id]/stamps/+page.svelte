@@ -24,7 +24,12 @@
   import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
   import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
-  import { getBlockTimestamp } from '@snaha/swarm-id'
+  import {
+    calculateTTLSeconds,
+    fetchBatchTTL,
+    fetchSwarmPrice,
+    getBlockTimestamp,
+  } from '@snaha/swarm-id'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const BATCH_ID_PREVIEW_LENGTH = 8
@@ -33,26 +38,10 @@
   const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
   const BYTES_PER_GB = BYTES_PER_MB * BYTES_PER_KB
   const MS_PER_SECOND = 1000
+  const SECONDS_PER_MONTH = 2592000
   const MAX_UTILIZATION_PERCENT = 100
-  const SWARMSCAN_STATS_URL = 'https://api.swarmscan.io/v1/postage-stamps/stats'
-  const CHUNKS_PER_GB = 262144n
-  const SECONDS_PER_MONTH = 2592000n
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
-  const PLUR_DECIMALS = 16
   const BEEPORT_TOPUP_URL = 'https://beeport.eth.limo/?topup='
-
-  function bzzToPlur(bzz: number): bigint {
-    const str = bzz.toFixed(PLUR_DECIMALS)
-    const [intPart, decPart = ''] = str.split('.')
-    const paddedDec = decPart.padEnd(PLUR_DECIMALS, '0').slice(0, PLUR_DECIMALS)
-    return BigInt(intPart + paddedDec)
-  }
-
-  function calculateBatchDurationSeconds(amount: bigint, pricePerGBPerMonth: number): number {
-    const perChunkPerMonthCost = bzzToPlur(pricePerGBPerMonth) / CHUNKS_PER_GB
-    if (perChunkPerMonthCost === 0n) return 0
-    return Number((amount * SECONDS_PER_MONTH) / perChunkPerMonthCost)
-  }
 
   const identityId = $derived(page.params.id)
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
@@ -70,6 +59,11 @@
 
   let pricePerGBPerMonth = $state<number | undefined>(undefined)
   const blockTimestamps = new SvelteMap<number, number>()
+  // Map of batchID hex → expiry timestamp in ms (Date.now() + batchTTL), sourced
+  // from the configured Bee node's `/stamps/{id}` response. Bee computes batchTTL
+  // from live chain state, so it accounts for price changes since stamp creation
+  // that the Swarmscan-price approximation cannot.
+  const beeExpiryMs = new SvelteMap<string, number>()
 
   async function fetchBlockTimestamp(blockNumber: number): Promise<number | undefined> {
     if (blockTimestamps.has(blockNumber)) {
@@ -88,23 +82,32 @@
     }
   }
 
-  onMount(async () => {
-    // Fetch Swarmscan price
-    try {
-      const res = await fetch(SWARMSCAN_STATS_URL)
-      const data: { pricePerGBPerMonth: number } = await res.json()
-      pricePerGBPerMonth = data.pricePerGBPerMonth
-    } catch {
-      // Silently fail — expiry date just won't render
+  async function fetchStampExpiryFromBee(stamp: PostageStamp): Promise<void> {
+    const ttlSeconds = await fetchBatchTTL(networkSettingsStore.beeNodeUrl, stamp.batchID.toHex())
+    if (ttlSeconds !== undefined) {
+      beeExpiryMs.set(stamp.batchID.toHex(), Date.now() + ttlSeconds * MS_PER_SECOND)
     }
+  }
 
-    // Fetch block timestamps for stamps
+  onMount(() => {
+    // Start the authoritative Bee batchTTL + block-timestamp fetches first;
+    // they don't depend on the Swarmscan price and shouldn't wait on it.
     const stamps = [accountStamp, identityStamp].filter(Boolean) as PostageStamp[]
     for (const stamp of stamps) {
       if (stamp.blockNumber > 0) {
         fetchBlockTimestamp(stamp.blockNumber)
       }
+      fetchStampExpiryFromBee(stamp)
     }
+
+    // Swarmscan price feeds only the constant-price fallback and the
+    // "expires soon" heuristic, so run it in parallel and let it fail
+    // silently — the Bee batchTTL path can still render an accurate date.
+    fetchSwarmPrice()
+      .then((price) => {
+        pricePerGBPerMonth = price
+      })
+      .catch(() => {})
   })
 
   function formatBytes(bytes: number): string {
@@ -126,39 +129,62 @@
     return batchId.toHex().slice(0, BATCH_ID_PREVIEW_LENGTH)
   }
 
-  function formatExpiryDate(
-    stamp: PostageStamp,
-    price: number,
-    blockTimestamp: number | undefined,
-  ): string {
-    const durationSeconds = calculateBatchDurationSeconds(stamp.amount, price)
+  interface StampExpiry {
+    expiryMs: number
+    /** True when expiryMs comes from the constant-price fallback rather than
+     * Bee's live chain state. The chain price may have moved since the stamp
+     * was purchased, so an estimated date can disagree with reality (see #279).
+     */
+    estimated: boolean
+  }
 
-    // Use block timestamp if available, otherwise fall back to createdAt
+  /**
+   * Resolves a stamp's expiry timestamp in ms, marking it as estimated when
+   * we had to fall back to the Swarmscan-price approximation. Bee's batchTTL
+   * (when available) reflects actual chain state and is treated as truth.
+   */
+  function getExpiry(
+    stamp: PostageStamp,
+    price: number | undefined,
+    blockTimestamp: number | undefined,
+    beeExpiry: number | undefined,
+  ): StampExpiry | undefined {
+    if (beeExpiry !== undefined) {
+      return { expiryMs: beeExpiry, estimated: false }
+    }
+    if (price === undefined) {
+      return undefined
+    }
+    const durationSeconds = calculateTTLSeconds(stamp.amount, price)
     const startTimeMs =
       blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
+    return { expiryMs: startTimeMs + durationSeconds * MS_PER_SECOND, estimated: true }
+  }
 
-    return new Date(startTimeMs + durationSeconds * MS_PER_SECOND).toLocaleDateString()
+  function formatExpiryDate(expiryMs: number, estimated: boolean): string {
+    const date = new Date(expiryMs).toLocaleDateString()
+    return estimated ? `~${date}` : date
+  }
+
+  function isExpired(expiryMs: number): boolean {
+    return expiryMs <= Date.now()
   }
 
   function isExpiringSoon(
     stamp: PostageStamp,
-    price: number,
-    blockTimestamp: number | undefined,
+    expiryMs: number,
+    price: number | undefined,
   ): boolean {
-    const totalLifetimeMs = calculateBatchDurationSeconds(stamp.amount, price) * MS_PER_SECOND
+    const remainingMs = expiryMs - Date.now()
+    if (remainingMs <= 0) return false
 
-    // Use block timestamp if available, otherwise fall back to createdAt
-    const startTimeMs =
-      blockTimestamp !== undefined ? blockTimestamp * MS_PER_SECOND : stamp.createdAt
+    const oneMonthMs = SECONDS_PER_MONTH * MS_PER_SECOND
+    if (remainingMs < oneMonthMs) return true
 
-    const expiryTimestamp = startTimeMs + totalLifetimeMs
-    const remainingMs = expiryTimestamp - Date.now()
-    const oneMonthMs = Number(SECONDS_PER_MONTH) * MS_PER_SECOND
-
-    return (
-      remainingMs > 0 &&
-      (remainingMs < oneMonthMs || remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION)
-    )
+    // If we have a price, also flag stamps in the last 10% of their estimated lifetime.
+    if (price === undefined) return false
+    const totalLifetimeMs = calculateTTLSeconds(stamp.amount, price) * MS_PER_SECOND
+    return totalLifetimeMs > 0 && remainingMs < totalLifetimeMs * EXPIRY_SOON_LIFETIME_FRACTION
   }
 </script>
 
@@ -210,19 +236,32 @@
         </div>
       </Horizontal>
 
-      {#if pricePerGBPerMonth}
-        {@const stampBlockTimestamp = blockTimestamps.get(stamp.blockNumber)}
-        {@const expiringSoon = isExpiringSoon(stamp, pricePerGBPerMonth, stampBlockTimestamp)}
+      {@const stampBlockTimestamp = blockTimestamps.get(stamp.blockNumber)}
+      {@const stampBeeExpiry = beeExpiryMs.get(stamp.batchID.toHex())}
+      {@const expiry = getExpiry(stamp, pricePerGBPerMonth, stampBlockTimestamp, stampBeeExpiry)}
+      {#if expiry !== undefined}
+        {@const expired = isExpired(expiry.expiryMs)}
+        {@const expiringSoon =
+          !expired && isExpiringSoon(stamp, expiry.expiryMs, pricePerGBPerMonth)}
         <Horizontal --horizontal-justify-content="space-between" --horizontal-align-items="center">
           <Typography>Expiry date</Typography>
           <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
-            <Typography --typography-color={expiringSoon ? 'var(--colors-red)' : undefined}>
-              {formatExpiryDate(stamp, pricePerGBPerMonth, stampBlockTimestamp)}
+            <Typography
+              --typography-color={expired || expiringSoon ? 'var(--colors-red)' : undefined}
+            >
+              {formatExpiryDate(expiry.expiryMs, expiry.estimated)}
             </Typography>
-            {#if expiringSoon}
-              <Badge variant="error" dimension="small"
-                ><WarningAltFilled size={16} />Expires soon</Badge
-              >
+            {#if expiry.estimated}
+              <Typography variant="small">(estimated)</Typography>
+            {/if}
+            {#if expired}
+              <Badge variant="error" dimension="small">
+                <WarningAltFilled size={16} />Expired
+              </Badge>
+            {:else if expiringSoon}
+              <Badge variant="error" dimension="small">
+                <WarningAltFilled size={16} />Expires soon
+              </Badge>
             {/if}
           </Horizontal>
         </Horizontal>
