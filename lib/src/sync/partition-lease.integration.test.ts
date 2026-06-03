@@ -124,9 +124,60 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       batchDepth: TEST_BATCH_DEPTH,
     })
 
-    expect(result.localCounter[100]).toBe(5)
-    expect(result.localCounter[200]).toBe(12)
-    expect(result.localCounter[0]).toBe(0)
+    expect(result.unchanged).toBe(false)
+    expect(result.localCounter![100]).toBe(5)
+    expect(result.localCounter![200]).toBe(12)
+    expect(result.localCounter![0]).toBe(0)
+  })
+
+  it("skips the reference + counter-chunk downloads when the feed reference is unchanged", async () => {
+    const { writePartitionState, readPartitionState } =
+      await import("./partition-state")
+
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[100] = 5
+    const stamper = createMockStamper() as unknown as Stamper
+    const writtenRef = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+    })
+
+    const getSpy = vi.spyOn(store, "get")
+
+    // No cached reference → full download.
+    const full = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+    expect(full.unchanged).toBe(false)
+    expect(full.localCounter![100]).toBe(5)
+    expect(full.referenceHex).toBe(writtenRef)
+    const callsForFullRead = getSpy.mock.calls.length
+
+    // Same reference cached → skip, reuse local counter, far fewer chunk reads.
+    const cached = await readPartitionState(
+      {
+        bee: bee as unknown as Bee,
+        owner: OWNER,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+        batchDepth: TEST_BATCH_DEPTH,
+      },
+      writtenRef,
+    )
+    expect(cached.unchanged).toBe(true)
+    expect(cached.localCounter).toBeUndefined()
+    expect(cached.referenceHex).toBe(writtenRef)
+    const callsForCachedRead = getSpy.mock.calls.length - callsForFullRead
+    expect(callsForCachedRead).toBeLessThan(callsForFullRead)
   })
 
   it("returns a fresh zero counter when the feed entry is unreadable", async () => {
@@ -155,8 +206,9 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       batchDepth: TEST_BATCH_DEPTH,
     })
 
-    expect(result.localCounter[0]).toBe(0)
-    expect(result.localCounter[1234]).toBe(0)
+    expect(result.unchanged).toBe(false)
+    expect(result.localCounter![0]).toBe(0)
+    expect(result.localCounter![1234]).toBe(0)
   })
 })
 

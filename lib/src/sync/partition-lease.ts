@@ -28,7 +28,11 @@
 import { Bee, BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "../utils/hex"
 import { deriveSecret } from "../utils/key-derivation"
-import { LEASE_TTL_MS, NUM_BUCKETS } from "../utils/batch-utilization"
+import {
+  LEASE_TTL_MS,
+  NUM_BUCKETS,
+  UtilizationAwareStamper,
+} from "../utils/batch-utilization"
 import {
   acquirePartitionLock,
   makeDeviceTiebreaker,
@@ -277,13 +281,27 @@ export class PartitionLease {
     const { partition, partitionCount } = args
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
 
-    const { localCounter } = await readPartitionState({
-      bee: this.opts.bee,
-      owner: this.opts.backupSigner.publicKey().address(),
-      batchId,
-      partition,
-      batchDepth,
-    })
+    // Cache-aware seed: pass the reference our local counter is already in
+    // sync with. If the feed still points there, `readPartitionState` skips
+    // the reference + counter-chunk downloads and we reuse the local counter.
+    const knownReference =
+      stamper instanceof UtilizationAwareStamper
+        ? await stamper.getSyncedReference(partition)
+        : undefined
+    const stateResult = await readPartitionState(
+      {
+        bee: this.opts.bee,
+        owner: this.opts.backupSigner.publicKey().address(),
+        batchId,
+        partition,
+        batchDepth,
+      },
+      knownReference,
+    )
+    const localCounter =
+      stateResult.unchanged && stamper instanceof UtilizationAwareStamper
+        ? stamper.buildLeaseLocalCounter()
+        : (stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS))
 
     const lockResult = await acquirePartitionLock({
       bee: this.opts.bee,
@@ -307,6 +325,18 @@ export class PartitionLease {
         localCounter: new Uint32Array(NUM_BUCKETS),
         isReadOnly: true,
       }
+    }
+
+    // Lock acquired → the caller will bind this counter, so record the feed
+    // reference we just downloaded as our "synced reference" (lets the next
+    // acquire skip the download). Only on a real read — never on `unchanged`
+    // (already cached) or a failed read (no `referenceHex`).
+    if (
+      !stateResult.unchanged &&
+      stateResult.referenceHex &&
+      stamper instanceof UtilizationAwareStamper
+    ) {
+      await stamper.setSyncedReference(partition, stateResult.referenceHex)
     }
 
     const payload = lockResult.payload
@@ -378,7 +408,7 @@ export class PartitionLease {
     const partition = this.self.partition
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
 
-    await writePartitionState({
+    const publishedReference = await writePartitionState({
       bee: this.opts.bee,
       stamper,
       batchId,
@@ -387,6 +417,14 @@ export class PartitionLease {
       localCounter,
       backupSigner: this.opts.backupSigner,
     })
+
+    // Record the reference we just published as our synced reference: the next
+    // acquire (if no peer publishes meanwhile) skips re-downloading our own
+    // counter. Our local counter equals what we published, so reusing it is
+    // correct.
+    if (stamper instanceof UtilizationAwareStamper) {
+      await stamper.setSyncedReference(partition, publishedReference)
+    }
 
     const releasePayload: PartitionLockPayload = {
       holderDeviceId: NO_HOLDER_DEVICE_ID,

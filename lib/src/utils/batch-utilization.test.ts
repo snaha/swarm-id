@@ -35,6 +35,7 @@ import {
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import type { Chunk as CafeChunk } from "cafe-utility"
 import type {
+  BatchMetadata,
   ChunkCacheEntry,
   UtilizationStoreDB,
 } from "../storage/utilization-store"
@@ -980,6 +981,7 @@ describe("UtilizationAwareStamper lease metadata", () => {
 
   function makeRecordingCache(): UtilizationStoreDB {
     const store = new Map<string, ChunkCacheEntry>()
+    const metaStore = new Map<string, BatchMetadata>()
     return {
       getAllChunks: async () => {
         const entries: ChunkCacheEntry[] = []
@@ -991,6 +993,10 @@ describe("UtilizationAwareStamper lease metadata", () => {
       },
       getChunk: async (batchId: string, chunkIndex: number) =>
         store.get(`${batchId}:${chunkIndex}`),
+      getMetadata: async (batchId: string) => metaStore.get(batchId),
+      putMetadata: async (metadata: BatchMetadata) => {
+        metaStore.set(metadata.batchId, { ...metadata })
+      },
     } as unknown as UtilizationStoreDB
   }
 
@@ -1006,6 +1012,23 @@ describe("UtilizationAwareStamper lease metadata", () => {
       TEST_ENC_KEY_LM,
     )
   }
+
+  it("getSyncedReference round-trips through setSyncedReference (per partition, merge-preserving)", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+
+    expect(await stamper.getSyncedReference(0)).toBeUndefined()
+
+    await stamper.setSyncedReference(0, "ref-zero")
+    await stamper.setSyncedReference(1, "ref-one")
+    expect(await stamper.getSyncedReference(0)).toBe("ref-zero")
+    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+
+    // Overwriting one partition preserves the other.
+    await stamper.setSyncedReference(0, "ref-zero-v2")
+    expect(await stamper.getSyncedReference(0)).toBe("ref-zero-v2")
+    expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+  })
 
   it("setLeaseMetadata persists a chunk at leaseChunkIndex(depth, partition)", async () => {
     const cache = makeRecordingCache()

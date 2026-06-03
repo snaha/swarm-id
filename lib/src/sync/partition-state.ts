@@ -86,26 +86,50 @@ export function makePartitionStateTopic(
  * counter: an unclean-crash window where a peer stamped past its last
  * publish is not defended against — that data was never durably persisted
  * anyway, so overwriting those slots loses nothing of value.
+ *
+ * Pass `knownReferenceHex` (the feed reference this device's local counter was
+ * last in sync with) to short-circuit: when the feed still points there,
+ * returns `{ unchanged: true }` WITHOUT downloading the reference/counter
+ * chunks, and the caller reuses its local counter. On a real read it returns
+ * the reconstructed `localCounter` plus the current `referenceHex` for the
+ * caller to cache.
  */
-export async function readPartitionState(opts: {
-  bee: Bee
-  owner: EthAddress
-  batchId: BatchId
-  partition: number
-  batchDepth: number
-}): Promise<{ localCounter: Uint32Array }> {
+export async function readPartitionState(
+  opts: {
+    bee: Bee
+    owner: EthAddress
+    batchId: BatchId
+    partition: number
+    batchDepth: number
+  },
+  knownReferenceHex?: string,
+): Promise<{
+  localCounter?: Uint32Array
+  referenceHex?: string
+  unchanged: boolean
+}> {
   const { bee, owner, batchId, partition, batchDepth } = opts
   const topic = makePartitionStateTopic(batchId, partition)
   const finder = new AsyncEpochFinder(bee, topic, owner)
   const now = BigInt(Math.floor(Date.now() / 1000))
 
   const refBytes = await finder.findAt(now)
-  const localCounter = new Uint32Array(NUM_BUCKETS)
 
   if (!refBytes) {
     // No prior state — start fresh from zero.
-    return { localCounter }
+    return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
   }
+
+  const referenceHex = Binary.uint8ArrayToHex(refBytes)
+
+  // Cache hit: the feed still points to the reference this device's local
+  // counter is already in sync with. Skip the reference-chunk + counter-chunk
+  // downloads; the caller reuses its local counter.
+  if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
+    return { referenceHex, unchanged: true }
+  }
+
+  const localCounter = new Uint32Array(NUM_BUCKETS)
 
   // The feed points to the reference chunk: a single chunk holding the
   // 64-byte encrypted references (address‖key) of this partition's counter
@@ -139,10 +163,12 @@ export async function readPartitionState(opts: {
       `[partition-state] reading partition ${partition} counter failed; seeding a fresh counter:`,
       err,
     )
-    return { localCounter: new Uint32Array(NUM_BUCKETS) }
+    // Don't return referenceHex — the read failed, so the caller must not
+    // cache this reference as "synced" (it would skip a needed future download).
+    return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
   }
 
-  return { localCounter }
+  return { localCounter, referenceHex, unchanged: false }
 }
 
 /**
@@ -164,7 +190,7 @@ export async function writePartitionState(opts: {
   partition: number
   localCounter: Uint32Array
   backupSigner: PrivateKey
-}): Promise<void> {
+}): Promise<string> {
   const {
     bee,
     stamper,
@@ -219,6 +245,10 @@ export async function writePartitionState(opts: {
     referenceChunkRef,
     target,
   )
+
+  // Return the feed reference so the caller can record it as this device's
+  // "synced reference" (skips re-downloading on the next acquire).
+  return Binary.uint8ArrayToHex(referenceChunkRef)
 }
 
 /**

@@ -1998,6 +1998,38 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
+   * Read the cached "synced reference" for `partition` — the partition-state
+   * feed reference this device's local counter was last in sync with. Used by
+   * the acquire path to skip re-downloading unchanged counter chunks.
+   */
+  async getSyncedReference(partition: number): Promise<string | undefined> {
+    const meta = await this.cache.getMetadata(this.batchId.toHex())
+    return meta?.syncedReferences?.[partition]
+  }
+
+  /**
+   * Record the partition-state feed reference this device's local counter is
+   * now in sync with (after a download or a publish). Merges into the existing
+   * batch metadata so other fields / partitions are preserved.
+   */
+  async setSyncedReference(
+    partition: number,
+    referenceHex: string,
+  ): Promise<void> {
+    const batchId = this.batchId.toHex()
+    const existing = await this.cache.getMetadata(batchId)
+    await this.cache.putMetadata({
+      batchId,
+      lastSync: existing?.lastSync ?? Date.now(),
+      chunkCount: existing?.chunkCount ?? 0,
+      syncedReferences: {
+        ...(existing?.syncedReferences ?? {}),
+        [partition]: referenceHex,
+      },
+    })
+  }
+
+  /**
    * Persist lease metadata (generation + claimHints) for partition `p` in
    * the local IndexedDB cache at chunk index `N + p`.
    * Called after a successful cold acquire so subsequent reloads can skip

@@ -54,6 +54,13 @@ export interface BatchMetadata {
   batchId: string
   lastSync: number
   chunkCount: number
+  /**
+   * Per-partition "synced reference": the partition-state feed reference
+   * (hex) this device's local counter was last in sync with. On a cold
+   * acquire, if the feed still points here the counter-chunk download is
+   * skipped and the local counter reused. Keyed by partition index.
+   */
+  syncedReferences?: Record<number, string>
 }
 
 // ============================================================================
