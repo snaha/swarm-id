@@ -93,9 +93,18 @@ function mergeConnectedApps(
   remote: ConnectedApp[],
 ): ConnectedApp[] {
   const keyOf = (a: ConnectedApp) => `${a.identityId}:${a.appUrl}`
+  // Last-writer-wins per app so updates AND removals propagate: a revoke is a
+  // tombstone (`revokedAt`) carrying a fresh `updatedAt`, so it supersedes an
+  // older active copy. `updatedAt` falls back to `lastConnectedAt` for records
+  // written before the field existed. Distinct apps still both survive (union).
+  const recency = (a: ConnectedApp) => a.updatedAt ?? a.lastConnectedAt ?? 0
   const merged = new Map<string, ConnectedApp>()
-  for (const a of remote) merged.set(keyOf(a), a)
-  for (const a of local) merged.set(keyOf(a), a) // local wins
+  // Process remote first, then local, so a tie favours local (most recent
+  // observation here); a strictly-newer entry on either side wins.
+  for (const a of [...remote, ...local]) {
+    const existing = merged.get(keyOf(a))
+    if (!existing || recency(a) >= recency(existing)) merged.set(keyOf(a), a)
+  }
   return Array.from(merged.values())
 }
 

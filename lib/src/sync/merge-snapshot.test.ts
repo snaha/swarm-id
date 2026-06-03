@@ -159,6 +159,49 @@ describe("mergeSnapshotWithRemote — identities / apps / stamps", () => {
     )
     expect(result.connectedApps).toHaveLength(3)
   })
+
+  it("a newer remote revocation tombstone supersedes a stale local active app", () => {
+    // The device-2 case: device 1 revoked the app and published a tombstone;
+    // device 2 still has the app active. The newer tombstone must win so the
+    // revocation propagates.
+    const active = {
+      ...makeConnectedApp("ident-1", "https://app.example"),
+      updatedAt: 1_000_000,
+    }
+    const tombstone = {
+      ...makeConnectedApp("ident-1", "https://app.example"),
+      updatedAt: 5_000_000,
+      revokedAt: 5_000_000,
+      connectedUntil: undefined,
+      appSecret: undefined,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [active] }), // local (device 2): still active
+      makeSnapshot({ connectedApps: [tombstone] }), // remote (device 1): revoked
+    )
+    expect(result.connectedApps).toHaveLength(1)
+    expect(result.connectedApps[0].revokedAt).toBe(5_000_000)
+  })
+
+  it("local revocation is not undone by an older remote active copy (publish merge)", () => {
+    // The publish case: device 1 revoked locally; the remote snapshot still has
+    // the app active (older). The union used to re-add it — LWW keeps the tombstone.
+    const tombstone = {
+      ...makeConnectedApp("ident-1", "https://app.example"),
+      updatedAt: 5_000_000,
+      revokedAt: 5_000_000,
+    }
+    const staleActive = {
+      ...makeConnectedApp("ident-1", "https://app.example"),
+      updatedAt: 1_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ connectedApps: [tombstone] }), // local (device 1): revoked
+      makeSnapshot({ connectedApps: [staleActive] }), // remote: still active (older)
+    )
+    expect(result.connectedApps).toHaveLength(1)
+    expect(result.connectedApps[0].revokedAt).toBe(5_000_000)
+  })
 })
 
 describe("mergeSnapshotWithRemote — scalar metadata fields", () => {

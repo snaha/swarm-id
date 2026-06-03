@@ -121,6 +121,21 @@ export const postageStampsStore = {
     savePostageStamps(postageStamps, true)
   },
 
+  /**
+   * Upsert stamps pulled from a Swarm refresh (by batchID), WITHOUT firing
+   * `triggerSync` — refresh data shouldn't be re-published. Stamps for other
+   * accounts are left untouched.
+   */
+  applyRefreshed(refreshedStamps: PostageStamp[]) {
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral upsert map
+    const byId = new Map(postageStamps.map((s) => [s.batchID.toHex(), s]))
+    for (const s of refreshedStamps) {
+      byId.set(s.batchID.toHex(), s)
+    }
+    postageStamps = [...byId.values()]
+    savePostageStamps(postageStamps, true)
+  },
+
   clear() {
     postageStamps = []
     storageManager.clear()

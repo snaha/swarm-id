@@ -213,6 +213,12 @@ export const ConnectedAppSchemaV1 = z.object({
   appDescription: z.string().optional(),
   connectedUntil: z.number().optional(),
   appSecret: z.string().optional(),
+  // Last-writer-wins clock for cross-device merge (set on any change). Absent
+  // on pre-existing records → merge falls back to `lastConnectedAt`.
+  updatedAt: z.number().optional(),
+  // Tombstone marker. A revoked app is kept in the snapshot (so the removal
+  // propagates to other devices) but hidden from the UI and invalid for auth.
+  revokedAt: z.number().optional(),
 })
 
 // ============================================================================

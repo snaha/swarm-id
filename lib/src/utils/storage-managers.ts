@@ -166,6 +166,8 @@ export function serializeConnectedApp(
     appDescription: app.appDescription,
     connectedUntil: app.connectedUntil,
     appSecret: app.appSecret,
+    updatedAt: app.updatedAt,
+    revokedAt: app.revokedAt,
   }
 }
 
