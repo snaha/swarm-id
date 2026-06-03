@@ -9,7 +9,6 @@ import {
   UtilizationAwareStamper,
   UtilizationStoreDB,
 } from '@snaha/swarm-id'
-import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
 // Storage Manager
@@ -37,13 +36,8 @@ function loadPostageStamps(): PostageStamp[] {
   return storageManager.load()
 }
 
-function savePostageStamps(data: PostageStamp[], skipSync = false, accountId?: string): void {
+function savePostageStamps(data: PostageStamp[]): void {
   storageManager.save(data)
-
-  // Trigger Swarm sync (unless explicitly skipped)
-  if (!skipSync && accountId) {
-    triggerSync(accountId)
-  }
 }
 
 // ============================================================================
@@ -57,7 +51,7 @@ export const postageStampsStore = {
     return postageStamps
   },
 
-  addStamp(stamp: Omit<PostageStamp, 'createdAt'>, accountId: string): PostageStamp {
+  addStamp(stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {
     // Check for duplicate batch ID
     const existingStamp = postageStamps.find((s) => s.batchID.equals(stamp.batchID))
     if (existingStamp) {
@@ -69,13 +63,13 @@ export const postageStampsStore = {
       createdAt: Date.now(),
     }
     postageStamps = [...postageStamps, newStamp]
-    savePostageStamps(postageStamps, false, accountId)
+    savePostageStamps(postageStamps)
     return newStamp
   },
 
-  removeStamp(batchID: BatchId, accountId: string) {
+  removeStamp(batchID: BatchId) {
     postageStamps = postageStamps.filter((s) => !s.batchID.equals(batchID))
-    savePostageStamps(postageStamps, false, accountId)
+    savePostageStamps(postageStamps)
   },
 
   getStamp(batchID: BatchId): PostageStamp | undefined {
@@ -117,8 +111,7 @@ export const postageStampsStore = {
     // Update utilization
     stamp.utilization = newUtilization
 
-    // Save without triggering sync (to avoid infinite loop)
-    savePostageStamps(postageStamps, true)
+    savePostageStamps(postageStamps)
   },
 
   clear() {

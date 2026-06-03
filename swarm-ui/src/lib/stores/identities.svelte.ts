@@ -4,8 +4,6 @@
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
 import { createIdentitiesStorageManager, type Identity } from '@snaha/swarm-id'
-import { triggerSync } from '$lib/utils/sync-hooks'
-import { sessionStore } from './session.svelte'
 
 // ============================================================================
 // Storage Manager
@@ -20,15 +18,6 @@ function loadIdentities(): Identity[] {
 
 function saveIdentities(data: Identity[]): void {
   storageManager.save(data)
-
-  // Trigger Swarm sync for current identity's account
-  const currentIdentityId = sessionStore.data.currentIdentityId
-  if (currentIdentityId) {
-    const identity = data.find((i) => i.id === currentIdentityId)
-    if (identity) {
-      triggerSync(identity.accountId.toHex())
-    }
-  }
 }
 
 // ============================================================================

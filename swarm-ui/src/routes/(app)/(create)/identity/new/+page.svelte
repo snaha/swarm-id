@@ -22,6 +22,7 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import type { Identity, Account } from '$lib/types'
   import { HDNodeWallet } from 'ethers'
   import { Bytes } from '@ethersphere/bee-js'
@@ -108,7 +109,7 @@
     }
 
     // Create the identity with custom name (identity stamp will be set on the identity stamp page)
-    const identity = identitiesStore.addIdentity({
+    const identity = getSyncedAccount(account.id).addIdentity({
       ...derivedIdentity,
       name: idName || derivedIdentity.name,
     })

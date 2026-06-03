@@ -15,6 +15,7 @@
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import { syncStore } from '$lib/stores/sync.svelte'
   import { devSettingsStore, type MockStampResult } from '$lib/stores/dev-settings.svelte'
   import Tabs from './tabs.svelte'
@@ -367,6 +368,7 @@ Check console logs for details:
     try {
       const batchId = new BatchId(selectedStampId)
       const accountId = new EthAddress(selectedAccountId)
+      const account = getSyncedAccount(accountId)
 
       // Determine which signer key to use
       const signerKeyToUse =
@@ -380,25 +382,22 @@ Check console logs for details:
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        postageStampsStore.addStamp(
-          {
-            batchID: batchId,
-            signerKey: signerKeyToUse,
-            utilization: Utils.getStampUsage(
-              beeStamp.utilization,
-              beeStamp.depth,
-              beeStamp.bucketDepth,
-            ),
-            usable: beeStamp.usable,
-            depth: beeStamp.depth,
-            amount: BigInt(beeStamp.amount),
-            bucketDepth: beeStamp.bucketDepth,
-            blockNumber: beeStamp.blockNumber,
-            immutableFlag: beeStamp.immutableFlag,
-            exists: beeStamp.exists,
-          },
-          selectedAccountId,
-        )
+        account.addStamp({
+          batchID: batchId,
+          signerKey: signerKeyToUse,
+          utilization: Utils.getStampUsage(
+            beeStamp.utilization,
+            beeStamp.depth,
+            beeStamp.bucketDepth,
+          ),
+          usable: beeStamp.usable,
+          depth: beeStamp.depth,
+          amount: BigInt(beeStamp.amount),
+          bucketDepth: beeStamp.bucketDepth,
+          blockNumber: beeStamp.blockNumber,
+          immutableFlag: beeStamp.immutableFlag,
+          exists: beeStamp.exists,
+        })
       } else if (useCustomSigner) {
         const beeStamp = postageStampsStore.getStamp(batchId)
         if (!beeStamp) {
@@ -406,18 +405,15 @@ Check console logs for details:
           return
         }
         if (beeStamp.signerKey !== signerKeyToUse) {
-          postageStampsStore.removeStamp(batchId, selectedAccountId)
-          postageStampsStore.addStamp(
-            {
-              ...beeStamp,
-              signerKey: signerKeyToUse,
-            },
-            selectedAccountId,
-          )
+          account.removeStamp(batchId)
+          account.addStamp({
+            ...beeStamp,
+            signerKey: signerKeyToUse,
+          })
         }
       }
 
-      accountsStore.setDefaultStamp(accountId, batchId)
+      account.setDefaultStamp(batchId)
       assignMessage = `✅ Set account stamp for ${accountId.toHex().slice(0, 8)}…`
     } catch (error) {
       assignError = error instanceof Error ? error.message : String(error)
@@ -444,6 +440,7 @@ Check console logs for details:
 
     try {
       const batchId = new BatchId(selectedStampId)
+      const account = getSyncedAccount(new EthAddress(selectedAccountId))
 
       // Determine which signer key to use
       const signerKeyToUse =
@@ -457,28 +454,25 @@ Check console logs for details:
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        postageStampsStore.addStamp(
-          {
-            batchID: batchId,
-            signerKey: signerKeyToUse,
-            utilization: Utils.getStampUsage(
-              beeStamp.utilization,
-              beeStamp.depth,
-              beeStamp.bucketDepth,
-            ),
-            usable: beeStamp.usable,
-            depth: beeStamp.depth,
-            amount: BigInt(beeStamp.amount),
-            bucketDepth: beeStamp.bucketDepth,
-            blockNumber: beeStamp.blockNumber,
-            immutableFlag: beeStamp.immutableFlag,
-            exists: beeStamp.exists,
-          },
-          selectedAccountId,
-        )
+        account.addStamp({
+          batchID: batchId,
+          signerKey: signerKeyToUse,
+          utilization: Utils.getStampUsage(
+            beeStamp.utilization,
+            beeStamp.depth,
+            beeStamp.bucketDepth,
+          ),
+          usable: beeStamp.usable,
+          depth: beeStamp.depth,
+          amount: BigInt(beeStamp.amount),
+          bucketDepth: beeStamp.bucketDepth,
+          blockNumber: beeStamp.blockNumber,
+          immutableFlag: beeStamp.immutableFlag,
+          exists: beeStamp.exists,
+        })
       }
 
-      identitiesStore.setDefaultStamp(selectedIdentityId, batchId)
+      account.setIdentityDefaultStamp(selectedIdentityId, batchId)
       assignMessage = `✅ Set identity stamp for ${selectedIdentityId.slice(0, 8)}…`
     } catch (error) {
       assignError = error instanceof Error ? error.message : String(error)

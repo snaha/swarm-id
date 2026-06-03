@@ -13,7 +13,7 @@
   import Polycon from '$lib/components/polycon.svelte'
   import Launch from 'carbon-icons-svelte/lib/Launch.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
-  import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import { BatchId, PrivateKey } from '@ethersphere/bee-js'
   import { openStampPurchaseWidget, type BatchEvent } from '$lib/services/multichain-widget'
   import { derivePostageSignerKey, hexToUint8Array } from '@snaha/swarm-id'
@@ -87,21 +87,18 @@
     submitError = undefined
 
     try {
-      const stamp = postageStampsStore.addStamp(
-        {
-          batchID: new BatchId(batchID),
-          signerKey: new PrivateKey(signerKey),
-          utilization: 0,
-          usable: true,
-          depth,
-          amount,
-          bucketDepth: 16,
-          blockNumber,
-          immutableFlag: false,
-          exists: true,
-        },
-        accountId,
-      )
+      const stamp = getSyncedAccount(new EthAddress(accountId)).addStamp({
+        batchID: new BatchId(batchID),
+        signerKey: new PrivateKey(signerKey),
+        utilization: 0,
+        usable: true,
+        depth,
+        amount,
+        bucketDepth: 16,
+        blockNumber,
+        immutableFlag: false,
+        exists: true,
+      })
 
       onSuccess(stamp)
     } catch (error) {
@@ -147,21 +144,18 @@
 
     try {
       // Create postage stamp from widget response
-      const stamp = postageStampsStore.addStamp(
-        {
-          batchID: new BatchId(batch.batchId),
-          signerKey: new PrivateKey(signerKeyBytes),
-          depth: batch.depth,
-          amount: BigInt(batch.amount),
-          blockNumber: parseInt(batch.blockNumber, HEX_BASE),
-          utilization: 0,
-          usable: true,
-          bucketDepth: 16,
-          immutableFlag: false,
-          exists: true,
-        },
-        accountId,
-      )
+      const stamp = getSyncedAccount(new EthAddress(accountId)).addStamp({
+        batchID: new BatchId(batch.batchId),
+        signerKey: new PrivateKey(signerKeyBytes),
+        depth: batch.depth,
+        amount: BigInt(batch.amount),
+        blockNumber: parseInt(batch.blockNumber, HEX_BASE),
+        utilization: 0,
+        usable: true,
+        bucketDepth: 16,
+        immutableFlag: false,
+        exists: true,
+      })
 
       // In auto-navigate mode, call onSuccess immediately (skip success screen)
       if (autoNavigateOnSuccess) {

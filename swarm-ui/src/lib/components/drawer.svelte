@@ -44,6 +44,7 @@
   } from '@snaha/swarm-id'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import type { Account, Identity, PostageStamp } from '$lib/types'
   import type { Bytes } from '@ethersphere/bee-js'
   import { deriveSecretSeedEncryptionKey, decryptSecretSeed } from '$lib/utils/encryption'
@@ -120,23 +121,11 @@
   }
 
   function onAccountNameChange() {
-    accountsStore.setAccountName(account.id, accountName)
+    getSyncedAccount(account.id).rename(accountName)
   }
 
   async function performAccountDeletion() {
-    const accountId = account.id
-    const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
-    // Collect stamp batch ids before removing identities, since the
-    // association is derived from the account/identity pointers.
-    const stampBatchIds = collectAccountStampBatchIds(account, accountIdentities)
-    for (const identity of accountIdentities) {
-      connectedAppsStore.removeAppsByIdentityId(identity.id)
-      identitiesStore.removeIdentity(identity.id)
-    }
-    for (const batchId of stampBatchIds) {
-      postageStampsStore.removeStamp(batchId, accountId.toHex())
-    }
-    accountsStore.removeAccount(accountId)
+    getSyncedAccount(account.id).delete()
     sessionStore.clearAccount()
     showDeleteModal = false
     drawerOpen = false
@@ -239,24 +228,12 @@
   }
 
   async function handleSignOut() {
-    const accountId = account.id
-    const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
-    // Collect stamp batch ids before removing identities, since the
-    // association is derived from the account/identity pointers.
-    const stampBatchIds = collectAccountStampBatchIds(account, accountIdentities)
-
-    for (const identity of accountIdentities) {
-      const apps = connectedAppsStore.getAppsByIdentityId(identity.id)
-      for (const app of apps) {
-        localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
-      }
-      connectedAppsStore.removeAppsByIdentityId(identity.id)
-      identitiesStore.removeIdentity(identity.id)
+    const aggregate = getSyncedAccount(account.id)
+    // Drop cached app secrets for this account's apps before deleting it.
+    for (const app of aggregate.apps) {
+      localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
     }
-    for (const batchId of stampBatchIds) {
-      postageStampsStore.removeStamp(batchId, accountId.toHex())
-    }
-    accountsStore.removeAccount(accountId)
+    aggregate.delete()
 
     sessionStore.clearAccount()
     drawerOpen = false
