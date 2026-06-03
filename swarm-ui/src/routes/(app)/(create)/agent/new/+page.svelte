@@ -24,9 +24,10 @@
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { createSyncedAccount } from '$lib/domain/synced-account'
   import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
   import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
-  import type { AccountSyncType } from '$lib/types'
+  import type { AccountSyncType, Account } from '$lib/types'
 
   let showTypeTooltip = $state(false)
   let accountName = $state('Agent')
@@ -92,14 +93,15 @@
       const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
 
       // Store account (seed phrase is NOT stored - must be re-entered each time)
-      const newAccount = accountsStore.addAccount({
+      const newAccount: Account = {
         id: account.id,
         name: account.name,
         createdAt: account.createdAt,
         type: 'agent',
         derivationKey,
         devices: mergeDevices([], getOrCreateDeviceId()),
-      })
+      }
+      createSyncedAccount(newAccount)
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')
 

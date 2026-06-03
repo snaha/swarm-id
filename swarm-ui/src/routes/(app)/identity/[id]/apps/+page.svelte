@@ -13,6 +13,7 @@
   import Grid from '$lib/components/ui/grid.svelte'
   import Select from '$lib/components/ui/select/select.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
 
   const identityId = $derived(page.params.id)
   const apps = $derived(identityId ? connectedAppsStore.getAppsByIdentityId(identityId) : [])
@@ -30,7 +31,7 @@
   function onSessionDurationChange() {
     if (identity) {
       const appSessionDuration = valueToSessionDuration(sessionDurationValue)
-      identitiesStore.updateIdentity(identity.id, {
+      getSyncedAccount(identity.accountId).updateIdentity(identity.id, {
         settings: {
           ...identity.settings,
           appSessionDuration,

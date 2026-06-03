@@ -482,11 +482,14 @@ Check console logs for details:
   function removeIdentityStamp() {
     assignError = ''
     assignMessage = ''
-    if (!selectedIdentityId) {
+    if (!selectedIdentityId || !selectedIdentity) {
       assignError = 'Select an identity first.'
       return
     }
-    identitiesStore.setDefaultStamp(selectedIdentityId, undefined)
+    getSyncedAccount(selectedIdentity.accountId).setIdentityDefaultStamp(
+      selectedIdentityId,
+      undefined,
+    )
     assignMessage = `✅ Removed identity stamp from ${selectedIdentityId.slice(0, 8)}…`
   }
 
@@ -501,7 +504,7 @@ Check console logs for details:
       assignError = 'Remove identity stamp first before removing account stamp.'
       return
     }
-    accountsStore.setDefaultStamp(new EthAddress(selectedAccountId), undefined)
+    getSyncedAccount(new EthAddress(selectedAccountId)).setDefaultStamp(undefined)
     assignMessage = `✅ Removed account stamp from ${selectedAccountId.slice(0, 8)}…`
   }
 </script>

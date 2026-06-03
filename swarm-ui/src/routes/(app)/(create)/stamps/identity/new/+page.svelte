@@ -13,6 +13,7 @@
   import AddPostageStampButtons from '$lib/components/add-postage-stamp-buttons.svelte'
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { PostageStamp } from '@snaha/swarm-id'
 
@@ -40,10 +41,10 @@
   }
 
   function handleSuccess(stamp: PostageStamp) {
-    if (!currentIdentityId) return
+    if (!currentIdentityId || !identity) return
 
     // Set as default stamp for the identity
-    identitiesStore.setDefaultStamp(currentIdentityId, stamp.batchID)
+    getSyncedAccount(identity.accountId).setIdentityDefaultStamp(currentIdentityId, stamp.batchID)
 
     navigateToConnectOrHome()
   }

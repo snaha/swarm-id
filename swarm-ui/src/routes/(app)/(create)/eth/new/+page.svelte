@@ -24,6 +24,7 @@
   import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { createSyncedAccount } from '$lib/domain/synced-account'
   import {
     generateEncryptionSalt,
     deriveEncryptionKey,
@@ -37,7 +38,7 @@
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
-  import type { AccountSyncType } from '$lib/types'
+  import type { AccountSyncType, Account } from '$lib/types'
 
   let showTypeTooltip = $state(false)
   let showSeedTooltip = $state(false)
@@ -108,7 +109,7 @@
       const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
 
       // Store account with encrypted masterKey and encrypted secret seed
-      const newAccount = accountsStore.addAccount({
+      const newAccount: Account = {
         id: masterAddress,
         createdAt: Date.now(),
         name: accountName.trim(),
@@ -119,7 +120,8 @@
         encryptedSecretSeed: encryptedSecretSeed,
         derivationKey,
         devices: mergeDevices([], getOrCreateDeviceId()),
-      })
+      }
+      createSyncedAccount(newAccount)
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')
 

@@ -15,7 +15,7 @@
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
-  import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { PostageStamp } from '@snaha/swarm-id'
@@ -51,7 +51,7 @@
     if (!account) return
 
     // Set as default stamp for the account
-    accountsStore.setDefaultStamp(account.id, stamp.batchID)
+    getSyncedAccount(account.id).setDefaultStamp(stamp.batchID)
 
     // If user chose separate stamps, go to identity stamp page next
     if (sessionStore.data.selectedStampOption === 'separate') {

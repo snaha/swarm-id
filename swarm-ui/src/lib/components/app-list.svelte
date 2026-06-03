@@ -9,7 +9,7 @@
   import Typography from '$lib/components/ui/typography.svelte'
   import type { ConnectedApp, Identity } from '$lib/types'
   import { DEFAULT_SESSION_DURATION } from '@snaha/swarm-id'
-  import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import Badge from './ui/badge.svelte'
   import Dropdown from './ui/dropdown.svelte'
   import { OverflowMenuVertical, TrashCan, Unlink } from 'carbon-icons-svelte'
@@ -36,7 +36,7 @@
   }
 
   function disconnectApp(app: ConnectedApp) {
-    connectedAppsStore.disconnectApp(app.appUrl, app.identityId)
+    getSyncedAccount(identity.accountId).disconnectApp(app.appUrl, app.identityId)
     localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
   }
 
@@ -47,7 +47,7 @@
 
   function revokeApp(app: ConnectedApp) {
     disconnectApp(app)
-    connectedAppsStore.removeApp(app.appUrl, app.identityId)
+    getSyncedAccount(identity.accountId).removeApp(app.appUrl, app.identityId)
   }
 </script>
 

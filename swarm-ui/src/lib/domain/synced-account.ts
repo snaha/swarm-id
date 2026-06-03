@@ -4,18 +4,17 @@
 /**
  * SyncedAccount — aggregate root for one account.
  *
- * PROTOTYPE: demonstrates the "accounts handle their own change" model as an
- * alternative to the sync coordinator. The account is the single entry point
- * for mutating its identities / apps / stamps, so each method *declares its own
- * sync intent*: meaningful changes call #sync(); volatile ones (utilization)
- * and deletion do not. No fingerprinting, no central diff — the method knows
- * what it changed.
+ * The account is the single entry point for mutating its identities / apps /
+ * stamps, so each method *declares its own sync intent*: meaningful changes
+ * call #sync(); volatile ones (utilization) and deletion do not. No
+ * fingerprinting, no central diff — the method knows what it changed. All
+ * swarm-ui mutation call sites route through this aggregate; the stores
+ * underneath are pure persistence.
  *
- * This is a thin reactive facade over the existing flat stores: it owns the
- * behavior and persists *through* the stores, so the localStorage shape (and
- * the iframe proxy that reads it) is unchanged. A full aggregate would also own
- * persistence; that's a larger migration into the shared lib and is out of
- * scope for this prototype.
+ * This is a reactive facade over the flat stores: it owns the behavior and
+ * persists *through* the stores, so the localStorage shape (and the iframe
+ * proxy that reads it) is unchanged. Promoting it to a true aggregate that also
+ * owns persistence is a follow-up that reaches into the shared lib.
  */
 
 import { EthAddress, BatchId } from '@ethersphere/bee-js'

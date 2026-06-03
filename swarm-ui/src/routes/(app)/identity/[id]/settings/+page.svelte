@@ -13,6 +13,7 @@
   import Input from '$lib/components/ui/input/input.svelte'
   import { page } from '$app/state'
   import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import Polycon from '$lib/components/polycon.svelte'
   import CopyButton from '$lib/components/copy-button.svelte'
   import Divider from '$lib/components/ui/divider.svelte'
@@ -34,7 +35,7 @@
 
   function onNameChange() {
     if (identity) {
-      identitiesStore.updateIdentity(identity.id, { name: identityName })
+      getSyncedAccount(identity.accountId).updateIdentity(identity.id, { name: identityName })
     }
   }
 </script>

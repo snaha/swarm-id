@@ -20,13 +20,14 @@
   import CreationLayout from '$lib/components/creation-layout.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { createSyncedAccount } from '$lib/domain/synced-account'
   import { keccak256 } from 'ethers'
   import { Bytes } from '@ethersphere/bee-js'
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import ErrorMessage from '$lib/components/ui/error-message.svelte'
   import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
-  import type { AccountSyncType } from '$lib/types'
+  import type { AccountSyncType, Account } from '$lib/types'
 
   let accountName = $state('Passkey')
   let accountType = $state<AccountSyncType>('local')
@@ -76,7 +77,7 @@
       const derivationKey = await deriveAccountDerivationKey(account.masterKey.toHex())
 
       // Store account WITHOUT masterKey (passkey accounts never persist masterKey)
-      const newAccount = accountsStore.addAccount({
+      const newAccount: Account = {
         id: account.ethereumAddress,
         createdAt: Date.now(),
         name: accountName.trim(),
@@ -84,7 +85,8 @@
         credentialId: account.credentialId,
         derivationKey,
         devices: mergeDevices([], getOrCreateDeviceId()),
-      })
+      }
+      createSyncedAccount(newAccount)
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')
 

@@ -18,6 +18,7 @@
   import routes from '$lib/routes'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { PostageStamp } from '@snaha/swarm-id'
 
@@ -66,9 +67,9 @@
     // If this account already has a default stamp, set this as the identity's default
     // Otherwise make it the account's default
     if (account.defaultPostageStampBatchID) {
-      identitiesStore.setDefaultStamp(identity.id, stamp.batchID)
+      getSyncedAccount(account.id).setIdentityDefaultStamp(identity.id, stamp.batchID)
     } else {
-      accountsStore.setDefaultStamp(account.id, stamp.batchID)
+      getSyncedAccount(account.id).setDefaultStamp(stamp.batchID)
     }
 
     navigateBack()

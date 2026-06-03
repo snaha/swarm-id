@@ -22,6 +22,7 @@
   import { AppDataSchema } from '$lib/types'
   import type { Account, Identity } from '$lib/types'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import { getSyncedAccount } from '$lib/domain/synced-account'
   import Polycon from '$lib/components/polycon.svelte'
   import { ArrowRight } from 'carbon-icons-svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -195,7 +196,7 @@
 
     // Write to localStorage - this triggers storage events in the iframe
     // which will detect the new connection and authenticate
-    connectedAppsStore.addOrUpdateApp(
+    getSyncedAccount(selectedIdentity.accountId).connectApp(
       {
         appUrl: sessionStore.data.appOrigin,
         appName: sessionStore.data.appData.appName,
