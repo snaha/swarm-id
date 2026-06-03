@@ -166,7 +166,6 @@ export class SwarmIdProxy {
    */
   private stamperAccountFingerprint: string | undefined
   private stampWorkerPool: StampWorkerPool | undefined
-  private stamperDepth: number = 23 // Default depth
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   private storagePartitionedIdentity:
@@ -424,12 +423,11 @@ export class SwarmIdProxy {
 
     this.postageBatchId = nextBatchId
     this.signerKey = nextSignerKey
-    this.stamperDepth = stamp?.depth ?? this.stamperDepth
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
 
     if (stamp) {
-      await this.initializeStamper()
+      await this.initializeStamper(stamp.depth)
     }
   }
 
@@ -458,8 +456,7 @@ export class SwarmIdProxy {
     if (stamp) {
       this.postageBatchId = stamp.batchID.toHex()
       this.signerKey = stamp.signerKey.toHex()
-      this.stamperDepth = stamp.depth
-      await this.initializeStamper()
+      await this.initializeStamper(stamp.depth)
     } else {
       this.postageBatchId = undefined
       this.signerKey = undefined
@@ -649,7 +646,7 @@ export class SwarmIdProxy {
    * Initialize the Stamper for client-side signing
    * Uses UtilizationAwareStamper to track bucket usage
    */
-  private async initializeStamper(): Promise<void> {
+  private async initializeStamper(stampDepth: number): Promise<void> {
     if (!this.signerKey || !this.postageBatchId) {
       console.warn(
         "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
@@ -674,7 +671,7 @@ export class SwarmIdProxy {
       this.stamper = await UtilizationAwareStamper.create(
         this.signerKey,
         new BatchId(this.postageBatchId),
-        this.stamperDepth,
+        stampDepth,
         this.utilizationStore,
         accountInfo.owner,
         accountInfo.encryptionKey,
@@ -794,7 +791,7 @@ export class SwarmIdProxy {
         bee: this.bee,
         deviceId,
         batchId: new BatchId(this.postageBatchId),
-        batchDepth: this.stamperDepth,
+        batchDepth: this.stamper.depth,
         swarmEncryptionKey: accountInfo.encryptionKey,
         stamper: this.stamper,
       })
@@ -1666,8 +1663,7 @@ export class SwarmIdProxy {
       if (stamp) {
         this.postageBatchId = stamp.batchID.toHex()
         this.signerKey = stamp.signerKey.toHex()
-        this.stamperDepth = stamp.depth
-        await this.initializeStamper()
+        await this.initializeStamper(stamp.depth)
       } else {
         this.postageBatchId = undefined
         this.signerKey = undefined
