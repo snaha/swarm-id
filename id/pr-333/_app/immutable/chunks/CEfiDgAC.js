@@ -1,0 +1,1 @@
+import{d as s}from"./ywXMqO1V.js";const e=s({mockStampEnabled:!1,mockStampResult:"success"}),o={get data(){return e},setMockStampEnabled(t){e.mockStampEnabled=t},setMockStampResult(t){e.mockStampResult=t}};export{o as d};
