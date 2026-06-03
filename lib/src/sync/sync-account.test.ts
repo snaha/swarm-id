@@ -4,7 +4,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
-import { deserializeAccountState } from "./serialization"
+import { deserializeAccountState, serializeAccountState } from "./serialization"
+import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type {
   AccountsStoreInterface,
   IdentitiesStoreInterface,
@@ -128,6 +129,9 @@ vi.mock("../proxy/upload", () => ({
 
 // Use a real class for the mock so `new BasicEpochUpdater(...)` works
 const mockUpdate = vi.fn()
+// Shared across all AsyncEpochFinder instances so a test can sequence both the
+// pre-write remote fetch and the post-write verify reads (both go via findAt).
+const mockFindAt = vi.fn(async (): Promise<Uint8Array | undefined> => undefined)
 
 vi.mock("../proxy/feeds/epochs", () => {
   return {
@@ -135,13 +139,25 @@ vi.mock("../proxy/feeds/epochs", () => {
       update = mockUpdate
       getOwner = vi.fn(() => new EthAddress("a".repeat(40)))
     },
-    // Pre-write remote-snapshot fetch reads via AsyncEpochFinder; return
-    // empty so the merge sees no remote state and falls back to local.
+    // Pre-write remote-snapshot fetch + post-write verify both read via
+    // AsyncEpochFinder; default returns empty so the merge sees no remote
+    // state and the verify treats the write as "won".
     AsyncEpochFinder: class MockAsyncEpochFinder {
-      findAt = vi.fn(async () => undefined)
+      findAt = mockFindAt
     },
   }
 })
+
+// tryFetchLatestSnapshot downloads + deserializes the snapshot the finder
+// points at. Default is never reached (findAt → undefined); the verify-retry
+// tests override it with a serialized peer snapshot. `vi.hoisted` so the
+// reference is initialized before the hoisted `vi.mock` factory runs.
+const mockDownloadData = vi.hoisted(() =>
+  vi.fn(async (): Promise<Uint8Array> => new Uint8Array()),
+)
+vi.mock("../proxy/download-data", () => ({
+  downloadDataWithChunkAPI: mockDownloadData,
+}))
 
 // Mock utilization to avoid complexity in these tests
 vi.mock("../utils/batch-utilization", () => ({
@@ -185,6 +201,11 @@ describe("createSyncAccount", () => {
 
     vi.mocked(readPartitionLock).mockReset()
     vi.mocked(acquirePartitionLock).mockReset()
+
+    mockFindAt.mockReset()
+    mockFindAt.mockResolvedValue(undefined)
+    mockDownloadData.mockReset()
+    mockDownloadData.mockResolvedValue(new Uint8Array())
 
     mockUpdate.mockReset()
     mockUpdate.mockImplementation(
@@ -442,5 +463,98 @@ describe("createSyncAccount", () => {
     expect(acquirePartitionLock).not.toHaveBeenCalled()
     expect(uploadCallCount).toBe(0)
     expect(epochUpdateCallCount).toBe(0)
+  })
+
+  // A peer snapshot already on Swarm, carrying a connected app we don't hold
+  // locally. A correct retry must fold this in (union) rather than drop it.
+  function makePeerSnapshot(): AccountStateSnapshot {
+    const peerApp = createConnectedApp({
+      appUrl: "https://peer.example.com",
+      appName: "Peer App",
+      appSecret: undefined,
+    })
+    return {
+      version: 1,
+      timestamp: 1700000000000,
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test Account",
+        defaultPostageStampBatchID: TEST_BATCH_ID_HEX,
+        createdAt: 1700000000000,
+        lastModified: 1700000000000,
+        devices: [],
+        partitionCount: 1,
+      },
+      identities: [createIdentity()],
+      connectedApps: [peerApp],
+      postageStamps: [createPostageStamp()],
+    }
+  }
+
+  it("re-merges and republishes when a peer overwrites the feed between write and verify", async () => {
+    const stores = createMockStores()
+    mockDownloadData.mockResolvedValue(
+      serializeAccountState(makePeerSnapshot()),
+    )
+
+    // FAKE_UPLOAD_REFERENCE is 32 bytes of 0xab; the verify compares the
+    // feed's current reference against the one we wrote.
+    const ourRef = new Uint8Array(32).fill(0xab)
+    const peerRef = new Uint8Array(32).fill(0xcd)
+    mockFindAt
+      .mockResolvedValueOnce(undefined) // publish #1 pre-write fetch: no remote
+      .mockResolvedValueOnce(peerRef) // verify #1: a peer overwrote us
+      .mockResolvedValueOnce(peerRef) // publish #2 pre-write fetch: peer snapshot
+      .mockResolvedValueOnce(ourRef) // verify #2: our write won
+      .mockResolvedValue(ourRef)
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("success")
+    // One initial publish + one retry.
+    expect(uploadCallCount).toBe(2)
+    expect(epochUpdateCallCount).toBe(2)
+    // The re-published snapshot is the union of our local app and the peer's.
+    expect(capturedUploadData).toBeDefined()
+    const republished = deserializeAccountState(capturedUploadData!)
+    const appNames = republished.connectedApps.map((a) => a.appName).sort()
+    expect(appNames).toEqual(["Peer App", "Test App"])
+  })
+
+  it("gives up with success-unverified after the retry budget when a peer keeps winning", async () => {
+    const stores = createMockStores()
+    mockDownloadData.mockResolvedValue(
+      serializeAccountState(makePeerSnapshot()),
+    )
+
+    // The verify never sees our reference, so every attempt looks lost.
+    mockFindAt.mockResolvedValue(new Uint8Array(32).fill(0xcd))
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("success-unverified")
+    // 1 initial publish + MAX_PUBLISH_RETRIES (3) retries.
+    expect(uploadCallCount).toBe(4)
+    expect(epochUpdateCallCount).toBe(4)
   })
 })

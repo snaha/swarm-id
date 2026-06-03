@@ -71,8 +71,30 @@ const SYNC_TIMEOUT_MS = 60000
 // consume the outer SYNC_TIMEOUT_MS budget.
 const VERIFY_PROBE_TIMEOUT_MS = 5000
 
+// Optimistic-publish retry budget for the shared account-state feed. The feed
+// update is last-writer-wins at the SOC level, so two devices publishing within
+// the same epoch slot stomp each other. After writing we re-read the feed and,
+// if a peer overwrote us, re-merge and republish — up to this many times.
+const MAX_PUBLISH_RETRIES = 3
+// Base backoff before a republish, plus a random jitter on top, so two devices
+// retrying in lockstep decorrelate and stop landing in the same epoch slot.
+const PUBLISH_RETRY_BACKOFF_MS = 200
+const PUBLISH_RETRY_JITTER_MS = 600
+
 // Topic prefix for sync feeds
 export const ACCOUNT_SYNC_TOPIC_PREFIX = "swarm-id-backup-v1:account"
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+function uint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
 
 /**
  * Read the latest on-Swarm snapshot for an account's sync feed, returning
@@ -470,34 +492,10 @@ export function createSyncAccount(
         `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
       )
 
-      // 1a. Fetch the latest on-Swarm snapshot (best effort) and merge
-      // it with our local state. This prevents the local-write-stomps-peer
-      // race: a device writing here doesn't lose other devices' additions
-      // that were published since our last refresh.
-      let mergedState = state
-      try {
-        const latestRemote = await tryFetchLatestSnapshot({
-          bee,
-          topic,
-          owner,
-        })
-        if (latestRemote) {
-          mergedState = mergeSnapshotWithRemote(state, latestRemote)
-          console.log(
-            `[SyncCoordinator ${timestamp()}] Merged remote snapshot (remote devices=${latestRemote.metadata.devices.length}, merged devices=${mergedState.metadata.devices.length})`,
-          )
-        }
-      } catch (err) {
-        console.warn(
-          `[SyncCoordinator ${timestamp()}] Pre-write remote-snapshot fetch failed; proceeding with local state only:`,
-          err,
-        )
-      }
-
-      // 2. Serialize merged state
-      const jsonData = serializeAccountState(mergedState)
-
-      // 3. Get stamper from store
+      // 2. Build the stamper once (reused across publish attempts). Bind it to
+      // the partition this device holds (per the lock SOC) so chunk-stamping
+      // picks slots from our slice instead of the "any" pool — prevents
+      // collisions with peers sharing the batch.
       const stamper = await postageStampsStore.getStamper(
         defaultStamp.batchID,
         {
@@ -505,80 +503,159 @@ export function createSyncAccount(
           encryptionKey: hexToUint8Array(encryptionKey),
         },
       )
+      if (!stamper) {
+        throw new Error(
+          `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`,
+        )
+      }
       if (
-        stamper &&
         heldPartition !== undefined &&
         partitionCount > 1 &&
         stamper.bindPartition &&
         stamper.buildLeaseLocalCounter
       ) {
-        // Bind the stamper to the partition this device holds (per the lock
-        // SOC) so chunk-stamping picks slots from our slice instead of the
-        // "any" pool — prevents collisions with peers sharing the batch.
         stamper.bindPartition({
           partition: heldPartition,
           partitionCount,
           localCounter: stamper.buildLeaseLocalCounter(),
         })
       }
-      if (!stamper) {
-        throw new Error(
-          `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`,
-        )
-      }
 
-      // 4. Upload encrypted data to Swarm
-      const target: UploadTarget = {
-        mode: "stamper",
-        bee,
-        stamper,
-      }
+      const target: UploadTarget = { mode: "stamper", bee, stamper }
+      const updater = new BasicEpochUpdater(topic, accountKey)
 
-      console.log(`[SyncCoordinator ${timestamp()}] Uploading data…`)
-      const uploadResult = await uploadData(target, jsonData, {
-        encryptionKey: hexToUint8Array(encryptionKey),
-      })
-
-      // Collect chunk addresses for utilization tracking
-      // chunkAddresses is always present when using encryption
-      const allChunkAddresses = uploadResult.chunkAddresses ?? []
-
-      // 5. Handle utilization tracking
-
-      if (allChunkAddresses.length > 0) {
+      // Publish once: fetch the latest remote snapshot, merge our local state
+      // onto it, upload, and write the epoch feed. Returns the reference we
+      // wrote so the caller can verify whether it actually won the feed slot.
+      //
+      // We always merge the *original* local `state` onto the freshest remote
+      // (never our own previous merge result), so a retry folds in whatever a
+      // peer published since our last attempt without dropping our changes.
+      const publishMerged = async (): Promise<{
+        reference: string
+        refBytes: Uint8Array
+        feedTimestamp: bigint
+        chunkAddresses: Uint8Array[]
+      }> => {
+        // Fetch the latest on-Swarm snapshot (best effort) and merge it with
+        // our local state, so we don't stomp additions a peer published since
+        // our last refresh.
+        let mergedState = state
         try {
-          await handleUtilizationUpdate(accountId, allChunkAddresses)
-        } catch (error) {
-          // Don't fail sync if utilization fails - continue with feed update
-          console.error(
-            `[SyncCoordinator ${timestamp()}] Utilization upload failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
-            error,
+          const latestRemote = await tryFetchLatestSnapshot({
+            bee,
+            topic,
+            owner,
+          })
+          if (latestRemote) {
+            mergedState = mergeSnapshotWithRemote(state, latestRemote)
+            console.log(
+              `[SyncCoordinator ${timestamp()}] Merged remote snapshot (remote devices=${latestRemote.metadata.devices.length}, merged devices=${mergedState.metadata.devices.length})`,
+            )
+          }
+        } catch (err) {
+          console.warn(
+            `[SyncCoordinator ${timestamp()}] Pre-write remote-snapshot fetch failed; proceeding with local state only:`,
+            err,
           )
+        }
+
+        const jsonData = serializeAccountState(mergedState)
+
+        console.log(`[SyncCoordinator ${timestamp()}] Uploading data…`)
+        const uploadResult = await uploadData(target, jsonData, {
+          encryptionKey: hexToUint8Array(encryptionKey),
+        })
+
+        // chunkAddresses is always present when using encryption.
+        const chunkAddresses = uploadResult.chunkAddresses ?? []
+        if (chunkAddresses.length > 0) {
+          try {
+            await handleUtilizationUpdate(accountId, chunkAddresses)
+          } catch (error) {
+            // Don't fail sync if utilization fails — continue with feed update.
+            console.error(
+              `[SyncCoordinator ${timestamp()}] Utilization upload failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
+              error,
+            )
+          }
+        }
+
+        const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
+        // Convert the 128-char hex reference to its 64-byte form.
+        const refBytes = new Reference(uploadResult.reference).toUint8Array()
+        console.log(`[SyncCoordinator ${timestamp()}] Updating feed…`)
+        const updateResult = await updater.update(
+          feedTimestamp,
+          refBytes,
+          target,
+        )
+        chunkAddresses.push(updateResult.socAddress)
+        return {
+          reference: uploadResult.reference,
+          refBytes,
+          feedTimestamp,
+          chunkAddresses,
         }
       }
 
-      // 6. Update epoch feed (after utilization completes)
-      // `topic` already declared above with the same construction.
-      const updater = new BasicEpochUpdater(topic, accountKey)
-      const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
+      // Did the feed end up pointing at the reference we just wrote? A shared
+      // epoch feed has no compare-and-swap: two devices publishing within the
+      // same epoch slot write the same SOC address and the later signer wins by
+      // last-writer-wins, silently orphaning the other's snapshot. Re-read the
+      // feed and compare; only a *different* confirmed reference counts as a
+      // loss. A missing/unreadable result (read-after-write lag, transient Bee
+      // error) is treated as "won" so we never spuriously republish.
+      const verifyWon = async (writtenRef: Uint8Array): Promise<boolean> => {
+        try {
+          const finder = new AsyncEpochFinder(bee, topic, owner)
+          const latest = await finder.findAt(
+            BigInt(Math.floor(Date.now() / 1000)),
+          )
+          return !latest || uint8ArraysEqual(latest, writtenRef)
+        } catch {
+          return true
+        }
+      }
 
-      // Convert 128-char hex reference to 64-byte Uint8Array
-      const refBytes = new Reference(uploadResult.reference).toUint8Array()
+      // Optimistic publish with bounded verify-retry. This recreates, across
+      // devices, the serialize-read-merge-write guarantee the cross-tab Web
+      // Lock already gives within a device. Only the loser of a collision
+      // retries; convergence holds because the merge is a union — each retry
+      // folds in the peer's additions.
+      let published = await publishMerged()
+      let verified = await verifyWon(published.refBytes)
+      for (
+        let attempt = 0;
+        !verified && attempt < MAX_PUBLISH_RETRIES;
+        attempt++
+      ) {
+        console.warn(
+          `[SyncCoordinator ${timestamp()}] Feed overwritten by a concurrent writer; re-merging and republishing (attempt ${attempt + 1}/${MAX_PUBLISH_RETRIES})`,
+        )
+        await delay(
+          PUBLISH_RETRY_BACKOFF_MS +
+            Math.floor(Math.random() * PUBLISH_RETRY_JITTER_MS),
+        )
+        published = await publishMerged()
+        verified = await verifyWon(published.refBytes)
+      }
 
-      // Create upload target for epoch feed update
-      const feedTarget: UploadTarget = { mode: "stamper", bee, stamper }
-      console.log(`[SyncCoordinator ${timestamp()}] Updating feed…`)
-      const updateResult = await updater.update(
-        feedTimestamp,
-        refBytes,
-        feedTarget,
-      )
+      if (!verified) {
+        const warning = `Account-state feed still overwritten by a concurrent writer after ${MAX_PUBLISH_RETRIES} retries; another device's publish won.`
+        console.warn(`[SyncCoordinator ${timestamp()}] ${warning}`)
+        return {
+          status: "success-unverified",
+          reference: published.reference,
+          timestamp: published.feedTimestamp,
+          chunkAddresses: published.chunkAddresses,
+          warning,
+        }
+      }
+
       console.log(
         `[SyncCoordinator ${timestamp()}] Feed updated (+${(performance.now() - startTime).toFixed(2)}ms), verifying root chunk…`,
       )
-
-      // Add SOC chunk to tracked addresses
-      allChunkAddresses.push(updateResult.socAddress)
 
       // 7. Verify the root chunk is retrievable immediately after upload.
       // This catches the case where Bee accepts the write but doesn't
@@ -586,7 +663,7 @@ export function createSyncAccount(
       // points at a reference, but downstream restores would fail.
       // refBytes is the snapshot reference: 32 bytes (plain) or 64 bytes
       // (encrypted = 32-byte address + 32-byte key). Probe the address only.
-      const rootChunkAddress = refBytes.slice(0, 32)
+      const rootChunkAddress = published.refBytes.slice(0, 32)
       const rootChunkAddressHex = Array.from(rootChunkAddress)
         .map((b) => b.toString(16).padStart(2, "0"))
         .join("")
@@ -620,9 +697,9 @@ export function createSyncAccount(
         )
         return {
           status: "success",
-          reference: uploadResult.reference,
-          timestamp: feedTimestamp,
-          chunkAddresses: allChunkAddresses,
+          reference: published.reference,
+          timestamp: published.feedTimestamp,
+          chunkAddresses: published.chunkAddresses,
         }
       }
 
@@ -636,9 +713,9 @@ export function createSyncAccount(
       console.warn(`[SyncCoordinator ${timestamp()}] ${warning}`)
       return {
         status: "success-unverified",
-        reference: uploadResult.reference,
-        timestamp: feedTimestamp,
-        chunkAddresses: allChunkAddresses,
+        reference: published.reference,
+        timestamp: published.feedTimestamp,
+        chunkAddresses: published.chunkAddresses,
         warning,
       }
     }
