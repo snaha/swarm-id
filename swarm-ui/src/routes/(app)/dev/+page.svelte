@@ -305,8 +305,13 @@ Check console logs for details:
     stampResult = undefined
 
     try {
+      // Buy a MUTABLE batch. Bee's POST /stamps defaults to immutable, but the
+      // multi-device partition scheme rewrites the partition-lock SOC on every
+      // lease refresh, which an immutable batch forbids. Request mutable
+      // explicitly so /dev-bought stamps work with partitioning.
       const response = await fetch(`${beeUrl}/stamps/${stampAmount}/${stampDepth}`, {
         method: 'POST',
+        headers: { immutable: 'false' },
       })
       if (!response.ok) {
         const errorText = await response.text()
