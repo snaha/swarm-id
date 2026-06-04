@@ -443,21 +443,22 @@ the merge rules — especially connectedApps LWW-with-tombstones.</li>
 uint32</strong>; serialized counters are <strong>little-endian</strong>; feeds are epoch feeds owned by the
 backup signer.</p>
 <h2 id="future-work">Future work</h2>
+<p>Tracked under the multi-device umbrella
+(<a href="https://github.com/snaha/swarm-id/issues/217">#217</a>):</p>
 <ul>
-<li><strong>Agent restore path.</strong> Agent (seed-phrase) accounts currently create fresh local state
-on a new device instead of restoring from Swarm; they need the same restore path as
-passkey/Ethereum sign-in.</li>
-<li><strong>Publish when no UI window is open.</strong> Today an open identity-UI tab does the publishing.
-The robust fix is to have the proxy iframe (the only guaranteed-persistent context on a
-dApp page) publish account state on a connection change — see the <code dir="auto">BatchWriteCoordinator</code>
-design below.</li>
-<li><strong>Broaden refresh triggers.</strong> Call refresh on app load / account switch, not only from
-the Devices tab.</li>
-<li><strong>Clearer contention logging.</strong> The sync path logs “all partitions are held by other
-devices” even when the real cause is a stamp/SOC error; surface those distinctly.</li>
-<li><strong><code dir="auto">BatchWriteCoordinator</code> refactor.</strong> Extract the partition-lease / stamp / write-lock
-orchestration the proxy and the sync path currently duplicate into one shared unit, so
-both share a single implementation. This is the change that unlocks proxy-side publish.</li>
-<li><strong>Deletion tombstones for identities and stamps.</strong> connectedApps propagate removals via
-tombstones; identities and postageStamps still cannot express a deletion across devices.</li>
+<li><strong><code dir="auto">BatchWriteCoordinator</code> refactor + proxy-side publish.</strong> Extract the partition-lease /
+stamp / write-lock orchestration the proxy and the sync path currently duplicate into one
+shared unit, then have the proxy iframe (the only guaranteed-persistent context on a dApp
+page) publish account state — including announcing a device when it first acquires its
+lease. Also folds in clearer contention logging (distinguish “all partitions held” from
+stamp/SOC errors). Tracked in
+<a href="https://github.com/snaha/swarm-id/issues/336">#336</a>.</li>
+<li><strong>Restore / refresh coverage.</strong> Give agent (seed-phrase) accounts a restore-from-Swarm
+path (today they start fresh on a new device), and broaden refresh triggers to app load /
+account switch instead of only the Devices view. Tracked in
+<a href="https://github.com/snaha/swarm-id/issues/338">#338</a>.</li>
+<li><strong>Merge consolidation + deletion tombstones.</strong> Make the snapshot-merge rules a single
+shared implementation (lib vs the UI refresh path), and extend the connectedApps tombstone
+pattern to identities and stamps so deletions propagate across devices. Tracked in
+<a href="https://github.com/snaha/swarm-id/issues/337">#337</a>.</li>
 </ul> </div> <footer class="sl-flex astro-2yl5k4ay"> <div class="meta sl-flex astro-2yl5k4ay">   </div> <div class="pagination-links print:hidden astro-eq2njstq" dir="ltr"> <a href="/docs/pr-335/local-development" rel="prev" class="astro-eq2njstq"> <svg aria-hidden="true" class="astro-eq2njstq astro-5eo6lqxr" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg>  <span class="astro-eq2njstq"> Previous <br class="astro-eq2njstq"> <span class="link-title astro-eq2njstq">Local Development</span> </span> </a> <a href="/docs/pr-335/api/" rel="next" class="astro-eq2njstq"> <svg aria-hidden="true" class="astro-eq2njstq astro-5eo6lqxr" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg>  <span class="astro-eq2njstq"> Next <br class="astro-eq2njstq"> <span class="link-title astro-eq2njstq">SwarmIdClient API Reference</span> </span> </a> </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>
