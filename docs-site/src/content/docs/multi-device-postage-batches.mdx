@@ -192,6 +192,18 @@ Payload (JSON, ~150 bytes, encrypted):
 - **`generation`** — the fencing token. `compareGenerations(a, b)` orders by `timestampMs`
   first, then by `tiebreaker` lexicographically. The higher generation always wins.
 
+:::note[Why the tiebreaker is stored, not derived]
+In a normal claim `generation.tiebreaker` equals `keccak256(holderDeviceId)[0:8]`, so it looks
+redundant with `holderDeviceId`. It is stored anyway because the `generation` is a **self-contained
+fencing token attributable to whoever wrote the SOC** — a different question from `holderDeviceId`
+("who holds it now"), and `compareGenerations` orders writers purely from the token without
+re-hashing or reading `holderDeviceId`. The two diverge at the **release sentinel**: a release sets
+`holderDeviceId = ""` but advances the generation with the _releasing_ device's tiebreaker, so it
+cannot be recovered from `holderDeviceId` (deriving it would yield `keccak256("")[0:8]`,
+attributable to no device). Storing it costs 16 hex chars and keeps the comparator decoupled from
+device-ID semantics.
+:::
+
 ### Acquire / refresh protocol
 
 A SOC has no compare-and-swap; ordering comes from the generation fence plus a guard
