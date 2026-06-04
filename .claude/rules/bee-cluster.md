@@ -25,7 +25,7 @@ upload) require Bee **pushsync** to complete a network **receipt**. A node only 
 when `IsReachable()` is true (`kademlia.go`: reachability == `Public`; checked in `pushsync.go`'s
 handler). Stock `ethersphere/bee` is compiled with `reachabilityOverridePublic="false"` (a **build-time
 ldflag**, not an env var), so it relies on libp2p AutoNAT — which never confirms reachability inside a
-docker bridge network. Every node's *own* reachability stays `Unknown` → `IsReachable()` is false → no
+docker bridge network. Every node's _own_ reachability stays `Unknown` → `IsReachable()` is false → no
 node ever stores a forwarded chunk → the push runs out Bee's hard `defaultTTL = 30 s` and fails with
 `context deadline exceeded`. Symptom: **every SOC/non-deferred upload takes exactly ~30 s** (the chunk
 is only stored locally on the origin, so reads work but replication/receipts don't), and multi-device
