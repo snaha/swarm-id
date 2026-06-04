@@ -23,8 +23,6 @@ import {
   getChunkIndexForBucket,
   getChunkLayout,
   initializeBatchUtilization,
-  makeBatchUtilizationTopic,
-  makeChunkIdentifier,
   mergeChunk,
   resolveUtilizationChunkKeys,
   serializeUint16Array,
@@ -210,26 +208,6 @@ describe("getChunkIndexForBucket (depth-dependent layout)", () => {
     expect(() => getChunkIndexForBucket(-1, 24)).toThrow(/Invalid bucket index/)
     expect(() => getChunkIndexForBucket(NUM_BUCKETS, 24)).toThrow(
       /Invalid bucket index/,
-    )
-  })
-})
-
-describe("makeChunkIdentifier (depth-dependent chunk count)", () => {
-  const topic = makeBatchUtilizationTopic(TEST_BATCH_ID)
-
-  it("is deterministic for the same topic, index, and depth", () => {
-    const a = makeChunkIdentifier(topic, 5, 24)
-    const b = makeChunkIdentifier(topic, 5, 24)
-    expect(a.toHex()).toBe(b.toHex())
-  })
-
-  it("rejects an index outside the uint16 layout but accepts it for uint32", () => {
-    expect(() => makeChunkIdentifier(topic, 32, 24)).toThrow(
-      /Invalid chunk index/,
-    )
-    expect(() => makeChunkIdentifier(topic, 32, 32)).not.toThrow()
-    expect(() => makeChunkIdentifier(topic, 64, 32)).toThrow(
-      /Invalid chunk index/,
     )
   })
 })

@@ -2,16 +2,16 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Per-partition lock SOC for multi-device postage-batch sharing (iteration 2).
+ * Per-partition lock SOC for multi-device postage-batch sharing.
  *
- * Replaces the per-device-claim-feed design with a single shared SOC per
- * partition. Multiple devices share the `backupSigner` so any of them can
- * write the SOC; concurrent writers are ordered deterministically by a
- * (timestampMs, tiebreaker) fencing token.
+ * A single shared SOC per partition is the cross-device authority for "who
+ * holds this partition". Multiple devices share the `backupSigner` so any of
+ * them can write the SOC; concurrent writers are ordered deterministically by
+ * a (timestampMs, tiebreaker) fencing token.
  *
  *   identifier = keccak256("swarm-id-partition-lock-v1:" || partition)
  *   owner       = backup signer (shared across the account's devices)
- *   encryption  = swarmEncryptionKey (same as iteration-1 feeds)
+ *   encryption  = swarmEncryptionKey
  *
  * The identifier only carries the partition number — domain separation
  * across accounts comes from the per-account `owner` (derived from each
@@ -25,7 +25,7 @@
  *   4. If our generation is still the latest visible → "acquired".
  *      If a higher generation was written during the guard → "lost-race".
  *
- * See: docs/Multi-Device-Partition-Lease-iteration-2.md
+ * See the "Multi-Device Postage Batches" page in docs-site for the full design.
  */
 
 import { Bee, PrivateKey, type Stamper } from "@ethersphere/bee-js"

@@ -21,8 +21,6 @@
 import {
   Stamper,
   BatchId,
-  Topic,
-  Identifier,
   type Bee,
   EthAddress,
   PrivateKey,
@@ -30,7 +28,6 @@ import {
 } from "@ethersphere/bee-js"
 import {
   makeEncryptedContentAddressedChunk,
-  makeContentAddressedChunk,
   type ContentAddressedChunk,
 } from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
@@ -97,9 +94,9 @@ export const DATA_COUNTER_START = PARTITION_COUNT
 export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
 
 /**
- * How often the holder bumps `leasedUntil` on its own claim feed. One
- * third of the TTL gives three "safety net" refresh attempts before a
- * peer would consider the lease expired.
+ * How often the holder re-writes its partition lock SOC to bump
+ * `leasedUntil`. One third of the TTL gives three "safety net" refresh
+ * attempts before a peer would consider the lease expired.
  */
 export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
 
@@ -228,20 +225,8 @@ export interface BatchUtilizationState {
   /** Metadata for each utilization chunk (32 for uint16, 64 for uint32) */
   chunks: ChunkMetadata[]
 
-  /** Topic for SOC storage */
-  topic: Topic
-
   /** Last sync timestamp */
   lastSync: number
-}
-
-/**
- * Chunk with bucket assignment
- */
-export interface ChunkWithBucket {
-  chunk: ContentAddressedChunk
-  bucket: number
-  slot: number
 }
 
 // ============================================================================
@@ -264,24 +249,6 @@ export function toBucket(chunkAddress: Uint8Array): number {
 
   // First 2 bytes as big-endian uint16
   return (chunkAddress[0] << 8) | chunkAddress[1]
-}
-
-/**
- * Calculate bucket assignments for multiple chunks
- */
-export function assignChunksToBuckets(
-  chunks: ContentAddressedChunk[],
-): ChunkWithBucket[] {
-  return chunks.map((chunk) => {
-    const address = chunk.address.toUint8Array()
-    const bucket = toBucket(address)
-
-    return {
-      chunk,
-      bucket,
-      slot: 0, // Will be assigned later
-    }
-  })
 }
 
 // ============================================================================
@@ -449,58 +416,6 @@ export class DirtyChunkTracker {
   get count(): number {
     return this.dirtyChunks.size
   }
-}
-
-// ============================================================================
-// SOC Identifier Generation for Swarm Storage
-// ============================================================================
-
-/**
- * Create a topic for batch utilization storage
- * Topic format: `batch-utilization:{batchId}`
- *
- * @param batchId - Batch ID
- * @returns Topic for this batch's utilization data
- */
-export function makeBatchUtilizationTopic(batchId: BatchId): Topic {
-  const topicString = `batch-utilization:${batchId.toHex()}`
-  const encoder = new TextEncoder()
-  const hash = Binary.keccak256(encoder.encode(topicString))
-  return new Topic(hash)
-}
-
-/**
- * Create an identifier for a specific utilization chunk
- * Identifier: Keccak256(topic || chunkIndex)
- *
- * @param topic - Batch utilization topic
- * @param chunkIndex - Chunk index
- * @param batchDepth - Batch depth, drives the chunk count
- * @returns Identifier for this chunk
- */
-export function makeChunkIdentifier(
-  topic: Topic,
-  chunkIndex: number,
-  batchDepth: number,
-): Identifier {
-  const { numUtilizationChunks } = getChunkLayout(batchDepth)
-  if (chunkIndex < 0 || chunkIndex >= numUtilizationChunks) {
-    throw new Error(
-      `Invalid chunk index: ${chunkIndex} (must be 0-${numUtilizationChunks - 1})`,
-    )
-  }
-
-  // Encode chunk index as 32-bit big-endian
-  const chunkIndexBytes = new Uint8Array(4)
-  const view = new DataView(chunkIndexBytes.buffer)
-  view.setUint32(0, chunkIndex, false) // false = big-endian
-
-  // Hash: topic || chunkIndex
-  const hash = Binary.keccak256(
-    Binary.concatBytes(topic.toUint8Array(), chunkIndexBytes),
-  )
-
-  return new Identifier(hash)
 }
 
 // ============================================================================
@@ -685,7 +600,6 @@ function claimedBucketsForCleanChunks(
  *
  * @param bee - Bee client instance
  * @param stamper - Stamper for signing
- * @param chunkIndex - Chunk index
  * @param data - Chunk data to upload (4KB)
  * @param encryptionKey - Encryption key (32 bytes)
  * @returns CAC reference
@@ -693,12 +607,9 @@ function claimedBucketsForCleanChunks(
 export async function uploadUtilizationChunk(
   bee: Bee,
   stamper: Stamper,
-  chunkIndex: number,
   data: Uint8Array,
   encryptionKey: Uint8Array,
 ): Promise<Uint8Array> {
-  void chunkIndex // Parameter kept for API compatibility
-
   // Validate inputs
   if (data.length < 1 || data.length > 4096) {
     throw new Error(`Invalid data length: ${data.length} (expected 1-4096)`)
@@ -729,75 +640,6 @@ export async function uploadUtilizationChunk(
   })
 
   return cacReference
-}
-
-/**
- * Download and decrypt a utilization chunk from Swarm by CAC reference
- *
- * @param bee - Bee client instance
- * @param cacReference - CAC reference (32 bytes)
- * @param chunkIndex - Chunk index (for logging)
- * @param encryptionKey - Encryption key (32 bytes)
- * @returns Decrypted chunk data (4KB) or undefined if not found
- */
-export async function downloadUtilizationChunk(
-  bee: Bee,
-  cacReference: Uint8Array,
-  chunkIndex: number,
-  encryptionKey: Uint8Array,
-): Promise<Uint8Array | undefined> {
-  if (encryptionKey.length !== 32) {
-    throw new Error(
-      `Invalid encryption key length: ${encryptionKey.length} (expected 32)`,
-    )
-  }
-
-  if (cacReference.length !== 32) {
-    throw new Error(
-      `Invalid CAC reference length: ${cacReference.length} (expected 32)`,
-    )
-  }
-
-  try {
-    // Download encrypted CAC from Swarm
-    const cacUrl = `${bee.url}/chunks/${Binary.uint8ArrayToHex(cacReference)}`
-
-    const cacResponse = await fetch(cacUrl, {
-      method: "GET",
-    })
-
-    if (cacResponse.status === 404) {
-      console.warn(
-        `[UtilChunk] CAC not found for chunk ${chunkIndex} (reference: ${Binary.uint8ArrayToHex(cacReference).substring(0, 16)}...)`,
-      )
-      return undefined
-    }
-
-    if (!cacResponse.ok) {
-      const text = await cacResponse.text()
-      throw new Error(
-        `Failed to download CAC: ${cacResponse.status} ${cacResponse.statusText}: ${text}`,
-      )
-    }
-
-    // Get the encrypted CAC data
-    void (await cacResponse.arrayBuffer())
-
-    // Decrypt the CAC data
-    // TODO: Implement decryption
-    // For now, this is a placeholder
-    throw new Error(
-      "Decryption not yet implemented - need to add decryptChunk function",
-    )
-  } catch (error) {
-    if (
-      error instanceof Error &&
-      error.message.includes("Decryption not yet implemented")
-    ) {
-      throw error
-    }
-    return undefined
-  }
 }
 
 // ============================================================================
@@ -879,48 +721,6 @@ export function deserializeUint16Array(bytes: Uint8Array): Uint32Array {
   return arr
 }
 
-/**
- * Split data into 4KB chunks
- */
-export function splitIntoChunks(data: Uint8Array): ContentAddressedChunk[] {
-  const chunks: ContentAddressedChunk[] = []
-
-  for (let i = 0; i < data.length; i += CHUNK_SIZE) {
-    const end = Math.min(i + CHUNK_SIZE, data.length)
-    const chunkData = data.slice(i, end)
-
-    // Pad last chunk if needed
-    const paddedData = new Uint8Array(CHUNK_SIZE)
-    paddedData.set(chunkData)
-
-    chunks.push(makeContentAddressedChunk(paddedData))
-  }
-
-  return chunks
-}
-
-/**
- * Reconstruct data from chunks
- */
-export function reconstructFromChunks(
-  chunks: ContentAddressedChunk[],
-  originalLength: number,
-): Uint8Array {
-  const result = new Uint8Array(originalLength)
-  let offset = 0
-
-  for (const chunk of chunks) {
-    const data = chunk.data
-    const copyLength = Math.min(data.length, originalLength - offset)
-    result.set(data.slice(0, copyLength), offset)
-    offset += copyLength
-
-    if (offset >= originalLength) break
-  }
-
-  return result
-}
-
 // ============================================================================
 // Utilization State Management
 // ============================================================================
@@ -958,15 +758,11 @@ export function initializeBatchUtilization(
     })
   }
 
-  // Create topic for this batch
-  const topic = makeBatchUtilizationTopic(batchId)
-
   return {
     batchId,
     batchDepth,
     dataCounters,
     chunks,
-    topic,
     lastSync: Date.now(),
   }
 }
@@ -1026,23 +822,6 @@ export function partitionCapacity(
 // ============================================================================
 
 /**
- * Create a Stamper with custom bucket state for mutable stamping
- *
- * @param privateKey - Private key for signing
- * @param batchId - Batch ID
- * @param bucketState - Custom bucket heights (for resuming or mutable overwrites)
- * @param batchDepth - Batch depth parameter
- */
-export function createStamper(
-  privateKey: Uint8Array | string,
-  batchId: BatchId,
-  bucketState: Uint32Array,
-  batchDepth: number,
-): Stamper {
-  return Stamper.fromState(privateKey, batchId, bucketState, batchDepth)
-}
-
-/**
  * Convert utilization data counters to Stamper bucket state
  *
  * Each dataCounter[bucket] represents the number of slots used in that bucket.
@@ -1074,27 +853,24 @@ export function utilizationToBucketState(
  *
  * Load order:
  * 1. Try IndexedDB cache (all chunks for the depth's layout)
- * 2. If incomplete, download missing chunks from Swarm
- * 3. If not found, initialize new state
- * 4. Cache downloaded chunks in IndexedDB
+ * 2. If a bucket has no cached chunk, seed it with a zeroed default
+ * 3. If nothing is cached, initialize new state
+ *
+ * The on-Swarm counter is resumed via the partition-state feed (see
+ * `sync/partition-state.ts`), not here — this only reads the local cache.
  *
  * @param batchId - Batch ID
- * @param options - Load options with bee, owner, encryption key, and cache
+ * @param options - Load options (local IndexedDB cache)
  * @returns Utilization state
  */
 export async function loadUtilizationState(
   batchId: BatchId,
   batchDepth: number,
   options: {
-    bee: Bee
-    owner: EthAddress
-    encryptionKey: Uint8Array
     cache: UtilizationStoreDB
   },
 ): Promise<BatchUtilizationState> {
   const { cache } = options
-  // TODO: Use bee, owner, encryptionKey when state feed is implemented
-  const { bee: _bee, owner: _owner, encryptionKey: _encryptionKey } = options
 
   const { counterByteSize, bucketsPerChunk, numUtilizationChunks } =
     getChunkLayout(batchDepth)
@@ -1121,23 +897,20 @@ export async function loadUtilizationState(
         })
       }
 
-      const topic = makeBatchUtilizationTopic(batchId)
-
       return {
         batchId,
         batchDepth,
         dataCounters,
         chunks,
-        topic,
         lastSync: Date.now(),
       }
     } catch (error) {
       console.warn(`[BatchUtil] Failed to reconstruct from cache:`, error)
-      // Fall through to Swarm download
+      // Fall through to per-chunk seeding below.
     }
   }
 
-  // Step 3: Download missing chunks from Swarm
+  // Step 2: Seed any bucket without a cached chunk with a zeroed default.
 
   const dataCounters = new Uint32Array(NUM_BUCKETS)
   const chunks: ChunkMetadata[] = []
@@ -1169,8 +942,7 @@ export async function loadUtilizationState(
       continue
     }
 
-    // TODO: Download from Swarm using state feed (not yet implemented)
-    // For now, initialize with defaults
+    // No cached chunk for this bucket range — seed a zeroed default.
     mergeChunk(dataCounters, i, defaultChunkData, batchDepth)
 
     chunks.push({
@@ -1182,14 +954,11 @@ export async function loadUtilizationState(
     })
   }
 
-  const topic = makeBatchUtilizationTopic(batchId)
-
   return {
     batchId,
     batchDepth,
     dataCounters,
     chunks,
-    topic,
     lastSync: Date.now(),
   }
 }
@@ -1272,7 +1041,6 @@ export async function saveUtilizationState(
       const cacReference = await uploadUtilizationChunk(
         bee,
         stamper,
-        chunkIndex,
         chunkData,
         resolved.key,
       )
@@ -1328,7 +1096,7 @@ export async function saveUtilizationState(
  * Update utilization state after writing data chunks
  *
  * This function:
- * 1. Loads current state (from cache or Swarm)
+ * 1. Loads current state from the local cache
  * 2. Updates bucket counters for new data chunks
  * 3. Marks affected utilization chunks as dirty
  * 4. Returns state and tracker for later upload
@@ -1336,7 +1104,7 @@ export async function saveUtilizationState(
  * @param batchId - Batch ID
  * @param dataChunks - Data chunks that were written
  * @param batchDepth - Batch depth parameter
- * @param options - Load options for state retrieval
+ * @param options - Load options (local IndexedDB cache)
  * @returns Updated state and dirty chunk tracker
  */
 export async function updateAfterWrite(
@@ -1344,9 +1112,6 @@ export async function updateAfterWrite(
   dataChunks: ContentAddressedChunk[],
   batchDepth: number,
   options: {
-    bee: Bee
-    owner: EthAddress
-    encryptionKey: Uint8Array
     cache: UtilizationStoreDB
   },
 ): Promise<{

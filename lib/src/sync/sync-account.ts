@@ -247,9 +247,6 @@ export function createSyncAccount(
       chunks,
       stamp.depth,
       {
-        bee,
-        owner,
-        encryptionKey: hexToUint8Array(swarmEncryptionKey),
         cache: utilizationStore,
       },
     )

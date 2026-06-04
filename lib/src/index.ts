@@ -39,16 +39,12 @@ export {
   loadUtilizationState,
   calculateUtilization,
   toBucket,
-  assignChunksToBuckets,
   serializeUint32Array,
   deserializeUint32Array,
   serializeUint16Array,
   deserializeUint16Array,
-  splitIntoChunks,
-  reconstructFromChunks,
   calculateMaxSlotsPerBucket,
   hasBucketCapacity,
-  createStamper,
   UtilizationAwareStamper,
   PartitionLeaseLostError,
   getChunkLayout,
@@ -381,7 +377,6 @@ export {
 export type {
   BatchUtilizationState,
   ChunkLayout,
-  ChunkWithBucket,
 } from "./utils/batch-utilization"
 
 // Versioned storage types
