@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Integration tests for the consolidated `PartitionLease`.
+ * Cross-module integration tests for the consolidated `PartitionLease`.
+ * In-memory only — no live Bee node / network.
  *
  * Uses MockBee + mockFetch so that `acquirePartitionLock`,
  * `readPartitionLock`, `writePartitionLock`, `readPartitionState`, and

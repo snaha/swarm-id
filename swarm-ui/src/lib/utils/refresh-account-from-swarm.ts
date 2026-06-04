@@ -128,7 +128,7 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
 
     const snapshot = deserializeAccountState(data)
 
-    console.log(
+    console.debug(
       `[RefreshAccount] devices=${snapshot.metadata.devices.length} identities=${snapshot.identities.length} apps=${snapshot.connectedApps.length} stamps=${snapshot.postageStamps.length} bee=${bee.url}`,
     )
 
