@@ -37,7 +37,6 @@ import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
-import type { EpochUpdateHints } from "../proxy/feeds/epochs/types"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret } from "./key-derivation"
 import { uint8ArrayToHex } from "./hex"
@@ -155,35 +154,6 @@ export interface ChunkLayout {
   bucketsPerChunk: number
   /** Total number of utilization chunks for one batch */
   numUtilizationChunks: number
-}
-
-/**
- * IndexedDB chunk index for the per-partition lease metadata chunk.
- * Lease metadata is stored at indices `N + p` where N = numUtilizationChunks.
- */
-export function leaseChunkIndex(batchDepth: number, partition: number): number {
-  const { numUtilizationChunks } = getChunkLayout(batchDepth)
-  return numUtilizationChunks + partition
-}
-
-/**
- * Cached lease input for the 0-reads fast-path in `PartitionLease.acquire()`.
- *
- * A returning device that still holds a valid lease can bypass `readPartitionState`
- * and `readDeviceClaim(self)` by passing this struct — the stamper's local
- * IndexedDB data is sufficient to reconstruct the partition state.
- */
-export interface CachedLeaseInput {
-  partition: number
-  /** Last known generation; next claim uses `generation + 1`. */
-  generation: number
-  /**
-   * Per-bucket local counter to pass to `bindPartition` (the resumed
-   * high-water from the cache / partition-state feed).
-   */
-  localCounter: Uint32Array
-  /** Epoch hints for `writeDeviceClaim`, skips epoch-tree traversal. */
-  claimHints: EpochUpdateHints
 }
 
 /**
@@ -1443,42 +1413,6 @@ export function calculateUtilization(
 }
 
 // ============================================================================
-// Lease Metadata Serialization
-// ============================================================================
-
-interface ClaimHintsJson {
-  lastEpoch?: { start: string; level: number }
-  lastTimestamp?: string
-}
-
-interface LeaseMetadataPayload {
-  generation: number
-  claimHints: ClaimHintsJson
-}
-
-function serializeClaimHints(hints: EpochUpdateHints): ClaimHintsJson {
-  return {
-    lastEpoch: hints.lastEpoch
-      ? {
-          start: hints.lastEpoch.start.toString(),
-          level: hints.lastEpoch.level,
-        }
-      : undefined,
-    lastTimestamp: hints.lastTimestamp?.toString(),
-  }
-}
-
-function deserializeClaimHints(json: ClaimHintsJson): EpochUpdateHints {
-  return {
-    lastEpoch: json.lastEpoch
-      ? { start: BigInt(json.lastEpoch.start), level: json.lastEpoch.level }
-      : undefined,
-    lastTimestamp:
-      json.lastTimestamp !== undefined ? BigInt(json.lastTimestamp) : undefined,
-  }
-}
-
-// ============================================================================
 // Utilization-Aware Stamper (Wrapper with Auto-Tracking)
 // ============================================================================
 
@@ -1986,12 +1920,9 @@ export class UtilizationAwareStamper implements Stamper {
 
   /**
    * Build the partition-local counter from the stamper's current
-   * `dataCounters` — i.e. resume exactly where this device left off.
-   *
-   * Same derivation `readCachedLease` does internally, exposed standalone
-   * for callers that already have lease state from somewhere else (e.g.
-   * `LeaseState` in localStorage) and just need the seed counter to pass
-   * into `bindPartition`.
+   * `dataCounters` — i.e. resume exactly where this device left off. The
+   * lease orchestrator passes the result into `bindPartition` as the seed
+   * counter for a held partition.
    */
   buildLeaseLocalCounter(): Uint32Array {
     return this.utilizationState.dataCounters.slice()
@@ -2027,71 +1958,6 @@ export class UtilizationAwareStamper implements Stamper {
         [partition]: referenceHex,
       },
     })
-  }
-
-  /**
-   * Persist lease metadata (generation + claimHints) for partition `p` in
-   * the local IndexedDB cache at chunk index `N + p`.
-   * Called after a successful cold acquire so subsequent reloads can skip
-   * `readPartitionState` and `readDeviceClaim(self)` entirely.
-   */
-  async setLeaseMetadata(
-    partition: number,
-    generation: number,
-    claimHints: EpochUpdateHints,
-  ): Promise<void> {
-    const payload: LeaseMetadataPayload = {
-      generation,
-      claimHints: serializeClaimHints(claimHints),
-    }
-    const data = new TextEncoder().encode(JSON.stringify(payload))
-    await this.cache.putChunk({
-      batchId: this.batchId.toHex(),
-      chunkIndex: leaseChunkIndex(this.depth, partition),
-      data,
-      contentHash: "",
-      lastAccess: Date.now(),
-    })
-  }
-
-  /**
-   * Update lease metadata for the currently held partition (after refresh).
-   * No-op when no partition is bound.
-   */
-  async updateLeaseMetadata(
-    generation: number,
-    claimHints: EpochUpdateHints,
-  ): Promise<void> {
-    if (this.partition === undefined) return
-    await this.setLeaseMetadata(this.partition, generation, claimHints)
-  }
-
-  /**
-   * Read cached lease metadata for partition `p` and derive the local
-   * counter from the current `dataCounters` (resume exactly where this
-   * device left off). Returns `undefined` when no metadata chunk is present
-   * in the cache.
-   */
-  async readCachedLease(
-    partition: number,
-  ): Promise<CachedLeaseInput | undefined> {
-    const cached = await this.cache.getChunk(
-      this.batchId.toHex(),
-      leaseChunkIndex(this.depth, partition),
-    )
-    if (!cached) return undefined
-
-    const payload: LeaseMetadataPayload = JSON.parse(
-      new TextDecoder().decode(cached.data),
-    )
-    const claimHints = deserializeClaimHints(payload.claimHints)
-    const localCounter = this.utilizationState.dataCounters.slice()
-    return {
-      partition,
-      generation: payload.generation,
-      localCounter,
-      claimHints,
-    }
   }
 
   /**

@@ -301,20 +301,6 @@ export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
 // ============================================================================
 
 /**
- * Per-device claim feed payload.
- *
- * `partition` is `-1` when the device explicitly released its lease. The
- * "current claim" for a device is the latest entry on its claim feed.
- */
-export const PartitionClaimSchemaV1 = z.object({
-  partition: z.number().int().min(-1),
-  leasedUntil: z.number(),
-  generation: z.number().int().min(0),
-  acquiredAt: z.number(),
-})
-export type PartitionClaim = z.infer<typeof PartitionClaimSchemaV1>
-
-/**
  * Per-partition state feed payload.
  *
  * `bucketCounters` is a serialised `Uint32Array(NUM_BUCKETS)` (little-endian

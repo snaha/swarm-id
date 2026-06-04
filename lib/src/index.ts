@@ -88,12 +88,6 @@ export type {
   PartitionHolderEntry,
 } from "./sync/partition-lease"
 export {
-  makeDeviceClaimTopic,
-  readDeviceClaim,
-  writeDeviceClaim,
-  NO_CLAIM_PARTITION,
-} from "./sync/partition-claim"
-export {
   makePartitionStateTopic,
   readPartitionState,
   writePartitionState,
