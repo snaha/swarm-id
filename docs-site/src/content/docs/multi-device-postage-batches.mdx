@@ -408,19 +408,21 @@ backup signer.
 
 ## Future work
 
-- **Agent restore path.** Agent (seed-phrase) accounts currently create fresh local state
-  on a new device instead of restoring from Swarm; they need the same restore path as
-  passkey/Ethereum sign-in.
-- **Publish when no UI window is open.** Today an open identity-UI tab does the publishing.
-  The robust fix is to have the proxy iframe (the only guaranteed-persistent context on a
-  dApp page) publish account state on a connection change — see the `BatchWriteCoordinator`
-  design below.
-- **Broaden refresh triggers.** Call refresh on app load / account switch, not only from
-  the Devices tab.
-- **Clearer contention logging.** The sync path logs "all partitions are held by other
-  devices" even when the real cause is a stamp/SOC error; surface those distinctly.
-- **`BatchWriteCoordinator` refactor.** Extract the partition-lease / stamp / write-lock
-  orchestration the proxy and the sync path currently duplicate into one shared unit, so
-  both share a single implementation. This is the change that unlocks proxy-side publish.
-- **Deletion tombstones for identities and stamps.** connectedApps propagate removals via
-  tombstones; identities and postageStamps still cannot express a deletion across devices.
+Tracked under the multi-device umbrella
+([#217](https://github.com/snaha/swarm-id/issues/217)):
+
+- **`BatchWriteCoordinator` refactor + proxy-side publish.** Extract the partition-lease /
+  stamp / write-lock orchestration the proxy and the sync path currently duplicate into one
+  shared unit, then have the proxy iframe (the only guaranteed-persistent context on a dApp
+  page) publish account state — including announcing a device when it first acquires its
+  lease. Also folds in clearer contention logging (distinguish "all partitions held" from
+  stamp/SOC errors). Tracked in
+  [#336](https://github.com/snaha/swarm-id/issues/336).
+- **Restore / refresh coverage.** Give agent (seed-phrase) accounts a restore-from-Swarm
+  path (today they start fresh on a new device), and broaden refresh triggers to app load /
+  account switch instead of only the Devices view. Tracked in
+  [#338](https://github.com/snaha/swarm-id/issues/338).
+- **Merge consolidation + deletion tombstones.** Make the snapshot-merge rules a single
+  shared implementation (lib vs the UI refresh path), and extend the connectedApps tombstone
+  pattern to identities and stamps so deletions propagate across devices. Tracked in
+  [#337](https://github.com/snaha/swarm-id/issues/337).
