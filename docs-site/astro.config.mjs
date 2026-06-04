@@ -31,6 +31,15 @@ export default defineConfig({
           ],
         },
         {
+          label: 'Multi-Device',
+          items: [
+            {
+              label: 'Postage Batch Sharing',
+              slug: 'multi-device-postage-batches',
+            },
+          ],
+        },
+        {
           label: 'API Reference',
           autogenerate: { directory: 'api' },
         },

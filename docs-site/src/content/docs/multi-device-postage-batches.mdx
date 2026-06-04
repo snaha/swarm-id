@@ -1,0 +1,414 @@
+---
+title: Multi-Device Postage Batches
+description: How several devices share one mutable Swarm postage batch and keep account state in sync — the on-chain layout, lock protocol, feeds, and key derivation needed to port this to another platform.
+---
+
+This page is the definitive, implementation-level specification of how Swarm ID lets
+several devices that share one account write to a **single mutable postage batch** at
+the same time without corrupting each other's data. It is written so the scheme can be
+re-implemented on another platform (native mobile, desktop, a different language) and
+**interoperate** with the reference TypeScript implementation in `@snaha/swarm-id`.
+
+Everything here is derived purely from Swarm primitives (chunks, single-owner chunks,
+epoch feeds) and a handful of deterministic key derivations. There is **no server, no
+coordinator, and no shared mutable state other than what lives on Swarm itself**.
+
+## Two independent systems
+
+The account shares one batch across devices. Two distinct problems arise, solved by two
+independent mechanisms:
+
+1. **Partition lease** — prevents two devices from stamping the _same_ `(bucket, slot)`
+   of the batch (which would make one chunk silently overwrite the other on the network).
+   Each active device leases a **partition** of every bucket's slot space and only ever
+   stamps slots in its own lane.
+2. **Account-state sync** — keeps the shared account snapshot (identities, connected
+   apps, postage stamps, the device list) eventually-consistent across devices. It is a
+   single epoch feed plus a merge function, with an optimistic verify-retry to survive
+   concurrent writers.
+
+They are orthogonal: account-state sync would be needed even with one batch per device,
+and the partition lease would be needed even if account state never changed. A device
+that holds a partition lease is also the device permitted to publish account state (the
+"partition gate", below).
+
+## Key derivation (the interop root)
+
+All cross-device addressing derives from the account's **derivation key** (`derivationKey`),
+a 32-byte secret every device reconstructs after authentication. Two devices interoperate
+**iff they derive the same keys from the same derivation key.**
+
+The primitive is `deriveSecret(key, context)`:
+
+```text
+deriveSecret(key, context) = hex( HMAC-SHA256( bytes_from_hex(key), utf8(context) ) )
+```
+
+Note the asymmetry: `key` is interpreted as a **hex string decoded to bytes**, `context`
+is encoded as **UTF-8**. From this:
+
+```text
+swarmEncryptionKey = deriveSecret(derivationKey,        "swarm-encryption")   // 32 bytes
+backupKey          = deriveSecret(swarmEncryptionKey,   "backup-key")         // 32 bytes
+```
+
+- **`backupSigner`** = the secp256k1 private key whose scalar is `backupKey`. Its
+  Ethereum address (`backupSigner.publicKey().address()`) is the **owner** of every feed
+  and every lock SOC in this document. Because the owner is per-account, the same
+  identifier/topic across two different accounts still produces different chunk addresses —
+  domain separation comes from the owner, not from baking the account ID into hashes.
+- **`swarmEncryptionKey`** encrypts the lock-SOC payloads and the device-claim payloads,
+  and seeds the per-utilization-chunk key derivation.
+
+Per-device identity:
+
+- **`deviceId`** — a per-install UUID (`crypto.randomUUID()`), stored under the
+  localStorage key `swarm-id-device-id`. Stable for the life of the install; **not**
+  derived from the account, so each device has a distinct one.
+- **`tiebreaker`** = `hex( keccak256(utf8(deviceId))[0:8] )` — the first 8 bytes of the
+  keccak256 of the device ID, as hex. Used to deterministically order two writers that
+  share a millisecond timestamp. Two distinct device IDs collide with probability 2⁻⁶⁴.
+
+## Batch slot layout & partitions
+
+A Swarm postage batch of depth `D` has:
+
+- **`NUM_BUCKETS` = 65 536** buckets (`2^16`, `BUCKET_DEPTH = 16`).
+- **`2^(D-16)` slots per bucket** (`calculateMaxSlotsPerBucket`).
+
+A chunk's bucket is the **first two bytes of its 32-byte address, big-endian**:
+
+```text
+bucket(addr) = (addr[0] << 8) | addr[1]      // 0 .. 65535
+```
+
+The slot space of _every_ bucket is divided into `PARTITION_COUNT = 2` interleaved lanes.
+The lowest `PARTITION_COUNT` slots are **reserved** (not data):
+
+- Slot index `p` (for `p` in `[0, PARTITION_COUNT)`) is reserved for **partition `p`**'s
+  lock SOC and counter (utilization) chunks.
+- Data slots begin at `DATA_COUNTER_START = PARTITION_COUNT`.
+
+The physical slot for partition `p`'s `j`-th data chunk in a bucket
+(`dataSlot(p, j, K)`, with `K = PARTITION_COUNT`):
+
+```text
+slot = K + p + K · j           // j = 0, 1, 2, …  (per-bucket, per-partition data counter)
+```
+
+So with `K = 2`: partition 0 writes data to slots `{2, 4, 6, …}`, partition 1 to
+`{3, 5, 7, …}`, and slots `{0, 1}` are the two partitions' reserved slots. The lanes
+never collide, so two devices on different partitions can stamp the same bucket
+concurrently.
+
+Per-partition per-bucket capacity (`partitionCapacity`):
+
+```text
+capacity = floor( 2^(D-16) / K ) − 1         // −1 for the reserved slot
+```
+
+| Depth `D` | slots/bucket | per-partition data slots/bucket (`K=2`) |
+| --------- | ------------ | --------------------------------------- |
+| 20        | 16           | 7                                       |
+| 22        | 64           | 31                                      |
+| 24        | 256          | 127                                     |
+| 28        | 4 096        | 2 047                                   |
+
+Legacy single-device accounts use `partitionCount = 1` (reserved slot 0, data from slot 1
+onward) and skip the lease entirely.
+
+## Utilization tracking
+
+Each device tracks, per bucket, how many data chunks **its partition** has written —
+the `j` counter above. This is held in memory as a `Uint32Array(65536)` (`dataCounters`),
+always uint32 in memory regardless of how it is serialized.
+
+### On-disk / on-wire codec
+
+The counter array is serialized into fixed `CHUNK_SIZE = 4096`-byte chunks. The per-bucket
+counter is **uint16** when it always fits (`D ≤ 31`, max `2^15`), else **uint32**
+(`D ≥ 32`). This sets the chunk layout (`getChunkLayout`):
+
+| Codec  | Applies when | `bucketsPerChunk` | `numUtilizationChunks` |
+| ------ | ------------ | ----------------- | ---------------------- |
+| uint16 | `D ≤ 31`     | 2 048             | 32                     |
+| uint32 | `D ≥ 32`     | 1 024             | 64                     |
+
+Counters are little-endian in the serialized chunk. Chunk `i` covers buckets
+`[i·bucketsPerChunk, (i+1)·bucketsPerChunk)`.
+
+### Per-chunk encryption key
+
+Utilization chunks are uploaded as **encrypted content-addressed chunks**. The key for
+chunk `i` is deterministic so re-saves dedup:
+
+```text
+chunkKey = HMAC-SHA256(
+    swarmEncryptionKey,
+    utf8("swarm-id-util-chunk-v1") ‖ batchId ‖ uint32_be(chunkIndex) ‖ uint32_be(nonce)
+)
+```
+
+`nonce` starts at 0 and is incremented only when the resulting encrypted address would
+land in the same bucket as another utilization chunk in the same save (collisions are
+vanishingly rare — ≈0.008 bumps per save with 32 chunks over 65 536 buckets). The nonce
+that produced a chunk is cached so an unchanged plaintext reuses the same key and the
+upload is skipped.
+
+### Local cache
+
+The reference implementation caches counter chunks in an IndexedDB store
+(`UtilizationStoreDB`, DB name `swarm-utilization-store`), keyed by `(batchId hex, chunkIndex)`,
+storing `{ data, contentHash, nonce, lastAccess }`. A port may use any local KV store; the
+cache is an optimization, not part of the wire protocol. The cross-device source of truth
+for a partition's counter is the **partition-state feed** (below), not the cache.
+
+## Lock SOCs
+
+A **single-owner chunk (SOC)** per partition is the cross-device authority for "who holds
+this partition right now." All of an account's devices share the `backupSigner`, so any of
+them can write any partition's lock SOC; concurrent writers are ordered by a fencing token.
+
+```text
+identifier = keccak256( utf8("swarm-id-partition-lock-v1:" + partition) )
+owner      = backupSigner address
+SOC address = keccak256( identifier ‖ owner )            // 32 bytes
+encryption = swarmEncryptionKey
+```
+
+Payload (JSON, ~150 bytes, encrypted):
+
+```json
+{
+  "holderDeviceId": "uuid-or-empty-string",
+  "generation": { "timestampMs": 1730000000000, "tiebreaker": "a1b2c3d4e5f6a7b8" },
+  "acquiredAt": 1730000000000,
+  "leasedUntil": 1730000030000
+}
+```
+
+- **`holderDeviceId`** — the current holder's device ID, or the sentinel
+  `NO_HOLDER_DEVICE_ID = ""` (empty string) after an explicit release.
+- **`generation`** — the fencing token. `compareGenerations(a, b)` orders by `timestampMs`
+  first, then by `tiebreaker` lexicographically. The higher generation always wins.
+
+### Acquire / refresh protocol
+
+A SOC has no compare-and-swap; ordering comes from the generation fence plus a guard
+window `PARTITION_LOCK_GUARD_MS = 2000` ms:
+
+1. **Read** the lock SOC.
+2. If a **live foreign holder** exists (`holderDeviceId` is neither us nor empty, and
+   `leasedUntil > now`) → return **`blocked`**, write nothing.
+3. Otherwise write our claim (`holderDeviceId = us`, fresh `generation`, `leasedUntil =
+now + LEASE_TTL_MS`).
+4. **Wait `guardMs`**, then re-read.
+5. If our generation is still the latest visible → **`acquired`**. If a higher generation
+   appeared during the guard → **`lost-race`** (a peer beat us; fall back to read-only).
+6. If the verify-read fails to return anything (transient Bee error / propagation lag) →
+   optimistically **`acquired`** — we observed no live foreign holder before writing, so a
+   failed read is not proof of a race; the periodic refresh reconciles and only demotes on
+   a _confirmed_ live foreign holder.
+
+### Reserved-slot routing
+
+The lock SOC's chunk lands in some bucket (`bucket(SOC address)`). The stamper routes the
+overstamp to that bucket's **reserved slot = the partition index**, so the tight heartbeat
+cadence never consumes data-slot budget and the SOC always occupies the same slot. The
+counter (utilization) chunks for a partition are routed the same way.
+
+## Partition-state feed
+
+Each `(batchId, partition)` has its own epoch feed carrying the holder's per-bucket data
+counter. The current holder publishes it **on release**; the next holder reads it **on
+acquire** and resumes from exactly that counter, so an orderly hand-off never re-uses a
+slot.
+
+```text
+topic = keccak256( utf8("swarm-id-partition-state-v1") ‖ batchId ‖ uint32_be(partition) )
+owner = backupSigner address
+```
+
+The counter is not a single blob. It is split into the same `numUtilizationChunks` counter
+chunks, each uploaded with a **random** encryption key to the partition's reserved slot,
+yielding a 64-byte **encrypted reference** (`address ‖ key`). A single **reference chunk**
+concatenates those references (`N · 64 ≤ 4096` bytes, one chunk even at `N = 64`), and the
+feed points at the reference chunk. A taking-over device follows
+**feed → reference chunk → counter chunks**, decrypting each from its embedded key.
+
+Reads short-circuit on a cached "synced reference": if the feed still points at the
+reference a device last synced with, it skips the downloads and reuses its local counter.
+A failed counter read falls back to a fresh zero counter rather than aborting the
+acquisition.
+
+:::note[Historical: device-claim feed]
+Iteration 1 used a per-device claim feed
+(`topic = keccak256(utf8("swarm-id-device-claim-v1:" + accountId + ":" + deviceId))`,
+payload `PartitionClaim { partition, leasedUntil, generation, acquiredAt }`, with
+`NO_CLAIM_PARTITION = -1`). The shared per-partition lock SOC **replaced** it as the
+holder authority. The claim-feed code still exists in the library but is not the active
+acquisition path; a fresh port does not need it.
+:::
+
+## Lease lifecycle
+
+The reference orchestrator is `PartitionLease`. Constants:
+
+| Constant                  | Value     | Meaning                                                             |
+| ------------------------- | --------- | ------------------------------------------------------------------- |
+| `LEASE_TTL_MS`            | 30 000 ms | A lease is valid this long; a crashed holder is reclaimable after.  |
+| `LEASE_REFRESH_MS`        | 10 000 ms | Holder re-writes the lock SOC this often (3 refreshes per TTL).     |
+| `IDLE_YIELD_MS`           | 30 000 ms | Holder voluntarily releases after this long with no upload.         |
+| `PARTITION_LOCK_GUARD_MS` | 2 000 ms  | Guard window between claim-write and verify-read.                   |
+| `SLOT_WAIT_TIMEOUT_MS`    | 30 000 ms | A device with no free partition polls this long for one to free up. |
+
+`acquire(partitionCount)`:
+
+1. If `partitionCount ≤ 1` → legacy single-device, no lease.
+2. `refreshFromSwarm` — read every partition's lock SOC, record the live (unexpired,
+   non-released) holders.
+3. Choose the partition we already hold, else the lowest free/expired one
+   (`pickFreeOrExpired`). If every partition has a live foreign holder → **read-only**.
+4. `claimPartition` — read the partition-state feed to seed the counter, then run the
+   lock acquire/verify protocol. On `acquired`, bind the counter to the stamper; on
+   `blocked`/`lost-race`, fall back to read-only.
+
+`refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil`; returns
+false (lease lost) on `blocked`/`lost-race`. `release(localCounter)` publishes the final
+counter to the partition-state feed, then writes the `holderDeviceId = ""` release
+sentinel. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a still-valid
+lease from a local cache without a Swarm round-trip (re-validated on the next refresh).
+
+### The four cases
+
+- **Case A — first device, fresh batch.** No lock SOC, no partition-state. Take partition
+  0, seed a zero counter.
+- **Case B — second device.** Partition 0 is live-held; take partition 1, seed its counter
+  from its partition-state feed (zero if never published).
+- **Case C — third+ device, turn-taking.** All `PARTITION_COUNT` partitions are held. The
+  new device waits (`SLOT_WAIT_TIMEOUT_MS`, polling every `LEASE_REFRESH_MS`) for a holder
+  to go idle (`IDLE_YIELD_MS` → it releases) or for a lease to lapse, then claims the freed
+  partition resuming from the published counter.
+- **Case D — crash recovery.** A holder dies without releasing. Its `leasedUntil` expires
+  after `LEASE_TTL_MS`; a peer then reclaims the partition. Resume is from the last
+  _published_ counter — an unclean crash that stamped past its last publish loses only data
+  that was never durably persisted anyway.
+
+## Account-state sync
+
+Account state is one **epoch feed** per account:
+
+```text
+topic = Topic.fromString("swarm-id-backup-v1:account:" + accountId)
+owner = backupSigner address
+```
+
+The feed points at an encrypted snapshot (`AccountStateSnapshot`, schema version 1):
+
+```text
+{ version: 1, timestamp, accountId,
+  metadata: { accountName, defaultPostageStampBatchID, createdAt, lastModified,
+              devices[], partitionCount },
+  identities[], connectedApps[], postageStamps[] }
+```
+
+`ConnectedApp` carries two fields that make cross-device merge correct:
+
+- **`updatedAt`** — a last-writer-wins clock, set on any change (falls back to
+  `lastConnectedAt` for records written before the field existed).
+- **`revokedAt`** — a tombstone marker. A revoked app is **kept** in the snapshot (so the
+  removal propagates) but hidden from the UI and invalid for auth.
+
+### Publish: optimistic verify-retry
+
+A shared epoch feed has no compare-and-swap — two devices publishing in the same epoch
+slot write the same SOC address and the later signer silently wins, orphaning the other's
+snapshot. Publishing therefore:
+
+1. Fetches the latest remote snapshot, **merges** the local state onto it (so we don't
+   stomp a peer's additions), uploads the merged snapshot, and updates the feed.
+2. Re-reads the feed (`verifyWon`): if it points at a _different_ reference, a peer won.
+3. Re-merges from the freshest remote and republishes, up to `MAX_PUBLISH_RETRIES = 3`
+   times, backing off `PUBLISH_RETRY_BACKOFF_MS = 200` ms plus up to
+   `PUBLISH_RETRY_JITTER_MS = 600` ms of jitter so two devices decorrelate. A
+   missing/unreadable re-read counts as "won" (never spuriously republish).
+
+The merge always folds the _original_ local state onto the freshest remote, so retries
+converge. Publishing is serialized within an origin by a cross-tab Web Lock
+(`swarm-write-<batchId>`) so a proxy iframe and the UI never collide locally.
+
+### Merge rules
+
+`mergeSnapshotWithRemote(local, remote)`:
+
+- **devices** — union by `deviceId`; larger `lastSignedInAt` wins, ties to local.
+- **identities** / **postageStamps** — union by key (`id` / `batchID`); **local wins** on
+  overlap.
+- **connectedApps** — **last-writer-wins** by `recency = updatedAt ?? lastConnectedAt ?? 0`,
+  keyed by `(identityId, appUrl)`. Process remote then local so a tie favours local. This
+  is what lets both _updates_ and _revocations_ (tombstones) propagate while distinct apps
+  still survive as a union.
+- **scalars** (`accountName`, `defaultPostageStampBatchID`, `partitionCount`) — local wins.
+- `timestamp` / `lastModified` — refreshed to now.
+
+### Restore vs refresh
+
+- **Restore** (first sign-in on a device): pull the snapshot and apply it wholesale into
+  local stores.
+- **Refresh** (already-known account): re-pull and merge the full snapshot into the stores
+  via no-sync "applyRefreshed" paths (so the refresh itself doesn't re-publish).
+
+### The partition gate
+
+A device may publish account state **only if it holds a partition** (or can claim a
+free/expired one), because publishing writes chunks to the shared batch. The lock SOC is
+the single source of truth for this — there is no separate "active devices" mirror. If
+every partition is held by a live foreign device, the publish is skipped and a peer
+publishes instead.
+
+## Porting checklist
+
+To interoperate with the reference implementation, an external client must:
+
+1. **Reconstruct the same `derivationKey`** after auth, then derive `swarmEncryptionKey`
+   and `backupKey` via `deriveSecret` exactly as above (HMAC-SHA256, key-as-hex-bytes,
+   context-as-UTF-8). The `backupSigner` address is the owner of everything.
+2. **Generate a stable per-install `deviceId`** (UUID) and the `tiebreaker`
+   (`keccak256(deviceId)[0:8]`).
+3. **Implement the lock-SOC protocol**: identifier hash, SOC address, encrypted JSON
+   payload, the read → guard (2 s) → verify acquire flow, generation fencing, and the
+   `""` release sentinel.
+4. **Implement the slot formula** `slot = K + p + K·j` and route lock-SOC/counter chunks to
+   reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
+5. **Implement the partition-state feed**: topic hash, the reference-chunk →
+   counter-chunks structure, publish-on-release / read-on-acquire.
+6. **Track per-bucket counters** with the uint16/uint32 codec and the
+   `swarm-id-util-chunk-v1` key derivation (only needed to publish counters that the
+   reference client can read).
+7. **Implement account-state sync**: the `swarm-id-backup-v1:account:<id>` epoch feed,
+   the snapshot schema (including `updatedAt`/`revokedAt`), the verify-retry publish, and
+   the merge rules — especially connectedApps LWW-with-tombstones.
+8. **Respect the partition gate**: never publish account state without holding a partition.
+
+All hashes are keccak256; all multi-byte integers in identifiers/topics are **big-endian
+uint32**; serialized counters are **little-endian**; feeds are epoch feeds owned by the
+backup signer.
+
+## Future work
+
+- **Agent restore path.** Agent (seed-phrase) accounts currently create fresh local state
+  on a new device instead of restoring from Swarm; they need the same restore path as
+  passkey/Ethereum sign-in.
+- **Publish when no UI window is open.** Today an open identity-UI tab does the publishing.
+  The robust fix is to have the proxy iframe (the only guaranteed-persistent context on a
+  dApp page) publish account state on a connection change — see the `BatchWriteCoordinator`
+  design below.
+- **Broaden refresh triggers.** Call refresh on app load / account switch, not only from
+  the Devices tab.
+- **Clearer contention logging.** The sync path logs "all partitions are held by other
+  devices" even when the real cause is a stamp/SOC error; surface those distinctly.
+- **`BatchWriteCoordinator` refactor.** Extract the partition-lease / stamp / write-lock
+  orchestration the proxy and the sync path currently duplicate into one shared unit, so
+  both share a single implementation. This is the change that unlocks proxy-side publish.
+- **Deletion tombstones for identities and stamps.** connectedApps propagate removals via
+  tombstones; identities and postageStamps still cannot express a deletion across devices.
