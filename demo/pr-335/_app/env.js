@@ -1,0 +1,1 @@
+export const env={"PUBLIC_ID_DOMAIN":"https://swarm.snaha.net/id/pr-335"}
