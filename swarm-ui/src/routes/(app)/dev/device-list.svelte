@@ -5,9 +5,6 @@
 
 <script lang="ts">
   import { browser } from '$app/environment'
-  import { goto } from '$app/navigation'
-  import { resolve } from '$app/paths'
-  import { page } from '$app/state'
   import { onMount } from 'svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
@@ -15,8 +12,6 @@
   import Divider from '$lib/components/ui/divider.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import CopyButton from '$lib/components/copy-button.svelte'
-  import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { syncStore } from '$lib/stores/sync.svelte'
   import {
@@ -25,28 +20,25 @@
     hexToUint8Array,
     leaseCacheStorageKey,
     PartitionLease,
+    type Account,
     type PartitionLeaseStateSnapshot,
   } from '@snaha/swarm-id'
   import { Bee } from '@ethersphere/bee-js'
   import { refreshAccountFromSwarm } from '$lib/utils/refresh-account-from-swarm'
-  import routes from '$lib/routes'
   import Laptop from 'carbon-icons-svelte/lib/Laptop.svelte'
   import CheckmarkFilled from 'carbon-icons-svelte/lib/CheckmarkFilled.svelte'
   import Renew from 'carbon-icons-svelte/lib/Renew.svelte'
+
+  const { account }: { account: Account } = $props()
 
   // Re-read the shared lease cache this often so the self row picks up the
   // proxy's per-tick `leasedUntil` advances even when `storage` events don't
   // cross the iframe/tab boundary.
   const LEASE_CACHE_POLL_MS = 3_000
 
-  const identityId = $derived(page.params.id)
-  const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
-  const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
   const thisDeviceId = browser ? getOrCreateDeviceId() : undefined
 
-  const hasPostageBatch = $derived(
-    !!account?.defaultPostageStampBatchID || !!identity?.defaultPostageStampBatchID,
-  )
+  const hasPostageBatch = $derived(!!account.defaultPostageStampBatchID)
 
   // Refresh state — pull the snapshot from Swarm so peers added on other
   // browsers show up here.
@@ -71,7 +63,7 @@
   let leaseCache = $state<PartitionLeaseStateSnapshot | undefined>(undefined)
 
   $effect(() => {
-    if (!browser || !account) return
+    if (!browser) return
     const key = leaseCacheStorageKey(account.id.toHex())
     const read = () => {
       const raw = localStorage.getItem(key)
@@ -92,7 +84,7 @@
   })
 
   async function doRefresh() {
-    if (!account || refreshing) return
+    if (refreshing) return
     refreshing = true
     refreshError = undefined
     noBackup = false
@@ -137,7 +129,7 @@
   // batch swap). Best-effort: if the account isn't active, syncAccount
   // refuses and we stay in the no-backup state — no worse than before.
   async function doPublish() {
-    if (!account || publishing) return
+    if (publishing) return
     publishing = true
     try {
       await syncStore.syncAccount(account.id.toHex())
@@ -153,9 +145,9 @@
   // re-fires whenever any tracked dependency changes (which happens every
   // time `applyRefreshedSnapshot` mutates the account), producing a loop.
   // onMount runs after initial render with no reactive subscriptions, so
-  // it fires once per fresh mount and never again. Switching to another
-  // tab and back creates a new component instance, which re-fires onMount
-  // — that's how "re-visit the tab to refresh" still works.
+  // it fires once per fresh mount and never again. Re-mounting the panel
+  // (e.g. switching the selected account via {#key}) re-fires onMount —
+  // that's how "re-visit to refresh" still works.
   onMount(() => {
     if (browser) void doRefresh()
   })
@@ -190,7 +182,7 @@
     // `_tick` so the self lease-expiry check re-evaluates over time.
     void _tick
     const now = Date.now()
-    return (account?.devices ?? []).map((d) => {
+    return (account.devices ?? []).map((d) => {
       const isThis = d.deviceId === thisDeviceId
       if (isThis) {
         // Self: read from the shared localStorage lease cache (proxy is the
@@ -241,19 +233,10 @@
     <Vertical --vertical-gap="var(--half-padding)">
       <Typography bold center>No synced account yet.</Typography>
       <Typography center>
-        Multi-device sync requires a postage stamp. Purchase one to enable uploading and see all
-        your registered devices here.
+        Multi-device sync requires a postage stamp. Assign one in the Stamps tab to enable uploading
+        and see all registered devices here.
       </Typography>
     </Vertical>
-    <Horizontal --horizontal-justify-content="center">
-      <Button
-        variant="strong"
-        dimension="compact"
-        onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
-      >
-        Add postage stamp
-      </Button>
-    </Horizontal>
   {:else}
     <Vertical --vertical-gap="var(--half-padding)">
       <Horizontal
@@ -275,7 +258,7 @@
         </Button>
       </Horizontal>
       <Typography variant="small">
-        Devices registered to this account. At most {account?.partitionCount ?? 1} can upload simultaneously.
+        Devices registered to this account. At most {account.partitionCount ?? 1} can upload simultaneously.
       </Typography>
       {#if refreshError}
         <Typography variant="small" --typography-color="var(--colors-danger, #da1e28)">

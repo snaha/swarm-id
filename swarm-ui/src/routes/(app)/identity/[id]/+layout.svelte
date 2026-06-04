@@ -20,7 +20,6 @@
           { label: 'Apps', href: resolve(routes.IDENTITY_APPS, { id: identityId }) },
           { label: 'Stamps', href: resolve(routes.IDENTITY_STAMPS, { id: identityId }) },
           { label: 'Identity', href: resolve(routes.IDENTITY_SETTINGS, { id: identityId }) },
-          { label: 'Devices', href: resolve(routes.IDENTITY_DEVICES, { id: identityId }) },
         ]
       : [],
   )
