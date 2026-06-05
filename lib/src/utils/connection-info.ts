@@ -26,6 +26,7 @@ export function connectionInfoEqual(
     a.identity?.address === b.identity?.address &&
     a.identity?.publicKey === b.identity?.publicKey &&
     a.appKey?.address === b.appKey?.address &&
-    a.appKey?.publicKey === b.appKey?.publicKey
+    a.appKey?.publicKey === b.appKey?.publicKey &&
+    a.partition === b.partition
   )
 }

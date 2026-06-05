@@ -9,6 +9,7 @@
 
 import { Binary } from "cafe-utility"
 import { PrivateKey, Topic, EthAddress } from "@ethersphere/bee-js"
+import { calculateChunkAddress } from "../../../chunk"
 
 /**
  * In-memory chunk storage for testing
@@ -91,7 +92,7 @@ export class MockBee {
       dataOrBatchId instanceof Uint8Array
         ? dataOrBatchId
         : (envelopeOrData as Uint8Array)
-    const address = Binary.keccak256(data)
+    const address = calculateChunkAddress(data).toUint8Array()
     const reference = Binary.uint8ArrayToHex(address)
     await this.store.put(reference, data)
     return { reference: { toHex: () => reference } }

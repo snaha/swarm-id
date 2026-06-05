@@ -46,8 +46,11 @@
   }
 
   function revokeApp(app: ConnectedApp) {
-    disconnectApp(app)
-    connectedAppsStore.removeApp(app.appUrl, app.identityId)
+    // Clear the local app secret the proxy reads, then tombstone the entry so
+    // the revocation propagates to other devices (a hard delete can't — the
+    // merge would re-add it from a peer snapshot).
+    localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
+    connectedAppsStore.revokeApp(app.appUrl, app.identityId)
   }
 </script>
 

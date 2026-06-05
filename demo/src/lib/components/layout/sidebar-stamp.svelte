@@ -52,6 +52,9 @@
 
   {#if clientStore.stamp}
     <div class="text-xs text-muted-foreground pl-6">TTL: {clientStore.stamp.ttl}</div>
+    <div class="text-xs text-muted-foreground pl-6">
+      Partition: {clientStore.partition === undefined ? 'Inactive' : clientStore.partition}
+    </div>
   {/if}
 
   {#if expanded}

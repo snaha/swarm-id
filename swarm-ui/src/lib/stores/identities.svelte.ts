@@ -82,8 +82,36 @@ export const identitiesStore = {
     saveIdentities(identities)
   },
 
+  /**
+   * Replace an account's identities with a freshly-merged set pulled from
+   * Swarm, WITHOUT firing `triggerSync` — the data came from a refresh, so
+   * re-publishing it would be wasted bandwidth and could clobber a peer write.
+   */
+  applyRefreshed(accountId: EthAddress, accountIdentities: Identity[]) {
+    identities = [...identities.filter((i) => !i.accountId.equals(accountId)), ...accountIdentities]
+    storageManager.save(identities)
+  },
+
   clear() {
     identities = []
     storageManager.clear()
   },
+}
+
+// Cross-context sync: when another same-origin context changes identities,
+// refresh our in-memory copy and publish for each affected account. The cross-
+// tab write lock serializes uploads to a single writer. Loop-safe: a publish
+// reads identities but never writes them.
+if (browser) {
+  storageManager.subscribe((ids) => {
+    identities = ids
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral set
+    const accountIds = new Set<string>()
+    for (const identity of ids) {
+      accountIds.add(identity.accountId.toHex())
+    }
+    for (const accountId of accountIds) {
+      triggerSync(accountId)
+    }
+  })
 }

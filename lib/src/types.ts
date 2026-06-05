@@ -51,6 +51,17 @@ export const STORAGE_KEY_CONNECTED_APPS = "swarm-id-connected-apps"
 export const STORAGE_KEY_POSTAGE_STAMPS = "swarm-id-postage-stamps"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
+export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
+
+/**
+ * localStorage key for the proxy's per-account partition-lease cache (a
+ * `PartitionLeaseStateSnapshot`). Same-origin tabs share this, so the
+ * SwarmID UI reads it to render the *self* device's active partition
+ * without a Swarm round-trip. The proxy is the sole writer.
+ */
+export function leaseCacheStorageKey(accountId: string): string {
+  return `${STORAGE_KEY_LEASE_CACHE_PREFIX}:${accountId.toLowerCase()}`
+}
 
 // ============================================================================
 // Upload/Download Options
@@ -566,6 +577,12 @@ export const ConnectionInfoSchema = z.object({
   storagePartitioned: z.boolean().optional(),
   /** Current upload mode: "user-stamp" (user has postage stamp), "subsidised" (using dApp gateway), "unavailable" (no upload capability) */
   uploadMode: UploadModeSchema.optional(),
+  /**
+   * Partition number this device currently holds in the postage batch's
+   * partition-lease. `undefined` when no lease is held (sign-in only,
+   * pre-first-upload) or for legacy single-device accounts.
+   */
+  partition: z.number().int().min(0).optional(),
   identity: z
     .object({
       id: z.string(),
@@ -1220,6 +1237,7 @@ export const ConnectionInfoChangedMessageSchema = z.object({
       publicKey: CompressedPublicKeySchema,
     })
     .optional(),
+  partition: z.number().int().min(0).optional(),
 })
 
 export const ConnectResponseMessageSchema = z.object({

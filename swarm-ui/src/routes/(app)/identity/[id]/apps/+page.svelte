@@ -15,7 +15,7 @@
   import { identitiesStore } from '$lib/stores/identities.svelte'
 
   const identityId = $derived(page.params.id)
-  const apps = $derived(identityId ? connectedAppsStore.getAppsByIdentityId(identityId) : [])
+  const apps = $derived(identityId ? connectedAppsStore.getActiveAppsByIdentityId(identityId) : [])
   const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
 
   let sessionDurationValue = $state(sessionDurationToValue(DEFAULT_SESSION_DURATION))

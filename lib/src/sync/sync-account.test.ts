@@ -2,9 +2,10 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { EthAddress, BatchId } from "@ethersphere/bee-js"
+import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
-import { deserializeAccountState } from "./serialization"
+import { deserializeAccountState, serializeAccountState } from "./serialization"
+import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type {
   AccountsStoreInterface,
   IdentitiesStoreInterface,
@@ -23,6 +24,7 @@ import {
   createPostageStamp,
   createDevice,
 } from "../test-fixtures"
+import { readPartitionLock, acquirePartitionLock } from "./partition-lock"
 
 // ============================================================================
 // Mock Factories
@@ -83,6 +85,16 @@ function createMockStores() {
   }
 }
 
+// Bee mock with a downloadChunk that succeeds, so the post-upload verification
+// probe in syncAccount sees the root chunk as retrievable and returns status
+// "success" rather than "success-unverified".
+function createMockBee(): Bee {
+  return {
+    url: "http://mock-bee",
+    downloadChunk: vi.fn().mockResolvedValue(new Uint8Array(105)),
+  } as unknown as Bee
+}
+
 // ============================================================================
 // Upload & Epoch Mock Setup
 // ============================================================================
@@ -117,6 +129,9 @@ vi.mock("../proxy/upload", () => ({
 
 // Use a real class for the mock so `new BasicEpochUpdater(...)` works
 const mockUpdate = vi.fn()
+// Shared across all AsyncEpochFinder instances so a test can sequence both the
+// pre-write remote fetch and the post-write verify reads (both go via findAt).
+const mockFindAt = vi.fn(async (): Promise<Uint8Array | undefined> => undefined)
 
 vi.mock("../proxy/feeds/epochs", () => {
   return {
@@ -124,8 +139,25 @@ vi.mock("../proxy/feeds/epochs", () => {
       update = mockUpdate
       getOwner = vi.fn(() => new EthAddress("a".repeat(40)))
     },
+    // Pre-write remote-snapshot fetch + post-write verify both read via
+    // AsyncEpochFinder; default returns empty so the merge sees no remote
+    // state and the verify treats the write as "won".
+    AsyncEpochFinder: class MockAsyncEpochFinder {
+      findAt = mockFindAt
+    },
   }
 })
+
+// tryFetchLatestSnapshot downloads + deserializes the snapshot the finder
+// points at. Default is never reached (findAt → undefined); the verify-retry
+// tests override it with a serialized peer snapshot. `vi.hoisted` so the
+// reference is initialized before the hoisted `vi.mock` factory runs.
+const mockDownloadData = vi.hoisted(() =>
+  vi.fn(async (): Promise<Uint8Array> => new Uint8Array()),
+)
+vi.mock("../proxy/download-data", () => ({
+  downloadDataWithChunkAPI: mockDownloadData,
+}))
 
 // Mock utilization to avoid complexity in these tests
 vi.mock("../utils/batch-utilization", () => ({
@@ -135,6 +167,24 @@ vi.mock("../utils/batch-utilization", () => ({
   }),
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
+  LEASE_TTL_MS: 30_000,
+}))
+
+// The multi-device gate reads/claims partition lock SOCs; mock both so each
+// test controls whether the device holds / can claim a partition.
+vi.mock("./partition-lock", () => ({
+  readPartitionLock: vi.fn(),
+  acquirePartitionLock: vi.fn(),
+  NO_HOLDER_DEVICE_ID: "",
+}))
+
+// device-id uses localStorage which isn't available in this test environment;
+// stub it out with a fixed value.
+vi.mock("../utils/device-id", () => ({
+  getOrCreateDeviceId: vi.fn(() => "test-device-self"),
+  getDeviceId: vi.fn(() => "test-device-self"),
+  mergeDevices: vi.fn((existing: unknown[]) => existing),
+  detectDeviceName: vi.fn(() => "Test Device"),
 }))
 
 // ============================================================================
@@ -148,6 +198,14 @@ describe("createSyncAccount", () => {
     capturedEpochReference = undefined
     uploadCallCount = 0
     epochUpdateCallCount = 0
+
+    vi.mocked(readPartitionLock).mockReset()
+    vi.mocked(acquirePartitionLock).mockReset()
+
+    mockFindAt.mockReset()
+    mockFindAt.mockResolvedValue(undefined)
+    mockDownloadData.mockReset()
+    mockDownloadData.mockResolvedValue(new Uint8Array())
 
     mockUpdate.mockReset()
     mockUpdate.mockImplementation(
@@ -167,7 +225,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -199,7 +257,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -235,7 +293,7 @@ describe("createSyncAccount", () => {
     ).mockReturnValue(undefined)
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -266,7 +324,7 @@ describe("createSyncAccount", () => {
     ])
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -292,7 +350,7 @@ describe("createSyncAccount", () => {
     )
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -313,7 +371,7 @@ describe("createSyncAccount", () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
-      bee: {} as never,
+      bee: createMockBee(),
       ...stores,
       utilizationStore: {} as UtilizationStoreDB,
       utilizationUploader: {
@@ -329,5 +387,174 @@ describe("createSyncAccount", () => {
     // Last address should be the SOC address from epoch feed update
     const lastAddress = result.chunkAddresses[result.chunkAddresses.length - 1]
     expect(lastAddress).toEqual(FAKE_SOC_ADDRESS)
+  })
+
+  it("claims a free partition and publishes when this device holds none (multi-device account)", async () => {
+    const stores = createMockStores()
+    const baseAccount = stores.accountsStore.getAccount(
+      new EthAddress(TEST_ETH_ADDRESS_HEX),
+    )!
+    stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
+      id.toHex() === TEST_ETH_ADDRESS_HEX
+        ? { ...baseAccount, partitionCount: 2 }
+        : undefined,
+    )
+
+    // No device holds either partition (all free), and the claim succeeds —
+    // so the SwarmID UI acquires partition 0 and publishes.
+    vi.mocked(readPartitionLock).mockResolvedValue(undefined)
+    vi.mocked(acquirePartitionLock).mockResolvedValue({
+      outcome: "acquired",
+      payload: {
+        holderDeviceId: "test-device-self",
+        generation: { timestampMs: 1, tiebreaker: "00" },
+        acquiredAt: 1,
+        leasedUntil: Date.now() + 60_000,
+      },
+    })
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+    expect(acquirePartitionLock).toHaveBeenCalledTimes(1)
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("success")
+    expect(uploadCallCount).toBe(1)
+  })
+
+  it("skips sync when all partitions are held by live foreign devices", async () => {
+    const stores = createMockStores()
+    const baseAccount = stores.accountsStore.getAccount(
+      new EthAddress(TEST_ETH_ADDRESS_HEX),
+    )!
+    stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
+      id.toHex() === TEST_ETH_ADDRESS_HEX
+        ? { ...baseAccount, partitionCount: 2 }
+        : undefined,
+    )
+
+    // Every partition is held by a *live* *foreign* device — nothing free to
+    // claim → skip; a peer (or the proxy) publishes instead.
+    vi.mocked(readPartitionLock).mockResolvedValue({
+      holderDeviceId: "some-other-device",
+      generation: { timestampMs: 1, tiebreaker: "00" },
+      acquiredAt: 1,
+      leasedUntil: Date.now() + 60_000,
+    })
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+    expect(result).toBeUndefined()
+    expect(acquirePartitionLock).not.toHaveBeenCalled()
+    expect(uploadCallCount).toBe(0)
+    expect(epochUpdateCallCount).toBe(0)
+  })
+
+  // A peer snapshot already on Swarm, carrying a connected app we don't hold
+  // locally. A correct retry must fold this in (union) rather than drop it.
+  function makePeerSnapshot(): AccountStateSnapshot {
+    const peerApp = createConnectedApp({
+      appUrl: "https://peer.example.com",
+      appName: "Peer App",
+      appSecret: undefined,
+    })
+    return {
+      version: 1,
+      timestamp: 1700000000000,
+      accountId: TEST_ETH_ADDRESS_HEX,
+      metadata: {
+        accountName: "Test Account",
+        defaultPostageStampBatchID: TEST_BATCH_ID_HEX,
+        createdAt: 1700000000000,
+        lastModified: 1700000000000,
+        devices: [],
+        partitionCount: 1,
+      },
+      identities: [createIdentity()],
+      connectedApps: [peerApp],
+      postageStamps: [createPostageStamp()],
+    }
+  }
+
+  it("re-merges and republishes when a peer overwrites the feed between write and verify", async () => {
+    const stores = createMockStores()
+    mockDownloadData.mockResolvedValue(
+      serializeAccountState(makePeerSnapshot()),
+    )
+
+    // FAKE_UPLOAD_REFERENCE is 32 bytes of 0xab; the verify compares the
+    // feed's current reference against the one we wrote.
+    const ourRef = new Uint8Array(32).fill(0xab)
+    const peerRef = new Uint8Array(32).fill(0xcd)
+    mockFindAt
+      .mockResolvedValueOnce(undefined) // publish #1 pre-write fetch: no remote
+      .mockResolvedValueOnce(peerRef) // verify #1: a peer overwrote us
+      .mockResolvedValueOnce(peerRef) // publish #2 pre-write fetch: peer snapshot
+      .mockResolvedValueOnce(ourRef) // verify #2: our write won
+      .mockResolvedValue(ourRef)
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("success")
+    // One initial publish + one retry.
+    expect(uploadCallCount).toBe(2)
+    expect(epochUpdateCallCount).toBe(2)
+    // The re-published snapshot is the union of our local app and the peer's.
+    expect(capturedUploadData).toBeDefined()
+    const republished = deserializeAccountState(capturedUploadData!)
+    const appNames = republished.connectedApps.map((a) => a.appName).sort()
+    expect(appNames).toEqual(["Peer App", "Test App"])
+  })
+
+  it("gives up with success-unverified after the retry budget when a peer keeps winning", async () => {
+    const stores = createMockStores()
+    mockDownloadData.mockResolvedValue(
+      serializeAccountState(makePeerSnapshot()),
+    )
+
+    // The verify never sees our reference, so every attempt looks lost.
+    mockFindAt.mockResolvedValue(new Uint8Array(32).fill(0xcd))
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("success-unverified")
+    // 1 initial publish + MAX_PUBLISH_RETRIES (3) retries.
+    expect(uploadCallCount).toBe(4)
+    expect(epochUpdateCallCount).toBe(4)
   })
 })

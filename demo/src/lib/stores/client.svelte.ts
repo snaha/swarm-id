@@ -48,6 +48,7 @@ let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailabl
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
+let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
 let beeApiUrl = $state<string | undefined>(undefined)
@@ -55,7 +56,7 @@ let beeApiUrl = $state<string | undefined>(undefined)
 let currentIdentityId: string | undefined
 let currentIdentityName: string | undefined
 let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
-let currentSubsidisedGatewayUrl: string | undefined = DEFAULT_BEE_NODE_URL
+let currentSubsidisedGatewayUrl: string | undefined = undefined
 
 // Monotonic generation counter for connection-change handler runs. Used to
 // drop stale results from in-flight `getPostageBatch()` calls when the user
@@ -110,6 +111,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   logStore.log(
     `Connection info: canUpload=${info.canUpload}, identity=${JSON.stringify(info.identity)}`,
   )
+  partition = info.partition
 
   if (info.storagePartitioned) {
     logStore.log(
@@ -170,6 +172,9 @@ export const clientStore = {
   },
   get stamp() {
     return stamp
+  },
+  get partition() {
+    return partition
   },
   get deferred() {
     return deferred
@@ -290,6 +295,7 @@ export const clientStore = {
     identity = undefined
     appKey = undefined
     stamp = undefined
+    partition = undefined
     socWriterInstance = undefined
   },
 }

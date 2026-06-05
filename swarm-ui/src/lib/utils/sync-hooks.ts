@@ -3,6 +3,9 @@
 
 import { syncStore } from '../stores/sync.svelte'
 
+// How long to coalesce rapid account mutations before publishing once.
+const SYNC_DEBOUNCE_MS = 2000
+
 // Debounce timer per account
 const syncTimers = new Map<string, ReturnType<typeof setTimeout>>()
 
@@ -22,7 +25,7 @@ export function triggerSync(accountId: string): void {
   const timer = setTimeout(() => {
     syncStore.syncAccount(accountId)
     syncTimers.delete(accountId)
-  }, 2000)
+  }, SYNC_DEBOUNCE_MS)
 
   syncTimers.set(accountId, timer)
 }

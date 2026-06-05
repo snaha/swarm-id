@@ -20,6 +20,7 @@
   import Tabs from './tabs.svelte'
   import CopyButton from './copy-button.svelte'
   import StatusDot from './status-dot.svelte'
+  import DeviceList from './device-list.svelte'
   import Divider from '$lib/components/ui/divider.svelte'
   import routes from '$lib/routes'
   import { BatchId, EthAddress, PrivateKey, Utils } from '@ethersphere/bee-js'
@@ -33,13 +34,14 @@
   const DEFAULT_STAMP_DAYS = 7
 
   // Tab state
-  type Tab = 'overview' | 'stamps' | 'sync'
+  type Tab = 'overview' | 'stamps' | 'sync' | 'devices'
   let activeTab = $state<Tab>('overview')
 
   const tabs = [
     { value: 'overview', label: 'Overview' },
     { value: 'stamps', label: 'Stamps' },
     { value: 'sync', label: 'Sync' },
+    { value: 'devices', label: 'Devices' },
   ] as const
 
   // Demo app URL for connect flow testing
@@ -245,7 +247,19 @@
 
     for (const account of accountsToSync) {
       try {
-        await syncStore.syncAccount(account.id.toHex())
+        const result = await syncStore.syncAccount(account.id.toHex())
+
+        if (!result) {
+          results.push(`⚠️ ${account.name}: no snapshot captured (missing stamp?)`)
+          errorCount++
+          continue
+        }
+
+        if (result.status === 'error') {
+          results.push(`❌ ${account.name}: ${result.error}`)
+          errorCount++
+          continue
+        }
 
         // Get default stamp to show utilization
         const defaultStamp =
@@ -256,6 +270,15 @@
         const utilization = stamp ? stamp.utilization.toFixed(2) : 'unknown'
 
         const identityCount = identitiesStore.getIdentitiesByAccount(account.id).length
+
+        if (result.status === 'success-unverified') {
+          results.push(
+            `⚠️ ${account.name} (${identityCount} identities): synced, but root chunk not retrievable — ${result.warning}`,
+          )
+          errorCount++
+          continue
+        }
+
         results.push(
           `✅ ${account.name} (${identityCount} identities): ${utilization}% utilization`,
         )
@@ -284,8 +307,13 @@ Check console logs for details:
     stampResult = undefined
 
     try {
+      // Buy a MUTABLE batch. Bee's POST /stamps defaults to immutable, but the
+      // multi-device partition scheme rewrites the partition-lock SOC on every
+      // lease refresh, which an immutable batch forbids. Request mutable
+      // explicitly so /dev-bought stamps work with partitioning.
       const response = await fetch(`${beeUrl}/stamps/${stampAmount}/${stampDepth}`, {
         method: 'POST',
+        headers: { immutable: 'false' },
       })
       if (!response.ok) {
         const errorText = await response.text()
@@ -879,6 +907,26 @@ Check console logs for details:
           • Open browser console to see detailed logs
         </Typography>
       </Vertical>
+    </Vertical>
+  {/if}
+
+  <!-- Devices Tab -->
+  {#if activeTab === 'devices'}
+    <Vertical --vertical-gap="var(--padding)">
+      <Typography variant="h3">Account Devices</Typography>
+      <Typography variant="small">
+        Inspect the devices registered to an account and which partitions they currently hold.
+      </Typography>
+      <Select label="Account" items={accountOptions} bind:value={selectedAccountId} />
+      {#if selectedAccount}
+        {#key selectedAccountId}
+          <DeviceList account={selectedAccount} />
+        {/key}
+      {:else}
+        <Typography variant="small" style="color: var(--colors-medium);">
+          No accounts found.
+        </Typography>
+      {/if}
     </Vertical>
   {/if}
 </Vertical>

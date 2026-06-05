@@ -25,7 +25,13 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
-  import { deriveAccountDerivationKey, getOrCreateDeviceId, mergeDevices } from '@snaha/swarm-id'
+  import {
+    deriveAccountDerivationKey,
+    getOrCreateDeviceId,
+    mergeDevices,
+    detectDeviceName,
+    PARTITION_COUNT,
+  } from '@snaha/swarm-id'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -92,13 +98,17 @@
       const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
 
       // Store account (seed phrase is NOT stored - must be re-entered each time)
+      const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
         id: account.id,
         name: account.name,
         createdAt: account.createdAt,
         type: 'agent',
         derivationKey,
-        devices: mergeDevices([], getOrCreateDeviceId()),
+        devices: mergeDevices([], deviceId, detectDeviceName()),
+        // Multi-device partition lease: opt new accounts into K=2 sharing
+        // from day one. Lock SOCs are claimed on demand by the proxy.
+        partitionCount: PARTITION_COUNT,
       })
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')

@@ -3,7 +3,12 @@
 
 import { browser } from '$app/environment'
 import { EthAddress, BatchId } from '@ethersphere/bee-js'
-import { createAccountsStorageManager, type Account, type Device } from '@snaha/swarm-id'
+import {
+  createAccountsStorageManager,
+  STORAGE_KEY_ACCOUNTS,
+  type Account,
+  type Device,
+} from '@snaha/swarm-id'
 import { triggerSync } from '$lib/utils/sync-hooks'
 
 // ============================================================================
@@ -26,6 +31,18 @@ function saveAccounts(data: Account[]): void {
 // ============================================================================
 
 let accounts = $state<Account[]>(loadAccounts())
+
+if (browser) {
+  // Cross-tab refresh: when another tab on the same origin mutates the
+  // accounts list (sign-in, sign-out, identity add, stamp purchase), pick
+  // up the new value so this tab's reactive state stays in sync. Lease
+  // state is no longer mirrored in the account record — the lock SOC is the
+  // source of truth — so there's nothing lease-related to diff here.
+  window.addEventListener('storage', (e) => {
+    if (e.key !== STORAGE_KEY_ACCOUNTS) return
+    accounts = loadAccounts()
+  })
+}
 
 export const accountsStore = {
   get accounts() {
@@ -56,6 +73,23 @@ export const accountsStore = {
   updateDevices(id: EthAddress, devices: Device[]) {
     accounts = accounts.map((account) =>
       account.id.equals(id) ? { ...account, devices } : account,
+    )
+    saveAccounts(accounts)
+  },
+
+  /**
+   * Apply a snapshot just fetched from Swarm. Updates `devices` in-place
+   * without firing `triggerSync` — the data came from Swarm, re-publishing
+   * it would be wasted bandwidth and could clobber a more recent peer write.
+   */
+  applyRefreshedSnapshot(id: EthAddress, fields: { devices: Device[] }): void {
+    accounts = accounts.map((account) =>
+      account.id.equals(id)
+        ? {
+            ...account,
+            devices: fields.devices,
+          }
+        : account,
     )
     saveAccounts(accounts)
   },
