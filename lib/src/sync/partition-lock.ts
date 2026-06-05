@@ -33,6 +33,15 @@ import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { makePartitionLockIdentifier } from "../utils/lock-soc"
+import {
+  PartitionLockPayloadSchemaV1,
+  type PartitionLockGeneration,
+  type PartitionLockPayload,
+} from "../schemas"
+
+// Re-export the wire-format types (the Zod schema is the source of truth, in
+// `../schemas`) so existing callers keep importing them from this module.
+export type { PartitionLockGeneration, PartitionLockPayload }
 
 // Re-export so external callers continue to import these from the
 // partition-lock module (the implementations live in utils/lock-soc.ts to
@@ -51,26 +60,6 @@ const TIEBREAKER_BYTES = 8
  * (e.g. after an explicit release).
  */
 export const NO_HOLDER_DEVICE_ID = ""
-
-/**
- * Fencing token for the partition lock. Two writers with equal `timestampMs`
- * are ordered by their per-device `tiebreaker` (hex of the first 8 bytes of
- * `keccak256(deviceId)`).
- */
-export interface PartitionLockGeneration {
-  /** Wall-clock ms at write time. */
-  timestampMs: number
-  /** Per-device fingerprint, hex. Stable across all writes by this device. */
-  tiebreaker: string
-}
-
-/** Payload stored in the partition-lock SOC. ~150 bytes JSON. */
-export interface PartitionLockPayload {
-  holderDeviceId: string
-  generation: PartitionLockGeneration
-  acquiredAt: number
-  leasedUntil: number
-}
 
 /**
  * Outcome of an `acquirePartitionLock` call.
@@ -133,11 +122,14 @@ export async function readPartitionLock(opts: {
       identifier,
       swarmEncryptionKey,
     )
-    return JSON.parse(
-      new TextDecoder().decode(soc.payload),
-    ) as PartitionLockPayload
+    const parsed = PartitionLockPayloadSchemaV1.safeParse(
+      JSON.parse(new TextDecoder().decode(soc.payload)),
+    )
+    // A payload that doesn't match the schema (foreign/corrupt/old format)
+    // is treated the same as a missing lock — see the catch below.
+    return parsed.success ? parsed.data : undefined
   } catch {
-    // Missing chunk, decryption failure, or malformed payload — treat all
+    // Missing chunk, decryption failure, or malformed JSON — treat all
     // as "lock unobserved". Callers (acquirePartitionLock) treat undefined
     // as "first acquire".
     return undefined

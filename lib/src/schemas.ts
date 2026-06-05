@@ -297,6 +297,38 @@ export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
 
 // ============================================================================
+// Partition-Lease Wire Formats
+// ============================================================================
+
+/**
+ * Fencing token for the partition lock. Two writers with equal `timestampMs`
+ * are ordered by `tiebreaker` (hex of the first 8 bytes of
+ * `keccak256(deviceId)`).
+ */
+export const PartitionLockGenerationSchemaV1 = z.object({
+  timestampMs: z.number().int().nonnegative(),
+  tiebreaker: z.string().regex(/^[0-9a-f]{16}$/),
+})
+
+/**
+ * Payload stored (as encrypted JSON) in a partition-lock SOC. The format is
+ * versioned by the SOC identifier domain (`swarm-id-partition-lock-v1`), so no
+ * in-payload version field is needed. `holderDeviceId` is `""` for the
+ * `NO_HOLDER_DEVICE_ID` sentinel (e.g. after an explicit release).
+ */
+export const PartitionLockPayloadSchemaV1 = z.object({
+  holderDeviceId: z.string(),
+  generation: PartitionLockGenerationSchemaV1,
+  acquiredAt: z.number().int().nonnegative(),
+  leasedUntil: z.number().int().nonnegative(),
+})
+
+export type PartitionLockGeneration = z.infer<
+  typeof PartitionLockGenerationSchemaV1
+>
+export type PartitionLockPayload = z.infer<typeof PartitionLockPayloadSchemaV1>
+
+// ============================================================================
 // Network Settings Schema
 // ============================================================================
 

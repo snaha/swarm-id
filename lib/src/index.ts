@@ -103,6 +103,10 @@ export type {
   PartitionLockGeneration,
   PartitionLockPayload,
 } from "./sync/partition-lock"
+export {
+  PartitionLockPayloadSchemaV1,
+  PartitionLockGenerationSchemaV1,
+} from "./schemas"
 
 // Utilization storage (IndexedDB cache)
 export {

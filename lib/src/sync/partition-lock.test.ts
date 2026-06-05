@@ -24,6 +24,8 @@ import {
   NO_HOLDER_DEVICE_ID,
   type PartitionLockPayload,
 } from "./partition-lock"
+import { PartitionLockPayloadSchemaV1 } from "../schemas"
+import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { toBucket } from "../utils/batch-utilization"
 import {
   MockBee,
@@ -243,6 +245,97 @@ describe("readPartitionLock / writePartitionLock round-trip", () => {
     })
     expect(read?.holderDeviceId).toBe(DEVICE_B)
     expect(read?.generation.timestampMs).toBe(2_000_000)
+  })
+})
+
+describe("PartitionLockPayloadSchemaV1", () => {
+  const valid: PartitionLockPayload = {
+    holderDeviceId: DEVICE_A,
+    generation: { timestampMs: 1_000_000, tiebreaker: "0123456789abcdef" },
+    acquiredAt: 1_000_000,
+    leasedUntil: 1_060_000,
+  }
+
+  it("accepts a well-formed payload", () => {
+    expect(PartitionLockPayloadSchemaV1.safeParse(valid).success).toBe(true)
+  })
+
+  it("accepts the empty-string NO_HOLDER_DEVICE_ID sentinel", () => {
+    const ok = PartitionLockPayloadSchemaV1.safeParse({
+      ...valid,
+      holderDeviceId: NO_HOLDER_DEVICE_ID,
+    })
+    expect(ok.success).toBe(true)
+  })
+
+  it("rejects a missing field", () => {
+    const { acquiredAt: _omit, ...partial } = valid
+    expect(PartitionLockPayloadSchemaV1.safeParse(partial).success).toBe(false)
+  })
+
+  it("rejects a malformed tiebreaker (not 16 lowercase hex)", () => {
+    for (const tiebreaker of [
+      "",
+      "XYZ",
+      "0123456789ABCDEF",
+      "0123456789abcde",
+    ]) {
+      const r = PartitionLockPayloadSchemaV1.safeParse({
+        ...valid,
+        generation: { ...valid.generation, tiebreaker },
+      })
+      expect(r.success).toBe(false)
+    }
+  })
+
+  it("rejects non-integer or negative timestamps", () => {
+    expect(
+      PartitionLockPayloadSchemaV1.safeParse({ ...valid, leasedUntil: -1 })
+        .success,
+    ).toBe(false)
+    expect(
+      PartitionLockPayloadSchemaV1.safeParse({
+        ...valid,
+        generation: { ...valid.generation, timestampMs: 1.5 },
+      }).success,
+    ).toBe(false)
+  })
+
+  it("rejects wrong field types", () => {
+    expect(
+      PartitionLockPayloadSchemaV1.safeParse({
+        ...valid,
+        holderDeviceId: 123,
+      }).success,
+    ).toBe(false)
+  })
+})
+
+describe("readPartitionLock — schema validation", () => {
+  it("returns undefined for a syntactically valid but schema-invalid SOC body", async () => {
+    // Write a SOC at the lock identifier whose (decrypted) JSON body is missing
+    // the required fields. readPartitionLock must reject it like a missing lock,
+    // not surface a half-formed object to callers.
+    const identifier = makePartitionLockIdentifier(PARTITION)
+    const target: UploadTarget = {
+      mode: "stamper",
+      bee: bee as unknown as Bee,
+      stamper,
+    }
+    const body = new TextEncoder().encode(
+      JSON.stringify({ holderDeviceId: DEVICE_A }),
+    )
+    await uploadSOC(target, BACKUP_SIGNER, identifier, body, {
+      encryptionKey: TEST_ENC_KEY,
+    })
+
+    const read = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+    })
+    expect(read).toBeUndefined()
   })
 })
 
