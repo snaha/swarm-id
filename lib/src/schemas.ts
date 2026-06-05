@@ -297,25 +297,6 @@ export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
 
 // ============================================================================
-// Partition-Lease Feed Payloads
-// ============================================================================
-
-/**
- * Per-partition state feed payload.
- *
- * `bucketCounters` is a serialised `Uint32Array(NUM_BUCKETS)` (little-endian
- * uint32 per bucket; the on-disk codec used for the utilisation chunks is
- * not reused here because this payload is read whole, not chunked into the
- * postage batch).
- */
-export const PartitionStateSchemaV1 = z.object({
-  bucketCounters: z.instanceof(Uint8Array),
-  publishedBy: z.string(),
-  publishedAt: z.number(),
-})
-export type PartitionState = z.infer<typeof PartitionStateSchemaV1>
-
-// ============================================================================
 // Network Settings Schema
 // ============================================================================
 

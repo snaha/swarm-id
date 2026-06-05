@@ -235,5 +235,11 @@ export async function acquirePartitionLock(opts: {
   if (compareGenerations(verified.generation, ourGeneration) > 0) {
     return { outcome: "lost-race", payload: verified }
   }
+  // A non-greater generation from a *different* holder still means our claim
+  // stands — don't source our self-lease timestamps (acquiredAt/leasedUntil)
+  // from a peer's payload.
+  if (verified.holderDeviceId !== opts.deviceId) {
+    return { outcome: "acquired", payload: ourPayload }
+  }
   return { outcome: "acquired", payload: verified }
 }

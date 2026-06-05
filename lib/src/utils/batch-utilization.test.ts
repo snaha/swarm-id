@@ -24,10 +24,8 @@ import {
   getChunkLayout,
   initializeBatchUtilization,
   mergeChunk,
-  resolveUtilizationChunkKeys,
   serializeUint16Array,
   serializeUint32Array,
-  toBucket,
 } from "./batch-utilization"
 import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import type { Chunk as CafeChunk } from "cafe-utility"
@@ -314,116 +312,6 @@ describe("deriveUtilizationChunkKey", () => {
     await expect(
       deriveUtilizationChunkKey(new Uint8Array(16), TEST_BATCH_ID, 0, 0),
     ).rejects.toThrow(/swarmEncryptionKey length/)
-  })
-})
-
-describe("resolveUtilizationChunkKeys", () => {
-  /**
-   * Build N distinct synthetic plaintexts. Each one is unique so the natural
-   * (nonce=0) bucket distribution is effectively random across chunkIndex,
-   * matching what production sees over time.
-   */
-  function buildDistinctPlaintexts(count: number): Uint8Array[] {
-    const out: Uint8Array[] = []
-    for (let i = 0; i < count; i++) {
-      const data = new Uint8Array(CHUNK_SIZE)
-      // Seed enough variation that BMT outputs are distinct
-      const seed = (i + 1) * 2654435761
-      for (let j = 0; j < CHUNK_SIZE; j++) {
-        data[j] = (seed + j * 31) & 0xff
-      }
-      out.push(data)
-    }
-    return out
-  }
-
-  it("produces 32 distinct buckets at depth 24 with a chunk-count fixture", async () => {
-    const plaintexts = buildDistinctPlaintexts(32)
-    const { keys, buckets } = await resolveUtilizationChunkKeys(plaintexts, {
-      swarmEncryptionKey: new Uint8Array(32).map((_, i) => i + 1),
-      batchId: TEST_BATCH_ID,
-    })
-    expect(keys.length).toBe(32)
-    expect(buckets.length).toBe(32)
-    expect(new Set(buckets).size).toBe(32)
-    // The expected number of nonce bumps for 32 chunks over 65,536 buckets
-    // is ~0.008. Allow up to 2 bumps to keep the test stable.
-    const totalBumps = keys.reduce((acc, k) => acc + k.nonce, 0)
-    expect(totalBumps).toBeLessThanOrEqual(2)
-  })
-
-  it("is stable across reruns when priorNonces match", async () => {
-    const plaintexts = buildDistinctPlaintexts(32)
-    const first = await resolveUtilizationChunkKeys(plaintexts, {
-      swarmEncryptionKey: new Uint8Array(32).map((_, i) => i + 1),
-      batchId: TEST_BATCH_ID,
-    })
-    const priorNonces: Record<number, number> = {}
-    for (let i = 0; i < first.keys.length; i++) {
-      priorNonces[i] = first.keys[i].nonce
-    }
-    const second = await resolveUtilizationChunkKeys(plaintexts, {
-      swarmEncryptionKey: new Uint8Array(32).map((_, i) => i + 1),
-      batchId: TEST_BATCH_ID,
-      priorNonces,
-    })
-    for (let i = 0; i < first.keys.length; i++) {
-      expect(second.keys[i].nonce).toBe(first.keys[i].nonce)
-      expect(Array.from(second.keys[i].key)).toEqual(
-        Array.from(first.keys[i].key),
-      )
-      expect(second.buckets[i]).toBe(first.buckets[i])
-    }
-  })
-
-  it("perturbs only the higher chunkIndex when two chunks share a bucket", async () => {
-    // Lower-index-wins is hard to demonstrate with random plaintexts (natural
-    // 2-way collisions in 65,536 buckets are vanishingly rare).
-    // Instead we set up the same plaintext for two indices but priorNonces
-    // such that chunk 1 starts at the same nonce that produces chunk 0's
-    // bucket. Since the key derivation is keyed by chunkIndex, this can't
-    // actually force a real collision; demonstrating it would require
-    // recovering identical bucket outputs from different (index, nonce)
-    // pairs — too brittle. Instead we assert the structural property: when
-    // a collision *does* happen during the inner loop, the result still
-    // satisfies the "all distinct" invariant. The "distinct buckets" test
-    // above already covers the happy path. Here we only assert the contract
-    // surface — every chunkIndex i sees a nonce >= priorNonces[i].
-    const plaintexts = buildDistinctPlaintexts(4)
-    const priorNonces: Record<number, number> = { 0: 7, 1: 3, 2: 0, 3: 5 }
-    const { keys } = await resolveUtilizationChunkKeys(plaintexts, {
-      swarmEncryptionKey: new Uint8Array(32).fill(42),
-      batchId: TEST_BATCH_ID,
-      priorNonces,
-    })
-    for (let i = 0; i < keys.length; i++) {
-      expect(keys[i].nonce).toBeGreaterThanOrEqual(priorNonces[i])
-    }
-  })
-
-  it("places each chunk at a bucket consistent with its derived key", async () => {
-    const plaintexts = buildDistinctPlaintexts(8)
-    const swarmKey = new Uint8Array(32).map((_, i) => (i * 17 + 3) & 0xff)
-    const { keys, buckets } = await resolveUtilizationChunkKeys(plaintexts, {
-      swarmEncryptionKey: swarmKey,
-      batchId: TEST_BATCH_ID,
-    })
-    for (let i = 0; i < keys.length; i++) {
-      const expectedKey = await deriveUtilizationChunkKey(
-        swarmKey,
-        TEST_BATCH_ID,
-        i,
-        keys[i].nonce,
-      )
-      expect(Array.from(keys[i].key)).toEqual(Array.from(expectedKey))
-      // The bucket reported by resolveUtilizationChunkKeys matches the bucket
-      // computed from the encrypted CAC address using the derived key.
-      const encryptedAddress = makeEncryptedContentAddressedChunk(
-        plaintexts[i],
-        keys[i].key,
-      ).address.toUint8Array()
-      expect(toBucket(encryptedAddress)).toBe(buckets[i])
-    }
   })
 })
 

@@ -49,7 +49,6 @@ export {
   PartitionLeaseLostError,
   getChunkLayout,
   deriveUtilizationChunkKey,
-  resolveUtilizationChunkKeys,
   NUM_BUCKETS,
   BUCKET_DEPTH,
   UTILIZATION_SLOTS_PER_BUCKET,

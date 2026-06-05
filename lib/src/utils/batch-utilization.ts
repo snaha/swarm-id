@@ -489,54 +489,16 @@ export async function deriveUtilizationChunkKey(
 }
 
 /**
- * Choose per-chunk encryption keys so each utilisation chunk lands in a
- * bucket distinct from every other chunk in the same save.
- *
- * Stability rule (matters for upload dedup): chunks are processed in
- * ascending `chunkIndex` order, and the first chunk to claim a bucket
- * keeps it. Each chunk starts its search from `priorNonces[i] ?? 0`, so
- * unchanged plaintexts whose previously-chosen nonce still produces a
- * distinct bucket reuse the same key (and therefore the same CAC address)
- * across saves — dedup at `saveUtilizationState` then skips the upload.
- *
- * In practice almost every save finds zero collisions: with 32 chunks over
- * 65,536 buckets the expected number of bumps per save is ≈ 0.008.
- */
-export async function resolveUtilizationChunkKeys(
-  plaintexts: Uint8Array[],
-  options: {
-    swarmEncryptionKey: Uint8Array
-    batchId: BatchId
-    priorNonces?: Record<number, number>
-  },
-): Promise<{
-  keys: UtilizationChunkKey[]
-  buckets: number[]
-}> {
-  const { swarmEncryptionKey, batchId, priorNonces } = options
-  const keys: UtilizationChunkKey[] = new Array(plaintexts.length)
-  const buckets: number[] = new Array(plaintexts.length)
-  const claimedBuckets = new Set<number>()
-
-  for (let i = 0; i < plaintexts.length; i++) {
-    const resolved = await chooseUtilizationChunkKey({
-      swarmEncryptionKey,
-      batchId,
-      chunkIndex: i,
-      plaintext: plaintexts[i],
-      priorNonce: priorNonces?.[i] ?? 0,
-      claimedBuckets,
-    })
-    keys[i] = { key: resolved.key, nonce: resolved.nonce }
-    buckets[i] = resolved.bucket
-  }
-
-  return { keys, buckets }
-}
-
-/**
- * Resolve the encryption key for a single chunk index against a set of
+ * Resolve the encryption key for a single utilisation chunk so it lands in a
+ * bucket distinct from every other chunk in the same save, against a set of
  * already-claimed buckets. Mutates `claimedBuckets` to add the chosen one.
+ *
+ * Stability rule (matters for upload dedup): callers process chunks in
+ * ascending `chunkIndex` order, and the first chunk to claim a bucket keeps
+ * it. Each chunk starts its search from its `priorNonce`, so unchanged
+ * plaintexts whose previously-chosen nonce still produces a distinct bucket
+ * reuse the same key (and therefore the same CAC address) across saves —
+ * dedup at `saveUtilizationState` then skips the upload.
  */
 async function chooseUtilizationChunkKey(args: {
   swarmEncryptionKey: Uint8Array
@@ -1171,7 +1133,12 @@ export function calculateUtilization(
   // when `j` reaches its per-partition capacity, so fill is measured against
   // that, not the raw slot count.
   const capacity = partitionCapacity(batchDepth, partitionCount)
-  const maxBucketUsage = Math.max(...Array.from(state.dataCounters))
+  // `dataCounters` has NUM_BUCKETS (65,536) entries — spreading it into
+  // Math.max(...) would blow the argument-count limit, so scan with a loop.
+  let maxBucketUsage = 0
+  for (const count of state.dataCounters) {
+    if (count > maxBucketUsage) maxBucketUsage = count
+  }
 
   // Utilization is based on the fullest bucket within the partition's lane.
   return capacity <= 0 ? 1 : Math.min(1, maxBucketUsage / capacity)

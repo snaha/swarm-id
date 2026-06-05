@@ -208,14 +208,6 @@ export class PartitionLease {
     }))
   }
 
-  /** The partition `deviceId` currently holds per the lock SOCs, else undefined. */
-  partitionFor(deviceId: string): number | undefined {
-    for (const [partition, holder] of this.holders) {
-      if (holder.deviceId === deviceId) return partition
-    }
-    return undefined
-  }
-
   /**
    * Lowest partition in `[0, partitionCount)` with no live holder that
    * isn't us, else `undefined`. Drives candidate selection in `acquire`.
