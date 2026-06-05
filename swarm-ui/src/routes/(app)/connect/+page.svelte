@@ -8,7 +8,8 @@
   import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
   import CreateNewAccount from '$lib/components/create-new-account.svelte'
   import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
-  import IdentityGroups from '$lib/components/identity-groups.svelte'
+  import IdentityList from '$lib/components/identity-list.svelte'
+  import SegmentedTabs from '$lib/components/segmented-tabs.svelte'
   import AccountSelector from '$lib/components/account-selector.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
@@ -22,6 +23,7 @@
   import { AppDataSchema } from '$lib/types'
   import type { Account, Identity } from '$lib/types'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import { layoutStore } from '$lib/stores/layout.svelte'
   import Polycon from '$lib/components/polycon.svelte'
   import { ArrowRight } from 'carbon-icons-svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -56,6 +58,38 @@
   })
   const hasAccounts = $derived(accountsStore.accounts.length > 0)
   const origin = window.location.origin
+
+  // Identities previously used to connect to this app, most-recently-used first.
+  const previouslyUsedIdentities = $derived.by(() => {
+    const appUrl = sessionStore.data.appOrigin
+    if (!appUrl) return []
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- Set is ephemeral, used only for deduplication
+    const seen = new Set<string>()
+    const ordered: Identity[] = []
+    for (const app of connectedAppsStore.getRecentApps()) {
+      if (app.appUrl !== appUrl || seen.has(app.identityId)) continue
+      const identity = allIdentities.find((i) => i.id === app.identityId)
+      if (identity) {
+        seen.add(app.identityId)
+        ordered.push(identity)
+      }
+    }
+    return ordered
+  })
+
+  const hasPreviouslyUsed = $derived(previouslyUsedIdentities.length > 0)
+
+  type ConnectTab = 'previously-used' | 'all-identities'
+  const TABS: readonly { value: ConnectTab; label: string }[] = [
+    { value: 'previously-used', label: 'Previously used' },
+    { value: 'all-identities', label: 'All identities' },
+  ]
+
+  // Defaults to "Previously used" when available, but a user selection takes precedence.
+  let selectedTab = $state<ConnectTab | undefined>(undefined)
+  const activeTab = $derived(
+    selectedTab ?? (hasPreviouslyUsed ? 'previously-used' : 'all-identities'),
+  )
 
   // Parse hash params (e.g., #origin=foo&appName=bar)
   function getHashParams(): URLSearchParams {
@@ -382,15 +416,22 @@
     {@render connectedAppHeader()}
     <!-- Show identity list -->
     <Vertical --vertical-gap="var(--double-padding)">
-      <AccountSelector bind:selectedAccount={selectedAccountId} />
-      <IdentityGroups
-        {identities}
-        appUrl={sessionStore.data.appOrigin}
-        onIdentityClick={selectIdentityForConnection}
-      />
-      <Horizontal --horizontal-justify-content="flex-start">
-        <CreateIdentityButton account={selectedAccount} bind:isAuthenticating />
-      </Horizontal>
+      {#if hasPreviouslyUsed}
+        <SegmentedTabs tabs={TABS} active={activeTab} onchange={(value) => (selectedTab = value)} />
+      {/if}
+
+      {#if activeTab === 'previously-used'}
+        <IdentityList
+          identities={previouslyUsedIdentities}
+          onIdentityClick={selectIdentityForConnection}
+        />
+      {:else}
+        <AccountSelector bind:selectedAccount={selectedAccountId} />
+        <IdentityList {identities} onIdentityClick={selectIdentityForConnection} />
+        <Horizontal --horizontal-justify-content={layoutStore.mobile ? 'center' : 'flex-start'}>
+          <CreateIdentityButton account={selectedAccount} bind:isAuthenticating />
+        </Horizontal>
+      {/if}
     </Vertical>
   {:else}
     <!-- No accounts, show create form -->
