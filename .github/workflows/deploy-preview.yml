@@ -31,7 +31,9 @@ jobs:
       id_legacy: ${{ steps.changes.outputs.id_legacy }}
       demo: ${{ steps.changes.outputs.demo }}
       docs: ${{ steps.changes.outputs.docs }}
-      needs-lib: ${{ steps.changes.outputs.id_legacy == 'true' || steps.changes.outputs.demo == 'true' }}
+      # A demo build is also triggered by a UI change (it runs against the UI),
+      # and the demo needs lib — so setup must run whenever id/id_legacy change.
+      needs-lib: ${{ steps.changes.outputs.id == 'true' || steps.changes.outputs.id_legacy == 'true' || steps.changes.outputs.demo == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -177,10 +179,11 @@ jobs:
           retention-days: 1
 
   # Build demo at /demo/pr-N, pointed at the new UI (/id/pr-N).
+  # Also rebuilt when the new UI changes, so it runs against the updated UI.
   build-demo:
     runs-on: ubuntu-latest
     needs: [detect-changes, setup]
-    if: needs.detect-changes.outputs.demo == 'true'
+    if: needs.detect-changes.outputs.demo == 'true' || needs.detect-changes.outputs.id == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -208,7 +211,8 @@ jobs:
       - name: Build demo
         env:
           BASE_PATH: /demo/pr-${{ github.event.number }}
-          PUBLIC_ID_DOMAIN: ${{ needs.detect-changes.outputs.id == 'true' && format('https://swarm.snaha.net/id/pr-{0}', github.event.number) || '' }}
+          # Point at this PR's new-UI preview when built, else the main new UI.
+          PUBLIC_ID_DOMAIN: ${{ needs.detect-changes.outputs.id == 'true' && format('https://swarm.snaha.net/id/pr-{0}', github.event.number) || 'https://swarm.snaha.net/id' }}
         run: pnpm --filter @swarm-id/demo build
 
       - name: Upload demo artifact
@@ -219,10 +223,11 @@ jobs:
           retention-days: 1
 
   # Build demo at /demo-legacy/pr-N, pointed at the legacy UI (/id-legacy/pr-N).
+  # Also rebuilt when the legacy UI changes, so it runs against the updated UI.
   build-demo-legacy:
     runs-on: ubuntu-latest
     needs: [detect-changes, setup]
-    if: needs.detect-changes.outputs.demo == 'true'
+    if: needs.detect-changes.outputs.demo == 'true' || needs.detect-changes.outputs.id_legacy == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -250,7 +255,8 @@ jobs:
       - name: Build legacy demo
         env:
           BASE_PATH: /demo-legacy/pr-${{ github.event.number }}
-          PUBLIC_ID_DOMAIN: ${{ needs.detect-changes.outputs.id_legacy == 'true' && format('https://swarm.snaha.net/id-legacy/pr-{0}', github.event.number) || '' }}
+          # Point at this PR's legacy-UI preview when built, else the main legacy UI.
+          PUBLIC_ID_DOMAIN: ${{ needs.detect-changes.outputs.id_legacy == 'true' && format('https://swarm.snaha.net/id-legacy/pr-{0}', github.event.number) || 'https://swarm.snaha.net/id-legacy' }}
         run: pnpm --filter @swarm-id/demo build
 
       - name: Upload legacy demo artifact
