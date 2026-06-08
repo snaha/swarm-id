@@ -517,6 +517,21 @@ export {
 } from "./utils/ttl"
 export type { ChainState } from "./utils/ttl"
 
+// On-chain postage batch reads (PostageStamp contract, ground-truth TTL)
+export {
+  fetchOnChainBatchState,
+  fetchBatchTTLFromContract,
+  fetchAuthoritativeBatchTTL,
+  calculateContractTTLSeconds,
+  decodeBatches,
+  decodeUint,
+  POSTAGE_STAMP_CONTRACT_ADDRESS,
+} from "./utils/postage-contract"
+export type {
+  OnChainPostageBatch,
+  OnChainBatchState,
+} from "./utils/postage-contract"
+
 // Postage stamp <-> account/identity association
 export {
   resolveStampForIdentity,

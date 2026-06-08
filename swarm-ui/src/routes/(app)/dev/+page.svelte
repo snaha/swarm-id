@@ -28,6 +28,7 @@
     calculateStampAmountForDays,
     derivePostageSignerKey,
     fetchChainState,
+    formatTTL,
   } from '@snaha/swarm-id'
   import { SvelteMap } from 'svelte/reactivity'
 
@@ -36,6 +37,19 @@
   // POST /stamps; 7 days gives comfortable headroom for dev testing without
   // re-buying constantly.
   const DEFAULT_STAMP_DAYS = 7
+
+  const MS_PER_SECOND = 1000
+
+  // Renders a listed stamp's remaining lifetime as "<ttl> (<date>)". batchTTL
+  // comes straight from the Bee node's /stamps response — authoritative for the
+  // batches it tracks, which is exactly what this list shows (no contract read
+  // needed here, and the default chain is local where the mainnet PostageStamp
+  // contract isn't deployed).
+  function formatStampExpiry(batchTTL: number): string {
+    if (!batchTTL || batchTTL <= 0) return 'Expired'
+    const date = new Date(Date.now() + batchTTL * MS_PER_SECOND).toLocaleDateString()
+    return `${formatTTL(batchTTL)} (${date})`
+  }
 
   // Tab state
   type Tab = 'overview' | 'stamps' | 'sync' | 'devices'
@@ -850,6 +864,9 @@ Check console logs for details:
                 </Typography>
                 <Typography variant="small" style="color: var(--colors-medium);">
                   Utilization: {stamp.utilization}
+                </Typography>
+                <Typography variant="small" style="color: var(--colors-medium);">
+                  Expires: {formatStampExpiry(stamp.batchTTL)}
                 </Typography>
                 {@const assignment = stampAssignments.get(stamp.batchID)}
                 <Typography variant="small" style="color: var(--colors-medium);">

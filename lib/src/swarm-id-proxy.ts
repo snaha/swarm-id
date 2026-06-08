@@ -120,9 +120,11 @@ import {
   fetchBatchDetails,
   fetchSwarmPrice,
 } from "./utils/ttl"
+import { fetchAuthoritativeBatchTTL } from "./utils/postage-contract"
 import { tryCreateTag } from "./utils/tag"
 import {
   DEFAULT_BEE_NODE_URL,
+  DEFAULT_GNOSIS_RPC_URL,
   UtilizationUpdateMessageSchema,
   type AccountStateSnapshot,
 } from "./schemas"
@@ -183,6 +185,7 @@ export class SwarmIdProxy {
     | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
+  private gnosisRpcUrl: string
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
   private buttonConfig: ButtonConfig | undefined
@@ -230,6 +233,7 @@ export class SwarmIdProxy {
     // Load Bee API URL from network settings, falling back to default
     const networkSettings = createNetworkSettingsStorageManager().load()
     this.beeApiUrl = networkSettings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
+    this.gnosisRpcUrl = networkSettings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
@@ -3887,17 +3891,25 @@ export class SwarmIdProxy {
       return
     }
 
-    // Prefer the Bee node's authoritative batch details (computed from live
-    // chain state) — the stored stamp's `usable`/`exists` are a snapshot from
-    // assignment time and can be stale (e.g. a batch assigned during its ~30s
-    // warm-up stays `usable: false` in storage forever). Fall back to the
-    // stored values / Swarmscan-price TTL approximation when the Bee node
-    // does not know about this batch (e.g. public gateway).
+    // The stored stamp's `usable`/`exists` are a snapshot from assignment time
+    // and can be stale (e.g. a batch assigned during its ~30s warm-up stays
+    // `usable: false` in storage forever), so read live batch details from the
+    // Bee node for those fields.
     const details = await fetchBatchDetails(
       this.beeApiUrl,
       stamp.batchID.toHex(),
     )
-    let batchTTL = details?.batchTTL
+
+    // Resolve TTL from live chain state: the PostageStamp contract first
+    // (ground truth for any batch, even one this Bee node has never seen), then
+    // the Bee node's batchTTL. Fall back to the Swarmscan-price approximation
+    // only when neither authoritative source can answer (e.g. RPC unreachable
+    // and a public gateway that does not track the batch).
+    let batchTTL: number | undefined = await fetchAuthoritativeBatchTTL(
+      this.gnosisRpcUrl,
+      this.beeApiUrl,
+      stamp.batchID.toHex(),
+    )
     if (batchTTL === undefined) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()

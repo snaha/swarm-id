@@ -26,7 +26,7 @@
   import WarningAltFilled from 'carbon-icons-svelte/lib/WarningAltFilled.svelte'
   import {
     calculateTTLSeconds,
-    fetchBatchTTL,
+    fetchAuthoritativeBatchTTL,
     fetchSwarmPrice,
     getBlockTimestamp,
   } from '@snaha/swarm-id'
@@ -59,11 +59,14 @@
 
   let pricePerGBPerMonth = $state<number | undefined>(undefined)
   const blockTimestamps = new SvelteMap<number, number>()
-  // Map of batchID hex → expiry timestamp in ms (Date.now() + batchTTL), sourced
-  // from the configured Bee node's `/stamps/{id}` response. Bee computes batchTTL
-  // from live chain state, so it accounts for price changes since stamp creation
-  // that the Swarmscan-price approximation cannot.
-  const beeExpiryMs = new SvelteMap<string, number>()
+  // Map of batchID hex → expiry timestamp in ms (Date.now() + remaining TTL),
+  // sourced from live chain state. We read the PostageStamp contract directly by
+  // batchId (ground truth, works for any batch — including manually added stamps
+  // the Bee node does not track, see #344), and fall back to the Bee node's
+  // `/stamps/{id}` batchTTL only when the RPC read is unavailable. Both account
+  // for price changes since stamp creation that the Swarmscan-price
+  // approximation cannot.
+  const chainExpiryMs = new SvelteMap<string, number>()
 
   async function fetchBlockTimestamp(blockNumber: number): Promise<number | undefined> {
     if (blockTimestamps.has(blockNumber)) {
@@ -82,22 +85,30 @@
     }
   }
 
-  async function fetchStampExpiryFromBee(stamp: PostageStamp): Promise<void> {
-    const ttlSeconds = await fetchBatchTTL(networkSettingsStore.beeNodeUrl, stamp.batchID.toHex())
+  async function fetchStampExpiry(stamp: PostageStamp): Promise<void> {
+    const batchId = stamp.batchID.toHex()
+    // Resolve remaining TTL from the most authoritative source: the on-chain
+    // PostageStamp contract first (works for any batchId, even one the
+    // configured Bee node has never seen), then the Bee node's batchTTL.
+    const ttlSeconds = await fetchAuthoritativeBatchTTL(
+      networkSettingsStore.gnosisRpcUrl,
+      networkSettingsStore.beeNodeUrl,
+      batchId,
+    )
     if (ttlSeconds !== undefined) {
-      beeExpiryMs.set(stamp.batchID.toHex(), Date.now() + ttlSeconds * MS_PER_SECOND)
+      chainExpiryMs.set(batchId, Date.now() + ttlSeconds * MS_PER_SECOND)
     }
   }
 
   onMount(() => {
-    // Start the authoritative Bee batchTTL + block-timestamp fetches first;
-    // they don't depend on the Swarmscan price and shouldn't wait on it.
+    // Start the authoritative chain/Bee batchTTL + block-timestamp fetches
+    // first; they don't depend on the Swarmscan price and shouldn't wait on it.
     const stamps = [accountStamp, identityStamp].filter(Boolean) as PostageStamp[]
     for (const stamp of stamps) {
       if (stamp.blockNumber > 0) {
         fetchBlockTimestamp(stamp.blockNumber)
       }
-      fetchStampExpiryFromBee(stamp)
+      fetchStampExpiry(stamp)
     }
 
     // Swarmscan price feeds only the constant-price fallback and the
@@ -140,17 +151,18 @@
 
   /**
    * Resolves a stamp's expiry timestamp in ms, marking it as estimated when
-   * we had to fall back to the Swarmscan-price approximation. Bee's batchTTL
-   * (when available) reflects actual chain state and is treated as truth.
+   * we had to fall back to the Swarmscan-price approximation. The chain-sourced
+   * expiry (PostageStamp contract, or Bee's batchTTL) reflects actual chain
+   * state and is treated as truth.
    */
   function getExpiry(
     stamp: PostageStamp,
     price: number | undefined,
     blockTimestamp: number | undefined,
-    beeExpiry: number | undefined,
+    chainExpiry: number | undefined,
   ): StampExpiry | undefined {
-    if (beeExpiry !== undefined) {
-      return { expiryMs: beeExpiry, estimated: false }
+    if (chainExpiry !== undefined) {
+      return { expiryMs: chainExpiry, estimated: false }
     }
     if (price === undefined) {
       return undefined
@@ -237,8 +249,8 @@
       </Horizontal>
 
       {@const stampBlockTimestamp = blockTimestamps.get(stamp.blockNumber)}
-      {@const stampBeeExpiry = beeExpiryMs.get(stamp.batchID.toHex())}
-      {@const expiry = getExpiry(stamp, pricePerGBPerMonth, stampBlockTimestamp, stampBeeExpiry)}
+      {@const stampChainExpiry = chainExpiryMs.get(stamp.batchID.toHex())}
+      {@const expiry = getExpiry(stamp, pricePerGBPerMonth, stampBlockTimestamp, stampChainExpiry)}
       {#if expiry !== undefined}
         {@const expired = isExpired(expiry.expiryMs)}
         {@const expiringSoon =
