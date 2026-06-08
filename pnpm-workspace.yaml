@@ -2,7 +2,7 @@ packages:
   - 'lib'
   - 'demo'
   - 'swarm-ui'
-  - 'swarm-ui-next'
+  - 'ui'
   - 'docs-site'
 
 # pnpm 11 reads non-auth settings from this file, not .npmrc.

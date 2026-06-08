@@ -1,5 +1,5 @@
 {
-  "name": "swarm-identity-next",
+  "name": "@swarm-id/ui",
   "version": "0.0.0",
   "private": true,
   "license": "MIT",

@@ -11,6 +11,7 @@ on:
       - 'lib/**'
       - 'demo/**'
       - 'swarm-ui/**'
+      - 'ui/**'
       - 'docs-site/**'
       - '.github/workflows/deploy-preview.yml'
 
@@ -26,10 +27,11 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event.action != 'closed'
     outputs:
-      demo: ${{ steps.changes.outputs.demo }}
       id: ${{ steps.changes.outputs.id }}
+      id_legacy: ${{ steps.changes.outputs.id_legacy }}
+      demo: ${{ steps.changes.outputs.demo }}
       docs: ${{ steps.changes.outputs.docs }}
-      needs-lib: ${{ steps.changes.outputs.demo == 'true' || steps.changes.outputs.id == 'true' }}
+      needs-lib: ${{ steps.changes.outputs.id_legacy == 'true' || steps.changes.outputs.demo == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -39,16 +41,18 @@ jobs:
         id: changes
         with:
           filters: |
+            id:
+              - 'ui/**'
+            id_legacy:
+              - 'swarm-ui/**'
+              - 'lib/**'
             demo:
               - 'demo/**'
-              - 'lib/**'
-            id:
-              - 'swarm-ui/**'
               - 'lib/**'
             docs:
               - 'docs-site/**'
 
-  # Shared setup: build lib (only if demo or id needs it)
+  # Shared setup: build lib (only if a lib-dependent app needs it)
   setup:
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -83,7 +87,96 @@ jobs:
             lib/dist
           retention-days: 1
 
-  # Build demo app
+  # Build the new identity UI (@swarm-id/ui) at /id/pr-N. No lib dependency,
+  # so it builds standalone without the shared workspace artifact.
+  build-id:
+    runs-on: ubuntu-latest
+    needs: detect-changes
+    if: needs.detect-changes.outputs.id == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build identity UI
+        env:
+          BASE_PATH: /id/pr-${{ github.event.number }}
+          ORIGIN: https://swarm.snaha.net
+          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo/pr-${{ github.event.number }}
+          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
+        run: pnpm --filter @swarm-id/ui build
+
+      - name: Create 404.html for SPA routing
+        run: cp ui/build/index.html ui/build/404.html
+
+      - name: Upload identity UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: id-build
+          path: ui/build
+          retention-days: 1
+
+  # Build the legacy identity UI (swarm-ui) at /id-legacy/pr-N.
+  build-id-legacy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, setup]
+    if: needs.detect-changes.outputs.id_legacy == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Download workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace
+          path: .
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build legacy identity UI
+        env:
+          BASE_PATH: /id-legacy/pr-${{ github.event.number }}
+          ORIGIN: https://swarm.snaha.net
+          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo-legacy/pr-${{ github.event.number }}
+          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id-legacy/pr-${{ github.event.number }}
+        run: pnpm --filter swarm-identity build
+
+      - name: Create 404.html for SPA routing
+        run: cp swarm-ui/build/index.html swarm-ui/build/404.html
+
+      - name: Upload legacy identity UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: id-legacy-build
+          path: swarm-ui/build
+          retention-days: 1
+
+  # Build demo at /demo/pr-N, pointed at the new UI (/id/pr-N).
   build-demo:
     runs-on: ubuntu-latest
     needs: [detect-changes, setup]
@@ -125,11 +218,11 @@ jobs:
           path: demo/build
           retention-days: 1
 
-  # Build identity UI
-  build-id:
+  # Build demo at /demo-legacy/pr-N, pointed at the legacy UI (/id-legacy/pr-N).
+  build-demo-legacy:
     runs-on: ubuntu-latest
     needs: [detect-changes, setup]
-    if: needs.detect-changes.outputs.id == 'true'
+    if: needs.detect-changes.outputs.demo == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -154,22 +247,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build identity UI
+      - name: Build legacy demo
         env:
-          BASE_PATH: /id/pr-${{ github.event.number }}
-          ORIGIN: https://swarm.snaha.net
-          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo/pr-${{ github.event.number }}
-          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id/pr-${{ github.event.number }}
-        run: pnpm --filter swarm-identity build
+          BASE_PATH: /demo-legacy/pr-${{ github.event.number }}
+          PUBLIC_ID_DOMAIN: ${{ needs.detect-changes.outputs.id_legacy == 'true' && format('https://swarm.snaha.net/id-legacy/pr-{0}', github.event.number) || '' }}
+        run: pnpm --filter @swarm-id/demo build
 
-      - name: Create 404.html for SPA routing
-        run: cp swarm-ui/build/index.html swarm-ui/build/404.html
-
-      - name: Upload identity UI artifact
+      - name: Upload legacy demo artifact
         uses: actions/upload-artifact@v4
         with:
-          name: id-build
-          path: swarm-ui/build
+          name: demo-legacy-build
+          path: demo/build
           retention-days: 1
 
   # Build docs (standalone, doesn't need lib)
@@ -209,20 +297,36 @@ jobs:
   # Deploy all built apps to GitHub Pages
   deploy:
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-demo, build-id, build-docs]
+    needs: [detect-changes, build-id, build-id-legacy, build-demo, build-demo-legacy, build-docs]
     if: |
       always() &&
       github.event.action != 'closed' &&
-      (needs.build-demo.result == 'success' || needs.build-demo.result == 'skipped') &&
       (needs.build-id.result == 'success' || needs.build-id.result == 'skipped') &&
+      (needs.build-id-legacy.result == 'success' || needs.build-id-legacy.result == 'skipped') &&
+      (needs.build-demo.result == 'success' || needs.build-demo.result == 'skipped') &&
+      (needs.build-demo-legacy.result == 'success' || needs.build-demo-legacy.result == 'skipped') &&
       (needs.build-docs.result == 'success' || needs.build-docs.result == 'skipped') &&
-      (needs.build-demo.result == 'success' || needs.build-id.result == 'success' || needs.build-docs.result == 'success')
+      (needs.build-id.result == 'success' || needs.build-id-legacy.result == 'success' || needs.build-demo.result == 'success' || needs.build-demo-legacy.result == 'success' || needs.build-docs.result == 'success')
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
       - name: Create preview directory structure
         run: mkdir -p preview-build
+
+      - name: Download identity UI artifact
+        if: needs.build-id.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: id-build
+          path: preview-build/id/pr-${{ github.event.number }}
+
+      - name: Download legacy identity UI artifact
+        if: needs.build-id-legacy.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: id-legacy-build
+          path: preview-build/id-legacy/pr-${{ github.event.number }}
 
       - name: Download demo artifact
         if: needs.build-demo.result == 'success'
@@ -231,12 +335,12 @@ jobs:
           name: demo-build
           path: preview-build/demo/pr-${{ github.event.number }}
 
-      - name: Download identity UI artifact
-        if: needs.build-id.result == 'success'
+      - name: Download legacy demo artifact
+        if: needs.build-demo-legacy.result == 'success'
         uses: actions/download-artifact@v4
         with:
-          name: id-build
-          path: preview-build/id/pr-${{ github.event.number }}
+          name: demo-legacy-build
+          path: preview-build/demo-legacy/pr-${{ github.event.number }}
 
       - name: Download docs artifact
         if: needs.build-docs.result == 'success'
@@ -262,12 +366,20 @@ jobs:
             echo "| App | Preview URL |"
             echo "|-----|-------------|"
 
-            if [ "${{ needs.build-demo.result }}" == "success" ]; then
-              echo "| Demo | https://swarm.snaha.net/demo/pr-${{ github.event.number }}/ |"
+            if [ "${{ needs.build-id.result }}" == "success" ]; then
+              echo "| Identity (new) | https://swarm.snaha.net/id/pr-${{ github.event.number }}/ |"
             fi
 
-            if [ "${{ needs.build-id.result }}" == "success" ]; then
-              echo "| Identity | https://swarm.snaha.net/id/pr-${{ github.event.number }}/ |"
+            if [ "${{ needs.build-id-legacy.result }}" == "success" ]; then
+              echo "| Identity (legacy) | https://swarm.snaha.net/id-legacy/pr-${{ github.event.number }}/ |"
+            fi
+
+            if [ "${{ needs.build-demo.result }}" == "success" ]; then
+              echo "| Demo (vs new) | https://swarm.snaha.net/demo/pr-${{ github.event.number }}/ |"
+            fi
+
+            if [ "${{ needs.build-demo-legacy.result }}" == "success" ]; then
+              echo "| Demo (vs legacy) | https://swarm.snaha.net/demo-legacy/pr-${{ github.event.number }}/ |"
             fi
 
             if [ "${{ needs.build-docs.result }}" == "success" ]; then
@@ -312,8 +424,10 @@ jobs:
 
       - name: Remove preview directories
         run: |
-          rm -rf demo/pr-${{ github.event.number }} || true
           rm -rf id/pr-${{ github.event.number }} || true
+          rm -rf id-legacy/pr-${{ github.event.number }} || true
+          rm -rf demo/pr-${{ github.event.number }} || true
+          rm -rf demo-legacy/pr-${{ github.event.number }} || true
           rm -rf docs/pr-${{ github.event.number }} || true
 
       - name: Commit and push cleanup

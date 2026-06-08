@@ -1,13 +1,15 @@
 name: Deploy Main to GitHub Pages
 
-# Publishes the latest main build of each app to GitHub Pages at the root paths:
-#   https://swarm.snaha.net/id/    (identity UI)
-#   https://swarm.snaha.net/demo/  (demo dApp)
-#   https://swarm.snaha.net/docs/  (docs site, with a root redirect)
+# Publishes the latest main build of each app to GitHub Pages at root paths:
+#   https://swarm.snaha.net/id/           new identity UI (@swarm-id/ui)
+#   https://swarm.snaha.net/id-legacy/    legacy identity UI (swarm-ui)
+#   https://swarm.snaha.net/demo/         demo dApp, run against /id
+#   https://swarm.snaha.net/demo-legacy/  demo dApp, run against /id-legacy
+#   https://swarm.snaha.net/docs/         docs site (with a root redirect)
 #
-# This mirrors deploy-preview.yml, but uses root base paths (/id, /demo, /docs)
-# instead of per-PR paths (/id/pr-N). It runs alongside deploy-do.yml, which
-# keeps the canonical swarm-id.snaha.net / swarm-demo.snaha.net DO domains.
+# This mirrors deploy-preview.yml, but uses root base paths instead of per-PR
+# paths (/id/pr-N). It runs alongside deploy-do.yml, which keeps the canonical
+# swarm-id.snaha.net / swarm-demo.snaha.net DO domains.
 #
 # keep_files: true ensures the per-PR preview folders are never clobbered.
 
@@ -17,6 +19,7 @@ on:
     paths:
       - 'lib/**'
       - 'swarm-ui/**'
+      - 'ui/**'
       - 'demo/**'
       - 'docs-site/**'
       - '.github/workflows/deploy-main-pages.yml'
@@ -35,10 +38,11 @@ jobs:
   detect-changes:
     runs-on: ubuntu-latest
     outputs:
-      demo: ${{ steps.changes.outputs.demo }}
       id: ${{ steps.changes.outputs.id }}
+      id_legacy: ${{ steps.changes.outputs.id_legacy }}
+      demo: ${{ steps.changes.outputs.demo }}
       docs: ${{ steps.changes.outputs.docs }}
-      needs-lib: ${{ steps.changes.outputs.demo == 'true' || steps.changes.outputs.id == 'true' }}
+      needs-lib: ${{ steps.changes.outputs.id_legacy == 'true' || steps.changes.outputs.demo == 'true' }}
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -48,17 +52,19 @@ jobs:
         id: changes
         with:
           filters: |
+            id:
+              - 'ui/**'
+            id_legacy:
+              - 'swarm-ui/**'
+              - 'lib/**'
             demo:
               - 'demo/**'
-              - 'lib/**'
-            id:
-              - 'swarm-ui-next/**'
               - 'lib/**'
             docs:
               - 'docs-site/**'
               - 'lib/**'
 
-  # Shared setup: build lib once (only if demo or id needs it).
+  # Shared setup: build lib once (only if a lib-dependent app needs it).
   setup:
     runs-on: ubuntu-latest
     needs: detect-changes
@@ -93,11 +99,53 @@ jobs:
             lib/dist
           retention-days: 1
 
-  # Build the next-generation identity UI (swarm-ui-next) at /id.
+  # Build the new identity UI (@swarm-id/ui) at /id. Has no lib dependency,
+  # so it builds standalone without the shared workspace artifact.
   build-id:
     runs-on: ubuntu-latest
-    needs: [detect-changes, setup]
+    needs: detect-changes
     if: needs.detect-changes.outputs.id == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build identity UI
+        env:
+          BASE_PATH: /id
+          ORIGIN: https://swarm.snaha.net
+          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo
+          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id
+        run: pnpm --filter @swarm-id/ui build
+
+      - name: Create 404.html for SPA routing
+        run: cp ui/build/index.html ui/build/404.html
+
+      - name: Upload identity UI artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: id-build-main
+          path: ui/build
+          retention-days: 1
+
+  # Build the legacy identity UI (swarm-ui) at /id-legacy.
+  build-id-legacy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, setup]
+    if: needs.detect-changes.outputs.id_legacy == 'true'
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -122,25 +170,25 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Build identity UI
+      - name: Build legacy identity UI
         env:
-          BASE_PATH: /id
+          BASE_PATH: /id-legacy
           ORIGIN: https://swarm.snaha.net
-          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo
-          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id
-        run: pnpm --filter swarm-identity-next build
+          PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo-legacy
+          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id-legacy
+        run: pnpm --filter swarm-identity build
 
       - name: Create 404.html for SPA routing
-        run: cp swarm-ui-next/build/index.html swarm-ui-next/build/404.html
+        run: cp swarm-ui/build/index.html swarm-ui/build/404.html
 
-      - name: Upload identity UI artifact
+      - name: Upload legacy identity UI artifact
         uses: actions/upload-artifact@v4
         with:
-          name: id-build-main
-          path: swarm-ui-next/build
+          name: id-legacy-build-main
+          path: swarm-ui/build
           retention-days: 1
 
-  # Build demo app at /demo.
+  # Build demo at /demo, pointed at the new UI (/id).
   build-demo:
     runs-on: ubuntu-latest
     needs: [detect-changes, setup]
@@ -179,6 +227,48 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: demo-build-main
+          path: demo/build
+          retention-days: 1
+
+  # Build demo at /demo-legacy, pointed at the legacy UI (/id-legacy).
+  build-demo-legacy:
+    runs-on: ubuntu-latest
+    needs: [detect-changes, setup]
+    if: needs.detect-changes.outputs.demo == 'true'
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Download workspace
+        uses: actions/download-artifact@v4
+        with:
+          name: workspace-main
+          path: .
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Build legacy demo
+        env:
+          BASE_PATH: /demo-legacy
+          PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id-legacy
+        run: pnpm --filter @swarm-id/demo build
+
+      - name: Upload legacy demo artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-legacy-build-main
           path: demo/build
           retention-days: 1
 
@@ -225,13 +315,15 @@ jobs:
   # Assemble all built apps and publish to GitHub Pages in a single push.
   deploy:
     runs-on: ubuntu-latest
-    needs: [detect-changes, build-id, build-demo, build-docs]
+    needs: [detect-changes, build-id, build-id-legacy, build-demo, build-demo-legacy, build-docs]
     if: |
       always() &&
       (needs.build-id.result == 'success' || needs.build-id.result == 'skipped') &&
+      (needs.build-id-legacy.result == 'success' || needs.build-id-legacy.result == 'skipped') &&
       (needs.build-demo.result == 'success' || needs.build-demo.result == 'skipped') &&
+      (needs.build-demo-legacy.result == 'success' || needs.build-demo-legacy.result == 'skipped') &&
       (needs.build-docs.result == 'success' || needs.build-docs.result == 'skipped') &&
-      (needs.build-id.result == 'success' || needs.build-demo.result == 'success' || needs.build-docs.result == 'success')
+      (needs.build-id.result == 'success' || needs.build-id-legacy.result == 'success' || needs.build-demo.result == 'success' || needs.build-demo-legacy.result == 'success' || needs.build-docs.result == 'success')
     steps:
       - name: Create build directory structure
         run: mkdir -p build-root
@@ -243,12 +335,26 @@ jobs:
           name: id-build-main
           path: build-root/id
 
+      - name: Download legacy identity UI artifact
+        if: needs.build-id-legacy.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: id-legacy-build-main
+          path: build-root/id-legacy
+
       - name: Download demo artifact
         if: needs.build-demo.result == 'success'
         uses: actions/download-artifact@v4
         with:
           name: demo-build-main
           path: build-root/demo
+
+      - name: Download legacy demo artifact
+        if: needs.build-demo-legacy.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          name: demo-legacy-build-main
+          path: build-root/demo-legacy
 
       # Docs artifact already contains docs/ plus the root redirect index.html.
       - name: Download docs artifact
