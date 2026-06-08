@@ -1,6 +1,17 @@
 @import 'tailwindcss';
 
+@font-face {
+  src: url('/fonts/iAWriterQuattroV.ttf') format('truetype');
+  font-family: 'iA Writer Quattro V';
+  font-weight: 200 900;
+  font-style: normal;
+  font-feature-settings: 'tnum';
+  font-optical-sizing: auto;
+  font-display: swap;
+}
+
 @theme inline {
+  --font-sans: 'iA Writer Quattro V', ui-sans-serif, system-ui, sans-serif;
   --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
@@ -42,7 +53,8 @@
 }
 
 :root {
-  --radius: 0.625rem;
+  /* Tight radius scale to match the design: rounded-md = 2px, rounded-lg = 4px. */
+  --radius: 0.25rem;
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -123,5 +135,6 @@
 
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-sans);
   }
 }
