@@ -21,12 +21,11 @@
         link: 'text-primary underline-offset-4 hover:underline',
       },
       size: {
-        default:
-          'h-9 gap-1.5 px-4 has-data-[icon=inline-end]:pr-3 has-data-[icon=inline-start]:pl-3',
+        default: 'h-8 gap-1.5 px-2.5',
         xs: "h-6 gap-1 rounded-md px-2 text-xs [&_svg:not([class*='size-'])]:size-3.5",
-        sm: "h-8 gap-1 rounded-md px-3 text-[0.8rem] has-data-[icon=inline-end]:pr-2 has-data-[icon=inline-start]:pl-2 [&_svg:not([class*='size-'])]:size-3.5",
-        lg: 'h-10 gap-1.5 px-5 has-data-[icon=inline-end]:pr-4 has-data-[icon=inline-start]:pl-4',
-        icon: 'size-9',
+        sm: "h-7 gap-1 rounded-md px-2.5 text-[0.8rem] [&_svg:not([class*='size-'])]:size-3.5",
+        lg: 'h-9 gap-1.5 px-2.5',
+        icon: 'size-8',
       },
     },
     defaultVariants: {

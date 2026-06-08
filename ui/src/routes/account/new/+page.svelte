@@ -1,13 +1,15 @@
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
-  import Dices from '@lucide/svelte/icons/dices'
 
   import { resolve } from '$app/paths'
 
   import AppHeader from '$lib/components/app-header.svelte'
+  import Polycon from '$lib/components/polycon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { generateName } from '$lib/name-generator'
+
+  const IDENTICON_SIZE = 32
 
   let name = $state(generateName())
 </script>
@@ -28,16 +30,9 @@
 
       <div class="flex w-full flex-col gap-2">
         <label for="name" class="text-sm font-medium">Name</label>
-        <div class="flex w-full items-start gap-2">
+        <div class="flex w-full items-center gap-2">
           <Input id="name" bind:value={name} placeholder="Jovial Einstein" />
-          <Button
-            variant="outline"
-            size="icon"
-            aria-label="Suggest a random name"
-            onclick={() => (name = generateName())}
-          >
-            <Dices />
-          </Button>
+          <Polycon value={name} size={IDENTICON_SIZE} class="shrink-0 overflow-hidden rounded-lg" />
         </div>
         <p class="text-muted-foreground text-xs">Identity displayed in connected apps.</p>
       </div>

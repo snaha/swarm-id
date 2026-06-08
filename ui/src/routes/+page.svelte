@@ -15,8 +15,8 @@
     <SwarmWordmark height={36} />
 
     <div class="flex w-full flex-col items-center gap-4">
-      <Button class="w-full" href={resolve('/account/new')}>Create a new account</Button>
-      <Button variant="secondary" class="w-full" href={resolve('/account/import')}>
+      <Button size="lg" class="w-full" href={resolve('/account/new')}>Create a new account</Button>
+      <Button size="lg" variant="secondary" class="w-full" href={resolve('/account/import')}>
         I already have an account
       </Button>
     </div>
