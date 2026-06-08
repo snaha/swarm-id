@@ -52,7 +52,7 @@ jobs:
               - 'demo/**'
               - 'lib/**'
             id:
-              - 'swarm-ui/**'
+              - 'swarm-ui-next/**'
               - 'lib/**'
             docs:
               - 'docs-site/**'
@@ -93,7 +93,7 @@ jobs:
             lib/dist
           retention-days: 1
 
-  # Build identity UI at /id.
+  # Build the next-generation identity UI (swarm-ui-next) at /id.
   build-id:
     runs-on: ubuntu-latest
     needs: [detect-changes, setup]
@@ -128,16 +128,16 @@ jobs:
           ORIGIN: https://swarm.snaha.net
           PUBLIC_APP_DOMAIN: https://swarm.snaha.net/demo
           PUBLIC_ID_DOMAIN: https://swarm.snaha.net/id
-        run: pnpm --filter swarm-identity build
+        run: pnpm --filter swarm-identity-next build
 
       - name: Create 404.html for SPA routing
-        run: cp swarm-ui/build/index.html swarm-ui/build/404.html
+        run: cp swarm-ui-next/build/index.html swarm-ui-next/build/404.html
 
       - name: Upload identity UI artifact
         uses: actions/upload-artifact@v4
         with:
           name: id-build-main
-          path: swarm-ui/build
+          path: swarm-ui-next/build
           retention-days: 1
 
   # Build demo app at /demo.

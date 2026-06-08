@@ -54,6 +54,22 @@ jobs:
         working-directory: ./swarm-ui
         run: pnpm test:unit
 
+      - name: Build swarm-ui-next
+        working-directory: ./swarm-ui-next
+        run: pnpm build
+
+      - name: Check the build (swarm-ui-next)
+        working-directory: ./swarm-ui-next
+        run: pnpm run check
+
+      - name: Code linting (swarm-ui-next)
+        working-directory: ./swarm-ui-next
+        run: pnpm run lint
+
+      - name: Check dependencies and unused files (swarm-ui-next)
+        working-directory: ./swarm-ui-next
+        run: pnpm knip
+
       - name: Build demo
         working-directory: ./demo
         run: pnpm build
