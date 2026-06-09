@@ -1,3 +1,5 @@
+// Copyright 2026 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 import type { KnipConfig } from 'knip'
 
 const config: KnipConfig = {
@@ -7,9 +9,6 @@ const config: KnipConfig = {
     '$env/*': ['.svelte-kit/ambient.d.ts'],
     '$lib/*': ['src/lib/*'],
   },
-  // bits-ui is the shadcn-svelte primitive library; kept installed so newly
-  // added UI components resolve without a re-install.
-  ignoreDependencies: ['bits-ui'],
   ignoreExportsUsedInFile: true,
 }
 

@@ -1,10 +1,21 @@
+// Copyright 2026 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
 import svelteParser from 'svelte-eslint-parser'
 
 import js from '@eslint/js'
 import eslintConfigPrettier from 'eslint-config-prettier'
+import notice from 'eslint-plugin-notice'
 import eslintPluginSvelte from 'eslint-plugin-svelte'
 import globals from 'globals'
 import typescriptEslint from 'typescript-eslint'
+
+import svelteLicenseHeader from '../eslint-rule-svelte-license-header.js'
+
+const svelteLicensePlugin = {
+  rules: {
+    'license-header': svelteLicenseHeader,
+  },
+}
 
 export default typescriptEslint.config(
   js.configs.recommended,
@@ -20,13 +31,37 @@ export default typescriptEslint.config(
     },
   },
   {
-    files: ['**/*.svelte', '**/*.svelte.ts'],
+    files: ['**/*.ts', '**/*.js', '**/*.mjs'],
+    plugins: { notice },
+    rules: {
+      'notice/notice': [
+        'error',
+        {
+          mustMatch: '// Copyright 2026 The Swarm Authors\\. All rights reserved\\.',
+          template:
+            '// Copyright 2026 The Swarm Authors. All rights reserved.\n// SPDX-License-Identifier: Apache-2.0\n\n',
+        },
+      ],
+    },
+  },
+  {
+    files: ['**/*.svelte'],
     languageOptions: {
       parser: svelteParser,
       parserOptions: {
         parser: typescriptEslint.parser,
         extraFileExtensions: ['.svelte'],
       },
+    },
+    plugins: { 'svelte-license': svelteLicensePlugin },
+    rules: {
+      'svelte-license/license-header': 'error',
+    },
+  },
+  {
+    files: ['**/*.svelte.ts'],
+    languageOptions: {
+      parser: typescriptEslint.parser,
     },
   },
   {
@@ -41,18 +76,6 @@ export default typescriptEslint.config(
       '@typescript-eslint/no-unused-vars': [
         'error',
         { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
-      ],
-      'no-restricted-syntax': [
-        'error',
-        {
-          selector: 'ImportDeclaration[source.value=/\\/.*\\.(?!(svelte|svg|json|css)$)\\w+$/]',
-          message:
-            'Unnecessary file extension in import. Only .svelte, .svg, .json, and .css extensions are allowed.',
-        },
-        {
-          selector: 'ImportDeclaration[source.value=/\\/index$/]',
-          message: 'Do not import from /index explicitly. Import from the directory instead.',
-        },
       ],
     },
   },
