@@ -81,7 +81,11 @@ import {
   saveMantarayTree,
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
-import { resolveStampForIdentity } from "./utils/postage-stamp-association"
+import {
+  resolveStampForIdentity,
+  collectAccountStampBatchIds,
+} from "./utils/postage-stamp-association"
+import { publishAccountState } from "./sync/publish-account-state"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
@@ -114,7 +118,11 @@ import {
   fetchSwarmPrice,
 } from "./utils/ttl"
 import { tryCreateTag } from "./utils/tag"
-import { DEFAULT_BEE_NODE_URL, UtilizationUpdateMessageSchema } from "./schemas"
+import {
+  DEFAULT_BEE_NODE_URL,
+  UtilizationUpdateMessageSchema,
+  type AccountStateSnapshot,
+} from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -126,6 +134,12 @@ import {
   publicKeyFromPrivate,
   compressPublicKey,
 } from "./proxy/act"
+
+/**
+ * Debounce window for proxy-side account-state publishing. Coalesces a burst of
+ * triggers (lease acquisition + storage changes) into a single feed write.
+ */
+const PUBLISH_DEBOUNCE_MS = 1500
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -186,6 +200,14 @@ export class SwarmIdProxy {
    * proxy delegates all writes to it via `withModeAwareWriteLock`.
    */
   private coordinator: BatchWriteCoordinator | undefined
+  /**
+   * Debounce timer + in-flight guard for proxy-side account-state publishing.
+   * The proxy publishes the account snapshot to the shared sync feed when it
+   * first acquires a partition (so the device announces itself — see #336
+   * motivation #4) and when account state changes while a lease is held.
+   */
+  private publishTimer: ReturnType<typeof setTimeout> | undefined
+  private publishInFlight: boolean = false
   /**
    * This device's identity, captured ONCE at authentication and reused for
    * every lease operation. Never re-read from `getOrCreateDeviceId()` mid-
@@ -339,6 +361,13 @@ export class SwarmIdProxy {
     }
 
     this.emitConnectionInfoIfChanged()
+
+    // If we hold a partition, an account-state change (new identity / stamp /
+    // rename) should propagate to peers. Debounced so a burst collapses into one
+    // feed write.
+    if (this.coordinator?.currentPartition !== undefined) {
+      this.schedulePublish()
+    }
   }
 
   /**
@@ -501,6 +530,10 @@ export class SwarmIdProxy {
     // vacate its partition promptly.
     this.coordinator?.teardown()
     this.coordinator = undefined
+    if (this.publishTimer !== undefined) {
+      clearTimeout(this.publishTimer)
+      this.publishTimer = undefined
+    }
 
     // Clean up utilization channel
     this.utilizationChannel.close()
@@ -647,6 +680,11 @@ export class SwarmIdProxy {
       flushStamperState: () => this.saveStamperStateIfNeeded(),
       getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
+      // On first acquiring a partition, announce this device by publishing the
+      // account snapshot (which includes ourselves in metadata.devices) to the
+      // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
+      // lock (the publish re-enters the lock via the coordinator).
+      onLeaseAcquired: () => this.schedulePublish(),
     })
     this.coordinator.startLease()
   }
@@ -1217,6 +1255,141 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Assemble the current account-state snapshot for the connected app's account
+   * from shared localStorage (the same shape `sync-account` builds from its DI
+   * stores). Returns the snapshot plus the feed signing key + owner. Undefined
+   * when storage is partitioned or the account/stamp can't be resolved.
+   */
+  private async buildAccountStateSnapshotForPublish(): Promise<
+    | {
+        snapshot: AccountStateSnapshot
+        encryptionKey: string
+        accountKey: PrivateKey
+        owner: EthAddress
+      }
+    | undefined
+  > {
+    if (!this.parentOrigin || this.storagePartitioned) {
+      return undefined
+    }
+    try {
+      const connectedApps = createConnectedAppsStorageManager().load()
+      const connectedApp = this.findMostRecentConnection(connectedApps)
+      if (!connectedApp) return undefined
+
+      const allIdentities = createIdentitiesStorageManager().load()
+      const connectedIdentity = allIdentities.find(
+        (i) => i.id === connectedApp.identityId,
+      )
+      if (!connectedIdentity) return undefined
+
+      const account = createAccountsStorageManager()
+        .load()
+        .find((a) => a.id.equals(connectedIdentity.accountId))
+      if (!account) return undefined
+
+      const identities = allIdentities.filter((i) =>
+        i.accountId.equals(account.id),
+      )
+      const defaultStampBatchID =
+        account.defaultPostageStampBatchID ??
+        identities[0]?.defaultPostageStampBatchID
+      if (!defaultStampBatchID) return undefined
+
+      const apps = identities.flatMap((identity) =>
+        connectedApps.filter((a) => a.identityId === identity.id),
+      )
+      const allStamps = createPostageStampsStorageManager().load()
+      const postageStamps = collectAccountStampBatchIds(account, identities)
+        .map((batchId) => allStamps.find((s) => s.batchID.equals(batchId)))
+        .filter((stamp): stamp is PostageStamp => stamp !== undefined)
+
+      const encryptionKey = await deriveSwarmEncryptionKey(
+        account.derivationKey,
+      )
+      const accountKey = new PrivateKey(
+        await deriveSecret(encryptionKey, "backup-key"),
+      )
+      const owner = accountKey.publicKey().address()
+
+      const snapshot: AccountStateSnapshot = {
+        version: 1,
+        timestamp: Date.now(),
+        accountId: account.id.toHex(),
+        metadata: {
+          accountName: account.name,
+          defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+          createdAt: account.createdAt,
+          lastModified: Date.now(),
+          devices: account.devices,
+          partitionCount: account.partitionCount ?? 1,
+        },
+        identities,
+        connectedApps: apps,
+        postageStamps,
+      }
+      return { snapshot, encryptionKey, accountKey, owner }
+    } catch (error) {
+      console.error("[Proxy] Failed to assemble account-state snapshot:", error)
+      return undefined
+    }
+  }
+
+  /**
+   * Schedule a debounced account-state publish. Safe to call from inside the
+   * coordinator's lease callbacks: it only arms a timer, so the actual publish
+   * runs later, outside any held write lock.
+   */
+  private schedulePublish(): void {
+    if (!this.coordinator) return
+    if (this.publishTimer !== undefined) clearTimeout(this.publishTimer)
+    this.publishTimer = setTimeout(() => {
+      this.publishTimer = undefined
+      void this.runAccountStatePublish()
+    }, PUBLISH_DEBOUNCE_MS)
+  }
+
+  /**
+   * Publish the account snapshot to the shared feed via the coordinator (same
+   * write lock + held partition). Only publishes while a partition is held
+   * (multi-device); single-device accounts are published by the SwarmID UI.
+   * Re-arms if a publish is already in flight so the latest state still lands.
+   */
+  private async runAccountStatePublish(): Promise<void> {
+    const coordinator = this.coordinator
+    if (!coordinator || coordinator.currentPartition === undefined) return
+    if (this.publishInFlight) {
+      this.schedulePublish()
+      return
+    }
+    this.publishInFlight = true
+    try {
+      const assembled = await this.buildAccountStateSnapshotForPublish()
+      if (!assembled) return
+      const { snapshot, encryptionKey, accountKey, owner } = assembled
+      await coordinator.withWrite((target) =>
+        publishAccountState({
+          bee: this.bee,
+          accountId: snapshot.accountId,
+          accountKey,
+          owner,
+          encryptionKey,
+          localSnapshot: snapshot,
+          target,
+          logLabel: "[Proxy publish]",
+        }),
+      )
+      console.info(
+        `[Proxy] Published account state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
+      )
+    } catch (error) {
+      console.warn("[Proxy] Account-state publish failed:", error)
+    } finally {
+      this.publishInFlight = false
+    }
+  }
+
+  /**
    * Check if a connection is still valid based on connectedUntil timestamp
    */
   private isConnectionValid(connectedApp: ConnectedApp): boolean {
@@ -1308,6 +1481,10 @@ export class SwarmIdProxy {
     this.deviceId = undefined
     this.coordinator?.teardown()
     this.coordinator = undefined
+    if (this.publishTimer !== undefined) {
+      clearTimeout(this.publishTimer)
+      this.publishTimer = undefined
+    }
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
     this.storagePartitioned = false
