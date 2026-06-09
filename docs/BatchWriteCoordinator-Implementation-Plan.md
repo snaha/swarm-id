@@ -2,10 +2,14 @@
 
 Status: **in progress.** Tracks GitHub issue [#336](https://github.com/snaha/swarm-id/issues/336).
 
-**Progress:** Step A (scaffold), Steps B–C (lease cluster + `withWrite` moved into the coordinator; proxy
-delegates), and the displacement-during-upload race fix are **done and committed** (`pnpm check:all`
-green, 655 lib tests passing; the proxy is ~530 lines smaller). **Step D** (route `sync-account` through
-the coordinator + proxy-side publish) is **not yet started** — see the note at the end of this doc.
+**Progress: all phases complete and committed** (lib typecheck + lint clean, 658 lib tests passing).
+Step A (scaffold), Steps B–C (lease cluster + `withWrite` moved into the coordinator; proxy delegates)
+and the displacement-during-upload race fix landed first (the proxy is ~530 lines smaller). Step D-a
+routed `sync-account` through a one-shot coordinator via the new shared
+`lib/src/sync/publish-account-state.ts` (gate removed; contention/error logging split), and Step D-b
+wired proxy-side publish-on-lease-acquisition (+ on account-state change) to fix the 3-device
+device-announce bug. See the constraints note at the end for the two integration frictions that were
+resolved.
 
 Companion to `BatchWriteCoordinator-Design.md` (the original design), `Postage-Batch-Partitioning.md`,
 and `Postage-Batch-Partitioning-Refactor-Plan.md`. This document records the **confirmed** approach and
