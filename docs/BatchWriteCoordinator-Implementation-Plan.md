@@ -1,6 +1,12 @@
 # Implementation Plan: extract a `BatchWriteCoordinator` from the proxy
 
 Status: **in progress.** Tracks GitHub issue [#336](https://github.com/snaha/swarm-id/issues/336).
+
+**Progress:** Step A (scaffold), Steps B–C (lease cluster + `withWrite` moved into the coordinator; proxy
+delegates), and the displacement-during-upload race fix are **done and committed** (`pnpm check:all`
+green, 655 lib tests passing; the proxy is ~530 lines smaller). **Step D** (route `sync-account` through
+the coordinator + proxy-side publish) is **not yet started** — see the note at the end of this doc.
+
 Companion to `BatchWriteCoordinator-Design.md` (the original design), `Postage-Batch-Partitioning.md`,
 and `Postage-Batch-Partitioning-Refactor-Plan.md`. This document records the **confirmed** approach and
 the step-by-step execution; the design doc records the original motivation.
@@ -194,3 +200,28 @@ New tests:
 - Avoid double-flush in the oneshot path (sync-account already flushes via `handleUtilizationUpdate`).
 - Proxy publish-on-acquire must not deadlock on the write lock it re-enters via `coordinator.withWrite`
   — run it outside the acquiring lock context, debounced.
+
+## Step D — constraints discovered while implementing A–C
+
+Two integration frictions to resolve when implementing Step D (recorded so the work is scoped before it
+starts):
+
+1. **Stamper type.** `PostageStampsStoreInterface.getStamper` returns the narrower `FlushableStamper`
+   (`stamp` + optional `flush`), not `UtilizationAwareStamper`. `sync-account` today feature-detects the
+   lease methods (`stamper.bindPartition && stamper.buildLeaseLocalCounter`). The coordinator's deps
+   require a `UtilizationAwareStamper` and call `bindPartition`/`buildLeaseLocalCounter`/`getLocalCounter`
+   unconditionally. Step D must either narrow the coordinator's stamper contract + feature-detect, or
+   have `sync-account` assert/cast the stamper to `UtilizationAwareStamper` (it is one in production for
+   shared, partitioned batches) — and the test `mockStamper` must gain the lease methods.
+
+2. **Gate tests move down a layer.** `sync-account.test.ts` mocks `./partition-lock`
+   (`readPartitionLock`/`acquirePartitionLock`) and asserts on call counts (e.g. "claims a free
+   partition" → `acquirePartitionLock` called once; "skips when all held" → not called). Once the gate
+   is the coordinator's `PartitionLease.acquire`, those assertions belong in
+   `batch-write-coordinator.test.ts`. In `sync-account.test.ts` the cleanest path is to **mock
+   `BatchWriteCoordinator`**: a publish test = `withWrite` resolves; a skip test = `withWrite` rejects
+   `PartitionContendedError` → assert `undefined` + the "Skipping" warn. This is the correct layering
+   (sync-account tests its _use_ of the coordinator; the coordinator tests the claim/skip).
+
+These make Step D a distinct, test-invasive phase. Steps A–C + the race fix are independently complete
+and green, so they can land as a reviewable unit before Step D proceeds.
