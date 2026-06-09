@@ -24,7 +24,7 @@ import {
   createPostageStamp,
   createDevice,
 } from "../test-fixtures"
-import { readPartitionLock, acquirePartitionLock } from "./partition-lock"
+import { PartitionContendedError } from "./batch-write-coordinator"
 
 // ============================================================================
 // Mock Factories
@@ -170,12 +170,32 @@ vi.mock("../utils/batch-utilization", () => ({
   LEASE_TTL_MS: 30_000,
 }))
 
-// The multi-device gate reads/claims partition lock SOCs; mock both so each
-// test controls whether the device holds / can claim a partition.
-vi.mock("./partition-lock", () => ({
-  readPartitionLock: vi.fn(),
-  acquirePartitionLock: vi.fn(),
-  NO_HOLDER_DEVICE_ID: "",
+// The write path (lock + partition lease + stamp flush) is the coordinator's
+// job and is unit-tested in batch-write-coordinator.test.ts. Here we mock it so
+// these tests cover sync-account's *use* of it: by default `withWrite` runs the
+// publish op against a stamper target; a test can override `withWrite` to reject
+// `PartitionContendedError` (the genuine-contention skip path).
+const coordinatorController = vi.hoisted(() => ({
+  withWrite: undefined as
+    | undefined
+    | ((op: (target: unknown) => Promise<unknown>) => Promise<unknown>),
+}))
+vi.mock("./batch-write-coordinator", () => ({
+  BatchWriteCoordinator: class MockBatchWriteCoordinator {
+    withWrite(op: (target: unknown) => Promise<unknown>) {
+      return coordinatorController.withWrite
+        ? coordinatorController.withWrite(op)
+        : op({ mode: "stamper" })
+    }
+  },
+  PartitionContendedError: class PartitionContendedError extends Error {
+    accountId?: string
+    constructor(message?: string, accountId?: string) {
+      super(message ?? "All partitions are held by other devices.")
+      this.name = "PartitionContendedError"
+      this.accountId = accountId
+    }
+  },
 }))
 
 // device-id uses localStorage which isn't available in this test environment;
@@ -199,8 +219,7 @@ describe("createSyncAccount", () => {
     uploadCallCount = 0
     epochUpdateCallCount = 0
 
-    vi.mocked(readPartitionLock).mockReset()
-    vi.mocked(acquirePartitionLock).mockReset()
+    coordinatorController.withWrite = undefined
 
     mockFindAt.mockReset()
     mockFindAt.mockResolvedValue(undefined)
@@ -389,7 +408,7 @@ describe("createSyncAccount", () => {
     expect(lastAddress).toEqual(FAKE_SOC_ADDRESS)
   })
 
-  it("claims a free partition and publishes when this device holds none (multi-device account)", async () => {
+  it("publishes for a multi-device account when the coordinator holds a partition", async () => {
     const stores = createMockStores()
     const baseAccount = stores.accountsStore.getAccount(
       new EthAddress(TEST_ETH_ADDRESS_HEX),
@@ -400,19 +419,9 @@ describe("createSyncAccount", () => {
         : undefined,
     )
 
-    // No device holds either partition (all free), and the claim succeeds —
-    // so the SwarmID UI acquires partition 0 and publishes.
-    vi.mocked(readPartitionLock).mockResolvedValue(undefined)
-    vi.mocked(acquirePartitionLock).mockResolvedValue({
-      outcome: "acquired",
-      payload: {
-        holderDeviceId: "test-device-self",
-        generation: { timestampMs: 1, tiebreaker: "00" },
-        acquiredAt: 1,
-        leasedUntil: Date.now() + 60_000,
-      },
-    })
-
+    // Default coordinator mock runs the publish op (i.e. a partition was held /
+    // claimed). The claim/skip decision itself is covered by
+    // batch-write-coordinator.test.ts.
     const syncAccount = createSyncAccount({
       bee: createMockBee(),
       ...stores,
@@ -423,13 +432,12 @@ describe("createSyncAccount", () => {
     })
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
-    expect(acquirePartitionLock).toHaveBeenCalledTimes(1)
     expect(result).toBeDefined()
     expect(result!.status).toBe("success")
     expect(uploadCallCount).toBe(1)
   })
 
-  it("skips sync when all partitions are held by live foreign devices", async () => {
+  it("skips sync (returns undefined, no upload) when the coordinator reports contention", async () => {
     const stores = createMockStores()
     const baseAccount = stores.accountsStore.getAccount(
       new EthAddress(TEST_ETH_ADDRESS_HEX),
@@ -440,14 +448,12 @@ describe("createSyncAccount", () => {
         : undefined,
     )
 
-    // Every partition is held by a *live* *foreign* device — nothing free to
-    // claim → skip; a peer (or the proxy) publishes instead.
-    vi.mocked(readPartitionLock).mockResolvedValue({
-      holderDeviceId: "some-other-device",
-      generation: { timestampMs: 1, tiebreaker: "00" },
-      acquiredAt: 1,
-      leasedUntil: Date.now() + 60_000,
-    })
+    // Every partition held by a live foreign device → withWrite throws
+    // PartitionContendedError → sync-account skips quietly.
+    coordinatorController.withWrite = () =>
+      Promise.reject(
+        new PartitionContendedError(undefined, TEST_ETH_ADDRESS_HEX),
+      )
 
     const syncAccount = createSyncAccount({
       bee: createMockBee(),
@@ -460,9 +466,31 @@ describe("createSyncAccount", () => {
 
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeUndefined()
-    expect(acquirePartitionLock).not.toHaveBeenCalled()
     expect(uploadCallCount).toBe(0)
     expect(epochUpdateCallCount).toBe(0)
+  })
+
+  it("returns a status:error result when the coordinator write fails operationally", async () => {
+    const stores = createMockStores()
+
+    // A non-contention failure (e.g. a stamp/SOC error) must surface as an
+    // error result, NOT be swallowed as contention.
+    coordinatorController.withWrite = () =>
+      Promise.reject(new Error("SOC upload failed: 400 invalid batch id"))
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
+    expect(result).toBeDefined()
+    expect(result!.status).toBe("error")
+    expect(uploadCallCount).toBe(0)
   })
 
   // A peer snapshot already on Swarm, carrying a connected app we don't hold
