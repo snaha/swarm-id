@@ -3,7 +3,7 @@
 import type { KnipConfig } from 'knip'
 
 const config: KnipConfig = {
-  entry: ['src/app.html', 'src/routes/**/*'],
+  entry: ['src/app.html', 'src/routes/**/*', 'src/**/*.{test,spec}.ts'],
   paths: {
     '$app/*': ['node_modules/@sveltejs/kit/src/runtime/app/*'],
     '$env/*': ['.svelte-kit/ambient.d.ts'],

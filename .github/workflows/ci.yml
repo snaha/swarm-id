@@ -70,6 +70,10 @@ jobs:
         working-directory: ./ui
         run: pnpm knip
 
+      - name: Run ui unit tests
+        working-directory: ./ui
+        run: pnpm test
+
       - name: Build demo
         working-directory: ./demo
         run: pnpm build
