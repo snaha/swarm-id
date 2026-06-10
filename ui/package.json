@@ -5,9 +5,9 @@
   "license": "Apache-2.0",
   "type": "module",
   "scripts": {
-    "dev": "vite dev --port 5175",
+    "dev": "vite dev --port 5500",
     "build": "vite build",
-    "preview": "vite preview --port 5175",
+    "preview": "vite preview --port 5501",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:all": "pnpm lint && pnpm check && pnpm knip",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
@@ -47,5 +47,8 @@
   "engines": {
     "node": ">=22",
     "pnpm": "11.x"
+  },
+  "dependencies": {
+    "ethers": "6.15.0"
   }
 }
