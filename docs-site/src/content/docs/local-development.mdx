@@ -41,7 +41,7 @@ Once the cluster is running, these endpoints are available:
 
 ## Developer Tools (/dev)
 
-The Identity UI includes a Developer Tools page at `http://localhost:5174/dev` with utilities for testing and debugging.
+The Identity UI includes a Developer Tools page at `http://localhost:5510/dev` with utilities for testing and debugging.
 
 ### Overview Tab
 
@@ -87,7 +87,7 @@ Postage stamps are required for uploading data to Swarm. In development, you can
 
 ### Using Developer Tools (Recommended)
 
-1. Navigate to `http://localhost:5174/dev`
+1. Navigate to `http://localhost:5510/dev`
 2. Go to the **Stamps** tab
 3. Select a signer key (Queen is pre-funded)
 4. Click **Buy Stamp**
@@ -199,14 +199,14 @@ Your VPS (nginx + HTTPS)              Your Local Machine
 ┌─────────────────────────┐           ┌─────────────────────┐
 │ demo.yourdomain.com     │◄──────────│ SSH -R tunnels      │
 │   → 127.0.0.1:18080     │           │   18080 → demo      │
-│ id.yourdomain.com       │           │   5174 → identity   │
-│   → 127.0.0.1:5174      │           │   (Vite dev server) │
+│ id.yourdomain.com       │           │   5510 → identity   │
+│   → 127.0.0.1:5510      │           │   (Vite dev server) │
 └─────────────────────────┘           └─────────────────────┘
 ```
 
 ### VPS Setup (one-time)
 
-1. Add nginx server blocks pointing to `127.0.0.1:18080` (demo) and `127.0.0.1:5174` (identity)
+1. Add nginx server blocks pointing to `127.0.0.1:18080` (demo) and `127.0.0.1:5510` (identity)
 2. Get SSL certificates with certbot
 3. Add DNS A records for both subdomains
 
@@ -220,7 +220,7 @@ pnpm dev:demo
 VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=id.yourdomain.com pnpm dev:swarm-ui
 
 # Terminal 3: Open SSH tunnel
-ssh -R 18080:localhost:3000 -R 5174:localhost:5174 user@your-vps
+ssh -R 18080:localhost:3000 -R 5510:localhost:5510 user@your-vps
 ```
 
 The `VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS` environment variable is required when accessing the Vite dev server through a foreign hostname. Without it, Vite will reject requests from the tunneled domain.

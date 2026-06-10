@@ -7,7 +7,7 @@ import { test, expect, type Page } from '@playwright/test'
 const TEST_SEED_PHRASE =
   'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about'
 const DEMO_URL = 'http://localhost:3000'
-const SWARM_UI_URL = 'http://localhost:5174'
+const SWARM_UI_URL = 'http://localhost:5510'
 
 // Helper to click the Connect button in the popover and wait for popup
 async function clickConnectAndWaitForPopup(page: Page) {

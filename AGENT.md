@@ -47,8 +47,9 @@ Master Key (from Passkey/SIWE challenge)
 
 ```bash
 pnpm install          # Install dependencies
-pnpm dev              # Start demo (:3000) + legacy identity UI (:5174)
-pnpm dev:ui           # Start the new identity UI (:5175)
+pnpm dev:new          # Start lib watch + new identity UI (:5500) + demo (:3000) against it
+pnpm dev:legacy       # Start lib watch + legacy identity UI (:5510) + demo (:3000) against it
+pnpm dev              # Alias for dev:legacy
 pnpm build            # Build everything
 pnpm check:all        # All CI checks (format, lint, typecheck, knip)
 pnpm clean            # Clean build outputs

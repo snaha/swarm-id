@@ -12,7 +12,7 @@ export function resolveProxyOrigin(): string {
 
   const { hostname } = window.location
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
-    return 'http://localhost:5174'
+    return 'http://localhost:5510'
   }
 
   return 'https://swarm-id.snaha.net'

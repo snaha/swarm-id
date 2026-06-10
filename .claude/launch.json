@@ -1,0 +1,33 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "ui-new",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev:ui"],
+      "port": 5500,
+      "autoPort": false
+    },
+    {
+      "name": "ui-legacy",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev:swarm-ui"],
+      "port": 5510,
+      "autoPort": false
+    },
+    {
+      "name": "demo-new",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev:demo:new"],
+      "port": 3000,
+      "autoPort": false
+    },
+    {
+      "name": "demo-legacy",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["dev:demo:legacy"],
+      "port": 3000,
+      "autoPort": false
+    }
+  ]
+}
