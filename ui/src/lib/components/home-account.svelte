@@ -22,6 +22,7 @@
   import { unlockAccount } from '$lib/crypto/unlock'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import type { Account } from '$lib/types'
+  import { notImplemented } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const ADDRESS_PREFIX_LENGTH = 6
@@ -202,14 +203,7 @@
         <AccessIcon class="size-4" />
         {accessLabel}
       </span>
-      <Button
-        variant="outline"
-        size="sm"
-        disabled
-        title="Changing the access method is coming soon"
-      >
-        Change
-      </Button>
+      <Button variant="outline" size="sm" onclick={notImplemented}>Change</Button>
     </div>
   </div>
 

@@ -7,4 +7,9 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+/** Placeholder handler for interactive elements whose feature hasn't landed yet. */
+export function notImplemented() {
+  alert('Not implemented yet.')
+}
+
 export type WithElementRef<T, El extends HTMLElement = HTMLElement> = T & { ref?: El | null }

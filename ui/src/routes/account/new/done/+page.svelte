@@ -16,6 +16,7 @@
   import { Button } from '$lib/components/ui/button'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import { notImplemented } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const IDENTICON_SIZE = 56
@@ -64,8 +65,8 @@
         </div>
 
         <div class="flex w-full flex-col items-center gap-4">
-          <!-- Stamp purchase flow is still TBD in the design; land on home for now. -->
-          <Button size="lg" class="w-full" href={resolve('/home')}>Add a postage stamp</Button>
+          <!-- Stamp purchase flow is still TBD in the design. -->
+          <Button size="lg" class="w-full" onclick={notImplemented}>Add a postage stamp</Button>
           <Button size="lg" variant="secondary" class="w-full" href={resolve('/home')}>
             Stay local for now
           </Button>

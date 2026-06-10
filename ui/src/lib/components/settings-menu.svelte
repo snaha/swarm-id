@@ -17,6 +17,7 @@
 
   import { Button } from '$lib/components/ui/button'
   import { type ThemePreference, themeStore } from '$lib/stores/theme.svelte'
+  import { notImplemented } from '$lib/utils'
 
   const APPEARANCE_OPTIONS = [
     { value: 'auto', label: 'Automatic', icon: Contrast },
@@ -51,6 +52,11 @@
     goto(resolve('/account/restore'))
   }
 
+  function networkSettings() {
+    close()
+    notImplemented()
+  }
+
   function selectAppearance(value: ThemePreference) {
     themeStore.set(value)
     close()
@@ -77,7 +83,7 @@
       tabindex="-1"
       class="bg-popover text-popover-foreground absolute top-full right-0 z-50 mt-2 min-w-36 rounded-lg border p-1 shadow-md"
     >
-      <button type="button" role="menuitem" class={ITEM_CLASS} onclick={close}>
+      <button type="button" role="menuitem" class={ITEM_CLASS} onclick={networkSettings}>
         <Settings class="size-4 shrink-0" />
         <span class="flex-1 whitespace-nowrap">Network settings</span>
       </button>

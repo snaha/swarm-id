@@ -11,6 +11,7 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
+  import { notImplemented } from '$lib/utils'
 
   let appName = $state('this app')
   let appUrl = $state('')
@@ -58,7 +59,7 @@
         </Button>
       </div>
 
-      <Button variant="ghost" size="xs">What is Swarm ID?</Button>
+      <Button variant="ghost" size="xs" onclick={notImplemented}>What is Swarm ID?</Button>
     </div>
   </main>
 </div>
