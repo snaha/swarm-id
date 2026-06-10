@@ -30,7 +30,10 @@ import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { serializeAccountState, deserializeAccountState } from "./serialization"
-import { mergeSnapshotWithRemote } from "./merge-snapshot"
+import {
+  mergeSnapshotWithRemote,
+  snapshotContainsContribution,
+} from "./merge-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type { SyncResult } from "./types"
 
@@ -94,6 +97,35 @@ async function tryFetchLatestSnapshot(opts: {
   const reference = new Reference(refBytes)
   const data = await downloadDataWithChunkAPI(bee, reference.toHex())
   return deserializeAccountState(data)
+}
+
+/**
+ * True when the published feed's latest snapshot already lists `deviceId`. Used
+ * to gate the proxy's announce-on-acquisition publish: once this device is in
+ * the feed there is nothing to announce, so a page reload need not republish.
+ *
+ * A read failure or empty feed returns `false` (the caller then publishes), so
+ * an as-yet-unannounced device is never silently dropped. Note this is a
+ * *pre-write* read, which is reliable even when post-write read-back lags.
+ */
+export async function remoteFeedHasDevice(opts: {
+  bee: Bee
+  accountId: string
+  owner: EthAddress
+  deviceId: string
+}): Promise<boolean> {
+  try {
+    const snapshot = await tryFetchLatestSnapshot({
+      bee: opts.bee,
+      topic: accountSyncTopic(opts.accountId),
+      owner: opts.owner,
+    })
+    return Boolean(
+      snapshot?.metadata.devices.some((d) => d.deviceId === opts.deviceId),
+    )
+  } catch {
+    return false
+  }
 }
 
 export interface PublishAccountStateDeps {
@@ -200,17 +232,31 @@ export async function publishAccountState(
   }
 
   // Did the feed end up pointing at the reference we just wrote? A shared epoch
-  // feed has no compare-and-swap: two devices publishing within the same epoch
+  // feed has no compare-and-swap: two writers publishing within the same epoch
   // slot write the same SOC address and the later signer wins by
-  // last-writer-wins, silently orphaning the other's snapshot. Re-read the feed
-  // and compare; only a *different* confirmed reference counts as a loss. A
+  // last-writer-wins. Re-read the feed and decide whether OUR contribution
+  // landed. A *different* winning reference is only a real loss if it DROPPED
+  // our entities — a co-writer that published the same account (e.g. the proxy
+  // announcing this device while the UI also syncs it) writes a union that still
+  // contains us, so convergence held and there is nothing to retry. Comparing
+  // exact refs would mis-read that as a loss (each writer mints a fresh
+  // timestamp → a different ref for the same content) and storm. A
   // missing/unreadable result (read-after-write lag, transient Bee error) is
   // treated as "won" so we never spuriously republish.
   const verifyWon = async (writtenRef: Uint8Array): Promise<boolean> => {
     try {
       const finder = new AsyncEpochFinder(bee, topic, owner)
       const latest = await finder.findAt(BigInt(Math.floor(Date.now() / 1000)))
-      return !latest || uint8ArraysEqual(latest, writtenRef)
+      if (!latest || uint8ArraysEqual(latest, writtenRef)) return true
+      // A different ref won the slot — only a loss if it's missing our entities.
+      const latestData = await downloadDataWithChunkAPI(
+        bee,
+        new Reference(latest).toHex(),
+      )
+      return snapshotContainsContribution(
+        state,
+        deserializeAccountState(latestData),
+      )
     } catch {
       return true
     }

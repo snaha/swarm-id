@@ -156,6 +156,19 @@ export class BatchWriteCoordinator {
   /** Uploads currently executing under the write lock; the refresh tick only
    *  yields an idle lease when this is 0. */
   private activeUploadCount: number = 0
+  /** Set by `teardown()`. Once disposed the coordinator must never re-acquire a
+   *  partition or arm a refresh timer: an in-flight `withWrite` (e.g. a deferred
+   *  publish, or a normal upload) can outlive a disconnect/sign-out, and without
+   *  this guard its `ensureLease` would re-lease the slot and start a detached
+   *  interval — a ghost lease the proxy can no longer tear down. */
+  private disposed: boolean = false
+  /** Bumped whenever held-lease state is reset (`pauseLeaseBackgroundWork`,
+   *  `finalizeDemote`, `yieldIdleLease`, `teardown`). An `acquire()` that began
+   *  under an older epoch must not commit (bind / start timers) when it
+   *  resolves — `Promise.race` cannot cancel a losing acquire, whose
+   *  continuation would otherwise resurrect a lease the coordinator already
+   *  cleared. */
+  private leaseEpoch: number = 0
 
   constructor(deps: BatchWriteCoordinatorDeps) {
     this.deps = deps
@@ -175,6 +188,13 @@ export class BatchWriteCoordinator {
    *  (appKey / uploadMode). */
   get stamperRef(): UtilizationAwareStamper {
     return this.deps.stamper
+  }
+
+  /** The account this coordinator (and its batch/lease) was built for —
+   *  exposed so the proxy can refuse to publish a snapshot assembled for a
+   *  different account through this coordinator's batch. */
+  get accountId(): string {
+    return this.deps.accountId
   }
 
   // ---- write entry point --------------------------------------------------
@@ -211,6 +231,7 @@ export class BatchWriteCoordinator {
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
    *  the background so the first upload doesn't pay the acquire latency. */
   startLease(): void {
+    if (this.disposed) return
     if (this.deps.mode !== "persistent") return
     if (this.deps.partitionCount <= 1) return
     this.pendingAcquire = true
@@ -228,6 +249,11 @@ export class BatchWriteCoordinator {
    * disconnect. Never throws.
    */
   teardown(): void {
+    // Disposed coordinators must never re-acquire: an in-flight `withWrite`
+    // (deferred publish or upload) can outlive this call and would otherwise
+    // re-lease the slot + arm a detached refresh interval.
+    this.disposed = true
+    this.leaseEpoch++
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
       this.partitionRefreshTimer = undefined
@@ -246,6 +272,14 @@ export class BatchWriteCoordinator {
             ),
           )
       }
+      // Invalidate BEFORE unbinding (same ordering as the displacement race
+      // fix): teardown runs synchronously, off the write lock, so it can land
+      // between two awaits of an in-flight `stamp()`. `unbindPartition` alone
+      // resets `leaseStale=false`, letting that stamp silently fall back to
+      // legacy "any"-pool slot-picking and corrupt a peer's slots; invalidating
+      // first arms the breaker so the in-flight stamp aborts with
+      // `PartitionLeaseLostError` instead.
+      stamper.invalidateLease()
       stamper.unbindPartition()
     }
     this.partitionLease = undefined
@@ -266,8 +300,14 @@ export class BatchWriteCoordinator {
    */
   private async ensureLease(wait: "block" | "skip"): Promise<void> {
     try {
-      // Single-partition (legacy) accounts never lease — nothing to do.
+      // Single-partition (legacy) accounts never lease — nothing to do (and no
+      // ghost-lease risk, so the disposed guard below doesn't apply to them).
       if (this.deps.partitionCount <= 1) return
+      // Torn down while this write was in flight (disconnect / sign-out / re-
+      // auth). Bail before any (re)acquire so we never resurrect a ghost lease.
+      if (this.disposed) {
+        throw new Error("BatchWriteCoordinator has been torn down.")
+      }
 
       if (!this.pendingAcquire && (!this.partitionLease || this.readOnly)) {
         this.pendingAcquire = true
@@ -277,8 +317,11 @@ export class BatchWriteCoordinator {
         this.pendingAcquire = false
         if (wait === "skip") {
           // One-off: a single acquire attempt. PartitionLease.acquire claims a
-          // free/expired slot under the lock SOC's generation fencing; if it
-          // comes back read-only every partition is held by a live peer.
+          // free/expired slot under the lock SOC's generation fencing. An
+          // operational failure inside `acquire` (lock-SOC scan/claim threw)
+          // propagates as-is so the caller reports an error; only a COMPLETED
+          // acquire that found every partition held by a live peer is
+          // contention.
           await this.acquire()
           if (this.readOnly || this.currentPartition === undefined) {
             throw new PartitionContendedError(undefined, this.deps.accountId)
@@ -326,6 +369,15 @@ export class BatchWriteCoordinator {
       this.readOnly = false
       return
     }
+    // Torn down before this acquire started (e.g. a later slot-wait iteration
+    // after a disconnect). Don't bind a partition we can never release.
+    if (this.disposed) return
+    // Epoch capture: `ensureLease`'s block path races this acquire against a
+    // timeout it cannot cancel. If the timeout fires, `pauseLeaseBackgroundWork`
+    // resets state and bumps the epoch; a late-completing continuation here must
+    // then abort instead of re-binding a partition and arming a refresh timer
+    // the coordinator no longer tracks.
+    const epoch = this.leaseEpoch
     try {
       const lease = await PartitionLease.fromSwarmEncryptionKey({
         bee: this.deps.bee,
@@ -335,6 +387,7 @@ export class BatchWriteCoordinator {
         swarmEncryptionKey,
         stamper,
       })
+      if (this.leaseEpoch !== epoch) return
       const cached = this.deps.readLeaseCache?.()
       if (cached) lease.hydrate(cached)
 
@@ -360,6 +413,7 @@ export class BatchWriteCoordinator {
       }
 
       const result = await lease.acquire({ partitionCount })
+      if (this.leaseEpoch !== epoch) return
       this.partitionLease = lease
       this.readOnly = result.isReadOnly
 
@@ -384,7 +438,6 @@ export class BatchWriteCoordinator {
       this.lastLeaseActivityAt = Date.now()
       this.deps.onLeaseAcquired?.(result.partition)
     } catch (error) {
-      if (error instanceof PartitionContendedError) throw error
       console.error(
         "[BatchWriteCoordinator] Failed to acquire partition lease:",
         error,
@@ -393,6 +446,10 @@ export class BatchWriteCoordinator {
       this.readOnly = false
       // Keep cache and in-memory state in lockstep: no lease → no live cache.
       this.deps.writeLeaseCache?.(undefined)
+      // Operational failure (the lock-SOC scan/claim threw) — NOT contention.
+      // Propagate so the skip path reports an error instead of "all partitions
+      // held", and the block path pauses background work on the real cause.
+      throw error
     }
   }
 
@@ -405,6 +462,9 @@ export class BatchWriteCoordinator {
     const deadline = Date.now() + SLOT_WAIT_TIMEOUT_MS
     while (true) {
       await this.acquire()
+      // Disposed mid-wait (disconnect during the slot poll): stop waiting for a
+      // slot we'd never be able to use.
+      if (this.disposed) return
       if (!this.readOnly) return
       if (Date.now() + LEASE_REFRESH_MS > deadline) {
         throw new PartitionContendedError(
@@ -479,6 +539,7 @@ export class BatchWriteCoordinator {
    * so no `stamp()` runs between `invalidateLease` and `unbindPartition`.
    */
   private finalizeDemote(): void {
+    this.leaseEpoch++
     this.deps.stamper.unbindPartition()
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
@@ -500,6 +561,9 @@ export class BatchWriteCoordinator {
    * doc. Persistent mode only.
    */
   private startRefreshTimer(lease: PartitionLease): void {
+    // A disposed coordinator must never arm an interval — closes the window
+    // where a `withWrite` acquire that began before teardown finishes after it.
+    if (this.disposed) return
     if (this.deps.mode !== "persistent") return
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
@@ -515,13 +579,31 @@ export class BatchWriteCoordinator {
 
     // Idle yield: if no upload touched this lease for IDLE_YIELD_MS and none is
     // in flight, voluntarily release so a waiting peer takes the slot without
-    // waiting out the TTL. We re-acquire on the next upload. The
-    // `activeUploadCount === 0` guard is essential — this runs off-lock.
+    // waiting out the TTL. We re-acquire on the next upload.
+    //
+    // The yield itself MUST run under the write lock: this tick is off-lock, so
+    // an upload can enter `withWrite` between the idle check here and the
+    // unbind inside `yieldIdleLease` — releasing the partition to peers and
+    // unbinding the stamper (which resets the `leaseStale` breaker) underneath
+    // an in-flight `stamp()` is the same slot-corruption race as a displacement.
+    // Holding the lock excludes in-flight uploads; the re-checks inside cover
+    // an upload that completed (or a demote/teardown that ran) while this tick
+    // waited for the lock.
     if (
       this.activeUploadCount === 0 &&
       Date.now() - this.lastLeaseActivityAt >= IDLE_YIELD_MS
     ) {
-      await this.yieldIdleLease(lease)
+      await this.lock(async () => {
+        if (this.disposed) return
+        if (this.partitionLease !== lease) return
+        if (
+          this.activeUploadCount !== 0 ||
+          Date.now() - this.lastLeaseActivityAt < IDLE_YIELD_MS
+        ) {
+          return
+        }
+        await this.yieldIdleLease(lease)
+      })
       return
     }
 
@@ -573,8 +655,10 @@ export class BatchWriteCoordinator {
   /**
    * Voluntarily give up the held partition after it has gone idle. Keeps the
    * coordinator able to re-acquire on the next write (re-arm via `ensureLease`).
+   * MUST run under the write lock (see the idle-yield note in `refreshTick`).
    */
   private async yieldIdleLease(lease: PartitionLease): Promise<void> {
+    this.leaseEpoch++
     const yieldedPartition = lease.currentPartition
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
@@ -610,6 +694,7 @@ export class BatchWriteCoordinator {
    * that path runs, so reaching here means there is no live lease to preserve.
    */
   private pauseLeaseBackgroundWork(): void {
+    this.leaseEpoch++
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
       this.partitionRefreshTimer = undefined

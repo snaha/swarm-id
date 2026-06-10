@@ -85,7 +85,10 @@ import {
   resolveStampForIdentity,
   collectAccountStampBatchIds,
 } from "./utils/postage-stamp-association"
-import { publishAccountState } from "./sync/publish-account-state"
+import {
+  publishAccountState,
+  remoteFeedHasDevice,
+} from "./sync/publish-account-state"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
@@ -208,6 +211,14 @@ export class SwarmIdProxy {
    */
   private publishTimer: ReturnType<typeof setTimeout> | undefined
   private publishInFlight: boolean = false
+  /**
+   * Why the next debounced publish was scheduled. `"acquired"` (announce on
+   * lease acquisition) is gated on this device not yet being in the feed, so a
+   * plain reload doesn't republish. `"change"` (account-state delta) always
+   * publishes. `"change"` dominates a coalesced burst — a real delta must never
+   * be skipped just because an acquisition was also pending.
+   */
+  private publishReason: "acquired" | "change" | undefined
   /**
    * This device's identity, captured ONCE at authentication and reused for
    * every lease operation. Never re-read from `getOrCreateDeviceId()` mid-
@@ -366,7 +377,7 @@ export class SwarmIdProxy {
     // rename) should propagate to peers. Debounced so a burst collapses into one
     // feed write.
     if (this.coordinator?.currentPartition !== undefined) {
-      this.schedulePublish()
+      this.schedulePublish("change")
     }
   }
 
@@ -684,7 +695,7 @@ export class SwarmIdProxy {
       // account snapshot (which includes ourselves in metadata.devices) to the
       // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
       // lock (the publish re-enters the lock via the coordinator).
-      onLeaseAcquired: () => this.schedulePublish(),
+      onLeaseAcquired: () => this.schedulePublish("acquired"),
     })
     this.coordinator.startLease()
   }
@@ -1340,12 +1351,17 @@ export class SwarmIdProxy {
    * coordinator's lease callbacks: it only arms a timer, so the actual publish
    * runs later, outside any held write lock.
    */
-  private schedulePublish(): void {
+  private schedulePublish(reason: "acquired" | "change"): void {
     if (!this.coordinator) return
+    // "change" dominates: if a real delta is pending in this debounce window,
+    // don't let a coalesced "acquired" downgrade it to the announce-gated path.
+    if (this.publishReason !== "change") this.publishReason = reason
     if (this.publishTimer !== undefined) clearTimeout(this.publishTimer)
     this.publishTimer = setTimeout(() => {
       this.publishTimer = undefined
-      void this.runAccountStatePublish()
+      const effectiveReason = this.publishReason ?? "acquired"
+      this.publishReason = undefined
+      void this.runAccountStatePublish(effectiveReason)
     }, PUBLISH_DEBOUNCE_MS)
   }
 
@@ -1355,18 +1371,59 @@ export class SwarmIdProxy {
    * (multi-device); single-device accounts are published by the SwarmID UI.
    * Re-arms if a publish is already in flight so the latest state still lands.
    */
-  private async runAccountStatePublish(): Promise<void> {
+  private async runAccountStatePublish(
+    reason: "acquired" | "change",
+  ): Promise<void> {
     const coordinator = this.coordinator
     if (!coordinator || coordinator.currentPartition === undefined) return
     if (this.publishInFlight) {
-      this.schedulePublish()
+      this.schedulePublish(reason)
       return
     }
     this.publishInFlight = true
     try {
       const assembled = await this.buildAccountStateSnapshotForPublish()
       if (!assembled) return
+      // Snapshot assembly awaits (crypto + storage reads); a disconnect /
+      // sign-out / re-auth may have torn down or replaced the coordinator in
+      // the meantime. Bail rather than write through a stale instance. (The
+      // coordinator also self-guards against re-acquire when disposed; this
+      // just avoids the needless lock round-trip.)
+      if (this.coordinator !== coordinator) return
       const { snapshot, encryptionKey, accountKey, owner } = assembled
+
+      // The snapshot is assembled from the most recent connection for this
+      // origin; if the connected account changed since the coordinator was
+      // built, publishing would pair account B's feed (key derived from the
+      // snapshot) with account A's batch and partition lease. Skip — the
+      // re-initialised coordinator for the new account publishes its own state.
+      if (snapshot.accountId !== coordinator.accountId) {
+        console.warn(
+          `[Proxy] Account changed during publish scheduling (snapshot ${snapshot.accountId} vs coordinator ${coordinator.accountId}); skipping publish.`,
+        )
+        return
+      }
+
+      // Announce-once: a publish triggered purely by acquiring the lease (e.g.
+      // every page reload) has nothing to announce once this device is already
+      // in the published feed. Skip it — that's what caused the redundant
+      // publish + verify-retry storm. A "change" publish carries a real delta
+      // and is never gated. The pre-write feed read here is reliable even when
+      // post-write read-back lags.
+      if (reason === "acquired") {
+        const alreadyAnnounced = await remoteFeedHasDevice({
+          bee: this.bee,
+          accountId: snapshot.accountId,
+          owner,
+          deviceId: this.requireDeviceId(),
+        })
+        if (alreadyAnnounced) {
+          console.info(
+            `[Proxy] Device already in feed for ${snapshot.accountId}; skipping announce publish.`,
+          )
+          return
+        }
+      }
       await coordinator.withWrite((target) =>
         publishAccountState({
           bee: this.bee,

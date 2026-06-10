@@ -336,15 +336,21 @@ export function createSyncAccount(
     const owner = accountKey.publicKey().address()
 
     // Build the stamper for the default batch. The coordinator binds the held
-    // partition on it; for a shared, partitioned batch this is always a
-    // UtilizationAwareStamper (the store builds one), which the coordinator's
-    // lease binding requires.
+    // partition on it and drives the lease circuit-breaker, so it needs the
+    // full UtilizationAwareStamper surface — the store interface only promises
+    // a FlushableStamper, so narrow at runtime instead of casting past the
+    // contract.
     const stamper = await postageStampsStore.getStamper(defaultStamp.batchID, {
       owner,
       encryptionKey: hexToUint8Array(encryptionKey),
     })
     if (!stamper) {
       const error = `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`
+      console.error(`[SyncCoordinator ${timestamp()}] ${error}`)
+      return { status: "error", error }
+    }
+    if (!(stamper instanceof UtilizationAwareStamper)) {
+      const error = `Stamper for batch ${defaultStamp.batchID.toHex()} does not support coordinated writes (expected a UtilizationAwareStamper)`
       console.error(`[SyncCoordinator ${timestamp()}] ${error}`)
       return { status: "error", error }
     }
@@ -357,7 +363,7 @@ export function createSyncAccount(
     const coordinator = new BatchWriteCoordinator({
       bee,
       batchId: defaultStamp.batchID.toHex(),
-      stamper: stamper as unknown as UtilizationAwareStamper,
+      stamper,
       deviceId: getOrCreateDeviceId(),
       accountId,
       backupSigner: accountKey,

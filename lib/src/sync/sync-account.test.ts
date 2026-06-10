@@ -58,15 +58,23 @@ function createMockStores() {
     ),
   }
 
-  const mockStamper = {
-    stamp: vi.fn().mockResolvedValue({
-      batchId: new Uint8Array(32),
-      index: new Uint8Array(8),
-      timestamp: new Uint8Array(8),
-      signature: new Uint8Array(65),
-    }),
-    flush: vi.fn().mockResolvedValue(undefined),
-  }
+  // Built on the mock stamper class's prototype so sync-account's
+  // `instanceof UtilizationAwareStamper` narrowing accepts it.
+  const mockStamper = Object.assign(
+    Object.create(MockUtilizationAwareStamper.prototype) as Record<
+      string,
+      unknown
+    >,
+    {
+      stamp: vi.fn().mockResolvedValue({
+        batchId: new Uint8Array(32),
+        index: new Uint8Array(8),
+        timestamp: new Uint8Array(8),
+        signature: new Uint8Array(65),
+      }),
+      flush: vi.fn().mockResolvedValue(undefined),
+    },
+  )
 
   const postageStampsStore: PostageStampsStoreInterface = {
     getStamp: vi.fn((batchID: BatchId) =>
@@ -159,7 +167,12 @@ vi.mock("../proxy/download-data", () => ({
   downloadDataWithChunkAPI: mockDownloadData,
 }))
 
-// Mock utilization to avoid complexity in these tests
+// Mock utilization to avoid complexity in these tests. The stamper class is a
+// real (mock) class because sync-account narrows the store's stamper with
+// `instanceof UtilizationAwareStamper` before handing it to the coordinator.
+const MockUtilizationAwareStamper = vi.hoisted(
+  () => class MockUtilizationAwareStamper {},
+)
 vi.mock("../utils/batch-utilization", () => ({
   updateAfterWrite: vi.fn().mockResolvedValue({
     state: { chunks: new Map() },
@@ -168,6 +181,7 @@ vi.mock("../utils/batch-utilization", () => ({
   saveUtilizationState: vi.fn().mockResolvedValue(undefined),
   calculateUtilization: vi.fn().mockReturnValue(0.01),
   LEASE_TTL_MS: 30_000,
+  UtilizationAwareStamper: MockUtilizationAwareStamper,
 }))
 
 // The write path (lock + partition lease + stamp flush) is the coordinator's
