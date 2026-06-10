@@ -1,0 +1,51 @@
+{
+  "name": "@swarm-id/ui",
+  "version": "0.0.0",
+  "private": true,
+  "license": "Apache-2.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite dev --port 5175",
+    "build": "vite build",
+    "preview": "vite preview --port 5175",
+    "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
+    "check:all": "pnpm lint && pnpm check && pnpm knip",
+    "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
+    "lint": "prettier --check . && eslint .",
+    "format": "prettier --write . && eslint . --fix",
+    "test": "vitest run --passWithNoTests"
+  },
+  "devDependencies": {
+    "@eslint/js": "9.39.1",
+    "@lucide/svelte": "^0.561.0",
+    "@sveltejs/adapter-static": "3.0.10",
+    "@sveltejs/kit": "2.50.1",
+    "@sveltejs/vite-plugin-svelte": "6.2.1",
+    "@tailwindcss/vite": "^4.2.2",
+    "@trivago/prettier-plugin-sort-imports": "^6.0.2",
+    "@types/node": "24.10.1",
+    "clsx": "^2.1.1",
+    "eslint": "9.39.1",
+    "eslint-config-prettier": "10.1.8",
+    "eslint-plugin-notice": "^1.0.0",
+    "eslint-plugin-svelte": "3.14.0",
+    "globals": "16.5.0",
+    "knip": "5.71.0",
+    "prettier": "3.7.3",
+    "prettier-plugin-svelte": "3.4.0",
+    "svelte": "5.48.2",
+    "svelte-check": "4.3.4",
+    "svelte-eslint-parser": "1.4.0",
+    "tailwind-merge": "^3.5.0",
+    "tailwind-variants": "^3.2.2",
+    "tailwindcss": "^4.2.2",
+    "typescript": "5.8.3",
+    "typescript-eslint": "8.48.1",
+    "vite": "7.2.6",
+    "vitest": "4.0.14"
+  },
+  "engines": {
+    "node": ">=22",
+    "pnpm": "11.x"
+  }
+}
