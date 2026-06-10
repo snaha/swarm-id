@@ -110,12 +110,24 @@ Methods and getters:
   demoting; transient errors keep the lease.
 - **Idle yield.** If no upload touched the lease for `IDLE_YIELD_MS` and none is in flight, the
   tick voluntarily releases the partition so a waiting peer takes the slot without waiting out
-  the TTL; the next write re-acquires.
+  the TTL; the next write re-acquires. The off-lock tick only _decides_ to yield — the yield
+  itself runs **under the write lock**, with re-checks inside (disposed / lease identity /
+  `activeUploadCount` / idle window), because releasing the slot and unbinding the stamper
+  off-lock underneath an upload that just entered `withWrite` would be the same corruption class
+  as the displacement race below.
 - **Disposed guard.** `teardown()` sets `disposed`; from then on the coordinator never re-acquires
   a partition or arms a timer. This matters because an in-flight `withWrite` (a deferred publish,
   or a normal upload) can outlive a disconnect/sign-out — without the guard its `ensureLease`
   would re-lease the slot and start a detached refresh interval: a ghost lease the proxy could no
   longer tear down.
+- **Lease-epoch guard.** The block-mode acquire races a 45 s timeout that cannot cancel the
+  losing acquire. Every lease reset (`pauseLeaseBackgroundWork`, `finalizeDemote`, idle yield,
+  `teardown`) bumps an epoch counter; an acquire that began under an older epoch discards its
+  result instead of resurrecting a cleared lease and arming a detached refresh timer.
+- **Error classification.** `acquire()` propagates operational failures (a lock-SOC scan/claim
+  that threw) after clearing state. Skip mode therefore throws `PartitionContendedError` only
+  when the acquire _completed_ read-only — a Bee outage surfaces from `sync-account` as
+  `status: "error"`, never as a quiet "all partitions held" skip.
 
 ## The displacement-during-upload race fix
 
