@@ -132,7 +132,8 @@ export async function createPasskeyKey(
   return authenticateWithPasskey(credentialId, signal)
 }
 
-async function authenticateWithPasskey(
+/** Authenticate with an existing passkey and re-derive the seed-encryption key. */
+export async function authenticateWithPasskey(
   credentialId: string,
   signal?: AbortSignal,
 ): Promise<PasskeyKey> {

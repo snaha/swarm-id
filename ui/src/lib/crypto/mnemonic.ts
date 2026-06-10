@@ -43,3 +43,9 @@ export function walletFromPhrase(phrase: string): DerivedWallet {
 export function phraseFromEntropy(entropy: Uint8Array): string {
   return Mnemonic.fromEntropy(entropy).phrase
 }
+
+/** The account's signing key (0x-prefixed hex), derived on demand after unlock. */
+export function privateKeyFromEntropy(entropy: Uint8Array): string {
+  const mnemonic = Mnemonic.fromEntropy(entropy)
+  return HDNodeWallet.fromMnemonic(mnemonic).privateKey
+}

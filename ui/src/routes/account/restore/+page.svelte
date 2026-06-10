@@ -7,6 +7,8 @@
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
+  import Upload from '@lucide/svelte/icons/upload'
+  import X from '@lucide/svelte/icons/x'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -14,17 +16,37 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
-  import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
-  import { generateName } from '$lib/name-generator'
-  import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { restoreBackup } from '$lib/crypto/backup'
+  import { isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
   import { sessionStore } from '$lib/stores/session.svelte'
 
+  let fileInput = $state<HTMLInputElement>()
+  let fileName = $state<string | undefined>(undefined)
+  let fileContents = $state<string | undefined>(undefined)
   let phrase = $state('')
-  let signingIn = $state(false)
+  let restoring = $state(false)
   let failed = $state(false)
 
   const phraseValid = $derived(isValidPhrase(phrase))
   const showInvalid = $derived(phrase.trim().length > 0 && !phraseValid)
+  const canRestore = $derived(fileContents !== undefined && phraseValid && !restoring)
+
+  async function onFileSelected() {
+    const file = fileInput?.files?.[0]
+    if (!file) {
+      return
+    }
+    fileName = file.name
+    fileContents = await file.text()
+  }
+
+  function clearFile() {
+    fileName = undefined
+    fileContents = undefined
+    if (fileInput) {
+      fileInput.value = ''
+    }
+  }
 
   async function pasteFromClipboard() {
     try {
@@ -34,32 +56,27 @@
     }
   }
 
-  async function signIn() {
-    signingIn = true
+  async function restore() {
+    if (!fileContents) {
+      return
+    }
+    restoring = true
     try {
       const normalized = normalizePhrase(phrase)
-      const wallet = walletFromPhrase(normalized)
-
-      // Already set up on this device — just switch to it.
-      const existing = accountsStore.get(wallet.address)
-      if (existing) {
-        sessionStore.setCurrentAccount(existing.id)
-        await goto(resolve('/home'))
-        return
-      }
-
-      sessionStore.startSignIn(generateName(), normalized)
+      const restored = await restoreBackup(fileContents, normalized)
+      sessionStore.startRestore(restored, normalized)
       await goto(resolve('/account/new/access'))
     } catch {
       failed = true
     } finally {
-      signingIn = false
+      restoring = false
     }
   }
 
   function tryAgain() {
     failed = false
     phrase = ''
+    clearFile()
   }
 </script>
 
@@ -72,7 +89,7 @@
         <div class="flex flex-col items-center gap-2">
           <CircleAlert class="text-destructive size-5" />
           <div class="flex flex-col items-center text-center">
-            <p class="text-sm font-bold">Sign in failed</p>
+            <p class="text-sm font-bold">Restoring account failed</p>
             <p class="text-sm">Please double-check your secret recovery phrase.</p>
           </div>
         </div>
@@ -93,19 +110,48 @@
         </Button>
 
         <div class="flex w-full flex-col">
-          <h1 class="text-lg font-bold">Existing account</h1>
+          <h1 class="text-lg font-bold">Restore account</h1>
           <p class="text-sm">
-            Provide the secret recovery phrase to set up an existing Swarm ID account on this
-            device.
+            Restore an account from a backup file and its secret recovery phrase.
           </p>
         </div>
 
+        <input
+          bind:this={fileInput}
+          type="file"
+          accept=".swarmid"
+          class="hidden"
+          onchange={onFileSelected}
+        />
+        {#if fileName}
+          <div
+            class="border-input flex h-8 w-full items-center gap-1.5 rounded-lg border px-2.5 text-sm"
+          >
+            <span class="flex-1 truncate">{fileName}</span>
+            <Button
+              variant="ghost"
+              size="icon"
+              class="size-5 rounded-md [&_svg]:size-3"
+              aria-label="Remove file"
+              onclick={clearFile}
+            >
+              <X />
+            </Button>
+          </div>
+        {:else}
+          <Button variant="secondary" class="w-full" onclick={() => fileInput?.click()}>
+            <Upload />
+            Select .swarmid file
+          </Button>
+        {/if}
+
         <div class="flex w-full flex-col gap-4">
           <div class="flex w-full flex-col gap-2">
+            <p class="text-sm">Provide the account secret recovery phrase:</p>
             <Textarea
               bind:value={phrase}
-              class="h-38"
-              disabled={signingIn}
+              class="h-28"
+              disabled={restoring}
               aria-invalid={showInvalid}
               placeholder="Add a space between each word and make sure no one is watching"
             />
@@ -113,24 +159,19 @@
               <p class="text-destructive text-xs">Invalid phrase</p>
             {/if}
           </div>
-          <div class="flex items-center gap-2">
-            <Button variant="ghost" size="xs" disabled={signingIn} onclick={pasteFromClipboard}>
+          <div>
+            <Button variant="ghost" size="xs" disabled={restoring} onclick={pasteFromClipboard}>
               Paste from clipboard
             </Button>
-            {#if phrase.trim().length > 0}
-              <Button variant="ghost" size="xs" disabled={signingIn} onclick={() => (phrase = '')}>
-                Clear
-              </Button>
-            {/if}
           </div>
         </div>
 
-        <Button class="w-full" disabled={!phraseValid || signingIn} onclick={signIn}>
-          {#if signingIn}
+        <Button class="w-full" disabled={!canRestore} onclick={restore}>
+          {#if restoring}
             <LoaderCircle class="animate-spin" />
-            Signing in
+            Restoring
           {:else}
-            Sign in
+            Restore
           {/if}
         </Button>
       </div>

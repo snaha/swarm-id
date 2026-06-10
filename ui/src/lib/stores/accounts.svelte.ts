@@ -35,6 +35,11 @@ function createAccountsStore() {
     })
   }
 
+  function update(id: string, change: (account: Account) => Account) {
+    accounts = accounts.map((account) => (account.id === id ? change(account) : account))
+    persist()
+  }
+
   return {
     get accounts() {
       return accounts
@@ -43,8 +48,29 @@ function createAccountsStore() {
       return accounts.find((account) => account.id === id)
     },
     add(account: Account) {
-      accounts = [...accounts, account]
+      // Replace any previous record for the same address (sign-in / restore).
+      accounts = [...accounts.filter((existing) => existing.id !== account.id), account]
       persist()
+    },
+    rename(id: string, name: string) {
+      update(id, (account) => ({ ...account, name }))
+    },
+    setAppConnectionDays(id: string, days: number) {
+      update(id, (account) => ({ ...account, appConnectionDays: days }))
+    },
+    disconnectApp(id: string, appUrl: string) {
+      update(id, (account) => ({
+        ...account,
+        connectedApps: account.connectedApps.map((app) =>
+          app.appUrl === appUrl ? { ...app, connectedUntil: undefined } : app,
+        ),
+      }))
+    },
+    removeApp(id: string, appUrl: string) {
+      update(id, (account) => ({
+        ...account,
+        connectedApps: account.connectedApps.filter((app) => app.appUrl !== appUrl),
+      }))
     },
   }
 }

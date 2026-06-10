@@ -13,6 +13,7 @@
   import { resolve } from '$app/paths'
 
   import AppHeader from '$lib/components/app-header.svelte'
+  import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Toast from '$lib/components/toast.svelte'
   import { Alert } from '$lib/components/ui/alert'
   import { Button } from '$lib/components/ui/button'
@@ -112,16 +113,7 @@
         {#if mode === 'generate'}
           <div class="flex w-full flex-col gap-2">
             {#if revealed}
-              <div class="grid w-full grid-cols-3 gap-2">
-                {#each words as word, index (index)}
-                  <div
-                    class="border-input flex h-8 items-center gap-1.5 rounded-lg border px-2.5 text-sm"
-                  >
-                    <span class="text-muted-foreground">{index + 1}.</span>
-                    <span class="truncate">{word}</span>
-                  </div>
-                {/each}
-              </div>
+              <PhraseGrid {words} />
             {:else}
               <div
                 class="border-input flex h-38 w-full flex-col items-center justify-center gap-2 rounded-lg border"

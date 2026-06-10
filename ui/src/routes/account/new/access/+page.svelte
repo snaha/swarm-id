@@ -57,6 +57,14 @@
     password.length >= MIN_PASSWORD_LENGTH && password === verifyPassword,
   )
 
+  const backHref = $derived(
+    sessionStore.draft?.flow === 'sign-in'
+      ? resolve('/account/import')
+      : sessionStore.draft?.flow === 'restore'
+        ? resolve('/account/restore')
+        : resolve('/account/new/phrase'),
+  )
+
   onMount(() => {
     if (!sessionStore.draft?.phrase) {
       goto(resolve('/account/new'))
@@ -69,19 +77,23 @@
       return
     }
     const wallet = walletFromPhrase(draft.phrase)
+    const restored = draft.restored
     accountsStore.add({
       id: wallet.address,
       name: draft.name,
       publicKey: wallet.publicKey,
-      createdAt: Date.now(),
+      createdAt: restored?.createdAt ?? Date.now(),
       access,
       encryptedSeed: await encryptSeed(wallet.entropy, key),
-      stamps: [],
-      connectedApps: [],
+      appConnectionDays: restored?.appConnectionDays,
+      defaultStampBatchId: restored?.defaultStampBatchId,
+      stamps: restored?.stamps ?? [],
+      connectedApps: restored?.connectedApps ?? [],
     })
     sessionStore.setCurrentAccount(wallet.address)
+    const flow = draft.flow
     sessionStore.clearDraft()
-    goto(resolve('/account/new/done'))
+    goto(resolve(flow === 'create' ? '/account/new/done' : '/home'))
   }
 
   async function confirmWithPasskey() {
@@ -188,7 +200,7 @@
         <Button
           variant="outline"
           size="icon"
-          href={resolve('/account/new/phrase')}
+          href={backHref}
           aria-label="Go back"
           class="size-6 rounded-md [&_svg]:size-3"
         >

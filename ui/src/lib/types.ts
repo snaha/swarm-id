@@ -47,7 +47,12 @@ export interface Account {
   access: AccessMethod
   /** BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext). */
   encryptedSeed: string
+  /** How long app connections stay valid, in days. */
+  appConnectionDays?: number
   defaultStampBatchId?: string
   stamps: PostageStamp[]
   connectedApps: ConnectedApp[]
 }
+
+/** The portable part of an account carried by sign-in sync and backup files. */
+export type AccountData = Omit<Account, 'access' | 'encryptedSeed'>

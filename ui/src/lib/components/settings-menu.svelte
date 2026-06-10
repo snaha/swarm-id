@@ -48,7 +48,7 @@
 
   function restoreFromBackup() {
     close()
-    goto(resolve('/account/import'))
+    goto(resolve('/account/restore'))
   }
 
   function selectAppearance(value: ThemePreference) {

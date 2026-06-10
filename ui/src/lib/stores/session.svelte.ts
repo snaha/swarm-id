@@ -1,12 +1,16 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import type { AccountData } from '$lib/types'
 
 const CURRENT_ACCOUNT_KEY = 'swarm-id-current-account-v2'
 
-/** In-memory state of the account-creation flow; lost on reload by design. */
-interface CreationDraft {
+/** In-memory state of an account setup flow; lost on reload by design. */
+interface SetupDraft {
+  flow: 'create' | 'sign-in' | 'restore'
   name: string
   phrase?: string
+  /** Account data carried over by a restore (stamps, apps, original name). */
+  restored?: AccountData
 }
 
 function loadCurrentAccountId(): string | undefined {
@@ -18,7 +22,7 @@ function loadCurrentAccountId(): string | undefined {
 
 function createSessionStore() {
   let currentAccountId = $state<string | undefined>(loadCurrentAccountId())
-  let draft = $state<CreationDraft | undefined>(undefined)
+  let draft = $state<SetupDraft | undefined>(undefined)
 
   return {
     get currentAccountId() {
@@ -32,7 +36,13 @@ function createSessionStore() {
       return draft
     },
     startDraft(name: string) {
-      draft = { name }
+      draft = { flow: 'create', name }
+    },
+    startSignIn(name: string, phrase: string) {
+      draft = { flow: 'sign-in', name, phrase }
+    },
+    startRestore(restored: AccountData, phrase: string) {
+      draft = { flow: 'restore', name: restored.name, phrase, restored }
     },
     setDraftPhrase(phrase: string) {
       if (draft) {
