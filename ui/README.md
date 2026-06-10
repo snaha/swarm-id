@@ -10,21 +10,9 @@ Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy").
 - **SvelteKit** (Svelte 5 runes) with `@sveltejs/adapter-static` — pure SPA (`ssr = false`,
   `index.html` fallback)
 - **Tailwind CSS v4** via `@tailwindcss/vite` (no PostCSS config needed)
-- **shadcn-svelte-style components** — hand-written primitives in `src/lib/components/ui/`
-  (button, input, textarea), themed via CSS variables in `src/app.css`
+- **shadcn-svelte-style components** — hand-written primitives in `src/lib/components/ui/`,
+  themed via CSS variables in `src/app.css`
 - **iA Writer Quattro** as the UI font, **polycon** identicons for identities
-
-## Screens
-
-| Route             | Screen                                                   |
-| ----------------- | -------------------------------------------------------- |
-| `/`               | Welcome — create a new account or import an existing one |
-| `/account/new`    | New account — pick a name (live identicon preview)       |
-| `/account/import` | Existing account — paste a secret recovery phrase        |
-| `/connect`        | Connect to app — OAuth-style consent screen for dApps    |
-
-Shared chrome: `app-header` (Swarm wordmark + settings menu). The settings menu sets the
-appearance (`auto`/`light`/`dark`, persisted in localStorage; `auto` follows the OS).
 
 ## Development
 

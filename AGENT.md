@@ -72,11 +72,9 @@ Figma MCP (requires the file open in the Figma desktop app).
 
 - **Stack**: SvelteKit (Svelte 5 runes) + `@sveltejs/adapter-static` (pure SPA, `ssr = false`),
   Tailwind CSS v4 via `@tailwindcss/vite`, shadcn-svelte-style components (hand-written, no bits-ui)
-- **Components**: `src/lib/components/ui/` holds the shadcn-style primitives (button, input,
-  textarea); `src/lib/components/` holds app components (app-header, settings-menu, polycon
-  identicon, swarm-logo, app-icon)
-- **Theming**: `src/lib/stores/theme.svelte.ts` — `auto`/`light`/`dark` preference persisted in
-  localStorage, applied as a `dark` class on `<html>`; settings menu in the header sets it
+- **Components**: shadcn-style primitives live in `src/lib/components/ui/`; app-level components
+  in `src/lib/components/`; stores in `src/lib/stores/` (e.g. theming: `auto`/`light`/`dark`
+  preference persisted in localStorage, applied as a `dark` class on `<html>`)
 - **Toolchain**: versions are pinned to match `swarm-ui` (eslint 9, vite 7, svelte 5.48,
   vite-plugin-svelte 6) — do NOT bump these independently of the rest of the monorepo
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
