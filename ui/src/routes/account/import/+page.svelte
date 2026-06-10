@@ -28,7 +28,13 @@
 
   <main class="flex w-full flex-1 flex-col items-center px-8">
     <div class="flex w-full max-w-96 flex-col items-start gap-8">
-      <Button variant="ghost" size="icon" href={resolve('/')} aria-label="Go back">
+      <Button
+        variant="outline"
+        size="icon"
+        href={resolve('/')}
+        aria-label="Go back"
+        class="size-6 rounded-md [&_svg]:size-3"
+      >
         <ChevronLeft />
       </Button>
 

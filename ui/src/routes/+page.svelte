@@ -6,14 +6,14 @@
 <script lang="ts">
   import { resolve } from '$app/paths'
 
+  import SettingsMenu from '$lib/components/settings-menu.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
-  import ThemeToggle from '$lib/components/theme-toggle.svelte'
   import { Button } from '$lib/components/ui/button'
 </script>
 
 <div class="relative flex min-h-svh flex-col items-center justify-center p-8">
   <div class="absolute top-8 right-8">
-    <ThemeToggle />
+    <SettingsMenu />
   </div>
 
   <div class="flex w-full max-w-96 flex-col items-center gap-8">
@@ -25,7 +25,5 @@
         I already have an account
       </Button>
     </div>
-
-    <Button variant="ghost" size="xs">Network settings</Button>
   </div>
 </div>
