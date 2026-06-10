@@ -21,7 +21,7 @@
  *
  * The lock SOC on Swarm (`partition-lock.ts`) stays the cross-device authority;
  * this class is the lifecycle layer above `PartitionLease`. See
- * `docs/BatchWriteCoordinator-Implementation-Plan.md`.
+ * `docs/BatchWriteCoordinator.md`.
  *
  * ## Displacement-during-upload race (issue #336)
  *
