@@ -2,12 +2,13 @@
 
 Cross-browser compatible authentication and identity management for Swarm dApps.
 
-**[Documentation](https://swarm.snaha.net/docs)** | **[Demo](https://swarm-demo.snaha.net)** | **[Identity UI](https://swarm-id.snaha.net)**
+**[Documentation](https://swarm.snaha.net/docs)** | **[New UI](https://swarm.snaha.net/id/)** | **[Demo](https://swarm.snaha.net/demo/)** | **[Legacy Identity UI](https://swarm-id.snaha.net)**
 
 ## Packages
 
 - **[lib/](./lib/README.md)** — `@snaha/swarm-id` TypeScript library for authentication and Bee API operations
-- **[swarm-ui/](./swarm-ui/)** — SvelteKit identity management UI (trusted domain)
+- **[ui/](./ui/README.md)** — `@swarm-id/ui` next-generation identity UI (standalone product, active redesign)
+- **[swarm-ui/](./swarm-ui/)** — legacy SvelteKit identity management UI (trusted domain), being superseded by `ui/`
 - **[demo/](./demo/)** — Demo dApp with library integration examples
 - **[docs-site/](./docs-site/)** — Starlight (Astro) documentation website
 
@@ -54,7 +55,20 @@ client.destroy()
 
 ## Deployment
 
-Both apps are deployed to Digital Ocean App Platform as separate static sites:
+### GitHub Pages — `swarm.snaha.net`
+
+The latest `main` build of every app deploys to root paths, and every PR gets previews under
+`…/pr-N/` (workflows: `deploy-main-pages.yml`, `deploy-preview.yml`):
+
+| Path                           | App                                 |
+| ------------------------------ | ----------------------------------- |
+| `swarm.snaha.net/id/`          | new identity UI (`ui/`)             |
+| `swarm.snaha.net/id-legacy/`   | legacy identity UI (`swarm-ui/`)    |
+| `swarm.snaha.net/demo/`        | demo, running against the new `/id` |
+| `swarm.snaha.net/demo-legacy/` | demo, running against `/id-legacy`  |
+| `swarm.snaha.net/docs/`        | documentation site                  |
+
+### DigitalOcean App Platform (legacy canonical domains)
 
 **swarm-demo.snaha.net** (`demo/build/`)
 
@@ -63,7 +77,7 @@ Both apps are deployed to Digital Ocean App Platform as separate static sites:
 
 **swarm-id.snaha.net** (`swarm-id-build/`)
 
-- SvelteKit identity management UI
+- Legacy SvelteKit identity management UI
 - Proxy/auth pages for iframe communication
 
 ## Local Development
@@ -84,11 +98,12 @@ Open http://localhost:3000 - that's it!
 ### Development Mode (with hot reload)
 
 ```bash
-# Start both demo and identity UI
+# Start both demo and legacy identity UI
 pnpm dev
 
 # Or start individually
-pnpm dev:swarm-ui    # Identity UI on port 5174
+pnpm dev:ui          # New identity UI on port 5175
+pnpm dev:swarm-ui    # Legacy identity UI on port 5174
 pnpm dev:demo        # Demo on port 3000
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
 ```
@@ -154,8 +169,9 @@ The Identity UI includes a Developer Tools page at http://localhost:5174/dev wit
 ```
 .
 ├── lib/                  # @snaha/swarm-id TypeScript library
+├── ui/                   # New identity UI (SvelteKit + Tailwind v4 + shadcn-svelte style)
 ├── demo/                 # Demo app (SvelteKit)
-├── swarm-ui/             # Identity management UI (SvelteKit)
+├── swarm-ui/             # Legacy identity management UI (SvelteKit)
 ├── docs-site/            # Documentation website (Starlight/Astro)
 └── swarm-id-build/       # Build output (deployed to swarm-id.snaha.net)
 ```
