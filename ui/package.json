@@ -49,6 +49,7 @@
     "pnpm": "11.x"
   },
   "dependencies": {
+    "@snaha/swarm-id": "workspace:*",
     "ethers": "6.15.0"
   }
 }
