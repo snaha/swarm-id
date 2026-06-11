@@ -53,6 +53,8 @@
   let abortController: AbortController | undefined
   let cancelled = false
 
+  const passwordTooShort = $derived(password.length > 0 && password.length < MIN_PASSWORD_LENGTH)
+  const passwordMismatch = $derived(verifyPassword.length > 0 && password !== verifyPassword)
   const passwordValid = $derived(
     password.length >= MIN_PASSWORD_LENGTH && password === verifyPassword,
   )
@@ -238,6 +240,7 @@
                     type={showPassword ? 'text' : 'password'}
                     bind:value={password}
                     autocomplete="new-password"
+                    aria-invalid={passwordTooShort}
                   />
                   <Button
                     variant="ghost"
@@ -253,7 +256,11 @@
                     {/if}
                   </Button>
                 </div>
-                <p class="text-muted-foreground text-xs">
+                <p
+                  class={passwordTooShort
+                    ? 'text-destructive text-xs'
+                    : 'text-muted-foreground text-xs'}
+                >
                   Must be at least {MIN_PASSWORD_LENGTH} characters
                 </p>
               </div>
@@ -266,6 +273,7 @@
                     type={showVerifyPassword ? 'text' : 'password'}
                     bind:value={verifyPassword}
                     autocomplete="new-password"
+                    aria-invalid={passwordMismatch}
                   />
                   <Button
                     variant="ghost"
@@ -281,6 +289,9 @@
                     {/if}
                   </Button>
                 </div>
+                {#if passwordMismatch}
+                  <p class="text-destructive text-xs">Passwords do not match</p>
+                {/if}
               </div>
             </div>
           {/if}
