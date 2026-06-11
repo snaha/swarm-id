@@ -21,6 +21,7 @@
   import { Textarea } from '$lib/components/ui/textarea'
   import { generatePhrase, isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import { copyToClipboard } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const TABS = [
@@ -64,14 +65,12 @@
   }
 
   async function copyPhrase() {
-    try {
-      await navigator.clipboard.writeText(generated)
-    } catch {
-      showToast('Could not copy to clipboard')
-      return
-    }
     phraseAccessed = true
-    showToast('Seed phrase copied to clipboard')
+    if (await copyToClipboard(generated)) {
+      showToast('Seed phrase copied to clipboard')
+    } else {
+      showToast('Could not copy to clipboard')
+    }
   }
 
   function downloadPhrase() {

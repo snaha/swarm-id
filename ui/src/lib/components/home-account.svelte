@@ -22,7 +22,7 @@
   import { unlockAccount } from '$lib/crypto/unlock'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import type { Account } from '$lib/types'
-  import { notImplemented } from '$lib/utils'
+  import { copyToClipboard, notImplemented } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const ADDRESS_PREFIX_LENGTH = 6
@@ -83,8 +83,11 @@
   }
 
   async function copyText(text: string, what: string) {
-    await navigator.clipboard.writeText(text)
-    showToast(`${what} copied to clipboard`)
+    if (await copyToClipboard(text)) {
+      showToast(`${what} copied to clipboard`)
+    } else {
+      showToast('Could not copy to clipboard')
+    }
   }
 
   /** Make sure the seed is decrypted, then run the target's reveal/export. */
