@@ -248,10 +248,42 @@ concatenates those references (`N · 64 ≤ 4096` bytes, one chunk even at `N = 
 feed points at the reference chunk. A taking-over device follows
 **feed → reference chunk → counter chunks**, decrypting each from its embedded key.
 
+### Wire format (byte layout)
+
+The format is **binary** and is versioned by the topic domain
+(`swarm-id-partition-state-v1`) — there is no in-blob version byte. A future v2 publishes
+under a v2 topic and never collides with v1 readers.
+
+**Reference chunk** — exactly `N × 64` bytes, where
+`N = numUtilizationChunks(batchDepth)`:
+
+| Offset        | Size | Content                                                             |
+| ------------- | ---- | ------------------------------------------------------------------- |
+| `i · 64`      | 32   | Swarm address of counter chunk `i`                                  |
+| `i · 64 + 32` | 32   | Decryption key of counter chunk `i` (random, generated per publish) |
+
+**Counter chunk `i`** — exactly 4096 bytes (`CHUNK_SIZE`): `bucketsPerChunk` consecutive
+per-bucket counters, **little-endian**, covering buckets
+`[i · bucketsPerChunk, (i + 1) · bucketsPerChunk)`. The counter width depends on the batch
+depth (`getChunkLayout`):
+
+| Batch depth                         | Counter width | `bucketsPerChunk` | `N` (chunks) |
+| ----------------------------------- | ------------- | ----------------- | ------------ |
+| `≤ 31` (`UINT16_COUNTER_MAX_DEPTH`) | `uint16` LE   | 2048              | 32           |
+| `≥ 32`                              | `uint32` LE   | 1024              | 64           |
+
+The decoded result is always a `Uint32Array(65536)` (one counter per bucket) regardless of
+the on-wire width; narrowing happens only at the serialize boundary. The decoded state is
+described by the exported `PartitionStateSchemaV1`
+(`{ counters: Uint32Array(NUM_BUCKETS) }` in `lib/src/sync/partition-state.ts`):
+`writePartitionState` validates its input against it, and `readPartitionState` validates
+the reassembled counter — plus the reference-chunk length (`N × 64`) and each counter
+chunk's length — before returning.
+
 Reads short-circuit on a cached "synced reference": if the feed still points at the
 reference a device last synced with, it skips the downloads and reuses its local counter.
-A failed counter read falls back to a fresh zero counter rather than aborting the
-acquisition.
+A failed or malformed counter read **fails safe**: it falls back to a fresh zero counter
+rather than aborting the acquisition, and does not cache the bad reference as synced.
 
 :::note[Historical: device-claim feed]
 Iteration 1 used a per-device claim feed

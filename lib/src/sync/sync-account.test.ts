@@ -167,13 +167,16 @@ vi.mock("../proxy/download-data", () => ({
   downloadDataWithChunkAPI: mockDownloadData,
 }))
 
-// Mock utilization to avoid complexity in these tests. The stamper class is a
-// real (mock) class because sync-account narrows the store's stamper with
+// Mock utilization to avoid complexity in these tests. Partial mock: real
+// constants (e.g. NUM_BUCKETS) stay available to transitive imports like
+// partition-state's module-scope schema. The stamper class override is a real
+// (mock) class because sync-account narrows the store's stamper with
 // `instanceof UtilizationAwareStamper` before handing it to the coordinator.
 const MockUtilizationAwareStamper = vi.hoisted(
   () => class MockUtilizationAwareStamper {},
 )
-vi.mock("../utils/batch-utilization", () => ({
+vi.mock("../utils/batch-utilization", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../utils/batch-utilization")>()),
   updateAfterWrite: vi.fn().mockResolvedValue({
     state: { chunks: new Map() },
     tracker: { hasDirtyChunks: () => false, getDirtyChunks: () => [] },
