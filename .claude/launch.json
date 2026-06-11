@@ -19,7 +19,7 @@
       "name": "demo-new",
       "runtimeExecutable": "pnpm",
       "runtimeArgs": ["dev:demo:new"],
-      "port": 3000,
+      "port": 3500,
       "autoPort": false
     },
     {

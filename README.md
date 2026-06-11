@@ -98,7 +98,7 @@ Open http://localhost:3000 - that's it!
 ### Development Mode (with hot reload)
 
 ```bash
-# Start the full stack against the new identity UI (lib + ui :5500 + demo :3000)
+# Start the full stack against the new identity UI (lib + ui :5500 + demo :3500)
 pnpm dev:new
 
 # Start the full stack against the legacy identity UI (lib + swarm-ui :5510 + demo :3000)
@@ -107,7 +107,7 @@ pnpm dev:legacy      # `pnpm dev` is an alias
 # Or start individually
 pnpm dev:ui          # New identity UI on port 5500
 pnpm dev:swarm-ui    # Legacy identity UI on port 5510
-pnpm dev:demo:new    # Demo on port 3000, connected to the new identity UI (:5500)
+pnpm dev:demo:new    # Demo on port 3500, connected to the new identity UI (:5500)
 pnpm dev:demo:legacy # Demo on port 3000, connected to the legacy identity UI (:5510)
 pnpm dev:demo        # Demo on port 3000, identity UI origin from demo/.env (legacy)
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
