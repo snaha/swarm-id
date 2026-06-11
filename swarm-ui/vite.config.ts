@@ -3,9 +3,12 @@
 
 import { existsSync, renameSync } from 'node:fs'
 import { resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 
 import { sveltekit } from '@sveltejs/kit/vite'
 import { defineConfig, type Plugin } from 'vitest/config'
+
+import { stampWorkerDev } from '../lib/dev/vite-stamp-worker.js'
 
 const DEV_ROUTE_DIR = resolve('src/routes/(app)/dev')
 const DEV_ROUTE_STASH = resolve('.dev-route-stash')
@@ -56,8 +59,18 @@ function excludeDevRoute(): Plugin {
   }
 }
 
-export default defineConfig({
-  plugins: [excludeDevRoute(), sveltekit()],
+export default defineConfig(({ command }) => ({
+  plugins: [excludeDevRoute(), sveltekit(), stampWorkerDev()],
+  resolve: {
+    // Dev consumes the lib SOURCE for reliable HMR (#347); `vite build`
+    // resolves the published dist bundle via package exports as before.
+    alias:
+      command === 'serve'
+        ? {
+            '@snaha/swarm-id': fileURLToPath(new URL('../lib/src/index.ts', import.meta.url)),
+          }
+        : undefined,
+  },
   optimizeDeps: {
     exclude: ['@snaha/swarm-id'],
   },
@@ -68,4 +81,4 @@ export default defineConfig({
     include: ['src/**/*.{test,spec}.{js,ts}'],
     exclude: ['src/**/*.ct.{test,spec}.{js,ts}'],
   },
-})
+}))
