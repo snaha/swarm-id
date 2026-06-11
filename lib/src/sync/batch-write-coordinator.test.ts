@@ -597,4 +597,56 @@ describe("BatchWriteCoordinator — acquire-epoch guard", () => {
     expect(coordinator.currentPartition).toBeUndefined()
     expect(coordinator.isReadOnly).toBe(false)
   })
+
+  it("a late-failing acquire does not clobber a newer lease's state", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    let rejectAcquire!: (e: Error) => void
+    const staleLease = makeLease()
+    staleLease.acquire = vi.fn(
+      () =>
+        new Promise((_, reject) => {
+          rejectAcquire = reject
+        }),
+    ) as typeof staleLease.acquire
+    leaseController.lease = staleLease
+    const writeLeaseCache = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+        writeLeaseCache,
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    const inFlight = internals.acquire()
+    await vi.waitFor(() => expect(staleLease.acquire).toHaveBeenCalled())
+    // The acquire timeout fires: ensureLease pauses background work, which
+    // bumps the epoch and detaches the still-pending acquire.
+    internals.pauseLeaseBackgroundWork()
+
+    // A later write re-acquires successfully — a new live lease owns the state.
+    const liveLease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+    })
+    leaseController.lease = liveLease
+    await internals.acquire()
+    expect(coordinator.currentPartition).toBe(1)
+    writeLeaseCache.mockClear()
+
+    // The detached acquire finally rejects. The failure must propagate, but
+    // it must NOT clear the live lease's in-memory state or wipe its cache.
+    rejectAcquire(new Error("lock SOC scan failed"))
+    await expect(inFlight).rejects.toThrow("lock SOC scan failed")
+
+    expect(coordinator.currentPartition).toBe(1)
+    expect(internals.partitionLease).toBe(liveLease)
+    expect(writeLeaseCache).not.toHaveBeenCalledWith(undefined)
+  })
 })

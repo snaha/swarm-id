@@ -442,6 +442,12 @@ export class BatchWriteCoordinator {
         "[BatchWriteCoordinator] Failed to acquire partition lease:",
         error,
       )
+      // Same epoch guard as the success paths above, mirrored to the failure
+      // side: a newer epoch owns the coordinator state now (the racing acquire
+      // timeout paused background work, and a later acquire may have re-leased).
+      // A stale failure must not clobber the live lease's in-memory state or
+      // wipe its cache — just propagate.
+      if (this.leaseEpoch !== epoch) throw error
       this.partitionLease = undefined
       this.readOnly = false
       // Keep cache and in-memory state in lockstep: no lease → no live cache.
