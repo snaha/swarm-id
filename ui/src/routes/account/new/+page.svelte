@@ -14,6 +14,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { generateName } from '$lib/name-generator'
+  import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
 
   const IDENTICON_SIZE = 32
@@ -22,7 +23,7 @@
 
   function onContinue() {
     sessionStore.startDraft(name.trim())
-    goto(resolve('/account/new/phrase'))
+    goto(resolve(routes.ACCOUNT_NEW_PHRASE))
   }
 </script>
 
@@ -34,7 +35,7 @@
       <Button
         variant="outline"
         size="icon"
-        href={resolve('/')}
+        href={resolve(routes.ROOT)}
         aria-label="Go back"
         class="size-6 rounded-md [&_svg]:size-3"
       >

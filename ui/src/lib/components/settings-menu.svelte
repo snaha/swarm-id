@@ -16,6 +16,7 @@
   import { resolve } from '$app/paths'
 
   import { Button } from '$lib/components/ui/button'
+  import routes from '$lib/routes'
   import { type ThemePreference, themeStore } from '$lib/stores/theme.svelte'
   import { notImplemented } from '$lib/utils'
 
@@ -49,7 +50,7 @@
 
   function restoreFromBackup() {
     close()
-    goto(resolve('/account/restore'))
+    goto(resolve(routes.ACCOUNT_RESTORE))
   }
 
   function networkSettings() {

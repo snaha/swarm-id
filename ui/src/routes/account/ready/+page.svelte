@@ -13,6 +13,7 @@
   import Polycon from '$lib/components/polycon.svelte'
   import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
 
@@ -28,7 +29,7 @@
 
   onMount(() => {
     if (!account) {
-      goto(resolve('/'))
+      goto(resolve(routes.ROOT))
       return
     }
     toastMessage = restored ? 'Account restored successfully!' : 'Sign in successful'
@@ -53,13 +54,13 @@
         </div>
 
         <div class="flex w-full flex-col items-center gap-2">
-          <Button class="w-full" href={resolve('/home')}>Continue with this account</Button>
+          <Button class="w-full" href={resolve(routes.HOME)}>Continue with this account</Button>
           {#if restored}
-            <Button variant="outline" class="w-full" href={resolve('/account/restore')}>
+            <Button variant="outline" class="w-full" href={resolve(routes.ACCOUNT_RESTORE)}>
               Restore another account
             </Button>
           {:else}
-            <Button variant="outline" class="w-full" href={resolve('/account/import')}>
+            <Button variant="outline" class="w-full" href={resolve(routes.ACCOUNT_IMPORT)}>
               Sign in to another account
             </Button>
           {/if}

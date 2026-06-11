@@ -13,6 +13,7 @@
   import Polycon from '$lib/components/polycon.svelte'
   import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { notImplemented } from '$lib/utils'
@@ -28,7 +29,7 @@
 
   onMount(() => {
     if (!account) {
-      goto(resolve('/'))
+      goto(resolve(routes.ROOT))
       return
     }
     const timer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
@@ -68,7 +69,7 @@
           <div class="flex w-full flex-col items-center gap-2">
             <!-- Stamp purchase flow is still TBD in the design. -->
             <Button class="w-full" onclick={notImplemented}>Add a postage stamp</Button>
-            <Button variant="outline" class="w-full" href={resolve('/home')}>
+            <Button variant="outline" class="w-full" href={resolve(routes.HOME)}>
               Stay local for now
             </Button>
           </div>

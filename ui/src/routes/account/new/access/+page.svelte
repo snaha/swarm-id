@@ -28,6 +28,7 @@
   import { bytesToHex } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { AccessMethod } from '$lib/types'
@@ -60,15 +61,15 @@
 
   const backHref = $derived(
     sessionStore.draft?.flow === 'sign-in'
-      ? resolve('/account/import')
+      ? resolve(routes.ACCOUNT_IMPORT)
       : sessionStore.draft?.flow === 'restore'
-        ? resolve('/account/restore')
-        : resolve('/account/new/phrase'),
+        ? resolve(routes.ACCOUNT_RESTORE)
+        : resolve(routes.ACCOUNT_NEW_PHRASE),
   )
 
   onMount(() => {
     if (!sessionStore.draft?.phrase) {
-      goto(resolve('/account/new'))
+      goto(resolve(routes.ACCOUNT_NEW))
     }
   })
 

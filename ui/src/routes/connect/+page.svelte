@@ -11,6 +11,7 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
+  import routes from '$lib/routes'
   import { notImplemented } from '$lib/utils'
 
   let appName = $state('this app')
@@ -52,9 +53,10 @@
       </div>
 
       <div class="flex w-full flex-col items-center gap-4">
-        <Button size="lg" class="w-full" href={resolve('/account/new')}>Create a new account</Button
+        <Button size="lg" class="w-full" href={resolve(routes.ACCOUNT_NEW)}
+          >Create a new account</Button
         >
-        <Button size="lg" variant="secondary" class="w-full" href={resolve('/account/import')}>
+        <Button size="lg" variant="secondary" class="w-full" href={resolve(routes.ACCOUNT_IMPORT)}>
           I already have an account
         </Button>
       </div>

@@ -16,6 +16,7 @@
   import { Textarea } from '$lib/components/ui/textarea'
   import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { generateName } from '$lib/name-generator'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
 
@@ -37,12 +38,12 @@
       if (existing) {
         sessionStore.setCurrentAccount(existing.id)
         sessionStore.setCompletedFlow('sign-in')
-        await goto(resolve('/account/ready'))
+        await goto(resolve(routes.ACCOUNT_READY))
         return
       }
 
       sessionStore.startSignIn(generateName(), normalized)
-      await goto(resolve('/account/new/access'))
+      await goto(resolve(routes.ACCOUNT_NEW_ACCESS))
     } catch {
       failed = true
     } finally {
@@ -78,7 +79,7 @@
         <Button
           variant="outline"
           size="icon"
-          href={resolve('/')}
+          href={resolve(routes.ROOT)}
           aria-label="Go back"
           class="size-6 rounded-md [&_svg]:size-3"
         >

@@ -45,6 +45,7 @@
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import { unlockAccount } from '$lib/crypto/unlock'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { AccessMethod, Account } from '$lib/types'
@@ -305,7 +306,7 @@
   function lockAccount() {
     entropy = undefined
     sessionStore.clearCurrentAccount()
-    goto(resolve('/'))
+    goto(resolve(routes.ROOT))
   }
 
   function deleteAccount() {
@@ -315,7 +316,7 @@
       sessionStore.setCurrentAccount(next.id)
     } else {
       sessionStore.clearCurrentAccount()
-      goto(resolve('/'))
+      goto(resolve(routes.ROOT))
     }
     dialog = undefined
   }

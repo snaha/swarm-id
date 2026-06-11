@@ -19,6 +19,7 @@
   import { Textarea } from '$lib/components/ui/textarea'
   import { isBackupFile, restoreBackup } from '$lib/crypto/backup'
   import { isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
+  import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
 
   let fileInput = $state<HTMLInputElement>()
@@ -66,7 +67,7 @@
       const normalized = normalizePhrase(phrase)
       const restored = await restoreBackup(fileContents, normalized)
       sessionStore.startRestore(restored, normalized)
-      await goto(resolve('/account/new/access'))
+      await goto(resolve(routes.ACCOUNT_NEW_ACCESS))
     } catch {
       failed = true
     } finally {
@@ -104,7 +105,7 @@
         <Button
           variant="outline"
           size="icon"
-          href={resolve('/')}
+          href={resolve(routes.ROOT)}
           aria-label="Go back"
           class="size-6 rounded-md [&_svg]:size-3"
         >

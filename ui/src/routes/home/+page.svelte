@@ -14,6 +14,7 @@
   import HomeApps from '$lib/components/home-apps.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Tabs } from '$lib/components/ui/tabs'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
 
@@ -31,7 +32,7 @@
 
   onMount(() => {
     if (!account) {
-      goto(resolve('/'))
+      goto(resolve(routes.ROOT))
     }
   })
 </script>

@@ -22,6 +22,7 @@
   import { Tabs } from '$lib/components/ui/tabs'
   import { Textarea } from '$lib/components/ui/textarea'
   import { generatePhrase, isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
+  import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { copyToClipboard } from '$lib/utils'
 
@@ -51,7 +52,7 @@
 
   onMount(() => {
     if (!sessionStore.draft) {
-      goto(resolve('/account/new'))
+      goto(resolve(routes.ACCOUNT_NEW))
     }
   })
 
@@ -88,7 +89,7 @@
 
   function onContinue() {
     sessionStore.setDraftPhrase(mode === 'generate' ? generated : normalizePhrase(imported))
-    goto(resolve('/account/new/access'))
+    goto(resolve(routes.ACCOUNT_NEW_ACCESS))
   }
 </script>
 
@@ -100,7 +101,7 @@
       <Button
         variant="outline"
         size="icon"
-        href={resolve('/account/new')}
+        href={resolve(routes.ACCOUNT_NEW)}
         aria-label="Go back"
         class="size-6 rounded-md [&_svg]:size-3"
       >
