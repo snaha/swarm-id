@@ -18,6 +18,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
+  import { completeConnect } from '$lib/connect-handshake'
   import {
     PASSWORD_KDF_ITERATIONS,
     deriveKeyFromPassword,
@@ -30,6 +31,7 @@
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { AccessMethod } from '$lib/types'
 
@@ -80,7 +82,7 @@
     }
     const wallet = walletFromPhrase(draft.phrase)
     const restored = draft.restored
-    accountsStore.add({
+    const account = {
       id: wallet.address,
       name: draft.name,
       publicKey: wallet.publicKey,
@@ -91,11 +93,21 @@
       defaultStampBatchId: restored?.defaultStampBatchId,
       stamps: restored?.stamps ?? [],
       connectedApps: restored?.connectedApps ?? [],
-    })
+    }
+    accountsStore.add(account)
     sessionStore.setCurrentAccount(wallet.address)
     const flow = draft.flow
     sessionStore.setCompletedFlow(flow)
     sessionStore.clearDraft()
+
+    // Came from a dApp connect popup — finish the handshake and hand back.
+    const request = connectStore.request
+    if (request) {
+      await completeConnect(account, wallet.entropy, request)
+      goto(resolve(routes.CONNECT_DONE))
+      return
+    }
+
     goto(resolve(flow === 'create' ? '/account/new/done' : '/account/ready'))
   }
 

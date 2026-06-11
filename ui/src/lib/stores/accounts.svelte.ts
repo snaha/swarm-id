@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import type { Account } from '$lib/types'
+import type { Account, ConnectedApp } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-id-accounts-v2'
 
@@ -65,6 +65,16 @@ function createAccountsStore() {
     },
     setAppConnectionDays(id: string, days: number) {
       update(id, (account) => ({ ...account, appConnectionDays: days }))
+    },
+    /** Record a (re)connection — replaces any previous entry for the app. */
+    connectApp(id: string, app: ConnectedApp) {
+      update(id, (account) => ({
+        ...account,
+        connectedApps: [
+          ...account.connectedApps.filter((existing) => existing.appUrl !== app.appUrl),
+          app,
+        ],
+      }))
     },
     disconnectApp(id: string, appUrl: string) {
       update(id, (account) => ({

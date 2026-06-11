@@ -14,10 +14,12 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
+  import { completeConnect } from '$lib/connect-handshake'
   import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { generateName } from '$lib/name-generator'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
 
   let phrase = $state('')
@@ -37,6 +39,16 @@
       const existing = accountsStore.get(wallet.address)
       if (existing) {
         sessionStore.setCurrentAccount(existing.id)
+
+        // Came from a dApp connect popup — the phrase already unlocked the
+        // account, so finish the handshake right away.
+        const request = connectStore.request
+        if (request) {
+          await completeConnect(existing, wallet.entropy, request)
+          await goto(resolve(routes.CONNECT_DONE))
+          return
+        }
+
         sessionStore.setCompletedFlow('sign-in')
         await goto(resolve(routes.ACCOUNT_READY))
         return
