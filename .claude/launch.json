@@ -4,14 +4,14 @@
     {
       "name": "ui-new",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:ui"],
+      "runtimeArgs": ["dev:ui:new"],
       "port": 5500,
       "autoPort": false
     },
     {
       "name": "ui-legacy",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:swarm-ui"],
+      "runtimeArgs": ["dev:ui:legacy"],
       "port": 5510,
       "autoPort": false
     },

@@ -105,8 +105,8 @@ pnpm dev:new
 pnpm dev:legacy      # `pnpm dev` is an alias
 
 # Or start individually
-pnpm dev:ui          # New identity UI on port 5500
-pnpm dev:swarm-ui    # Legacy identity UI on port 5510
+pnpm dev:ui:new      # New identity UI on port 5500
+pnpm dev:ui:legacy   # Legacy identity UI on port 5510
 pnpm dev:demo:new    # Demo on port 3500, connected to the new identity UI (:5500)
 pnpm dev:demo:legacy # Demo on port 3000, connected to the legacy identity UI (:5510)
 pnpm dev:demo        # Demo on port 3000, identity UI origin from demo/.env (legacy)

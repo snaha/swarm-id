@@ -217,7 +217,7 @@ Your VPS (nginx + HTTPS)              Your Local Machine
 pnpm dev:demo
 
 # Terminal 2: Start SvelteKit dev server with allowed hosts
-VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=id.yourdomain.com pnpm dev:swarm-ui
+VITE_ADDITIONAL_SERVER_ALLOWED_HOSTS=id.yourdomain.com pnpm dev:ui:legacy
 
 # Terminal 3: Open SSH tunnel
 ssh -R 18080:localhost:3000 -R 5510:localhost:5510 user@your-vps
