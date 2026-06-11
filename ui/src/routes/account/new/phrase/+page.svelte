@@ -34,12 +34,14 @@
 
   let mode = $state('generate')
   let revealed = $state(false)
+  // The user had a chance to save the phrase (revealed, copied, or downloaded).
+  let phraseAccessed = $state(false)
   let imported = $state('')
   let toastMessage = $state<string | undefined>(undefined)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
   const importedValid = $derived(isValidPhrase(imported))
-  const canContinue = $derived(mode === 'generate' ? revealed : importedValid)
+  const canContinue = $derived(mode === 'generate' ? phraseAccessed : importedValid)
   const showImportError = $derived(
     mode === 'import' && imported.trim().length > 0 && !importedValid,
   )
@@ -56,12 +58,24 @@
     toastTimer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
   }
 
+  function reveal() {
+    revealed = true
+    phraseAccessed = true
+  }
+
   async function copyPhrase() {
-    await navigator.clipboard.writeText(generated)
+    try {
+      await navigator.clipboard.writeText(generated)
+    } catch {
+      showToast('Could not copy to clipboard')
+      return
+    }
+    phraseAccessed = true
     showToast('Seed phrase copied to clipboard')
   }
 
   function downloadPhrase() {
+    phraseAccessed = true
     const blob = new Blob([generated], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -118,7 +132,7 @@
               <div
                 class="border-input flex h-38 w-full flex-col items-center justify-center gap-2 rounded-lg border"
               >
-                <Button variant="outline" size="sm" onclick={() => (revealed = true)}>
+                <Button variant="outline" size="sm" onclick={reveal}>
                   <Eye />
                   Reveal
                 </Button>
