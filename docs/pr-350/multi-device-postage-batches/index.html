@@ -1,0 +1,526 @@
+<!DOCTYPE html><html lang="en" dir="ltr" data-theme="dark" data-has-toc data-has-sidebar class="astro-nekwxp4a"> <head><meta charset="utf-8"/><meta name="viewport" content="width=device-width, initial-scale=1"/><title>Multi-Device Postage Batches | Swarm ID</title><link rel="canonical" href="https://swarm.snaha.net/docs/pr-350/multi-device-postage-batches/"/><link rel="sitemap" href="/docs/pr-350/sitemap-index.xml"/><link rel="shortcut icon" href="/docs/pr-350/favicon.svg" type="image/svg+xml"/><meta name="generator" content="Astro v5.16.7"/><meta name="generator" content="Starlight v0.31.1"/><meta property="og:title" content="Multi-Device Postage Batches"/><meta property="og:type" content="article"/><meta property="og:url" content="https://swarm.snaha.net/docs/pr-350/multi-device-postage-batches/"/><meta property="og:locale" content="en"/><meta property="og:description" content="How several devices share one mutable Swarm postage batch and keep account state in sync — the on-chain layout, lock protocol, feeds, and key derivation needed to port this to another platform."/><meta property="og:site_name" content="Swarm ID"/><meta name="twitter:card" content="summary_large_image"/><meta name="description" content="How several devices share one mutable Swarm postage batch and keep account state in sync — the on-chain layout, lock protocol, feeds, and key derivation needed to port this to another platform."/><script>
+	window.StarlightThemeProvider = (() => {
+		const storedTheme =
+			typeof localStorage !== 'undefined' && localStorage.getItem('starlight-theme');
+		const theme =
+			storedTheme ||
+			(window.matchMedia('(prefers-color-scheme: light)').matches ? 'light' : 'dark');
+		document.documentElement.dataset.theme = theme === 'light' ? 'light' : 'dark';
+		return {
+			updatePickers(theme = storedTheme || 'auto') {
+				document.querySelectorAll('starlight-theme-select').forEach((picker) => {
+					const select = picker.querySelector('select');
+					if (select) select.value = theme;
+					/** @type {HTMLTemplateElement | null} */
+					const tmpl = document.querySelector(`#theme-icons`);
+					const newIcon = tmpl && tmpl.content.querySelector('.' + theme);
+					if (newIcon) {
+						const oldIcon = picker.querySelector('svg.label-icon');
+						if (oldIcon) {
+							oldIcon.replaceChildren(...newIcon.cloneNode(true).childNodes);
+						}
+					}
+				});
+			},
+		};
+	})();
+</script><template id="theme-icons"><svg aria-hidden="true" class="light astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M5 12a1 1 0 0 0-1-1H3a1 1 0 0 0 0 2h1a1 1 0 0 0 1-1Zm.64 5-.71.71a1 1 0 0 0 0 1.41 1 1 0 0 0 1.41 0l.71-.71A1 1 0 0 0 5.64 17ZM12 5a1 1 0 0 0 1-1V3a1 1 0 0 0-2 0v1a1 1 0 0 0 1 1Zm5.66 2.34a1 1 0 0 0 .7-.29l.71-.71a1 1 0 1 0-1.41-1.41l-.66.71a1 1 0 0 0 0 1.41 1 1 0 0 0 .66.29Zm-12-.29a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.71-.71a1.004 1.004 0 1 0-1.43 1.41l.73.71ZM21 11h-1a1 1 0 0 0 0 2h1a1 1 0 0 0 0-2Zm-2.64 6A1 1 0 0 0 17 18.36l.71.71a1 1 0 0 0 1.41 0 1 1 0 0 0 0-1.41l-.76-.66ZM12 6.5a5.5 5.5 0 1 0 5.5 5.5A5.51 5.51 0 0 0 12 6.5Zm0 9a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7Zm0 3.5a1 1 0 0 0-1 1v1a1 1 0 0 0 2 0v-1a1 1 0 0 0-1-1Z"/></svg> <svg aria-hidden="true" class="dark astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.64 13a1 1 0 0 0-1.05-.14 8.049 8.049 0 0 1-3.37.73 8.15 8.15 0 0 1-8.14-8.1 8.59 8.59 0 0 1 .25-2A1 1 0 0 0 8 2.36a10.14 10.14 0 1 0 14 11.69 1 1 0 0 0-.36-1.05Zm-9.5 6.69A8.14 8.14 0 0 1 7.08 5.22v.27a10.15 10.15 0 0 0 10.14 10.14 9.784 9.784 0 0 0 2.1-.22 8.11 8.11 0 0 1-7.18 4.32v-.04Z"/></svg> <svg aria-hidden="true" class="auto astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg> </template><link rel="stylesheet" href="/docs/pr-350/_astro/print.BJ0teN4y.css" media="print"><link rel="stylesheet" href="/docs/pr-350/_astro/index.BuW7j_SB.css"><script type="module" src="/docs/pr-350/_astro/page.B1D-nYk3.js"></script></head> <body class="astro-nekwxp4a"> <a href="#_top" class="astro-xhra3722">Skip to content</a>  <div class="page sl-flex astro-lndalvzl"> <header class="header astro-lndalvzl"><div class="header sl-flex astro-vrz3g4qu"> <div class="title-wrapper sl-flex astro-vrz3g4qu"> <a href="/docs/pr-350/" class="site-title sl-flex astro-ntwc2ch6">  <span class="astro-ntwc2ch6" translate="no"> Swarm ID </span> </a>  </div> <div class="sl-flex print:hidden astro-vrz3g4qu"> <site-search class="astro-vrz3g4qu astro-pt4rwnlp" data-translations="{&#34;placeholder&#34;:&#34;Search&#34;}"> <button data-open-modal disabled aria-label="Search" aria-keyshortcuts="Control+K" class="astro-pt4rwnlp"> <svg aria-hidden="true" class="astro-pt4rwnlp astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21.71 20.29 18 16.61A9 9 0 1 0 16.61 18l3.68 3.68a.999.999 0 0 0 1.42 0 1 1 0 0 0 0-1.39ZM11 18a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg>  <span class="sl-hidden md:sl-block astro-pt4rwnlp" aria-hidden="true">Search</span> <kbd class="sl-hidden md:sl-flex astro-pt4rwnlp" style="display: none;"> <kbd class="astro-pt4rwnlp">Ctrl</kbd><kbd class="astro-pt4rwnlp">K</kbd> </kbd> </button> <dialog style="padding:0" aria-label="Search" class="astro-pt4rwnlp"> <div class="dialog-frame sl-flex astro-pt4rwnlp">  <button data-close-modal class="sl-flex md:sl-hidden astro-pt4rwnlp"> Cancel </button> <div class="search-container astro-pt4rwnlp"> <div id="starlight__search" class="astro-pt4rwnlp"></div> </div> </div> </dialog> </site-search>  <script>
+	(() => {
+		const openBtn = document.querySelector('button[data-open-modal]');
+		const shortcut = openBtn?.querySelector('kbd');
+		if (!openBtn || !(shortcut instanceof HTMLElement)) return;
+		const platformKey = shortcut.querySelector('kbd');
+		if (platformKey && /(Mac|iPhone|iPod|iPad)/i.test(navigator.platform)) {
+			platformKey.textContent = '⌘';
+			openBtn.setAttribute('aria-keyshortcuts', 'Meta+K');
+		}
+		shortcut.style.display = '';
+	})();
+</script> <script type="module" src="/docs/pr-350/_astro/Search.astro_astro_type_script_index_0_lang.DDNg5sD8.js"></script>   </div> <div class="sl-hidden md:sl-flex print:hidden right-group astro-vrz3g4qu"> <div class="sl-flex social-icons astro-vrz3g4qu"> <a href="https://github.com/snaha/swarm-id" rel="me" class="sl-flex astro-mjsuiwl2"><span class="sr-only astro-mjsuiwl2">GitHub</span><svg aria-hidden="true" class="astro-mjsuiwl2 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </a> </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-7sf565f2"> <span class="sr-only astro-7sf565f2">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-7sf565f2 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg>  <select value="auto" autocomplete="off" class="astro-7sf565f2"> <option value="dark" class="astro-7sf565f2">Dark</option><option value="light" class="astro-7sf565f2">Light</option><option value="auto" selected class="astro-7sf565f2">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-7sf565f2 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </label>  </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script> <script type="module">const r="starlight-theme",o=e=>e==="auto"||e==="dark"||e==="light"?e:"auto",c=()=>o(typeof localStorage<"u"&&localStorage.getItem(r));function n(e){typeof localStorage<"u"&&localStorage.setItem(r,e==="light"||e==="dark"?e:"")}const l=()=>matchMedia("(prefers-color-scheme: light)").matches?"light":"dark";function t(e){StarlightThemeProvider.updatePickers(e),document.documentElement.dataset.theme=e==="auto"?l():e,n(e)}matchMedia("(prefers-color-scheme: light)").addEventListener("change",()=>{c()==="auto"&&t("auto")});class s extends HTMLElement{constructor(){super(),t(c()),this.querySelector("select")?.addEventListener("change",a=>{a.currentTarget instanceof HTMLSelectElement&&t(o(a.currentTarget.value))})}}customElements.define("starlight-theme-select",s);</script> <script type="module">class s extends HTMLElement{constructor(){super();const e=this.querySelector("select");e&&(e.addEventListener("change",t=>{t.currentTarget instanceof HTMLSelectElement&&(window.location.pathname=t.currentTarget.value)}),window.addEventListener("pageshow",t=>{if(!t.persisted)return;const n=e.querySelector("option[selected]")?.index;n!==e.selectedIndex&&(e.selectedIndex=n??0)}))}}customElements.define("starlight-lang-select",s);</script> </div> </div> </header> <nav class="sidebar print:hidden astro-lndalvzl" aria-label="Main"> <starlight-menu-button class="print:hidden astro-wdhl7iu6"> <button aria-expanded="false" aria-label="Menu" aria-controls="starlight__sidebar" class="sl-flex md:sl-hidden astro-wdhl7iu6"> <svg aria-hidden="true" class="astro-wdhl7iu6 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M3 8h18a1 1 0 1 0 0-2H3a1 1 0 0 0 0 2Zm18 8H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Zm0-5H3a1 1 0 0 0 0 2h18a1 1 0 0 0 0-2Z"/></svg>  </button> </starlight-menu-button> <script type="module">class s extends HTMLElement{constructor(){super(),this.btn=this.querySelector("button"),this.btn.addEventListener("click",()=>this.toggleExpanded());const t=this.closest("nav");t&&t.addEventListener("keyup",e=>this.closeOnEscape(e))}setExpanded(t){this.setAttribute("aria-expanded",String(t)),document.body.toggleAttribute("data-mobile-menu-expanded",t)}toggleExpanded(){this.setExpanded(this.getAttribute("aria-expanded")!=="true")}closeOnEscape(t){t.code==="Escape"&&(this.setExpanded(!1),this.btn.focus())}}customElements.define("starlight-menu-button",s);</script>   <div id="starlight__sidebar" class="sidebar-pane astro-lndalvzl"> <div class="sidebar-content sl-flex astro-lndalvzl"> <sl-sidebar-state-persist data-hash="00ts68u" class="astro-zr6ao7wl"> <script aria-hidden="true">
+		(() => {
+			try {
+				if (!matchMedia('(min-width: 50em)').matches) return;
+				/** @type {HTMLElement | null} */
+				const target = document.querySelector('sl-sidebar-state-persist');
+				const state = JSON.parse(sessionStorage.getItem('sl-sidebar-state') || '0');
+				if (!target || !state || target.dataset.hash !== state.hash) return;
+				window._starlightScrollRestore = state.scroll;
+				customElements.define(
+					'sl-sidebar-restore',
+					class SidebarRestore extends HTMLElement {
+						connectedCallback() {
+							try {
+								const idx = parseInt(this.dataset.index || '');
+								const details = this.closest('details');
+								if (details && typeof state.open[idx] === 'boolean') details.open = state.open[idx];
+							} catch {}
+						}
+					}
+				);
+			} catch {}
+		})();
+	</script>  <ul class="top-level astro-lgnta7dt"> <li class="astro-lgnta7dt"> <details open class="astro-lgnta7dt"> <sl-sidebar-restore data-index="0"></sl-sidebar-restore> <summary class="astro-lgnta7dt"> <div class="group-label astro-lgnta7dt"> <span class="large astro-lgnta7dt">Getting Started</span>  </div> <svg aria-hidden="true" class="caret astro-lgnta7dt astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </summary> <ul class="astro-lgnta7dt"> <li class="astro-lgnta7dt"> <a href="/docs/pr-350/" aria-current="false" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">Introduction</span>  </a> </li><li class="astro-lgnta7dt"> <a href="/docs/pr-350/getting-started" aria-current="false" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">Quick Start</span>  </a> </li><li class="astro-lgnta7dt"> <a href="/docs/pr-350/architecture" aria-current="false" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">Architecture</span>  </a> </li><li class="astro-lgnta7dt"> <a href="/docs/pr-350/subsidised-gateway" aria-current="false" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">Subsidised Gateway</span>  </a> </li><li class="astro-lgnta7dt"> <a href="/docs/pr-350/local-development" aria-current="false" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">Local Development</span>  </a> </li> </ul>  </details> </li><li class="astro-lgnta7dt"> <details open class="astro-lgnta7dt"> <sl-sidebar-restore data-index="1"></sl-sidebar-restore> <summary class="astro-lgnta7dt"> <div class="group-label astro-lgnta7dt"> <span class="large astro-lgnta7dt">Multi-Device</span>  </div> <svg aria-hidden="true" class="caret astro-lgnta7dt astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </summary> <ul class="astro-lgnta7dt"> <li class="astro-lgnta7dt"> <a href="/docs/pr-350/multi-device-postage-batches" aria-current="page" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">Postage Batch Sharing</span>  </a> </li> </ul>  </details> </li><li class="astro-lgnta7dt"> <details open class="astro-lgnta7dt"> <sl-sidebar-restore data-index="2"></sl-sidebar-restore> <summary class="astro-lgnta7dt"> <div class="group-label astro-lgnta7dt"> <span class="large astro-lgnta7dt">API Reference</span>  </div> <svg aria-hidden="true" class="caret astro-lgnta7dt astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.25rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </summary> <ul class="astro-lgnta7dt"> <li class="astro-lgnta7dt"> <a href="/docs/pr-350/api/" aria-current="false" class="astro-lgnta7dt"> <span class="astro-lgnta7dt">SwarmIdClient API Reference</span>  </a> </li> </ul>  </details> </li> </ul>   <script aria-hidden="true">
+		(() => {
+			const scroller = document.getElementById('starlight__sidebar');
+			if (!window._starlightScrollRestore || !scroller) return;
+			scroller.scrollTop = window._starlightScrollRestore;
+			delete window._starlightScrollRestore;
+		})();
+	</script> </sl-sidebar-state-persist>  <div class="md:sl-hidden"> <div class="mobile-preferences sl-flex astro-olvar3fl"> <div class="sl-flex social-icons astro-olvar3fl"> <a href="https://github.com/snaha/swarm-id" rel="me" class="sl-flex astro-mjsuiwl2"><span class="sr-only astro-mjsuiwl2">GitHub</span><svg aria-hidden="true" class="astro-mjsuiwl2 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg> </a> </div> <starlight-theme-select>  <label style="--sl-select-width: 6.25em" class="astro-7sf565f2"> <span class="sr-only astro-7sf565f2">Select theme</span> <svg aria-hidden="true" class="icon label-icon astro-7sf565f2 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M21 14h-1V7a3 3 0 0 0-3-3H7a3 3 0 0 0-3 3v7H3a1 1 0 0 0-1 1v2a3 3 0 0 0 3 3h14a3 3 0 0 0 3-3v-2a1 1 0 0 0-1-1ZM6 7a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v7H6V7Zm14 10a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1v-1h16v1Z"/></svg>  <select value="auto" autocomplete="off" class="astro-7sf565f2"> <option value="dark" class="astro-7sf565f2">Dark</option><option value="light" class="astro-7sf565f2">Light</option><option value="auto" selected class="astro-7sf565f2">Auto</option> </select> <svg aria-hidden="true" class="icon caret astro-7sf565f2 astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1em;"><path d="M17 9.17a1 1 0 0 0-1.41 0L12 12.71 8.46 9.17a1 1 0 1 0-1.41 1.42l4.24 4.24a1.002 1.002 0 0 0 1.42 0L17 10.59a1.002 1.002 0 0 0 0-1.42Z"/></svg>  </label>  </starlight-theme-select>  <script>
+	StarlightThemeProvider.updatePickers();
+</script>   </div>  </div> </div> </div> </nav> <div class="main-frame astro-lndalvzl">  <script type="module">const a=document.getElementById("starlight__sidebar"),n=a?.querySelector("sl-sidebar-state-persist"),o="sl-sidebar-state",i=()=>{let t=[];const e=n?.dataset.hash||"";try{const s=sessionStorage.getItem(o),r=JSON.parse(s||"{}");Array.isArray(r.open)&&r.hash===e&&(t=r.open)}catch{}return{hash:e,open:t,scroll:a?.scrollTop||0}},c=t=>{try{sessionStorage.setItem(o,JSON.stringify(t))}catch{}},d=()=>c(i()),l=(t,e)=>{const s=i();s.open[e]=t,c(s)};n?.addEventListener("click",t=>{if(!(t.target instanceof Element))return;const e=t.target.closest("summary")?.closest("details");if(!e)return;const s=e.querySelector("sl-sidebar-restore"),r=parseInt(s?.dataset.index||"");isNaN(r)||l(!e.open,r)});addEventListener("visibilitychange",()=>{document.visibilityState==="hidden"&&d()});addEventListener("pageHide",d);</script> <div class="lg:sl-flex astro-7v22bhxv"> <aside class="right-sidebar-container print:hidden astro-7v22bhxv"> <div class="right-sidebar astro-7v22bhxv"> <div class="lg:sl-hidden astro-owni2rur"><mobile-starlight-toc data-min-h="2" data-max-h="3" class="astro-7d7vtwkm"><nav aria-labelledby="starlight__on-this-page--mobile" class="astro-7d7vtwkm"><details id="starlight__mobile-toc" class="astro-7d7vtwkm"><summary id="starlight__on-this-page--mobile" class="sl-flex astro-7d7vtwkm"><div class="toggle sl-flex astro-7d7vtwkm">On this page<svg aria-hidden="true" class="caret astro-7d7vtwkm astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1rem;"><path d="m14.83 11.29-4.24-4.24a1 1 0 1 0-1.42 1.41L12.71 12l-3.54 3.54a1 1 0 0 0 0 1.41 1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.24-4.24a1.002 1.002 0 0 0 0-1.42Z"/></svg> </div><span class="display-current astro-7d7vtwkm"></span></summary><div class="dropdown astro-7d7vtwkm"><ul class="isMobile astro-ttuyvvbb" style="--depth: 0;"> <li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#_top" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#two-independent-systems" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Two independent systems</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#key-derivation-the-interop-root" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Key derivation (the interop root)</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#batch-slot-layout--partitions" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Batch slot layout &amp; partitions</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#utilization-tracking" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Utilization tracking</span> </a> <ul class="isMobile astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#on-disk--on-wire-codec" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">On-disk / on-wire codec</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#per-chunk-encryption-key" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Per-chunk encryption key</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#local-cache" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Local cache</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#lock-socs" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Lock SOCs</span> </a> <ul class="isMobile astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#acquire--refresh-protocol" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Acquire / refresh protocol</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#reserved-slot-routing" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Reserved-slot routing</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#partition-state-feed" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Partition-state feed</span> </a> <ul class="isMobile astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#wire-format-byte-layout" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Wire format (byte layout)</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#lease-lifecycle" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Lease lifecycle</span> </a> <ul class="isMobile astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#the-four-cases" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">The four cases</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#account-state-sync" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Account-state sync</span> </a> <ul class="isMobile astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#publish-optimistic-verify-retry" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Publish: optimistic verify-retry</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#merge-rules" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Merge rules</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#restore-vs-refresh" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Restore vs refresh</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#the-partition-gate" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">The partition gate</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#porting-checklist" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Porting checklist</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#future-work" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Future work</span> </a>  </li> </ul> </div></details></nav></mobile-starlight-toc><script type="module" src="/docs/pr-350/_astro/MobileTableOfContents.astro_astro_type_script_index_0_lang.C181hMzK.js"></script></div><div class="right-sidebar-panel sl-hidden lg:sl-block astro-owni2rur"><div class="sl-container astro-owni2rur"><starlight-toc data-min-h="2" data-max-h="3"><nav aria-labelledby="starlight__on-this-page"><h2 id="starlight__on-this-page">On this page</h2><ul class="astro-ttuyvvbb" style="--depth: 0;"> <li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#_top" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Overview</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#two-independent-systems" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Two independent systems</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#key-derivation-the-interop-root" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Key derivation (the interop root)</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#batch-slot-layout--partitions" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Batch slot layout &amp; partitions</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#utilization-tracking" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Utilization tracking</span> </a> <ul class="astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#on-disk--on-wire-codec" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">On-disk / on-wire codec</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#per-chunk-encryption-key" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Per-chunk encryption key</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#local-cache" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Local cache</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#lock-socs" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Lock SOCs</span> </a> <ul class="astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#acquire--refresh-protocol" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Acquire / refresh protocol</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#reserved-slot-routing" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Reserved-slot routing</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#partition-state-feed" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Partition-state feed</span> </a> <ul class="astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#wire-format-byte-layout" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Wire format (byte layout)</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#lease-lifecycle" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Lease lifecycle</span> </a> <ul class="astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#the-four-cases" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">The four cases</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#account-state-sync" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Account-state sync</span> </a> <ul class="astro-ttuyvvbb" style="--depth: 1;"> <li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#publish-optimistic-verify-retry" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Publish: optimistic verify-retry</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#merge-rules" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Merge rules</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#restore-vs-refresh" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">Restore vs refresh</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 1;"> <a href="#the-partition-gate" class="astro-ttuyvvbb" style="--depth: 1;"> <span class="astro-ttuyvvbb" style="--depth: 1;">The partition gate</span> </a>  </li> </ul>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#porting-checklist" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Porting checklist</span> </a>  </li><li class="astro-ttuyvvbb" style="--depth: 0;"> <a href="#future-work" class="astro-ttuyvvbb" style="--depth: 0;"> <span class="astro-ttuyvvbb" style="--depth: 0;">Future work</span> </a>  </li> </ul> </nav></starlight-toc><script type="module" src="/docs/pr-350/_astro/TableOfContents.astro_astro_type_script_index_0_lang.CKWWgpjV.js"></script></div></div> </div> </aside> <div class="main-pane astro-7v22bhxv">  <main data-pagefind-body class="astro-nekwxp4a" lang="en" dir="ltr">    <div class="content-panel astro-ys3mwcae"> <div class="sl-container astro-ys3mwcae"> <h1 id="_top" class="astro-bhgpsquo">Multi-Device Postage Batches</h1>  </div> </div>  <div class="content-panel astro-ys3mwcae"> <div class="sl-container astro-ys3mwcae"> <div class="sl-markdown-content"> <p>This page is the definitive, implementation-level specification of how Swarm ID lets
+several devices that share one account write to a <strong>single mutable postage batch</strong> at
+the same time without corrupting each other’s data. It is written so the scheme can be
+re-implemented on another platform (native mobile, desktop, a different language) and
+<strong>interoperate</strong> with the reference TypeScript implementation in <code dir="auto">@snaha/swarm-id</code>.</p>
+<p>Everything here is derived purely from Swarm primitives (chunks, single-owner chunks,
+epoch feeds) and a handful of deterministic key derivations. There is <strong>no server, no
+coordinator, and no shared mutable state other than what lives on Swarm itself</strong>.</p>
+<h2 id="two-independent-systems">Two independent systems</h2>
+<p>The account shares one batch across devices. Two distinct problems arise, solved by two
+independent mechanisms:</p>
+<ol>
+<li><strong>Partition lease</strong> — prevents two devices from stamping the <em>same</em> <code dir="auto">(bucket, slot)</code>
+of the batch (which would make one chunk silently overwrite the other on the network).
+Each active device leases a <strong>partition</strong> of every bucket’s slot space and only ever
+stamps slots in its own lane.</li>
+<li><strong>Account-state sync</strong> — keeps the shared account snapshot (identities, connected
+apps, postage stamps, the device list) eventually-consistent across devices. It is a
+single epoch feed plus a merge function, with an optimistic verify-retry to survive
+concurrent writers.</li>
+</ol>
+<p>They are orthogonal: account-state sync would be needed even with one batch per device,
+and the partition lease would be needed even if account state never changed. A device
+that holds a partition lease is also the device permitted to publish account state (the
+“partition gate”, below).</p>
+<h2 id="key-derivation-the-interop-root">Key derivation (the interop root)</h2>
+<p>All cross-device addressing derives from the account’s <strong>derivation key</strong> (<code dir="auto">derivationKey</code>),
+a 32-byte secret every device reconstructs after authentication. Two devices interoperate
+<strong>iff they derive the same keys from the same derivation key.</strong></p>
+<p>The primitive is <code dir="auto">deriveSecret(key, context)</code>:</p>
+<div class="expressive-code"><link rel="stylesheet" href="/docs/pr-350/_astro/ec.tm3va.css"><script type="module" src="/docs/pr-350/_astro/ec.8zarh.js"></script><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">deriveSecret(key, context) = hex( HMAC-SHA256( bytes_from_hex(key), utf8(context) ) )</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="deriveSecret(key, context) = hex( HMAC-SHA256( bytes_from_hex(key), utf8(context) ) )"><div></div></button></div></figure></div>
+<p>Note the asymmetry: <code dir="auto">key</code> is interpreted as a <strong>hex string decoded to bytes</strong>, <code dir="auto">context</code>
+is encoded as <strong>UTF-8</strong>. From this:</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">swarmEncryptionKey = deriveSecret(derivationKey,        "swarm-encryption")   // 32 bytes</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">backupKey          = deriveSecret(swarmEncryptionKey,   "backup-key")         // 32 bytes</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="swarmEncryptionKey = deriveSecret(derivationKey,        &#x22;swarm-encryption&#x22;)   // 32 bytesbackupKey          = deriveSecret(swarmEncryptionKey,   &#x22;backup-key&#x22;)         // 32 bytes"><div></div></button></div></figure></div>
+<ul>
+<li><strong><code dir="auto">backupSigner</code></strong> = the secp256k1 private key whose scalar is <code dir="auto">backupKey</code>. Its
+Ethereum address (<code dir="auto">backupSigner.publicKey().address()</code>) is the <strong>owner</strong> of every feed
+and every lock SOC in this document. Because the owner is per-account, the same
+identifier/topic across two different accounts still produces different chunk addresses —
+domain separation comes from the owner, not from baking the account ID into hashes.</li>
+<li><strong><code dir="auto">swarmEncryptionKey</code></strong> encrypts the lock-SOC payloads and the device-claim payloads,
+and seeds the per-utilization-chunk key derivation.</li>
+</ul>
+<p>Per-device identity:</p>
+<ul>
+<li><strong><code dir="auto">deviceId</code></strong> — a per-install UUID (<code dir="auto">crypto.randomUUID()</code>), stored under the
+localStorage key <code dir="auto">swarm-id-device-id</code>. Stable for the life of the install; <strong>not</strong>
+derived from the account, so each device has a distinct one.</li>
+<li><strong><code dir="auto">tiebreaker</code></strong> = <code dir="auto">hex( keccak256(utf8(deviceId))[0:8] )</code> — the first 8 bytes of the
+keccak256 of the device ID, as hex. Used to deterministically order two writers that
+share a millisecond timestamp. Two distinct device IDs collide with probability 2⁻⁶⁴.</li>
+</ul>
+<h2 id="batch-slot-layout--partitions">Batch slot layout &#x26; partitions</h2>
+<p>A Swarm postage batch of depth <code dir="auto">D</code> has:</p>
+<ul>
+<li><strong><code dir="auto">NUM_BUCKETS</code> = 65 536</strong> buckets (<code dir="auto">2^16</code>, <code dir="auto">BUCKET_DEPTH = 16</code>).</li>
+<li><strong><code dir="auto">2^(D-16)</code> slots per bucket</strong> (<code dir="auto">calculateMaxSlotsPerBucket</code>).</li>
+</ul>
+<p>A chunk’s bucket is the <strong>first two bytes of its 32-byte address, big-endian</strong>:</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">bucket(addr) = (addr[0] &#x3C;&#x3C; 8) | addr[1]      // 0 .. 65535</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="bucket(addr) = (addr[0] << 8) | addr[1]      // 0 .. 65535"><div></div></button></div></figure></div>
+<p>The slot space of <em>every</em> bucket is divided into <code dir="auto">PARTITION_COUNT = 2</code> interleaved lanes.
+The lowest <code dir="auto">PARTITION_COUNT</code> slots are <strong>reserved</strong> (not data):</p>
+<ul>
+<li>Slot index <code dir="auto">p</code> (for <code dir="auto">p</code> in <code dir="auto">[0, PARTITION_COUNT)</code>) is reserved for <strong>partition <code dir="auto">p</code></strong>’s
+lock SOC and counter (utilization) chunks.</li>
+<li>Data slots begin at <code dir="auto">DATA_COUNTER_START = PARTITION_COUNT</code>.</li>
+</ul>
+<p>The physical slot for partition <code dir="auto">p</code>’s <code dir="auto">j</code>-th data chunk in a bucket
+(<code dir="auto">dataSlot(p, j, K)</code>, with <code dir="auto">K = PARTITION_COUNT</code>):</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">slot = K + p + K · j           // j = 0, 1, 2, …  (per-bucket, per-partition data counter)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="slot = K + p + K · j           // j = 0, 1, 2, …  (per-bucket, per-partition data counter)"><div></div></button></div></figure></div>
+<p>So with <code dir="auto">K = 2</code>: partition 0 writes data to slots <code dir="auto">{2, 4, 6, …}</code>, partition 1 to
+<code dir="auto">{3, 5, 7, …}</code>, and slots <code dir="auto">{0, 1}</code> are the two partitions’ reserved slots. The lanes
+never collide, so two devices on different partitions can stamp the same bucket
+concurrently.</p>
+<p>Per-partition per-bucket capacity (<code dir="auto">partitionCapacity</code>):</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">capacity = floor( 2^(D-16) / K ) − 1         // −1 for the reserved slot</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="capacity = floor( 2^(D-16) / K ) − 1         // −1 for the reserved slot"><div></div></button></div></figure></div>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Depth <code dir="auto">D</code></th><th>slots/bucket</th><th>per-partition data slots/bucket (<code dir="auto">K=2</code>)</th></tr></thead><tbody><tr><td>20</td><td>16</td><td>7</td></tr><tr><td>22</td><td>64</td><td>31</td></tr><tr><td>24</td><td>256</td><td>127</td></tr><tr><td>28</td><td>4 096</td><td>2 047</td></tr></tbody></table>
+<p>Legacy single-device accounts use <code dir="auto">partitionCount = 1</code> (reserved slot 0, data from slot 1
+onward) and skip the lease entirely.</p>
+<h2 id="utilization-tracking">Utilization tracking</h2>
+<p>Each device tracks, per bucket, how many data chunks <strong>its partition</strong> has written —
+the <code dir="auto">j</code> counter above. This is held in memory as a <code dir="auto">Uint32Array(65536)</code> (<code dir="auto">dataCounters</code>),
+always uint32 in memory regardless of how it is serialized.</p>
+<h3 id="on-disk--on-wire-codec">On-disk / on-wire codec</h3>
+<p>The counter array is serialized into fixed <code dir="auto">CHUNK_SIZE = 4096</code>-byte chunks. The per-bucket
+counter is <strong>uint16</strong> when it always fits (<code dir="auto">D ≤ 31</code>, max <code dir="auto">2^15</code>), else <strong>uint32</strong>
+(<code dir="auto">D ≥ 32</code>). This sets the chunk layout (<code dir="auto">getChunkLayout</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Codec</th><th>Applies when</th><th><code dir="auto">bucketsPerChunk</code></th><th><code dir="auto">numUtilizationChunks</code></th></tr></thead><tbody><tr><td>uint16</td><td><code dir="auto">D ≤ 31</code></td><td>2 048</td><td>32</td></tr><tr><td>uint32</td><td><code dir="auto">D ≥ 32</code></td><td>1 024</td><td>64</td></tr></tbody></table>
+<p>Counters are little-endian in the serialized chunk. Chunk <code dir="auto">i</code> covers buckets
+<code dir="auto">[i·bucketsPerChunk, (i+1)·bucketsPerChunk)</code>.</p>
+<h3 id="per-chunk-encryption-key">Per-chunk encryption key</h3>
+<p>Utilization chunks are uploaded as <strong>encrypted content-addressed chunks</strong>. The key for
+chunk <code dir="auto">i</code> is deterministic so re-saves dedup:</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">chunkKey = HMAC-SHA256(</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#d6deeb;--1:#403f53">    </span></span><span style="--0:#d6deeb;--1:#403f53">swarmEncryptionKey,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#d6deeb;--1:#403f53">    </span></span><span style="--0:#d6deeb;--1:#403f53">utf8("swarm-id-util-chunk-v1") ‖ batchId ‖ uint32_be(chunkIndex) ‖ uint32_be(nonce)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">)</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="chunkKey = HMAC-SHA256(    swarmEncryptionKey,    utf8(&#x22;swarm-id-util-chunk-v1&#x22;) ‖ batchId ‖ uint32_be(chunkIndex) ‖ uint32_be(nonce))"><div></div></button></div></figure></div>
+<p><code dir="auto">nonce</code> starts at 0 and is incremented only when the resulting encrypted address would
+land in the same bucket as another utilization chunk in the same save (collisions are
+vanishingly rare — ≈0.008 bumps per save with 32 chunks over 65 536 buckets). The nonce
+that produced a chunk is cached so an unchanged plaintext reuses the same key and the
+upload is skipped.</p>
+<h3 id="local-cache">Local cache</h3>
+<p>The reference implementation caches counter chunks in an IndexedDB store
+(<code dir="auto">UtilizationStoreDB</code>, DB name <code dir="auto">swarm-utilization-store</code>), keyed by <code dir="auto">(batchId hex, chunkIndex)</code>,
+storing <code dir="auto">{ data, contentHash, nonce, lastAccess }</code>. A port may use any local KV store; the
+cache is an optimization, not part of the wire protocol. The cross-device source of truth
+for a partition’s counter is the <strong>partition-state feed</strong> (below), not the cache.</p>
+<h2 id="lock-socs">Lock SOCs</h2>
+<p>A <strong>single-owner chunk (SOC)</strong> per partition is the cross-device authority for “who holds
+this partition right now.” All of an account’s devices share the <code dir="auto">backupSigner</code>, so any of
+them can write any partition’s lock SOC; concurrent writers are ordered by a fencing token.</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">identifier = keccak256( utf8("swarm-id-partition-lock-v1:" + partition) )</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner      = backupSigner address</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">SOC address = keccak256( identifier ‖ owner )            // 32 bytes</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">encryption = swarmEncryptionKey</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="identifier = keccak256( utf8(&#x22;swarm-id-partition-lock-v1:&#x22; + partition) )owner      = backupSigner addressSOC address = keccak256( identifier ‖ owner )            // 32 bytesencryption = swarmEncryptionKey"><div></div></button></div></figure></div>
+<p>Payload (JSON, ~150 bytes, encrypted):</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="json"><code><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">{</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#096E72">"holderDeviceId"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#C789D6;--1:#7C5686">uuid-or-empty-string</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#096E72">"generation"</span><span style="--0:#D6DEEB;--1:#403F53">: { </span><span style="--0:#7FDBCA;--1:#096E72">"timestampMs"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#F78C6C;--1:#AA0982">1730000000000</span><span style="--0:#D6DEEB;--1:#403F53">, </span><span style="--0:#7FDBCA;--1:#096E72">"tiebreaker"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#C789D6;--1:#7C5686">a1b2c3d4e5f6a7b8</span><span style="--0:#D9F5DD;--1:#111111">"</span><span style="--0:#D6DEEB;--1:#403F53"> },</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#096E72">"acquiredAt"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#F78C6C;--1:#AA0982">1730000000000</span><span style="--0:#D6DEEB;--1:#403F53">,</span></div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#7FDBCA;--1:#096E72">"leasedUntil"</span><span style="--0:#D6DEEB;--1:#403F53">: </span><span style="--0:#F78C6C;--1:#AA0982">1730000030000</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="{  &#x22;holderDeviceId&#x22;: &#x22;uuid-or-empty-string&#x22;,  &#x22;generation&#x22;: { &#x22;timestampMs&#x22;: 1730000000000, &#x22;tiebreaker&#x22;: &#x22;a1b2c3d4e5f6a7b8&#x22; },  &#x22;acquiredAt&#x22;: 1730000000000,  &#x22;leasedUntil&#x22;: 1730000030000}"><div></div></button></div></figure></div>
+<ul>
+<li><strong><code dir="auto">holderDeviceId</code></strong> — the current holder’s device ID, or the sentinel
+<code dir="auto">NO_HOLDER_DEVICE_ID = ""</code> (empty string) after an explicit release.</li>
+<li><strong><code dir="auto">generation</code></strong> — the fencing token. <code dir="auto">compareGenerations(a, b)</code> orders by <code dir="auto">timestampMs</code>
+first, then by <code dir="auto">tiebreaker</code> lexicographically. The higher generation always wins.</li>
+</ul>
+<aside aria-label="Why the tiebreaker is stored, not derived" class="starlight-aside starlight-aside--note"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path d="M12 11C11.7348 11 11.4804 11.1054 11.2929 11.2929C11.1054 11.4804 11 11.7348 11 12V16C11 16.2652 11.1054 16.5196 11.2929 16.7071C11.4804 16.8946 11.7348 17 12 17C12.2652 17 12.5196 16.8946 12.7071 16.7071C12.8946 16.5196 13 16.2652 13 16V12C13 11.7348 12.8946 11.4804 12.7071 11.2929C12.5196 11.1054 12.2652 11 12 11ZM12.38 7.08C12.1365 6.97998 11.8635 6.97998 11.62 7.08C11.4973 7.12759 11.3851 7.19896 11.29 7.29C11.2017 7.3872 11.1306 7.49882 11.08 7.62C11.024 7.73868 10.9966 7.86882 11 8C10.9992 8.13161 11.0245 8.26207 11.0742 8.38391C11.124 8.50574 11.1973 8.61656 11.29 8.71C11.3872 8.79833 11.4988 8.86936 11.62 8.92C11.7715 8.98224 11.936 9.00632 12.099 8.99011C12.2619 8.97391 12.4184 8.91792 12.5547 8.82707C12.691 8.73622 12.8029 8.61328 12.8805 8.46907C12.9582 8.32486 12.9992 8.16378 13 8C12.9963 7.73523 12.8927 7.48163 12.71 7.29C12.6149 7.19896 12.5028 7.12759 12.38 7.08ZM12 2C10.0222 2 8.08879 2.58649 6.4443 3.6853C4.79981 4.78412 3.51809 6.3459 2.76121 8.17317C2.00433 10.0004 1.8063 12.0111 2.19215 13.9509C2.578 15.8907 3.53041 17.6725 4.92894 19.0711C6.32746 20.4696 8.10929 21.422 10.0491 21.8079C11.9889 22.1937 13.9996 21.9957 15.8268 21.2388C17.6541 20.4819 19.2159 19.2002 20.3147 17.5557C21.4135 15.9112 22 13.9778 22 12C22 10.6868 21.7413 9.38642 21.2388 8.17317C20.7363 6.95991 19.9997 5.85752 19.0711 4.92893C18.1425 4.00035 17.0401 3.26375 15.8268 2.7612C14.6136 2.25866 13.3132 2 12 2ZM12 20C10.4178 20 8.87104 19.5308 7.55544 18.6518C6.23985 17.7727 5.21447 16.5233 4.60897 15.0615C4.00347 13.5997 3.84504 11.9911 4.15372 10.4393C4.4624 8.88743 5.22433 7.46197 6.34315 6.34315C7.46197 5.22433 8.88743 4.4624 10.4393 4.15372C11.9911 3.84504 13.5997 4.00346 15.0615 4.60896C16.5233 5.21447 17.7727 6.23984 18.6518 7.55544C19.5308 8.87103 20 10.4177 20 12C20 14.1217 19.1572 16.1566 17.6569 17.6569C16.1566 19.1571 14.1217 20 12 20Z"></path></svg>Why the tiebreaker is stored, not derived</p><div class="starlight-aside__content"><p>In a normal claim <code dir="auto">generation.tiebreaker</code> equals <code dir="auto">keccak256(holderDeviceId)[0:8]</code>, so it looks
+redundant with <code dir="auto">holderDeviceId</code>. It is stored anyway because the <code dir="auto">generation</code> is a <strong>self-contained
+fencing token attributable to whoever wrote the SOC</strong> — a different question from <code dir="auto">holderDeviceId</code>
+(“who holds it now”), and <code dir="auto">compareGenerations</code> orders writers purely from the token without
+re-hashing or reading <code dir="auto">holderDeviceId</code>. The two diverge at the <strong>release sentinel</strong>: a release sets
+<code dir="auto">holderDeviceId = ""</code> but advances the generation with the <em>releasing</em> device’s tiebreaker, so it
+cannot be recovered from <code dir="auto">holderDeviceId</code> (deriving it would yield <code dir="auto">keccak256("")[0:8]</code>,
+attributable to no device). Storing it costs 16 hex chars and keeps the comparator decoupled from
+device-ID semantics.</p></div></aside>
+<h3 id="acquire--refresh-protocol">Acquire / refresh protocol</h3>
+<p>A SOC has no compare-and-swap; ordering comes from the generation fence plus a guard
+window <code dir="auto">PARTITION_LOCK_GUARD_MS = 2000</code> ms:</p>
+<ol>
+<li><strong>Read</strong> the lock SOC.</li>
+<li>If a <strong>live foreign holder</strong> exists (<code dir="auto">holderDeviceId</code> is neither us nor empty, and
+<code dir="auto">leasedUntil > now</code>) → return <strong><code dir="auto">blocked</code></strong>, write nothing.</li>
+<li>Otherwise write our claim (<code dir="auto">holderDeviceId = us</code>, fresh <code dir="auto">generation</code>, <code dir="auto">leasedUntil = now + LEASE_TTL_MS</code>).</li>
+<li><strong>Wait <code dir="auto">guardMs</code></strong>, then re-read.</li>
+<li>If our generation is still the latest visible → <strong><code dir="auto">acquired</code></strong>. If a higher generation
+appeared during the guard → <strong><code dir="auto">lost-race</code></strong> (a peer beat us; fall back to read-only).</li>
+<li>If the verify-read fails to return anything (transient Bee error / propagation lag) →
+optimistically <strong><code dir="auto">acquired</code></strong> — we observed no live foreign holder before writing, so a
+failed read is not proof of a race; the periodic refresh reconciles and only demotes on
+a <em>confirmed</em> live foreign holder.</li>
+</ol>
+<h3 id="reserved-slot-routing">Reserved-slot routing</h3>
+<p>The lock SOC’s chunk lands in some bucket (<code dir="auto">bucket(SOC address)</code>). The stamper routes the
+overstamp to that bucket’s <strong>reserved slot = the partition index</strong>, so the tight heartbeat
+cadence never consumes data-slot budget and the SOC always occupies the same slot. The
+counter (utilization) chunks for a partition are routed the same way.</p>
+<h2 id="partition-state-feed">Partition-state feed</h2>
+<p>Each <code dir="auto">(batchId, partition)</code> has its own epoch feed carrying the holder’s per-bucket data
+counter. The current holder publishes it <strong>on release</strong>; the next holder reads it <strong>on
+acquire</strong> and resumes from exactly that counter, so an orderly hand-off never re-uses a
+slot.</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">topic = keccak256( utf8("swarm-id-partition-state-v1") ‖ batchId ‖ uint32_be(partition) )</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner = backupSigner address</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="topic = keccak256( utf8(&#x22;swarm-id-partition-state-v1&#x22;) ‖ batchId ‖ uint32_be(partition) )owner = backupSigner address"><div></div></button></div></figure></div>
+<p>The counter is not a single blob. It is split into the same <code dir="auto">numUtilizationChunks</code> counter
+chunks, each uploaded with a <strong>random</strong> encryption key to the partition’s reserved slot,
+yielding a 64-byte <strong>encrypted reference</strong> (<code dir="auto">address ‖ key</code>). A single <strong>reference chunk</strong>
+concatenates those references (<code dir="auto">N · 64 ≤ 4096</code> bytes, one chunk even at <code dir="auto">N = 64</code>), and the
+feed points at the reference chunk. A taking-over device follows
+<strong>feed → reference chunk → counter chunks</strong>, decrypting each from its embedded key.</p>
+<h3 id="wire-format-byte-layout">Wire format (byte layout)</h3>
+<p>The format is <strong>binary</strong> and is versioned by the topic domain
+(<code dir="auto">swarm-id-partition-state-v1</code>) — there is no in-blob version byte. A future v2 publishes
+under a v2 topic and never collides with v1 readers.</p>
+<p><strong>Reference chunk</strong> — exactly <code dir="auto">N × 64</code> bytes, where
+<code dir="auto">N = numUtilizationChunks(batchDepth)</code>:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Offset</th><th>Size</th><th>Content</th></tr></thead><tbody><tr><td><code dir="auto">i · 64</code></td><td>32</td><td>Swarm address of counter chunk <code dir="auto">i</code></td></tr><tr><td><code dir="auto">i · 64 + 32</code></td><td>32</td><td>Decryption key of counter chunk <code dir="auto">i</code> (random, generated per publish)</td></tr></tbody></table>
+<p><strong>Counter chunk <code dir="auto">i</code></strong> — exactly 4096 bytes (<code dir="auto">CHUNK_SIZE</code>): <code dir="auto">bucketsPerChunk</code> consecutive
+per-bucket counters, <strong>little-endian</strong>, covering buckets
+<code dir="auto">[i · bucketsPerChunk, (i + 1) · bucketsPerChunk)</code>. The counter width depends on the batch
+depth (<code dir="auto">getChunkLayout</code>):</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Batch depth</th><th>Counter width</th><th><code dir="auto">bucketsPerChunk</code></th><th><code dir="auto">N</code> (chunks)</th></tr></thead><tbody><tr><td><code dir="auto">≤ 31</code> (<code dir="auto">UINT16_COUNTER_MAX_DEPTH</code>)</td><td><code dir="auto">uint16</code> LE</td><td>2048</td><td>32</td></tr><tr><td><code dir="auto">≥ 32</code></td><td><code dir="auto">uint32</code> LE</td><td>1024</td><td>64</td></tr></tbody></table>
+<p>The decoded result is always a <code dir="auto">Uint32Array(65536)</code> (one counter per bucket) regardless of
+the on-wire width; narrowing happens only at the serialize boundary. The decoded state is
+described by the exported <code dir="auto">PartitionStateSchemaV1</code>
+(<code dir="auto">{ counters: Uint32Array(NUM_BUCKETS) }</code> in <code dir="auto">lib/src/sync/partition-state.ts</code>):
+<code dir="auto">writePartitionState</code> validates its input against it, and <code dir="auto">readPartitionState</code> validates
+the reassembled counter — plus the reference-chunk length (<code dir="auto">N × 64</code>) and each counter
+chunk’s length — before returning.</p>
+<p>Reads short-circuit on a cached “synced reference”: if the feed still points at the
+reference a device last synced with, it skips the downloads and reuses its local counter.
+A failed or malformed counter read <strong>fails safe</strong>: it falls back to a fresh zero counter
+rather than aborting the acquisition, and does not cache the bad reference as synced.</p>
+<aside aria-label="Historical: device-claim feed" class="starlight-aside starlight-aside--note"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path d="M12 11C11.7348 11 11.4804 11.1054 11.2929 11.2929C11.1054 11.4804 11 11.7348 11 12V16C11 16.2652 11.1054 16.5196 11.2929 16.7071C11.4804 16.8946 11.7348 17 12 17C12.2652 17 12.5196 16.8946 12.7071 16.7071C12.8946 16.5196 13 16.2652 13 16V12C13 11.7348 12.8946 11.4804 12.7071 11.2929C12.5196 11.1054 12.2652 11 12 11ZM12.38 7.08C12.1365 6.97998 11.8635 6.97998 11.62 7.08C11.4973 7.12759 11.3851 7.19896 11.29 7.29C11.2017 7.3872 11.1306 7.49882 11.08 7.62C11.024 7.73868 10.9966 7.86882 11 8C10.9992 8.13161 11.0245 8.26207 11.0742 8.38391C11.124 8.50574 11.1973 8.61656 11.29 8.71C11.3872 8.79833 11.4988 8.86936 11.62 8.92C11.7715 8.98224 11.936 9.00632 12.099 8.99011C12.2619 8.97391 12.4184 8.91792 12.5547 8.82707C12.691 8.73622 12.8029 8.61328 12.8805 8.46907C12.9582 8.32486 12.9992 8.16378 13 8C12.9963 7.73523 12.8927 7.48163 12.71 7.29C12.6149 7.19896 12.5028 7.12759 12.38 7.08ZM12 2C10.0222 2 8.08879 2.58649 6.4443 3.6853C4.79981 4.78412 3.51809 6.3459 2.76121 8.17317C2.00433 10.0004 1.8063 12.0111 2.19215 13.9509C2.578 15.8907 3.53041 17.6725 4.92894 19.0711C6.32746 20.4696 8.10929 21.422 10.0491 21.8079C11.9889 22.1937 13.9996 21.9957 15.8268 21.2388C17.6541 20.4819 19.2159 19.2002 20.3147 17.5557C21.4135 15.9112 22 13.9778 22 12C22 10.6868 21.7413 9.38642 21.2388 8.17317C20.7363 6.95991 19.9997 5.85752 19.0711 4.92893C18.1425 4.00035 17.0401 3.26375 15.8268 2.7612C14.6136 2.25866 13.3132 2 12 2ZM12 20C10.4178 20 8.87104 19.5308 7.55544 18.6518C6.23985 17.7727 5.21447 16.5233 4.60897 15.0615C4.00347 13.5997 3.84504 11.9911 4.15372 10.4393C4.4624 8.88743 5.22433 7.46197 6.34315 6.34315C7.46197 5.22433 8.88743 4.4624 10.4393 4.15372C11.9911 3.84504 13.5997 4.00346 15.0615 4.60896C16.5233 5.21447 17.7727 6.23984 18.6518 7.55544C19.5308 8.87103 20 10.4177 20 12C20 14.1217 19.1572 16.1566 17.6569 17.6569C16.1566 19.1571 14.1217 20 12 20Z"></path></svg>Historical: device-claim feed</p><div class="starlight-aside__content"><p>Iteration 1 used a per-device claim feed
+(<code dir="auto">topic = keccak256(utf8("swarm-id-device-claim-v1:" + accountId + ":" + deviceId))</code>,
+payload <code dir="auto">PartitionClaim { partition, leasedUntil, generation, acquiredAt }</code>, with
+<code dir="auto">NO_CLAIM_PARTITION = -1</code>). The shared per-partition lock SOC <strong>replaced</strong> it as the
+holder authority. The claim-feed code still exists in the library but is not the active
+acquisition path; a fresh port does not need it.</p></div></aside>
+<h2 id="lease-lifecycle">Lease lifecycle</h2>
+<p>The reference orchestrator is <code dir="auto">PartitionLease</code>. Constants:</p>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+<table><thead><tr><th>Constant</th><th>Value</th><th>Meaning</th></tr></thead><tbody><tr><td><code dir="auto">LEASE_TTL_MS</code></td><td>30 000 ms</td><td>A lease is valid this long; a crashed holder is reclaimable after.</td></tr><tr><td><code dir="auto">LEASE_REFRESH_MS</code></td><td>10 000 ms</td><td>Holder re-writes the lock SOC this often (3 refreshes per TTL).</td></tr><tr><td><code dir="auto">IDLE_YIELD_MS</code></td><td>30 000 ms</td><td>Holder voluntarily releases after this long with no upload.</td></tr><tr><td><code dir="auto">PARTITION_LOCK_GUARD_MS</code></td><td>2 000 ms</td><td>Guard window between claim-write and verify-read.</td></tr><tr><td><code dir="auto">SLOT_WAIT_TIMEOUT_MS</code></td><td>30 000 ms</td><td>A device with no free partition polls this long for one to free up.</td></tr></tbody></table>
+<p><code dir="auto">acquire(partitionCount)</code>:</p>
+<ol>
+<li>If <code dir="auto">partitionCount ≤ 1</code> → legacy single-device, no lease.</li>
+<li><code dir="auto">refreshFromSwarm</code> — read every partition’s lock SOC, record the live (unexpired,
+non-released) holders.</li>
+<li>Choose the partition we already hold, else the lowest free/expired one
+(<code dir="auto">pickFreeOrExpired</code>). If every partition has a live foreign holder → <strong>read-only</strong>.</li>
+<li><code dir="auto">claimPartition</code> — read the partition-state feed to seed the counter, then run the
+lock acquire/verify protocol. On <code dir="auto">acquired</code>, bind the counter to the stamper; on
+<code dir="auto">blocked</code>/<code dir="auto">lost-race</code>, fall back to read-only.</li>
+</ol>
+<p><code dir="auto">refresh()</code> re-runs the lock protocol on the held partition to bump <code dir="auto">leasedUntil</code>; returns
+false (lease lost) on <code dir="auto">blocked</code>/<code dir="auto">lost-race</code>. <code dir="auto">release(localCounter)</code> publishes the final
+counter to the partition-state feed, then writes the <code dir="auto">holderDeviceId = ""</code> release
+sentinel. <code dir="auto">adoptIfLive()</code>/<code dir="auto">hydrate()</code>/<code dir="auto">serialize()</code> let a reload re-adopt a still-valid
+lease from a local cache without a Swarm round-trip (re-validated on the next refresh).</p>
+<h3 id="the-four-cases">The four cases</h3>
+<ul>
+<li><strong>Case A — first device, fresh batch.</strong> No lock SOC, no partition-state. Take partition
+0, seed a zero counter.</li>
+<li><strong>Case B — second device.</strong> Partition 0 is live-held; take partition 1, seed its counter
+from its partition-state feed (zero if never published).</li>
+<li><strong>Case C — third+ device, turn-taking.</strong> All <code dir="auto">PARTITION_COUNT</code> partitions are held. The
+new device waits (<code dir="auto">SLOT_WAIT_TIMEOUT_MS</code>, polling every <code dir="auto">LEASE_REFRESH_MS</code>) for a holder
+to go idle (<code dir="auto">IDLE_YIELD_MS</code> → it releases) or for a lease to lapse, then claims the freed
+partition resuming from the published counter.</li>
+<li><strong>Case D — crash recovery.</strong> A holder dies without releasing. Its <code dir="auto">leasedUntil</code> expires
+after <code dir="auto">LEASE_TTL_MS</code>; a peer then reclaims the partition. Resume is from the last
+<em>published</em> counter — an unclean crash that stamped past its last publish loses only data
+that was never durably persisted anyway.</li>
+</ul>
+<h2 id="account-state-sync">Account-state sync</h2>
+<p>Account state is one <strong>epoch feed</strong> per account:</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">topic = Topic.fromString("swarm-id-backup-v1:account:" + accountId)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">owner = backupSigner address</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="topic = Topic.fromString(&#x22;swarm-id-backup-v1:account:&#x22; + accountId)owner = backupSigner address"><div></div></button></div></figure></div>
+<p>The feed points at an encrypted snapshot (<code dir="auto">AccountStateSnapshot</code>, schema version 1):</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="text"><code><div class="ec-line"><div class="code"><span style="--0:#d6deeb;--1:#403f53">{ version: 1, timestamp, accountId,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#d6deeb;--1:#403f53">  </span></span><span style="--0:#d6deeb;--1:#403f53">metadata: { accountName, defaultPostageStampBatchID, createdAt, lastModified,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#d6deeb;--1:#403f53">              </span></span><span style="--0:#d6deeb;--1:#403f53">devices[], partitionCount },</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#d6deeb;--1:#403f53">  </span></span><span style="--0:#d6deeb;--1:#403f53">identities[], connectedApps[], postageStamps[] }</span></div></div></code></pre><div class="copy"><button title="Copy to clipboard" data-copied="Copied!" data-code="{ version: 1, timestamp, accountId,  metadata: { accountName, defaultPostageStampBatchID, createdAt, lastModified,              devices[], partitionCount },  identities[], connectedApps[], postageStamps[] }"><div></div></button></div></figure></div>
+<p><code dir="auto">ConnectedApp</code> carries two fields that make cross-device merge correct:</p>
+<ul>
+<li><strong><code dir="auto">updatedAt</code></strong> — a last-writer-wins clock, set on any change (falls back to
+<code dir="auto">lastConnectedAt</code> for records written before the field existed).</li>
+<li><strong><code dir="auto">revokedAt</code></strong> — a tombstone marker. A revoked app is <strong>kept</strong> in the snapshot (so the
+removal propagates) but hidden from the UI and invalid for auth.</li>
+</ul>
+<h3 id="publish-optimistic-verify-retry">Publish: optimistic verify-retry</h3>
+<p>A shared epoch feed has no compare-and-swap — two devices publishing in the same epoch
+slot write the same SOC address and the later signer silently wins, orphaning the other’s
+snapshot. Publishing therefore:</p>
+<ol>
+<li>Fetches the latest remote snapshot, <strong>merges</strong> the local state onto it (so we don’t
+stomp a peer’s additions), uploads the merged snapshot, and updates the feed.</li>
+<li>Re-reads the feed (<code dir="auto">verifyWon</code>): if it points at a <em>different</em> reference, a peer won.</li>
+<li>Re-merges from the freshest remote and republishes, up to <code dir="auto">MAX_PUBLISH_RETRIES = 3</code>
+times, backing off <code dir="auto">PUBLISH_RETRY_BACKOFF_MS = 200</code> ms plus up to
+<code dir="auto">PUBLISH_RETRY_JITTER_MS = 600</code> ms of jitter so two devices decorrelate. A
+missing/unreadable re-read counts as “won” (never spuriously republish).</li>
+</ol>
+<p>The merge always folds the <em>original</em> local state onto the freshest remote, so retries
+converge. Publishing is serialized within an origin by a cross-tab Web Lock
+(<code dir="auto">swarm-write-&#x3C;batchId></code>) so a proxy iframe and the UI never collide locally.</p>
+<h3 id="merge-rules">Merge rules</h3>
+<p><code dir="auto">mergeSnapshotWithRemote(local, remote)</code>:</p>
+<ul>
+<li><strong>devices</strong> — union by <code dir="auto">deviceId</code>; larger <code dir="auto">lastSignedInAt</code> wins, ties to local.</li>
+<li><strong>identities</strong> / <strong>postageStamps</strong> — union by key (<code dir="auto">id</code> / <code dir="auto">batchID</code>); <strong>local wins</strong> on
+overlap.</li>
+<li><strong>connectedApps</strong> — <strong>last-writer-wins</strong> by <code dir="auto">recency = updatedAt ?? lastConnectedAt ?? 0</code>,
+keyed by <code dir="auto">(identityId, appUrl)</code>. Process remote then local so a tie favours local. This
+is what lets both <em>updates</em> and <em>revocations</em> (tombstones) propagate while distinct apps
+still survive as a union.</li>
+<li><strong>scalars</strong> (<code dir="auto">accountName</code>, <code dir="auto">defaultPostageStampBatchID</code>, <code dir="auto">partitionCount</code>) — local wins.</li>
+<li><code dir="auto">timestamp</code> / <code dir="auto">lastModified</code> — refreshed to now.</li>
+</ul>
+<h3 id="restore-vs-refresh">Restore vs refresh</h3>
+<ul>
+<li><strong>Restore</strong> (first sign-in on a device): pull the snapshot and apply it wholesale into
+local stores.</li>
+<li><strong>Refresh</strong> (already-known account): re-pull and merge the full snapshot into the stores
+via no-sync “applyRefreshed” paths (so the refresh itself doesn’t re-publish).</li>
+</ul>
+<h3 id="the-partition-gate">The partition gate</h3>
+<p>A device may publish account state <strong>only if it holds a partition</strong> (or can claim a
+free/expired one), because publishing writes chunks to the shared batch. The lock SOC is
+the single source of truth for this — there is no separate “active devices” mirror. If
+every partition is held by a live foreign device, the publish is skipped and a peer
+publishes instead.</p>
+<h2 id="porting-checklist">Porting checklist</h2>
+<p>To interoperate with the reference implementation, an external client must:</p>
+<ol>
+<li><strong>Reconstruct the same <code dir="auto">derivationKey</code></strong> after auth, then derive <code dir="auto">swarmEncryptionKey</code>
+and <code dir="auto">backupKey</code> via <code dir="auto">deriveSecret</code> exactly as above (HMAC-SHA256, key-as-hex-bytes,
+context-as-UTF-8). The <code dir="auto">backupSigner</code> address is the owner of everything.</li>
+<li><strong>Generate a stable per-install <code dir="auto">deviceId</code></strong> (UUID) and the <code dir="auto">tiebreaker</code>
+(<code dir="auto">keccak256(deviceId)[0:8]</code>).</li>
+<li><strong>Implement the lock-SOC protocol</strong>: identifier hash, SOC address, encrypted JSON
+payload, the read → guard (2 s) → verify acquire flow, generation fencing, and the
+<code dir="auto">""</code> release sentinel.</li>
+<li><strong>Implement the slot formula</strong> <code dir="auto">slot = K + p + K·j</code> and route lock-SOC/counter chunks to
+reserved slot <code dir="auto">p</code>. Honour <code dir="auto">PARTITION_COUNT = 2</code>, <code dir="auto">DATA_COUNTER_START = 2</code>.</li>
+<li><strong>Implement the partition-state feed</strong>: topic hash, the reference-chunk →
+counter-chunks structure, publish-on-release / read-on-acquire.</li>
+<li><strong>Track per-bucket counters</strong> with the uint16/uint32 codec and the
+<code dir="auto">swarm-id-util-chunk-v1</code> key derivation (only needed to publish counters that the
+reference client can read).</li>
+<li><strong>Implement account-state sync</strong>: the <code dir="auto">swarm-id-backup-v1:account:&#x3C;id></code> epoch feed,
+the snapshot schema (including <code dir="auto">updatedAt</code>/<code dir="auto">revokedAt</code>), the verify-retry publish, and
+the merge rules — especially connectedApps LWW-with-tombstones.</li>
+<li><strong>Respect the partition gate</strong>: never publish account state without holding a partition.</li>
+</ol>
+<p>All hashes are keccak256; all multi-byte integers in identifiers/topics are <strong>big-endian
+uint32</strong>; serialized counters are <strong>little-endian</strong>; feeds are epoch feeds owned by the
+backup signer.</p>
+<h2 id="future-work">Future work</h2>
+<p>Tracked under the multi-device umbrella
+(<a href="https://github.com/snaha/swarm-id/issues/217">#217</a>):</p>
+<ul>
+<li><strong><code dir="auto">BatchWriteCoordinator</code> refactor + proxy-side publish.</strong> Extract the partition-lease /
+stamp / write-lock orchestration the proxy and the sync path currently duplicate into one
+shared unit, then have the proxy iframe (the only guaranteed-persistent context on a dApp
+page) publish account state — including announcing a device when it first acquires its
+lease. Also folds in clearer contention logging (distinguish “all partitions held” from
+stamp/SOC errors). Tracked in
+<a href="https://github.com/snaha/swarm-id/issues/336">#336</a>.</li>
+<li><strong>Restore / refresh coverage.</strong> Give agent (seed-phrase) accounts a restore-from-Swarm
+path (today they start fresh on a new device), and broaden refresh triggers to app load /
+account switch instead of only the Devices view. Tracked in
+<a href="https://github.com/snaha/swarm-id/issues/338">#338</a>.</li>
+<li><strong>Merge consolidation + deletion tombstones.</strong> Make the snapshot-merge rules a single
+shared implementation (lib vs the UI refresh path), and extend the connectedApps tombstone
+pattern to identities and stamps so deletions propagate across devices. Tracked in
+<a href="https://github.com/snaha/swarm-id/issues/337">#337</a>.</li>
+</ul> </div> <footer class="sl-flex astro-2kpfktjj"> <div class="meta sl-flex astro-2kpfktjj">   </div> <div class="pagination-links print:hidden astro-se2vcubt" dir="ltr"> <a href="/docs/pr-350/local-development" rel="prev" class="astro-se2vcubt"> <svg aria-hidden="true" class="astro-se2vcubt astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17 11H9.41l3.3-3.29a1.004 1.004 0 1 0-1.42-1.42l-5 5a1 1 0 0 0-.21.33 1 1 0 0 0 0 .76 1 1 0 0 0 .21.33l5 5a1.002 1.002 0 0 0 1.639-.325 1 1 0 0 0-.219-1.095L9.41 13H17a1 1 0 0 0 0-2Z"/></svg>  <span class="astro-se2vcubt"> Previous <br class="astro-se2vcubt"> <span class="link-title astro-se2vcubt">Local Development</span> </span> </a> <a href="/docs/pr-350/api/" rel="next" class="astro-se2vcubt"> <svg aria-hidden="true" class="astro-se2vcubt astro-5kfzkzu6" width="16" height="16" viewBox="0 0 24 24" fill="currentColor" style="--sl-icon-size: 1.5rem;"><path d="M17.92 11.62a1.001 1.001 0 0 0-.21-.33l-5-5a1.003 1.003 0 1 0-1.42 1.42l3.3 3.29H7a1 1 0 0 0 0 2h7.59l-3.3 3.29a1.002 1.002 0 0 0 .325 1.639 1 1 0 0 0 1.095-.219l5-5a1 1 0 0 0 .21-.33 1 1 0 0 0 0-.76Z"/></svg>  <span class="astro-se2vcubt"> Next <br class="astro-se2vcubt"> <span class="link-title astro-se2vcubt">SwarmIdClient API Reference</span> </span> </a> </div>   </footer>  </div> </div>   </main> </div> </div>  </div> </div>  </body></html>
