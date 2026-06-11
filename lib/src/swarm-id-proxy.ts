@@ -81,18 +81,18 @@ import {
   saveMantarayTree,
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
-import { resolveStampForIdentity } from "./utils/postage-stamp-association"
 import {
-  LEASE_TTL_MS,
-  LEASE_REFRESH_MS,
-  IDLE_YIELD_MS,
-  UtilizationAwareStamper,
-} from "./utils/batch-utilization"
-import { withBatchWriteLock } from "./utils/batch-write-lock"
+  resolveStampForIdentity,
+  collectAccountStampBatchIds,
+} from "./utils/postage-stamp-association"
+import {
+  publishAccountState,
+  remoteFeedHasDevice,
+} from "./sync/publish-account-state"
+import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
-import { PartitionLease } from "./sync/partition-lease"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
-import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./sync/partition-lock"
+import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { getOrCreateDeviceId } from "./utils/device-id"
 import {
   createConnectedAppsStorageManager,
@@ -121,7 +121,11 @@ import {
   fetchSwarmPrice,
 } from "./utils/ttl"
 import { tryCreateTag } from "./utils/tag"
-import { DEFAULT_BEE_NODE_URL, UtilizationUpdateMessageSchema } from "./schemas"
+import {
+  DEFAULT_BEE_NODE_URL,
+  UtilizationUpdateMessageSchema,
+  type AccountStateSnapshot,
+} from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -133,6 +137,12 @@ import {
   publicKeyFromPrivate,
   compressPublicKey,
 } from "./proxy/act"
+
+/**
+ * Debounce window for proxy-side account-state publishing. Coalesces a burst of
+ * triggers (lease acquisition + storage changes) into a single feed write.
+ */
+const PUBLISH_DEBOUNCE_MS = 1500
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -187,57 +197,28 @@ export class SwarmIdProxy {
   private utilizationChannel: BroadcastChannel
   private subsidisedGatewayUrl: string | undefined
   /**
-   * Active partition-lease for the current account+batch combination.
-   * Undefined when no lease is held (single-device legacy mode, or the
-   * device is in read-only mode because all partitions are taken).
+   * The write path (lock + partition lease + stamp flush) for the current
+   * account+batch. Constructed in `initializeStamper` once the stamper and
+   * account context are known; undefined before auth / after disconnect. The
+   * proxy delegates all writes to it via `withModeAwareWriteLock`.
    */
-  private partitionLease: PartitionLease | undefined
-  private partitionRefreshTimer: ReturnType<typeof setInterval> | undefined
-  private isReadOnly: boolean = false
-  private leaseAccountId: string | undefined
+  private coordinator: BatchWriteCoordinator | undefined
   /**
-   * Wall-clock ms of the last time we verified the lock SOC still names us
-   * as holder. Updated on successful acquire, successful refresh, and the
-   * throttled `ensureLeaseStillValid` upload-entry check. Drives the
-   * upload-time freshness check so a write burst pays at most one extra
-   * lock-SOC read per refresh interval.
+   * Debounce timer + in-flight guard for proxy-side account-state publishing.
+   * The proxy publishes the account snapshot to the shared sync feed when it
+   * first acquires a partition (so the device announces itself — see #336
+   * motivation #4) and when account state changes while a lease is held.
    */
-  private lastLeaseValidatedAt: number = 0
+  private publishTimer: ReturnType<typeof setTimeout> | undefined
+  private publishInFlight: boolean = false
   /**
-   * Wall-clock ms of the last upload activity (acquire success or an upload
-   * passing through the write lock). When a held lease goes idle for
-   * `IDLE_YIELD_MS`, the refresh tick yields the partition so a waiting peer
-   * can take the slot. Re-acquired transparently on the next upload.
+   * Why the next debounced publish was scheduled. `"acquired"` (announce on
+   * lease acquisition) is gated on this device not yet being in the feed, so a
+   * plain reload doesn't republish. `"change"` (account-state delta) always
+   * publishes. `"change"` dominates a coalesced burst — a real delta must never
+   * be skipped just because an acquisition was also pending.
    */
-  private lastLeaseActivityAt: number = 0
-  /**
-   * Count of uploads currently executing under the write lock. The refresh
-   * tick (which runs on a bare interval, not under the lock) only yields an
-   * idle lease when this is 0, so a yield can never unbind the stamper
-   * underneath an in-flight upload.
-   */
-  private activeUploadCount: number = 0
-  /**
-   * Backup signer + account context bound alongside lock SOCs. Held so the
-   * refresh tick and `ensureLeaseStillValid` can read/write the lock SOC
-   * without re-deriving the signer each time.
-   */
-  private leaseContext:
-    | {
-        accountId: string
-        backupSigner: PrivateKey
-        swarmEncryptionKey: Uint8Array
-        partitionCount: number
-      }
-    | undefined
-  private pendingLeaseAccountInfo:
-    | {
-        owner: EthAddress
-        encryptionKey: Uint8Array
-        accountId: string
-        partitionCount: number
-      }
-    | undefined
+  private publishReason: "acquired" | "change" | undefined
   /**
    * This device's identity, captured ONCE at authentication and reused for
    * every lease operation. Never re-read from `getOrCreateDeviceId()` mid-
@@ -391,6 +372,13 @@ export class SwarmIdProxy {
     }
 
     this.emitConnectionInfoIfChanged()
+
+    // If we hold a partition, an account-state change (new identity / stamp /
+    // rename) should propagate to peers. Debounced so a burst collapses into one
+    // feed write.
+    if (this.coordinator?.currentPartition !== undefined) {
+      this.schedulePublish("change")
+    }
   }
 
   /**
@@ -551,7 +539,12 @@ export class SwarmIdProxy {
 
     // Release the partition lease (best-effort) so peers see this device
     // vacate its partition promptly.
-    this.tearDownPartitionLease()
+    this.coordinator?.teardown()
+    this.coordinator = undefined
+    if (this.publishTimer !== undefined) {
+      clearTimeout(this.publishTimer)
+      this.publishTimer = undefined
+    }
 
     // Clean up utilization channel
     this.utilizationChannel.close()
@@ -578,21 +571,6 @@ export class SwarmIdProxy {
         console.error("[Proxy] Failed to apply utilization update:", error)
       }
     }
-  }
-
-  /**
-   * Execute a write operation with an exclusive lock across all tabs.
-   * Uses Web Locks API to ensure only one write happens at a time.
-   * Lock is scoped to the batch ID to allow different batches to write concurrently.
-   */
-  private async withWriteLock<T>(operation: () => Promise<T>): Promise<T> {
-    return withBatchWriteLock(this.postageBatchId, async () => {
-      try {
-        return await operation()
-      } finally {
-        await this.saveStamperStateIfNeeded()
-      }
-    })
   }
 
   /**
@@ -684,54 +662,43 @@ export class SwarmIdProxy {
       return
     }
 
-    // Multi-device: stash context and eagerly pre-acquire a partition in
-    // the background so the first upload doesn't pay the acquire latency.
-    // The acquire never blocks init/proxyReady (fire-and-forget under the
-    // write lock); a concurrent first upload simply queues on the same
-    // write lock and then finds the lease already held.
-    if (accountInfo.partitionCount > 1) {
-      this.pendingLeaseAccountInfo = {
-        owner: accountInfo.owner,
-        encryptionKey: accountInfo.encryptionKey,
-        accountId: accountInfo.accountId,
-        partitionCount: accountInfo.partitionCount,
-      }
-      // Lock-SOC routing on the stamper was auto-bound inside
-      // `UtilizationAwareStamper.create` (from `(partition, owner)`); we
-      // only need to stash the lease context for the refresh tick and the
-      // throttled freshness check.
-      await this.captureLeaseContext(accountInfo)
-      void this.withWriteLock(() => this.ensurePartitionLease()).catch((err) =>
-        console.warn("[Proxy] Background lease warm-up failed:", err),
-      )
-    }
-  }
-
-  /**
-   * Stash the backup signer + account context so the refresh tick and
-   * `ensureLeaseStillValid` can read/write the lock SOC without re-deriving
-   * the signer each time.
-   */
-  private async captureLeaseContext(accountInfo: {
-    accountId: string
-    encryptionKey: Uint8Array
-    partitionCount: number
-  }): Promise<void> {
-    const swarmEncryptionKeyHex = uint8ArrayToHex(accountInfo.encryptionKey)
-    const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
-    const backupSigner = new PrivateKey(backupKeyHex)
-    this.leaseContext = {
+    // Build the write-path coordinator for this account+batch. It owns the
+    // cross-tab write lock, the partition-lease lifecycle, and the stamp flush.
+    // Lock-SOC routing on the stamper was auto-bound inside
+    // `UtilizationAwareStamper.create`. For multi-device accounts the
+    // coordinator eagerly pre-acquires a partition in the background
+    // (`startLease`) so the first upload doesn't pay the acquire latency; a
+    // concurrent first upload queues on the same write lock and then finds the
+    // lease already held. Single-device accounts get a lock-only coordinator.
+    this.coordinator?.teardown()
+    const backupKeyHex = await deriveSecret(
+      uint8ArrayToHex(accountInfo.encryptionKey),
+      "backup-key",
+    )
+    this.coordinator = new BatchWriteCoordinator({
+      bee: this.bee,
+      batchId: this.postageBatchId,
+      stamper: this.stamper,
+      deviceId: this.requireDeviceId(),
       accountId: accountInfo.accountId,
-      backupSigner,
+      backupSigner: new PrivateKey(backupKeyHex),
       swarmEncryptionKey: accountInfo.encryptionKey,
       partitionCount: accountInfo.partitionCount,
-    }
+      mode: "persistent",
+      readLeaseCache: () => this.readLeaseCache(accountInfo.accountId),
+      writeLeaseCache: (snap) =>
+        this.writeLeaseCache(accountInfo.accountId, snap ?? null),
+      flushStamperState: () => this.saveStamperStateIfNeeded(),
+      getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
+      onLeaseChange: () => this.emitConnectionInfoIfChanged(),
+      // On first acquiring a partition, announce this device by publishing the
+      // account snapshot (which includes ourselves in metadata.devices) to the
+      // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
+      // lock (the publish re-enters the lock via the coordinator).
+      onLeaseAcquired: () => this.schedulePublish("acquired"),
+    })
+    this.coordinator.startLease()
   }
-
-  /** Hard cap on the acquire path (including any wait-for-slot retry). */
-  private static readonly PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 45000
-  /** Max time the acquire spends polling for a slot when all are held. */
-  private static readonly SLOT_WAIT_TIMEOUT_MS = 30000
 
   /**
    * This device's identity, captured once. Lazily initialised here as a
@@ -765,452 +732,6 @@ export class SwarmIdProxy {
     } else {
       localStorage.setItem(key, JSON.stringify(snap))
     }
-  }
-
-  /**
-   * Acquire a partition via the lock SOC — the single source of truth.
-   * The local cache is only a hint (`hydrate`); `acquire` always re-reads
-   * and reconciles against the lock SOCs before binding.
-   */
-  private async acquirePartitionLease(accountInfo: {
-    owner: EthAddress
-    encryptionKey: Uint8Array
-    accountId: string
-    partitionCount: number
-  }): Promise<void> {
-    if (!this.stamper || !this.postageBatchId) return
-    if (accountInfo.partitionCount <= 1) {
-      this.isReadOnly = false
-      return
-    }
-    this.leaseAccountId = accountInfo.accountId
-
-    try {
-      const deviceId = this.requireDeviceId()
-      const lease = await PartitionLease.fromSwarmEncryptionKey({
-        bee: this.bee,
-        deviceId,
-        batchId: new BatchId(this.postageBatchId),
-        batchDepth: this.stamper.depth,
-        swarmEncryptionKey: accountInfo.encryptionKey,
-        stamper: this.stamper,
-      })
-      const cached = this.readLeaseCache(accountInfo.accountId)
-      if (cached) lease.hydrate(cached)
-
-      // Re-adopt fast path: a still-valid cached lease (e.g. after a reload
-      // within the TTL) is re-established from local state alone — no lock-SOC
-      // scan/write, so it survives transient Bee 500s. The refresh tick then
-      // reconciles with Swarm and demotes only on a confirmed foreign holder.
-      const adopted = lease.adoptIfLive()
-      if (adopted !== undefined) {
-        this.partitionLease = lease
-        this.isReadOnly = false
-        this.stamper.bindPartition({
-          partition: adopted,
-          partitionCount: accountInfo.partitionCount,
-          localCounter: this.stamper.buildLeaseLocalCounter(),
-        })
-        this.writeLeaseCache(accountInfo.accountId, lease.serialize())
-        this.scheduleLeaseRefresh({ accountId: accountInfo.accountId, lease })
-        this.lastLeaseValidatedAt = Date.now()
-        this.lastLeaseActivityAt = Date.now()
-        return
-      }
-
-      const result = await lease.acquire({
-        partitionCount: accountInfo.partitionCount,
-      })
-      this.partitionLease = lease
-      this.isReadOnly = result.isReadOnly
-
-      if (result.partition === undefined) {
-        if (result.isReadOnly) {
-          console.warn(
-            "[Proxy] All partitions held; entering read-only mode until a peer releases.",
-          )
-        }
-        this.writeLeaseCache(accountInfo.accountId, lease.serialize())
-        return
-      }
-
-      this.stamper.bindPartition({
-        partition: result.partition,
-        partitionCount: result.partitionCount,
-        localCounter: result.localCounter,
-      })
-      this.writeLeaseCache(accountInfo.accountId, lease.serialize())
-      this.scheduleLeaseRefresh({ accountId: accountInfo.accountId, lease })
-      this.lastLeaseValidatedAt = Date.now()
-      this.lastLeaseActivityAt = Date.now()
-    } catch (error) {
-      console.error("[Proxy] Failed to acquire partition lease:", error)
-      this.partitionLease = undefined
-      this.isReadOnly = false
-      // Keep the cache and in-memory state in lockstep: no lease held → no
-      // live cache, so the UI doesn't show Active while the demo shows nothing.
-      this.writeLeaseCache(accountInfo.accountId, null)
-    }
-  }
-
-  /**
-   * Stop lease background work and drop the in-memory lease + cache. Used when
-   * the cold acquire path times out. A still-valid cached lease is re-adopted
-   * before that path runs (see `acquirePartitionLease`), so reaching here means
-   * there's no live lease to preserve — clearing the cache keeps the UI and the
-   * demo consistent.
-   */
-  private pauseLeaseBackgroundWork(): void {
-    if (this.partitionRefreshTimer !== undefined) {
-      clearInterval(this.partitionRefreshTimer)
-      this.partitionRefreshTimer = undefined
-    }
-    this.partitionLease = undefined
-    this.isReadOnly = false
-    // We only reach here when the cold acquire timed out — a live cached lease
-    // is re-adopted before that path runs, so any cache present now is stale.
-    // Clear it so the UI doesn't show Active with no in-memory lease.
-    if (this.leaseAccountId) this.writeLeaseCache(this.leaseAccountId, null)
-  }
-
-  /**
-   * Tear down lease-related background work (sign-out, disconnect). Best-
-   * effort release of the held partition.
-   */
-  private tearDownPartitionLease(): void {
-    if (this.partitionRefreshTimer !== undefined) {
-      clearInterval(this.partitionRefreshTimer)
-      this.partitionRefreshTimer = undefined
-    }
-    const lease = this.partitionLease
-    const stamper = this.stamper
-    if (lease && stamper) {
-      const localCounter = stamper.getLocalCounter()
-      if (localCounter !== undefined) {
-        void lease
-          .release(localCounter)
-          .catch((err) =>
-            console.warn("[Proxy] Partition lease release failed:", err),
-          )
-      }
-      stamper.unbindPartition()
-    }
-    this.partitionLease = undefined
-    this.isReadOnly = false
-    this.lastLeaseValidatedAt = 0
-    if (this.leaseAccountId) {
-      this.writeLeaseCache(this.leaseAccountId, null)
-      this.leaseAccountId = undefined
-    }
-    this.leaseContext = undefined
-  }
-
-  /**
-   * Voluntarily give up the held partition after it has gone idle (see the
-   * idle-yield check in `refreshTick`). Unlike `tearDownPartitionLease`, this
-   * KEEPS `leaseContext` / `leaseAccountId` so the next upload re-acquires via
-   * `ensurePartitionLease`'s re-arm path. We publish the final counter + write
-   * the release sentinel so a waiting peer takes the slot immediately rather
-   * than waiting out the TTL.
-   */
-  private async yieldIdleLease(
-    accountId: string,
-    lease: PartitionLease,
-  ): Promise<void> {
-    const yieldedPartition = lease.currentPartition
-    if (this.partitionRefreshTimer !== undefined) {
-      clearInterval(this.partitionRefreshTimer)
-      this.partitionRefreshTimer = undefined
-    }
-    const localCounter = this.stamper?.getLocalCounter()
-    if (localCounter !== undefined) {
-      try {
-        // Best-effort: on a Swarm-write failure the slot still lapses via the
-        // TTL within LEASE_TTL_MS, so peers recover either way.
-        await lease.release(localCounter)
-      } catch (err) {
-        console.warn("[Proxy] Idle partition-lease release failed:", err)
-      }
-    }
-    this.stamper?.unbindPartition()
-    this.partitionLease = undefined
-    this.isReadOnly = false
-    this.lastLeaseValidatedAt = 0
-    // Keep leaseContext + leaseAccountId so the next upload re-acquires.
-    this.writeLeaseCache(accountId, null)
-    this.emitConnectionInfoIfChanged()
-    console.info(
-      `[Proxy] Released idle partition ${yieldedPartition ?? "?"}; will re-acquire on next upload.`,
-    )
-  }
-
-  /**
-   * Acquire the partition lease if one is pending (deferred from
-   * initializeStamper), OR run the throttled lock-SOC freshness check on an
-   * already-held lease. Called from withModeAwareWriteLock so it runs under
-   * the write lock — at most one acquisition attempt is in-flight at a time.
-   */
-  private async ensurePartitionLease(): Promise<void> {
-    try {
-      // Re-arm from the stashed context so THIS upload acquires (or retries)
-      // a partition. Two cases:
-      //   - No lease held and none pending (e.g. the connect-time warm-up
-      //     consumed the pending info and then paused on a transient Bee
-      //     failure). Without re-arming, the upload would no-op in
-      //     `ensureLeaseStillValid` and the lease cache would never be written
-      //     — the device stays Inactive (the "needs a second upload" bug).
-      //   - Read-only (all partitions held by live peers). Re-arming lets the
-      //     upload re-enter `acquirePartitionLeaseWithSlotWait` and wait up to
-      //     SLOT_WAIT_TIMEOUT_MS for a peer's lease to lapse, so turn-taking
-      //     works on the 3rd+ device instead of failing instantly.
-      // Only fires per upload (not in the refresh tick), so no busy-loop.
-      if (
-        !this.pendingLeaseAccountInfo &&
-        (!this.partitionLease || this.isReadOnly) &&
-        this.leaseContext
-      ) {
-        this.pendingLeaseAccountInfo = {
-          owner: this.leaseContext.backupSigner.publicKey().address(),
-          encryptionKey: this.leaseContext.swarmEncryptionKey,
-          accountId: this.leaseContext.accountId,
-          partitionCount: this.leaseContext.partitionCount,
-        }
-      }
-
-      if (this.pendingLeaseAccountInfo) {
-        const accountInfo = this.pendingLeaseAccountInfo
-        this.pendingLeaseAccountInfo = undefined
-        const timeout = new Promise<void>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Partition lease timed out after ${SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
-                ),
-              ),
-            SwarmIdProxy.PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
-          ),
-        )
-        try {
-          await Promise.race([
-            this.acquirePartitionLeaseWithSlotWait(accountInfo),
-            timeout,
-          ])
-        } catch (error) {
-          console.warn(
-            "[Proxy] Partition lease acquisition failed, pausing background work:",
-            error,
-          )
-          this.pauseLeaseBackgroundWork()
-        }
-        return
-      }
-      await this.ensureLeaseStillValid()
-    } finally {
-      // Reflect any partition transition (acquire / adopt / read-only / pause)
-      // to the dApp. Idempotent — suppressed when ConnectionInfo is unchanged.
-      this.emitConnectionInfoIfChanged()
-    }
-  }
-
-  /**
-   * Wait-for-slot wrapper around `acquirePartitionLease`. When the initial
-   * acquire returns read-only (every partition held by a live foreign
-   * holder), poll every `LEASE_REFRESH_MS` up to `SLOT_WAIT_TIMEOUT_MS`.
-   */
-  private async acquirePartitionLeaseWithSlotWait(accountInfo: {
-    owner: EthAddress
-    encryptionKey: Uint8Array
-    accountId: string
-    partitionCount: number
-  }): Promise<void> {
-    const deadline = Date.now() + SwarmIdProxy.SLOT_WAIT_TIMEOUT_MS
-    // eslint-disable-next-line no-constant-condition
-    while (true) {
-      await this.acquirePartitionLease(accountInfo)
-      if (!this.isReadOnly) return
-      if (Date.now() + LEASE_REFRESH_MS > deadline) {
-        throw new Error(
-          "No partition available — all slots are held by other devices.",
-        )
-      }
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, LEASE_REFRESH_MS),
-      )
-    }
-  }
-
-  /**
-   * Throttled lock-SOC freshness check. Compares the lock SOC's holder
-   * against our captured `deviceId` (stable for the session). Demotes if a
-   * peer now holds our partition.
-   */
-  /**
-   * A lock-SOC payload means we've been displaced only if it names a
-   * *different*, *live* device. A missing/unreadable payload (e.g. a Bee
-   * 500), our own id, the release sentinel, or an *expired* foreign holder
-   * are all NOT displacement — the demo keeps its lease and retries.
-   */
-  private isDisplaced(
-    payload: { holderDeviceId: string; leasedUntil: number } | undefined,
-    now: number,
-  ): boolean {
-    return (
-      payload !== undefined &&
-      payload.holderDeviceId !== this.requireDeviceId() &&
-      payload.holderDeviceId !== NO_HOLDER_DEVICE_ID &&
-      payload.leasedUntil > now
-    )
-  }
-
-  private async ensureLeaseStillValid(): Promise<void> {
-    if (!this.partitionLease || this.isReadOnly) return
-    if (!this.leaseContext || !this.leaseAccountId) return
-    const partition = this.partitionLease.currentPartition
-    if (partition === undefined) return
-    if (Date.now() - this.lastLeaseValidatedAt < LEASE_REFRESH_MS) return
-
-    let payload
-    try {
-      payload = await readPartitionLock({
-        bee: this.bee,
-        backupSigner: this.leaseContext.backupSigner,
-        swarmEncryptionKey: this.leaseContext.swarmEncryptionKey,
-        partition,
-      })
-    } catch (err) {
-      // Read failed (transient) — inconclusive, keep the lease and retry.
-      console.warn("[Proxy] Lease freshness check read failed:", err)
-      return
-    }
-
-    if (this.isDisplaced(payload, Date.now())) {
-      console.warn(
-        `[Proxy] Lease freshness check: partition ${partition} taken by ${payload!.holderDeviceId}; demoting.`,
-      )
-      this.demoteSilently(this.leaseAccountId)
-      throw new Error("Partition lease was reclaimed by another device.")
-    }
-
-    // Not displaced (our holder, sentinel, expired-foreign, or unreadable):
-    // the demo is alive and still holds — keep the lease fresh.
-    this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
-    this.lastLeaseValidatedAt = Date.now()
-    this.writeLeaseCache(this.leaseAccountId, this.partitionLease.serialize())
-  }
-
-  /**
-   * Drop our claim on the current partition (a peer wrote a higher-
-   * generation lock). Clears stamper binding, kills the refresh timer,
-   * wipes the cache, and queues a fresh acquire for the next upload.
-   */
-  private demoteSilently(accountId: string): void {
-    if (this.stamper) {
-      this.stamper.invalidateLease()
-      this.stamper.unbindPartition()
-    }
-    if (this.partitionRefreshTimer !== undefined) {
-      clearInterval(this.partitionRefreshTimer)
-      this.partitionRefreshTimer = undefined
-    }
-    this.partitionLease = undefined
-    this.isReadOnly = true
-    this.lastLeaseValidatedAt = 0
-    this.writeLeaseCache(accountId, null)
-    this.leaseAccountId = undefined
-    if (this.leaseContext) {
-      const owner = this.leaseContext.backupSigner.publicKey().address()
-      this.pendingLeaseAccountInfo = {
-        owner,
-        encryptionKey: this.leaseContext.swarmEncryptionKey,
-        accountId: this.leaseContext.accountId,
-        partitionCount: this.leaseContext.partitionCount,
-      }
-    }
-    // A demote can fire from the async refresh tick (outside
-    // `ensurePartitionLease`), so emit the partition→undefined transition here.
-    this.emitConnectionInfoIfChanged()
-  }
-
-  /**
-   * Periodic refresh: re-run the lock protocol on the held partition every
-   * `LEASE_REFRESH_MS`. On a non-`acquired` outcome a peer has displaced
-   * us → demote silently. On success, refresh the persisted cache.
-   */
-  private scheduleLeaseRefresh(args: {
-    accountId: string
-    lease: PartitionLease
-  }): void {
-    const { accountId, lease } = args
-    if (this.partitionRefreshTimer !== undefined) {
-      clearInterval(this.partitionRefreshTimer)
-    }
-    this.partitionRefreshTimer = setInterval(() => {
-      // This tick firing is proof the demo is alive. Try to refresh the
-      // on-Swarm lock SOC (best-effort, for peers); but whether or not that
-      // write/verify succeeds, keep the LOCAL lease fresh so the UI and
-      // crash-detection see us holding. Only give up on a CONFIRMED foreign
-      // holder. On crash the tick stops, `leasedUntil` freezes, and it
-      // expires on its own.
-      void this.refreshTick(accountId, lease)
-    }, LEASE_REFRESH_MS)
-  }
-
-  private async refreshTick(
-    accountId: string,
-    lease: PartitionLease,
-  ): Promise<void> {
-    const partition = lease.currentPartition
-    if (partition === undefined || !this.leaseContext) return
-
-    // Idle yield: if no upload has touched this lease for IDLE_YIELD_MS and no
-    // upload is currently in flight, voluntarily release the partition so a
-    // waiting peer can take the slot without waiting out the TTL. We re-acquire
-    // transparently on the next upload. The `activeUploadCount === 0` guard is
-    // essential — this tick runs on a bare interval, not under the write lock.
-    if (
-      this.activeUploadCount === 0 &&
-      Date.now() - this.lastLeaseActivityAt >= IDLE_YIELD_MS
-    ) {
-      await this.yieldIdleLease(accountId, lease)
-      return
-    }
-
-    let confirmedDisplaced = false
-    try {
-      const ok = await lease.refresh()
-      if (!ok) {
-        // Couldn't confirm via write+verify — check for ACTUAL displacement
-        // with one read. A 500 here returns undefined → not displaced.
-        const payload = await readPartitionLock({
-          bee: this.bee,
-          backupSigner: this.leaseContext.backupSigner,
-          swarmEncryptionKey: this.leaseContext.swarmEncryptionKey,
-          partition,
-        })
-        confirmedDisplaced = this.isDisplaced(payload, Date.now())
-      }
-    } catch (err) {
-      // Swarm write/read threw (e.g. Bee 500) — transient, not displacement.
-      console.warn(
-        "[Proxy] Lease refresh hit a transient error; keeping lease:",
-        err,
-      )
-    }
-
-    if (confirmedDisplaced) {
-      console.warn(
-        `[Proxy] Refresh: partition ${partition} taken by a peer; demoting.`,
-      )
-      this.demoteSilently(accountId)
-      return
-    }
-
-    // Alive + not displaced → bump the local heartbeat and persist it so the
-    // UI stays Active even when the Swarm write is transiently failing.
-    lease.bumpLocalLease(LEASE_TTL_MS)
-    this.lastLeaseValidatedAt = Date.now()
-    this.writeLeaseCache(accountId, lease.serialize())
   }
 
   /**
@@ -1281,71 +802,27 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Build mode-appropriate upload target.
-   * Encapsulates mode detection and validation logic.
-   */
-  private async getUploadTarget(options?: {
-    useWorkers?: boolean
-    workerCount?: number
-  }): Promise<UploadTarget> {
-    if (this.isSubsidisedModeActive()) {
-      return {
-        mode: "subsidised",
-        gatewayUrl: this.subsidisedGatewayUrl!,
-      }
-    }
-
-    // Validate user-stamp mode requirements
-    if (!this.signerKey || !this.postageBatchId) {
-      throw new Error(
-        "Signer key and postage batch ID required. Please login first.",
-      )
-    }
-    if (!this.stamper) {
-      throw new Error("Stamper not initialized. Please login first.")
-    }
-
-    const workerPool = options?.useWorkers
-      ? await this.getOrCreateWorkerPool(options.workerCount)
-      : undefined
-
-    return {
-      mode: "stamper",
-      bee: this.bee,
-      stamper: this.stamper,
-      workerPool,
-    }
-  }
-
-  /**
-   * Execute operation with write lock only in stamper mode.
-   * In subsidised mode, skip locking (no local stamp state to protect).
-   * Also handles getting the upload target based on mode.
+   * Execute an upload operation against the right target for the current mode.
+   * In subsidised mode (no usable user stamp) the gateway handles stamping, so
+   * there is no local stamp state to protect and we run unlocked. In user-stamp
+   * mode the write goes through the {@link BatchWriteCoordinator}, which takes
+   * the cross-tab write lock, ensures a held partition, and flushes stamper
+   * state — the proxy no longer owns any of that.
    */
   private async withModeAwareWriteLock<T>(
     targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
     operation: (target: UploadTarget) => Promise<T>,
   ): Promise<T> {
-    const target = await this.getUploadTarget(targetOptions)
     if (this.isSubsidisedModeActive()) {
-      return operation(target)
+      return operation({
+        mode: "subsidised",
+        gatewayUrl: this.subsidisedGatewayUrl!,
+      })
     }
-    return this.withWriteLock(async () => {
-      await this.ensurePartitionLease()
-      this.ensurePartitionHeldForUpload()
-      // Mark upload activity and bracket the in-flight upload so the refresh
-      // tick's idle-yield can't release the partition (and unbind the stamper)
-      // underneath us. `lastLeaseActivityAt` is refreshed again on completion
-      // so the idle timer measures from the end of the last upload.
-      this.lastLeaseActivityAt = Date.now()
-      this.activeUploadCount++
-      try {
-        return await operation(target)
-      } finally {
-        this.activeUploadCount--
-        this.lastLeaseActivityAt = Date.now()
-      }
-    })
+    if (!this.coordinator) {
+      throw new Error("Stamper not initialized. Please login first.")
+    }
+    return this.coordinator.withWrite(operation, targetOptions)
   }
 
   /**
@@ -1789,6 +1266,187 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Assemble the current account-state snapshot for the connected app's account
+   * from shared localStorage (the same shape `sync-account` builds from its DI
+   * stores). Returns the snapshot plus the feed signing key + owner. Undefined
+   * when storage is partitioned or the account/stamp can't be resolved.
+   */
+  private async buildAccountStateSnapshotForPublish(): Promise<
+    | {
+        snapshot: AccountStateSnapshot
+        encryptionKey: string
+        accountKey: PrivateKey
+        owner: EthAddress
+      }
+    | undefined
+  > {
+    if (!this.parentOrigin || this.storagePartitioned) {
+      return undefined
+    }
+    try {
+      const connectedApps = createConnectedAppsStorageManager().load()
+      const connectedApp = this.findMostRecentConnection(connectedApps)
+      if (!connectedApp) return undefined
+
+      const allIdentities = createIdentitiesStorageManager().load()
+      const connectedIdentity = allIdentities.find(
+        (i) => i.id === connectedApp.identityId,
+      )
+      if (!connectedIdentity) return undefined
+
+      const account = createAccountsStorageManager()
+        .load()
+        .find((a) => a.id.equals(connectedIdentity.accountId))
+      if (!account) return undefined
+
+      const identities = allIdentities.filter((i) =>
+        i.accountId.equals(account.id),
+      )
+      const defaultStampBatchID =
+        account.defaultPostageStampBatchID ??
+        identities[0]?.defaultPostageStampBatchID
+      if (!defaultStampBatchID) return undefined
+
+      const apps = identities.flatMap((identity) =>
+        connectedApps.filter((a) => a.identityId === identity.id),
+      )
+      const allStamps = createPostageStampsStorageManager().load()
+      const postageStamps = collectAccountStampBatchIds(account, identities)
+        .map((batchId) => allStamps.find((s) => s.batchID.equals(batchId)))
+        .filter((stamp): stamp is PostageStamp => stamp !== undefined)
+
+      const encryptionKey = await deriveSwarmEncryptionKey(
+        account.derivationKey,
+      )
+      const accountKey = new PrivateKey(
+        await deriveSecret(encryptionKey, "backup-key"),
+      )
+      const owner = accountKey.publicKey().address()
+
+      const snapshot: AccountStateSnapshot = {
+        version: 1,
+        timestamp: Date.now(),
+        accountId: account.id.toHex(),
+        metadata: {
+          accountName: account.name,
+          defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+          createdAt: account.createdAt,
+          lastModified: Date.now(),
+          devices: account.devices,
+          partitionCount: account.partitionCount ?? 1,
+        },
+        identities,
+        connectedApps: apps,
+        postageStamps,
+      }
+      return { snapshot, encryptionKey, accountKey, owner }
+    } catch (error) {
+      console.error("[Proxy] Failed to assemble account-state snapshot:", error)
+      return undefined
+    }
+  }
+
+  /**
+   * Schedule a debounced account-state publish. Safe to call from inside the
+   * coordinator's lease callbacks: it only arms a timer, so the actual publish
+   * runs later, outside any held write lock.
+   */
+  private schedulePublish(reason: "acquired" | "change"): void {
+    if (!this.coordinator) return
+    // "change" dominates: if a real delta is pending in this debounce window,
+    // don't let a coalesced "acquired" downgrade it to the announce-gated path.
+    if (this.publishReason !== "change") this.publishReason = reason
+    if (this.publishTimer !== undefined) clearTimeout(this.publishTimer)
+    this.publishTimer = setTimeout(() => {
+      this.publishTimer = undefined
+      const effectiveReason = this.publishReason ?? "acquired"
+      this.publishReason = undefined
+      void this.runAccountStatePublish(effectiveReason)
+    }, PUBLISH_DEBOUNCE_MS)
+  }
+
+  /**
+   * Publish the account snapshot to the shared feed via the coordinator (same
+   * write lock + held partition). Only publishes while a partition is held
+   * (multi-device); single-device accounts are published by the SwarmID UI.
+   * Re-arms if a publish is already in flight so the latest state still lands.
+   */
+  private async runAccountStatePublish(
+    reason: "acquired" | "change",
+  ): Promise<void> {
+    const coordinator = this.coordinator
+    if (!coordinator || coordinator.currentPartition === undefined) return
+    if (this.publishInFlight) {
+      this.schedulePublish(reason)
+      return
+    }
+    this.publishInFlight = true
+    try {
+      const assembled = await this.buildAccountStateSnapshotForPublish()
+      if (!assembled) return
+      // Snapshot assembly awaits (crypto + storage reads); a disconnect /
+      // sign-out / re-auth may have torn down or replaced the coordinator in
+      // the meantime. Bail rather than write through a stale instance. (The
+      // coordinator also self-guards against re-acquire when disposed; this
+      // just avoids the needless lock round-trip.)
+      if (this.coordinator !== coordinator) return
+      const { snapshot, encryptionKey, accountKey, owner } = assembled
+
+      // The snapshot is assembled from the most recent connection for this
+      // origin; if the connected account changed since the coordinator was
+      // built, publishing would pair account B's feed (key derived from the
+      // snapshot) with account A's batch and partition lease. Skip — the
+      // re-initialised coordinator for the new account publishes its own state.
+      if (snapshot.accountId !== coordinator.accountId) {
+        console.warn(
+          `[Proxy] Account changed during publish scheduling (snapshot ${snapshot.accountId} vs coordinator ${coordinator.accountId}); skipping publish.`,
+        )
+        return
+      }
+
+      // Announce-once: a publish triggered purely by acquiring the lease (e.g.
+      // every page reload) has nothing to announce once this device is already
+      // in the published feed. Skip it — that's what caused the redundant
+      // publish + verify-retry storm. A "change" publish carries a real delta
+      // and is never gated. The pre-write feed read here is reliable even when
+      // post-write read-back lags.
+      if (reason === "acquired") {
+        const alreadyAnnounced = await remoteFeedHasDevice({
+          bee: this.bee,
+          accountId: snapshot.accountId,
+          owner,
+          deviceId: this.requireDeviceId(),
+        })
+        if (alreadyAnnounced) {
+          console.info(
+            `[Proxy] Device already in feed for ${snapshot.accountId}; skipping announce publish.`,
+          )
+          return
+        }
+      }
+      await coordinator.withWrite((target) =>
+        publishAccountState({
+          bee: this.bee,
+          accountId: snapshot.accountId,
+          accountKey,
+          owner,
+          encryptionKey,
+          localSnapshot: snapshot,
+          target,
+          logLabel: "[Proxy publish]",
+        }),
+      )
+      console.info(
+        `[Proxy] Published account state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
+      )
+    } catch (error) {
+      console.warn("[Proxy] Account-state publish failed:", error)
+    } finally {
+      this.publishInFlight = false
+    }
+  }
+
+  /**
    * Check if a connection is still valid based on connectedUntil timestamp
    */
   private isConnectionValid(connectedApp: ConnectedApp): boolean {
@@ -1877,9 +1535,13 @@ export class SwarmIdProxy {
     this.appSecret = undefined
     this.postageBatchId = undefined
     this.signerKey = undefined
-    this.pendingLeaseAccountInfo = undefined
     this.deviceId = undefined
-    this.tearDownPartitionLease()
+    this.coordinator?.teardown()
+    this.coordinator = undefined
+    if (this.publishTimer !== undefined) {
+      clearTimeout(this.publishTimer)
+      this.publishTimer = undefined
+    }
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
     this.storagePartitioned = false
@@ -1923,35 +1585,10 @@ export class SwarmIdProxy {
       )
     }
     // NB: the multi-device "all partitions held" case is NOT checked here.
-    // It's deferred to `ensurePartitionHeldForUpload`, which runs after a
-    // fresh acquisition attempt (with slot-wait) under the write lock — so a
-    // read-only upload waits for a slot to free (turn-taking) instead of
-    // failing instantly.
-  }
-
-  /**
-   * Post-acquisition guard for multi-device uploads. Called inside the write
-   * lock after `ensurePartitionLease` has had its chance to acquire (including
-   * the slot-wait). Throws only when a multi-device account still holds no
-   * partition.
-   *
-   * Keyed on "partition held", NOT `isReadOnly`: a failed slot-wait throws,
-   * which `ensurePartitionLease` catches and routes through
-   * `pauseLeaseBackgroundWork` — that resets `isReadOnly` to `false` while
-   * clearing `partitionLease`, so `isReadOnly` is an unreliable signal here.
-   * `currentPartition === undefined` catches both the still-read-only and the
-   * paused/failed-wait states. Single-device accounts (`partitionCount <= 1`)
-   * never have a partition and are intentionally skipped.
-   */
-  private ensurePartitionHeldForUpload(): void {
-    if (this.isSubsidisedModeActive()) return
-    if (!this.leaseContext || this.leaseContext.partitionCount <= 1) return
-    if (this.partitionLease?.currentPartition === undefined) {
-      throw new Error(
-        "Uploads are unavailable: the postage batch is fully leased by other devices. " +
-          "Sign out of another device or wait for its lease to expire.",
-      )
-    }
+    // It's deferred to the coordinator's `withWrite`, which runs a fresh
+    // acquisition attempt (with slot-wait) under the write lock and then throws
+    // if no partition is held — so a read-only upload waits for a slot to free
+    // (turn-taking) instead of failing instantly.
   }
 
   /**
@@ -2092,7 +1729,7 @@ export class SwarmIdProxy {
       uploadMode,
       identity,
       appKey,
-      partition: this.partitionLease?.currentPartition,
+      partition: this.coordinator?.currentPartition,
     }
   }
 
