@@ -47,7 +47,7 @@
   </header>
 
   <main class="flex w-full flex-1 flex-col items-center px-8 pb-8">
-    <div class="flex w-full max-w-108 flex-col items-center gap-8">
+    <div class="flex w-full max-w-144 flex-col items-center gap-8">
       <Tabs tabs={TABS} bind:value={tab} />
 
       {#if account}

@@ -26,14 +26,6 @@
   const phraseValid = $derived(isValidPhrase(phrase))
   const showInvalid = $derived(phrase.trim().length > 0 && !phraseValid)
 
-  async function pasteFromClipboard() {
-    try {
-      phrase = await navigator.clipboard.readText()
-    } catch {
-      // Clipboard access denied or unavailable — the user can paste manually.
-    }
-  }
-
   async function signIn() {
     signingIn = true
     try {
@@ -44,7 +36,8 @@
       const existing = accountsStore.get(wallet.address)
       if (existing) {
         sessionStore.setCurrentAccount(existing.id)
-        await goto(resolve('/home'))
+        sessionStore.setCompletedFlow('sign-in')
+        await goto(resolve('/account/ready'))
         return
       }
 
@@ -76,7 +69,7 @@
             <p class="text-sm">Please double-check your secret recovery phrase.</p>
           </div>
         </div>
-        <Button variant="secondary" class="w-full" onclick={tryAgain}>Try again</Button>
+        <Button variant="outline" class="w-full" onclick={tryAgain}>Try again</Button>
       </div>
     </main>
   {:else}
@@ -95,34 +88,24 @@
         <div class="flex w-full flex-col">
           <h1 class="text-lg font-bold">Existing account</h1>
           <p class="text-sm">
-            Provide the secret recovery phrase to set up an existing Swarm ID account on this
-            device.
+            Enter your secret recovery phrase to sign in to your Swarm ID account on this device.
           </p>
         </div>
 
-        <div class="flex w-full flex-col gap-4">
-          <div class="flex w-full flex-col gap-2">
-            <Textarea
-              bind:value={phrase}
-              class="h-38"
-              disabled={signingIn}
-              aria-invalid={showInvalid}
-              placeholder="Add a space between each word and make sure no one is watching"
-            />
-            {#if showInvalid}
-              <p class="text-destructive text-xs">Invalid phrase</p>
-            {/if}
-          </div>
-          <div class="flex items-center gap-2">
-            <Button variant="ghost" size="xs" disabled={signingIn} onclick={pasteFromClipboard}>
-              Paste from clipboard
-            </Button>
-            {#if phrase.trim().length > 0}
-              <Button variant="ghost" size="xs" disabled={signingIn} onclick={() => (phrase = '')}>
-                Clear
-              </Button>
-            {/if}
-          </div>
+        <div class="flex w-full flex-col gap-2">
+          <Textarea
+            bind:value={phrase}
+            class="h-38"
+            disabled={signingIn}
+            aria-invalid={showInvalid}
+            placeholder="Add a space between each word and make sure no one is watching"
+          />
+          {#if showInvalid}
+            <p class="text-destructive flex items-center gap-1.5 text-xs">
+              <CircleAlert class="size-3.5" />
+              Invalid phrase
+            </p>
+          {/if}
         </div>
 
         <Button class="w-full" disabled={!phraseValid || signingIn} onclick={signIn}>

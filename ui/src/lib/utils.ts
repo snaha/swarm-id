@@ -39,4 +39,12 @@ export async function copyToClipboard(text: string): Promise<boolean> {
   }
 }
 
+const ADDRESS_PREFIX_LENGTH = 6
+const ADDRESS_SUFFIX_LENGTH = 4
+
+/** 0x71C7...976F-style truncation for Ethereum addresses. */
+export function truncateAddress(address: string): string {
+  return `${address.slice(0, ADDRESS_PREFIX_LENGTH)}...${address.slice(-ADDRESS_SUFFIX_LENGTH)}`
+}
+
 export type WithElementRef<T, El extends HTMLElement = HTMLElement> = T & { ref?: El | null }

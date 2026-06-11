@@ -43,7 +43,7 @@
 
       <div class="flex w-full flex-col">
         <h1 class="text-lg font-bold">New account</h1>
-        <p class="text-sm">Create a new Swarm ID account.</p>
+        <p class="text-sm">Choose a name, the identicon is generated from it.</p>
       </div>
 
       <div class="flex w-full flex-col gap-2">
@@ -52,7 +52,7 @@
           <Input id="name" bind:value={name} placeholder="Jovial Einstein" />
           <Polycon value={name} size={IDENTICON_SIZE} class="shrink-0 overflow-hidden rounded-lg" />
         </div>
-        <p class="text-muted-foreground text-xs">Identity displayed in connected apps.</p>
+        <p class="text-muted-foreground text-xs">This is how you'll appear in connected apps.</p>
       </div>
 
       <Button class="w-full" disabled={name.trim().length === 0} onclick={onContinue}>

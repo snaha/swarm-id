@@ -15,7 +15,6 @@
   import { Button } from '$lib/components/ui/button'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { notImplemented } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const IDENTICON_SIZE = 80
@@ -23,14 +22,16 @@
   const account = $derived(
     sessionStore.currentAccountId ? accountsStore.get(sessionStore.currentAccountId) : undefined,
   )
+  const restored = sessionStore.completedFlow === 'restore'
 
-  let toastMessage = $state<string | undefined>('Account created successfully!')
+  let toastMessage = $state<string | undefined>(undefined)
 
   onMount(() => {
     if (!account) {
       goto(resolve('/'))
       return
     }
+    toastMessage = restored ? 'Account restored successfully!' : 'Sign in successful'
     const timer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
     return () => clearTimeout(timer)
   })
@@ -51,31 +52,17 @@
           <p class="text-sm font-bold">{account.name}</p>
         </div>
 
-        <div class="flex w-full flex-col gap-4">
-          <p class="text-center text-sm">
-            Your Swarm ID is ready! You can browse and view content on this device straight away.
-          </p>
-
-          <div class="bg-muted flex w-full flex-col items-center rounded-lg p-2 text-center">
-            <p class="text-sm font-bold">Want the full experience?</p>
-            <p class="text-sm">
-              Upload data and sync your Swarm ID across devices with a postage stamp.
-            </p>
-          </div>
-        </div>
-
-        <div class="flex w-full flex-col items-center gap-4">
-          <div class="flex w-full flex-col items-center gap-2">
-            <!-- Stamp purchase flow is still TBD in the design. -->
-            <Button class="w-full" onclick={notImplemented}>Add a postage stamp</Button>
-            <Button variant="outline" class="w-full" href={resolve('/home')}>
-              Stay local for now
+        <div class="flex w-full flex-col items-center gap-2">
+          <Button class="w-full" href={resolve('/home')}>Continue with this account</Button>
+          {#if restored}
+            <Button variant="outline" class="w-full" href={resolve('/account/restore')}>
+              Restore another account
             </Button>
-          </div>
-
-          <p class="text-muted-foreground text-center text-xs">
-            Local accounts are limited to viewing content and cannot be used on other devices.
-          </p>
+          {:else}
+            <Button variant="outline" class="w-full" href={resolve('/account/import')}>
+              Sign in to another account
+            </Button>
+          {/if}
         </div>
       </div>
     </main>

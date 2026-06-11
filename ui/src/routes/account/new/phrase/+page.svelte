@@ -7,6 +7,9 @@
   import { onMount } from 'svelte'
 
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
+  import CircleAlert from '@lucide/svelte/icons/circle-alert'
+  import Copy from '@lucide/svelte/icons/copy'
+  import Download from '@lucide/svelte/icons/download'
   import Eye from '@lucide/svelte/icons/eye'
 
   import { goto } from '$app/navigation'
@@ -15,7 +18,6 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Toast from '$lib/components/toast.svelte'
-  import { Alert } from '$lib/components/ui/alert'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
   import { Textarea } from '$lib/components/ui/textarea'
@@ -84,14 +86,6 @@
     URL.revokeObjectURL(url)
   }
 
-  async function pasteFromClipboard() {
-    try {
-      imported = await navigator.clipboard.readText()
-    } catch {
-      // Clipboard access denied or unavailable — the user can paste manually.
-    }
-  }
-
   function onContinue() {
     sessionStore.setDraftPhrase(mode === 'generate' ? generated : normalizePhrase(imported))
     goto(resolve('/account/new/access'))
@@ -131,7 +125,7 @@
               <div
                 class="border-input flex h-38 w-full flex-col items-center justify-center gap-2 rounded-lg border"
               >
-                <Button variant="outline" size="sm" onclick={reveal}>
+                <Button variant="ghost" onclick={reveal}>
                   <Eye />
                   Reveal
                 </Button>
@@ -141,9 +135,23 @@
               </div>
             {/if}
           </div>
-          <div class="flex items-center gap-2">
-            <Button variant="ghost" size="xs" onclick={copyPhrase}>Copy</Button>
-            <Button variant="ghost" size="xs" onclick={downloadPhrase}>Download</Button>
+          <div class="flex w-full items-center gap-4">
+            <div class="flex items-center gap-2">
+              <Button variant="outline" size="icon" aria-label="Copy phrase" onclick={copyPhrase}>
+                <Copy />
+              </Button>
+              <Button
+                variant="outline"
+                size="icon"
+                aria-label="Download phrase"
+                onclick={downloadPhrase}
+              >
+                <Download />
+              </Button>
+            </div>
+            <p class="text-muted-foreground flex-1 text-xs">
+              Save in a safe place. If someone has it, they can access your account.
+            </p>
           </div>
         {:else}
           <div class="flex w-full flex-col gap-2">
@@ -154,21 +162,14 @@
               placeholder="Add a space between each word and make sure no one is watching"
             />
             {#if showImportError}
-              <p class="text-destructive text-xs">Invalid phrase</p>
+              <p class="text-destructive flex items-center gap-1.5 text-xs">
+                <CircleAlert class="size-3.5" />
+                Invalid phrase
+              </p>
             {/if}
-          </div>
-          <div>
-            <Button variant="ghost" size="xs" onclick={pasteFromClipboard}>
-              Paste from clipboard
-            </Button>
           </div>
         {/if}
       </div>
-
-      <Alert>
-        <span class="font-bold">Save your secret recovery phrase in a safe place.</span><br />
-        If someone has it, they can access your account.
-      </Alert>
 
       <Button class="w-full" disabled={!canContinue} onclick={onContinue}>Continue</Button>
     </div>

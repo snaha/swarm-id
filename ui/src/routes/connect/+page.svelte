@@ -59,7 +59,7 @@
         </Button>
       </div>
 
-      <Button variant="ghost" size="xs" onclick={notImplemented}>What is Swarm ID?</Button>
+      <Button variant="ghost" size="xs" onclick={notImplemented}>WTF is Swarm ID?</Button>
     </div>
   </main>
 </div>

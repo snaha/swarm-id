@@ -23,6 +23,7 @@ function loadCurrentAccountId(): string | undefined {
 function createSessionStore() {
   let currentAccountId = $state<string | undefined>(loadCurrentAccountId())
   let draft = $state<SetupDraft | undefined>(undefined)
+  let completedFlow = $state<SetupDraft['flow'] | undefined>(undefined)
 
   return {
     get currentAccountId() {
@@ -31,6 +32,10 @@ function createSessionStore() {
     setCurrentAccount(id: string) {
       currentAccountId = id
       localStorage.setItem(CURRENT_ACCOUNT_KEY, id)
+    },
+    clearCurrentAccount() {
+      currentAccountId = undefined
+      localStorage.removeItem(CURRENT_ACCOUNT_KEY)
     },
     get draft() {
       return draft
@@ -51,6 +56,13 @@ function createSessionStore() {
     },
     clearDraft() {
       draft = undefined
+    },
+    /** Which setup flow just finished; drives the post-setup confirmation screen. */
+    get completedFlow() {
+      return completedFlow
+    },
+    setCompletedFlow(flow: SetupDraft['flow']) {
+      completedFlow = flow
     },
   }
 }

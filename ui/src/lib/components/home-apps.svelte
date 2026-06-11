@@ -62,7 +62,7 @@
     <Select
       options={DURATION_OPTIONS}
       bind:value={connectionDays}
-      class="w-52"
+      class="w-70"
       onchange={(value) => accountsStore.setAppConnectionDays(account.id, Number(value))}
     />
   </div>
@@ -75,13 +75,13 @@
     <div class="flex w-full flex-col">
       {#each account.connectedApps as app (app.appUrl)}
         <div class="border-border flex w-full items-center gap-3 border-b py-2.5">
-          <AppIcon src={app.appIcon} name={app.appName} size={32} />
+          <AppIcon src={app.appIcon} name={app.appName} size={40} />
           <div class="flex min-w-0 flex-1 flex-col">
             <p class="truncate text-sm font-medium">{app.appName}</p>
             <p class="text-muted-foreground truncate text-sm">{app.appUrl}</p>
           </div>
           {#if isConnected(app.connectedUntil)}
-            <span class="bg-secondary text-secondary-foreground rounded-full px-2 py-0.5 text-xs">
+            <span class="bg-secondary text-secondary-foreground rounded-md px-2 py-0.5 text-xs">
               Connected
             </span>
           {/if}

@@ -15,7 +15,6 @@
   import { resolve } from '$app/paths'
 
   import AppHeader from '$lib/components/app-header.svelte'
-  import { Alert } from '$lib/components/ui/alert'
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
@@ -94,8 +93,9 @@
     })
     sessionStore.setCurrentAccount(wallet.address)
     const flow = draft.flow
+    sessionStore.setCompletedFlow(flow)
     sessionStore.clearDraft()
-    goto(resolve(flow === 'create' ? '/account/new/done' : '/home'))
+    goto(resolve(flow === 'create' ? '/account/new/done' : '/account/ready'))
   }
 
   async function confirmWithPasskey() {
@@ -193,7 +193,7 @@
             </p>
           </div>
         </div>
-        <Button variant="secondary" class="w-full" onclick={cancelPending}>Cancel</Button>
+        <Button variant="outline" class="w-full" onclick={cancelPending}>Cancel</Button>
       </div>
     </main>
   {:else}
@@ -225,8 +225,6 @@
               </p>
             {:else if method === 'eth-wallet'}
               <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
-            {:else}
-              <p class="text-sm">Unlock with a password.</p>
             {/if}
           </div>
 
@@ -306,7 +304,9 @@
             <Button class="w-full" onclick={confirmWithWallet}>Confirm with wallet</Button>
           {:else}
             <div class="flex w-full flex-col gap-8">
-              <Alert>Save your password &mdash; it can&rsquo;t be reset or recovered.</Alert>
+              <p class="text-muted-foreground text-xs">
+                Save your password &mdash; it can&rsquo;t be reset or recovered.
+              </p>
               <Button
                 class="w-full"
                 disabled={!passwordValid || busy}

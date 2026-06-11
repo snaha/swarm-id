@@ -68,8 +68,6 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 ## New UI (`ui/`)
 
 The new identity UI is a fresh SvelteKit product replacing `swarm-ui/` screen by screen.
-Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy") — read frames via the
-Figma MCP (requires the file open in the Figma desktop app).
 
 - **Stack**: SvelteKit (Svelte 5 runes) + `@sveltejs/adapter-static` (pure SPA, `ssr = false`),
   Tailwind CSS v4 via `@tailwindcss/vite`, shadcn-svelte-style components (hand-written, no bits-ui)

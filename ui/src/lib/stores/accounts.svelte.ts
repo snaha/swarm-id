@@ -55,6 +55,14 @@ function createAccountsStore() {
     rename(id: string, name: string) {
       update(id, (account) => ({ ...account, name }))
     },
+    remove(id: string) {
+      accounts = accounts.filter((account) => account.id !== id)
+      persist()
+    },
+    /** Swap the unlock method: new access metadata + seed re-encrypted for it. */
+    setAccess(id: string, access: Account['access'], encryptedSeed: string) {
+      update(id, (account) => ({ ...account, access, encryptedSeed }))
+    },
     setAppConnectionDays(id: string, days: number) {
       update(id, (account) => ({ ...account, appConnectionDays: days }))
     },

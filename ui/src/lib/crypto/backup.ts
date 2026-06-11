@@ -78,6 +78,16 @@ export async function createBackup(account: Account, entropy: Uint8Array): Promi
   return JSON.stringify(envelope)
 }
 
+/** Shape check for inline validation — no phrase needed, does not decrypt. */
+export function isBackupFile(fileContents: string): boolean {
+  try {
+    const envelope = JSON.parse(fileContents) as BackupEnvelope
+    return envelope.format === 'swarm-id-backup' && envelope.version === BACKUP_VERSION
+  } catch {
+    return false
+  }
+}
+
 /**
  * Decrypt .swarmid file contents with the recovery phrase. Throws when the
  * file is not a backup, the phrase does not match the file, or the backed-up
