@@ -347,6 +347,10 @@ export class BatchWriteCoordinator {
             error,
           )
           this.pauseLeaseBackgroundWork()
+          // Surface the real cause (Bee down, timeout, contention) instead of
+          // letting `ensureHeldForUpload` mislabel it as "batch fully leased
+          // by other devices". `startLease`'s warm-up catch absorbs this.
+          throw error
         }
         return
       }
@@ -448,6 +452,17 @@ export class BatchWriteCoordinator {
       // A stale failure must not clobber the live lease's in-memory state or
       // wipe its cache — just propagate.
       if (this.leaseEpoch !== epoch) throw error
+      // The throw may have come AFTER bindPartition/startRefreshTimer (e.g. a
+      // consumer callback — writeLeaseCache/onLeaseAcquired — threw): undo the
+      // partial commit so the stamper and the interval don't outlive the lease
+      // record. Invalidate-before-unbind per the displacement-race ordering;
+      // all three are no-ops when nothing was bound/armed.
+      if (this.partitionRefreshTimer !== undefined) {
+        clearInterval(this.partitionRefreshTimer)
+        this.partitionRefreshTimer = undefined
+      }
+      stamper.invalidateLease()
+      stamper.unbindPartition()
       this.partitionLease = undefined
       this.readOnly = false
       // Keep cache and in-memory state in lockstep: no lease → no live cache.
@@ -466,6 +481,12 @@ export class BatchWriteCoordinator {
    */
   private async acquireWithSlotWait(): Promise<void> {
     const deadline = Date.now() + SLOT_WAIT_TIMEOUT_MS
+    // Epoch capture: when the Promise.race timeout in `ensureLease` fires,
+    // this loop keeps running detached (race can't cancel it) and would
+    // otherwise wake from its poll sleep and claim the lock SOC one more
+    // time, only for `acquire()` to discard the claim — a pointless ghost
+    // claim peers must wait out via the TTL.
+    const epoch = this.leaseEpoch
     while (true) {
       await this.acquire()
       // Disposed mid-wait (disconnect during the slot poll): stop waiting for a
@@ -481,6 +502,9 @@ export class BatchWriteCoordinator {
       await new Promise<void>((resolve) =>
         setTimeout(resolve, LEASE_REFRESH_MS),
       )
+      // Checked between the sleep and the next acquire: a fresh `acquire()`
+      // call would capture the bumped epoch as its own baseline and commit.
+      if (this.leaseEpoch !== epoch) return
     }
   }
 
@@ -580,6 +604,13 @@ export class BatchWriteCoordinator {
   }
 
   private async refreshTick(lease: PartitionLease): Promise<void> {
+    // Stale-continuation guard: clearing the interval (teardown / demote /
+    // pause) cannot stop a tick already in flight, and a slow tick can overlap
+    // the next one. A tick for a lease the coordinator no longer tracks must
+    // not touch Swarm, the stamper, or the cache. Re-checked after every await
+    // below; a teardown landing mid-`lease.refresh()` can still produce one
+    // ghost lock-SOC re-claim, which self-heals via LEASE_TTL_MS.
+    if (this.disposed || this.partitionLease !== lease) return
     const partition = lease.currentPartition
     if (partition === undefined) return
 
@@ -639,6 +670,10 @@ export class BatchWriteCoordinator {
     }
 
     if (confirmedDisplaced) {
+      // The lease may have been demoted and a NEW one re-acquired while the
+      // refresh/read above was in flight; invalidating the stamper here would
+      // arm the breaker on the new binding and demoting would clobber it.
+      if (this.disposed || this.partitionLease !== lease) return
       console.warn(
         `[BatchWriteCoordinator] Refresh: partition ${partition} taken by a peer; demoting.`,
       )
@@ -646,6 +681,11 @@ export class BatchWriteCoordinator {
       // write lock (this tick is not under the lock).
       this.signalLeaseLost()
       await this.lock(async () => {
+        // Re-check after winning the lock: a queued withWrite may have demoted
+        // this lease and re-acquired a new live one while we waited. Same
+        // guards as the idle-yield branch — this is the correctness-critical
+        // check; the off-lock one above only narrows the breaker window.
+        if (this.disposed || this.partitionLease !== lease) return
         this.finalizeDemote()
       })
       return
@@ -653,6 +693,10 @@ export class BatchWriteCoordinator {
 
     // Alive + not displaced → bump the local heartbeat and persist it so the
     // UI stays Active even when the Swarm write is transiently failing.
+    // Guard the tail too: after teardown/demote cleared the cache, a stale
+    // tick must not re-write a live-looking snapshot that a future acquire
+    // would hydrate + adoptIfLive without any Swarm round-trip.
+    if (this.disposed || this.partitionLease !== lease) return
     lease.bumpLocalLease(LEASE_TTL_MS)
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(lease.serialize())

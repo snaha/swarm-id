@@ -123,7 +123,20 @@ Methods and getters:
 - **Lease-epoch guard.** The block-mode acquire races a 45 s timeout that cannot cancel the
   losing acquire. Every lease reset (`pauseLeaseBackgroundWork`, `finalizeDemote`, idle yield,
   `teardown`) bumps an epoch counter; an acquire that began under an older epoch discards its
-  result instead of resurrecting a cleared lease and arming a detached refresh timer.
+  result — on success _and_ on failure — instead of resurrecting or clobbering a lease the
+  coordinator re-established meanwhile. The slot-wait loop checks the epoch between its poll
+  sleep and the next claim so a detached loop never claims the lock SOC again after the timeout
+  already gave up. A claim discarded this way self-heals on Swarm via the lease TTL.
+- **Stale-tick guards.** Clearing the refresh interval cannot stop a `refreshTick` already in
+  flight (and a slow tick can overlap the next one). Every tick therefore re-checks
+  `disposed` / `partitionLease !== lease` at entry, before arming the displacement breaker,
+  inside the locked demote (mirroring the idle-yield guards), and before the tail heartbeat +
+  cache write — a stale tick must not re-claim a released partition, demote a re-acquired
+  lease, or resurrect a cleared lease cache that a later acquire would `adoptIfLive`.
+- **Failure unwind.** `acquire()`'s cleanup undoes a partial commit: if a consumer callback
+  (`writeLeaseCache`, `onLeaseAcquired`) throws after `bindPartition`/`startRefreshTimer`, the
+  catch clears the timer and invalidates + unbinds the stamper so neither outlives the dropped
+  lease record.
 - **Error classification.** `acquire()` propagates operational failures (a lock-SOC scan/claim
   that threw) after clearing state. Skip mode therefore throws `PartitionContendedError` only
   when the acquire _completed_ read-only — a Bee outage surfaces from `sync-account` as

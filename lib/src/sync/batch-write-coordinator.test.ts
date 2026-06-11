@@ -42,6 +42,7 @@ import {
   type BatchWriteCoordinatorDeps,
 } from "./batch-write-coordinator"
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
+import { LEASE_REFRESH_MS, LEASE_TTL_MS } from "../utils/batch-utilization"
 
 const SELF = "self-device"
 const PEER = "peer-device"
@@ -206,8 +207,10 @@ type Internals = {
   lastLeaseActivityAt: number
   activeUploadCount: number
   pendingAcquire: boolean
+  readOnly: boolean
   refreshTick: (lease: unknown) => Promise<void>
   acquire: () => Promise<void>
+  acquireWithSlotWait: () => Promise<void>
   pauseLeaseBackgroundWork: () => void
 }
 
@@ -458,8 +461,10 @@ describe("BatchWriteCoordinator — error classification", () => {
     )
 
     const op = vi.fn(async () => "ok")
+    // The real cause propagates — not the generic "fully leased" message
+    // ensureHeldForUpload would emit for genuine contention.
     await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
-      /Uploads are unavailable/,
+      "lock-SOC write failed",
     )
     expect(op).not.toHaveBeenCalled()
   })
@@ -648,5 +653,173 @@ describe("BatchWriteCoordinator — acquire-epoch guard", () => {
     expect(coordinator.currentPartition).toBe(1)
     expect(internals.partitionLease).toBe(liveLease)
     expect(writeLeaseCache).not.toHaveBeenCalledWith(undefined)
+  })
+})
+
+describe("BatchWriteCoordinator — stale refresh-tick guards", () => {
+  it("a tick whose refresh straddles teardown does not resurrect the lease cache", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const writeLeaseCache = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache,
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    // Held lease whose refresh is pending when teardown lands.
+    let resolveRefresh!: (ok: boolean) => void
+    const lease = makeLease({ partition: 0 })
+    lease.refresh = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          resolveRefresh = resolve
+        }),
+    ) as typeof lease.refresh
+    internals.partitionLease = lease
+    internals.lastLeaseActivityAt = Date.now()
+    internals.activeUploadCount = 1 // skip the idle-yield branch
+
+    const tick = internals.refreshTick(lease)
+    await vi.waitFor(() => expect(lease.refresh).toHaveBeenCalled())
+
+    // Sign-out mid-tick: clears state and the cache.
+    coordinator.teardown()
+    writeLeaseCache.mockClear()
+
+    resolveRefresh(true)
+    await tick
+
+    // The stale tick's tail must not re-write a live-looking snapshot into
+    // the cache (a future acquire would hydrate + adoptIfLive it without any
+    // Swarm round-trip) nor bump the local heartbeat.
+    expect(writeLeaseCache).not.toHaveBeenCalled()
+    expect(lease.bumpLocalLease).not.toHaveBeenCalled()
+  })
+
+  it("a displaced tick that lost the lock race does not demote a re-acquired lease", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const writeLeaseCache = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache,
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    // Lease A on partition 0: refresh fails, lock SOC names a live peer →
+    // the tick confirms displacement and queues finalizeDemote on the lock.
+    const leaseA = makeLease({ partition: 0, refreshResult: false })
+    internals.partitionLease = leaseA
+    internals.lastLeaseActivityAt = Date.now()
+    internals.activeUploadCount = 1 // skip the idle-yield branch
+    lockController.payload = {
+      holderDeviceId: PEER,
+      leasedUntil: Date.now() + 10_000,
+    }
+
+    // While the tick queues on the write lock, a withWrite already demoted and
+    // re-acquired lease B on another partition.
+    const leaseB = makeLease({ partition: 1 })
+    writeLockController.onGrant = () => {
+      internals.partitionLease = leaseB
+      internals.readOnly = false
+    }
+    try {
+      await internals.refreshTick(leaseA)
+    } finally {
+      writeLockController.onGrant = undefined
+    }
+
+    // The stale demote must be skipped: lease B keeps its partition, its
+    // stamper binding, and its cache; the coordinator does not flip read-only.
+    expect(stamper.unbindPartition).not.toHaveBeenCalled()
+    expect(coordinator.currentPartition).toBe(1)
+    expect(coordinator.isReadOnly).toBe(false)
+    expect(writeLeaseCache).not.toHaveBeenCalledWith(undefined)
+  })
+})
+
+describe("BatchWriteCoordinator — acquire failure cleanup", () => {
+  it("a consumer callback throwing after bind unwinds the stamper and the timer", async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      const lease = makeLease({
+        acquireResult: {
+          partition: 1,
+          partitionCount: 4,
+          localCounter: new Uint32Array(8),
+          isReadOnly: false,
+        },
+      })
+      leaseController.lease = lease
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "persistent", // arms the refresh timer before onLeaseAcquired
+          onLeaseAcquired: () => {
+            throw new Error("consumer callback exploded")
+          },
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      await expect(internals.acquire()).rejects.toThrow(
+        "consumer callback exploded",
+      )
+
+      // The partial commit is unwound: breaker armed before unbind, no lease
+      // record left behind.
+      expect(calls).toEqual(["bind", "invalidate", "unbind"])
+      expect(coordinator.currentPartition).toBeUndefined()
+
+      // And the refresh interval armed before the throw must not leak.
+      await vi.advanceTimersByTimeAsync(LEASE_TTL_MS * 2)
+      expect(lease.refresh).not.toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("BatchWriteCoordinator — slot-wait epoch exit", () => {
+  it("does not claim again after the acquire timeout paused background work", async () => {
+    vi.useFakeTimers()
+    try {
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      // Every acquire completes read-only (all partitions held by live peers),
+      // so the slot-wait loop polls.
+      const lease = makeLease()
+      leaseController.lease = lease
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      const inFlight = internals.acquireWithSlotWait()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(lease.acquire).toHaveBeenCalledTimes(1)
+
+      // The 45s race timeout fires while the loop sleeps between polls.
+      internals.pauseLeaseBackgroundWork()
+
+      // Wake the loop past its poll sleep: it must exit without another
+      // lock-SOC claim (a fresh acquire would commit under the new epoch).
+      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS * 3)
+      await inFlight
+      expect(lease.acquire).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 })
