@@ -128,6 +128,15 @@ export async function readPartitionState(
   localCounter?: Uint32Array
   referenceHex?: string
   unchanged: boolean
+  /**
+   * True when the feed HAS an entry but the reference chunk or a counter
+   * chunk could not be read. The caller must NOT proceed with a zero
+   * counter — the partition has a real resume point we failed to learn,
+   * and stamping from zero would re-issue every used slot (each overstamp
+   * evicts the existing data chunk from the reserve). Degrade to read-only
+   * and retry instead.
+   */
+  readFailed?: boolean
 }> {
   const { bee, owner, batchId, partition, batchDepth } = opts
   const topic = makePartitionStateTopic(batchId, partition)
@@ -157,11 +166,13 @@ export async function readPartitionState(
   // chunks. Each reference carries its own decryption key, so no key
   // derivation is needed — downloadDataWithChunkAPI decrypts from the ref.
   //
-  // Resilience: any failure here (an unreadable/transient chunk, or a feed
-  // entry written in an older format) must NOT abort the caller's acquisition
-  // (`claimPartition` reads this *before* writing the lock SOC). Fall back to a
-  // fresh zero counter — the same as the no-entry path — and let the next
-  // `release` republish the current format.
+  // Failure policy: the feed HAS an entry, so the partition has a real
+  // resume point. If we cannot read it (transient network error, or a
+  // published chunk evicted from the reserve), we must NOT fall back to a
+  // zero counter — resuming at zero re-issues every used slot, and each
+  // overstamp deterministically evicts the existing data chunk (Bee replaces
+  // the older chunk at a colliding (bucket, slot) stamp index). Report
+  // `readFailed` so the caller degrades to read-only and retries later.
   try {
     const referenceChunk = await downloadDataWithChunkAPI(
       bee,
@@ -188,12 +199,12 @@ export async function readPartitionState(
     PartitionStateSchemaV1.parse({ counters: localCounter })
   } catch (err) {
     console.warn(
-      `[partition-state] reading partition ${partition} counter failed; seeding a fresh counter:`,
+      `[partition-state] reading partition ${partition} counter failed; degrading to read-only:`,
       err,
     )
     // Don't return referenceHex — the read failed, so the caller must not
     // cache this reference as "synced" (it would skip a needed future download).
-    return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
+    return { unchanged: false, readFailed: true }
   }
 
   return { localCounter, referenceHex, unchanged: false }

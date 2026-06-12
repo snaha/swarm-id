@@ -290,6 +290,24 @@ export class PartitionLease {
       },
       knownReference,
     )
+
+    // The partition has a published resume point we failed to read. Claiming
+    // anyway would mean stamping from an unknown (effectively zero) counter —
+    // re-issuing used slots and evicting the partition's existing data. Fall
+    // back to read-only WITHOUT writing the lock SOC; the coordinator's
+    // slot-wait / next-upload acquire retries shortly.
+    if (stateResult.readFailed) {
+      console.warn(
+        `[PartitionLease] Partition ${partition} state read failed; falling back to read-only without claiming.`,
+      )
+      return {
+        partition: undefined,
+        partitionCount,
+        localCounter: new Uint32Array(NUM_BUCKETS),
+        isReadOnly: true,
+      }
+    }
+
     const localCounter =
       stateResult.unchanged && stamper instanceof UtilizationAwareStamper
         ? stamper.buildLeaseLocalCounter()
