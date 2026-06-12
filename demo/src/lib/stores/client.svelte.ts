@@ -12,6 +12,11 @@ import { logStore } from './log.svelte'
 
 const PROXY_PATH = '/proxy'
 const CLIENT_TIMEOUT = 600000 // 10 minutes for large file uploads
+const STAMP_USABLE_POLL_INTERVAL = 10000 // fresh batches become usable after ~30s
+// Cap re-polling — on a public gateway the Bee node never learns about the
+// batch, so the proxy keeps reporting the stored snapshot and the stamp
+// would otherwise be polled forever.
+const STAMP_USABLE_POLL_MAX_ATTEMPTS = 30
 
 const BEE_ICON =
   'data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIHZpZXdCb3g9IjAgMCA1NiA1NiIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KICA8cmVjdCB3aWR0aD0iNTYiIGhlaWdodD0iNTYiIGZpbGw9IndoaXRlIiByeD0iOCIvPgogIDx0ZXh0IHg9IjUwJSIgeT0iNTAlIiBmb250LXNpemU9IjMyIiBkb21pbmFudC1iYXNlbGluZT0ibWlkZGxlIiB0ZXh0LWFuY2hvcj0ibWlkZGxlIj7wn5CdPC90ZXh0Pgo8L3N2Zz4='
@@ -63,6 +68,18 @@ let currentSubsidisedGatewayUrl: string | undefined = undefined
 // switches identity or disconnects while a fetch is pending.
 let connectionGeneration = 0
 
+// Re-poll timer for a not-yet-usable stamp (see updatePostageStampInfo).
+let stampPollTimer: ReturnType<typeof setTimeout> | undefined
+let stampPollAttempts = 0
+
+function clearStampPollTimer() {
+  if (stampPollTimer !== undefined) {
+    clearTimeout(stampPollTimer)
+    stampPollTimer = undefined
+  }
+  stampPollAttempts = 0
+}
+
 async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
@@ -71,6 +88,7 @@ async function updatePostageStampInfo(generation: number) {
     if (generation !== connectionGeneration) return
     if (batch) {
       const batchIdStr = String(batch.batchID)
+      const previous = stamp
       stamp = {
         batchID: batchIdStr,
         utilization: batch.utilization.toFixed(2),
@@ -82,9 +100,28 @@ async function updatePostageStampInfo(generation: number) {
         immutableFlag: batch.immutableFlag,
         ttl: formatTTL(batch.batchTTL),
       }
-      logStore.log(`Postage stamp loaded: ${batchIdStr.slice(0, 16)}...`)
+      // Poll re-runs only log when something the user can see changed.
+      if (previous === undefined || previous.batchID !== batchIdStr) {
+        logStore.log(`Postage stamp loaded: ${batchIdStr.slice(0, 16)}...`)
+      } else if (previous.usable !== batch.usable) {
+        logStore.log(`Postage stamp is now ${batch.usable ? 'usable' : 'unusable'}`)
+      }
+      // A freshly bought batch reports usable=false until it warms up on
+      // chain (~30s) — re-poll until it flips so the UI catches up without
+      // a reload.
+      if (batch.usable) {
+        stampPollAttempts = 0
+      } else if (stampPollAttempts < STAMP_USABLE_POLL_MAX_ATTEMPTS) {
+        stampPollAttempts++
+        stampPollTimer = setTimeout(() => {
+          stampPollTimer = undefined
+          if (generation !== connectionGeneration) return
+          void updatePostageStampInfo(generation)
+        }, STAMP_USABLE_POLL_INTERVAL)
+      }
     } else {
       stamp = undefined
+      stampPollAttempts = 0
       logStore.log('No postage stamp configured')
     }
   } catch (error) {
@@ -102,6 +139,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   // snapshot (e.g. a different identity or pre-disconnect state) is dropped
   // when it resolves instead of overwriting current state.
   const generation = ++connectionGeneration
+  clearStampPollTimer()
   const isAuthenticated = info.identity !== undefined
   authenticated = isAuthenticated
   canUpload = info.canUpload
@@ -270,6 +308,8 @@ export const clientStore = {
       logStore.log(
         `Subsidised gateway changed to ${useSubsidised ? 'enabled' : 'disabled'}, reinitializing client...`,
       )
+      connectionGeneration++
+      clearStampPollTimer()
       client.destroy()
       client = undefined
       currentSubsidisedGatewayUrl = subsidisedUrl
@@ -286,6 +326,10 @@ export const clientStore = {
   },
 
   destroy() {
+    // Bump the generation so an in-flight `getPostageBatch` resolving after
+    // destroy can't write `stamp` back, and stop any pending re-poll.
+    connectionGeneration++
+    clearStampPollTimer()
     client?.destroy()
     client = undefined
     authenticated = false

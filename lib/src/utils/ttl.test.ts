@@ -6,6 +6,7 @@ import {
   calculateStampAmountForDays,
   calculateTTLSeconds,
   fetchChainState,
+  fetchBatchDetails,
   fetchBatchTTL,
 } from "./ttl"
 
@@ -273,5 +274,110 @@ describe("fetchBatchTTL", () => {
     const ttl = await fetchBatchTTL("https://bee.example.com", BATCH_ID)
 
     expect(ttl).toBeUndefined()
+  })
+})
+
+describe("fetchBatchDetails", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch")
+  })
+
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  it("returns batchTTL, usable and exists from Bee /stamps/{id} response", async () => {
+    fetchSpy.mockResolvedValue(
+      mockResponse({ batchTTL: 86400, usable: true, exists: true }),
+    )
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toEqual({ batchTTL: 86400, usable: true, exists: true })
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `https://bee.example.com/stamps/${BATCH_ID}`,
+    )
+  })
+
+  it("strips a trailing slash from the Bee URL", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: 123 }))
+
+    await fetchBatchDetails("https://bee.example.com/", BATCH_ID)
+
+    expect(fetchSpy).toHaveBeenCalledWith(
+      `https://bee.example.com/stamps/${BATCH_ID}`,
+    )
+  })
+
+  it("omits fields missing from the response body", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: 86400 }))
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toEqual({
+      batchTTL: 86400,
+      usable: undefined,
+      exists: undefined,
+    })
+  })
+
+  it("omits wrongly-typed fields instead of failing", async () => {
+    fetchSpy.mockResolvedValue(
+      mockResponse({ batchTTL: "86400", usable: "yes", exists: 1 }),
+    )
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toEqual({
+      batchTTL: undefined,
+      usable: undefined,
+      exists: undefined,
+    })
+  })
+
+  it("normalises negative TTL values to 0 and passes usable through", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({ batchTTL: -1, usable: false }))
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toEqual({ batchTTL: 0, usable: false, exists: undefined })
+  })
+
+  it("returns undefined when the stamp is not found (404)", async () => {
+    fetchSpy.mockResolvedValue(mockResponse({}, false, 404))
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toBeUndefined()
+  })
+
+  it("returns undefined when the response body is not an object", async () => {
+    fetchSpy.mockResolvedValue(mockResponse(null))
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toBeUndefined()
+  })
+
+  it("returns undefined when fetch rejects", async () => {
+    fetchSpy.mockRejectedValue(new Error("network error"))
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toBeUndefined()
+  })
+
+  it("returns undefined when JSON parsing fails", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new Error("invalid json")),
+    } as unknown as Response)
+
+    const details = await fetchBatchDetails("https://bee.example.com", BATCH_ID)
+
+    expect(details).toBeUndefined()
   })
 })

@@ -117,3 +117,51 @@ function mergePostageStamps(
   for (const s of local) merged.set(s.batchID.toHex(), s) // local wins
   return Array.from(merged.values())
 }
+
+function listContainsAll<T>(
+  latest: T[],
+  mine: T[],
+  key: (t: T) => string,
+): boolean {
+  const present = new Set(latest.map(key))
+  return mine.every((item) => present.has(key(item)))
+}
+
+/**
+ * True when `latest` already includes every device / identity / connected-app /
+ * postage-stamp present in `mine` (compared by their natural keys — the same
+ * keys `mergeSnapshotWithRemote` unions on; timestamps and scalar metadata are
+ * ignored).
+ *
+ * Used by the publish path to tell a *real* last-writer-wins loss (our entities
+ * were dropped) apart from a harmless co-writer that published the same account
+ * (e.g. the proxy announcing this device while the UI also syncs it) — whose
+ * union still contains us, so convergence held and there is nothing to retry.
+ *
+ * Note: this is membership-only. Tombstone/scalar nuances (a revoke or an
+ * account rename stomped by a co-writer) are NOT detected here; the union
+ * merge's recency rules reconcile those on the next sync.
+ */
+export function snapshotContainsContribution(
+  mine: AccountStateSnapshot,
+  latest: AccountStateSnapshot,
+): boolean {
+  return (
+    listContainsAll(
+      latest.metadata.devices,
+      mine.metadata.devices,
+      (d) => d.deviceId,
+    ) &&
+    // identity.id is a hex string (AddressSchema); String() also normalises the
+    // EthAddress instances some callers/tests construct.
+    listContainsAll(latest.identities, mine.identities, (i) => String(i.id)) &&
+    listContainsAll(
+      latest.connectedApps,
+      mine.connectedApps,
+      (a) => `${a.identityId}:${a.appUrl}`,
+    ) &&
+    listContainsAll(latest.postageStamps, mine.postageStamps, (s) =>
+      s.batchID.toHex(),
+    )
+  )
+}

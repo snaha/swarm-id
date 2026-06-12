@@ -26,11 +26,15 @@ import {
   readPartitionLock,
   writePartitionLock,
 } from "./partition-lock"
+import { Binary } from "cafe-utility"
 import {
   LEASE_TTL_MS,
   PARTITION_COUNT,
   NUM_BUCKETS,
+  getChunkLayout,
 } from "../utils/batch-utilization"
+import { makeEncryptedContentAddressedChunk } from "../chunk"
+import { uploadData, type UploadTarget } from "../proxy/upload"
 import {
   MockBee,
   MockChunkStore,
@@ -57,6 +61,23 @@ const GUARD_MS = 50 // small for tests; production default is 2000
 // ============================================================================
 // Helpers
 // ============================================================================
+
+/**
+ * Upload `plaintext` with a random encryption key (mirrors the private
+ * `uploadReservedChunk` in partition-state.ts) and return its 64-byte
+ * encrypted reference (address ‖ key).
+ */
+async function uploadEncryptedBlob(
+  target: UploadTarget,
+  plaintext: Uint8Array,
+): Promise<Uint8Array> {
+  const encrypted = makeEncryptedContentAddressedChunk(plaintext)
+  await uploadData(target, plaintext, {
+    encryptionKey: encrypted.encryptionKey,
+    deferred: false,
+  })
+  return encrypted.reference.toUint8Array()
+}
 
 function makeLease(opts: {
   deviceId: string
@@ -210,6 +231,107 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(result.unchanged).toBe(false)
     expect(result.localCounter![0]).toBe(0)
     expect(result.localCounter![1234]).toBe(0)
+  })
+
+  it("falls back to a fresh counter when the reference chunk has the wrong length", async () => {
+    const { readPartitionState, makePartitionStateTopic } =
+      await import("./partition-state")
+    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
+
+    const target: UploadTarget = {
+      mode: "stamper",
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+    }
+
+    // A readable chunk that is NOT numUtilizationChunks × 64 bytes — e.g. an
+    // entry written by a buggy or older writer. Reads must fail safe, not
+    // silently slice short/empty references out of it.
+    const malformedRef = await uploadEncryptedBlob(
+      target,
+      new Uint8Array(32).fill(7),
+    )
+    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
+    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
+    await updater.update(
+      BigInt(Math.floor(Date.now() / 1000)),
+      malformedRef,
+      target,
+    )
+
+    const result = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+
+    expect(result.unchanged).toBe(false)
+    // The failed read must not be cached as "synced".
+    expect(result.referenceHex).toBeUndefined()
+    expect(result.localCounter!.every((c) => c === 0)).toBe(true)
+  })
+
+  it("falls back to a fresh counter when a counter chunk has the wrong length", async () => {
+    const { readPartitionState, makePartitionStateTopic } =
+      await import("./partition-state")
+    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
+
+    const target: UploadTarget = {
+      mode: "stamper",
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+    }
+
+    // A correctly-sized reference chunk whose entries all point at a counter
+    // chunk of the wrong length (100 bytes instead of CHUNK_SIZE). mergeChunk
+    // must reject it and the read must fall back to a fresh counter.
+    const shortCounterRef = await uploadEncryptedBlob(
+      target,
+      new Uint8Array(100).fill(1),
+    )
+    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
+    const referenceChunk = Binary.concatBytes(
+      ...Array.from({ length: numUtilizationChunks }, () => shortCounterRef),
+    )
+    const referenceChunkRef = await uploadEncryptedBlob(target, referenceChunk)
+
+    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
+    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
+    await updater.update(
+      BigInt(Math.floor(Date.now() / 1000)),
+      referenceChunkRef,
+      target,
+    )
+
+    const result = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+
+    expect(result.unchanged).toBe(false)
+    expect(result.referenceHex).toBeUndefined()
+    expect(result.localCounter!.every((c) => c === 0)).toBe(true)
+  })
+
+  it("rejects publishing a counter with the wrong length", async () => {
+    const { writePartitionState } = await import("./partition-state")
+
+    await expect(
+      writePartitionState({
+        bee: bee as unknown as Bee,
+        stamper: createMockStamper() as unknown as Stamper,
+        batchId: TEST_BATCH_ID,
+        batchDepth: TEST_BATCH_DEPTH,
+        partition: 0,
+        localCounter: new Uint32Array(5),
+        backupSigner: BACKUP_SIGNER,
+      }),
+    ).rejects.toThrow(/65536/)
   })
 })
 

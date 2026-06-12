@@ -14,8 +14,6 @@ import {
   PrivateKey,
   BatchId,
   EthAddress,
-  Topic,
-  Reference,
   type Chunk,
 } from "@ethersphere/bee-js"
 import {
@@ -28,9 +26,7 @@ import {
   saveUtilizationState,
   calculateUtilization,
   UtilizationAwareStamper,
-  LEASE_TTL_MS,
 } from "../utils/batch-utilization"
-import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { collectAccountStampBatchIds } from "../utils/postage-stamp-association"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
@@ -40,22 +36,20 @@ import type {
   ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
 } from "./store-interfaces"
-import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
-import { uploadData, type UploadTarget } from "../proxy/upload"
-import { downloadDataWithChunkAPI } from "../proxy/download-data"
-import { serializeAccountState, deserializeAccountState } from "./serialization"
 import type { SyncResult } from "./types"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import { rejectAfter } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
-import { mergeSnapshotWithRemote } from "./merge-snapshot"
 import {
-  readPartitionLock,
-  acquirePartitionLock,
-  NO_HOLDER_DEVICE_ID,
-} from "./partition-lock"
-import { PARTITION_LOCK_GUARD_MS } from "./partition-lease"
+  BatchWriteCoordinator,
+  PartitionContendedError,
+} from "./batch-write-coordinator"
+import { publishAccountState } from "./publish-account-state"
 import { getOrCreateDeviceId } from "../utils/device-id"
+
+// Re-exported from its new home so existing importers of `./sync-account`
+// (restore-account, the SwarmUI refresh util) keep working.
+export { ACCOUNT_SYNC_TOPIC_PREFIX } from "./publish-account-state"
 
 // Timeout for utilization upload in milliseconds
 const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
@@ -64,62 +58,6 @@ const UTILIZATION_UPLOAD_TIMEOUT_MS = 30000
 // Bee client requests use bare fetch with no timeout, so a non-responding
 // node would otherwise hang forever.
 const SYNC_TIMEOUT_MS = 60000
-
-// Inner timeout for the post-upload verification probe.
-// The probe is a best-effort diagnostic — if it can't answer quickly we
-// move on to "success-unverified" rather than letting bee-js retries
-// consume the outer SYNC_TIMEOUT_MS budget.
-const VERIFY_PROBE_TIMEOUT_MS = 5000
-
-// Optimistic-publish retry budget for the shared account-state feed. The feed
-// update is last-writer-wins at the SOC level, so two devices publishing within
-// the same epoch slot stomp each other. After writing we re-read the feed and,
-// if a peer overwrote us, re-merge and republish — up to this many times.
-const MAX_PUBLISH_RETRIES = 3
-// Base backoff before a republish, plus a random jitter on top, so two devices
-// retrying in lockstep decorrelate and stop landing in the same epoch slot.
-const PUBLISH_RETRY_BACKOFF_MS = 200
-const PUBLISH_RETRY_JITTER_MS = 600
-
-// Topic prefix for sync feeds
-export const ACCOUNT_SYNC_TOPIC_PREFIX = "swarm-id-backup-v1:account"
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms))
-}
-
-function uint8ArraysEqual(a: Uint8Array, b: Uint8Array): boolean {
-  if (a.length !== b.length) return false
-  for (let i = 0; i < a.length; i++) {
-    if (a[i] !== b[i]) return false
-  }
-  return true
-}
-
-/**
- * Read the latest on-Swarm snapshot for an account's sync feed, returning
- * `undefined` when the feed is empty or the chunks aren't retrievable.
- *
- * Best-effort: the caller treats `undefined` as "no remote, use local only".
- * Errors propagate so the caller's catch can log them.
- */
-async function tryFetchLatestSnapshot(opts: {
-  bee: Bee
-  topic: Topic
-  owner: EthAddress
-}): Promise<AccountStateSnapshot | undefined> {
-  const { bee, topic, owner } = opts
-  // Feed SOCs are uploaded unencrypted (no encryptionKey passed to
-  // updater.update below); the finder must not use one either.
-  const finder = new AsyncEpochFinder(bee, topic, owner)
-  const now = BigInt(Math.floor(Date.now() / 1000))
-  const refBytes = await finder.findAt(now)
-  if (!refBytes) return undefined
-
-  const reference = new Reference(refBytes)
-  const data = await downloadDataWithChunkAPI(bee, reference.toHex())
-  return deserializeAccountState(data)
-}
 
 /**
  * Options for creating a sync account function
@@ -383,7 +321,7 @@ export function createSyncAccount(
     const startTime = performance.now()
     const timestamp = () => new Date().toISOString()
 
-    // Capture state snapshot (derives encryption key from derivation key)
+    // Capture state snapshot (derives encryption key from derivation key).
     const snapshotResult = await getAccountStateSnapshot(accountId)
     if (!snapshotResult) {
       return undefined
@@ -392,332 +330,53 @@ export function createSyncAccount(
     const { snapshot: state, encryptionKey, defaultStamp } = snapshotResult
     const partitionCount = state.metadata.partitionCount ?? 1
 
-    // Safety gate: a device may only write to the shared batch when it
-    // actually holds a partition. The lock SOC is the single source of
-    // truth (no `activeDevices` mirror). Read it directly — this device's
-    // backup signer owns the lock SOCs. Inactive devices skip the publish;
-    // the proxy publishes under its own held lease.
-    let heldPartition: number | undefined
-    if (partitionCount > 1) {
-      const selfDeviceId = getOrCreateDeviceId()
-      const gateBackupKeyHex = await deriveSecret(encryptionKey, "backup-key")
-      const gateBackupSigner = new PrivateKey(gateBackupKeyHex)
-      const gateSwarmKey = hexToUint8Array(encryptionKey)
-      const now = Date.now()
-      let freePartition: number | undefined
-      for (let p = 0; p < partitionCount; p++) {
-        const lock = await readPartitionLock({
-          bee,
-          backupSigner: gateBackupSigner,
-          swarmEncryptionKey: gateSwarmKey,
-          partition: p,
-        })
-        if (
-          lock &&
-          lock.holderDeviceId === selfDeviceId &&
-          lock.leasedUntil > now
-        ) {
-          heldPartition = p
-          break
-        }
-        if (
-          freePartition === undefined &&
-          (!lock ||
-            lock.holderDeviceId === NO_HOLDER_DEVICE_ID ||
-            lock.leasedUntil <= now)
-        ) {
-          freePartition = p
-        }
-      }
-      // The SwarmID UI must be able to publish its own account-state changes
-      // (the proxy is not the only writer). If we don't already hold a
-      // partition, claim a free/expired one so the publish can proceed. The
-      // lock-SOC protocol (generation fencing) makes the claim safe without the
-      // write lock. Skip only when every partition is held by a live foreign
-      // device — then a peer (or the proxy) publishes instead.
-      if (heldPartition === undefined && freePartition !== undefined) {
-        const gateStamper = await postageStampsStore.getStamper(
-          defaultStamp.batchID,
-          {
-            owner: gateBackupSigner.publicKey().address(),
-            encryptionKey: gateSwarmKey,
-          },
-        )
-        if (gateStamper) {
-          try {
-            const claim = await acquirePartitionLock({
-              bee,
-              stamper: gateStamper,
-              backupSigner: gateBackupSigner,
-              swarmEncryptionKey: gateSwarmKey,
-              partition: freePartition,
-              deviceId: selfDeviceId,
-              ttlMs: LEASE_TTL_MS,
-              guardMs: PARTITION_LOCK_GUARD_MS,
-            })
-            if (claim.outcome === "acquired") {
-              heldPartition = freePartition
-            }
-          } catch (err) {
-            // A transient claim failure must not crash the sync — skip the
-            // publish; a later trigger (or the proxy) retries.
-            console.warn(
-              `[SyncCoordinator] Partition claim for ${accountId} failed; skipping publish:`,
-              err,
-            )
-          }
-        }
-      }
-      if (heldPartition === undefined) {
-        console.warn(
-          `[SyncCoordinator] Skipping sync ${accountId}: all partitions are held by other devices.`,
-        )
-        return undefined
-      }
+    // Derive the account feed key (also the lock-SOC backup signer) + owner.
+    const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
+    const accountKey = new PrivateKey(backupKeyHex)
+    const owner = accountKey.publicKey().address()
+
+    // Build the stamper for the default batch. The coordinator binds the held
+    // partition on it and drives the lease circuit-breaker, so it needs the
+    // full UtilizationAwareStamper surface — the store interface only promises
+    // a FlushableStamper, so narrow at runtime instead of casting past the
+    // contract.
+    const stamper = await postageStampsStore.getStamper(defaultStamp.batchID, {
+      owner,
+      encryptionKey: hexToUint8Array(encryptionKey),
+    })
+    if (!stamper) {
+      const error = `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`
+      console.error(`[SyncCoordinator ${timestamp()}] ${error}`)
+      return { status: "error", error }
     }
+    if (!(stamper instanceof UtilizationAwareStamper)) {
+      const error = `Stamper for batch ${defaultStamp.batchID.toHex()} does not support coordinated writes (expected a UtilizationAwareStamper)`
+      console.error(`[SyncCoordinator ${timestamp()}] ${error}`)
+      return { status: "error", error }
+    }
+
+    // Route the publish through the shared coordinator (same Web Lock + same
+    // partition acquire the proxy uses). One-off mode: no refresh timer — the
+    // lease lapses by TTL. `wait: "skip"` claims a free/expired partition once
+    // and throws `PartitionContendedError` when every partition is held by a
+    // live foreign device, so we skip rather than wait.
+    const coordinator = new BatchWriteCoordinator({
+      bee,
+      batchId: defaultStamp.batchID.toHex(),
+      stamper,
+      deviceId: getOrCreateDeviceId(),
+      accountId,
+      backupSigner: accountKey,
+      swarmEncryptionKey: hexToUint8Array(encryptionKey),
+      partitionCount,
+      mode: "oneshot",
+    })
 
     console.log(
       `[SyncCoordinator ${timestamp()}] Starting sync for ${accountId} bee.url=${bee.url}`,
     )
 
-    const runSync = async (): Promise<SyncResult> => {
-      // 1. Derive account signing key for feed
-      const backupKeyHex = await deriveSecret(encryptionKey, "backup-key")
-      const accountKey = new PrivateKey(backupKeyHex)
-      const owner = accountKey.publicKey().address()
-      const topic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`,
-      )
-
-      // 2. Build the stamper once (reused across publish attempts). Bind it to
-      // the partition this device holds (per the lock SOC) so chunk-stamping
-      // picks slots from our slice instead of the "any" pool — prevents
-      // collisions with peers sharing the batch.
-      const stamper = await postageStampsStore.getStamper(
-        defaultStamp.batchID,
-        {
-          owner,
-          encryptionKey: hexToUint8Array(encryptionKey),
-        },
-      )
-      if (!stamper) {
-        throw new Error(
-          `Cannot create stamper for batch ${defaultStamp.batchID.toHex()}`,
-        )
-      }
-      if (
-        heldPartition !== undefined &&
-        partitionCount > 1 &&
-        stamper.bindPartition &&
-        stamper.buildLeaseLocalCounter
-      ) {
-        stamper.bindPartition({
-          partition: heldPartition,
-          partitionCount,
-          localCounter: stamper.buildLeaseLocalCounter(),
-        })
-      }
-
-      const target: UploadTarget = { mode: "stamper", bee, stamper }
-      const updater = new BasicEpochUpdater(topic, accountKey)
-
-      // Publish once: fetch the latest remote snapshot, merge our local state
-      // onto it, upload, and write the epoch feed. Returns the reference we
-      // wrote so the caller can verify whether it actually won the feed slot.
-      //
-      // We always merge the *original* local `state` onto the freshest remote
-      // (never our own previous merge result), so a retry folds in whatever a
-      // peer published since our last attempt without dropping our changes.
-      const publishMerged = async (): Promise<{
-        reference: string
-        refBytes: Uint8Array
-        feedTimestamp: bigint
-        chunkAddresses: Uint8Array[]
-      }> => {
-        // Fetch the latest on-Swarm snapshot (best effort) and merge it with
-        // our local state, so we don't stomp additions a peer published since
-        // our last refresh.
-        let mergedState = state
-        try {
-          const latestRemote = await tryFetchLatestSnapshot({
-            bee,
-            topic,
-            owner,
-          })
-          if (latestRemote) {
-            mergedState = mergeSnapshotWithRemote(state, latestRemote)
-            console.log(
-              `[SyncCoordinator ${timestamp()}] Merged remote snapshot (remote devices=${latestRemote.metadata.devices.length}, merged devices=${mergedState.metadata.devices.length})`,
-            )
-          }
-        } catch (err) {
-          console.warn(
-            `[SyncCoordinator ${timestamp()}] Pre-write remote-snapshot fetch failed; proceeding with local state only:`,
-            err,
-          )
-        }
-
-        const jsonData = serializeAccountState(mergedState)
-
-        console.log(`[SyncCoordinator ${timestamp()}] Uploading data…`)
-        const uploadResult = await uploadData(target, jsonData, {
-          encryptionKey: hexToUint8Array(encryptionKey),
-        })
-
-        // chunkAddresses is always present when using encryption.
-        const chunkAddresses = uploadResult.chunkAddresses ?? []
-        if (chunkAddresses.length > 0) {
-          try {
-            await handleUtilizationUpdate(accountId, chunkAddresses)
-          } catch (error) {
-            // Don't fail sync if utilization fails — continue with feed update.
-            console.error(
-              `[SyncCoordinator ${timestamp()}] Utilization upload failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
-              error,
-            )
-          }
-        }
-
-        const feedTimestamp = BigInt(Math.floor(Date.now() / 1000))
-        // Convert the 128-char hex reference to its 64-byte form.
-        const refBytes = new Reference(uploadResult.reference).toUint8Array()
-        console.log(`[SyncCoordinator ${timestamp()}] Updating feed…`)
-        const updateResult = await updater.update(
-          feedTimestamp,
-          refBytes,
-          target,
-        )
-        chunkAddresses.push(updateResult.socAddress)
-        return {
-          reference: uploadResult.reference,
-          refBytes,
-          feedTimestamp,
-          chunkAddresses,
-        }
-      }
-
-      // Did the feed end up pointing at the reference we just wrote? A shared
-      // epoch feed has no compare-and-swap: two devices publishing within the
-      // same epoch slot write the same SOC address and the later signer wins by
-      // last-writer-wins, silently orphaning the other's snapshot. Re-read the
-      // feed and compare; only a *different* confirmed reference counts as a
-      // loss. A missing/unreadable result (read-after-write lag, transient Bee
-      // error) is treated as "won" so we never spuriously republish.
-      const verifyWon = async (writtenRef: Uint8Array): Promise<boolean> => {
-        try {
-          const finder = new AsyncEpochFinder(bee, topic, owner)
-          const latest = await finder.findAt(
-            BigInt(Math.floor(Date.now() / 1000)),
-          )
-          return !latest || uint8ArraysEqual(latest, writtenRef)
-        } catch {
-          return true
-        }
-      }
-
-      // Optimistic publish with bounded verify-retry. This recreates, across
-      // devices, the serialize-read-merge-write guarantee the cross-tab Web
-      // Lock already gives within a device. Only the loser of a collision
-      // retries; convergence holds because the merge is a union — each retry
-      // folds in the peer's additions.
-      let published = await publishMerged()
-      let verified = await verifyWon(published.refBytes)
-      for (
-        let attempt = 0;
-        !verified && attempt < MAX_PUBLISH_RETRIES;
-        attempt++
-      ) {
-        console.warn(
-          `[SyncCoordinator ${timestamp()}] Feed overwritten by a concurrent writer; re-merging and republishing (attempt ${attempt + 1}/${MAX_PUBLISH_RETRIES})`,
-        )
-        await delay(
-          PUBLISH_RETRY_BACKOFF_MS +
-            Math.floor(Math.random() * PUBLISH_RETRY_JITTER_MS),
-        )
-        published = await publishMerged()
-        verified = await verifyWon(published.refBytes)
-      }
-
-      if (!verified) {
-        const warning = `Account-state feed still overwritten by a concurrent writer after ${MAX_PUBLISH_RETRIES} retries; another device's publish won.`
-        console.warn(`[SyncCoordinator ${timestamp()}] ${warning}`)
-        return {
-          status: "success-unverified",
-          reference: published.reference,
-          timestamp: published.feedTimestamp,
-          chunkAddresses: published.chunkAddresses,
-          warning,
-        }
-      }
-
-      console.log(
-        `[SyncCoordinator ${timestamp()}] Feed updated (+${(performance.now() - startTime).toFixed(2)}ms), verifying root chunk…`,
-      )
-
-      // 7. Verify the root chunk is retrievable immediately after upload.
-      // This catches the case where Bee accepts the write but doesn't
-      // actually retain the data — the upload reports success, the feed
-      // points at a reference, but downstream restores would fail.
-      // refBytes is the snapshot reference: 32 bytes (plain) or 64 bytes
-      // (encrypted = 32-byte address + 32-byte key). Probe the address only.
-      const rootChunkAddress = published.refBytes.slice(0, 32)
-      const rootChunkAddressHex = Array.from(rootChunkAddress)
-        .map((b) => b.toString(16).padStart(2, "0"))
-        .join("")
-
-      // Bound the probe with its own timeout + per-request timeout so bee-js
-      // can't retry the 500 response indefinitely.
-      let probeTimer: ReturnType<typeof setTimeout> | undefined
-      const probeTimeoutPromise = new Promise<"timeout">((resolve) => {
-        probeTimer = setTimeout(
-          () => resolve("timeout"),
-          VERIFY_PROBE_TIMEOUT_MS,
-        )
-      })
-      const probePromise = bee
-        .downloadChunk(rootChunkAddressHex, undefined, {
-          timeout: VERIFY_PROBE_TIMEOUT_MS,
-        })
-        .then(() => "ok" as const)
-        .catch((err) => err as Error)
-
-      let probeOutcome: "ok" | "timeout" | Error
-      try {
-        probeOutcome = await Promise.race([probePromise, probeTimeoutPromise])
-      } finally {
-        if (probeTimer !== undefined) clearTimeout(probeTimer)
-      }
-
-      if (probeOutcome === "ok") {
-        console.log(
-          `[SyncCoordinator ${timestamp()}] Verified root chunk retrievable addr=${rootChunkAddressHex}`,
-        )
-        return {
-          status: "success",
-          reference: published.reference,
-          timestamp: published.feedTimestamp,
-          chunkAddresses: published.chunkAddresses,
-        }
-      }
-
-      const reason =
-        probeOutcome === "timeout"
-          ? `probe timed out after ${VERIFY_PROBE_TIMEOUT_MS}ms`
-          : probeOutcome instanceof Error
-            ? probeOutcome.message
-            : String(probeOutcome)
-      const warning = `Root chunk ${rootChunkAddressHex} not retrievable immediately after upload from ${bee.url}: ${reason}`
-      console.warn(`[SyncCoordinator ${timestamp()}] ${warning}`)
-      return {
-        status: "success-unverified",
-        reference: published.reference,
-        timestamp: published.feedTimestamp,
-        chunkAddresses: published.chunkAddresses,
-        warning,
-      }
-    }
-
-    // Race the sync against a timeout. Bee client requests have no built-in
+    // Race the publish against a timeout. Bee client requests have no built-in
     // timeout, so a non-responding node would otherwise hang the UI forever.
     // Note: this surfaces the timeout to the caller but does NOT cancel the
     // underlying fetch (would require AbortSignal propagation through bee-js).
@@ -732,11 +391,23 @@ export function createSyncAccount(
     })
 
     try {
-      // Serialize the publish against every other writer on this batch (proxy
-      // iframes and the SwarmID UI) via the shared cross-tab Web Lock, so the
-      // snapshot chunks never collide with a concurrent partition write.
       const result = await Promise.race([
-        withBatchWriteLock(defaultStamp.batchID.toHex(), runSync),
+        coordinator.withWrite(
+          (target) =>
+            publishAccountState({
+              bee,
+              accountId,
+              accountKey,
+              owner,
+              encryptionKey,
+              localSnapshot: state,
+              target,
+              onChunksUploaded: (addresses) =>
+                handleUtilizationUpdate(accountId, addresses),
+              logLabel: "[SyncCoordinator]",
+            }),
+          { wait: "skip" },
+        ),
         timeoutPromise,
       ])
       if (result.status === "error") {
@@ -747,6 +418,16 @@ export function createSyncAccount(
       }
       return result
     } catch (error) {
+      // Genuine contention (every partition held by a live foreign device):
+      // skip quietly — a peer (or the proxy) publishes instead.
+      if (error instanceof PartitionContendedError) {
+        console.warn(
+          `[SyncCoordinator] Skipping sync ${accountId}: all partitions are held by other devices.`,
+        )
+        return undefined
+      }
+      // Operational failure (stamp/SOC/lock error) — log as an error, distinct
+      // from contention.
       console.error(
         `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
         error,

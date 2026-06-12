@@ -3,7 +3,10 @@
 
 import { describe, it, expect } from "vitest"
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
-import { mergeSnapshotWithRemote } from "./merge-snapshot"
+import {
+  mergeSnapshotWithRemote,
+  snapshotContainsContribution,
+} from "./merge-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type { Device, Identity, ConnectedApp, PostageStamp } from "../schemas"
 
@@ -221,5 +224,58 @@ describe("mergeSnapshotWithRemote — scalar metadata fields", () => {
     expect(result.timestamp).toBeGreaterThanOrEqual(before)
     expect(result.timestamp).toBeLessThanOrEqual(after)
     expect(result.metadata.lastModified).toBeGreaterThanOrEqual(before)
+  })
+})
+
+describe("snapshotContainsContribution", () => {
+  const idA = "aa".padEnd(40, "0")
+  const idB = "bb".padEnd(40, "0")
+
+  it("is true when latest is a superset of mine (co-writer published us)", () => {
+    const mine = makeSnapshot({ devices: [makeDevice(SELF_DEVICE_ID)] })
+    const latest = makeSnapshot({
+      devices: [makeDevice(SELF_DEVICE_ID), makeDevice(OTHER_DEVICE_ID)],
+    })
+    expect(snapshotContainsContribution(mine, latest)).toBe(true)
+  })
+
+  it("is true for equal sets (ignoring timestamps)", () => {
+    const mine = makeSnapshot({
+      devices: [makeDevice(SELF_DEVICE_ID, 1_000_000)],
+      identities: [makeIdentity(idA)],
+    })
+    const latest = makeSnapshot({
+      devices: [makeDevice(SELF_DEVICE_ID, 9_000_000)],
+      identities: [makeIdentity(idA)],
+    })
+    expect(snapshotContainsContribution(mine, latest)).toBe(true)
+  })
+
+  it("is false when latest is missing my device (genuine loss)", () => {
+    const mine = makeSnapshot({ devices: [makeDevice(SELF_DEVICE_ID)] })
+    const latest = makeSnapshot({ devices: [makeDevice(OTHER_DEVICE_ID)] })
+    expect(snapshotContainsContribution(mine, latest)).toBe(false)
+  })
+
+  it("is false when latest is missing one of my identities", () => {
+    const mine = makeSnapshot({
+      identities: [makeIdentity(idA), makeIdentity(idB)],
+    })
+    const latest = makeSnapshot({ identities: [makeIdentity(idA)] })
+    expect(snapshotContainsContribution(mine, latest)).toBe(false)
+  })
+
+  it("is false when latest is missing one of my connected apps", () => {
+    const mine = makeSnapshot({
+      connectedApps: [makeConnectedApp("ident-1", "https://app.example")],
+    })
+    const latest = makeSnapshot({ connectedApps: [] })
+    expect(snapshotContainsContribution(mine, latest)).toBe(false)
+  })
+
+  it("is false when latest is missing one of my postage stamps", () => {
+    const mine = makeSnapshot({ postageStamps: [makeStamp("aa".repeat(32))] })
+    const latest = makeSnapshot({ postageStamps: [makeStamp("bb".repeat(32))] })
+    expect(snapshotContainsContribution(mine, latest)).toBe(false)
   })
 })

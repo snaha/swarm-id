@@ -86,7 +86,9 @@ export {
   makePartitionStateTopic,
   readPartitionState,
   writePartitionState,
+  PartitionStateSchemaV1,
 } from "./sync/partition-state"
+export type { PartitionState } from "./sync/partition-state"
 export {
   acquirePartitionLock,
   compareGenerations,

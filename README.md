@@ -98,10 +98,10 @@ Open http://localhost:3000 - that's it!
 ### Development Mode (with hot reload)
 
 ```bash
-# Start the full stack against the new identity UI (lib + ui :5500 + demo :3500)
+# Start the full stack against the new identity UI (ui :5500 + demo :3500)
 pnpm dev:new
 
-# Start the full stack against the legacy identity UI (lib + swarm-ui :5510 + demo :3000)
+# Start the full stack against the legacy identity UI (swarm-ui :5510 + demo :3000)
 pnpm dev:legacy      # `pnpm dev` is an alias
 
 # Or start individually

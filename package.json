@@ -5,9 +5,9 @@
   "description": "Swarm Identity Management - Monorepo",
   "type": "module",
   "scripts": {
-    "dev": "pnpm dev:legacy",
-    "dev:new": "concurrently -n lib,ui,demo -c yellow,blue,green \"pnpm dev:lib\" \"pnpm dev:ui:new\" \"pnpm dev:demo:new\"",
-    "dev:legacy": "concurrently -n lib,ui,demo -c yellow,blue,green \"pnpm dev:lib\" \"pnpm dev:ui:legacy\" \"pnpm dev:demo:legacy\"",
+"dev": "pnpm dev:legacy",
+    "dev:new": "concurrently -n ui,demo -c blue,green \"pnpm dev:ui:new\" \"pnpm dev:demo:new\"",
+    "dev:legacy": "concurrently -n ui,demo -c blue,green \"pnpm dev:ui:legacy\" \"pnpm dev:demo:legacy\"",
     "dev:bee": "bee-compose start --full 4 --no-detach",
     "dev:bee:detach": "bee-compose start --full 4",
     "dev:bee:stop": "bee-compose stop",
