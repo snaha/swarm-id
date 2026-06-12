@@ -280,10 +280,35 @@ described by the exported `PartitionStateSchemaV1`
 the reassembled counter — plus the reference-chunk length (`N × 64`) and each counter
 chunk's length — before returning.
 
+### Read semantics
+
+After reconstructing the counter, the reader applies one compensation: **+1 in the bucket
+of the feed entry's own SOC address**. The publisher extracts the snapshot first and
+writes the feed SOC last, so the feed SOC consumed one data slot — `slot(snapshot[bucket])`
+of its own bucket — that the snapshot does not record. Without the +1, the next holder's
+first chunk in that bucket would overstamp the feed entry and evict it from the reserve
+(Bee deterministically replaces the older chunk at a colliding stamp index), breaking
+later feed walks. The bump applies only to the entry actually read (earlier entries were
+compensated by the readers that consumed them) and never on the cached short-circuit path
+below (the local counter already includes it).
+
 Reads short-circuit on a cached "synced reference": if the feed still points at the
 reference a device last synced with, it skips the downloads and reuses its local counter.
-A failed or malformed counter read **fails safe**: it falls back to a fresh zero counter
-rather than aborting the acquisition, and does not cache the bad reference as synced.
+
+Failure semantics are fail-safe: when the feed **has** an entry but the reference chunk or
+any counter chunk cannot be read (or fails the wire-format validation above), the read
+reports failure — without caching the bad reference as synced — and the device falls back
+to **read-only without claiming the partition** (retried on the next acquire). It must not
+seed a zero counter, since stamping from zero would re-issue every used slot and evict the
+partition's data chunk by chunk. A zero counter is seeded only when the feed provably has
+no entry (the legitimate fresh-partition seed in Cases A/B).
+
+Both sides also protect the published chunks from later overstamps: the publisher avoids
+the buckets of the partition's lock SOC and of its live utilization chunks, and every
+device records the published state chunks' buckets (returned by the write, re-derived from
+the reference chunk on read) so its utilization saves avoid placing chunks there — all
+these chunks share the partition's reserved slot, and a collision would evict the resume
+point a later takeover depends on.
 
 :::note[Historical: device-claim feed]
 Iteration 1 used a per-device claim feed
@@ -335,8 +360,10 @@ lease from a local cache without a Swarm round-trip (re-validated on the next re
   partition resuming from the published counter.
 - **Case D — crash recovery.** A holder dies without releasing. Its `leasedUntil` expires
   after `LEASE_TTL_MS`; a peer then reclaims the partition. Resume is from the last
-  _published_ counter — an unclean crash that stamped past its last publish loses only data
-  that was never durably persisted anyway.
+  _published_ counter (plus the +1 feed-entry compensation above) — an unclean crash that
+  stamped past its last publish loses only data that was never durably persisted anyway.
+  If the published counter exists but cannot be read, the taker stays read-only and
+  retries rather than resuming from zero.
 
 ## Account-state sync
 
@@ -425,7 +452,10 @@ To interoperate with the reference implementation, an external client must:
 4. **Implement the slot formula** `slot = K + p + K·j` and route lock-SOC/counter chunks to
    reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
 5. **Implement the partition-state feed**: topic hash, the reference-chunk →
-   counter-chunks structure, publish-on-release / read-on-acquire.
+   counter-chunks structure, publish-on-release / read-on-acquire — including the **+1
+   feed-entry compensation** on read and the fail-safe (read-only, never zero-seed)
+   handling of an unreadable published counter. Skipping either re-introduces silent
+   slot-reuse data loss.
 6. **Track per-bucket counters** with the uint16/uint32 codec and the
    `swarm-id-util-chunk-v1` key derivation (only needed to publish counters that the
    reference client can read).
