@@ -18,6 +18,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
+  import { Tabs } from '$lib/components/ui/tabs'
   import { completeConnect, reuseConnection } from '$lib/connect-handshake'
   import { unlockAccount } from '$lib/crypto/unlock'
   import routes from '$lib/routes'
@@ -41,6 +42,34 @@
     request ? (request.appIcon ?? `${request.appOrigin}/favicon.ico`) : undefined,
   )
   const accounts = $derived(accountsStore.accounts)
+
+  // Accounts previously connected to this app, most recently used first.
+  const previouslyUsed = $derived.by(() => {
+    const appOrigin = request?.appOrigin
+    if (!appOrigin) {
+      return []
+    }
+    return accounts
+      .map((account) => ({
+        account,
+        connection: account.connectedApps.find((app) => app.appUrl === appOrigin),
+      }))
+      .filter((entry) => entry.connection !== undefined)
+      .sort((a, b) => (b.connection?.lastConnectedAt ?? 0) - (a.connection?.lastConnectedAt ?? 0))
+      .map((entry) => entry.account)
+  })
+
+  const TABS = [
+    { value: 'previously-used', label: 'Previously used' },
+    { value: 'all-accounts', label: 'All accounts' },
+  ]
+
+  // Defaults to "Previously used" when available; a user selection takes precedence.
+  let selectedTab = $state<string | undefined>(undefined)
+  const activeTab = $derived(
+    selectedTab ?? (previouslyUsed.length > 0 ? 'previously-used' : 'all-accounts'),
+  )
+  const shownAccounts = $derived(activeTab === 'previously-used' ? previouslyUsed : accounts)
 
   onMount(() => {
     missingRequest = !connectStore.initFromHash(window.location.hash)
@@ -137,8 +166,11 @@
         {#if accounts.length > 0}
           <div class="flex w-full flex-col gap-2">
             <p class="text-muted-foreground text-xs">Connect with an account on this device</p>
+            {#if previouslyUsed.length > 0}
+              <Tabs tabs={TABS} bind:value={() => activeTab, (value) => (selectedTab = value)} />
+            {/if}
             <div class="flex w-full flex-col rounded-lg border p-1">
-              {#each accounts as account (account.id)}
+              {#each shownAccounts as account (account.id)}
                 <button
                   type="button"
                   class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm outline-none"

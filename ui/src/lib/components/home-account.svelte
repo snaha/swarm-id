@@ -69,7 +69,7 @@
 
   type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
   /** What the unlock confirmation is for; completes once the seed decrypts. */
-  type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method'
+  type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method' | 'delete'
   type DialogState =
     | { kind: 'unlock'; target: UnlockTarget; pending: boolean }
     | { kind: 'set-method'; pending: boolean }
@@ -219,6 +219,8 @@
       phraseRevealed = true
     } else if (target === 'export') {
       void exportBackupFile()
+    } else if (target === 'delete') {
+      deleteAccount()
     } else {
       newMethod = 'passkey'
       newPassword = ''
@@ -628,7 +630,9 @@
           ? 'Reveal secret recovery phrase'
           : dialog.target === 'export'
             ? 'Export backup'
-            : 'Change unlock method'}
+            : dialog.target === 'delete'
+              ? 'Delete account'
+              : 'Change unlock method'}
     >
       <p class="text-sm">
         {#if dialog.target === 'change-method'}
@@ -636,6 +640,8 @@
           your current {accessLabel.toLowerCase()}.
         {:else if dialog.target === 'export'}
           Unlock your account to export an encrypted backup file.
+        {:else if dialog.target === 'delete'}
+          Unlock your account to confirm the deletion.
         {:else}
           Make sure no one is watching your screen.
         {/if}
@@ -752,10 +758,11 @@
   <Dialog onclose={closeDialog} title="Delete account">
     <p class="text-sm">
       This removes the account and its data from this device. You can get it back later with a
-      backup file or its secret recovery phrase.
+      backup file or its secret recovery phrase.{#if !entropy}
+        You'll be asked to unlock your account to confirm.{/if}
     </p>
     <div class="flex w-full flex-col gap-2">
-      <Button variant="destructive" class="w-full" onclick={deleteAccount}>
+      <Button variant="destructive" class="w-full" onclick={() => openUnlock('delete')}>
         <Trash2 />
         Delete account
       </Button>
