@@ -382,6 +382,33 @@ describe("BatchWriteCoordinator — teardown safety", () => {
     expect(calls).toEqual(["invalidate", "unbind"])
   })
 
+  it("runs the teardown release under the batch write lock (#349)", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const lease = makeLease({ partition: 1 })
+    lease.release.mockImplementation(async () => {
+      calls.push("release")
+    })
+    writeLockController.onGrant = () => calls.push("lock-granted")
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+    ;(coordinator as unknown as Internals).partitionLease = lease
+
+    coordinator.teardown()
+    await vi.waitFor(() => expect(lease.release).toHaveBeenCalledTimes(1))
+    writeLockController.onGrant = undefined
+
+    // The release goes THROUGH the origin-wide lock — a successor's acquire
+    // (which queues on the same lock) cannot interleave with it, so the
+    // sentinel's stamp is always minted before the successor's claim stamp.
+    expect(calls.indexOf("lock-granted")).toBeGreaterThanOrEqual(0)
+    expect(calls.indexOf("lock-granted")).toBeLessThan(calls.indexOf("release"))
+  })
+
   it("a withWrite that resumes after teardown does NOT re-acquire and never runs op", async () => {
     leaseController.lease = makeLease({
       acquireResult: {

@@ -1199,13 +1199,18 @@ export class UtilizationAwareStamper implements Stamper {
     | undefined = undefined
 
   /**
-   * Hex addresses of the utilisation (counter) chunks for the in-flight save.
-   * `stamp()` routes these to this partition's reserved slot instead of a data
-   * slot. Unlike the lock SOC, a counter chunk's address changes whenever the
-   * counter changes, so `saveUtilizationState` registers the current set via
-   * `markReservedUtilizationChunk` and clears it with `clearReservedUtilizationChunks`.
+   * Hex addresses of the utilisation (counter) chunks for the in-flight save,
+   * mapped to the reserved SLOT each must overstamp. `stamp()` routes these to
+   * that slot instead of a data slot. The slot is recorded at marking time
+   * (not read from `this.partition` at stamp time) because the teardown
+   * release publishes through an UNBOUND stamper — `partition` is already
+   * undefined there, and falling back to slot 0 would overstamp the OTHER
+   * partition's reserved chunks. Unlike the lock SOC, a counter chunk's
+   * address changes whenever the counter changes, so writers register the
+   * current set via `markReservedUtilizationChunk` and clear it with
+   * `clearReservedUtilizationChunks`.
    */
-  private reservedUtilizationChunks: Set<string> | undefined = undefined
+  private reservedUtilizationChunks: Map<string, number> | undefined = undefined
 
   /**
    * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
@@ -1367,15 +1372,21 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
-   * Register a utilisation (counter) chunk address so the next `stamp()` of it
-   * routes to this partition's reserved slot instead of a data slot. Called by
-   * `saveUtilizationState` for each chunk it is about to upload. Idempotent.
+   * Register a utilisation/state chunk address so the next `stamp()` of it
+   * routes to a reserved slot instead of a data slot. `slot` defaults to the
+   * currently bound partition — pass it explicitly when the stamper may be
+   * unbound at stamp time (the teardown release publishes state chunks after
+   * `unbindPartition()`, and a default of 0 would overstamp partition 0's
+   * reserved chunks). Idempotent per address.
    */
-  markReservedUtilizationChunk(address: Uint8Array): void {
+  markReservedUtilizationChunk(address: Uint8Array, slot?: number): void {
     if (!this.reservedUtilizationChunks) {
-      this.reservedUtilizationChunks = new Set()
+      this.reservedUtilizationChunks = new Map()
     }
-    this.reservedUtilizationChunks.add(uint8ArrayToHex(address))
+    this.reservedUtilizationChunks.set(
+      uint8ArrayToHex(address),
+      slot ?? this.partition ?? 0,
+    )
   }
 
   /** Clear the registered utilisation-chunk addresses after a save. */
@@ -1541,15 +1552,18 @@ export class UtilizationAwareStamper implements Stamper {
       return this.stamper.stamp(chunk)
     }
 
-    // Utilisation-chunk short-circuit: a counter chunk for this partition
-    // overstamps its bucket's reserved slot (= partition index), just like the
-    // lock SOC. Persisting the counter therefore never consumes a data slot or
+    // Utilisation-chunk short-circuit: a counter/state chunk overstamps its
+    // bucket's reserved slot (recorded at marking time), just like the lock
+    // SOC. Persisting the counter therefore never consumes a data slot or
     // bumps the counter. The addresses are content-derived (they change as the
-    // counter changes), so `saveUtilizationState` registers the current save's
-    // addresses via `markReservedUtilizationChunk` before uploading them.
-    if (this.reservedUtilizationChunks?.has(uint8ArrayToHex(chunkAddress))) {
+    // counter changes), so writers register the current save's addresses via
+    // `markReservedUtilizationChunk` before uploading them.
+    const reservedSlot = this.reservedUtilizationChunks?.get(
+      uint8ArrayToHex(chunkAddress),
+    )
+    if (reservedSlot !== undefined) {
       const bucket = toBucket(chunkAddress)
-      this.stamper.buckets[bucket] = this.partition ?? 0
+      this.stamper.buckets[bucket] = reservedSlot
       return this.stamper.stamp(chunk)
     }
 

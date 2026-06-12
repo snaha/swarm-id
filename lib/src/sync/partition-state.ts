@@ -310,6 +310,7 @@ export async function writePartitionState(opts: {
       plaintext,
       claimedBuckets,
       reserve,
+      partition,
     )
     references.push(ref)
     stateBuckets.push(toBucket(ref.slice(0, 32)))
@@ -323,6 +324,7 @@ export async function writePartitionState(opts: {
     referenceChunk,
     claimedBuckets,
     reserve,
+    partition,
   )
   stateBuckets.push(toBucket(referenceChunkRef.slice(0, 32)))
 
@@ -351,13 +353,16 @@ export async function writePartitionState(opts: {
  * slot, returning its 64-byte encrypted reference (address‖key). Retries the
  * random key until the encrypted address lands in a bucket not yet claimed by
  * another reserved chunk (they all share the same reserved slot, so each must
- * occupy a distinct bucket).
+ * occupy a distinct bucket). The slot is passed EXPLICITLY: the teardown
+ * release publishes through an unbound stamper, whose `partition` fallback
+ * (slot 0) would overstamp the other partition's reserved chunks.
  */
 async function uploadReservedChunk(
   target: UploadTarget,
   plaintext: Uint8Array,
   claimedBuckets: Set<number>,
   reserve: UtilizationAwareStamper | undefined,
+  partition: number,
 ): Promise<Uint8Array> {
   let encrypted = makeEncryptedContentAddressedChunk(plaintext)
   while (claimedBuckets.has(toBucket(encrypted.address.toUint8Array()))) {
@@ -365,7 +370,7 @@ async function uploadReservedChunk(
   }
   const address = encrypted.address.toUint8Array()
   claimedBuckets.add(toBucket(address))
-  reserve?.markReservedUtilizationChunk(address)
+  reserve?.markReservedUtilizationChunk(address, partition)
   await uploadData(target, plaintext, {
     encryptionKey: encrypted.encryptionKey,
     deferred: false,

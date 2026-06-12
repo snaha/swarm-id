@@ -818,6 +818,50 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(DATA_COUNTER_START + 1 + PARTITION_COUNT * SKEW)
   })
+
+  it("routes a marked reserved chunk to its EXPLICIT slot even when unbound", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    // No bindPartition: this is the teardown-release scenario — the
+    // coordinator unbinds synchronously and the detached release publishes
+    // afterwards. The slot recorded at marking time must win; falling back
+    // to `partition ?? 0` would overstamp partition 0's reserved chunks.
+    const BUCKET = 0x1234
+    const chunk = makeChunkInBucket(BUCKET, 7)
+    stamper.markReservedUtilizationChunk(chunk.hash(), 1)
+
+    const env = decodeIndex(stamper.stamp(chunk).index)
+    expect(env.bucket).toBe(BUCKET)
+    expect(env.slot).toBe(1)
+  })
+
+  it("defaults a marked reserved chunk to the bound partition's slot", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    const BUCKET = 0x4321
+    const chunk = makeChunkInBucket(BUCKET, 9)
+    stamper.markReservedUtilizationChunk(chunk.hash())
+
+    const env = decodeIndex(stamper.stamp(chunk).index)
+    expect(env.slot).toBe(1)
+  })
 })
 
 describe("UtilizationAwareStamper synced reference", () => {

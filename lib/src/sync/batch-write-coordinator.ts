@@ -263,14 +263,27 @@ export class BatchWriteCoordinator {
     if (lease) {
       const localCounter = stamper.getLocalCounter()
       if (localCounter !== undefined) {
-        void lease
-          .release(localCounter)
-          .catch((err) =>
-            console.warn(
-              "[BatchWriteCoordinator] Partition lease release failed:",
-              err,
-            ),
-          )
+        // Serialize the detached release under the batch write lock (#349):
+        // a successor coordinator's acquire (`startLease`/`withWrite` →
+        // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
+        // release's publish + sentinel fully complete BEFORE the successor
+        // can read or write the lock SOC — the sentinel's postage stamp is
+        // minted strictly before the successor's claim stamp, and Bee's
+        // newer-stamp-wins replacement keeps the claim. The generation fence
+        // in `releasePartitionLock` covers writers outside this lock. (In
+        // non-browser contexts the lock no-ops; only `oneshot` mode runs
+        // there and it never releases.)
+        //
+        // The release runs AFTER the synchronous unbind below — the publish
+        // goes through an unbound stamper, which is safe because
+        // `writePartitionState` marks its chunks with the explicit partition
+        // slot.
+        void this.lock(() => lease.release(localCounter)).catch((err) =>
+          console.warn(
+            "[BatchWriteCoordinator] Partition lease release failed:",
+            err,
+          ),
+        )
       }
       // Invalidate BEFORE unbinding (same ordering as the displacement race
       // fix): teardown runs synchronously, off the write lock, so it can land
