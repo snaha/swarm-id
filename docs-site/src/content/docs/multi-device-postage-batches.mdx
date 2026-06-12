@@ -198,11 +198,41 @@ redundant with `holderDeviceId`. It is stored anyway because the `generation` is
 fencing token attributable to whoever wrote the SOC** — a different question from `holderDeviceId`
 ("who holds it now"), and `compareGenerations` orders writers purely from the token without
 re-hashing or reading `holderDeviceId`. The two diverge at the **release sentinel**: a release sets
-`holderDeviceId = ""` but advances the generation with the _releasing_ device's tiebreaker, so it
-cannot be recovered from `holderDeviceId` (deriving it would yield `keccak256("")[0:8]`,
-attributable to no device). Storing it costs 16 hex chars and keeps the comparator decoupled from
-device-ID semantics.
+`holderDeviceId = ""` but carries the **released claim's** generation (whose tiebreaker is the
+releasing device's, since claims always mint their own), so it cannot be recovered from
+`holderDeviceId` (deriving it would yield `keccak256("")[0:8]`, attributable to no device).
+Storing it costs 16 hex chars and keeps the comparator decoupled from device-ID semantics.
 :::
+
+### Release protocol (generation-fenced)
+
+A release is an action on a **specific claim**, not on the partition: the sentinel carries
+the generation of the claim it releases — never a fresh one — so any later claim
+(a successor on the same device, or a peer) is logically newer than the release. Before
+writing, the releaser re-reads the lock and **skips the sentinel** when the lock no longer
+carries the claim being released:
+
+- an existing sentinel (any generation) — already released; rewriting would mint a fresh
+  postage stamp that could clobber a claim landing in between;
+- a foreign claim, live or expired — never clobber a peer (expired already reads as
+  takeable);
+- our own claim with a **newer** generation — a successor re-acquired while the release
+  was publishing.
+
+Our own claim at a non-newer generation writes (`<=`, not `==`): a stale read returning an
+older refresh of the same holdership must not suppress the release. This matters because
+Bee replaces a same-address SOC whenever the new chunk's **postage stamp timestamp** is
+newer — without the fence, a detached release outliving a same-device re-acquire would
+deterministically clobber the successor's claim and peers would read the partition as
+free (turning one writer into two). In the reference implementation the sign-out release
+is additionally serialized under the same origin-wide write lock the acquire path uses,
+so its sentinel's stamp is always minted before a successor's claim stamp. A holder that
+nevertheless sights a sentinel on its own partition re-asserts its claim at the next
+upload or refresh tick.
+
+Residual (accepted): a releaser whose node serves a stale view (e.g. a caching gateway
+that never re-fetches) can still write its fenced sentinel over a peer claim it cannot
+see; recovery is the displaced peer's refresh re-assert, bounded by `LEASE_REFRESH_MS`.
 
 ### Acquire / refresh protocol
 
@@ -343,10 +373,14 @@ The reference orchestrator is `PartitionLease`. Constants:
    `blocked`/`lost-race`, fall back to read-only.
 
 `refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil`; returns
-false (lease lost) on `blocked`/`lost-race`. `release(localCounter)` publishes the final
-counter to the partition-state feed, then writes the `holderDeviceId = ""` release
-sentinel. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a still-valid
-lease from a local cache without a Swarm round-trip (re-validated on the next refresh).
+false (lease lost) on `blocked`/`lost-race`/`aborted` (a refresh that overlaps an
+in-flight `release()` aborts before writing, so it cannot mint a ghost claim the fenced
+release would refuse to clear). `release(localCounter)` publishes the final counter to
+the partition-state feed, then writes the generation-fenced release sentinel (see
+"Release protocol" above) — skipped entirely when the lock no longer carries the claim
+being released. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a
+still-valid lease from a local cache without a Swarm round-trip (re-validated on the next
+refresh).
 
 ### The four cases
 
@@ -448,7 +482,10 @@ To interoperate with the reference implementation, an external client must:
    (`keccak256(deviceId)[0:8]`).
 3. **Implement the lock-SOC protocol**: identifier hash, SOC address, encrypted JSON
    payload, the read → guard (2 s) → verify acquire flow, generation fencing, and the
-   `""` release sentinel.
+   **generation-fenced** `""` release sentinel — the sentinel carries the released
+   claim's generation and is skipped when the lock no longer carries that claim. A port
+   that mints fresh sentinel generations or releases unconditionally re-introduces the
+   stale-release claim-clobbering race (#349).
 4. **Implement the slot formula** `slot = K + p + K·j` and route lock-SOC/counter chunks to
    reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
 5. **Implement the partition-state feed**: topic hash, the reference-chunk →
