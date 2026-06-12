@@ -31,7 +31,10 @@ import {
 import { Binary } from "cafe-utility"
 import { z } from "zod"
 import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
-import { BasicEpochUpdater } from "../proxy/feeds/epochs/updater"
+import {
+  BasicEpochUpdater,
+  epochSocAddress,
+} from "../proxy/feeds/epochs/updater"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
@@ -143,13 +146,14 @@ export async function readPartitionState(
   const finder = new AsyncEpochFinder(bee, topic, owner)
   const now = BigInt(Math.floor(Date.now() / 1000))
 
-  const refBytes = await finder.findAt(now)
+  const entry = await finder.findAtWithMetadata(now)
 
-  if (!refBytes) {
+  if (!entry) {
     // No prior state — start fresh from zero.
     return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
   }
 
+  const refBytes = entry.reference
   const referenceHex = Binary.uint8ArrayToHex(refBytes)
 
   // Cache hit: the feed still points to the reference this device's local
@@ -206,6 +210,22 @@ export async function readPartitionState(
     // cache this reference as "synced" (it would skip a needed future download).
     return { unchanged: false, readFailed: true }
   }
+
+  // Compensate for the feed entry's own SOC: `writePartitionState` extracts
+  // and uploads the counter snapshot FIRST and writes the feed SOC LAST, so
+  // the feed SOC consumed one data slot — `slot(snapshot[bucket])` of its own
+  // address's bucket — that the snapshot does not record. Resuming without
+  // this +1 would place the next data chunk in that bucket onto the feed
+  // SOC's exact slot, evicting the feed entry from the reserve (Bee replaces
+  // the older chunk at a colliding stamp index) and breaking later feed
+  // walks. The bump is unconditional: if a future writer ever pre-accounted
+  // the slot, the +1 merely wastes one slot in one bucket. Only this (the
+  // latest) entry needs compensation — earlier entries were compensated by
+  // the readers that consumed them. NOTE: the `unchanged` short-circuit above
+  // must NOT bump — the caller's live counter already includes the increment
+  // made when the feed SOC was stamped.
+  const feedSocAddr = await epochSocAddress(topic, entry.epoch, owner)
+  localCounter[toBucket(feedSocAddr)] += 1
 
   return { localCounter, referenceHex, unchanged: false }
 }

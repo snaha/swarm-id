@@ -32,6 +32,7 @@ import {
   PARTITION_COUNT,
   NUM_BUCKETS,
   getChunkLayout,
+  toBucket,
 } from "../utils/batch-utilization"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import { uploadData, type UploadTarget } from "../proxy/upload"
@@ -77,6 +78,24 @@ async function uploadEncryptedBlob(
     deferred: false,
   })
   return encrypted.reference.toUint8Array()
+}
+
+/**
+ * Bucket of the partition-state feed's LATEST entry SOC — the bucket
+ * `readPartitionState` compensates with +1 (the entry's own SOC consumed an
+ * unrecorded data slot there; see partition-state.ts).
+ */
+async function feedSocBucket(partition: number): Promise<number> {
+  const { makePartitionStateTopic } = await import("./partition-state")
+  const { AsyncEpochFinder, epochSocAddress } =
+    await import("../proxy/feeds/epochs")
+  const topic = makePartitionStateTopic(TEST_BATCH_ID, partition)
+  const finder = new AsyncEpochFinder(bee as unknown as Bee, topic, OWNER)
+  const entry = await finder.findAtWithMetadata(
+    BigInt(Math.floor(Date.now() / 1000)),
+  )
+  const addr = await epochSocAddress(topic, entry!.epoch, OWNER)
+  return toBucket(addr)
 }
 
 function makeLease(opts: {
@@ -147,9 +166,38 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     })
 
     expect(result.unchanged).toBe(false)
-    expect(result.localCounter![100]).toBe(5)
-    expect(result.localCounter![200]).toBe(12)
-    expect(result.localCounter![0]).toBe(0)
+    // The read equals the published snapshot plus exactly one compensation:
+    // +1 in the bucket of the feed entry's own SOC, whose data slot the
+    // publish-then-update-feed ordering left unrecorded. Resuming there
+    // without the +1 would overstamp (and evict) the feed entry itself.
+    const expected = localCounter.slice()
+    expected[await feedSocBucket(0)] += 1
+    expect(result.localCounter).toEqual(expected)
+  })
+
+  it("derives the same feed-entry SOC address the updater actually wrote", async () => {
+    const { makePartitionStateTopic } = await import("./partition-state")
+    const { BasicEpochUpdater, EpochIndex, epochSocAddress } =
+      await import("../proxy/feeds/epochs")
+
+    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
+    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
+    const result = await updater.update(
+      BigInt(Math.floor(Date.now() / 1000)),
+      new Uint8Array(64).fill(0x11),
+      {
+        mode: "stamper",
+        bee: bee as unknown as Bee,
+        stamper: createMockStamper() as unknown as Stamper,
+      },
+    )
+
+    const derived = await epochSocAddress(
+      topic,
+      new EpochIndex(result.epoch.start, result.epoch.level),
+      OWNER,
+    )
+    expect(derived).toEqual(result.socAddress)
   })
 
   it("skips the reference + counter-chunk downloads when the feed reference is unchanged", async () => {
@@ -180,7 +228,9 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       batchDepth: TEST_BATCH_DEPTH,
     })
     expect(full.unchanged).toBe(false)
-    expect(full.localCounter![100]).toBe(5)
+    const expected = localCounter.slice()
+    expected[await feedSocBucket(0)] += 1
+    expect(full.localCounter).toEqual(expected)
     expect(full.referenceHex).toBe(writtenRef)
     const callsForFullRead = getSpy.mock.calls.length
 
