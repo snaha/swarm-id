@@ -47,8 +47,9 @@ Master Key (from Passkey/SIWE challenge)
 
 ```bash
 pnpm install          # Install dependencies
-pnpm dev              # Start demo (:3000) + legacy identity UI (:5174)
-pnpm dev:ui           # Start the new identity UI (:5175)
+pnpm dev:new          # Start the new identity UI (:5500) + demo (:3500) against it
+pnpm dev:legacy       # Start the legacy identity UI (:5510) + demo (:3000) against it
+pnpm dev              # Alias for dev:legacy
 pnpm build            # Build everything
 pnpm check:all        # All CI checks (format, lint, typecheck, knip)
 pnpm clean            # Clean build outputs
@@ -67,8 +68,6 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 ## New UI (`ui/`)
 
 The new identity UI is a fresh SvelteKit product replacing `swarm-ui/` screen by screen.
-Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy") — read frames via the
-Figma MCP (requires the file open in the Figma desktop app).
 
 - **Stack**: SvelteKit (Svelte 5 runes) + `@sveltejs/adapter-static` (pure SPA, `ssr = false`),
   Tailwind CSS v4 via `@tailwindcss/vite`, shadcn-svelte-style components (hand-written, no bits-ui)

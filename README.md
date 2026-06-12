@@ -90,7 +90,7 @@ pnpm dev
 Open http://localhost:3000 - that's it!
 
 - Demo app runs on port 3000
-- Identity UI runs on port 5174
+- Identity UI runs on port 5510
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
 **Note:** Safari operates in download-only mode — authentication and downloads work, but uploads are disabled due to ITP storage partitioning. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
@@ -98,13 +98,18 @@ Open http://localhost:3000 - that's it!
 ### Development Mode (with hot reload)
 
 ```bash
-# Start both demo and legacy identity UI
-pnpm dev
+# Start the full stack against the new identity UI (ui :5500 + demo :3500)
+pnpm dev:new
+
+# Start the full stack against the legacy identity UI (swarm-ui :5510 + demo :3000)
+pnpm dev:legacy      # `pnpm dev` is an alias
 
 # Or start individually
-pnpm dev:ui          # New identity UI on port 5175
-pnpm dev:swarm-ui    # Legacy identity UI on port 5174
-pnpm dev:demo        # Demo on port 3000
+pnpm dev:ui:new      # New identity UI on port 5500
+pnpm dev:ui:legacy   # Legacy identity UI on port 5510
+pnpm dev:demo:new    # Demo on port 3500, connected to the new identity UI (:5500)
+pnpm dev:demo:legacy # Demo on port 3000, connected to the legacy identity UI (:5510)
+pnpm dev:demo        # Demo on port 3000, identity UI origin from demo/.env (legacy)
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
 ```
 
@@ -138,7 +143,7 @@ pnpm dev:bee:fresh
 
 The easiest way is to use the Developer Tools page in the Identity UI:
 
-1. Navigate to http://localhost:5174/dev
+1. Navigate to http://localhost:5510/dev
 2. Go to the **Stamps** tab
 3. Click **Buy Stamp** with the default settings
 
@@ -158,7 +163,7 @@ See the [Local Development guide](https://swarm.snaha.net/docs/local-development
 
 ### Developer Tools (/dev route)
 
-The Identity UI includes a Developer Tools page at http://localhost:5174/dev with utilities for local development:
+The Identity UI includes a Developer Tools page at http://localhost:5510/dev with utilities for local development:
 
 - **Overview**: Quick start guide and local Bee endpoint links with copy buttons
 - **Stamps**: Buy postage stamps from the local Bee node using pre-funded signer keys
@@ -180,7 +185,7 @@ The Identity UI includes a Developer Tools page at http://localhost:5174/dev wit
 
 ### Demo not loading
 
-- Check if ports 3000 and 5174 are already in use: `lsof -i :3000 -i :5174`
+- Check if ports 3000 and 5510 are already in use: `lsof -i :3000 -i :5510`
 - Ensure both servers are running: `pnpm dev`
 
 ### Authentication popup blocked

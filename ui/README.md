@@ -17,9 +17,9 @@ Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy").
 ## Development
 
 ```bash
-pnpm --filter @swarm-id/ui dev      # http://localhost:5175
+pnpm --filter @swarm-id/ui dev      # http://localhost:5500
 # or from the repo root:
-pnpm dev:ui
+pnpm dev:ui:new
 ```
 
 ## Build

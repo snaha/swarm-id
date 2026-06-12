@@ -284,6 +284,16 @@ importers:
         version: 4.1.13
 
   ui:
+    dependencies:
+      '@ethersphere/bee-js':
+        specifier: ^11.1.1
+        version: 11.1.1
+      '@snaha/swarm-id':
+        specifier: workspace:*
+        version: link:../lib
+      ethers:
+        specifier: 6.15.0
+        version: 6.15.0
     devDependencies:
       '@eslint/js':
         specifier: 9.39.1

@@ -1,39 +1,58 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-type Theme = 'light' | 'dark'
+/** User-selectable appearance preference. "auto" follows the OS setting. */
+export type ThemePreference = 'auto' | 'light' | 'dark'
 
-const STORAGE_KEY = 'swarm-ui-theme'
+// Not the old 'swarm-ui-theme' key: earlier deployments auto-persisted the
+// OS-resolved theme there on every first visit, so its value can't be told
+// apart from an explicit user choice. A fresh key starts everyone on 'auto'.
+const STORAGE_KEY = 'swarm-id-theme'
+const DARK_QUERY = '(prefers-color-scheme: dark)'
 
 function createThemeStore() {
-  let theme = $state<Theme>('light')
+  let preference = $state<ThemePreference>('auto')
+  let initialized = false
 
-  function apply(next: Theme) {
-    theme = next
-    document.documentElement.classList.toggle('dark', next === 'dark')
-    localStorage.setItem(STORAGE_KEY, next)
+  function systemPrefersDark(): boolean {
+    return window.matchMedia(DARK_QUERY).matches
+  }
+
+  /** Resolve the preference to a concrete theme and reflect it on the document. */
+  function applyToDocument() {
+    const dark = preference === 'dark' || (preference === 'auto' && systemPrefersDark())
+    document.documentElement.classList.toggle('dark', dark)
   }
 
   function init() {
-    const stored = localStorage.getItem(STORAGE_KEY)
-    if (stored === 'dark' || stored === 'light') {
-      apply(stored)
+    if (initialized) {
       return
     }
-    const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches
-    apply(prefersDark ? 'dark' : 'light')
+    initialized = true
+    const stored = localStorage.getItem(STORAGE_KEY)
+    preference = stored === 'dark' || stored === 'light' || stored === 'auto' ? stored : 'auto'
+    applyToDocument()
+
+    // While on "auto", track live OS theme changes.
+    window.matchMedia(DARK_QUERY).addEventListener('change', () => {
+      if (preference === 'auto') {
+        applyToDocument()
+      }
+    })
   }
 
-  function toggle() {
-    apply(theme === 'dark' ? 'light' : 'dark')
+  function set(next: ThemePreference) {
+    preference = next
+    localStorage.setItem(STORAGE_KEY, next)
+    applyToDocument()
   }
 
   return {
-    get current() {
-      return theme
+    get preference() {
+      return preference
     },
     init,
-    toggle,
+    set,
   }
 }
 
