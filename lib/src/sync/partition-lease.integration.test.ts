@@ -418,7 +418,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     expect(lock).toBeUndefined()
   })
 
-  it("falls back to a fresh counter when the reference chunk has the wrong length", async () => {
+  it("reports readFailed when the reference chunk has the wrong length", async () => {
     const { readPartitionState, makePartitionStateTopic } =
       await import("./partition-state")
     const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
@@ -430,8 +430,9 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     }
 
     // A readable chunk that is NOT numUtilizationChunks × 64 bytes — e.g. an
-    // entry written by a buggy or older writer. Reads must fail safe, not
-    // silently slice short/empty references out of it.
+    // entry written by a buggy or older writer. Reads must fail safe: the
+    // feed HAS an entry, so the partition has a real resume point — a zero
+    // counter would re-issue every used slot.
     const malformedRef = await uploadEncryptedBlob(
       target,
       new Uint8Array(32).fill(7),
@@ -452,13 +453,13 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       batchDepth: TEST_BATCH_DEPTH,
     })
 
-    expect(result.unchanged).toBe(false)
+    expect(result.readFailed).toBe(true)
+    expect(result.localCounter).toBeUndefined()
     // The failed read must not be cached as "synced".
     expect(result.referenceHex).toBeUndefined()
-    expect(result.localCounter!.every((c) => c === 0)).toBe(true)
   })
 
-  it("falls back to a fresh counter when a counter chunk has the wrong length", async () => {
+  it("reports readFailed when a counter chunk has the wrong length", async () => {
     const { readPartitionState, makePartitionStateTopic } =
       await import("./partition-state")
     const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
@@ -471,7 +472,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
 
     // A correctly-sized reference chunk whose entries all point at a counter
     // chunk of the wrong length (100 bytes instead of CHUNK_SIZE). mergeChunk
-    // must reject it and the read must fall back to a fresh counter.
+    // must reject it and the read must fail safe (readFailed, no zero-seed).
     const shortCounterRef = await uploadEncryptedBlob(
       target,
       new Uint8Array(100).fill(1),
@@ -498,9 +499,9 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       batchDepth: TEST_BATCH_DEPTH,
     })
 
-    expect(result.unchanged).toBe(false)
+    expect(result.readFailed).toBe(true)
+    expect(result.localCounter).toBeUndefined()
     expect(result.referenceHex).toBeUndefined()
-    expect(result.localCounter!.every((c) => c === 0)).toBe(true)
   })
 
   it("rejects publishing a counter with the wrong length", async () => {

@@ -66,7 +66,8 @@ const UINT32_BYTES = 4
  * collides with v1 readers.
  *
  * `readPartitionState` validates the assembled counter against this schema
- * before returning it; a failure falls back to a fresh zero counter.
+ * before returning it; a failure is reported as `readFailed` (fail-safe —
+ * never a zero counter, which would re-issue used slots).
  * `writePartitionState` validates its input against it before publishing.
  */
 export const PartitionStateSchemaV1 = z.object({
