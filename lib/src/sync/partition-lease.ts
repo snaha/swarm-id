@@ -35,10 +35,9 @@ import {
 } from "../utils/batch-utilization"
 import {
   acquirePartitionLock,
-  makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
   readPartitionLock,
-  writePartitionLock,
+  releasePartitionLock,
   type PartitionLockGeneration,
   type PartitionLockPayload,
 } from "./partition-lock"
@@ -97,6 +96,14 @@ export class PartitionLease {
   private self: SelfLease | undefined
   /** Per-partition holders observed by the last `refreshFromSwarm()`. */
   private holders = new Map<number, PartitionHolderEntry>()
+  /**
+   * Set at the start of `release()` (the lease session is closing) and
+   * cleared by the next `acquire()`. While set, an overlapping `refresh()`
+   * aborts before its claim write — otherwise it could mint a ghost claim
+   * NEWER than the generation the in-flight release is fenced to, which the
+   * release would then refuse to clear (peers would wait out the TTL).
+   */
+  private closed = false
 
   constructor(
     private readonly opts: {
@@ -231,6 +238,9 @@ export class PartitionLease {
     snapshot: PartitionLeaseSnapshotInputs,
   ): Promise<AcquireResult> {
     const { partitionCount } = snapshot
+
+    // A new acquisition opens a new lease session.
+    this.closed = false
 
     if (partitionCount <= 1) {
       return {
@@ -382,32 +392,40 @@ export class PartitionLease {
   /**
    * Re-run the lock protocol on the currently-held partition to bump
    * `leasedUntil`. Returns `false` when we don't hold a lease (legacy mode)
-   * or the lock protocol returned `blocked` / `lost-race` — the caller
-   * should treat that as "lease lost".
+   * or the lock protocol returned `blocked` / `lost-race` / `aborted` — the
+   * caller should treat that as "lease lost".
    */
   async refresh(): Promise<boolean> {
     if (!this.self) return false
+    const partition = this.self.partition
     const { stamper } = this.requireWriteContext()
     const lockResult = await acquirePartitionLock({
       bee: this.opts.bee,
       stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
-      partition: this.self.partition,
+      partition,
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
       guardMs: this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS,
       now: () => this.now(),
+      // A release closes the lease session; a refresh that overlaps it must
+      // not mint a fresh ghost claim — the generation-fenced release would
+      // refuse to clear it and peers would wait out the TTL.
+      shouldAbort: () => this.closed,
     })
+    // `release()` can complete during the guard window above and null
+    // `this.self` — re-check before dereferencing it.
+    if (!this.self) return false
     if (lockResult.outcome !== "acquired" || !lockResult.payload) {
       console.warn(
-        `[PartitionLease] Refresh on partition ${this.self.partition} returned ${lockResult.outcome}.`,
+        `[PartitionLease] Refresh on partition ${partition} returned ${lockResult.outcome}.`,
       )
       return false
     }
     const payload = lockResult.payload
     this.self = {
-      partition: this.self.partition,
+      partition,
       generation: payload.generation,
       acquiredAt: payload.acquiredAt,
       leasedUntil: payload.leasedUntil,
@@ -417,12 +435,20 @@ export class PartitionLease {
 
   /**
    * Publish the final local counter on the partition-state feed, then
-   * write a `holderDeviceId: ""` sentinel to the lock SOC so peers see
-   * an immediate, authoritative release. No-op when no lease is held.
+   * write the generation-fenced release sentinel to the lock SOC so peers
+   * see an immediate, authoritative release. The sentinel carries the
+   * generation of the claim being released (captured BEFORE the slow
+   * publish) and is skipped entirely when the lock no longer carries that
+   * claim — a detached release outliving a same-device re-acquire must not
+   * clobber the successor's claim (#349). No-op when no lease is held.
    */
   async release(localCounter: Uint32Array): Promise<void> {
     if (!this.self) return
-    const partition = this.self.partition
+    // Capture the claim being released before anything slow happens: the
+    // sentinel fences exactly this claim, and `closed` stops a concurrent
+    // refresh from minting a newer ghost claim mid-release.
+    const { partition, generation, acquiredAt } = this.self
+    this.closed = true
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
 
     const published = await writePartitionState({
@@ -445,24 +471,20 @@ export class PartitionLease {
       await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
     }
 
-    const releasePayload: PartitionLockPayload = {
-      holderDeviceId: NO_HOLDER_DEVICE_ID,
-      generation: {
-        timestampMs: this.now(),
-        tiebreaker: makeDeviceTiebreaker(this.opts.deviceId),
-      },
-      acquiredAt: this.self.acquiredAt,
-      leasedUntil: this.now(),
-    }
-    await writePartitionLock({
+    await releasePartitionLock({
       bee: this.opts.bee,
       stamper,
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
       partition,
-      payload: releasePayload,
+      deviceId: this.opts.deviceId,
+      releasedGeneration: generation,
+      acquiredAt,
+      now: () => this.now(),
     })
 
+    // The lease session is over on BOTH outcomes — "skipped" means a
+    // successor or peer owns the lock now, which releases us just the same.
     this.self = undefined
     this.holders.delete(partition)
   }

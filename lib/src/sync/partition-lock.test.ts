@@ -20,8 +20,10 @@ import {
   makeDeviceTiebreaker,
   makePartitionLockIdentifier,
   readPartitionLock,
+  releasePartitionLock,
   writePartitionLock,
   NO_HOLDER_DEVICE_ID,
+  type PartitionLockGeneration,
   type PartitionLockPayload,
 } from "./partition-lock"
 import { PartitionLockPayloadSchemaV1 } from "../schemas"
@@ -838,6 +840,219 @@ describe("acquirePartitionLock — known failure modes", () => {
     waitA.release()
     const rA = await pA
     expect(rA.outcome).toBe("acquired") // wrong answer
+  })
+})
+
+describe("acquirePartitionLock — shouldAbort", () => {
+  it("aborts before writing when shouldAbort returns true", async () => {
+    const result = await acquirePartitionLock({
+      ...commonOpts(DEVICE_A, { now: () => 1_000_000 }),
+      shouldAbort: () => true,
+    })
+    expect(result.outcome).toBe("aborted")
+    expect(store.size()).toBe(0) // nothing written
+    expect(
+      await readPartitionLock({
+        bee: bee as unknown as Bee,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        partition: PARTITION,
+      }),
+    ).toBeUndefined()
+  })
+
+  it("acquires normally when shouldAbort returns false", async () => {
+    const result = await acquirePartitionLock({
+      ...commonOpts(DEVICE_A, { now: () => 1_000_000 }),
+      shouldAbort: () => false,
+    })
+    expect(result.outcome).toBe("acquired")
+  })
+})
+
+describe("releasePartitionLock — generation fencing", () => {
+  const NOW = 1_000_000
+
+  function gen(timestampMs: number, deviceId: string): PartitionLockGeneration {
+    return { timestampMs, tiebreaker: makeDeviceTiebreaker(deviceId) }
+  }
+
+  function seedLock(payload: PartitionLockPayload): Promise<void> {
+    return writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      payload,
+    })
+  }
+
+  function release(
+    deviceId: string,
+    releasedGeneration: PartitionLockGeneration,
+  ) {
+    return releasePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId,
+      releasedGeneration,
+      acquiredAt: NOW - 10_000,
+      now: () => NOW,
+    })
+  }
+
+  function readLock() {
+    return readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+    })
+  }
+
+  it("writes a sentinel carrying the RELEASED claim's generation (not a fresh one)", async () => {
+    const g = gen(NOW - 5_000, DEVICE_A)
+    await seedLock({
+      holderDeviceId: DEVICE_A,
+      generation: g,
+      acquiredAt: NOW - 10_000,
+      leasedUntil: NOW + TTL_MS,
+    })
+
+    const result = await release(DEVICE_A, g)
+    expect(result.outcome).toBe("released")
+
+    const lock = await readLock()
+    expect(lock?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
+    // L1: the sentinel is fenced to the claim it releases — any later claim
+    // (successor or peer) is logically newer than it.
+    expect(lock?.generation).toEqual(g)
+  })
+
+  it("writes when the visible claim is our own OLDER generation (stale read must not skip)", async () => {
+    await seedLock({
+      holderDeviceId: DEVICE_A,
+      generation: gen(NOW - 20_000, DEVICE_A),
+      acquiredAt: NOW - 30_000,
+      leasedUntil: NOW + TTL_MS,
+    })
+
+    // We refreshed since (newer generation) but the read shows the older
+    // write — releasing is still correct: the claim is ours.
+    const result = await release(DEVICE_A, gen(NOW - 5_000, DEVICE_A))
+    expect(result.outcome).toBe("released")
+    expect((await readLock())?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
+  })
+
+  it("skips when our own NEWER claim is visible (successor re-acquired — #349)", async () => {
+    const successorGen = gen(NOW - 1_000, DEVICE_A)
+    await seedLock({
+      holderDeviceId: DEVICE_A,
+      generation: successorGen,
+      acquiredAt: NOW - 1_000,
+      leasedUntil: NOW + TTL_MS,
+    })
+
+    const result = await release(DEVICE_A, gen(NOW - 20_000, DEVICE_A))
+    expect(result.outcome).toBe("skipped")
+    expect(result.observed?.generation).toEqual(successorGen)
+
+    const lock = await readLock()
+    expect(lock?.holderDeviceId).toBe(DEVICE_A) // claim untouched
+    expect(lock?.generation).toEqual(successorGen)
+  })
+
+  it("skips when a live foreign holder exists", async () => {
+    await seedLock({
+      holderDeviceId: DEVICE_B,
+      generation: gen(NOW - 1_000, DEVICE_B),
+      acquiredAt: NOW - 1_000,
+      leasedUntil: NOW + TTL_MS,
+    })
+
+    const result = await release(DEVICE_A, gen(NOW - 20_000, DEVICE_A))
+    expect(result.outcome).toBe("skipped")
+    expect((await readLock())?.holderDeviceId).toBe(DEVICE_B)
+  })
+
+  it("skips when an expired foreign claim exists", async () => {
+    await seedLock({
+      holderDeviceId: DEVICE_B,
+      generation: gen(NOW - TTL_MS * 3, DEVICE_B),
+      acquiredAt: NOW - TTL_MS * 3,
+      leasedUntil: NOW - TTL_MS, // expired — already reads as takeable
+    })
+
+    const result = await release(DEVICE_A, gen(NOW - 20_000, DEVICE_A))
+    expect(result.outcome).toBe("skipped")
+    expect((await readLock())?.holderDeviceId).toBe(DEVICE_B)
+  })
+
+  it("skips when a sentinel is already present — even one with the same generation", async () => {
+    const g = gen(NOW - 5_000, DEVICE_A)
+    await seedLock({
+      holderDeviceId: NO_HOLDER_DEVICE_ID,
+      generation: g,
+      acquiredAt: NOW - 10_000,
+      leasedUntil: NOW - 5_000,
+    })
+    const sizeBefore = store.size()
+
+    // Re-releasing the same claim must not re-write: the fresh stamp could
+    // clobber a claim that landed between the read and the write.
+    const result = await release(DEVICE_A, g)
+    expect(result.outcome).toBe("skipped")
+    expect(store.size()).toBe(sizeBefore)
+  })
+
+  it("writes when the lock is missing or unreadable (best-effort release)", async () => {
+    const result = await release(DEVICE_A, gen(NOW - 5_000, DEVICE_A))
+    expect(result.outcome).toBe("released")
+    expect(result.observed).toBeUndefined()
+    expect((await readLock())?.holderDeviceId).toBe(NO_HOLDER_DEVICE_ID)
+  })
+})
+
+describe("acquirePartitionLock — verify vs fenced sentinels", () => {
+  it("an older-generation sentinel landing during the guard does not cause a false lost-race", async () => {
+    const waitA = controlledWait()
+    const NOW = 1_000_000
+
+    const acquireA = acquirePartitionLock({
+      ...commonOpts(DEVICE_A, { now: () => NOW }),
+      wait: waitA.fn,
+    })
+    await waitA.triggered
+
+    // A stale generation-fenced release (of some EARLIER claim) lands while
+    // A is parked in its guard window. Under the old fresh-generation
+    // sentinel this read back as a HIGHER generation → false lost-race →
+    // spurious read-only. The fenced sentinel is older → A's claim stands.
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      payload: {
+        holderDeviceId: NO_HOLDER_DEVICE_ID,
+        generation: {
+          timestampMs: NOW - 60_000,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+        },
+        acquiredAt: NOW - 90_000,
+        leasedUntil: NOW - 60_000,
+      },
+    })
+
+    waitA.release()
+    const result = await acquireA
+    expect(result.outcome).toBe("acquired")
+    expect(result.payload?.holderDeviceId).toBe(DEVICE_A)
   })
 })
 
