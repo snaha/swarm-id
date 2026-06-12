@@ -29,6 +29,7 @@ import {
   type Stamper,
 } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
+import { z } from "zod"
 import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
 import { BasicEpochUpdater } from "../proxy/feeds/epochs/updater"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
@@ -52,6 +53,26 @@ const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v1"
 
 /** Bytes to encode `partition` as big-endian uint32. */
 const UINT32_BYTES = 4
+
+/**
+ * Schema for the *decoded* partition state: the per-bucket counter
+ * reconstructed from the binary wire format (reference chunk → counter
+ * chunks, see the module doc above for the byte layout). The wire format is
+ * versioned by the feed topic domain (`PARTITION_STATE_TOPIC_DOMAIN`), not an
+ * in-blob version byte — a future v2 publishes under a v2 topic and never
+ * collides with v1 readers.
+ *
+ * `readPartitionState` validates the assembled counter against this schema
+ * before returning it; a failure falls back to a fresh zero counter.
+ * `writePartitionState` validates its input against it before publishing.
+ */
+export const PartitionStateSchemaV1 = z.object({
+  counters: z.instanceof(Uint32Array).refine((c) => c.length === NUM_BUCKETS, {
+    message: `counters must have ${NUM_BUCKETS} entries`,
+  }),
+})
+
+export type PartitionState = z.infer<typeof PartitionStateSchemaV1>
 
 /**
  * Build the per-partition state feed topic.
@@ -147,6 +168,12 @@ export async function readPartitionState(
       new Reference(refBytes).toHex(),
     )
     const { numUtilizationChunks } = getChunkLayout(batchDepth)
+    const expectedLength = numUtilizationChunks * ENCRYPTED_REFERENCE_BYTES
+    if (referenceChunk.length !== expectedLength) {
+      throw new Error(
+        `reference chunk has ${referenceChunk.length} bytes, expected ${expectedLength} (${numUtilizationChunks} × ${ENCRYPTED_REFERENCE_BYTES})`,
+      )
+    }
     for (let i = 0; i < numUtilizationChunks; i++) {
       const ref = referenceChunk.slice(
         i * ENCRYPTED_REFERENCE_BYTES,
@@ -158,6 +185,7 @@ export async function readPartitionState(
       )
       mergeChunk(localCounter, i, chunkData, batchDepth)
     }
+    PartitionStateSchemaV1.parse({ counters: localCounter })
   } catch (err) {
     console.warn(
       `[partition-state] reading partition ${partition} counter failed; seeding a fresh counter:`,
@@ -201,11 +229,7 @@ export async function writePartitionState(opts: {
     backupSigner,
   } = opts
 
-  if (localCounter.length !== NUM_BUCKETS) {
-    throw new Error(
-      `localCounter must have ${NUM_BUCKETS} entries, got ${localCounter.length}`,
-    )
-  }
+  PartitionStateSchemaV1.parse({ counters: localCounter })
 
   const { numUtilizationChunks } = getChunkLayout(batchDepth)
   const target: UploadTarget = { mode: "stamper", bee, stamper }
