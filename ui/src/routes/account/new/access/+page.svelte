@@ -53,7 +53,8 @@
   let showVerifyPassword = $state(false)
 
   let abortController: AbortController | undefined
-  let cancelled = false
+  /** Bumped on cancel/retry — a stale ceremony resolution must not finalize. */
+  let attempt = 0
 
   const passwordTooShort = $derived(password.length > 0 && password.length < MIN_PASSWORD_LENGTH)
   const passwordMismatch = $derived(verifyPassword.length > 0 && password !== verifyPassword)
@@ -81,67 +82,75 @@
       return
     }
     const wallet = walletFromPhrase(draft.phrase)
-    const restored = draft.restored
+    // Carry over data from a restore, or from an existing record for the same
+    // address — re-importing a phrase must not wipe stamps or connected apps.
+    const carried = draft.restored ?? accountsStore.get(wallet.address)
     const account = {
       id: wallet.address,
       name: draft.name,
       publicKey: wallet.publicKey,
-      createdAt: restored?.createdAt ?? Date.now(),
+      createdAt: carried?.createdAt ?? Date.now(),
       access,
       encryptedSeed: await encryptSeed(wallet.entropy, key),
-      appConnectionDays: restored?.appConnectionDays,
-      defaultStampBatchId: restored?.defaultStampBatchId,
-      stamps: restored?.stamps ?? [],
-      connectedApps: restored?.connectedApps ?? [],
+      appConnectionDays: carried?.appConnectionDays,
+      defaultStampBatchId: carried?.defaultStampBatchId,
+      stamps: carried?.stamps ?? [],
+      connectedApps: carried?.connectedApps ?? [],
     }
     accountsStore.add(account)
     sessionStore.setCurrentAccount(wallet.address)
     const flow = draft.flow
-    sessionStore.setCompletedFlow(flow)
-    sessionStore.clearDraft()
 
     // Came from a dApp connect popup — finish the handshake and hand back.
+    // The draft is cleared only once the handshake succeeded, so a failure
+    // leaves the Confirm buttons functional for a retry.
     const request = connectStore.request
     if (request) {
       await completeConnect(account, wallet.entropy, request)
+      sessionStore.setCompletedFlow(flow)
+      sessionStore.clearDraft()
       goto(resolve(routes.CONNECT_DONE))
       return
     }
 
-    goto(resolve(flow === 'create' ? '/account/new/done' : '/account/ready'))
+    sessionStore.setCompletedFlow(flow)
+    sessionStore.clearDraft()
+    goto(resolve(flow === 'create' ? routes.ACCOUNT_NEW_DONE : routes.ACCOUNT_READY))
   }
 
   async function confirmWithPasskey() {
+    const draft = sessionStore.draft
+    if (!draft) {
+      return
+    }
+    const myAttempt = ++attempt
     error = undefined
-    cancelled = false
     pending = 'passkey'
     abortController = new AbortController()
     try {
-      const draft = sessionStore.draft
-      if (!draft) {
-        return
-      }
       const passkey = await createPasskeyKey(draft.name, abortController.signal)
-      if (cancelled) {
+      if (myAttempt !== attempt) {
         return
       }
       await finalize({ type: 'passkey', credentialId: passkey.credentialId }, passkey.key)
     } catch (caught) {
-      if (!cancelled) {
+      if (myAttempt === attempt) {
         error = caught instanceof Error ? caught.message : 'Passkey creation failed.'
       }
     } finally {
-      pending = undefined
+      if (myAttempt === attempt) {
+        pending = undefined
+      }
     }
   }
 
   async function confirmWithWallet() {
+    const myAttempt = ++attempt
     error = undefined
-    cancelled = false
     pending = 'eth-wallet'
     try {
       const source = await requestWalletKeySource()
-      if (cancelled) {
+      if (myAttempt !== attempt) {
         return
       }
       const salt = randomSalt()
@@ -155,15 +164,20 @@
         key,
       )
     } catch (caught) {
-      if (!cancelled) {
+      if (myAttempt === attempt) {
         error = caught instanceof Error ? caught.message : 'Wallet signing failed.'
       }
     } finally {
-      pending = undefined
+      if (myAttempt === attempt) {
+        pending = undefined
+      }
     }
   }
 
   async function confirmWithPassword() {
+    if (busy) {
+      return
+    }
     error = undefined
     busy = true
     try {
@@ -181,7 +195,9 @@
   }
 
   function cancelPending() {
-    cancelled = true
+    // Invalidate the in-flight ceremony — wallet prompts can't be aborted, so
+    // a later approval of a cancelled prompt must not finalize.
+    attempt++
     abortController?.abort()
     pending = undefined
   }

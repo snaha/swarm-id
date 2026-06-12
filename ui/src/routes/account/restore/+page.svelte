@@ -17,7 +17,7 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Textarea } from '$lib/components/ui/textarea'
-  import { isBackupFile, restoreBackup } from '$lib/crypto/backup'
+  import { isBackupFile, isLegacyBackupFile, restoreBackup } from '$lib/crypto/backup'
   import { isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
   import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -25,10 +25,11 @@
   let fileInput = $state<HTMLInputElement>()
   let fileName = $state<string | undefined>(undefined)
   let fileContents = $state<string | undefined>(undefined)
-  let fileInvalid = $state(false)
+  let fileError = $state<string | undefined>(undefined)
   let phrase = $state('')
   let restoring = $state(false)
   let failed = $state(false)
+  let failureMessage = $state<string | undefined>(undefined)
 
   const phraseValid = $derived(isValidPhrase(phrase))
   const showInvalid = $derived(phrase.trim().length > 0 && !phraseValid)
@@ -42,10 +43,12 @@
     const contents = await file.text()
     if (!isBackupFile(contents)) {
       clearFile()
-      fileInvalid = true
+      fileError = isLegacyBackupFile(contents)
+        ? 'This backup is from the previous Swarm ID app and cannot be restored here. Sign in with your secret recovery phrase instead.'
+        : 'Invalid backup file'
       return
     }
-    fileInvalid = false
+    fileError = undefined
     fileName = file.name
     fileContents = contents
   }

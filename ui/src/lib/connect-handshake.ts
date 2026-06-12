@@ -14,7 +14,7 @@
  * Key hierarchy (master key = the account wallet's private key, matching
  * legacy agent accounts): master key → identity key → per-app secret.
  */
-import { EthAddress } from '@ethersphere/bee-js'
+import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import {
   DEFAULT_SESSION_DURATION,
   PARTITION_COUNT,
@@ -22,6 +22,7 @@ import {
   createAccountsStorageManager,
   createConnectedAppsStorageManager,
   createIdentitiesStorageManager,
+  createPostageStampsStorageManager,
   deriveAccountDerivationKey,
   deriveIdentityKey,
   deriveSecret,
@@ -45,18 +46,65 @@ function connectionDuration(account: Account): number {
     : DEFAULT_SESSION_DURATION
 }
 
+/** The stamp the proxy should upload with: the account default or its first stamp. */
+function defaultBatchId(account: Account): BatchId | undefined {
+  const batchId = account.defaultStampBatchId ?? account.stamps[0]?.batchId
+  return batchId === undefined ? undefined : new BatchId(batchId)
+}
+
+/** Mirror the account's stamps into the shared postage-stamps store the proxy reads. */
+function saveSharedStamps(account: Account): void {
+  if (account.stamps.length === 0) {
+    return
+  }
+  const manager = createPostageStampsStorageManager()
+  const mine = new Set(account.stamps.map((stamp) => bareHex(stamp.batchId)))
+  const others = manager.load().filter((stamp) => !mine.has(bareHex(stamp.batchID.toHex())))
+  manager.save([
+    ...others,
+    ...account.stamps.map((stamp) => ({
+      batchID: new BatchId(stamp.batchId),
+      signerKey: new PrivateKey(stamp.signerKey),
+      utilization: stamp.utilization,
+      usable: stamp.usable,
+      depth: stamp.depth,
+      amount: BigInt(stamp.amount),
+      bucketDepth: stamp.bucketDepth,
+      blockNumber: stamp.blockNumber,
+      immutableFlag: stamp.immutableFlag,
+      exists: stamp.exists,
+      batchTTL: stamp.batchTTL,
+      createdAt: stamp.createdAt,
+    })),
+  ])
+}
+
 /**
- * Ensure the shared `accounts` and `identities` records the proxy resolves a
- * connection against exist. The new UI has no separate identity concept, so
- * the account doubles as its single identity (identity id = account address).
+ * Upsert the shared `accounts`, `identities`, and `postageStamps` records the
+ * proxy resolves a connection (and its upload stamp) against. The new UI has
+ * no separate identity concept, so the account doubles as its single identity
+ * (identity id = account address).
  */
 async function saveSharedRecords(account: Account, masterKey: string): Promise<void> {
   const accountId = new EthAddress(account.id)
   const identityId = bareHex(account.id)
+  const stampBatchId = defaultBatchId(account)
 
   const accountsManager = createAccountsStorageManager()
   const sharedAccounts = accountsManager.load()
-  if (!sharedAccounts.some((shared) => shared.id.equals(accountId))) {
+  if (sharedAccounts.some((shared) => shared.id.equals(accountId))) {
+    accountsManager.save(
+      sharedAccounts.map((shared) =>
+        shared.id.equals(accountId)
+          ? {
+              ...shared,
+              name: account.name,
+              defaultPostageStampBatchID: stampBatchId ?? shared.defaultPostageStampBatchID,
+            }
+          : shared,
+      ),
+    )
+  } else {
     accountsManager.save([
       ...sharedAccounts,
       {
@@ -65,6 +113,7 @@ async function saveSharedRecords(account: Account, masterKey: string): Promise<v
         name: account.name,
         createdAt: account.createdAt,
         derivationKey: await deriveAccountDerivationKey(masterKey),
+        defaultPostageStampBatchID: stampBatchId,
         devices: [],
         partitionCount: PARTITION_COUNT,
       },
@@ -78,15 +127,31 @@ async function saveSharedRecords(account: Account, masterKey: string): Promise<v
   if (existing) {
     identitiesManager.save(
       identities.map((identity) =>
-        identity.id === identityId ? { ...identity, name: account.name, publicKey } : identity,
+        identity.id === identityId
+          ? {
+              ...identity,
+              name: account.name,
+              publicKey,
+              defaultPostageStampBatchID: stampBatchId ?? identity.defaultPostageStampBatchID,
+            }
+          : identity,
       ),
     )
   } else {
     identitiesManager.save([
       ...identities,
-      { id: identityId, accountId, name: account.name, publicKey, createdAt: account.createdAt },
+      {
+        id: identityId,
+        accountId,
+        name: account.name,
+        publicKey,
+        defaultPostageStampBatchID: stampBatchId,
+        createdAt: account.createdAt,
+      },
     ])
   }
+
+  saveSharedStamps(account)
 }
 
 /**
@@ -200,4 +265,81 @@ export function reuseConnection(account: Account, request: ConnectRequest): bool
   saveConnection(account, request, existing.appSecret)
   sendSecretToOpener(account, request, existing.appSecret)
   return true
+}
+
+function updateSharedConnections(
+  identityId: string,
+  matches: (app: SharedConnectedApp) => boolean,
+  change: (app: SharedConnectedApp) => SharedConnectedApp,
+): void {
+  const manager = createConnectedAppsStorageManager()
+  manager.save(
+    manager
+      .load()
+      .map((app) => (app.identityId === identityId && matches(app) ? change(app) : app)),
+  )
+}
+
+function revoked(app: SharedConnectedApp, tombstone: boolean): SharedConnectedApp {
+  const now = Date.now()
+  return {
+    ...app,
+    appSecret: undefined,
+    connectedUntil: undefined,
+    lastConnectedAt: 0,
+    updatedAt: now,
+    revokedAt: tombstone ? now : app.revokedAt,
+  }
+}
+
+/**
+ * Invalidate the app's shared connected-app record: drops the app secret so
+ * the dApp's proxy iframe de-authenticates (storage event) and a reconnect
+ * needs a fresh unlock ceremony.
+ */
+export function disconnectSharedConnection(account: Account, appUrl: string): void {
+  updateSharedConnections(
+    bareHex(account.id),
+    (app) => app.appUrl === appUrl,
+    (app) => revoked(app, false),
+  )
+}
+
+/** Disconnect and tombstone the shared record so the removal propagates to sync. */
+export function removeSharedConnection(account: Account, appUrl: string): void {
+  updateSharedConnections(
+    bareHex(account.id),
+    (app) => app.appUrl === appUrl,
+    (app) => revoked(app, true),
+  )
+}
+
+/**
+ * Erase the account's shared-storage footprint: revoke every connected app
+ * (de-authenticating their proxy iframes), then drop the identity, account,
+ * and postage-stamp records.
+ */
+export function removeSharedAccountRecords(account: Account): void {
+  const accountId = new EthAddress(account.id)
+  const identityId = bareHex(account.id)
+
+  updateSharedConnections(
+    identityId,
+    () => true,
+    (app) => revoked(app, true),
+  )
+
+  const identitiesManager = createIdentitiesStorageManager()
+  identitiesManager.save(identitiesManager.load().filter((identity) => identity.id !== identityId))
+
+  const accountsManager = createAccountsStorageManager()
+  accountsManager.save(accountsManager.load().filter((shared) => !shared.id.equals(accountId)))
+
+  if (account.stamps.length > 0) {
+    const mine = new Set(account.stamps.map((stamp) => bareHex(stamp.batchId)))
+    const stampsManager = createPostageStampsStorageManager()
+    stampsManager.save(
+      stampsManager.load().filter((stamp) => !mine.has(bareHex(stamp.batchID.toHex()))),
+    )
+  }
 }

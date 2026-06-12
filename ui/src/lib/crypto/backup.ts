@@ -6,14 +6,13 @@
  * a key derived from the recovery-phrase entropy, so the file is useless
  * without the phrase and restoring needs exactly: file + phrase.
  */
+import { decryptSeed, deriveKeyFromSecret, encryptSeed } from '$lib/crypto/encryption'
 import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
 import { walletFromPhrase } from '$lib/crypto/mnemonic'
 import type { Account, AccountData } from '$lib/types'
 
 const BACKUP_VERSION = 1
-const AES_GCM = 'AES-GCM'
-const AES_KEY_BITS = 256
-const IV_LENGTH = 12
+const BACKUP_KEY_INFO = 'swarm-id-backup-v1'
 const SALT_LENGTH = 32
 
 interface BackupEnvelope {
@@ -23,22 +22,25 @@ interface BackupEnvelope {
   payload: string
 }
 
-async function deriveBackupKey(entropy: Uint8Array, salt: Uint8Array): Promise<CryptoKey> {
-  const ikm = await crypto.subtle.importKey('raw', entropy as BufferSource, 'HKDF', false, [
-    'deriveKey',
-  ])
-  return crypto.subtle.deriveKey(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: salt as BufferSource,
-      info: new TextEncoder().encode('swarm-id-backup-v1'),
-    },
-    ikm,
-    { name: AES_GCM, length: AES_KEY_BITS },
-    false,
-    ['encrypt', 'decrypt'],
-  )
+function deriveBackupKey(entropy: Uint8Array, salt: Uint8Array): Promise<CryptoKey> {
+  return deriveKeyFromSecret(entropy, salt, BACKUP_KEY_INFO)
+}
+
+function parseEnvelope(fileContents: string): BackupEnvelope | undefined {
+  try {
+    const envelope = JSON.parse(fileContents) as BackupEnvelope
+    if (
+      envelope.format === 'swarm-id-backup' &&
+      envelope.version === BACKUP_VERSION &&
+      typeof envelope.salt === 'string' &&
+      typeof envelope.payload === 'string'
+    ) {
+      return envelope
+    }
+  } catch {
+    // Not JSON — fall through.
+  }
+  return undefined
 }
 
 /** Serialize and encrypt an account into .swarmid file contents. */
@@ -56,33 +58,31 @@ export async function createBackup(account: Account, entropy: Uint8Array): Promi
 
   const salt = new Uint8Array(SALT_LENGTH)
   crypto.getRandomValues(salt)
-  const iv = new Uint8Array(IV_LENGTH)
-  crypto.getRandomValues(iv)
-
   const key = await deriveBackupKey(entropy, salt)
-  const ciphertext = await crypto.subtle.encrypt(
-    { name: AES_GCM, iv: iv as BufferSource },
-    key,
-    new TextEncoder().encode(JSON.stringify(data)),
-  )
-  const payload = new Uint8Array(IV_LENGTH + ciphertext.byteLength)
-  payload.set(iv)
-  payload.set(new Uint8Array(ciphertext), IV_LENGTH)
 
   const envelope: BackupEnvelope = {
     format: 'swarm-id-backup',
     version: BACKUP_VERSION,
     salt: bytesToHex(salt),
-    payload: bytesToHex(payload),
+    payload: await encryptSeed(new TextEncoder().encode(JSON.stringify(data)), key),
   }
   return JSON.stringify(envelope)
 }
 
 /** Shape check for inline validation — no phrase needed, does not decrypt. */
 export function isBackupFile(fileContents: string): boolean {
+  return parseEnvelope(fileContents) !== undefined
+}
+
+/**
+ * Export from the legacy Swarm ID app — same .swarmid extension, but an
+ * incompatible envelope and key chain. Detected only to tell the user where
+ * the file came from instead of a generic "invalid file" error.
+ */
+export function isLegacyBackupFile(fileContents: string): boolean {
   try {
-    const envelope = JSON.parse(fileContents) as BackupEnvelope
-    return envelope.format === 'swarm-id-backup' && envelope.version === BACKUP_VERSION
+    const parsed = JSON.parse(fileContents) as { accountType?: unknown; ciphertext?: unknown }
+    return typeof parsed.accountType === 'string' && typeof parsed.ciphertext === 'string'
   } catch {
     return false
   }
@@ -94,27 +94,25 @@ export function isBackupFile(fileContents: string): boolean {
  * account does not belong to the phrase.
  */
 export async function restoreBackup(fileContents: string, phrase: string): Promise<AccountData> {
-  let envelope: BackupEnvelope
-  try {
-    envelope = JSON.parse(fileContents) as BackupEnvelope
-  } catch {
+  const envelope = parseEnvelope(fileContents)
+  if (!envelope) {
     throw new Error('Not a valid backup file.')
   }
-  if (envelope.format !== 'swarm-id-backup' || envelope.version !== BACKUP_VERSION) {
+
+  let salt: Uint8Array
+  try {
+    salt = hexToBytes(envelope.salt)
+    hexToBytes(envelope.payload) // corrupt hex is a file problem, not a phrase mismatch
+  } catch {
     throw new Error('Not a valid backup file.')
   }
 
   const wallet = walletFromPhrase(phrase)
-  const key = await deriveBackupKey(wallet.entropy, hexToBytes(envelope.salt))
-  const payload = hexToBytes(envelope.payload)
+  const key = await deriveBackupKey(wallet.entropy, salt)
 
-  let plaintext: ArrayBuffer
+  let plaintext: Uint8Array
   try {
-    plaintext = await crypto.subtle.decrypt(
-      { name: AES_GCM, iv: payload.slice(0, IV_LENGTH) as BufferSource },
-      key,
-      payload.slice(IV_LENGTH) as BufferSource,
-    )
+    plaintext = await decryptSeed(envelope.payload, key)
   } catch {
     throw new Error('The recovery phrase does not match this backup.')
   }

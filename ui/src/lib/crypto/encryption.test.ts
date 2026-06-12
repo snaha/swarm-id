@@ -1,16 +1,17 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { Wallet } from 'ethers'
+import { Signature, Wallet } from 'ethers'
 import { describe, expect, it } from 'vitest'
 
 import {
   decryptSeed,
   deriveKeyFromPassword,
   deriveKeyFromPrf,
-  deriveKeyFromPublicKey,
+  deriveKeyFromSignature,
   encryptSeed,
   randomSalt,
 } from './encryption'
+import { hexToBytes } from './hex'
 
 // Fast KDF settings for tests only.
 const TEST_ITERATIONS = 10
@@ -47,13 +48,20 @@ describe('seed encryption round-trips', () => {
     expect(await decryptSeed(payload, await deriveKeyFromPrf(prfOutput))).toEqual(ENTROPY)
   })
 
-  it('with a wallet-public-key-derived key', async () => {
+  it('with a wallet-signature-derived key', async () => {
     const wallet = Wallet.createRandom()
+    const message = 'sign to encrypt'
     const salt = randomSalt()
-    const key = await deriveKeyFromPublicKey(wallet.signingKey.publicKey, salt)
+
+    // Deterministic ECDSA: signing the same message again yields the same key.
+    const signature = Signature.from(await wallet.signMessage(message)).serialized
+    const reSignature = Signature.from(await wallet.signMessage(message)).serialized
+    expect(reSignature).toBe(signature)
+
+    const key = await deriveKeyFromSignature(hexToBytes(signature), salt)
     const payload = await encryptSeed(ENTROPY, key)
     expect(
-      await decryptSeed(payload, await deriveKeyFromPublicKey(wallet.signingKey.publicKey, salt)),
+      await decryptSeed(payload, await deriveKeyFromSignature(hexToBytes(reSignature), salt)),
     ).toEqual(ENTROPY)
   })
 

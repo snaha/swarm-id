@@ -33,6 +33,7 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
+  import { removeSharedAccountRecords } from '$lib/connect-handshake'
   import { backupFilename, createBackup } from '$lib/crypto/backup'
   import {
     PASSWORD_KDF_ITERATIONS,
@@ -91,7 +92,8 @@
   let dialog = $state<DialogState | undefined>(undefined)
   let dialogError = $state<string | undefined>(undefined)
   let busy = $state(false)
-  let cancelled = false
+  /** Bumped on cancel/retry — a stale ceremony resolution must not complete. */
+  let attempt = 0
   let abortController: AbortController | undefined
 
   let password = $state('')
@@ -163,7 +165,9 @@
   }
 
   function closeDialog() {
-    cancelled = true
+    // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
+    // a later approval of a cancelled prompt must not complete.
+    attempt++
     abortController?.abort()
     dialog = undefined
     dialogError = undefined
@@ -174,12 +178,12 @@
   }
 
   async function confirmUnlock() {
-    if (dialog?.kind !== 'unlock') {
+    if (busy || dialog?.kind !== 'unlock') {
       return
     }
     const target = dialog.target
+    const myAttempt = ++attempt
     dialogError = undefined
-    cancelled = false
     busy = true
     if (account.access.type !== 'password') {
       dialog = { kind: 'unlock', target, pending: true }
@@ -189,7 +193,7 @@
         account,
         account.access.type === 'password' ? password : undefined,
       )
-      if (cancelled) {
+      if (myAttempt !== attempt) {
         return
       }
       entropy = unlocked
@@ -197,12 +201,14 @@
       dialog = undefined
       complete(target)
     } catch (caught) {
-      if (!cancelled) {
+      if (myAttempt === attempt) {
         dialogError = caught instanceof Error ? caught.message : 'Unlock failed.'
         dialog = { kind: 'unlock', target, pending: false }
       }
     } finally {
-      busy = false
+      if (myAttempt === attempt) {
+        busy = false
+      }
     }
   }
 
@@ -222,11 +228,11 @@
   }
 
   async function confirmNewMethod() {
-    if (dialog?.kind !== 'set-method' || !entropy) {
+    if (busy || dialog?.kind !== 'set-method' || !entropy) {
       return
     }
+    const myAttempt = ++attempt
     dialogError = undefined
-    cancelled = false
     busy = true
     if (newMethod !== 'password') {
       dialog = { kind: 'set-method', pending: true }
@@ -257,7 +263,7 @@
           kdfIterations: PASSWORD_KDF_ITERATIONS,
         }
       }
-      if (cancelled) {
+      if (myAttempt !== attempt) {
         return
       }
       accountsStore.setAccess(account.id, access, await encryptSeed(entropy, key))
@@ -266,13 +272,15 @@
       verifyNewPassword = ''
       showToast('Unlock method updated')
     } catch (caught) {
-      if (!cancelled) {
+      if (myAttempt === attempt) {
         dialogError = caught instanceof Error ? caught.message : 'Could not set the new method.'
         dialog = { kind: 'set-method', pending: false }
       }
     } finally {
-      busy = false
-      abortController = undefined
+      if (myAttempt === attempt) {
+        busy = false
+        abortController = undefined
+      }
     }
   }
 
@@ -310,6 +318,7 @@
   }
 
   function deleteAccount() {
+    removeSharedAccountRecords(account)
     accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
     if (next) {

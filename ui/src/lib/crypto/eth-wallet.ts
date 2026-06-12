@@ -2,13 +2,20 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Ethereum wallet access method (EIP-1193, no connection library). The user
- * signs a fixed message; the seed-encryption key is derived from the public
- * key recovered from that signature, so re-signing the same message on any
- * device unlocks the seed.
+ * signs a fixed message; the seed-encryption key is derived from that
+ * signature, so re-signing the same message with the same wallet unlocks the
+ * seed. Only the wallet holder can produce the signature — the stored salt
+ * and address alone reveal nothing.
+ *
+ * Relies on deterministic ECDSA (RFC 6979, standard in wallets): the same
+ * message and key must always produce the same signature. Smart-contract
+ * wallets (ERC-1271) don't return a recoverable ECDSA signature and are
+ * rejected up front.
  */
-import { SigningKey, getAddress, hashMessage } from 'ethers'
+import { Signature, getAddress, verifyMessage } from 'ethers'
 
-import { deriveKeyFromPublicKey } from '$lib/crypto/encryption'
+import { deriveKeyFromSignature } from '$lib/crypto/encryption'
+import { hexToBytes } from '$lib/crypto/hex'
 
 interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>
@@ -19,7 +26,8 @@ const SIGNING_MESSAGE =
 
 export interface WalletKeySource {
   walletAddress: string
-  publicKey: string
+  /** Canonical-serialized signature of SIGNING_MESSAGE — the secret key material. */
+  signature: string
 }
 
 function getProvider(): EthereumProvider {
@@ -30,7 +38,7 @@ function getProvider(): EthereumProvider {
   return provider
 }
 
-/** Connect the wallet and recover its public key from a message signature. */
+/** Connect the wallet and obtain the deterministic message signature. */
 export async function requestWalletKeySource(): Promise<WalletKeySource> {
   const provider = getProvider()
 
@@ -45,11 +53,19 @@ export async function requestWalletKeySource(): Promise<WalletKeySource> {
     params: [SIGNING_MESSAGE, walletAddress],
   })) as string
 
-  const publicKey = SigningKey.recoverPublicKey(hashMessage(SIGNING_MESSAGE), signature)
-  return { walletAddress: getAddress(walletAddress), publicKey }
+  // Reject non-ECDSA signatures (smart-contract wallets) — they can't be
+  // reproduced for key derivation — and normalize the representation so
+  // unlock derives the same bytes as creation.
+  if (getAddress(verifyMessage(SIGNING_MESSAGE, signature)) !== getAddress(walletAddress)) {
+    throw new Error('This wallet type is not supported for securing an account.')
+  }
+  return {
+    walletAddress: getAddress(walletAddress),
+    signature: Signature.from(signature).serialized,
+  }
 }
 
 /** Derive the seed-encryption key for a wallet key source. */
 export function deriveWalletKey(source: WalletKeySource, salt: Uint8Array): Promise<CryptoKey> {
-  return deriveKeyFromPublicKey(source.publicKey, salt)
+  return deriveKeyFromSignature(hexToBytes(source.signature), salt)
 }

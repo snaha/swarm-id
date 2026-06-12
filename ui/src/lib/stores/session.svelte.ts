@@ -41,7 +41,9 @@ function createSessionStore() {
       return draft
     },
     startDraft(name: string) {
-      draft = { flow: 'create', name }
+      // Keep an in-progress create draft (and its generated phrase) so going
+      // back to rename does not silently swap in a new recovery phrase.
+      draft = draft?.flow === 'create' ? { ...draft, name } : { flow: 'create', name }
     },
     startSignIn(name: string, phrase: string) {
       draft = { flow: 'sign-in', name, phrase }

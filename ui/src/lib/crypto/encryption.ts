@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Seed encryption at rest. The BIP-39 entropy is AES-GCM encrypted with a key
- * derived from the chosen access method (passkey PRF, wallet public key, or
+ * derived from the chosen access method (passkey PRF, wallet signature, or
  * password); the access method can always re-derive the key, so only the
  * ciphertext is persisted.
  */
@@ -13,6 +13,7 @@ const AES_KEY_BITS = 256
 const IV_LENGTH = 12
 const SALT_LENGTH = 32
 const PBKDF2_ITERATIONS = 600_000
+const SEED_ENCRYPTION_INFO = 'swarm-id-seed-encryption-v1'
 
 export function randomSalt(): Uint8Array {
   const salt = new Uint8Array(SALT_LENGTH)
@@ -20,14 +21,14 @@ export function randomSalt(): Uint8Array {
   return salt
 }
 
-/** Encrypt seed entropy; returns hex of IV || ciphertext. */
-export async function encryptSeed(entropy: Uint8Array, key: CryptoKey): Promise<string> {
+/** Encrypt bytes; returns hex of IV || ciphertext. */
+export async function encryptSeed(data: Uint8Array, key: CryptoKey): Promise<string> {
   const iv = new Uint8Array(IV_LENGTH)
   crypto.getRandomValues(iv)
   const ciphertext = await crypto.subtle.encrypt(
     { name: AES_GCM, iv: iv as BufferSource },
     key,
-    entropy as BufferSource,
+    data as BufferSource,
   )
   const payload = new Uint8Array(IV_LENGTH + ciphertext.byteLength)
   payload.set(iv)
@@ -39,57 +40,52 @@ export async function decryptSeed(payloadHex: string, key: CryptoKey): Promise<U
   const payload = hexToBytes(payloadHex)
   const iv = payload.slice(0, IV_LENGTH)
   const ciphertext = payload.slice(IV_LENGTH)
-  const entropy = await crypto.subtle.decrypt(
+  const data = await crypto.subtle.decrypt(
     { name: AES_GCM, iv: iv as BufferSource },
     key,
     ciphertext as BufferSource,
   )
-  return new Uint8Array(entropy)
+  return new Uint8Array(data)
 }
 
-/** Derive the seed-encryption key from a passkey PRF output (HKDF). */
-export async function deriveKeyFromPrf(prfOutput: Uint8Array): Promise<CryptoKey> {
-  const ikm = await crypto.subtle.importKey('raw', prfOutput as BufferSource, 'HKDF', false, [
+/**
+ * Derive an AES-GCM key from secret input keying material (HKDF-SHA256).
+ * The IKM must be secret — anything recoverable by a third party (addresses,
+ * public keys) gives no protection.
+ */
+export async function deriveKeyFromSecret(
+  ikm: Uint8Array,
+  salt: Uint8Array,
+  info: string,
+): Promise<CryptoKey> {
+  const key = await crypto.subtle.importKey('raw', ikm as BufferSource, 'HKDF', false, [
     'deriveKey',
   ])
   return crypto.subtle.deriveKey(
     {
       name: 'HKDF',
       hash: 'SHA-256',
-      salt: new Uint8Array(),
-      info: new TextEncoder().encode('swarm-id-seed-encryption-v1'),
+      salt: salt as BufferSource,
+      info: new TextEncoder().encode(info),
     },
-    ikm,
+    key,
     { name: AES_GCM, length: AES_KEY_BITS },
     false,
     ['encrypt', 'decrypt'],
   )
 }
 
-/** Derive the seed-encryption key from a wallet public key + stored salt (HKDF). */
-export async function deriveKeyFromPublicKey(
-  publicKeyHex: string,
+/** Derive the seed-encryption key from a passkey PRF output (HKDF). */
+export function deriveKeyFromPrf(prfOutput: Uint8Array): Promise<CryptoKey> {
+  return deriveKeyFromSecret(prfOutput, new Uint8Array(), SEED_ENCRYPTION_INFO)
+}
+
+/** Derive the seed-encryption key from a wallet message signature + stored salt (HKDF). */
+export function deriveKeyFromSignature(
+  signature: Uint8Array,
   salt: Uint8Array,
 ): Promise<CryptoKey> {
-  const ikm = await crypto.subtle.importKey(
-    'raw',
-    hexToBytes(publicKeyHex) as BufferSource,
-    'HKDF',
-    false,
-    ['deriveKey'],
-  )
-  return crypto.subtle.deriveKey(
-    {
-      name: 'HKDF',
-      hash: 'SHA-256',
-      salt: salt as BufferSource,
-      info: new TextEncoder().encode('swarm-id-seed-encryption-v1'),
-    },
-    ikm,
-    { name: AES_GCM, length: AES_KEY_BITS },
-    false,
-    ['encrypt', 'decrypt'],
-  )
+  return deriveKeyFromSecret(signature, salt, SEED_ENCRYPTION_INFO)
 }
 
 /** Derive the seed-encryption key from a password + stored salt (PBKDF2). */

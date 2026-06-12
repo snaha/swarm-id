@@ -5,8 +5,8 @@
  * and decrypt the BIP-39 entropy. Used by reveals (private key, recovery
  * phrase) and backup export.
  */
-import { decryptSeed, deriveKeyFromPassword, deriveKeyFromPublicKey } from '$lib/crypto/encryption'
-import { requestWalletKeySource } from '$lib/crypto/eth-wallet'
+import { decryptSeed, deriveKeyFromPassword } from '$lib/crypto/encryption'
+import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
 import { hexToBytes } from '$lib/crypto/hex'
 import { authenticateWithPasskey } from '$lib/crypto/passkey'
 import type { Account } from '$lib/types'
@@ -32,7 +32,7 @@ export async function unlockAccount(account: Account, password?: string): Promis
     if (source.walletAddress.toLowerCase() !== access.walletAddress.toLowerCase()) {
       throw new Error('Connected wallet does not match the one securing this account.')
     }
-    key = await deriveKeyFromPublicKey(source.publicKey, hexToBytes(access.encryptionSalt))
+    key = await deriveWalletKey(source, hexToBytes(access.encryptionSalt))
   }
 
   try {

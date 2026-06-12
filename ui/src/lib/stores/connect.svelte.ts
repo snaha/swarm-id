@@ -23,6 +23,14 @@ export interface ConnectRequest {
   partitionChallenge?: string
 }
 
+/**
+ * Remembers (per popup tab) a challenge we already matched in localStorage.
+ * The challenge key is consumed on first match, so without this marker a
+ * reload or back-navigation re-running initFromHash would misread the missing
+ * key as partitioned storage and force the dApp into download-only mode.
+ */
+const CHALLENGE_MATCHED_KEY = 'swarm-id-challenge-matched'
+
 function deriveAppName(origin: string): string {
   try {
     return new URL(origin).hostname.split('.')[0] || origin
@@ -52,14 +60,16 @@ export const connectStore = {
     }
 
     // Storage partitioning detection: the proxy iframe wrote this challenge
-    // to localStorage right before opening the popup. If we can't read it,
-    // our storage is partitioned from the iframe's.
+    // to localStorage right before opening the popup. If we can't read it
+    // (and didn't already consume it earlier in this tab), our storage is
+    // partitioned from the iframe's.
     let partitionChallenge: string | undefined = undefined
     const challenge = params.get('challenge')
     if (challenge) {
       if (localStorage.getItem(STORAGE_CHALLENGE_KEY) === challenge) {
         localStorage.removeItem(STORAGE_CHALLENGE_KEY)
-      } else {
+        sessionStorage.setItem(CHALLENGE_MATCHED_KEY, challenge)
+      } else if (sessionStorage.getItem(CHALLENGE_MATCHED_KEY) !== challenge) {
         partitionChallenge = challenge
       }
     }

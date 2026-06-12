@@ -99,7 +99,10 @@ export async function createPasskeyKey(
           authenticatorSelection: {
             requireResidentKey: true,
             residentKey: 'required',
-            userVerification: 'preferred',
+            // Must match authentication ('required' there too): CTAP2 keeps
+            // separate PRF secrets for UV and non-UV, so a non-UV registration
+            // would encrypt the seed under a key no later assertion can derive.
+            userVerification: 'required',
           },
           extensions: { prf: { eval: { first: prfSalt as BufferSource } } },
           timeout: WEBAUTHN_TIMEOUT_MS,

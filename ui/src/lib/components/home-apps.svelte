@@ -11,6 +11,7 @@
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select } from '$lib/components/ui/select'
+  import { disconnectSharedConnection, removeSharedConnection } from '$lib/connect-handshake'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import type { Account } from '$lib/types'
 
@@ -44,11 +45,15 @@
   }
 
   function disconnect(appUrl: string) {
+    // Revoke the shared record too — it holds the app secret the dApp's proxy
+    // iframe authenticates from; the UI-local store is just the display copy.
+    disconnectSharedConnection(account, appUrl)
     accountsStore.disconnectApp(account.id, appUrl)
     openMenuFor = undefined
   }
 
   function remove(appUrl: string) {
+    removeSharedConnection(account, appUrl)
     accountsStore.removeApp(account.id, appUrl)
     openMenuFor = undefined
   }

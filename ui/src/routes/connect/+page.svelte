@@ -33,7 +33,8 @@
   let busy = $state(false)
   let password = $state('')
   let dialogError = $state<string | undefined>(undefined)
-  let cancelled = false
+  /** Bumped on cancel/retry — a stale ceremony resolution must not connect. */
+  let attempt = 0
 
   const request = $derived(connectStore.request)
   const appIcon = $derived(
@@ -63,11 +64,11 @@
 
   async function confirmUnlock() {
     const account = unlocking
-    if (!account || !request) {
+    if (busy || !account || !request) {
       return
     }
+    const myAttempt = ++attempt
     dialogError = undefined
-    cancelled = false
     busy = true
     if (account.access.type !== 'password') {
       pendingCeremony = true
@@ -77,7 +78,7 @@
         account,
         account.access.type === 'password' ? password : undefined,
       )
-      if (cancelled) {
+      if (myAttempt !== attempt) {
         return
       }
       await completeConnect(account, entropy, request)
@@ -86,17 +87,21 @@
       password = ''
       await goto(resolve(routes.CONNECT_DONE))
     } catch (caught) {
-      if (!cancelled) {
+      if (myAttempt === attempt) {
         dialogError = caught instanceof Error ? caught.message : 'Unlock failed.'
         pendingCeremony = false
       }
     } finally {
-      busy = false
+      if (myAttempt === attempt) {
+        busy = false
+      }
     }
   }
 
   function closeDialog() {
-    cancelled = true
+    // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
+    // a later approval of a cancelled prompt must not connect.
+    attempt++
     unlocking = undefined
     pendingCeremony = false
     busy = false
