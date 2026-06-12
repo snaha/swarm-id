@@ -25,6 +25,7 @@
   let phrase = $state('')
   let signingIn = $state(false)
   let failed = $state(false)
+  let failureMessage = $state<string | undefined>(undefined)
 
   const phraseValid = $derived(isValidPhrase(phrase))
   const showInvalid = $derived(phrase.trim().length > 0 && !phraseValid)
@@ -56,8 +57,12 @@
 
       sessionStore.startSignIn(generateName(), normalized)
       await goto(resolve(routes.ACCOUNT_NEW_ACCESS))
-    } catch {
+    } catch (caught) {
+      // The phrase was checksum-validated before the button enabled, so a
+      // failure here is almost always the connect handshake — surface it
+      // instead of blaming the phrase.
       failed = true
+      failureMessage = caught instanceof Error ? caught.message : undefined
     } finally {
       signingIn = false
     }
@@ -65,6 +70,7 @@
 
   function tryAgain() {
     failed = false
+    failureMessage = undefined
     phrase = ''
   }
 </script>
@@ -79,7 +85,9 @@
           <CircleAlert class="text-destructive size-5" />
           <div class="flex flex-col items-center text-center">
             <p class="text-sm font-bold">Sign in failed</p>
-            <p class="text-sm">Please double-check your secret recovery phrase.</p>
+            <p class="text-sm">
+              {failureMessage ?? 'Please double-check your secret recovery phrase.'}
+            </p>
           </div>
         </div>
         <Button variant="outline" class="w-full" onclick={tryAgain}>Try again</Button>

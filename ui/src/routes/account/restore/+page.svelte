@@ -71,8 +71,9 @@
       const restored = await restoreBackup(fileContents, normalized)
       sessionStore.startRestore(restored, normalized)
       await goto(resolve(routes.ACCOUNT_NEW_ACCESS))
-    } catch {
+    } catch (caught) {
       failed = true
+      failureMessage = caught instanceof Error ? caught.message : undefined
     } finally {
       restoring = false
     }
@@ -80,7 +81,8 @@
 
   function tryAgain() {
     failed = false
-    fileInvalid = false
+    failureMessage = undefined
+    fileError = undefined
     phrase = ''
     clearFile()
   }
@@ -96,7 +98,9 @@
           <CircleAlert class="text-destructive size-5" />
           <div class="flex flex-col items-center text-center">
             <p class="text-sm font-bold">Restoring account failed</p>
-            <p class="text-sm">Please double-check your secret recovery phrase.</p>
+            <p class="text-sm">
+              {failureMessage ?? 'Please double-check your secret recovery phrase.'}
+            </p>
           </div>
         </div>
         <Button variant="outline" class="w-full" onclick={tryAgain}>Try again</Button>
@@ -149,10 +153,10 @@
               <Upload />
               Select .swarmid file
             </Button>
-            {#if fileInvalid}
+            {#if fileError}
               <p class="text-destructive flex items-center gap-1.5 text-xs">
-                <CircleAlert class="size-3.5" />
-                Invalid backup file
+                <CircleAlert class="size-3.5 shrink-0" />
+                {fileError}
               </p>
             {/if}
           </div>
