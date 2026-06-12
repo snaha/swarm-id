@@ -340,13 +340,20 @@ export class PartitionLease {
     // Lock acquired → the caller will bind this counter, so record the feed
     // reference we just downloaded as our "synced reference" (lets the next
     // acquire skip the download). Only on a real read — never on `unchanged`
-    // (already cached) or a failed read (no `referenceHex`).
+    // (already cached) or a failed read (no `referenceHex`). Also protect the
+    // published state chunks' buckets from our utilisation saves.
     if (
       !stateResult.unchanged &&
       stateResult.referenceHex &&
       stamper instanceof UtilizationAwareStamper
     ) {
       await stamper.setSyncedReference(partition, stateResult.referenceHex)
+      if (stateResult.stateBuckets) {
+        await stamper.setProtectedStateBuckets(
+          partition,
+          stateResult.stateBuckets,
+        )
+      }
     }
 
     const payload = lockResult.payload
@@ -418,7 +425,7 @@ export class PartitionLease {
     const partition = this.self.partition
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
 
-    const publishedReference = await writePartitionState({
+    const published = await writePartitionState({
       bee: this.opts.bee,
       stamper,
       batchId,
@@ -431,9 +438,11 @@ export class PartitionLease {
     // Record the reference we just published as our synced reference: the next
     // acquire (if no peer publishes meanwhile) skips re-downloading our own
     // counter. Our local counter equals what we published, so reusing it is
-    // correct.
+    // correct. Also protect the publish's buckets from future utilisation
+    // saves — overstamping one would evict the resume point from the reserve.
     if (stamper instanceof UtilizationAwareStamper) {
-      await stamper.setSyncedReference(partition, publishedReference)
+      await stamper.setSyncedReference(partition, published.referenceHex)
+      await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
     }
 
     const releasePayload: PartitionLockPayload = {

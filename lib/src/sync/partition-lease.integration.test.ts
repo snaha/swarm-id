@@ -175,6 +175,44 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(result.localCounter).toEqual(expected)
   })
 
+  it("reports the published state-chunk buckets identically on write and read", async () => {
+    const { writePartitionState, readPartitionState } =
+      await import("./partition-state")
+    const { lockSocBucket } = await import("../utils/lock-soc")
+    const { getChunkLayout } = await import("../utils/batch-utilization")
+
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[42] = 3
+    const written = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+    })
+
+    // One bucket per counter chunk plus the reference chunk, all distinct,
+    // and none on the partition's lock-SOC bucket (an overstamp there would
+    // evict the lock itself).
+    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
+    expect(written.stateBuckets).toHaveLength(numUtilizationChunks + 1)
+    expect(new Set(written.stateBuckets).size).toBe(numUtilizationChunks + 1)
+    expect(written.stateBuckets).not.toContain(lockSocBucket(0, OWNER))
+
+    // A taking-over device derives the same protection set from the
+    // reference chunk it downloads.
+    const read = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+    expect(new Set(read.stateBuckets)).toEqual(new Set(written.stateBuckets))
+  })
+
   it("derives the same feed-entry SOC address the updater actually wrote", async () => {
     const { makePartitionStateTopic } = await import("./partition-state")
     const { BasicEpochUpdater, EpochIndex, epochSocAddress } =
@@ -207,7 +245,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const localCounter = new Uint32Array(NUM_BUCKETS)
     localCounter[100] = 5
     const stamper = createMockStamper() as unknown as Stamper
-    const writtenRef = await writePartitionState({
+    const { referenceHex: writtenRef } = await writePartitionState({
       bee: bee as unknown as Bee,
       stamper,
       batchId: TEST_BATCH_ID,

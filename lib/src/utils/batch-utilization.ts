@@ -1216,6 +1216,14 @@ export class UtilizationAwareStamper implements Stamper {
    */
   private leaseStale: boolean = false
 
+  /**
+   * Per-partition buckets of the latest published partition-state chunks.
+   * Utilisation saves must not place chunks in these buckets (same reserved
+   * slot → overstamp → the published resume point is evicted from the
+   * reserve). Mirrors `BatchMetadata.stateChunkBuckets`; restored on create.
+   */
+  private protectedStateBuckets = new Map<number, ReadonlySet<number>>()
+
   readonly batchId: BatchId
   readonly depth: number
 
@@ -1263,6 +1271,59 @@ export class UtilizationAwareStamper implements Stamper {
       set.add(toBucket(soc.address))
     }
     return set
+  }
+
+  /**
+   * All buckets a utilisation save must avoid: the lock-SOC buckets plus the
+   * buckets of the latest published partition-state chunks for the partition
+   * this stamper writes reserved slots in (`partition ?? 0`). A utilisation
+   * chunk landing in a published state chunk's bucket would overstamp the
+   * same reserved slot and evict the published chunk from the reserve —
+   * destroying the resume point a later takeover depends on.
+   */
+  getProtectedBuckets(): ReadonlySet<number> {
+    const set = new Set<number>(this.getLockSocBuckets())
+    const stateBuckets = this.protectedStateBuckets.get(this.partition ?? 0)
+    for (const bucket of stateBuckets ?? []) {
+      set.add(bucket)
+    }
+    return set
+  }
+
+  /**
+   * Buckets occupied by this stamper's current CLEAN utilisation chunks.
+   * The partition-state publish avoids them so a randomly-keyed state chunk
+   * does not evict a live utilisation chunk from the reserve.
+   */
+  getCleanChunkBuckets(): ReadonlySet<number> {
+    return claimedBucketsForCleanChunks(this.utilizationState)
+  }
+
+  /**
+   * Record the buckets occupied by the latest published partition-state
+   * chunks for `partition` (in memory + persisted in the batch metadata, so
+   * a reload keeps avoiding them). Called after every successful publish
+   * (`PartitionLease.release`) and after every successful state read
+   * (`claimPartition`) — the set is replaced wholesale; only the latest
+   * publish needs protection, superseded chunks are dead.
+   */
+  async setProtectedStateBuckets(
+    partition: number,
+    buckets: number[],
+  ): Promise<void> {
+    this.protectedStateBuckets.set(partition, new Set(buckets))
+    const batchId = this.batchId.toHex()
+    const existing = await this.cache.getMetadata(batchId)
+    await this.cache.putMetadata({
+      batchId,
+      lastSync: existing?.lastSync ?? Date.now(),
+      chunkCount: existing?.chunkCount ?? 0,
+      syncedReferences: existing?.syncedReferences,
+      stateChunkBuckets: {
+        ...(existing?.stateChunkBuckets ?? {}),
+        [partition]: buckets,
+      },
+    })
   }
 
   /**
@@ -1418,6 +1479,23 @@ export class UtilizationAwareStamper implements Stamper {
       utilizationState,
     )
 
+    // Restore the protected partition-state buckets so saves keep avoiding
+    // the published resume point across reloads. Tolerates minimal caches
+    // (tests stub only getAllChunks/putChunk).
+    try {
+      const meta = await cache.getMetadata?.(batchId.toHex())
+      for (const [p, buckets] of Object.entries(
+        meta?.stateChunkBuckets ?? {},
+      )) {
+        instance.protectedStateBuckets.set(Number(p), new Set(buckets))
+      }
+    } catch (error) {
+      console.warn(
+        `[UtilizationAwareStamper] Failed to restore protected state buckets:`,
+        error,
+      )
+    }
+
     // Auto-bind lock SOCs for all partitions. The lock-SOC owner is the
     // BACKUP signer's address — same value `writePartitionLock` derives
     // internally — NOT the `owner` parameter callers pass (which is the
@@ -1560,6 +1638,14 @@ export class UtilizationAwareStamper implements Stamper {
       for (const soc of this.lockSocs ?? []) {
         claimedBuckets.add(toBucket(soc.address))
       }
+      // Also reserve the latest published partition-state chunks' buckets —
+      // they share this partition's reserved slot, and overstamping one
+      // evicts the resume point a later takeover depends on.
+      for (const bucket of this.protectedStateBuckets.get(
+        this.partition ?? 0,
+      ) ?? []) {
+        claimedBuckets.add(bucket)
+      }
       const sortedDirtyChunkIndexes = Array.from(dirtyChunkIndexes).sort(
         (a, b) => a - b,
       )
@@ -1689,6 +1775,7 @@ export class UtilizationAwareStamper implements Stamper {
         ...(existing?.syncedReferences ?? {}),
         [partition]: referenceHex,
       },
+      stateChunkBuckets: existing?.stateChunkBuckets,
     })
   }
 

@@ -140,6 +140,13 @@ export async function readPartitionState(
    * and retry instead.
    */
   readFailed?: boolean
+  /**
+   * Buckets occupied by the published state chunks (counter chunks + the
+   * reference chunk) of the entry that was read. The caller hands these to
+   * the stamper so utilisation saves avoid overstamping (and evicting) the
+   * published resume point. Present only on a successful full read.
+   */
+  stateBuckets?: number[]
 }> {
   const { bee, owner, batchId, partition, batchDepth } = opts
   const topic = makePartitionStateTopic(batchId, partition)
@@ -164,6 +171,12 @@ export async function readPartitionState(
   }
 
   const localCounter = new Uint32Array(NUM_BUCKETS)
+  // The reference chunk and every counter chunk overstamp this partition's
+  // reserved slot in their respective buckets — collect those buckets so the
+  // caller can protect them from utilisation saves (an overstamp there would
+  // evict the published resume point). The chunk address is the first 32
+  // bytes of each 64-byte encrypted reference.
+  const stateBuckets: number[] = [toBucket(refBytes.slice(0, 32))]
 
   // The feed points to the reference chunk: a single chunk holding the
   // 64-byte encrypted references (address‖key) of this partition's counter
@@ -199,6 +212,7 @@ export async function readPartitionState(
         Binary.uint8ArrayToHex(ref),
       )
       mergeChunk(localCounter, i, chunkData, batchDepth)
+      stateBuckets.push(toBucket(ref.slice(0, 32)))
     }
     PartitionStateSchemaV1.parse({ counters: localCounter })
   } catch (err) {
@@ -227,7 +241,7 @@ export async function readPartitionState(
   const feedSocAddr = await epochSocAddress(topic, entry.epoch, owner)
   localCounter[toBucket(feedSocAddr)] += 1
 
-  return { localCounter, referenceHex, unchanged: false }
+  return { localCounter, referenceHex, unchanged: false, stateBuckets }
 }
 
 /**
@@ -249,7 +263,16 @@ export async function writePartitionState(opts: {
   partition: number
   localCounter: Uint32Array
   backupSigner: PrivateKey
-}): Promise<string> {
+}): Promise<{
+  /** Feed reference (hex) — the caller's "synced reference". */
+  referenceHex: string
+  /**
+   * Buckets occupied by the uploaded state chunks (counter chunks + the
+   * reference chunk). The caller hands these to the stamper so subsequent
+   * utilisation saves avoid overstamping (and evicting) this publish.
+   */
+  stateBuckets: number[]
+}> {
   const {
     bee,
     stamper,
@@ -265,19 +288,30 @@ export async function writePartitionState(opts: {
   const { numUtilizationChunks } = getChunkLayout(batchDepth)
   const target: UploadTarget = { mode: "stamper", bee, stamper }
   const owner = backupSigner.publicKey().address()
-  // Every chunk below overstamps the partition's reserved slot, so they must
-  // land in distinct buckets and clear of the partition's lock-SOC bucket.
-  const claimedBuckets = new Set<number>([lockSocBucket(partition, owner)])
   const reserve =
     stamper instanceof UtilizationAwareStamper ? stamper : undefined
+  // Every chunk below overstamps the partition's reserved slot, so they must
+  // land in distinct buckets, clear of the partition's lock-SOC bucket, and
+  // clear of the live utilisation chunks (whose buckets share the same
+  // reserved slot — landing there would evict them from the reserve).
+  const claimedBuckets = new Set<number>([
+    lockSocBucket(partition, owner),
+    ...(reserve?.getCleanChunkBuckets() ?? []),
+  ])
 
   // 1. Upload each counter chunk → 64-byte encrypted reference.
   const references: Uint8Array[] = []
+  const stateBuckets: number[] = []
   for (let i = 0; i < numUtilizationChunks; i++) {
     const plaintext = extractChunk(localCounter, i, batchDepth)
-    references.push(
-      await uploadReservedChunk(target, plaintext, claimedBuckets, reserve),
+    const ref = await uploadReservedChunk(
+      target,
+      plaintext,
+      claimedBuckets,
+      reserve,
     )
+    references.push(ref)
+    stateBuckets.push(toBucket(ref.slice(0, 32)))
   }
 
   // 2. Upload the reference chunk listing those references (N·64 bytes; ≤ 4096
@@ -289,6 +323,7 @@ export async function writePartitionState(opts: {
     claimedBuckets,
     reserve,
   )
+  stateBuckets.push(toBucket(referenceChunkRef.slice(0, 32)))
 
   reserve?.clearReservedUtilizationChunks()
 
@@ -302,8 +337,12 @@ export async function writePartitionState(opts: {
   )
 
   // Return the feed reference so the caller can record it as this device's
-  // "synced reference" (skips re-downloading on the next acquire).
-  return Binary.uint8ArrayToHex(referenceChunkRef)
+  // "synced reference" (skips re-downloading on the next acquire), plus the
+  // buckets the publish occupied so saves can avoid evicting it.
+  return {
+    referenceHex: Binary.uint8ArrayToHex(referenceChunkRef),
+    stateBuckets,
+  }
 }
 
 /**

@@ -219,7 +219,7 @@ export function createSyncAccount(
             tracker,
             reservedBuckets:
               stamper instanceof UtilizationAwareStamper
-                ? stamper.getLockSocBuckets()
+                ? stamper.getProtectedBuckets()
                 : undefined,
           })
 
