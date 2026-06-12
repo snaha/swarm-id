@@ -205,10 +205,12 @@ describe("BatchWriteCoordinator (Step A shell)", () => {
 type Internals = {
   partitionLease: unknown
   lastLeaseActivityAt: number
+  lastLeaseValidatedAt: number
   activeUploadCount: number
   pendingAcquire: boolean
   readOnly: boolean
   refreshTick: (lease: unknown) => Promise<void>
+  ensureLeaseStillValid: () => Promise<void>
   acquire: () => Promise<void>
   acquireWithSlotWait: () => Promise<void>
   pauseLeaseBackgroundWork: () => void
@@ -359,6 +361,63 @@ describe("BatchWriteCoordinator — displacement-during-upload race fix", () => 
     expect(stamper.unbindPartition).not.toHaveBeenCalled()
     expect(coordinator.currentPartition).toBe(0)
     expect(lease.bumpLocalLease).toHaveBeenCalled()
+  })
+})
+
+describe("BatchWriteCoordinator — sentinel re-assert at upload start", () => {
+  function setup(lease: ReturnType<typeof makeLease>) {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const writeLeaseCache = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        writeLeaseCache,
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    internals.partitionLease = lease
+    internals.lastLeaseValidatedAt = 0 // age past the freshness throttle
+    lockController.payload = {
+      holderDeviceId: NO_HOLDER_DEVICE_ID,
+      leasedUntil: Date.now() - 1_000,
+    }
+    return { coordinator, internals, stamper, writeLeaseCache }
+  }
+
+  it("re-asserts the claim when a sentinel is visible while holding", async () => {
+    const lease = makeLease({ partition: 0, refreshResult: true })
+    const { internals, stamper, writeLeaseCache } = setup(lease)
+
+    await internals.ensureLeaseStillValid()
+
+    expect(lease.refresh).toHaveBeenCalledTimes(1)
+    expect(stamper.invalidateLease).not.toHaveBeenCalled()
+    expect(internals.lastLeaseValidatedAt).toBeGreaterThan(0)
+    expect(writeLeaseCache).toHaveBeenCalled()
+  })
+
+  it("demotes and throws when the re-assert loses to a peer", async () => {
+    const lease = makeLease({ partition: 0, refreshResult: false })
+    const { coordinator, internals, stamper } = setup(lease)
+
+    await expect(internals.ensureLeaseStillValid()).rejects.toThrow(/reclaimed/)
+    // Same breaker-before-unbind ordering as the displaced branch.
+    expect(stamper.invalidateLease).toHaveBeenCalledTimes(1)
+    expect(stamper.unbindPartition).toHaveBeenCalledTimes(1)
+    expect(coordinator.isReadOnly).toBe(true)
+  })
+
+  it("keeps the lease (and retries next upload) when the re-assert throws", async () => {
+    const lease = makeLease({ partition: 0 })
+    lease.refresh.mockRejectedValueOnce(new Error("bee hiccup"))
+    const { internals, stamper } = setup(lease)
+
+    await expect(internals.ensureLeaseStillValid()).resolves.toBeUndefined()
+
+    expect(stamper.invalidateLease).not.toHaveBeenCalled()
+    // lastLeaseValidatedAt NOT bumped — the next upload re-checks.
+    expect(internals.lastLeaseValidatedAt).toBe(0)
   })
 })
 

@@ -561,6 +561,46 @@ export class BatchWriteCoordinator {
       throw new Error("Partition lease was reclaimed by another device.")
     }
 
+    // A release sentinel is visible while we believe we hold — a stale
+    // (pre-fencing) sentinel converging late, or a frozen-cache view of one.
+    // Re-assert the claim NOW instead of waiting for the next refresh tick,
+    // so peers stop reading the partition as free before this upload runs.
+    // NOTE: this is defence in depth, not the primary #349 fix — the
+    // freshness throttle above usually skips this check in the seconds right
+    // after a re-acquire; the teardown-release lock serialization closes
+    // that window.
+    if (
+      payload !== undefined &&
+      payload.holderDeviceId === NO_HOLDER_DEVICE_ID
+    ) {
+      let reasserted: boolean
+      try {
+        reasserted = await this.partitionLease.refresh()
+      } catch (err) {
+        // Transient — keep the lease, and do NOT bump lastLeaseValidatedAt so
+        // the next upload retries the check.
+        console.warn(
+          "[BatchWriteCoordinator] Sentinel re-assert hit a transient error; keeping lease:",
+          err,
+        )
+        return
+      }
+      if (!reasserted) {
+        // blocked / lost-race — a peer claimed after the sentinel. Mirror
+        // the displaced branch exactly (we are under the write lock).
+        console.warn(
+          `[BatchWriteCoordinator] Sentinel re-assert: partition ${partition} taken by a peer; demoting.`,
+        )
+        this.signalLeaseLost()
+        this.finalizeDemote()
+        throw new Error("Partition lease was reclaimed by another device.")
+      }
+      // Re-asserted: refresh() rewrote the claim and bumped the lease.
+      this.lastLeaseValidatedAt = Date.now()
+      this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+      return
+    }
+
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(this.partitionLease.serialize())
