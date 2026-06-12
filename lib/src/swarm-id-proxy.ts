@@ -117,7 +117,7 @@ import { createAsyncSequentialFinder } from "./proxy/feeds/sequence"
 import { Binary } from "cafe-utility"
 import {
   calculateTTLSeconds,
-  fetchBatchTTL,
+  fetchBatchDetails,
   fetchSwarmPrice,
 } from "./utils/ttl"
 import { tryCreateTag } from "./utils/tag"
@@ -3887,13 +3887,17 @@ export class SwarmIdProxy {
       return
     }
 
-    // Prefer the Bee node's authoritative batchTTL (computed from live chain
-    // state). Fall back to the Swarmscan-price approximation when the Bee node
+    // Prefer the Bee node's authoritative batch details (computed from live
+    // chain state) — the stored stamp's `usable`/`exists` are a snapshot from
+    // assignment time and can be stale (e.g. a batch assigned during its ~30s
+    // warm-up stays `usable: false` in storage forever). Fall back to the
+    // stored values / Swarmscan-price TTL approximation when the Bee node
     // does not know about this batch (e.g. public gateway).
-    let batchTTL: number | undefined = await fetchBatchTTL(
+    const details = await fetchBatchDetails(
       this.beeApiUrl,
       stamp.batchID.toHex(),
     )
+    let batchTTL = details?.batchTTL
     if (batchTTL === undefined) {
       try {
         const pricePerGBPerMonth = await fetchSwarmPrice()
@@ -3907,14 +3911,14 @@ export class SwarmIdProxy {
     const postageBatch: PostageBatch = {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,
-      usable: stamp.usable,
+      usable: details?.usable ?? stamp.usable,
       label: "", // PostageStamp doesn't store label
       depth: stamp.depth,
       amount: stamp.amount.toString(),
       bucketDepth: stamp.bucketDepth,
       blockNumber: stamp.blockNumber,
       immutableFlag: stamp.immutableFlag,
-      exists: stamp.exists,
+      exists: details?.exists ?? stamp.exists,
       batchTTL,
     }
 

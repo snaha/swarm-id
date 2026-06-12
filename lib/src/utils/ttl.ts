@@ -249,10 +249,70 @@ export function calculateStampAmountForDays(
 }
 
 /**
+ * Live details for a batch from a Bee node's `/stamps/{batchId}` endpoint.
+ * Fields are individually optional: each is present only when the response
+ * carries it with the expected type.
+ */
+export interface BatchDetails {
+  /** Remaining TTL in seconds; negative API values are normalised to `0`. */
+  batchTTL?: number
+  /** Whether the batch is usable (started and not expired). */
+  usable?: boolean
+  /** Whether the batch exists on chain. */
+  exists?: boolean
+}
+
+/**
+ * Fetches live batch details directly from a Bee node's `/stamps/{batchId}`
+ * endpoint. The Bee node computes these from current chain state, so they are
+ * authoritative — unlike the snapshot stored at stamp-assignment time, which
+ * can go stale (e.g. a freshly bought batch reports `usable: false` for ~30s).
+ *
+ * @param beeUrl - Bee node URL
+ * @param batchId - Hex-encoded batch ID (without `0x` prefix)
+ * @returns Batch details, or `undefined` if the Bee node does not know about
+ *          this batch or the request fails.
+ */
+export async function fetchBatchDetails(
+  beeUrl: string,
+  batchId: string,
+): Promise<BatchDetails | undefined> {
+  try {
+    const base = beeUrl.replace(/\/$/, "")
+    const response = await fetch(`${base}/stamps/${batchId}`)
+    if (!response.ok) {
+      return undefined
+    }
+    const data: unknown = await response.json()
+    if (typeof data !== "object" || data === null) {
+      return undefined
+    }
+    const { batchTTL, usable, exists } = data as {
+      batchTTL?: unknown
+      usable?: unknown
+      exists?: unknown
+    }
+    return {
+      batchTTL:
+        typeof batchTTL === "number"
+          ? batchTTL < 0
+            ? 0
+            : batchTTL
+          : undefined,
+      usable: typeof usable === "boolean" ? usable : undefined,
+      exists: typeof exists === "boolean" ? exists : undefined,
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Fetches the remaining batchTTL (in seconds) for a stamp directly from a Bee
- * node's `/stamps/{batchId}` endpoint. The Bee node computes this from current
- * chain state (per-block price and cumulative outpayment), so it is more
- * accurate than the constant-price approximation in {@link calculateTTLSeconds}.
+ * node's `/stamps/{batchId}` endpoint, via {@link fetchBatchDetails}. The Bee
+ * node computes this from current chain state (per-block price and cumulative
+ * outpayment), so it is more accurate than the constant-price approximation
+ * in {@link calculateTTLSeconds}.
  *
  * @param beeUrl - Bee node URL
  * @param batchId - Hex-encoded batch ID (without `0x` prefix)
@@ -264,22 +324,6 @@ export async function fetchBatchTTL(
   beeUrl: string,
   batchId: string,
 ): Promise<number | undefined> {
-  try {
-    const base = beeUrl.replace(/\/$/, "")
-    const response = await fetch(`${base}/stamps/${batchId}`)
-    if (!response.ok) {
-      return undefined
-    }
-    const data: unknown = await response.json()
-    if (typeof data !== "object" || data === null) {
-      return undefined
-    }
-    const ttl = (data as { batchTTL?: unknown }).batchTTL
-    if (typeof ttl !== "number") {
-      return undefined
-    }
-    return ttl < 0 ? 0 : ttl
-  } catch {
-    return undefined
-  }
+  const details = await fetchBatchDetails(beeUrl, batchId)
+  return details?.batchTTL
 }
