@@ -8,6 +8,8 @@
  * Controls mock behavior for testing various flows.
  */
 
+import { browser } from '$app/environment'
+
 export type MockStampResult = 'success' | 'error'
 
 interface DevSettings {
@@ -15,9 +17,24 @@ interface DevSettings {
   mockStampResult: MockStampResult
 }
 
+// Persist mock mode in sessionStorage so toggling it off survives navigation
+// (e.g. creating a user and returning to /dev) within the same tab session.
+const MOCK_ENABLED_KEY = 'dev-mock-stamp-enabled'
+const MOCK_RESULT_KEY = 'dev-mock-stamp-result'
+
+function loadMockEnabled(): boolean {
+  if (!browser) return import.meta.env.DEV
+  const stored = sessionStorage.getItem(MOCK_ENABLED_KEY)
+  return stored === undefined || stored === null ? import.meta.env.DEV : stored === 'true'
+}
+
+function loadMockResult(): MockStampResult {
+  return browser && sessionStorage.getItem(MOCK_RESULT_KEY) === 'error' ? 'error' : 'success'
+}
+
 const settings = $state<DevSettings>({
-  mockStampEnabled: import.meta.env.DEV, // Default to DEV mode
-  mockStampResult: 'success',
+  mockStampEnabled: loadMockEnabled(),
+  mockStampResult: loadMockResult(),
 })
 
 export const devSettingsStore = {
@@ -26,8 +43,10 @@ export const devSettingsStore = {
   },
   setMockStampEnabled(enabled: boolean) {
     settings.mockStampEnabled = enabled
+    if (browser) sessionStorage.setItem(MOCK_ENABLED_KEY, String(enabled))
   },
   setMockStampResult(result: MockStampResult) {
     settings.mockStampResult = result
+    if (browser) sessionStorage.setItem(MOCK_RESULT_KEY, result)
   },
 }

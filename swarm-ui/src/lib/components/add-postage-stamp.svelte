@@ -128,7 +128,12 @@
       console.error('[AddPostageStamp] Account not found', accountId)
       return
     }
-    const signerKeyHex = await derivePostageSignerKey(account.derivationKey, identityId)
+    // The purchased stamp becomes the ACCOUNT default when the account has none
+    // yet (an upgrade); only when an account default already exists is it a
+    // per-identity stamp. Derive the signer to match where the stamp is stored
+    // — see handleSuccess in the stamp pages.
+    const signerIdentityId = account.defaultPostageStampBatchID ? identityId : undefined
+    const signerKeyHex = await derivePostageSignerKey(account.derivationKey, signerIdentityId)
     signerKeyBytes = hexToUint8Array(signerKeyHex)
     derivedSignerKeyHex = signerKeyHex
     const signerKeyPrivate = new PrivateKey(signerKeyBytes)
