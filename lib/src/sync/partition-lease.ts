@@ -35,6 +35,7 @@ import {
 } from "../utils/batch-utilization"
 import {
   acquirePartitionLock,
+  deviceHomePartition,
   NO_HOLDER_DEVICE_ID,
   readPartitionLock,
   releasePartitionLock,
@@ -216,11 +217,18 @@ export class PartitionLease {
   }
 
   /**
-   * Lowest partition in `[0, partitionCount)` with no live holder that
-   * isn't us, else `undefined`. Drives candidate selection in `acquire`.
+   * First partition with no live holder that isn't us, else `undefined`,
+   * scanning from this device's deterministic home offset
+   * (`deviceHomePartition`) and wrapping. Starting from a per-device offset
+   * spreads devices across slots even when none can read peers' locks (the
+   * disjoint-gateway frozen-cache case); the wrap keeps full coverage so a
+   * genuinely free slot is never missed. Drives candidate selection in
+   * `acquire`.
    */
   private pickFreeOrExpired(partitionCount: number): number | undefined {
-    for (let p = 0; p < partitionCount; p++) {
+    const start = deviceHomePartition(this.opts.deviceId, partitionCount)
+    for (let i = 0; i < partitionCount; i++) {
+      const p = (start + i) % partitionCount
       const holder = this.holders.get(p)
       if (!holder || holder.deviceId === this.opts.deviceId) return p
     }

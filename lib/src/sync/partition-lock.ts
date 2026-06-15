@@ -103,6 +103,28 @@ export function makeDeviceTiebreaker(deviceId: string): string {
 }
 
 /**
+ * Deterministic per-device starting partition: `keccak256(deviceId) mod
+ * partitionCount`. Distinct devices map to distinct home partitions with high
+ * probability, so they spread across slots even when none can read peers' lock
+ * SOCs (the disjoint-gateway frozen-cache case — see
+ * docs/Partition-Lock-Hardening-Plan.md). Only changes the selection scan
+ * ORDER; visibly-held slots are still skipped, so behaviour under working
+ * reads is unchanged.
+ *
+ * ponytail: probabilistic spread, not mutual exclusion — colliding home
+ * partitions still race. The complete cross-gateway fix is the Phase 2
+ * intent-SOC protocol in the hardening plan.
+ */
+export function deviceHomePartition(
+  deviceId: string,
+  partitionCount: number,
+): number {
+  const hash = Binary.keccak256(new TextEncoder().encode(deviceId))
+  const n = ((hash[0] << 24) | (hash[1] << 16) | (hash[2] << 8) | hash[3]) >>> 0
+  return n % partitionCount
+}
+
+/**
  * Lexicographic comparison of two generations: timestamp first, then
  * tiebreaker. Returns -1 / 0 / 1.
  */

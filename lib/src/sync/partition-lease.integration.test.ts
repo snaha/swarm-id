@@ -73,7 +73,12 @@ import {
 const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 const TEST_BATCH_DEPTH = 24
 const TEST_ENC_KEY = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff)
-const DEVICE_A = "device-alpha-111"
+// Selection scans from each device's deterministic home partition
+// (`deviceHomePartition`). These device IDs are chosen so DEVICE_A's home is
+// partition 0 at PARTITION_COUNT (2), keeping the selection/fencing scenarios
+// below readable in natural partition order. The home-offset spread itself is
+// covered directly in partition-lock.test.ts.
+const DEVICE_A = "device-alpha-1" // home partition 0 (keccak256 mod 2)
 const DEVICE_B = "device-beta-222"
 
 const BACKUP_SIGNER = createTestSigner() as PrivateKey
