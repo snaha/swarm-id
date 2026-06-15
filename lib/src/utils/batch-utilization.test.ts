@@ -716,6 +716,88 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env2.slot).toBe(dataSlot(1, 0, PARTITION_COUNT))
   })
 
+  it("intent SOC routes to the contended partition's reserved slot, never a data lane, without consuming data budget", async () => {
+    // Phase-2 intent SOCs (partition-intent.ts) are stamped BEFORE the partition
+    // is bound. They must overstamp the contended partition's reserved slot
+    // (< DATA_COUNTER_START), so they can never collide with user data.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    // Bind to partition 0 to prove the intent slot comes from the EXPLICIT
+    // reservation (the contended partition, here 1), not `this.partition`.
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const BUCKET = 0x2222
+    const CONTENDED = 1
+    const intentChunk = makeChunkInBucket(BUCKET, 1)
+    stamper.reserveIntentSocSlot(intentChunk.hash(), CONTENDED)
+    const intentEnv = decodeIndex(stamper.stamp(intentChunk).index)
+    stamper.clearIntentSocSlot()
+
+    expect(intentEnv.bucket).toBe(BUCKET)
+    // Routed to the contended partition's reserved slot — below every data lane.
+    expect(intentEnv.slot).toBe(CONTENDED)
+    expect(intentEnv.slot).toBeLessThan(DATA_COUNTER_START)
+    // Did not consume the data lane: counter untouched, so the next data chunk
+    // in this bucket still lands at j=0.
+    expect(stamper.getLocalCounter()![BUCKET]).toBe(0)
+    const dataEnv = decodeIndex(
+      stamper.stamp(makeChunkInBucket(BUCKET, 2)).index,
+    )
+    expect(dataEnv.slot).toBe(dataSlot(0, 0, PARTITION_COUNT))
+    expect(dataEnv.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
+  })
+
+  it("intent stamps never share a (bucket, slot) with data stamps", async () => {
+    // Regression guard for the class of bug where intents fell into a data
+    // lane (overstamping user data). Interleave data + intent stamps in one
+    // bucket and assert the two occupy disjoint slot ranges: data lives at
+    // >= DATA_COUNTER_START, intents at the contended partition's reserved
+    // slot (< DATA_COUNTER_START). (Intents overstamping each OTHER at the
+    // same reserved slot is the documented, accepted residual — not asserted.)
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const BUCKET = 0x3333
+    const dataSlots = new Set<number>()
+    for (let i = 0; i < 10; i++) {
+      const dataEnv = decodeIndex(
+        stamper.stamp(makeChunkInBucket(BUCKET, 100 + i)).index,
+      )
+      expect(dataEnv.slot).toBeGreaterThanOrEqual(DATA_COUNTER_START)
+      expect(dataSlots.has(dataEnv.slot)).toBe(false) // data slots never reused
+      dataSlots.add(dataEnv.slot)
+
+      const intentChunk = makeChunkInBucket(BUCKET, 200 + i)
+      stamper.reserveIntentSocSlot(intentChunk.hash(), 0)
+      const intentEnv = decodeIndex(stamper.stamp(intentChunk).index)
+      stamper.clearIntentSocSlot()
+      // Intent slot is below the data range, so it can never equal a data slot.
+      expect(intentEnv.slot).toBeLessThan(DATA_COUNTER_START)
+      expect(dataSlots.has(intentEnv.slot)).toBe(false)
+    }
+  })
+
   it("auto-bind uses the BACKUP-signer address (derived from encryptionKey), not the `owner` arg", async () => {
     // Regression: `writePartitionLock` writes the lock SOC to
     // `keccak256(identifier || backupSigner.publicKey().address())`, where

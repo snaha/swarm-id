@@ -35,12 +35,36 @@
  * flaky device must not deadlock), so the guarantee is "when the network
  * works, rivals are seen"; genuine network partition still falls back to the
  * existing guard + TTL + refresh backstop.
+ *
+ * Slot safety: an intent is stamped into the CONTENDED partition's reserved
+ * slot (= the partition index, `< DATA_COUNTER_START`), via
+ * `UtilizationAwareStamper.reserveIntentSocSlot`. It therefore can NEVER share
+ * a postage `(bucket, slot)` with user data (data lives at
+ * `>= DATA_COUNTER_START`) — a deterministic guarantee, not probabilistic.
+ *
+ * Two residuals remain (both ~1/65536 per contending pair per round, far rarer
+ * than the systematic disjoint-gateway failure, and NOT closed here):
+ *   - Two contenders for the same partition whose per-epoch intent addresses
+ *     hash into the same bucket both route to that partition's reserved slot;
+ *     the older loses its stamp and reads as "no intent", so on disjoint
+ *     gateways both may "win" → a rare dual-acquire. (A verify-own-intent
+ *     back-off or per-device slot would close it.)
+ *   - An intent may overstamp the contended partition's own (stale) lock SOC
+ *     (harmless — re-acquired) or a published state chunk (→ `readFailed` →
+ *     read-only fallback). Liveness-only, never data loss.
  */
 
-import { Bee, Identifier, PrivateKey, type Stamper } from "@ethersphere/bee-js"
+import {
+  Bee,
+  Identifier,
+  PrivateKey,
+  type EthAddress,
+  type Stamper,
+} from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
+import { UtilizationAwareStamper } from "../utils/batch-utilization"
 import { rejectAfter } from "../utils/promise"
 import {
   PartitionIntentPayloadSchemaV1,
@@ -98,6 +122,28 @@ export function makePartitionIntentIdentifier(
 }
 
 /**
+ * 32-byte SOC chunk address for an intent — `keccak256(identifier ‖ owner)`,
+ * the same derivation `uploadSOC` uses. Computable before the upload so the
+ * stamper can reserve the chunk's slot (route it to the contended partition's
+ * reserved index instead of a data lane).
+ */
+export function intentSocAddress(
+  partition: number,
+  deviceId: string,
+  epochBucket: number,
+  owner: EthAddress,
+): Uint8Array {
+  const identifier = makePartitionIntentIdentifier(
+    partition,
+    deviceId,
+    epochBucket,
+  )
+  return Binary.keccak256(
+    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
+  )
+}
+
+/**
  * Write this device's intent for (partition, epochBucket). The payload carries
  * the generation the device intends to claim with, so rivals can order against
  * it. Uses the shared backup signer as owner (same as the lock SOC); each
@@ -128,6 +174,31 @@ export async function writePartitionIntent(opts: {
     bee: opts.bee,
     stamper: opts.stamper,
   }
+
+  // Route the intent to the contended partition's reserved slot so it can
+  // never land in a data lane and overstamp user data (see module header).
+  // Only the partition-aware stamper can do this; a plain stamper (legacy
+  // single-device) never contends, so a normal upload is fine there.
+  const stamper = opts.stamper
+  if (stamper instanceof UtilizationAwareStamper) {
+    const owner = opts.backupSigner.publicKey().address()
+    const address = intentSocAddress(
+      opts.partition,
+      opts.deviceId,
+      opts.epochBucket,
+      owner,
+    )
+    stamper.reserveIntentSocSlot(address, opts.partition)
+    try {
+      await uploadSOC(target, opts.backupSigner, identifier, data, {
+        encryptionKey: opts.swarmEncryptionKey,
+      })
+    } finally {
+      stamper.clearIntentSocSlot()
+    }
+    return
+  }
+
   await uploadSOC(target, opts.backupSigner, identifier, data, {
     encryptionKey: opts.swarmEncryptionKey,
   })

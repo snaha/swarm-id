@@ -1213,6 +1213,19 @@ export class UtilizationAwareStamper implements Stamper {
   private reservedUtilizationChunks: Map<string, number> | undefined = undefined
 
   /**
+   * The per-partition intent SOC for an in-flight intent round (Phase 2 —
+   * `partition-intent.ts`), mapped to the reserved SLOT it must overstamp (the
+   * contended partition index). Routed like the lock SOC / utilisation chunks:
+   * `stamp()` places it in the partition's reserved slot, so it NEVER lands in
+   * a data lane (`>= DATA_COUNTER_START`) and cannot overstamp user data.
+   * Single-entry and self-clearing (set immediately before the upload, cleared
+   * in a `finally`), so it stays isolated from the `reservedUtilizationChunks`
+   * save lifecycle and never grows. See `reserveIntentSocSlot`.
+   */
+  private intentSoc: { addressHex: string; slot: number } | undefined =
+    undefined
+
+  /**
    * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
    * detects displacement on a refresh tick (or upload-start lease check);
    * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
@@ -1395,6 +1408,23 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
+   * Register the per-partition intent SOC so `stamp()` routes it to `slot`
+   * (the contended partition's reserved index) instead of a data slot — never
+   * consuming data budget or bumping the counter. `slot` is passed explicitly
+   * because the intent round runs BEFORE `bindPartition`, so `this.partition`
+   * is not yet set. Call immediately before the upload; pair with
+   * `clearIntentSocSlot` in a `finally`.
+   */
+  reserveIntentSocSlot(address: Uint8Array, slot: number): void {
+    this.intentSoc = { addressHex: uint8ArrayToHex(address), slot }
+  }
+
+  /** Clear the registered intent SOC after its upload. */
+  clearIntentSocSlot(): void {
+    this.intentSoc = undefined
+  }
+
+  /**
    * Inverse of `bindPartition` — clears partition slot state on demote.
    * Leaves `lockSocs` intact (still valid for the account; refresh/yield
    * writes may need them) and clears the lease-stale flag.
@@ -1564,6 +1594,20 @@ export class UtilizationAwareStamper implements Stamper {
     if (reservedSlot !== undefined) {
       const bucket = toBucket(chunkAddress)
       this.stamper.buckets[bucket] = reservedSlot
+      return this.stamper.stamp(chunk)
+    }
+
+    // Intent-SOC short-circuit: a partition-intent chunk (Phase 2) overstamps
+    // the contended partition's reserved slot — like the lock SOC, below the
+    // data lanes — so it can never collide with user data. Doesn't bump the
+    // counter. Not gated by `leaseStale`: the intent round runs before binding,
+    // while no lease is held.
+    if (
+      this.intentSoc !== undefined &&
+      this.intentSoc.addressHex === uint8ArrayToHex(chunkAddress)
+    ) {
+      const bucket = toBucket(chunkAddress)
+      this.stamper.buckets[bucket] = this.intentSoc.slot
       return this.stamper.stamp(chunk)
     }
 

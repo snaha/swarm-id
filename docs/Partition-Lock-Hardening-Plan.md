@@ -192,6 +192,17 @@ both writers back on one mutable address — same divergence problem.
 > `knownDeviceIds` getter threaded from the proxy's account device registry. Constants:
 > `INTENT_EPOCH_MS = 30_000`, `INTENT_READ_TIMEOUT_MS = 2500`. The winner = strictly-minimum
 > generation; losers fall back to read-only. Description below is the original design.
+>
+> **Slot placement:** the intent SOC is stamped into the **contended partition's existing
+> reserved slot** (`= partition index`, `< DATA_COUNTER_START`), via
+> `UtilizationAwareStamper.reserveIntentSocSlot` — NOT a data slot and NOT a new reserved
+> index. So it can never share a postage `(bucket, slot)` with user data (deterministic).
+> Residuals, both ~1/65536 per contending pair per round and NOT closed: (1) two contenders'
+> intents hashing into the same bucket → one's stamp evicted → possible rare dual-acquire on
+> disjoint gateways (a verify-own-intent back-off would close it); (2) an intent overstamping
+> the contended partition's own stale lock SOC (harmless) or a published state chunk (→
+> read-only fallback, liveness-only). A dedicated reserved index was rejected: it does not
+> remove residual (1) and costs `1/2^(depth-16)` of the batch.
 
 The account already maintains a synced **device registry** (account-state sync, device
 announce). Use it for enumeration:
