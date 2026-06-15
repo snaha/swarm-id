@@ -693,6 +693,8 @@ export class SwarmIdProxy {
       batchId: this.postageBatchId,
       stamper: this.stamper,
       deviceId: this.requireDeviceId(),
+      knownDeviceIds: () =>
+        this.knownDeviceIdsForAccount(accountInfo.accountId),
       accountId: accountInfo.accountId,
       backupSigner: new PrivateKey(backupKeyHex),
       swarmEncryptionKey: accountInfo.encryptionKey,
@@ -1275,6 +1277,22 @@ export class SwarmIdProxy {
     } catch (error) {
       console.error("[Proxy] Error looking up account:", error)
       return undefined
+    }
+  }
+
+  /**
+   * Current device IDs registered for `accountId`, read fresh from shared
+   * storage so the partition-intent round (Phase 2) reflects devices that
+   * announced after the coordinator was built. Returns [] on any error — the
+   * lease then falls back to the guard+TTL acquire path.
+   */
+  private knownDeviceIdsForAccount(accountId: string): string[] {
+    try {
+      const accounts = createAccountsStorageManager().load()
+      const account = accounts.find((a) => a.id.toHex() === accountId)
+      return account?.devices.map((d) => d.deviceId) ?? []
+    } catch {
+      return []
     }
   }
 

@@ -218,6 +218,12 @@ export async function acquirePartitionLock(opts: {
   now?: () => number
   wait?: (ms: number) => Promise<void>
   /**
+   * Pre-built generation to claim with. Pass the SAME generation already
+   * advertised in a Phase-2 intent round so the winner's lock claim and its
+   * intent order identically. Defaults to a fresh `(now, tiebreaker)`.
+   */
+  generation?: PartitionLockGeneration
+  /**
    * Checked immediately before the claim write. When it returns true the
    * acquire aborts WITHOUT writing — used by `PartitionLease` to stop a
    * refresh that overlaps a `release()` from minting a ghost claim the
@@ -250,7 +256,7 @@ export async function acquirePartitionLock(opts: {
 
   // Lock is empty, expired, released, or already ours. Write our claim
   // and verify after the guard window.
-  const ourGeneration: PartitionLockGeneration = {
+  const ourGeneration: PartitionLockGeneration = opts.generation ?? {
     timestampMs: t,
     tiebreaker: makeDeviceTiebreaker(opts.deviceId),
   }

@@ -119,6 +119,14 @@ export interface BatchWriteCoordinatorDeps {
   stamper: UtilizationAwareStamper
   /** This device's identity, captured once by the caller. */
   deviceId: string
+  /**
+   * Current known device IDs for this account (from the synced device
+   * registry). Read fresh per acquire so it reflects late-announced devices.
+   * Drives the Phase-2 intent round that lets disjoint-gateway contenders for
+   * a free partition agree on one winner (see partition-intent.ts). Omit for
+   * single-device / legacy callers — acquire falls back to guard+TTL only.
+   */
+  knownDeviceIds?: () => string[]
   accountId: string
   /** Owns the per-partition lock SOCs (derived from the account key). */
   backupSigner: PrivateKey
@@ -403,6 +411,7 @@ export class BatchWriteCoordinator {
         batchDepth: stamper.depth,
         swarmEncryptionKey,
         stamper,
+        knownDeviceIds: this.deps.knownDeviceIds,
       })
       if (this.leaseEpoch !== epoch) return
       const cached = this.deps.readLeaseCache?.()

@@ -36,12 +36,14 @@ import {
 import {
   acquirePartitionLock,
   deviceHomePartition,
+  makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
   readPartitionLock,
   releasePartitionLock,
   type PartitionLockGeneration,
   type PartitionLockPayload,
 } from "./partition-lock"
+import { resolveIntentRound } from "./partition-intent"
 import { readPartitionState, writePartitionState } from "./partition-state"
 
 /** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
@@ -131,6 +133,17 @@ export class PartitionLease {
       now?: () => number
       /** Override for tests; defaults to PARTITION_LOCK_GUARD_MS. */
       guardMs?: number
+      /**
+       * Current known device IDs for this account (from the synced device
+       * registry). Read fresh each round so it reflects late-announced
+       * devices. When provided with ≥1 rival, a fresh claim of a free
+       * partition first runs an intent round (Phase 2 — see
+       * `partition-intent.ts`) so disjoint-gateway contenders agree on one
+       * winner before binding. Omitted (or empty) → today's guard+TTL path.
+       */
+      knownDeviceIds?: () => string[]
+      /** Override for tests; per-rival intent-read timeout. */
+      intentReadTimeoutMs?: number
     },
   ) {}
 
@@ -149,6 +162,8 @@ export class PartitionLease {
     stamper?: Stamper
     now?: () => number
     guardMs?: number
+    knownDeviceIds?: () => string[]
+    intentReadTimeoutMs?: number
   }): Promise<PartitionLease> {
     const swarmEncryptionKeyHex = uint8ArrayToHex(opts.swarmEncryptionKey)
     const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
@@ -262,8 +277,10 @@ export class PartitionLease {
     await this.refreshFromSwarm(partitionCount)
 
     // Prefer the partition we already hold; otherwise the first free/expired.
-    const chosenPartition =
-      this.heldPartition() ?? this.pickFreeOrExpired(partitionCount)
+    // A re-acquire of our own partition is not a contended claim — skip the
+    // intent round (which only guards taking a free/expired slot).
+    const held = this.heldPartition()
+    const chosenPartition = held ?? this.pickFreeOrExpired(partitionCount)
 
     if (chosenPartition === undefined) {
       // Every partition is live + foreign-held.
@@ -275,7 +292,11 @@ export class PartitionLease {
       }
     }
 
-    return this.claimPartition({ partition: chosenPartition, partitionCount })
+    return this.claimPartition({
+      partition: chosenPartition,
+      partitionCount,
+      freshClaim: held === undefined,
+    })
   }
 
   /**
@@ -287,8 +308,10 @@ export class PartitionLease {
   private async claimPartition(args: {
     partition: number
     partitionCount: number
+    /** A first-time claim of a free/expired slot (vs. a re-acquire of ours). */
+    freshClaim: boolean
   }): Promise<AcquireResult> {
-    const { partition, partitionCount } = args
+    const { partition, partitionCount, freshClaim } = args
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
 
     // Cache-aware seed: pass the reference our local counter is already in
@@ -331,6 +354,45 @@ export class PartitionLease {
         ? stamper.buildLeaseLocalCounter()
         : (stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS))
 
+    // The generation we will both advertise (intent round) and claim with, so
+    // the round's winner binds the lock with the exact generation it announced.
+    const generation: PartitionLockGeneration = {
+      timestampMs: this.now(),
+      tiebreaker: makeDeviceTiebreaker(this.opts.deviceId),
+    }
+
+    // Phase 2: for a fresh claim of a free/expired slot with known rivals, run
+    // an intent round at a fresh per-epoch address (forces a network read that
+    // bypasses the gateway's frozen lock-SOC cache). Only the round's winner
+    // proceeds to bind; losers back off to read-only. See partition-intent.ts.
+    const knownDeviceIds = this.opts.knownDeviceIds?.() ?? []
+    const hasRival = knownDeviceIds.some((id) => id !== this.opts.deviceId)
+    if (freshClaim && hasRival) {
+      const outcome = await resolveIntentRound({
+        bee: this.opts.bee,
+        stamper,
+        backupSigner: this.opts.backupSigner,
+        swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        partition,
+        deviceId: this.opts.deviceId,
+        generation,
+        knownDeviceIds,
+        now: this.now(),
+        timeoutMs: this.opts.intentReadTimeoutMs,
+      })
+      if (outcome === "lose") {
+        console.warn(
+          `[PartitionLease] Lost intent round for partition ${partition}; falling back to read-only.`,
+        )
+        return {
+          partition: undefined,
+          partitionCount,
+          localCounter: new Uint32Array(NUM_BUCKETS),
+          isReadOnly: true,
+        }
+      }
+    }
+
     const lockResult = await acquirePartitionLock({
       bee: this.opts.bee,
       stamper,
@@ -340,6 +402,7 @@ export class PartitionLease {
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
       guardMs: this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS,
+      generation,
       now: () => this.now(),
     })
 

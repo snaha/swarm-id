@@ -48,6 +48,7 @@ import {
   readPartitionLock,
   writePartitionLock,
 } from "./partition-lock"
+import { intentEpochBucket, writePartitionIntent } from "./partition-intent"
 import { Binary } from "cafe-utility"
 import {
   LEASE_TTL_MS,
@@ -129,6 +130,8 @@ function makeLease(opts: {
   deviceId: string
   bee: Bee
   now?: () => number
+  knownDeviceIds?: () => string[]
+  intentReadTimeoutMs?: number
 }): PartitionLease {
   return new PartitionLease({
     bee: opts.bee,
@@ -140,6 +143,8 @@ function makeLease(opts: {
     stamper: createMockStamper() as unknown as Stamper,
     now: opts.now,
     guardMs: GUARD_MS,
+    knownDeviceIds: opts.knownDeviceIds,
+    intentReadTimeoutMs: opts.intentReadTimeoutMs,
   })
 }
 
@@ -1033,5 +1038,119 @@ describe("PartitionLease.serialize / hydrate", () => {
     const other = makeLease({ deviceId: DEVICE_B, bee: bee as unknown as Bee })
     other.hydrate(snap)
     expect(other.currentPartition).toBeUndefined()
+  })
+})
+
+describe("PartitionLease.acquire — intent round (Phase 2)", () => {
+  // DEVICE_A's home partition is 0 (see the constant above), so a fresh claim
+  // targets partition 0 and the intent round consults rivals for partition 0.
+  const NOW = 5_000_000
+
+  it("backs off to read-only when a rival advertises an earlier intent", async () => {
+    // A rival announced intent for partition 0 with a SMALLER generation than
+    // DEVICE_A will use (timestampMs NOW). No lock SOC exists, so without the
+    // intent round DEVICE_A would bind partition 0 — the disjoint-gateway bug.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW - 1,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+    })
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(result.isReadOnly).toBe(true)
+    expect(result.partition).toBeUndefined()
+    // Crucially: no lock claim was written over the contested partition.
+    const lock = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(lock?.holderDeviceId).not.toBe(DEVICE_A)
+  })
+
+  it("wins and binds when a rival advertises a later intent", async () => {
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW + 1,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+    })
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(result.isReadOnly).toBe(false)
+    expect(result.partition).toBe(0)
+    const lock = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(lock?.holderDeviceId).toBe(DEVICE_A)
+  })
+
+  it("does not run an intent round when re-acquiring our own partition", async () => {
+    // First claim with no rivals.
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // A rival now advertises an earlier intent — but a re-acquire of a
+    // partition we already hold must NOT be gated by the intent round.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW - 1,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+    })
+
+    const reacquire = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(reacquire.partition).toBe(0)
+    expect(reacquire.isReadOnly).toBe(false)
   })
 })

@@ -328,6 +328,23 @@ export type PartitionLockGeneration = z.infer<
 >
 export type PartitionLockPayload = z.infer<typeof PartitionLockPayloadSchemaV1>
 
+/**
+ * Payload stored (as encrypted JSON) in a per-device partition-INTENT SOC.
+ * Written before a fresh claim on a free partition so rival contenders — who
+ * read each other's intent at a fresh per-epoch address that forces a network
+ * retrieval (bypassing the gateway's frozen lock-SOC cache) — can agree on a
+ * single winner by `generation` before any of them binds the lock. `deviceId`
+ * is carried for diagnostics/sanity; the address already encodes it.
+ */
+export const PartitionIntentPayloadSchemaV1 = z.object({
+  deviceId: z.string(),
+  generation: PartitionLockGenerationSchemaV1,
+})
+
+export type PartitionIntentPayload = z.infer<
+  typeof PartitionIntentPayloadSchemaV1
+>
+
 // ============================================================================
 // Network Settings Schema
 // ============================================================================
