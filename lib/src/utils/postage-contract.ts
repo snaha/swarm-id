@@ -188,6 +188,9 @@ async function ethCallBatch(
  *
  * @param rpcUrl - Gnosis Chain JSON-RPC URL
  * @param batchId - 32-byte hex batch ID, with or without `0x` prefix
+ * @param contractAddress - PostageStamp contract address to read from. Defaults
+ *          to the Gnosis mainnet deployment; override for a local dev chain
+ *          (bee-compose anvil deploys it at a different address).
  * @returns The decoded state, or `undefined` if the batch is unknown to the
  *          contract (zero owner) or the RPC request fails. Never throws — the
  *          UI falls back to other expiry sources on `undefined`.
@@ -195,21 +198,22 @@ async function ethCallBatch(
 export async function fetchOnChainBatchState(
   rpcUrl: string,
   batchId: string,
+  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
 ): Promise<OnChainBatchState | undefined> {
   try {
     const id = normalizeBatchId(batchId)
     const [batchesResult, outPaymentResult, lastPriceResult] =
       await ethCallBatch(rpcUrl, [
         {
-          to: POSTAGE_STAMP_CONTRACT_ADDRESS,
+          to: contractAddress,
           data: `0x${SELECTOR_BATCHES}${id}`,
         },
         {
-          to: POSTAGE_STAMP_CONTRACT_ADDRESS,
+          to: contractAddress,
           data: `0x${SELECTOR_CURRENT_TOTAL_OUT_PAYMENT}`,
         },
         {
-          to: POSTAGE_STAMP_CONTRACT_ADDRESS,
+          to: contractAddress,
           data: `0x${SELECTOR_LAST_PRICE}`,
         },
       ])
@@ -261,14 +265,17 @@ export function calculateContractTTLSeconds(
  * batch the contract knows about, regardless of whether the configured Bee node
  * tracks it.
  *
+ * @param contractAddress - PostageStamp contract address (defaults to mainnet;
+ *          override for a local dev chain).
  * @returns Remaining TTL in seconds (`0` when expired), or `undefined` when the
  *          batch is unknown, the RPC request fails, or the price is zero.
  */
 export async function fetchBatchTTLFromContract(
   rpcUrl: string,
   batchId: string,
+  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
 ): Promise<number | undefined> {
-  const state = await fetchOnChainBatchState(rpcUrl, batchId)
+  const state = await fetchOnChainBatchState(rpcUrl, batchId, contractAddress)
   if (state === undefined) {
     return undefined
   }
@@ -290,15 +297,18 @@ export async function fetchBatchTTLFromContract(
  * @param gnosisRpcUrl - Gnosis Chain JSON-RPC URL (for the contract read)
  * @param beeUrl - Bee node URL (fallback)
  * @param batchId - 32-byte hex batch ID, with or without `0x` prefix
+ * @param contractAddress - PostageStamp contract address for the contract read
+ *          (defaults to mainnet; override for a local dev chain).
  * @returns Remaining TTL in seconds, or `undefined` if neither source can answer.
  */
 export async function fetchAuthoritativeBatchTTL(
   gnosisRpcUrl: string,
   beeUrl: string,
   batchId: string,
+  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
 ): Promise<number | undefined> {
   return (
-    (await fetchBatchTTLFromContract(gnosisRpcUrl, batchId)) ??
+    (await fetchBatchTTLFromContract(gnosisRpcUrl, batchId, contractAddress)) ??
     (await fetchBatchTTL(beeUrl, batchId))
   )
 }

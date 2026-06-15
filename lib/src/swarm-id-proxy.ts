@@ -120,7 +120,10 @@ import {
   fetchBatchDetails,
   fetchSwarmPrice,
 } from "./utils/ttl"
-import { fetchAuthoritativeBatchTTL } from "./utils/postage-contract"
+import {
+  fetchAuthoritativeBatchTTL,
+  POSTAGE_STAMP_CONTRACT_ADDRESS,
+} from "./utils/postage-contract"
 import { tryCreateTag } from "./utils/tag"
 import {
   DEFAULT_BEE_NODE_URL,
@@ -186,6 +189,7 @@ export class SwarmIdProxy {
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private gnosisRpcUrl: string
+  private postageStampContractAddress: string
   private authButtonContainer: HTMLElement | undefined
   private currentStyles: ButtonStyles | undefined
   private buttonConfig: ButtonConfig | undefined
@@ -229,11 +233,16 @@ export class SwarmIdProxy {
    */
   private deviceId: string | undefined
 
-  constructor() {
+  constructor(config?: ProxyConfig) {
     // Load Bee API URL from network settings, falling back to default
     const networkSettings = createNetworkSettingsStorageManager().load()
     this.beeApiUrl = networkSettings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
     this.gnosisRpcUrl = networkSettings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
+    // PostageStamp contract address for on-chain TTL reads. The host app
+    // supplies this from a build-time env so local dev can point at the
+    // bee-compose anvil deployment; defaults to the Gnosis mainnet contract.
+    this.postageStampContractAddress =
+      config?.postageStampContractAddress || POSTAGE_STAMP_CONTRACT_ADDRESS
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
@@ -3909,6 +3918,7 @@ export class SwarmIdProxy {
       this.gnosisRpcUrl,
       this.beeApiUrl,
       stamp.batchID.toHex(),
+      this.postageStampContractAddress,
     )
     if (batchTTL === undefined) {
       try {
@@ -4002,8 +4012,20 @@ export class SwarmIdProxy {
 }
 
 /**
+ * Optional configuration for the proxy, supplied by the host trusted-domain app.
+ */
+export interface ProxyConfig {
+  /**
+   * PostageStamp contract address for on-chain stamp-TTL reads. Defaults to the
+   * Gnosis mainnet deployment; set this (from a build-time env) to the local
+   * bee-compose anvil address when developing against a local chain.
+   */
+  postageStampContractAddress?: string
+}
+
+/**
  * Initialize the proxy (called from HTML page)
  */
-export function initProxy(): SwarmIdProxy {
-  return new SwarmIdProxy()
+export function initProxy(config?: ProxyConfig): SwarmIdProxy {
+  return new SwarmIdProxy(config)
 }

@@ -11,6 +11,13 @@ declare global {
     // interface PageState {}
     // interface Platform {}
   }
+
+  // Optional override for the PostageStamp contract address used in on-chain
+  // stamp-TTL reads. Unset in production (falls back to the mainnet default);
+  // set to the local anvil deployment for development. See $lib/constants.
+  interface ImportMetaEnv {
+    readonly VITE_POSTAGE_STAMP_CONTRACT_ADDRESS?: string
+  }
 }
 
 export {}

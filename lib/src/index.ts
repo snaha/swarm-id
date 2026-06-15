@@ -13,6 +13,7 @@ export { SwarmIdClient } from "./swarm-id-client"
 
 // Proxy for iframe
 export { SwarmIdProxy, initProxy } from "./swarm-id-proxy"
+export type { ProxyConfig } from "./swarm-id-proxy"
 
 // Key derivation utilities
 export {

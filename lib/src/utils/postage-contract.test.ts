@@ -177,6 +177,25 @@ describe("fetchOnChainBatchState", () => {
     expect(body[0].params[0].data).toBe(`0xc81e25ab${BATCH_ID}`)
   })
 
+  it("targets a custom contract address when provided (local dev chain)", async () => {
+    fetchSpy.mockResolvedValue(batchResponse(FULL_RESPONSE))
+    const LOCAL_CONTRACT = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"
+
+    await fetchOnChainBatchState(
+      "https://rpc.example",
+      BATCH_ID,
+      LOCAL_CONTRACT,
+    )
+
+    const body = JSON.parse(
+      (fetchSpy.mock.calls[0][1] as RequestInit).body as string,
+    )
+    expect(body).toHaveLength(3)
+    for (const call of body) {
+      expect(call.params[0].to).toBe(LOCAL_CONTRACT)
+    }
+  })
+
   it("accepts a 0x-prefixed batch ID", async () => {
     fetchSpy.mockResolvedValue(batchResponse(FULL_RESPONSE))
 

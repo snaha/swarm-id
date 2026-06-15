@@ -31,6 +31,7 @@
     getBlockTimestamp,
   } from '@snaha/swarm-id'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
+  import { postageStampContractAddress } from '$lib/constants'
 
   const BATCH_ID_PREVIEW_LENGTH = 8
   const CHUNK_SIZE_BYTES = 4096
@@ -94,6 +95,7 @@
       networkSettingsStore.gnosisRpcUrl,
       networkSettingsStore.beeNodeUrl,
       batchId,
+      postageStampContractAddress,
     )
     if (ttlSeconds !== undefined) {
       chainExpiryMs.set(batchId, Date.now() + ttlSeconds * MS_PER_SECOND)
