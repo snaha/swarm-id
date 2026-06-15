@@ -30,7 +30,14 @@ export interface PurchaseStampOptions {
   destination: string // Batch owner address (0x...)
   onSuccess: (batch: BatchEvent) => void
   onError: (error: Error) => void
+  // The user explicitly backed out of the widget (a `finish` event) without
+  // completing a purchase.
   onCancel: () => void
+  // The popup closed without us receiving a recognized batch event — ambiguous,
+  // because the on-chain purchase may have succeeded but its message was missed
+  // (e.g. the widget didn't auto-close and the user closed it manually). The
+  // caller MUST NOT treat this as a clean cancel that discards the purchase.
+  onUnconfirmedClose: () => void
   mocked?: boolean // For testing - returns dummy batches
   mockError?: boolean // For testing - simulate error instead of success
 }
@@ -61,25 +68,69 @@ function isAllowedOrigin(origin: string): boolean {
 }
 
 /**
- * Parse and validate a batch event from the widget
+ * Coerce a postMessage payload into a plain object for inspection. The widget
+ * may post a structured-clone object OR a JSON string; both are accepted.
  */
-function parseBatchEvent(data: unknown): BatchEvent | undefined {
-  if (typeof data !== 'object' || data === undefined || data === null) {
+function coerceObject(data: unknown): Record<string, unknown> | undefined {
+  let value = data
+  if (typeof value === 'string') {
+    try {
+      value = JSON.parse(value)
+    } catch {
+      return undefined
+    }
+  }
+  return typeof value === 'object' && value !== null
+    ? (value as Record<string, unknown>)
+    : undefined
+}
+
+/**
+ * Coerce a value that may arrive as a number or a numeric string into a finite
+ * number, else `undefined`. The real widget's message-field types are not
+ * contractually guaranteed, so we accept either form.
+ */
+function toFiniteNumber(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isFinite(value) ? value : undefined
+  if (typeof value === 'string' && value.trim() !== '') {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : undefined
+  }
+  return undefined
+}
+
+/**
+ * Coerce a value that may arrive as a string, number, or bigint into its string
+ * form (used for `amount`/`blockNumber`, which downstream re-parse as BigInt /
+ * integer).
+ */
+function toStringField(value: unknown): string | undefined {
+  if (typeof value === 'string' && value.trim() !== '') return value
+  if (typeof value === 'number' && Number.isFinite(value)) return String(value)
+  if (typeof value === 'bigint') return value.toString()
+  return undefined
+}
+
+/**
+ * Parse and validate a batch event from the widget.
+ *
+ * Tolerant by design: the external widget's exact message shape is not a
+ * documented contract, so we accept the payload as an object OR a JSON string,
+ * and accept numeric fields (`depth`/`amount`/`blockNumber`) as either numbers
+ * or numeric strings. A too-strict parser silently drops a successful purchase
+ * (the message is ignored, then the popup-close path reverts the UI).
+ */
+export function parseBatchEvent(data: unknown): BatchEvent | undefined {
+  const obj = coerceObject(data)
+  if (!obj || obj.event !== 'batch') {
     return undefined
   }
 
-  const obj = data as Record<string, unknown>
+  const depth = toFiniteNumber(obj.depth)
+  const amount = toStringField(obj.amount)
+  const blockNumber = toStringField(obj.blockNumber)
 
-  if (obj.event !== 'batch') {
-    return undefined
-  }
-
-  if (
-    typeof obj.batchId !== 'string' ||
-    typeof obj.depth !== 'number' ||
-    typeof obj.amount !== 'string' ||
-    typeof obj.blockNumber !== 'string'
-  ) {
+  if (typeof obj.batchId !== 'string' || depth === undefined || !amount || !blockNumber) {
     return undefined
   }
 
@@ -92,9 +143,9 @@ function parseBatchEvent(data: unknown): BatchEvent | undefined {
   return {
     event: 'batch',
     batchId: batchIdHex, // Store without 0x prefix
-    depth: obj.depth,
-    amount: obj.amount,
-    blockNumber: obj.blockNumber,
+    depth,
+    amount,
+    blockNumber,
   }
 }
 
@@ -104,7 +155,8 @@ function parseBatchEvent(data: unknown): BatchEvent | undefined {
  * @param options - Purchase options including destination address and callbacks
  */
 export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
-  const { destination, onSuccess, onError, onCancel, mocked, mockError } = options
+  const { destination, onSuccess, onError, onCancel, onUnconfirmedClose, mocked, mockError } =
+    options
 
   const url = buildWidgetUrl(destination, mocked)
   const popup = window.open(url, 'stamp-purchase', POPUP_FEATURES)
@@ -114,8 +166,14 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
     return
   }
 
+  // How long to keep listening for a trailing `batch` message after the popup
+  // is observed closed, before concluding the close was unconfirmed. The widget
+  // can post the result just before/after closing its window.
+  const CLOSE_GRACE_MS = 1_500
+
   let completed = false
   let mockTimeout: ReturnType<typeof setTimeout> | undefined
+  let closeGraceTimer: ReturnType<typeof setTimeout> | undefined
 
   // Handle messages from the widget
   const handleMessage = (event: MessageEvent) => {
@@ -136,34 +194,55 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
       return
     }
 
-    // Check for error event
-    if ((typeof data === 'object' && data !== undefined) || data !== null) {
-      const obj = data as Record<string, unknown>
-      if (obj.event === 'error') {
-        completed = true
-        cleanup()
-        popup.close()
-        onError(new Error(String(obj.message || 'Widget error')))
-        return
-      }
+    const obj = coerceObject(data)
 
-      // Check for finish event (user closed widget without completing)
-      if (obj.event === 'finish') {
-        completed = true
-        cleanup()
-        popup.close()
-        onCancel()
-        return
-      }
+    // Check for error event
+    if (obj?.event === 'error') {
+      completed = true
+      cleanup()
+      popup.close()
+      onError(new Error(String(obj.message || 'Widget error')))
+      return
     }
+
+    // Check for finish event (user explicitly closed the widget without
+    // completing a purchase) — a genuine cancel.
+    if (obj?.event === 'finish') {
+      completed = true
+      cleanup()
+      popup.close()
+      onCancel()
+      return
+    }
+
+    // An allowed-origin message we didn't recognize. Leave a breadcrumb so a
+    // future "purchase succeeded but the UI didn't update" report can be
+    // diagnosed without special capture effort.
+    console.warn('[multichain-widget] unrecognized message from widget origin', {
+      origin: event.origin,
+      data,
+    })
+  }
+
+  // Conclude an ambiguous popup close: the on-chain purchase may have succeeded
+  // but its message was never recognized (e.g. the widget didn't auto-close and
+  // the user closed it manually). NOT a clean cancel — the caller must not
+  // discard a possible purchase.
+  const concludeUnconfirmedClose = () => {
+    if (completed) return
+    completed = true
+    cleanup()
+    onUnconfirmedClose()
   }
 
   // Check if popup was closed
   const checkClosed = setInterval(() => {
-    if (popup.closed && !completed) {
-      completed = true
-      cleanup()
-      onCancel()
+    if (popup.closed && !completed && closeGraceTimer === undefined) {
+      // Stop polling but keep the message listener alive for the grace window,
+      // so a `batch`/`finish` message arriving right as the popup closes is
+      // still handled.
+      clearInterval(checkClosed)
+      closeGraceTimer = setTimeout(concludeUnconfirmedClose, CLOSE_GRACE_MS)
     }
   }, 500)
 
@@ -173,6 +252,9 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
     clearInterval(checkClosed)
     if (mockTimeout) {
       clearTimeout(mockTimeout)
+    }
+    if (closeGraceTimer) {
+      clearTimeout(closeGraceTimer)
     }
   }
 

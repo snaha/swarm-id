@@ -24,11 +24,18 @@
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
 
-  const HEX_BASE = 16
   const POLYCON_SIZE = 80
 
+  // Parse a block number that may arrive as a 0x-hex string ("0x2a828b8") or a
+  // decimal string/number from the widget. `Number()` handles both 0x-prefixed
+  // hex and decimal; fall back to 0 if it isn't parseable.
+  function parseBlockNumber(value: string): number {
+    const n = Number(value)
+    return Number.isFinite(n) ? n : 0
+  }
+
   export type PageState = 'select' | 'purchase' | 'manual'
-  export type PurchaseState = 'waiting' | 'success' | 'error'
+  export type PurchaseState = 'waiting' | 'success' | 'error' | 'unconfirmed'
   export type StampVariant = 'account-creation' | 'dashboard' | 'external-app'
 
   interface Props {
@@ -78,6 +85,10 @@
 
   // Purchase flow state
   let signerKeyBytes = $state<Uint8Array | undefined>(undefined)
+  // Derived signer key (hex) for the just-attempted purchase, so an unconfirmed
+  // close can pre-fill the manual recovery form — the user only needs the batch
+  // ID the widget showed, not the (derived) signer key.
+  let derivedSignerKeyHex = $state('')
 
   export function goToSelect() {
     pageState = 'select'
@@ -119,6 +130,7 @@
     }
     const signerKeyHex = await derivePostageSignerKey(account.derivationKey, identityId)
     signerKeyBytes = hexToUint8Array(signerKeyHex)
+    derivedSignerKeyHex = signerKeyHex
     const signerKeyPrivate = new PrivateKey(signerKeyBytes)
 
     // Derive destination address from signer key
@@ -134,6 +146,7 @@
       onSuccess: handleWidgetSuccess,
       onError: handleWidgetError,
       onCancel: handleWidgetCancel,
+      onUnconfirmedClose: handleWidgetUnconfirmedClose,
       mocked: devSettingsStore.data.mockStampEnabled,
       mockError: devSettingsStore.data.mockStampResult === 'error',
     })
@@ -153,7 +166,7 @@
           signerKey: new PrivateKey(signerKeyBytes),
           depth: batch.depth,
           amount: BigInt(batch.amount),
-          blockNumber: parseInt(batch.blockNumber, HEX_BASE),
+          blockNumber: parseBlockNumber(batch.blockNumber),
           utilization: 0,
           usable: true,
           bucketDepth: 16,
@@ -192,8 +205,23 @@
   }
 
   function handleWidgetCancel() {
-    // User cancelled - go back to select state
+    // User explicitly backed out of the widget - go back to select state.
     pageState = 'select'
+  }
+
+  function handleWidgetUnconfirmedClose() {
+    // The popup closed without a recognized batch event. The on-chain purchase
+    // may have succeeded (e.g. the widget didn't auto-close and the user closed
+    // it manually), so do NOT silently revert to 'select' and discard it —
+    // surface a recovery state instead.
+    purchaseState = 'unconfirmed'
+  }
+
+  function goToManualRecovery() {
+    // Pre-fill the derived signer key so the user only needs the batch ID the
+    // widget showed for the just-attempted purchase.
+    signerKey = derivedSignerKeyHex
+    pageState = 'manual'
   }
 </script>
 
@@ -287,6 +315,32 @@
     >
       <Typography variant="h4" center>‼️ Something went wrong</Typography>
       <Typography center>An unexpected error occurred. Please try again.</Typography>
+    </Vertical>
+  {:else if purchaseState === 'unconfirmed'}
+    <Vertical
+      --vertical-gap="var(--padding)"
+      --vertical-align-items="center"
+      --vertical-justify-content="center"
+      style="flex: 1;"
+    >
+      <Typography variant="h4" center>⚠️ Purchase not confirmed</Typography>
+      <Typography center>
+        The window closed before we could confirm your purchase. If you completed it, your stamp was
+        created — add it here using the batch ID the widget showed.
+      </Typography>
+      <Horizontal --horizontal-gap="var(--padding)">
+        <Button variant="strong" dimension="compact" flexGrow onclick={goToManualRecovery}>
+          Enter batch ID
+        </Button>
+        <Button
+          variant="secondary"
+          dimension="compact"
+          flexGrow
+          onclick={() => (pageState = 'select')}
+        >
+          Back to options
+        </Button>
+      </Horizontal>
     </Vertical>
   {/if}
 {:else if pageState === 'manual'}
