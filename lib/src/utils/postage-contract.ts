@@ -20,6 +20,7 @@
  */
 
 import { fetchBatchTTL, GNOSIS_BLOCK_TIME } from "./ttl"
+import { postJsonRpc } from "./json-rpc"
 
 /**
  * PostageStamp contract address on Gnosis Chain. Lowercased — RPC nodes accept
@@ -38,9 +39,11 @@ const SELECTOR_CURRENT_TOTAL_OUT_PAYMENT = "51b17cd0" // currentTotalOutPayment(
 const SELECTOR_LAST_PRICE = "053f14da" // lastPrice()
 
 const HEX_WORD_LENGTH = 64 // 32 bytes as hex
-const BATCH_ID_HEX_LENGTH = 64 // 32 bytes as hex
 const ADDRESS_HEX_LENGTH = 40 // 20 bytes as hex
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000"
+
+// A batch ID is exactly one 32-byte word. Compiled once, not per call.
+const BATCH_ID_REGEX = new RegExp(`^[0-9a-f]{${HEX_WORD_LENGTH}}$`)
 
 /**
  * Decoded `batches(bytes32)` tuple. Field names mirror the contract's `Batch`
@@ -75,7 +78,7 @@ export interface OnChainBatchState {
 function normalizeBatchId(batchId: string): string {
   const stripped = batchId.startsWith("0x") ? batchId.slice(2) : batchId
   const lower = stripped.toLowerCase()
-  if (!new RegExp(`^[0-9a-f]{${BATCH_ID_HEX_LENGTH}}$`).test(lower)) {
+  if (!BATCH_ID_REGEX.test(lower)) {
     throw new Error(`Invalid batch ID: ${batchId}`)
   }
   return lower
@@ -143,21 +146,13 @@ async function ethCallBatch(
     params: [{ to: call.to, data: call.data }, "latest"],
   }))
 
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(payload),
-  })
-  if (!response.ok) {
-    throw new Error(`RPC request failed: HTTP ${response.status}`)
-  }
-
-  const data: unknown = await response.json()
+  const data: unknown = await postJsonRpc(rpcUrl, payload)
   if (!Array.isArray(data) || data.length !== calls.length) {
     throw new Error("Malformed JSON-RPC batch response")
   }
 
   const results: string[] = new Array(calls.length)
+  const seen = new Set<number>()
   for (const entry of data as Array<{
     id?: unknown
     result?: unknown
@@ -170,13 +165,22 @@ async function ethCallBatch(
     ) {
       throw new Error("JSON-RPC response with out-of-range id")
     }
+    if (seen.has(entry.id)) {
+      throw new Error(`JSON-RPC response with duplicate id ${entry.id}`)
+    }
     if (entry.error) {
       throw new Error(`RPC error: ${entry.error.message ?? "unknown"}`)
     }
     if (typeof entry.result !== "string") {
       throw new Error("JSON-RPC response missing result")
     }
+    seen.add(entry.id)
     results[entry.id] = entry.result
+  }
+  // Unique, in-range ids covering exactly `calls.length` slots means every
+  // slot is filled — so the `string[]` type holds no holes.
+  if (seen.size !== calls.length) {
+    throw new Error("JSON-RPC batch response missing results")
   }
   return results
 }

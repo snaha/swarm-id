@@ -10,3 +10,6 @@
 // `dev:swarm-ui`) and must also point the Gnosis RPC URL at the local node
 // (http://localhost:9545) via the identity UI's network settings.
 export const postageStampContractAddress = import.meta.env.VITE_POSTAGE_STAMP_CONTRACT_ADDRESS
+
+// Milliseconds per second — for converting TTL/Unix seconds to JS `Date` ms.
+export const MS_PER_SECOND = 1000

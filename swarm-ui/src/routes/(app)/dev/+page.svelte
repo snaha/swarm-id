@@ -30,6 +30,7 @@
     fetchChainState,
     formatTTL,
   } from '@snaha/swarm-id'
+  import { MS_PER_SECOND } from '$lib/constants'
   import { SvelteMap } from 'svelte/reactivity'
 
   // How many days of validity to fund by default when auto-filling the
@@ -37,8 +38,6 @@
   // POST /stamps; 7 days gives comfortable headroom for dev testing without
   // re-buying constantly.
   const DEFAULT_STAMP_DAYS = 7
-
-  const MS_PER_SECOND = 1000
 
   // Renders a listed stamp's remaining lifetime as "<ttl> (<date>)". batchTTL
   // comes straight from the Bee node's /stamps response — authoritative for the

@@ -31,14 +31,13 @@
     getBlockTimestamp,
   } from '@snaha/swarm-id'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-  import { postageStampContractAddress } from '$lib/constants'
+  import { postageStampContractAddress, MS_PER_SECOND } from '$lib/constants'
 
   const BATCH_ID_PREVIEW_LENGTH = 8
   const CHUNK_SIZE_BYTES = 4096
   const BYTES_PER_KB = 1024
   const BYTES_PER_MB = BYTES_PER_KB * BYTES_PER_KB
   const BYTES_PER_GB = BYTES_PER_MB * BYTES_PER_KB
-  const MS_PER_SECOND = 1000
   const SECONDS_PER_MONTH = 2592000
   const MAX_UTILIZATION_PERCENT = 100
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1

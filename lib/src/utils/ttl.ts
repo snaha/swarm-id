@@ -5,6 +5,8 @@
  * TTL (Time To Live) calculation and formatting utilities for postage stamps
  */
 
+import { postJsonRpc } from "./json-rpc"
+
 /**
  * Gnosis Chain block time in seconds
  */
@@ -138,18 +140,13 @@ export async function getBlockTimestamp(
   rpcUrl: string,
   blockNumber: number,
 ): Promise<number> {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      method: "eth_getBlockByNumber",
-      params: [`0x${blockNumber.toString(16)}`, false],
-      id: 1,
-    }),
-  })
+  const data = (await postJsonRpc(rpcUrl, {
+    jsonrpc: "2.0",
+    method: "eth_getBlockByNumber",
+    params: [`0x${blockNumber.toString(16)}`, false],
+    id: 1,
+  })) as { error?: { message?: string }; result?: { timestamp: string } }
 
-  const data = await response.json()
   if (data.error) {
     throw new Error(`RPC error: ${data.error.message}`)
   }
