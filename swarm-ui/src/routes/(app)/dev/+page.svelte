@@ -24,7 +24,11 @@
   import Divider from '$lib/components/ui/divider.svelte'
   import routes from '$lib/routes'
   import { BatchId, EthAddress, PrivateKey, Utils } from '@ethersphere/bee-js'
-  import { calculateStampAmountForDays, fetchChainState } from '@snaha/swarm-id'
+  import {
+    calculateStampAmountForDays,
+    derivePostageSignerKey,
+    fetchChainState,
+  } from '@snaha/swarm-id'
   import { SvelteMap } from 'svelte/reactivity'
 
   // How many days of validity to fund by default when auto-filling the
@@ -68,6 +72,35 @@
   let selectedStampId = $state<string | undefined>(undefined)
   let selectedAccountId = $state<string | undefined>(undefined)
   let selectedIdentityId = $state<string | undefined>(undefined)
+
+  // Derived postage signer key + owner address for the selected account/identity.
+  // Use the owner address to buy a stamp online, then paste the private key into
+  // the "Use existing one" screen as the signer key.
+  let accountSigner = $state<{ privateKey: string; owner: string } | undefined>(undefined)
+  let identitySigner = $state<{ privateKey: string; owner: string } | undefined>(undefined)
+
+  $effect(() => {
+    const acct = selectedAccountId
+      ? accountsStore.getAccount(new EthAddress(selectedAccountId))
+      : undefined
+    const identityId = selectedIdentityId
+    if (!acct) {
+      accountSigner = undefined
+      identitySigner = undefined
+      return
+    }
+    // ponytail: fire-and-forget derive; effect re-runs when the selection changes
+    void (async () => {
+      const k = await derivePostageSignerKey(acct.derivationKey)
+      accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
+      if (identityId) {
+        const ik = await derivePostageSignerKey(acct.derivationKey, identityId)
+        identitySigner = { privateKey: ik, owner: new PrivateKey(ik).publicKey().address().toHex() }
+      } else {
+        identitySigner = undefined
+      }
+    })()
+  })
   let beeStamps = $state<
     Array<{
       batchID: string
@@ -540,6 +573,33 @@ Check console logs for details:
   }
 </script>
 
+{#snippet signerCard(label: string, signer: { privateKey: string; owner: string })}
+  <Vertical
+    --vertical-gap="var(--half-padding)"
+    style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+  >
+    <Typography font="mono">{label}</Typography>
+    <Vertical --vertical-gap="var(--half-padding)">
+      <Typography variant="small" style="color: var(--colors-medium);">Owner Address</Typography>
+      <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+        <Typography font="mono" variant="small" style="word-break: break-all;"
+          >{signer.owner}</Typography
+        >
+        <CopyButton text={signer.owner} />
+      </Horizontal>
+    </Vertical>
+    <Vertical --vertical-gap="var(--half-padding)">
+      <Typography variant="small" style="color: var(--colors-medium);">Private Key</Typography>
+      <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+        <Typography font="mono" variant="small" style="word-break: break-all;"
+          >{signer.privateKey}</Typography
+        >
+        <CopyButton text={signer.privateKey} />
+      </Horizontal>
+    </Vertical>
+  </Vertical>
+{/snippet}
+
 <Vertical
   --vertical-gap="var(--double-padding)"
   style="max-width: 800px; padding: var(--double-padding);"
@@ -872,6 +932,29 @@ Check console logs for details:
       {/if}
       {#if assignError}
         <Typography variant="small" style="color: var(--colors-error);">{assignError}</Typography>
+      {/if}
+
+      <Divider --margin="var(--padding) 0" />
+
+      <Typography variant="h3">Signer Key / Owner Address</Typography>
+      <Typography variant="small" style="color: var(--colors-medium);">
+        Buy a stamp online under the owner address, then paste the private key as the signer key in
+        the "Use existing one" screen. Reflects the account/identity selected above.
+      </Typography>
+
+      {#if !selectedAccountId}
+        <Typography variant="small" style="color: var(--colors-medium);">
+          Select an account above to view its signer key.
+        </Typography>
+      {:else}
+        <Vertical --vertical-gap="var(--half-padding)">
+          {#if accountSigner}
+            {@render signerCard('Account-level signer', accountSigner)}
+          {/if}
+          {#if identitySigner}
+            {@render signerCard('Identity-level signer', identitySigner)}
+          {/if}
+        </Vertical>
       {/if}
     </Vertical>
   {/if}
