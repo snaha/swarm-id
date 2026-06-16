@@ -127,6 +127,13 @@ export interface BatchWriteCoordinatorDeps {
    * single-device / legacy callers — acquire falls back to guard+TTL only.
    */
   knownDeviceIds?: () => string[]
+  /**
+   * Gateway-propagation tuning for the intent round (optional overrides; default
+   * to the `INTENT_*` constants). Lets the proxy pass runtime-tunable values.
+   */
+  intentReadTimeoutMs?: number
+  intentGuardWindowMs?: number
+  intentGuardPollMs?: number
   accountId: string
   /** Owns the per-partition lock SOCs (derived from the account key). */
   backupSigner: PrivateKey
@@ -412,6 +419,9 @@ export class BatchWriteCoordinator {
         swarmEncryptionKey,
         stamper,
         knownDeviceIds: this.deps.knownDeviceIds,
+        intentReadTimeoutMs: this.deps.intentReadTimeoutMs,
+        intentGuardWindowMs: this.deps.intentGuardWindowMs,
+        intentGuardPollMs: this.deps.intentGuardPollMs,
       })
       if (this.leaseEpoch !== epoch) return
       const cached = this.deps.readLeaseCache?.()

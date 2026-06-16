@@ -98,8 +98,23 @@ export const INTENT_EPOCH_MS = 30_000
  */
 export const INTENT_READ_TIMEOUT_MS = 2500
 
+/**
+ * Total window an intent round polls rivals before binding a fresh claim.
+ * Sized to the gateway's write→cross-device-retrieve propagation delay: a peer
+ * that wrote its intent/beacon seconds ago isn't immediately readable, so a
+ * single read races ahead of propagation and misses it. Polling over this
+ * window lets the peer surface. Tunable per gateway (lease/coordinator opts +
+ * the `swarm-id-partition-tuning` localStorage override).
+ */
+export const INTENT_GUARD_WINDOW_MS = 12_000
+
+/** Interval between rival re-reads within the guard window. */
+export const INTENT_GUARD_POLL_MS = 2500
+
 /** Internal marker so a timed-out read is distinguishable from a real error. */
 const INTENT_TIMEOUT_MESSAGE = "intent read timed out"
+
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** `floor(nowMs / INTENT_EPOCH_MS)` — the current intent epoch bucket. */
 export function intentEpochBucket(nowMs: number): number {
@@ -161,6 +176,12 @@ export async function writePartitionIntent(opts: {
   deviceId: string
   epochBucket: number
   generation: PartitionLockGeneration
+  /**
+   * Present when this write is a holder PRESENCE BEACON (re-published each
+   * refresh): lets a reading joiner apply a `leasedUntil > now` liveness test.
+   * Omitted for a pre-claim intent (the symmetric-race announce).
+   */
+  leasedUntil?: number
 }): Promise<void> {
   const identifier = makePartitionIntentIdentifier(
     opts.partition,
@@ -170,6 +191,9 @@ export async function writePartitionIntent(opts: {
   const payload: PartitionIntentPayload = {
     deviceId: opts.deviceId,
     generation: opts.generation,
+    ...(opts.leasedUntil !== undefined
+      ? { leasedUntil: opts.leasedUntil }
+      : {}),
   }
   const data = new TextEncoder().encode(JSON.stringify(payload))
   const target: UploadTarget = {
@@ -195,11 +219,6 @@ export async function writePartitionIntent(opts: {
     try {
       await uploadSOC(target, opts.backupSigner, identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
-        // Non-deferred = receipt-backed push-sync into the storage
-        // neighborhood. The whole point of the intent SOC is cross-gateway
-        // visibility; a deferred write would sit on this device's gateway and
-        // a peer's retrieval of the fresh address would never find it.
-        deferred: false,
       })
     } finally {
       stamper.clearIntentSocSlot()
@@ -209,7 +228,6 @@ export async function writePartitionIntent(opts: {
 
   await uploadSOC(target, opts.backupSigner, identifier, data, {
     encryptionKey: opts.swarmEncryptionKey,
-    deferred: false,
   })
 }
 
@@ -250,17 +268,30 @@ export async function readPartitionIntent(opts: {
     const parsed = PartitionIntentPayloadSchemaV1.safeParse(
       JSON.parse(new TextDecoder().decode(soc.payload)),
     )
-    return parsed.success ? parsed.data : undefined
-  } catch (error) {
-    // A timeout means the rival's chunk may well exist but the gateway didn't
-    // retrieve it within the budget — distinct from a genuine "not found", and
-    // worth surfacing because a too-short timeout would silently re-enable the
-    // dual-acquire this whole mechanism exists to prevent.
-    if (error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE) {
-      console.warn(
-        `[partition-intent] read TIMEOUT for device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket} (>${opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS}ms) — treated as no-intent`,
+    if (!parsed.success) {
+      console.log(
+        `[partition-intent] read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}: malformed`,
       )
+      return undefined
     }
+    console.log(
+      `[partition-intent] read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}: FOUND (gen ts=${parsed.data.generation.timestampMs} leasedUntil=${parsed.data.leasedUntil ?? "none"})`,
+    )
+    return parsed.data
+  } catch (error) {
+    // Distinguish a timeout (the rival's chunk may well exist but the gateway
+    // didn't retrieve it within the budget) from a genuine not-found — a
+    // too-short timeout would silently re-enable the dual-acquire this whole
+    // mechanism exists to prevent.
+    const timedOut =
+      error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE
+    console.log(
+      `[partition-intent] read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}: ${
+        timedOut
+          ? `TIMEOUT (>${opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS}ms)`
+          : `missing (${error instanceof Error ? error.message : String(error)})`
+      } — treated as no-intent`,
+    )
     return undefined
   }
 }
@@ -291,6 +322,14 @@ export async function resolveIntentRound(opts: {
   knownDeviceIds: string[]
   now: number
   timeoutMs?: number
+  /**
+   * Poll rivals over this window before deciding (default 0 = a single read,
+   * used by tests). Sized to the gateway propagation delay so a peer's recent
+   * intent/beacon surfaces before we bind. See `INTENT_GUARD_WINDOW_MS`.
+   */
+  guardWindowMs?: number
+  /** Interval between polls within the guard window. */
+  guardPollMs?: number
 }): Promise<"win" | "lose"> {
   const rivals = opts.knownDeviceIds.filter((id) => id !== opts.deviceId)
   if (rivals.length === 0) return "win"
@@ -312,37 +351,66 @@ export async function resolveIntentRound(opts: {
     generation: opts.generation,
   })
 
-  // Read every rival's intent for both buckets in parallel; each read is
-  // individually time-bounded so an absent rival doesn't stall the round.
-  const observed = await Promise.all(
-    rivals.flatMap((rivalId) =>
-      [currentBucket, previousBucket].map(async (bucket) => ({
-        rivalId,
-        intent: await readPartitionIntent({
-          bee: opts.bee,
-          backupSigner: opts.backupSigner,
-          swarmEncryptionKey: opts.swarmEncryptionKey,
-          partition: opts.partition,
-          deviceId: rivalId,
-          epochBucket: bucket,
-          timeoutMs: opts.timeoutMs,
-        }),
-      })),
-    ),
-  )
+  // One sweep: read every rival's intent for both buckets in parallel (each
+  // read individually time-bounded), and return the first rival that beats us:
+  //  - a LIVE holder (beacon with `leasedUntil > now`) — already holds it,
+  //    regardless of generation; or
+  //  - a contender ordering strictly below us (a pre-claim intent, no
+  //    `leasedUntil`, smaller generation).
+  // An EXPIRED beacon (`leasedUntil <= now`) is a departed holder — ignored.
+  const sweep = async (): Promise<
+    { rivalId: string; reason: "live-beacon" | "earlier-intent" } | undefined
+  > => {
+    const observed = await Promise.all(
+      rivals.flatMap((rivalId) =>
+        [currentBucket, previousBucket].map(async (bucket) => ({
+          rivalId,
+          intent: await readPartitionIntent({
+            bee: opts.bee,
+            backupSigner: opts.backupSigner,
+            swarmEncryptionKey: opts.swarmEncryptionKey,
+            partition: opts.partition,
+            deviceId: rivalId,
+            epochBucket: bucket,
+            timeoutMs: opts.timeoutMs,
+          }),
+        })),
+      ),
+    )
+    for (const r of observed) {
+      const intent = r.intent
+      if (!intent) continue
+      if (intent.leasedUntil !== undefined) {
+        if (intent.leasedUntil > opts.now)
+          return { rivalId: r.rivalId, reason: "live-beacon" }
+        continue
+      }
+      if (compareGenerations(intent.generation, opts.generation) < 0)
+        return { rivalId: r.rivalId, reason: "earlier-intent" }
+    }
+    return undefined
+  }
 
-  const found = observed.filter((r) => r.intent !== undefined)
-  // A rival ordering strictly below us wins the partition; we back off.
-  const beatenBy = found.find(
-    (r) => compareGenerations(r.intent!.generation, opts.generation) < 0,
-  )
+  // Poll across the guard window. A peer's freshly-written intent/beacon takes
+  // a few seconds to become cross-device-retrievable on a gateway, so a single
+  // immediate read races ahead of propagation. We back off as soon as ANY sweep
+  // finds a beating rival; we only win after the whole window stays clear.
+  const guardWindowMs = opts.guardWindowMs ?? 0
+  const guardPollMs = opts.guardPollMs ?? INTENT_GUARD_POLL_MS
+  const polls = Math.max(1, Math.floor(guardWindowMs / guardPollMs) + 1)
+  let beatenBy: Awaited<ReturnType<typeof sweep>>
+  for (let i = 0; i < polls; i++) {
+    if (i > 0) await sleep(guardPollMs)
+    beatenBy = await sweep()
+    if (beatenBy) break
+  }
+
   const outcome = beatenBy ? "lose" : "win"
-
-  // One concise line per round so a gateway run shows whether peers were
-  // actually observed (the failure mode being "found=0 → everyone wins").
   console.log(
-    `[partition-intent] round p=${opts.partition} self=${opts.deviceId} rivals=${rivals.length} found=${found.length} → ${outcome}` +
-      (beatenBy ? ` (beaten by ${beatenBy.rivalId})` : ""),
+    `[partition-intent] round p=${opts.partition} self=${opts.deviceId} rivals=${rivals.length} polls=${polls} → ${outcome}` +
+      (beatenBy
+        ? ` (beaten by ${beatenBy.rivalId} via ${beatenBy.reason})`
+        : ""),
   )
 
   return outcome

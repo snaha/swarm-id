@@ -35,6 +35,7 @@ import {
 } from "../utils/batch-utilization"
 import {
   acquirePartitionLock,
+  compareGenerations,
   deviceHomePartition,
   makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
@@ -43,7 +44,14 @@ import {
   type PartitionLockGeneration,
   type PartitionLockPayload,
 } from "./partition-lock"
-import { resolveIntentRound } from "./partition-intent"
+import {
+  INTENT_GUARD_POLL_MS,
+  INTENT_GUARD_WINDOW_MS,
+  intentEpochBucket,
+  readPartitionIntent,
+  resolveIntentRound,
+  writePartitionIntent,
+} from "./partition-intent"
 import { readPartitionState, writePartitionState } from "./partition-state"
 
 /** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
@@ -144,6 +152,13 @@ export class PartitionLease {
       knownDeviceIds?: () => string[]
       /** Override for tests; per-rival intent-read timeout. */
       intentReadTimeoutMs?: number
+      /**
+       * Fresh-claim intent-round poll window / interval (gateway-propagation
+       * tunable). Default to the `INTENT_GUARD_*` constants; tests pass 0 for a
+       * single immediate read.
+       */
+      intentGuardWindowMs?: number
+      intentGuardPollMs?: number
     },
   ) {}
 
@@ -164,6 +179,8 @@ export class PartitionLease {
     guardMs?: number
     knownDeviceIds?: () => string[]
     intentReadTimeoutMs?: number
+    intentGuardWindowMs?: number
+    intentGuardPollMs?: number
   }): Promise<PartitionLease> {
     const swarmEncryptionKeyHex = uint8ArrayToHex(opts.swarmEncryptionKey)
     const backupKeyHex = await deriveSecret(swarmEncryptionKeyHex, "backup-key")
@@ -186,19 +203,108 @@ export class PartitionLease {
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
         partition: p,
       })
-      if (
-        !lock ||
-        lock.holderDeviceId === NO_HOLDER_DEVICE_ID ||
-        lock.leasedUntil <= now
-      ) {
+      // Per-partition outcome — this is the line that reveals whether a joining
+      // device can actually SEE the current holder's lock SOC (the suspected
+      // cross-device dual-acquire cause). "no readable lock" here for a
+      // partition a peer holds = the lock SOC is invisible to us.
+      if (!lock) {
+        console.log(`[PartitionLease] refresh p=${p}: no readable lock`)
         continue
       }
+      if (lock.holderDeviceId === NO_HOLDER_DEVICE_ID) {
+        console.log(`[PartitionLease] refresh p=${p}: released sentinel`)
+        continue
+      }
+      const self = lock.holderDeviceId === this.opts.deviceId ? " (self)" : ""
+      if (lock.leasedUntil <= now) {
+        console.log(
+          `[PartitionLease] refresh p=${p}: EXPIRED holder ${lock.holderDeviceId}${self} (until ${lock.leasedUntil} <= now ${now})`,
+        )
+        continue
+      }
+      console.log(
+        `[PartitionLease] refresh p=${p}: held by ${lock.holderDeviceId}${self} until ${lock.leasedUntil}`,
+      )
       this.holders.set(p, {
         deviceId: lock.holderDeviceId,
         generation: lock.generation,
         acquiredAt: lock.acquiredAt,
         leasedUntil: lock.leasedUntil,
       })
+    }
+    const summary = Array.from(this.holders.entries())
+      .map(([p, h]) => `${p}->${h.deviceId}`)
+      .join(",")
+    console.log(
+      `[PartitionLease] refresh: live holders={${summary}} self=${this.opts.deviceId}`,
+    )
+  }
+
+  /**
+   * Merge live holders detected from per-device PRESENCE BEACONS (the intent
+   * SOCs holders re-publish each refresh) into `holders`. Unlike the static
+   * lock SOC, these live at fresh per-epoch addresses, so reading them forces a
+   * network retrieval that works on a gateway that 404s the static address —
+   * this is what lets a joiner detect an existing holder. Call AFTER
+   * `refreshFromSwarm` (union, not replace): either channel showing a live
+   * foreign holder marks the partition held. No-op without known rivals.
+   */
+  async refreshHoldersFromPresence(partitionCount: number): Promise<void> {
+    const now = this.now()
+    const rivals = (this.opts.knownDeviceIds?.() ?? []).filter(
+      (id) => id !== this.opts.deviceId,
+    )
+    if (rivals.length === 0) return
+
+    const currentBucket = intentEpochBucket(now)
+    const buckets = [currentBucket, currentBucket - 1]
+
+    const results = await Promise.all(
+      Array.from({ length: partitionCount }).flatMap((_unused, p) =>
+        rivals.flatMap((deviceId) =>
+          buckets.map(async (bucket) => ({
+            partition: p,
+            deviceId,
+            bucket,
+            intent: await readPartitionIntent({
+              bee: this.opts.bee,
+              backupSigner: this.opts.backupSigner,
+              swarmEncryptionKey: this.opts.swarmEncryptionKey,
+              partition: p,
+              deviceId,
+              epochBucket: bucket,
+              timeoutMs: this.opts.intentReadTimeoutMs,
+            }),
+          })),
+        ),
+      ),
+    )
+
+    for (const { partition, deviceId, bucket, intent } of results) {
+      if (!intent) continue
+      // A holder beacon carries `leasedUntil`; a pre-claim intent (the
+      // symmetric-race announce) does NOT. Only a beacon means "this partition
+      // is HELD" — a bare intent is a contender, left for the intent round to
+      // resolve, so it must NOT mark the partition held here.
+      if (intent.leasedUntil === undefined || intent.leasedUntil <= now)
+        continue
+      const leasedUntil = intent.leasedUntil
+
+      const existing = this.holders.get(partition)
+      // Keep a self-claim (from the lock SOC) — we hold it; don't let a foreign
+      // beacon shadow it. Otherwise record/refresh the foreign holder.
+      if (existing && existing.deviceId === this.opts.deviceId) continue
+      if (!existing || leasedUntil > existing.leasedUntil) {
+        this.holders.set(partition, {
+          deviceId,
+          generation: intent.generation,
+          acquiredAt: existing?.acquiredAt ?? 0,
+          leasedUntil,
+        })
+        console.log(
+          `[PartitionLease] presence p=${partition}: live holder ${deviceId} (bucket ${bucket}, leasedUntil ${leasedUntil})`,
+        )
+      }
     }
   }
 
@@ -275,12 +381,22 @@ export class PartitionLease {
     }
 
     await this.refreshFromSwarm(partitionCount)
+    // Union in holders detected via presence beacons (fresh per-epoch reads
+    // that work on the gateway where the static lock SOC is unreadable). This
+    // is what lets us detect a peer that ALREADY holds a partition.
+    await this.refreshHoldersFromPresence(partitionCount)
 
     // Prefer the partition we already hold; otherwise the first free/expired.
     // A re-acquire of our own partition is not a contended claim — skip the
     // intent round (which only guards taking a free/expired slot).
     const held = this.heldPartition()
     const chosenPartition = held ?? this.pickFreeOrExpired(partitionCount)
+    // Why this partition was chosen — `home` is our deterministic scan start,
+    // `liveHolders` the count refreshFromSwarm saw. If we pick a partition a
+    // peer actually holds, that means we couldn't read its lock SOC above.
+    console.log(
+      `[PartitionLease] acquire: chosen=${chosenPartition} via=${held !== undefined ? "held(re-acquire)" : "pickFreeOrExpired"} home=${deviceHomePartition(this.opts.deviceId, partitionCount)} liveHolders=${this.holders.size} partitionCount=${partitionCount}`,
+    )
 
     if (chosenPartition === undefined) {
       // Every partition is live + foreign-held.
@@ -385,6 +501,8 @@ export class PartitionLease {
         knownDeviceIds,
         now: this.now(),
         timeoutMs: this.opts.intentReadTimeoutMs,
+        guardWindowMs: this.opts.intentGuardWindowMs ?? INTENT_GUARD_WINDOW_MS,
+        guardPollMs: this.opts.intentGuardPollMs ?? INTENT_GUARD_POLL_MS,
       })
       if (outcome === "lose") {
         console.warn(
@@ -457,6 +575,14 @@ export class PartitionLease {
       leasedUntil: payload.leasedUntil,
     })
 
+    // Publish presence immediately so a joiner appearing before our first
+    // refresh tick still detects us (don't wait ~10s for the first heartbeat).
+    await this.publishPresenceBeacon(
+      partition,
+      payload.generation,
+      payload.leasedUntil,
+    )
+
     return {
       partition,
       partitionCount,
@@ -507,7 +633,102 @@ export class PartitionLease {
       acquiredAt: payload.acquiredAt,
       leasedUntil: payload.leasedUntil,
     }
+    // Re-publish our presence beacon so a joining device can detect us on the
+    // gateway, where the static lock SOC isn't reliably retrievable. Best-effort
+    // (a failed beacon self-heals next tick).
+    await this.publishPresenceBeacon(
+      partition,
+      payload.generation,
+      payload.leasedUntil,
+    )
+
+    // Deconfliction backstop: if a concurrent claim slipped past the acquire-time
+    // poll-guard (propagation outran the window), two devices can briefly hold
+    // the same partition. Once both beacons have propagated, the one with the
+    // LATER generation yields here so the pair resolves to a single holder.
+    if (await this.foreignBeaconBeatsUs(partition, payload.generation)) {
+      console.warn(
+        `[PartitionLease] Refresh on partition ${partition}: an earlier-generation peer holds it; yielding.`,
+      )
+      return false
+    }
     return true
+  }
+
+  /**
+   * True if some OTHER device has a live presence beacon on `partition` whose
+   * generation orders strictly before `ourGeneration` (i.e. it claimed first).
+   * Reads the current+previous epoch bucket for each known rival (fresh
+   * addresses → gateway-retrievable). No rivals known → false.
+   */
+  private async foreignBeaconBeatsUs(
+    partition: number,
+    ourGeneration: PartitionLockGeneration,
+  ): Promise<boolean> {
+    const now = this.now()
+    const rivals = (this.opts.knownDeviceIds?.() ?? []).filter(
+      (id) => id !== this.opts.deviceId,
+    )
+    if (rivals.length === 0) return false
+    const currentBucket = intentEpochBucket(now)
+    const results = await Promise.all(
+      rivals.flatMap((deviceId) =>
+        [currentBucket, currentBucket - 1].map((bucket) =>
+          readPartitionIntent({
+            bee: this.opts.bee,
+            backupSigner: this.opts.backupSigner,
+            swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            partition,
+            deviceId,
+            epochBucket: bucket,
+            timeoutMs: this.opts.intentReadTimeoutMs,
+          }),
+        ),
+      ),
+    )
+    return results.some(
+      (intent) =>
+        intent?.leasedUntil !== undefined &&
+        intent.leasedUntil > now &&
+        compareGenerations(intent.generation, ourGeneration) < 0,
+    )
+  }
+
+  /**
+   * Re-publish this device's holder presence beacon for `partition` at the
+   * CURRENT epoch (the intent SOC, with `leasedUntil` set). A joiner's
+   * `refreshHoldersFromPresence` reads this at a fresh per-epoch address (forced
+   * network retrieval), which works on a gateway that 404s the static lock SOC.
+   * Gated on a known rival (no one to inform otherwise) and best-effort — never
+   * fails the refresh; the ~10s refresh cadence < INTENT_EPOCH_MS (30s) keeps
+   * the current bucket continuously populated for a live holder.
+   */
+  private async publishPresenceBeacon(
+    partition: number,
+    generation: PartitionLockGeneration,
+    leasedUntil: number,
+  ): Promise<void> {
+    const knownDeviceIds = this.opts.knownDeviceIds?.() ?? []
+    if (!knownDeviceIds.some((id) => id !== this.opts.deviceId)) return
+    const { stamper } = this.requireWriteContext()
+    try {
+      await writePartitionIntent({
+        bee: this.opts.bee,
+        stamper,
+        backupSigner: this.opts.backupSigner,
+        swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        partition,
+        deviceId: this.opts.deviceId,
+        epochBucket: intentEpochBucket(this.now()),
+        generation,
+        leasedUntil,
+      })
+    } catch (error) {
+      console.warn(
+        `[PartitionLease] presence beacon publish failed for p=${partition} (self-heals next tick):`,
+        error,
+      )
+    }
   }
 
   /**

@@ -166,11 +166,21 @@ export async function readPartitionLock(opts: {
     )
     // A payload that doesn't match the schema (foreign/corrupt/old format)
     // is treated the same as a missing lock — see the catch below.
-    return parsed.success ? parsed.data : undefined
-  } catch {
+    if (!parsed.success) {
+      console.warn(
+        `[partition-lock] read p=${partition}: SOC present but payload failed schema validation — treating as no lock`,
+      )
+      return undefined
+    }
+    return parsed.data
+  } catch (error) {
     // Missing chunk, decryption failure, or malformed JSON — treat all
     // as "lock unobserved". Callers (acquirePartitionLock) treat undefined
-    // as "first acquire".
+    // as "first acquire". Log the reason: a gateway read failure (404/timeout)
+    // for a lock another device DID write is the suspected cross-device
+    // dual-acquire cause, and must be distinguishable from a genuine "no lock".
+    const reason = error instanceof Error ? error.message : String(error)
+    console.warn(`[partition-lock] read p=${partition}: unreadable — ${reason}`)
     return undefined
   }
 }
@@ -193,6 +203,10 @@ export async function writePartitionLock(opts: {
   const identifier = makePartitionLockIdentifier(partition)
   const data = new TextEncoder().encode(JSON.stringify(payload))
   const target: UploadTarget = { mode: "stamper", bee, stamper }
+  // No `deferred` flag: Bee's /soc handler hardcodes Deferred:false and ignores
+  // the Swarm-Deferred-Upload header (bee 2.8.0 pkg/api/soc.go), so SOC writes
+  // are always synchronous / receipt-backed regardless. (Replication still
+  // depends on node reachability — see .claude/rules/bee-cluster.md.)
   await uploadSOC(target, backupSigner, identifier, data, {
     encryptionKey: swarmEncryptionKey,
   })

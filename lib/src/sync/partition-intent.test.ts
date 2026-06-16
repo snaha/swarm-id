@@ -134,28 +134,10 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
     expect(read).toBeUndefined()
   })
 
-  it("writes the intent non-deferred so a peer's gateway can retrieve it", async () => {
-    // Regression: a deferred write stays on the writer's gateway and is never
-    // push-synced into the neighborhood, so a peer's retrieval of the fresh
-    // address finds nothing → the intent round is a no-op and both devices win.
-    const fetchSpy = vi.spyOn(global, "fetch")
-    await writePartitionIntent({
-      bee: bee as unknown as Bee,
-      stamper,
-      backupSigner: BACKUP_SIGNER,
-      swarmEncryptionKey: TEST_ENC_KEY,
-      partition: PARTITION,
-      deviceId: DEVICE_A,
-      epochBucket: intentEpochBucket(NOW),
-      generation: gen(1000, DEVICE_A),
-    })
-    const socCall = fetchSpy.mock.calls.find(([u]) =>
-      (typeof u === "string" ? u : String(u)).includes("/soc/"),
-    )
-    expect(socCall).toBeDefined()
-    const headers = (socCall![1]?.headers ?? {}) as Record<string, string>
-    expect(headers["swarm-deferred-upload"]).toBe("false")
-  })
+  // Note: no "non-deferred" assertion — Bee's /soc handler hardcodes
+  // Deferred:false and ignores the Swarm-Deferred-Upload header (bee 2.8.0
+  // pkg/api/soc.go), so SOC writes are always synchronous regardless of the
+  // client flag. The deferred flag is only meaningful for /bytes data uploads.
 })
 
 describe("resolveIntentRound", () => {
@@ -273,5 +255,44 @@ describe("resolveIntentRound", () => {
     expect([a, b].filter((o) => o === "win")).toHaveLength(1)
     expect(a).toBe("win")
     expect(b).toBe("lose")
+  })
+
+  it("polls across a guard window and yields to a live beacon", async () => {
+    // A live holder beacon (leasedUntil > now) for DEVICE_A on this partition.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(1000, DEVICE_A),
+      leasedUntil: NOW + INTENT_EPOCH_MS,
+    })
+    const outcome = await resolveIntentRound({
+      ...common(),
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B],
+      guardWindowMs: 120,
+      guardPollMs: 40,
+    })
+    expect(outcome).toBe("lose")
+  })
+
+  it("polls the full guard window then wins when no rival surfaces", async () => {
+    const t0 = Date.now()
+    const outcome = await resolveIntentRound({
+      ...common(),
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B],
+      guardWindowMs: 120,
+      guardPollMs: 40,
+    })
+    expect(outcome).toBe("win")
+    // It actually waited out the window (didn't bind on the first immediate read).
+    expect(Date.now() - t0).toBeGreaterThanOrEqual(100)
   })
 })

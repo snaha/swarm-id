@@ -185,6 +185,24 @@ derivation needs the rival's generation, which is exactly what neither can read 
 premise of the failure). A shared per-round address (e.g. derived from a time epoch) puts
 both writers back on one mutable address — same divergence problem.
 
+### Holder presence beacons — covers the join-against-an-existing-holder case (SHIPPED)
+
+> **Shipped.** The intent SOC now doubles as a **holder presence beacon**: a holder re-publishes
+> it every refresh tick at the current epoch with `leasedUntil` set (`PartitionLease.refresh` /
+> `publishPresenceBeacon`, payload field `PartitionIntentPayloadSchemaV1.leasedUntil`).
+> `PartitionLease.refreshHoldersFromPresence` (run in `acquire()`, unioned with the static
+> lock-SOC `refreshFromSwarm`) reads every known rival's beacon for the current+previous epoch
+> bucket — fresh per-epoch addresses that retrieve on the gateway where the static lock SOC 404s —
+> and marks a partition **held** iff a beacon has `leasedUntil > now`. This closes the original
+> symmetric/displacement gap's *mirror*: a device joining while a peer already holds a partition
+> now detects that holder and picks another partition (or read-only) instead of colliding. A bare
+> intent (no `leasedUntil`) is a contender, not a holder, and is still resolved by the intent
+> round; an expired beacon is ignored so a lapsed partition can be taken over. `knownDeviceIds` is
+> threaded into the background-sync coordinator (`sync-account.ts`) too, so it isn't a collision
+> source. Residuals unchanged: registry-lag enumeration gap, absence-unprovable (timeout = no
+> beacon), and the ~1/65536 reserved-slot collision — all fail to read-only / self-heal, never
+> silent overwrite.
+
 ### Extension that covers the symmetric case: per-device intent SOCs
 
 > **Shipped** in `lib/src/sync/partition-intent.ts` + wired through

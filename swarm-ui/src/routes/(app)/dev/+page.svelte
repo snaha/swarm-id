@@ -14,6 +14,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { identitiesStore } from '$lib/stores/identities.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
+  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { syncStore } from '$lib/stores/sync.svelte'
   import { devSettingsStore, type MockStampResult } from '$lib/stores/dev-settings.svelte'
@@ -23,12 +24,16 @@
   import DeviceList from './device-list.svelte'
   import Divider from '$lib/components/ui/divider.svelte'
   import routes from '$lib/routes'
-  import { BatchId, EthAddress, PrivateKey, Utils } from '@ethersphere/bee-js'
+  import { BatchId, Bee, EthAddress, Identifier, PrivateKey, Utils } from '@ethersphere/bee-js'
   import {
     calculateStampAmountForDays,
     derivePostageSignerKey,
+    downloadEncryptedSOC,
     fetchChainState,
     formatTTL,
+    rejectAfter,
+    uint8ArrayToHex,
+    uploadSOC,
   } from '@snaha/swarm-id'
   import { MS_PER_SECOND } from '$lib/constants'
   import { SvelteMap } from 'svelte/reactivity'
@@ -133,6 +138,216 @@
   let beeStampsError = $state('')
   let lastBeeUrl = $state('')
 
+  // Retrievability self-check: does the configured Bee node serve back a SOC we
+  // just wrote? (If not, no cross-device coordination — lock/intent/presence
+  // SOCs — can work there, and normal sync/download is unreliable too.)
+  let selfCheckStampId = $state<string | undefined>(undefined)
+  let selfCheckRunning = $state(false)
+  let selfCheckLog = $state<string[]>([])
+  // The address of the just-written test SOC — copy it to another device's
+  // "Read by address" to test cross-device retrievability.
+  let selfCheckSocAddress = $state('')
+
+  // Cross-device check: read a chunk BY ADDRESS that another device wrote
+  // (paste the SOC address printed by that device's self-check). On a
+  // load-balanced gateway the writer can read its own write back from its own
+  // backend, but a different device may hit a backend that can't retrieve it —
+  // this is the read that actually mirrors cross-device coordination.
+  let readAddr = $state('')
+  let readChecking = $state(false)
+  let readLog = $state<string[]>([])
+
+  // Partition-coordination timing overrides (gateway propagation tuning). Read
+  // by the proxy from this localStorage key on connect; blank fields fall back
+  // to the lib defaults. Must match PARTITION_TUNING_KEY in swarm-id-proxy.ts.
+  const PARTITION_TUNING_KEY = 'swarm-id-partition-tuning'
+  function loadTuning(): {
+    guardWindowMs?: number
+    guardPollMs?: number
+    readTimeoutMs?: number
+  } {
+    if (typeof localStorage === 'undefined') return {}
+    try {
+      return JSON.parse(localStorage.getItem(PARTITION_TUNING_KEY) ?? '{}') ?? {}
+    } catch {
+      return {}
+    }
+  }
+  const initialTuning = loadTuning()
+  let tuningWindow = $state(initialTuning.guardWindowMs?.toString() ?? '')
+  let tuningPoll = $state(initialTuning.guardPollMs?.toString() ?? '')
+  let tuningTimeout = $state(initialTuning.readTimeoutMs?.toString() ?? '')
+  let tuningSaved = $state('')
+
+  function saveTuning() {
+    const obj: Record<string, number> = {}
+    const add = (key: string, raw: string) => {
+      const n = Number(raw)
+      if (raw.trim() !== '' && Number.isFinite(n) && n >= 0) obj[key] = n
+    }
+    add('guardWindowMs', tuningWindow)
+    add('guardPollMs', tuningPoll)
+    add('readTimeoutMs', tuningTimeout)
+    localStorage.setItem(PARTITION_TUNING_KEY, JSON.stringify(obj))
+    tuningSaved = `Saved ${JSON.stringify(obj)} — reload the app/proxy to apply.`
+  }
+  function resetTuning() {
+    localStorage.removeItem(PARTITION_TUNING_KEY)
+    tuningWindow = ''
+    tuningPoll = ''
+    tuningTimeout = ''
+    tuningSaved = 'Cleared — reload to use defaults (window 12000 / poll 2500 / read 2500 ms).'
+  }
+
+  // Per-read timeout and the elapsed-since-upload checkpoints to poll at.
+  const SELF_CHECK_READ_TIMEOUT_MS = 3000
+  const SELF_CHECK_POLL_MS = [0, 2000, 5000, 10000, 20000]
+  const RANDOM_BYTES = 32
+
+  function randomBytes(): Uint8Array {
+    return crypto.getRandomValues(new Uint8Array(RANDOM_BYTES))
+  }
+
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
+
+  async function runRetrievabilityCheck() {
+    selfCheckRunning = true
+    const log: string[] = []
+    selfCheckLog = log
+    const push = (line: string) => {
+      log.push(line)
+      selfCheckLog = [...log]
+    }
+    try {
+      const stamp = postageStampsStore.stamps.find((s) => s.batchID.toHex() === selfCheckStampId)
+      if (!stamp) {
+        push('❌ Select a stored stamp to pay for the test chunk.')
+        return
+      }
+      // Test the node the proxy/app actually uses (network settings), not the
+      // dev-page stamp-buying URL which defaults to localhost.
+      const nodeUrl = networkSettingsStore.beeNodeUrl
+      const bee = new Bee(nodeUrl)
+      // Throwaway, fresh-per-run SOC: random owner key + identifier + encryption
+      // key + payload. Postage is paid by the stamp's signerKey; the SOC is
+      // owned by the throwaway signer — the same split a real presence beacon
+      // uses. A fresh address guarantees the read isn't served from a stale
+      // local cache.
+      const signer = new PrivateKey(randomBytes())
+      const encryptionKey = randomBytes()
+      const identifier = new Identifier(randomBytes())
+      const owner = signer.publicKey().address()
+
+      const stamper = await postageStampsStore.getStamper(stamp.batchID, {
+        owner,
+        encryptionKey,
+      })
+      if (!stamper) {
+        push('❌ Could not build a stamper for that batch.')
+        return
+      }
+
+      push(`Node: ${nodeUrl}`)
+      push(`Batch: ${stamp.batchID.toHex().slice(0, 12)}… (depth ${stamp.depth})`)
+      const t0 = Date.now()
+      const { socAddress } = await uploadSOC(
+        { mode: 'stamper', bee, stamper },
+        signer,
+        identifier,
+        randomBytes(),
+        { encryptionKey },
+      )
+      const addrHex = uint8ArrayToHex(socAddress)
+      selfCheckSocAddress = addrHex
+      push(`✅ Upload OK in ${Date.now() - t0}ms — SOC address ${addrHex}`)
+
+      let retrievedMs: number | undefined
+      let prev = 0
+      for (const checkpoint of SELF_CHECK_POLL_MS) {
+        await sleep(Math.max(0, checkpoint - prev))
+        prev = checkpoint
+        try {
+          await Promise.race([
+            downloadEncryptedSOC(bee, owner, identifier, encryptionKey),
+            rejectAfter(SELF_CHECK_READ_TIMEOUT_MS, 'read timed out'),
+          ])
+          retrievedMs = Date.now() - t0
+          break
+        } catch (error) {
+          push(
+            `  read @ ${checkpoint}ms: not yet (${error instanceof Error ? error.message : String(error)})`,
+          )
+        }
+      }
+
+      if (retrievedMs !== undefined) {
+        push(
+          `✅ Retrievable after ${retrievedMs}ms → this node serves back writes; multi-device coordination can work here.`,
+        )
+      } else {
+        push(
+          `❌ NOT retrievable within ~${SELF_CHECK_POLL_MS[SELF_CHECK_POLL_MS.length - 1] / 1000}s → this node does not serve back recently-written chunks. Cross-device coordination (lock/intent/presence SOCs) cannot work here, and normal sync/download will be unreliable too.`,
+        )
+      }
+    } catch (error) {
+      push(`❌ Error: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      selfCheckRunning = false
+    }
+  }
+
+  async function runReadByAddress() {
+    readChecking = true
+    const log: string[] = []
+    readLog = log
+    const push = (line: string) => {
+      log.push(line)
+      readLog = [...log]
+    }
+    try {
+      const addr = readAddr.trim().replace(/^0x/, '')
+      if (!/^[0-9a-fA-F]{64}$/.test(addr)) {
+        push('❌ Enter a 64-char hex chunk address (the SOC address from another device).')
+        return
+      }
+      const nodeUrl = networkSettingsStore.beeNodeUrl
+      const bee = new Bee(nodeUrl)
+      push(`Node: ${nodeUrl}`)
+      const t0 = Date.now()
+      let foundMs: number | undefined
+      let prev = 0
+      for (const checkpoint of SELF_CHECK_POLL_MS) {
+        await sleep(Math.max(0, checkpoint - prev))
+        prev = checkpoint
+        try {
+          await Promise.race([
+            bee.downloadChunk(addr),
+            rejectAfter(SELF_CHECK_READ_TIMEOUT_MS, 'read timed out'),
+          ])
+          foundMs = Date.now() - t0
+          break
+        } catch (error) {
+          push(
+            `  read @ ${checkpoint}ms: not yet (${error instanceof Error ? error.message : String(error)})`,
+          )
+        }
+      }
+      if (foundMs !== undefined) {
+        push(
+          `✅ Retrievable after ${foundMs}ms → this device CAN read the chunk the other device wrote; cross-device coordination can work.`,
+        )
+      } else {
+        push(
+          `❌ NOT retrievable within ~${SELF_CHECK_POLL_MS[SELF_CHECK_POLL_MS.length - 1] / 1000}s → this device cannot read the other device's chunk. The gateway isn't serving writes across nodes/sessions, so cross-device coordination cannot work here.`,
+        )
+      }
+    } catch (error) {
+      push(`❌ Error: ${error instanceof Error ? error.message : String(error)}`)
+    } finally {
+      readChecking = false
+    }
+  }
+
   // Known dev signers (pre-funded with ETH + BZZ in the local Bee cluster)
   const KNOWN_SIGNERS = [
     {
@@ -190,6 +405,18 @@
       label: `${stamp.batchID.slice(0, 10)}… (depth ${stamp.depth})`,
     })),
   )
+  // Stored stamps (with signerKey) usable to pay for the retrievability check.
+  const storedStampOptions = $derived(
+    postageStampsStore.stamps.map((stamp) => ({
+      value: stamp.batchID.toHex(),
+      label: `${stamp.batchID.toHex().slice(0, 10)}… (depth ${stamp.depth})`,
+    })),
+  )
+  $effect(() => {
+    if (storedStampOptions.length && !selfCheckStampId) {
+      selfCheckStampId = storedStampOptions[0].value
+    }
+  })
   const accountOptions = $derived(
     accountsStore.accounts.map((account) => ({
       value: account.id.toHex(),
@@ -373,11 +600,27 @@ Check console logs for details:
     }
   }
 
-  function clearAllData() {
+  // Clear just this browser's account stores (identities, apps, stamps).
+  function clearAccount() {
     accountsStore.clear()
     identitiesStore.clear()
     connectedAppsStore.clear()
     postageStampsStore.clear()
+  }
+
+  // Full reset: every swarm* localStorage key + the IndexedDB utilization DB,
+  // then reload so all in-memory stores re-init from empty storage. onblocked
+  // resolves too — an open DB connection is closed by the reload, letting the
+  // pending delete finish.
+  async function clearAll() {
+    for (const key of Object.keys(localStorage)) {
+      if (key.startsWith('swarm')) localStorage.removeItem(key)
+    }
+    await new Promise<void>((resolve) => {
+      const req = indexedDB.deleteDatabase('swarm-utilization-store')
+      req.onsuccess = req.onerror = req.onblocked = () => resolve()
+    })
+    location.reload()
   }
 
   async function loadBeeStamps() {
@@ -684,7 +927,10 @@ Check console logs for details:
           {accountCount} accounts, {identityCount} identities, {connectionCount} connections, {stampCount}
           stamps
         </Typography>
-        <Button variant="secondary" danger onclick={clearAllData}>Clear All Data</Button>
+        <Horizontal --horizontal-gap="var(--half-padding)">
+          <Button variant="secondary" danger onclick={clearAccount}>Clear account</Button>
+          <Button variant="secondary" danger onclick={clearAll}>Clear all</Button>
+        </Horizontal>
       </Vertical>
     </Vertical>
   {/if}
@@ -826,6 +1072,199 @@ Check console logs for details:
           <Typography font="mono" style="color: var(--colors-error);">❌ {stampError}</Typography>
         </Vertical>
       {/if}
+
+      <Divider --margin="var(--padding) 0" />
+
+      <Typography variant="h3">Stored Stamps (local)</Typography>
+      <Typography variant="small" style="color: var(--colors-medium);">
+        The postage batches saved in this browser. Copy these fields before clearing storage — paste
+        them into the "Use existing one" screen to re-adopt the same batch on a fresh identity (the
+        owner is derived from the signer key).
+      </Typography>
+      {#if postageStampsStore.stamps.length === 0}
+        <Typography variant="small" style="color: var(--colors-medium);">
+          No stamps stored locally.
+        </Typography>
+      {:else}
+        <Vertical --vertical-gap="var(--half-padding)">
+          {#each postageStampsStore.stamps as stamp (stamp.batchID.toHex())}
+            {@const assignment = stampAssignments.get(stamp.batchID.toHex())}
+            <Vertical
+              --vertical-gap="var(--half-padding)"
+              style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+            >
+              <Vertical --vertical-gap="var(--half-padding)">
+                <Typography variant="small" style="color: var(--colors-medium);"
+                  >Batch ID</Typography
+                >
+                <Horizontal
+                  --horizontal-gap="var(--half-padding)"
+                  --horizontal-align-items="center"
+                >
+                  <Typography font="mono" variant="small" style="word-break: break-all;"
+                    >{stamp.batchID.toHex()}</Typography
+                  >
+                  <CopyButton text={stamp.batchID.toHex()} />
+                </Horizontal>
+              </Vertical>
+
+              <Vertical --vertical-gap="var(--half-padding)">
+                <Typography variant="small" style="color: var(--colors-medium);"
+                  >Signer Key</Typography
+                >
+                <Horizontal
+                  --horizontal-gap="var(--half-padding)"
+                  --horizontal-align-items="center"
+                >
+                  <Typography font="mono" variant="small" style="word-break: break-all;"
+                    >{stamp.signerKey.toHex()}</Typography
+                  >
+                  <CopyButton text={stamp.signerKey.toHex()} />
+                </Horizontal>
+              </Vertical>
+
+              <Horizontal --horizontal-gap="var(--double-padding)">
+                <Vertical --vertical-gap="var(--half-padding)">
+                  <Typography variant="small" style="color: var(--colors-medium);"
+                    >Amount</Typography
+                  >
+                  <Horizontal
+                    --horizontal-gap="var(--half-padding)"
+                    --horizontal-align-items="center"
+                  >
+                    <Typography font="mono" variant="small">{stamp.amount.toString()}</Typography>
+                    <CopyButton text={stamp.amount.toString()} />
+                  </Horizontal>
+                </Vertical>
+                <Vertical --vertical-gap="var(--half-padding)">
+                  <Typography variant="small" style="color: var(--colors-medium);">Depth</Typography
+                  >
+                  <Horizontal
+                    --horizontal-gap="var(--half-padding)"
+                    --horizontal-align-items="center"
+                  >
+                    <Typography font="mono" variant="small">{stamp.depth}</Typography>
+                    <CopyButton text={String(stamp.depth)} />
+                  </Horizontal>
+                </Vertical>
+                <Vertical --vertical-gap="var(--half-padding)">
+                  <Typography variant="small" style="color: var(--colors-medium);"
+                    >Block number</Typography
+                  >
+                  <Horizontal
+                    --horizontal-gap="var(--half-padding)"
+                    --horizontal-align-items="center"
+                  >
+                    <Typography font="mono" variant="small">{stamp.blockNumber}</Typography>
+                    <CopyButton text={String(stamp.blockNumber)} />
+                  </Horizontal>
+                </Vertical>
+              </Horizontal>
+
+              <Typography variant="small" style="color: var(--colors-medium);">
+                Account: {assignment?.account ?? '—'} · Identity: {assignment?.identity ?? '—'}
+              </Typography>
+            </Vertical>
+          {/each}
+        </Vertical>
+      {/if}
+
+      <Divider --margin="var(--padding) 0" />
+
+      <Typography variant="h3">Retrievability self-check</Typography>
+      <Typography variant="small" style="color: var(--colors-medium);">
+        Writes a throwaway single-owner chunk to the Bee node from network settings ({networkSettingsStore.beeNodeUrl})
+        and reads it back, to confirm the node actually serves back what you write. Multi-device
+        coordination (and reliable sync/download) only works when this succeeds.
+      </Typography>
+      <Vertical --vertical-gap="var(--half-padding)">
+        <Select
+          label="Pay with stored stamp"
+          items={storedStampOptions}
+          bind:value={selfCheckStampId}
+        />
+        <Button
+          onclick={runRetrievabilityCheck}
+          busy={selfCheckRunning}
+          disabled={selfCheckRunning || !selfCheckStampId}
+        >
+          {selfCheckRunning ? 'Checking…' : 'Run self-check'}
+        </Button>
+      </Vertical>
+      {#if selfCheckLog.length}
+        <Vertical
+          --vertical-gap="var(--half-padding)"
+          style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+        >
+          {#each selfCheckLog as line, i (i)}
+            <Typography font="mono" variant="small" style="word-break: break-all;"
+              >{line}</Typography
+            >
+          {/each}
+          {#if selfCheckSocAddress}
+            <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+              <Typography variant="small" style="color: var(--colors-medium);">
+                SOC address (copy to another device):
+              </Typography>
+              <CopyButton text={selfCheckSocAddress} />
+            </Horizontal>
+          {/if}
+        </Vertical>
+      {/if}
+
+      <Typography
+        variant="small"
+        style="color: var(--colors-medium); margin-top: var(--half-padding);"
+      >
+        Cross-device check: run the self-check on another device, copy its SOC address, paste it
+        here, and read it back. The writer reading its own chunk can succeed on a load-balanced
+        gateway even when a different device cannot — this is the read that mirrors coordination.
+      </Typography>
+      <Vertical --vertical-gap="var(--half-padding)">
+        <Input label="Chunk address from another device" bind:value={readAddr} />
+        <Button
+          variant="secondary"
+          onclick={runReadByAddress}
+          busy={readChecking}
+          disabled={readChecking || !readAddr}
+        >
+          {readChecking ? 'Reading…' : 'Read by address'}
+        </Button>
+      </Vertical>
+      {#if readLog.length}
+        <Vertical
+          --vertical-gap="var(--half-padding)"
+          style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
+        >
+          {#each readLog as line, i (i)}
+            <Typography font="mono" variant="small" style="word-break: break-all;"
+              >{line}</Typography
+            >
+          {/each}
+        </Vertical>
+      {/if}
+
+      <Divider --margin="var(--padding) 0" />
+
+      <Typography variant="h3">Partition tuning</Typography>
+      <Typography variant="small" style="color: var(--colors-medium);">
+        Tune the multi-device intent-round timing for this gateway's propagation delay. Blank =
+        library default (window 12000 / poll 2500 / read 2500 ms). Reload the app after saving so
+        the proxy picks it up.
+      </Typography>
+      <Vertical --vertical-gap="var(--half-padding)">
+        <Input label="Guard window (ms)" bind:value={tuningWindow} />
+        <Input label="Poll interval (ms)" bind:value={tuningPoll} />
+        <Input label="Read timeout (ms)" bind:value={tuningTimeout} />
+        <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
+          <Button onclick={saveTuning}>Save tuning</Button>
+          <Button variant="secondary" onclick={resetTuning}>Reset to defaults</Button>
+        </Horizontal>
+        {#if tuningSaved}
+          <Typography variant="small" style="color: var(--colors-medium);">{tuningSaved}</Typography
+          >
+        {/if}
+      </Vertical>
 
       <Divider --margin="var(--padding) 0" />
 
