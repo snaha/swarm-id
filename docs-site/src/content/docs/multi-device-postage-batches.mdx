@@ -198,11 +198,41 @@ redundant with `holderDeviceId`. It is stored anyway because the `generation` is
 fencing token attributable to whoever wrote the SOC** — a different question from `holderDeviceId`
 ("who holds it now"), and `compareGenerations` orders writers purely from the token without
 re-hashing or reading `holderDeviceId`. The two diverge at the **release sentinel**: a release sets
-`holderDeviceId = ""` but advances the generation with the _releasing_ device's tiebreaker, so it
-cannot be recovered from `holderDeviceId` (deriving it would yield `keccak256("")[0:8]`,
-attributable to no device). Storing it costs 16 hex chars and keeps the comparator decoupled from
-device-ID semantics.
+`holderDeviceId = ""` but carries the **released claim's** generation (whose tiebreaker is the
+releasing device's, since claims always mint their own), so it cannot be recovered from
+`holderDeviceId` (deriving it would yield `keccak256("")[0:8]`, attributable to no device).
+Storing it costs 16 hex chars and keeps the comparator decoupled from device-ID semantics.
 :::
+
+### Release protocol (generation-fenced)
+
+A release is an action on a **specific claim**, not on the partition: the sentinel carries
+the generation of the claim it releases — never a fresh one — so any later claim
+(a successor on the same device, or a peer) is logically newer than the release. Before
+writing, the releaser re-reads the lock and **skips the sentinel** when the lock no longer
+carries the claim being released:
+
+- an existing sentinel (any generation) — already released; rewriting would mint a fresh
+  postage stamp that could clobber a claim landing in between;
+- a foreign claim, live or expired — never clobber a peer (expired already reads as
+  takeable);
+- our own claim with a **newer** generation — a successor re-acquired while the release
+  was publishing.
+
+Our own claim at a non-newer generation writes (`<=`, not `==`): a stale read returning an
+older refresh of the same holdership must not suppress the release. This matters because
+Bee replaces a same-address SOC whenever the new chunk's **postage stamp timestamp** is
+newer — without the fence, a detached release outliving a same-device re-acquire would
+deterministically clobber the successor's claim and peers would read the partition as
+free (turning one writer into two). In the reference implementation the sign-out release
+is additionally serialized under the same origin-wide write lock the acquire path uses,
+so its sentinel's stamp is always minted before a successor's claim stamp. A holder that
+nevertheless sights a sentinel on its own partition re-asserts its claim at the next
+upload or refresh tick.
+
+Residual (accepted): a releaser whose node serves a stale view (e.g. a caching gateway
+that never re-fetches) can still write its fenced sentinel over a peer claim it cannot
+see; recovery is the displaced peer's refresh re-assert, bounded by `LEASE_REFRESH_MS`.
 
 ### Acquire / refresh protocol
 
@@ -280,10 +310,35 @@ described by the exported `PartitionStateSchemaV1`
 the reassembled counter — plus the reference-chunk length (`N × 64`) and each counter
 chunk's length — before returning.
 
+### Read semantics
+
+After reconstructing the counter, the reader applies one compensation: **+1 in the bucket
+of the feed entry's own SOC address**. The publisher extracts the snapshot first and
+writes the feed SOC last, so the feed SOC consumed one data slot — `slot(snapshot[bucket])`
+of its own bucket — that the snapshot does not record. Without the +1, the next holder's
+first chunk in that bucket would overstamp the feed entry and evict it from the reserve
+(Bee deterministically replaces the older chunk at a colliding stamp index), breaking
+later feed walks. The bump applies only to the entry actually read (earlier entries were
+compensated by the readers that consumed them) and never on the cached short-circuit path
+below (the local counter already includes it).
+
 Reads short-circuit on a cached "synced reference": if the feed still points at the
 reference a device last synced with, it skips the downloads and reuses its local counter.
-A failed or malformed counter read **fails safe**: it falls back to a fresh zero counter
-rather than aborting the acquisition, and does not cache the bad reference as synced.
+
+Failure semantics are fail-safe: when the feed **has** an entry but the reference chunk or
+any counter chunk cannot be read (or fails the wire-format validation above), the read
+reports failure — without caching the bad reference as synced — and the device falls back
+to **read-only without claiming the partition** (retried on the next acquire). It must not
+seed a zero counter, since stamping from zero would re-issue every used slot and evict the
+partition's data chunk by chunk. A zero counter is seeded only when the feed provably has
+no entry (the legitimate fresh-partition seed in Cases A/B).
+
+Both sides also protect the published chunks from later overstamps: the publisher avoids
+the buckets of the partition's lock SOC and of its live utilization chunks, and every
+device records the published state chunks' buckets (returned by the write, re-derived from
+the reference chunk on read) so its utilization saves avoid placing chunks there — all
+these chunks share the partition's reserved slot, and a collision would evict the resume
+point a later takeover depends on.
 
 :::note[Historical: device-claim feed]
 Iteration 1 used a per-device claim feed
@@ -318,10 +373,14 @@ The reference orchestrator is `PartitionLease`. Constants:
    `blocked`/`lost-race`, fall back to read-only.
 
 `refresh()` re-runs the lock protocol on the held partition to bump `leasedUntil`; returns
-false (lease lost) on `blocked`/`lost-race`. `release(localCounter)` publishes the final
-counter to the partition-state feed, then writes the `holderDeviceId = ""` release
-sentinel. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a still-valid
-lease from a local cache without a Swarm round-trip (re-validated on the next refresh).
+false (lease lost) on `blocked`/`lost-race`/`aborted` (a refresh that overlaps an
+in-flight `release()` aborts before writing, so it cannot mint a ghost claim the fenced
+release would refuse to clear). `release(localCounter)` publishes the final counter to
+the partition-state feed, then writes the generation-fenced release sentinel (see
+"Release protocol" above) — skipped entirely when the lock no longer carries the claim
+being released. `adoptIfLive()`/`hydrate()`/`serialize()` let a reload re-adopt a
+still-valid lease from a local cache without a Swarm round-trip (re-validated on the next
+refresh).
 
 ### The four cases
 
@@ -335,8 +394,10 @@ lease from a local cache without a Swarm round-trip (re-validated on the next re
   partition resuming from the published counter.
 - **Case D — crash recovery.** A holder dies without releasing. Its `leasedUntil` expires
   after `LEASE_TTL_MS`; a peer then reclaims the partition. Resume is from the last
-  _published_ counter — an unclean crash that stamped past its last publish loses only data
-  that was never durably persisted anyway.
+  _published_ counter (plus the +1 feed-entry compensation above) — an unclean crash that
+  stamped past its last publish loses only data that was never durably persisted anyway.
+  If the published counter exists but cannot be read, the taker stays read-only and
+  retries rather than resuming from zero.
 
 ## Account-state sync
 
@@ -421,11 +482,17 @@ To interoperate with the reference implementation, an external client must:
    (`keccak256(deviceId)[0:8]`).
 3. **Implement the lock-SOC protocol**: identifier hash, SOC address, encrypted JSON
    payload, the read → guard (2 s) → verify acquire flow, generation fencing, and the
-   `""` release sentinel.
+   **generation-fenced** `""` release sentinel — the sentinel carries the released
+   claim's generation and is skipped when the lock no longer carries that claim. A port
+   that mints fresh sentinel generations or releases unconditionally re-introduces the
+   stale-release claim-clobbering race (#349).
 4. **Implement the slot formula** `slot = K + p + K·j` and route lock-SOC/counter chunks to
    reserved slot `p`. Honour `PARTITION_COUNT = 2`, `DATA_COUNTER_START = 2`.
 5. **Implement the partition-state feed**: topic hash, the reference-chunk →
-   counter-chunks structure, publish-on-release / read-on-acquire.
+   counter-chunks structure, publish-on-release / read-on-acquire — including the **+1
+   feed-entry compensation** on read and the fail-safe (read-only, never zero-seed)
+   handling of an unreadable published counter. Skipping either re-introduces silent
+   slot-reuse data loss.
 6. **Track per-bucket counters** with the uint16/uint32 codec and the
    `swarm-id-util-chunk-v1` key derivation (only needed to publish counters that the
    reference client can read).

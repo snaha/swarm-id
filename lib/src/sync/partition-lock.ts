@@ -69,11 +69,28 @@ export const NO_HOLDER_DEVICE_ID = ""
  * - `"blocked"` — a live foreign holder exists; no write was performed.
  * - `"lost-race"` — we wrote, but a higher-generation writer appeared
  *   during the guard window. The verify-read returned that other write.
+ * - `"aborted"` — `shouldAbort` flipped before the claim write (the owning
+ *   lease session closed, e.g. a release started); no write was performed.
  */
 export interface AcquirePartitionLockResult {
-  outcome: "acquired" | "blocked" | "lost-race"
+  outcome: "acquired" | "blocked" | "lost-race" | "aborted"
   /** Latest payload observed by this call (after the verify-read). */
   payload: PartitionLockPayload | undefined
+}
+
+/**
+ * Outcome of a `releasePartitionLock` call.
+ *
+ * - `"released"` — the release sentinel was written.
+ * - `"skipped"` — the lock no longer carries the claim being released
+ *   (successor claim, peer claim, or an existing sentinel); writing the
+ *   sentinel would clobber state that is not ours to release. The lock is
+ *   left untouched.
+ */
+export interface ReleasePartitionLockResult {
+  outcome: "released" | "skipped"
+  /** Payload observed by the pre-write read (undefined when missing/unreadable). */
+  observed?: PartitionLockPayload
 }
 
 /**
@@ -178,6 +195,14 @@ export async function acquirePartitionLock(opts: {
   guardMs: number
   now?: () => number
   wait?: (ms: number) => Promise<void>
+  /**
+   * Checked immediately before the claim write. When it returns true the
+   * acquire aborts WITHOUT writing — used by `PartitionLease` to stop a
+   * refresh that overlaps a `release()` from minting a ghost claim the
+   * generation-fenced release would then refuse to clear (peers would have
+   * to wait out the TTL).
+   */
+  shouldAbort?: () => boolean
 }): Promise<AcquirePartitionLockResult> {
   const now = opts.now ?? Date.now
   const wait =
@@ -194,6 +219,11 @@ export async function acquirePartitionLock(opts: {
     current.leasedUntil > t
   ) {
     return { outcome: "blocked", payload: current }
+  }
+
+  // The owning lease session closed while we were reading — do not write.
+  if (opts.shouldAbort?.()) {
+    return { outcome: "aborted", payload: current }
   }
 
   // Lock is empty, expired, released, or already ours. Write our claim
@@ -234,4 +264,83 @@ export async function acquirePartitionLock(opts: {
     return { outcome: "acquired", payload: ourPayload }
   }
   return { outcome: "acquired", payload: verified }
+}
+
+/**
+ * Write the release sentinel for a SPECIFIC claim — generation-fenced.
+ *
+ * A release is an action on the claim identified by `releasedGeneration`,
+ * not on the partition as such. The sentinel therefore carries that
+ * generation (it does NOT mint a fresh one), and it is only written when the
+ * lock still visibly carries the claim being released. Without the fence, a
+ * detached release that outlives a re-acquire writes its sentinel LAST —
+ * and Bee replaces a same-address SOC whenever the new chunk's postage
+ * stamp timestamp is newer, so the stale sentinel would deterministically
+ * clobber the successor's claim and peers would treat the partition as free
+ * while the successor still believes it holds it (issue #349).
+ *
+ * Skip rules (never write a sentinel over a claim that is not the one being
+ * released):
+ * - an existing sentinel (any generation) — already released; rewriting
+ *   would mint a fresh stamp that could clobber a claim landing in between.
+ *   Checked BEFORE the generation compare: a prior sentinel for this same
+ *   claim carries the same generation and would otherwise match "ours".
+ * - a foreign claim, live or expired — never clobber a peer; an expired
+ *   claim already reads as takeable.
+ * - our own claim with a NEWER generation — a successor re-acquired while
+ *   this release was publishing (#349), or a release-overlapping refresh.
+ * - our own claim at a non-newer generation writes (`<=`, not `==`): a
+ *   stale read returning an older refresh of the same holdership must not
+ *   suppress the release.
+ * - a missing/unreadable lock writes (best-effort release; the sentinel is
+ *   generation-fenced, so readers and successors can order it correctly).
+ *
+ * Residual (documented, accepted): a skip decision is only as fresh as the
+ * pre-write read. The same-device #349 race reads through the same Bee node
+ * (read-your-writes holds), so the fence is dependable there; cross-node
+ * staleness falls back to the displacement/TTL machinery.
+ */
+export async function releasePartitionLock(opts: {
+  bee: Bee
+  stamper: Stamper
+  backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  partition: number
+  deviceId: string
+  /** Generation of the claim being released — fences the sentinel. */
+  releasedGeneration: PartitionLockGeneration
+  /** `acquiredAt` of the claim being released (carried in the sentinel). */
+  acquiredAt: number
+  now?: () => number
+}): Promise<ReleasePartitionLockResult> {
+  const now = opts.now ?? Date.now
+
+  const current = await readPartitionLock(opts)
+  if (current) {
+    const skip = (reason: string): ReleasePartitionLockResult => {
+      console.info(
+        `[partition-lock] Skipping release sentinel for partition ${opts.partition}: ${reason}.`,
+        current,
+      )
+      return { outcome: "skipped", observed: current }
+    }
+    if (current.holderDeviceId === NO_HOLDER_DEVICE_ID) {
+      return skip("already released")
+    }
+    if (current.holderDeviceId !== opts.deviceId) {
+      return skip("a peer holds the partition")
+    }
+    if (compareGenerations(current.generation, opts.releasedGeneration) > 0) {
+      return skip("a newer own claim exists (successor re-acquired)")
+    }
+  }
+
+  const releasePayload: PartitionLockPayload = {
+    holderDeviceId: NO_HOLDER_DEVICE_ID,
+    generation: opts.releasedGeneration,
+    acquiredAt: opts.acquiredAt,
+    leasedUntil: now(),
+  }
+  await writePartitionLock({ ...opts, payload: releasePayload })
+  return { outcome: "released", observed: current }
 }

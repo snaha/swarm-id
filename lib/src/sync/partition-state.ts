@@ -31,7 +31,10 @@ import {
 import { Binary } from "cafe-utility"
 import { z } from "zod"
 import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
-import { BasicEpochUpdater } from "../proxy/feeds/epochs/updater"
+import {
+  BasicEpochUpdater,
+  epochSocAddress,
+} from "../proxy/feeds/epochs/updater"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
@@ -63,7 +66,8 @@ const UINT32_BYTES = 4
  * collides with v1 readers.
  *
  * `readPartitionState` validates the assembled counter against this schema
- * before returning it; a failure falls back to a fresh zero counter.
+ * before returning it; a failure is reported as `readFailed` (fail-safe —
+ * never a zero counter, which would re-issue used slots).
  * `writePartitionState` validates its input against it before publishing.
  */
 export const PartitionStateSchemaV1 = z.object({
@@ -128,19 +132,36 @@ export async function readPartitionState(
   localCounter?: Uint32Array
   referenceHex?: string
   unchanged: boolean
+  /**
+   * True when the feed HAS an entry but the reference chunk or a counter
+   * chunk could not be read. The caller must NOT proceed with a zero
+   * counter — the partition has a real resume point we failed to learn,
+   * and stamping from zero would re-issue every used slot (each overstamp
+   * evicts the existing data chunk from the reserve). Degrade to read-only
+   * and retry instead.
+   */
+  readFailed?: boolean
+  /**
+   * Buckets occupied by the published state chunks (counter chunks + the
+   * reference chunk) of the entry that was read. The caller hands these to
+   * the stamper so utilisation saves avoid overstamping (and evicting) the
+   * published resume point. Present only on a successful full read.
+   */
+  stateBuckets?: number[]
 }> {
   const { bee, owner, batchId, partition, batchDepth } = opts
   const topic = makePartitionStateTopic(batchId, partition)
   const finder = new AsyncEpochFinder(bee, topic, owner)
   const now = BigInt(Math.floor(Date.now() / 1000))
 
-  const refBytes = await finder.findAt(now)
+  const entry = await finder.findAtWithMetadata(now)
 
-  if (!refBytes) {
+  if (!entry) {
     // No prior state — start fresh from zero.
     return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
   }
 
+  const refBytes = entry.reference
   const referenceHex = Binary.uint8ArrayToHex(refBytes)
 
   // Cache hit: the feed still points to the reference this device's local
@@ -151,17 +172,25 @@ export async function readPartitionState(
   }
 
   const localCounter = new Uint32Array(NUM_BUCKETS)
+  // The reference chunk and every counter chunk overstamp this partition's
+  // reserved slot in their respective buckets — collect those buckets so the
+  // caller can protect them from utilisation saves (an overstamp there would
+  // evict the published resume point). The chunk address is the first 32
+  // bytes of each 64-byte encrypted reference.
+  const stateBuckets: number[] = [toBucket(refBytes.slice(0, 32))]
 
   // The feed points to the reference chunk: a single chunk holding the
   // 64-byte encrypted references (address‖key) of this partition's counter
   // chunks. Each reference carries its own decryption key, so no key
   // derivation is needed — downloadDataWithChunkAPI decrypts from the ref.
   //
-  // Resilience: any failure here (an unreadable/transient chunk, or a feed
-  // entry written in an older format) must NOT abort the caller's acquisition
-  // (`claimPartition` reads this *before* writing the lock SOC). Fall back to a
-  // fresh zero counter — the same as the no-entry path — and let the next
-  // `release` republish the current format.
+  // Failure policy: the feed HAS an entry, so the partition has a real
+  // resume point. If we cannot read it (transient network error, or a
+  // published chunk evicted from the reserve), we must NOT fall back to a
+  // zero counter — resuming at zero re-issues every used slot, and each
+  // overstamp deterministically evicts the existing data chunk (Bee replaces
+  // the older chunk at a colliding (bucket, slot) stamp index). Report
+  // `readFailed` so the caller degrades to read-only and retries later.
   try {
     const referenceChunk = await downloadDataWithChunkAPI(
       bee,
@@ -184,19 +213,36 @@ export async function readPartitionState(
         Binary.uint8ArrayToHex(ref),
       )
       mergeChunk(localCounter, i, chunkData, batchDepth)
+      stateBuckets.push(toBucket(ref.slice(0, 32)))
     }
     PartitionStateSchemaV1.parse({ counters: localCounter })
   } catch (err) {
     console.warn(
-      `[partition-state] reading partition ${partition} counter failed; seeding a fresh counter:`,
+      `[partition-state] reading partition ${partition} counter failed; degrading to read-only:`,
       err,
     )
     // Don't return referenceHex — the read failed, so the caller must not
     // cache this reference as "synced" (it would skip a needed future download).
-    return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
+    return { unchanged: false, readFailed: true }
   }
 
-  return { localCounter, referenceHex, unchanged: false }
+  // Compensate for the feed entry's own SOC: `writePartitionState` extracts
+  // and uploads the counter snapshot FIRST and writes the feed SOC LAST, so
+  // the feed SOC consumed one data slot — `slot(snapshot[bucket])` of its own
+  // address's bucket — that the snapshot does not record. Resuming without
+  // this +1 would place the next data chunk in that bucket onto the feed
+  // SOC's exact slot, evicting the feed entry from the reserve (Bee replaces
+  // the older chunk at a colliding stamp index) and breaking later feed
+  // walks. The bump is unconditional: if a future writer ever pre-accounted
+  // the slot, the +1 merely wastes one slot in one bucket. Only this (the
+  // latest) entry needs compensation — earlier entries were compensated by
+  // the readers that consumed them. NOTE: the `unchanged` short-circuit above
+  // must NOT bump — the caller's live counter already includes the increment
+  // made when the feed SOC was stamped.
+  const feedSocAddr = await epochSocAddress(topic, entry.epoch, owner)
+  localCounter[toBucket(feedSocAddr)] += 1
+
+  return { localCounter, referenceHex, unchanged: false, stateBuckets }
 }
 
 /**
@@ -218,7 +264,16 @@ export async function writePartitionState(opts: {
   partition: number
   localCounter: Uint32Array
   backupSigner: PrivateKey
-}): Promise<string> {
+}): Promise<{
+  /** Feed reference (hex) — the caller's "synced reference". */
+  referenceHex: string
+  /**
+   * Buckets occupied by the uploaded state chunks (counter chunks + the
+   * reference chunk). The caller hands these to the stamper so subsequent
+   * utilisation saves avoid overstamping (and evicting) this publish.
+   */
+  stateBuckets: number[]
+}> {
   const {
     bee,
     stamper,
@@ -234,19 +289,31 @@ export async function writePartitionState(opts: {
   const { numUtilizationChunks } = getChunkLayout(batchDepth)
   const target: UploadTarget = { mode: "stamper", bee, stamper }
   const owner = backupSigner.publicKey().address()
-  // Every chunk below overstamps the partition's reserved slot, so they must
-  // land in distinct buckets and clear of the partition's lock-SOC bucket.
-  const claimedBuckets = new Set<number>([lockSocBucket(partition, owner)])
   const reserve =
     stamper instanceof UtilizationAwareStamper ? stamper : undefined
+  // Every chunk below overstamps the partition's reserved slot, so they must
+  // land in distinct buckets, clear of the partition's lock-SOC bucket, and
+  // clear of the live utilisation chunks (whose buckets share the same
+  // reserved slot — landing there would evict them from the reserve).
+  const claimedBuckets = new Set<number>([
+    lockSocBucket(partition, owner),
+    ...(reserve?.getCleanChunkBuckets() ?? []),
+  ])
 
   // 1. Upload each counter chunk → 64-byte encrypted reference.
   const references: Uint8Array[] = []
+  const stateBuckets: number[] = []
   for (let i = 0; i < numUtilizationChunks; i++) {
     const plaintext = extractChunk(localCounter, i, batchDepth)
-    references.push(
-      await uploadReservedChunk(target, plaintext, claimedBuckets, reserve),
+    const ref = await uploadReservedChunk(
+      target,
+      plaintext,
+      claimedBuckets,
+      reserve,
+      partition,
     )
+    references.push(ref)
+    stateBuckets.push(toBucket(ref.slice(0, 32)))
   }
 
   // 2. Upload the reference chunk listing those references (N·64 bytes; ≤ 4096
@@ -257,7 +324,9 @@ export async function writePartitionState(opts: {
     referenceChunk,
     claimedBuckets,
     reserve,
+    partition,
   )
+  stateBuckets.push(toBucket(referenceChunkRef.slice(0, 32)))
 
   reserve?.clearReservedUtilizationChunks()
 
@@ -271,8 +340,12 @@ export async function writePartitionState(opts: {
   )
 
   // Return the feed reference so the caller can record it as this device's
-  // "synced reference" (skips re-downloading on the next acquire).
-  return Binary.uint8ArrayToHex(referenceChunkRef)
+  // "synced reference" (skips re-downloading on the next acquire), plus the
+  // buckets the publish occupied so saves can avoid evicting it.
+  return {
+    referenceHex: Binary.uint8ArrayToHex(referenceChunkRef),
+    stateBuckets,
+  }
 }
 
 /**
@@ -280,13 +353,16 @@ export async function writePartitionState(opts: {
  * slot, returning its 64-byte encrypted reference (address‖key). Retries the
  * random key until the encrypted address lands in a bucket not yet claimed by
  * another reserved chunk (they all share the same reserved slot, so each must
- * occupy a distinct bucket).
+ * occupy a distinct bucket). The slot is passed EXPLICITLY: the teardown
+ * release publishes through an unbound stamper, whose `partition` fallback
+ * (slot 0) would overstamp the other partition's reserved chunks.
  */
 async function uploadReservedChunk(
   target: UploadTarget,
   plaintext: Uint8Array,
   claimedBuckets: Set<number>,
   reserve: UtilizationAwareStamper | undefined,
+  partition: number,
 ): Promise<Uint8Array> {
   let encrypted = makeEncryptedContentAddressedChunk(plaintext)
   while (claimedBuckets.has(toBucket(encrypted.address.toUint8Array()))) {
@@ -294,7 +370,7 @@ async function uploadReservedChunk(
   }
   const address = encrypted.address.toUint8Array()
   claimedBuckets.add(toBucket(address))
-  reserve?.markReservedUtilizationChunk(address)
+  reserve?.markReservedUtilizationChunk(address, partition)
   await uploadData(target, plaintext, {
     encryptionKey: encrypted.encryptionKey,
     deferred: false,

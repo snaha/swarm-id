@@ -16,6 +16,38 @@ import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
 
 /**
+ * Build the SOC identifier for one epoch of a topic's epoch feed:
+ * `keccak256(topic ‖ epoch.marshalBinary())`. Exported so readers can
+ * reconstruct the SOC address of a feed entry they found (e.g. the
+ * partition-state reader compensates for the slot the entry's own SOC
+ * consumed).
+ */
+export async function makeEpochIdentifier(
+  topic: Topic,
+  epoch: EpochIndex,
+): Promise<Identifier> {
+  const epochHash = await epoch.marshalBinary()
+  return new Identifier(
+    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), epochHash)),
+  )
+}
+
+/**
+ * 32-byte SOC chunk address of one epoch-feed entry:
+ * `keccak256(identifier ‖ owner)` — same formula as every SOC address.
+ */
+export async function epochSocAddress(
+  topic: Topic,
+  epoch: EpochIndex,
+  owner: EthAddress,
+): Promise<Uint8Array> {
+  const identifier = await makeEpochIdentifier(topic, epoch)
+  return Binary.keccak256(
+    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
+  )
+}
+
+/**
  * Basic updater for epoch-based feeds
  *
  * Implements Bee-compatible stateless epoch calculation.
@@ -159,12 +191,7 @@ export class BasicEpochUpdater implements EpochUpdater {
     encryptionKey?: Uint8Array,
   ): Promise<Uint8Array> {
     // Calculate epoch identifier: Keccak256(topic || Keccak256(start || level))
-    const epochHash = await epoch.marshalBinary()
-    const identifier = new Identifier(
-      Binary.keccak256(
-        Binary.concatBytes(this.topic.toUint8Array(), epochHash),
-      ),
-    )
+    const identifier = await makeEpochIdentifier(this.topic, epoch)
 
     // Timestamp: 8-byte big-endian
     const timestamp = new Uint8Array(8)

@@ -33,6 +33,10 @@ export class MockChunkStore {
     return this.chunks.has(address.toLowerCase())
   }
 
+  delete(address: string): boolean {
+    return this.chunks.delete(address.toLowerCase())
+  }
+
   clear(): void {
     this.chunks.clear()
   }

@@ -263,14 +263,27 @@ export class BatchWriteCoordinator {
     if (lease) {
       const localCounter = stamper.getLocalCounter()
       if (localCounter !== undefined) {
-        void lease
-          .release(localCounter)
-          .catch((err) =>
-            console.warn(
-              "[BatchWriteCoordinator] Partition lease release failed:",
-              err,
-            ),
-          )
+        // Serialize the detached release under the batch write lock (#349):
+        // a successor coordinator's acquire (`startLease`/`withWrite` →
+        // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
+        // release's publish + sentinel fully complete BEFORE the successor
+        // can read or write the lock SOC — the sentinel's postage stamp is
+        // minted strictly before the successor's claim stamp, and Bee's
+        // newer-stamp-wins replacement keeps the claim. The generation fence
+        // in `releasePartitionLock` covers writers outside this lock. (In
+        // non-browser contexts the lock no-ops; only `oneshot` mode runs
+        // there and it never releases.)
+        //
+        // The release runs AFTER the synchronous unbind below — the publish
+        // goes through an unbound stamper, which is safe because
+        // `writePartitionState` marks its chunks with the explicit partition
+        // slot.
+        void this.lock(() => lease.release(localCounter)).catch((err) =>
+          console.warn(
+            "[BatchWriteCoordinator] Partition lease release failed:",
+            err,
+          ),
+        )
       }
       // Invalidate BEFORE unbinding (same ordering as the displacement race
       // fix): teardown runs synchronously, off the write lock, so it can land
@@ -546,6 +559,46 @@ export class BatchWriteCoordinator {
       this.signalLeaseLost()
       this.finalizeDemote()
       throw new Error("Partition lease was reclaimed by another device.")
+    }
+
+    // A release sentinel is visible while we believe we hold — a stale
+    // (pre-fencing) sentinel converging late, or a frozen-cache view of one.
+    // Re-assert the claim NOW instead of waiting for the next refresh tick,
+    // so peers stop reading the partition as free before this upload runs.
+    // NOTE: this is defence in depth, not the primary #349 fix — the
+    // freshness throttle above usually skips this check in the seconds right
+    // after a re-acquire; the teardown-release lock serialization closes
+    // that window.
+    if (
+      payload !== undefined &&
+      payload.holderDeviceId === NO_HOLDER_DEVICE_ID
+    ) {
+      let reasserted: boolean
+      try {
+        reasserted = await this.partitionLease.refresh()
+      } catch (err) {
+        // Transient — keep the lease, and do NOT bump lastLeaseValidatedAt so
+        // the next upload retries the check.
+        console.warn(
+          "[BatchWriteCoordinator] Sentinel re-assert hit a transient error; keeping lease:",
+          err,
+        )
+        return
+      }
+      if (!reasserted) {
+        // blocked / lost-race — a peer claimed after the sentinel. Mirror
+        // the displaced branch exactly (we are under the write lock).
+        console.warn(
+          `[BatchWriteCoordinator] Sentinel re-assert: partition ${partition} taken by a peer; demoting.`,
+        )
+        this.signalLeaseLost()
+        this.finalizeDemote()
+        throw new Error("Partition lease was reclaimed by another device.")
+      }
+      // Re-asserted: refresh() rewrote the claim and bumped the lease.
+      this.lastLeaseValidatedAt = Date.now()
+      this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+      return
     }
 
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)

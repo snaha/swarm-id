@@ -818,6 +818,50 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(env.bucket).toBe(BUCKET)
     expect(env.slot).toBe(DATA_COUNTER_START + 1 + PARTITION_COUNT * SKEW)
   })
+
+  it("routes a marked reserved chunk to its EXPLICIT slot even when unbound", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    // No bindPartition: this is the teardown-release scenario — the
+    // coordinator unbinds synchronously and the detached release publishes
+    // afterwards. The slot recorded at marking time must win; falling back
+    // to `partition ?? 0` would overstamp partition 0's reserved chunks.
+    const BUCKET = 0x1234
+    const chunk = makeChunkInBucket(BUCKET, 7)
+    stamper.markReservedUtilizationChunk(chunk.hash(), 1)
+
+    const env = decodeIndex(stamper.stamp(chunk).index)
+    expect(env.bucket).toBe(BUCKET)
+    expect(env.slot).toBe(1)
+  })
+
+  it("defaults a marked reserved chunk to the bound partition's slot", async () => {
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    const BUCKET = 0x4321
+    const chunk = makeChunkInBucket(BUCKET, 9)
+    stamper.markReservedUtilizationChunk(chunk.hash())
+
+    const env = decodeIndex(stamper.stamp(chunk).index)
+    expect(env.slot).toBe(1)
+  })
 })
 
 describe("UtilizationAwareStamper synced reference", () => {
@@ -877,5 +921,55 @@ describe("UtilizationAwareStamper synced reference", () => {
     await stamper.setSyncedReference(0, "ref-zero-v2")
     expect(await stamper.getSyncedReference(0)).toBe("ref-zero-v2")
     expect(await stamper.getSyncedReference(1)).toBe("ref-one")
+  })
+
+  it("persists protected state buckets and restores them on create", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    await stamper.setProtectedStateBuckets(1, [7, 99, 1234])
+    const protectedNow = stamper.getProtectedBuckets()
+    expect(protectedNow.has(7)).toBe(true)
+    expect(protectedNow.has(99)).toBe(true)
+    expect(protectedNow.has(1234)).toBe(true)
+    // Lock-SOC buckets stay included.
+    for (const bucket of stamper.getLockSocBuckets()) {
+      expect(protectedNow.has(bucket)).toBe(true)
+    }
+
+    // A reload (fresh stamper over the same cache) keeps avoiding them.
+    const reloaded = await makeStamper(cache)
+    reloaded.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    expect(reloaded.getProtectedBuckets().has(1234)).toBe(true)
+  })
+
+  it("scopes protection to the bound partition and survives setSyncedReference", async () => {
+    const cache = makeRecordingCache()
+    const stamper = await makeStamper(cache)
+    await stamper.setProtectedStateBuckets(0, [11])
+    await stamper.setProtectedStateBuckets(1, [22])
+    // Persisting a synced reference must not drop the protected buckets
+    // (both live in the same metadata record).
+    await stamper.setSyncedReference(0, "ref-zero")
+
+    const reloaded = await makeStamper(cache)
+    reloaded.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    expect(reloaded.getProtectedBuckets().has(11)).toBe(true)
+    // Partition 1's set does not leak into partition 0's saves.
+    expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
+    expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
   })
 })

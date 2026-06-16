@@ -61,6 +61,16 @@ export interface BatchMetadata {
    * skipped and the local counter reused. Keyed by partition index.
    */
   syncedReferences?: Record<number, string>
+  /**
+   * Per-partition buckets occupied by the LATEST published partition-state
+   * chunks (counter chunks + reference chunk). Those chunks overstamp the
+   * partition's reserved slot in their buckets, so utilization saves must
+   * avoid placing chunks there — a collision would evict the published
+   * state from the reserve (Bee replaces the older chunk at a colliding
+   * stamp index), and a later takeover would fail to read its resume point.
+   * Keyed by partition index; replaced wholesale on every publish/read.
+   */
+  stateChunkBuckets?: Record<number, number[]>
 }
 
 // ============================================================================
