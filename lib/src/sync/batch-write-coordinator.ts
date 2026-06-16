@@ -423,6 +423,12 @@ export class BatchWriteCoordinator {
       // reconciles with Swarm and demotes only on a confirmed foreign holder.
       const adopted = lease.adoptIfLive()
       if (adopted !== undefined) {
+        // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
+        // intent round. If two devices both adopt partition 0 from stale
+        // caches, that's a dual-hold the intent round never gets to arbitrate.
+        console.log(
+          `[BatchWriteCoordinator] Adopted cached lease p=${adopted} (no acquire/intent round) for device=${this.deps.deviceId}`,
+        )
         this.partitionLease = lease
         this.readOnly = false
         stamper.bindPartition({

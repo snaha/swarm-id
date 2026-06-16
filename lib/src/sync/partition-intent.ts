@@ -98,6 +98,9 @@ export const INTENT_EPOCH_MS = 30_000
  */
 export const INTENT_READ_TIMEOUT_MS = 2500
 
+/** Internal marker so a timed-out read is distinguishable from a real error. */
+const INTENT_TIMEOUT_MESSAGE = "intent read timed out"
+
 /** `floor(nowMs / INTENT_EPOCH_MS)` — the current intent epoch bucket. */
 export function intentEpochBucket(nowMs: number): number {
   return Math.floor(nowMs / INTENT_EPOCH_MS)
@@ -192,6 +195,11 @@ export async function writePartitionIntent(opts: {
     try {
       await uploadSOC(target, opts.backupSigner, identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
+        // Non-deferred = receipt-backed push-sync into the storage
+        // neighborhood. The whole point of the intent SOC is cross-gateway
+        // visibility; a deferred write would sit on this device's gateway and
+        // a peer's retrieval of the fresh address would never find it.
+        deferred: false,
       })
     } finally {
       stamper.clearIntentSocSlot()
@@ -201,6 +209,7 @@ export async function writePartitionIntent(opts: {
 
   await uploadSOC(target, opts.backupSigner, identifier, data, {
     encryptionKey: opts.swarmEncryptionKey,
+    deferred: false,
   })
 }
 
@@ -235,14 +244,23 @@ export async function readPartitionIntent(opts: {
       ),
       rejectAfter(
         opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS,
-        "intent read timed out",
+        INTENT_TIMEOUT_MESSAGE,
       ),
     ])
     const parsed = PartitionIntentPayloadSchemaV1.safeParse(
       JSON.parse(new TextDecoder().decode(soc.payload)),
     )
     return parsed.success ? parsed.data : undefined
-  } catch {
+  } catch (error) {
+    // A timeout means the rival's chunk may well exist but the gateway didn't
+    // retrieve it within the budget — distinct from a genuine "not found", and
+    // worth surfacing because a too-short timeout would silently re-enable the
+    // dual-acquire this whole mechanism exists to prevent.
+    if (error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE) {
+      console.warn(
+        `[partition-intent] read TIMEOUT for device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket} (>${opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS}ms) — treated as no-intent`,
+      )
+    }
     return undefined
   }
 }
@@ -296,27 +314,36 @@ export async function resolveIntentRound(opts: {
 
   // Read every rival's intent for both buckets in parallel; each read is
   // individually time-bounded so an absent rival doesn't stall the round.
-  const reads = rivals.flatMap((rivalId) =>
-    [currentBucket, previousBucket].map((bucket) =>
-      readPartitionIntent({
-        bee: opts.bee,
-        backupSigner: opts.backupSigner,
-        swarmEncryptionKey: opts.swarmEncryptionKey,
-        partition: opts.partition,
-        deviceId: rivalId,
-        epochBucket: bucket,
-        timeoutMs: opts.timeoutMs,
-      }),
+  const observed = await Promise.all(
+    rivals.flatMap((rivalId) =>
+      [currentBucket, previousBucket].map(async (bucket) => ({
+        rivalId,
+        intent: await readPartitionIntent({
+          bee: opts.bee,
+          backupSigner: opts.backupSigner,
+          swarmEncryptionKey: opts.swarmEncryptionKey,
+          partition: opts.partition,
+          deviceId: rivalId,
+          epochBucket: bucket,
+          timeoutMs: opts.timeoutMs,
+        }),
+      })),
     ),
   )
-  const observed = await Promise.all(reads)
 
-  for (const intent of observed) {
-    if (!intent) continue
-    // A rival ordering strictly below us wins the partition; we back off.
-    if (compareGenerations(intent.generation, opts.generation) < 0) {
-      return "lose"
-    }
-  }
-  return "win"
+  const found = observed.filter((r) => r.intent !== undefined)
+  // A rival ordering strictly below us wins the partition; we back off.
+  const beatenBy = found.find(
+    (r) => compareGenerations(r.intent!.generation, opts.generation) < 0,
+  )
+  const outcome = beatenBy ? "lose" : "win"
+
+  // One concise line per round so a gateway run shows whether peers were
+  // actually observed (the failure mode being "found=0 → everyone wins").
+  console.log(
+    `[partition-intent] round p=${opts.partition} self=${opts.deviceId} rivals=${rivals.length} found=${found.length} → ${outcome}` +
+      (beatenBy ? ` (beaten by ${beatenBy.rivalId})` : ""),
+  )
+
+  return outcome
 }

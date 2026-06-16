@@ -367,6 +367,12 @@ export class PartitionLease {
     // proceeds to bind; losers back off to read-only. See partition-intent.ts.
     const knownDeviceIds = this.opts.knownDeviceIds?.() ?? []
     const hasRival = knownDeviceIds.some((id) => id !== this.opts.deviceId)
+    // Diagnostic: shows whether the intent round even runs, and on how many
+    // peers. The dual-acquire failure is "freshClaim + no rival seen at acquire
+    // time" (registry not yet synced) or "round ran but found nothing".
+    console.log(
+      `[PartitionLease] claim p=${partition} self=${this.opts.deviceId} freshClaim=${freshClaim} knownDevices=${knownDeviceIds.length} intentRound=${freshClaim && hasRival}`,
+    )
     if (freshClaim && hasRival) {
       const outcome = await resolveIntentRound({
         bee: this.opts.bee,

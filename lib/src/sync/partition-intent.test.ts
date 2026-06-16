@@ -133,6 +133,29 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
     })
     expect(read).toBeUndefined()
   })
+
+  it("writes the intent non-deferred so a peer's gateway can retrieve it", async () => {
+    // Regression: a deferred write stays on the writer's gateway and is never
+    // push-synced into the neighborhood, so a peer's retrieval of the fresh
+    // address finds nothing → the intent round is a no-op and both devices win.
+    const fetchSpy = vi.spyOn(global, "fetch")
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(1000, DEVICE_A),
+    })
+    const socCall = fetchSpy.mock.calls.find(([u]) =>
+      (typeof u === "string" ? u : String(u)).includes("/soc/"),
+    )
+    expect(socCall).toBeDefined()
+    const headers = (socCall![1]?.headers ?? {}) as Record<string, string>
+    expect(headers["swarm-deferred-upload"]).toBe("false")
+  })
 })
 
 describe("resolveIntentRound", () => {
