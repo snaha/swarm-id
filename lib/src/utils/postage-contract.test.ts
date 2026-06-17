@@ -9,7 +9,10 @@ import {
   fetchAuthoritativeBatchTTL,
   fetchBatchTTLFromContract,
   fetchOnChainBatchState,
+  fetchOnChainBatchStateResult,
+  resolveBatchStatus,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
+  resolvePostageStampContractAddress,
   type OnChainBatchState,
 } from "./postage-contract"
 
@@ -372,5 +375,154 @@ describe("fetchAuthoritativeBatchTTL", () => {
     const ttl = await fetchAuthoritativeBatchTTL(RPC, BEE, BATCH_ID)
 
     expect(ttl).toBeUndefined()
+  })
+})
+
+describe("resolvePostageStampContractAddress", () => {
+  const LOCAL = "0xe7f1725e7734ce288f8367e1bb143e90bb3f0512"
+
+  it("honours the local override only for a local RPC", () => {
+    expect(
+      resolvePostageStampContractAddress("http://localhost:9545", LOCAL),
+    ).toBe(LOCAL)
+    expect(
+      resolvePostageStampContractAddress("http://127.0.0.1:9545", LOCAL),
+    ).toBe(LOCAL)
+  })
+
+  it("ignores the local override for a remote RPC (mainnet)", () => {
+    expect(
+      resolvePostageStampContractAddress(
+        "https://xdai.fairdatasociety.org/",
+        LOCAL,
+      ),
+    ).toBe(POSTAGE_STAMP_CONTRACT_ADDRESS)
+  })
+
+  it("falls back to mainnet when no override is given", () => {
+    expect(resolvePostageStampContractAddress("http://localhost:9545")).toBe(
+      POSTAGE_STAMP_CONTRACT_ADDRESS,
+    )
+  })
+})
+
+const ZERO_TUPLE = "0x" + "0".repeat(64 * 6)
+
+describe("fetchOnChainBatchStateResult", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch")
+  })
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  it("reports found with the decoded state", async () => {
+    fetchSpy.mockResolvedValue(batchResponse(FULL_RESPONSE))
+    const result = await fetchOnChainBatchStateResult(
+      "https://rpc.example",
+      BATCH_ID,
+    )
+    expect(result.status).toBe("found")
+    if (result.status === "found") {
+      expect(result.state.lastPrice).toBe(LAST_PRICE)
+    }
+  })
+
+  it("reports not-found for a zero-owner tuple", async () => {
+    fetchSpy.mockResolvedValue(
+      batchResponse({
+        0: { result: ZERO_TUPLE },
+        1: { result: OUT_PAYMENT_RESULT },
+        2: { result: LAST_PRICE_RESULT },
+      }),
+    )
+    const result = await fetchOnChainBatchStateResult(
+      "https://rpc.example",
+      BATCH_ID,
+    )
+    expect(result.status).toBe("not-found")
+  })
+
+  it("reports error when the RPC fails", async () => {
+    fetchSpy.mockRejectedValue(new Error("rpc down"))
+    const result = await fetchOnChainBatchStateResult(
+      "https://rpc.example",
+      BATCH_ID,
+    )
+    expect(result.status).toBe("error")
+  })
+})
+
+describe("resolveBatchStatus", () => {
+  let fetchSpy: ReturnType<typeof vi.spyOn>
+
+  const RPC = "https://rpc.example"
+  const BEE = "https://bee.example"
+
+  beforeEach(() => {
+    fetchSpy = vi.spyOn(globalThis, "fetch")
+  })
+  afterEach(() => {
+    fetchSpy.mockRestore()
+  })
+
+  it("found via contract, with the contract TTL", async () => {
+    fetchSpy.mockImplementation((url) =>
+      Promise.resolve(
+        url === RPC ? batchResponse(FULL_RESPONSE) : ({} as Response),
+      ),
+    )
+    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
+    expect(result).toEqual({
+      status: "found",
+      ttlSeconds: EXPECTED_TTL_SECONDS,
+    })
+  })
+
+  it("not-found is authoritative and does not consult the Bee node", async () => {
+    fetchSpy.mockImplementation((url) => {
+      if (url === RPC) {
+        return Promise.resolve(
+          batchResponse({
+            0: { result: ZERO_TUPLE },
+            1: { result: OUT_PAYMENT_RESULT },
+            2: { result: LAST_PRICE_RESULT },
+          }),
+        )
+      }
+      throw new Error("Bee must not be consulted on contract not-found")
+    })
+    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
+    expect(result).toEqual({ status: "not-found" })
+  })
+
+  it("falls back to the Bee node when the contract read errors", async () => {
+    fetchSpy.mockImplementation((url) =>
+      url === RPC
+        ? Promise.reject(new Error("rpc down"))
+        : Promise.resolve({
+            ok: true,
+            status: 200,
+            json: () => Promise.resolve({ batchTTL: 4242 }),
+          } as Response),
+    )
+    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
+    expect(result).toEqual({ status: "found", ttlSeconds: 4242 })
+  })
+
+  it("is unreachable when both the contract and the Bee node fail", async () => {
+    fetchSpy.mockImplementation((url) =>
+      url === RPC
+        ? Promise.reject(new Error("rpc down"))
+        : Promise.resolve({
+            ok: false,
+            status: 404,
+            json: () => Promise.resolve({}),
+          } as Response),
+    )
+    const result = await resolveBatchStatus(RPC, BEE, BATCH_ID)
+    expect(result).toEqual({ status: "unreachable" })
   })
 })

@@ -523,6 +523,8 @@ export {
   fetchOnChainBatchState,
   fetchBatchTTLFromContract,
   fetchAuthoritativeBatchTTL,
+  resolveBatchStatus,
+  resolvePostageStampContractAddress,
   calculateContractTTLSeconds,
   decodeBatches,
   decodeUint,
@@ -531,6 +533,8 @@ export {
 export type {
   OnChainPostageBatch,
   OnChainBatchState,
+  OnChainBatchResult,
+  BatchResolution,
 } from "./utils/postage-contract"
 
 // Postage stamp <-> account/identity association
