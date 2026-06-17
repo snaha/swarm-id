@@ -30,6 +30,41 @@ export const POSTAGE_STAMP_CONTRACT_ADDRESS =
   "0x45a1502382541cd610cc9068e88727426b696293"
 
 /**
+ * True when an RPC URL targets a local dev chain (bee-compose anvil). A
+ * dev-deployed PostageStamp address is only valid against such a node.
+ */
+function isLocalRpcUrl(rpcUrl: string): boolean {
+  try {
+    const { hostname } = new URL(rpcUrl)
+    return (
+      hostname === "localhost" ||
+      hostname === "127.0.0.1" ||
+      hostname === "0.0.0.0"
+    )
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Picks the PostageStamp contract address that matches the chain `rpcUrl` points
+ * at. A dev-override address (bee-compose anvil) is only honoured against a local
+ * RPC; against any remote RPC (Gnosis mainnet) it would read a nonexistent
+ * contract — `eth_call` returns empty, the batch looks unknown, and callers
+ * silently fall back to a bogus price estimate. Tying the address to the RPC
+ * network stops the two from drifting apart, which is what produced wildly wrong
+ * estimated expiry dates when a dev build read a mainnet batch (#344).
+ */
+export function resolvePostageStampContractAddress(
+  rpcUrl: string,
+  localContractAddress?: string,
+): string {
+  return isLocalRpcUrl(rpcUrl) && localContractAddress
+    ? localContractAddress
+    : POSTAGE_STAMP_CONTRACT_ADDRESS
+}
+
+/**
  * 4-byte function selectors (first 4 bytes of keccak256 of the signature).
  * Hardcoded so the library needs no keccak/ABI dependency for these fixed,
  * argument-free (or single-bytes32) calls.
@@ -199,11 +234,29 @@ async function ethCallBatch(
  *          contract (zero owner) or the RPC request fails. Never throws — the
  *          UI falls back to other expiry sources on `undefined`.
  */
-export async function fetchOnChainBatchState(
+/**
+ * Outcome of an on-chain batch read, keeping the two failure modes distinct:
+ *   - `found` — the contract knows the batch (non-zero owner).
+ *   - `not-found` — the contract returned an all-zero tuple; the batch
+ *     authoritatively does not exist on this chain.
+ *   - `error` — the RPC request failed or returned an undecodable payload, so
+ *     existence is *unknown* (not the same as "does not exist").
+ */
+export type OnChainBatchResult =
+  | { status: "found"; state: OnChainBatchState }
+  | { status: "not-found" }
+  | { status: "error" }
+
+/**
+ * Reads a batch's on-chain state, distinguishing "definitively absent" from
+ * "couldn't check". {@link fetchOnChainBatchState} is the simpler wrapper that
+ * collapses both into `undefined`.
+ */
+export async function fetchOnChainBatchStateResult(
   rpcUrl: string,
   batchId: string,
   contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
-): Promise<OnChainBatchState | undefined> {
+): Promise<OnChainBatchResult> {
   try {
     const id = normalizeBatchId(batchId)
     const [batchesResult, outPaymentResult, lastPriceResult] =
@@ -223,20 +276,36 @@ export async function fetchOnChainBatchState(
       ])
 
     const batch = decodeBatches(batchesResult)
-    // A non-existent batch decodes to an all-zero tuple. Treat it as unknown so
-    // callers fall back rather than render a bogus "expired" date.
+    // A non-existent batch decodes to an all-zero tuple — a definitive "no such
+    // batch on this chain", distinct from an RPC error below.
     if (batch.owner === ZERO_ADDRESS) {
-      return undefined
+      return { status: "not-found" }
     }
 
     return {
-      batch,
-      currentTotalOutPayment: decodeUint(outPaymentResult),
-      lastPrice: decodeUint(lastPriceResult),
+      status: "found",
+      state: {
+        batch,
+        currentTotalOutPayment: decodeUint(outPaymentResult),
+        lastPrice: decodeUint(lastPriceResult),
+      },
     }
   } catch {
-    return undefined
+    return { status: "error" }
   }
+}
+
+export async function fetchOnChainBatchState(
+  rpcUrl: string,
+  batchId: string,
+  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
+): Promise<OnChainBatchState | undefined> {
+  const result = await fetchOnChainBatchStateResult(
+    rpcUrl,
+    batchId,
+    contractAddress,
+  )
+  return result.status === "found" ? result.state : undefined
 }
 
 /**
@@ -301,18 +370,83 @@ export async function fetchBatchTTLFromContract(
  * @param gnosisRpcUrl - Gnosis Chain JSON-RPC URL (for the contract read)
  * @param beeUrl - Bee node URL (fallback)
  * @param batchId - 32-byte hex batch ID, with or without `0x` prefix
- * @param contractAddress - PostageStamp contract address for the contract read
- *          (defaults to mainnet; override for a local dev chain).
+ * @param localContractAddress - PostageStamp address for a local dev chain. Only
+ *          honoured when `gnosisRpcUrl` targets a local node; against any remote
+ *          RPC the Gnosis mainnet deployment is used regardless (see
+ *          {@link resolvePostageStampContractAddress}).
  * @returns Remaining TTL in seconds, or `undefined` if neither source can answer.
  */
 export async function fetchAuthoritativeBatchTTL(
   gnosisRpcUrl: string,
   beeUrl: string,
   batchId: string,
-  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
+  localContractAddress?: string,
 ): Promise<number | undefined> {
+  const contractAddress = resolvePostageStampContractAddress(
+    gnosisRpcUrl,
+    localContractAddress,
+  )
   return (
     (await fetchBatchTTLFromContract(gnosisRpcUrl, batchId, contractAddress)) ??
     (await fetchBatchTTL(beeUrl, batchId))
   )
+}
+
+/**
+ * Existence + remaining TTL of a batch, for UI that must tell "this batch does
+ * not exist on the configured chain" apart from "we couldn't reach the chain".
+ *   - `found` — carries `ttlSeconds` (remaining TTL, or `undefined` when the
+ *     price is zero so there is no finite expiry).
+ *   - `not-found` — the PostageStamp contract authoritatively has no such batch.
+ *   - `unreachable` — neither the contract nor the Bee node could be reached, so
+ *     existence is unknown.
+ */
+export type BatchResolution =
+  | { status: "found"; ttlSeconds: number | undefined }
+  | { status: "not-found" }
+  | { status: "unreachable" }
+
+/**
+ * Resolves a batch's existence and remaining TTL, treating the on-chain contract
+ * as the source of truth. A contract `not-found` is authoritative — a Bee node
+ * that happens to track the batch cannot override the chain. The Bee node is
+ * consulted only when the contract read itself failed (RPC unreachable), as a
+ * best-effort second opinion.
+ *
+ * Unlike {@link fetchAuthoritativeBatchTTL} (best-effort TTL, falls back to Bee
+ * even on contract `not-found`), this is the stricter lookup for existence-aware
+ * UI.
+ *
+ * @param localContractAddress - PostageStamp address for a local dev chain; only
+ *          honoured against a local RPC (see {@link resolvePostageStampContractAddress}).
+ */
+export async function resolveBatchStatus(
+  gnosisRpcUrl: string,
+  beeUrl: string,
+  batchId: string,
+  localContractAddress?: string,
+): Promise<BatchResolution> {
+  const contractAddress = resolvePostageStampContractAddress(
+    gnosisRpcUrl,
+    localContractAddress,
+  )
+  const contract = await fetchOnChainBatchStateResult(
+    gnosisRpcUrl,
+    batchId,
+    contractAddress,
+  )
+  if (contract.status === "found") {
+    return {
+      status: "found",
+      ttlSeconds: calculateContractTTLSeconds(contract.state),
+    }
+  }
+  if (contract.status === "not-found") {
+    return { status: "not-found" }
+  }
+  // Contract read errored — fall back to the Bee node as a second opinion.
+  const beeTtl = await fetchBatchTTL(beeUrl, batchId)
+  return beeTtl !== undefined
+    ? { status: "found", ttlSeconds: beeTtl }
+    : { status: "unreachable" }
 }

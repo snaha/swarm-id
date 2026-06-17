@@ -59,88 +59,116 @@
     return undefined
   })
 
+  // Validation errors are surfaced only when focus leaves a field, never while
+  // typing. These hold the error snapshot captured at blur (the derived *Error
+  // values above stay live and drive `disabled`). Mutated only in focus handlers,
+  // so typing in a field never changes its displayed error.
+  let batchIDErrorShown = $state<string | undefined>(undefined)
+  let numberErrorShown = $state<string | undefined>(undefined)
+  let signerKeyErrorShown = $state<string | undefined>(undefined)
+
+  // Snapshot the current error when focus leaves a field — but not when the whole
+  // window loses focus (e.g. alt-tabbing to an editor to copy a value).
+  function snapshotOnBlur(snapshot: () => void) {
+    if (document.hasFocus()) snapshot()
+  }
+
   $effect(() => {
-    disabled = !batchID || !depth || !!batchIDError || !!numberError || !!signerKeyError
+    disabled =
+      !batchID || !depth || !signerKey || !!batchIDError || !!numberError || !!signerKeyError
   })
 </script>
 
 <Vertical>
   <!-- Row 1 -->
-  <div class="input-wrapper">
+  <div
+    class="input-wrapper"
+    onfocusin={() => (batchIDErrorShown = undefined)}
+    onfocusout={() => snapshotOnBlur(() => (batchIDErrorShown = batchIDError))}
+  >
     <Input
       variant="outline"
       dimension="compact"
       name="batchID"
       bind:value={batchID}
-      error={batchIDError}
+      error={batchIDErrorShown}
       label="Stamp ID"
       helperText="Don't reuse stamps across accounts and identities"
     />
   </div>
-  {#if batchIDError}
+  {#if batchIDErrorShown}
     <div class="error-full-width">
-      <ErrorMessage>{batchIDError}</ErrorMessage>
+      <ErrorMessage>{batchIDErrorShown}</ErrorMessage>
     </div>
   {/if}
 
   <!-- Row 2 -->
   <Vertical>
-    <ResponsiveLayout --responsive-justify-content="stretch">
-      <FormattedNumberInput
-        variant="outline"
-        dimension="compact"
-        name="depth"
-        locale={undefined}
-        bind:value={depth}
-        label="Depth"
-        class="flex-grow"
-        min={0}
-        max={255}
-        step={1}
-      />
-      <FormattedBigintInput
-        variant="outline"
-        dimension="compact"
-        name="amount"
-        locale={undefined}
-        bind:value={amount}
-        label="Amount"
-        class="flex-grow"
-        min={0n}
-      />
-      <FormattedNumberInput
-        variant="outline"
-        dimension="compact"
-        name="blockNumber"
-        locale={undefined}
-        bind:value={blockNumber}
-        label="Block number"
-        class="flex-grow"
-        min={0}
-        step={1}
-      />
-    </ResponsiveLayout>
-    {#if numberError}
+    <div
+      onfocusin={() => (numberErrorShown = undefined)}
+      onfocusout={() => snapshotOnBlur(() => (numberErrorShown = numberError))}
+    >
+      <ResponsiveLayout --responsive-justify-content="stretch">
+        <FormattedNumberInput
+          variant="outline"
+          dimension="compact"
+          name="depth"
+          locale={undefined}
+          bind:value={depth}
+          label="Depth"
+          class="flex-grow"
+          min={0}
+          max={255}
+          step={1}
+        />
+        <FormattedBigintInput
+          variant="outline"
+          dimension="compact"
+          name="amount"
+          locale={undefined}
+          bind:value={amount}
+          label="Amount"
+          class="flex-grow"
+          min={0n}
+        />
+        <FormattedNumberInput
+          variant="outline"
+          dimension="compact"
+          name="blockNumber"
+          locale={undefined}
+          bind:value={blockNumber}
+          label="Block number"
+          class="flex-grow"
+          min={0}
+          step={1}
+        />
+      </ResponsiveLayout>
+    </div>
+    {#if numberErrorShown}
       <div class="error-full-width">
-        <ErrorMessage>{numberError}</ErrorMessage>
+        <ErrorMessage>{numberErrorShown}</ErrorMessage>
       </div>
     {/if}
   </Vertical>
 
   <!-- Row 3 -->
-  <div class="input-wrapper">
+  <div
+    class="input-wrapper"
+    onfocusin={() => (signerKeyErrorShown = undefined)}
+    onfocusout={() => snapshotOnBlur(() => (signerKeyErrorShown = signerKeyError))}
+  >
     <Input
       variant="outline"
       dimension="compact"
       name="signerKey"
       bind:value={signerKey}
-      error={signerKeyError}
+      error={signerKeyErrorShown}
       label="Signer key"
     />
   </div>
-  {#if signerKeyError}
+  {#if signerKeyErrorShown}
     <div class="error-full-width">
-      <ErrorMessage>{signerKeyError}</ErrorMessage>
+      <ErrorMessage>{signerKeyErrorShown}</ErrorMessage>
     </div>
   {/if}
 
