@@ -4,8 +4,7 @@ Status: Phase 1 fully specified. The disjoint-gateway hole has two shipped mitig
 
 1. **Deterministic home partition** (`deviceHomePartition`, `partition-lock.ts`): selection
    scans from `keccak256(deviceId) mod partitionCount` instead of always 0, so devices that
-   cannot see each other's locks still spread across slots rather than all binding partition
-   0. Probabilistic — colliding home partitions still race.
+   cannot see each other's locks still spread across slots rather than all binding partition 0. Probabilistic — colliding home partitions still race.
 2. **Per-device intent SOCs** (`partition-intent.ts`, the symmetric-free-partition extension
    below): a fresh claim of a free partition first runs an intent round at a per-epoch
    address that forces a network retrieval (bypassing the frozen gateway cache), so
@@ -17,7 +16,7 @@ Status: Phase 1 fully specified. The disjoint-gateway hole has two shipped mitig
 
 The 2 s guard window in `acquirePartitionLock` (`lib/src/sync/partition-lock.ts`) provides
 probabilistic mutual exclusion only. After writing its claim, a device does ONE verify-read
-and treats *absence of a rival* as success:
+and treats _absence of a rival_ as success:
 
 - a failed verify-read returns `"acquired"` optimistically;
 - a verify-read showing a **lower** generation (stale view, or a rival's chunk that
@@ -32,7 +31,7 @@ silently overwritten and never reconciled.
 
 An **initial** claim must observe its own write (generation equality on a verify-read)
 before returning `"acquired"`. Refresh of an already-live own lease keeps today's optimism —
-safe because `BatchWriteCoordinator.refreshTick` demotes only on a *confirmed* foreign
+safe because `BatchWriteCoordinator.refreshTick` demotes only on a _confirmed_ foreign
 holder (`isDisplaced` with a failed read keeps the lease; verified in code).
 
 ### Protocol change (`lib/src/sync/partition-lock.ts`)
@@ -42,7 +41,7 @@ holder (`isDisplaced` with a failed read keeps the lease; verified in code).
 - New outcome `"unconfirmed"` in `AcquirePartitionLockResult`: nobody contradicted us, but
   our own write never became readable; payload = our claim (peers may still see it live).
 - `isRefresh = current !== undefined && current.holderDeviceId === opts.deviceId &&
-  current.leasedUntil > t`, computed from the pre-write read. Liveness is required: an
+current.leasedUntil > t`, computed from the pre-write read. Liveness is required: an
   expired own claim is contestable and gets initial-claim strictness.
 - After `writePartitionLock` + `wait(guardMs)`: loop up to `1 + SAMPLES` reads (interval
   wait between extras):
@@ -59,7 +58,7 @@ holder (`isDisplaced` with a failed read keeps the lease; verified in code).
   `LEASE_TTL_MS`.
 
 **Why back-off instead of re-assert on LWW inversion** (a rival's lower-generation chunk
-physically survived over our logically-winning one): re-asserting makes *both* contenders
+physically survived over our logically-winning one): re-asserting makes _both_ contenders
 confirm themselves in the crossed-reads interleaving — a guaranteed dual-hold. Backing off
 on any live foreign claim yields exactly one winner regardless of which chunk physically
 survived. In the rare both-back-off cross, the slot heals via the 30 s TTL (correctness
@@ -93,8 +92,8 @@ over availability).
 ### What Phase 1 wins / does not win
 
 Wins: failed-read optimism eliminated for initial claims (fail-safe to read-only); broken
-read-your-writes environments (misrouted gateway, flaky node) become a *liveness* problem
-instead of a *safety* problem; LWW inversion resolved at acquire time with exactly one
+read-your-writes environments (misrouted gateway, flaky node) become a _liveness_ problem
+instead of a _safety_ problem; LWW inversion resolved at acquire time with exactly one
 winner; stale-payload `leasedUntil` regression fixed. Healthy-path latency unchanged
 (~2 s); degraded paths add ≤ 3 s before failing safe.
 
@@ -105,8 +104,8 @@ Does NOT win: the disjoint-gateway race below.
 Device A writes its claim through gateway/node X; device B through node Y. Each verify-read
 is served from the device's own node, which holds (and keeps serving) the device's own
 version of the lock SOC. Both confirm their own writes; neither sees the rival within the
-guard. Both acquire. Phase 1 cannot help: *reading back your own write through your own
-node proves nothing about what the rest of the network sees.*
+guard. Both acquire. Phase 1 cannot help: _reading back your own write through your own
+node proves nothing about what the rest of the network sees._
 
 Root cause: a single mutable address whose value can diverge across nodes. A Bee node
 serves a SOC from its local store when it has one — a node that stored your write has no
@@ -114,7 +113,7 @@ reason to re-fetch the address from the network, so it may never show you the ri
 version. The read path's freshness depends on cache coherence Swarm does not promise.
 
 **It is worse than the own-write case (verified in Bee source, see "Key Bee facts"
-below):** a node also caches chunks it *retrieved* (LRU, no TTL, no invalidation), and
+below):** a node also caches chunks it _retrieved_ (LRU, no TTL, no invalidation), and
 non-neighborhood nodes never participate in pull-sync for the address. So ANY reader
 behind a gateway gets a frozen view of the lock SOC after its first read — not just the
 writer. Displacement detection and Case C polling through a caching gateway degrade the
@@ -123,11 +122,11 @@ same way.
 ## Phase 2 direction — contest SOCs (exploration)
 
 Intuition (AG): alongside the lock SOC, a second SOC whose address is **deterministically
-derived from the lock SOC**, used to *contest* the existing holder.
+derived from the lock SOC**, used to _contest_ the existing holder.
 
 ### The kernel that makes this work
 
-The disjoint-gateway failure is a *local short-circuit*: your node serves its local copy
+The disjoint-gateway failure is a _local short-circuit_: your node serves its local copy
 of an address it has — because you wrote it, **or because it retrieved it once before**
 (retrieved chunks are cached with no TTL and no invalidation; see Key Bee facts). But a
 read of an address your node has **never seen** must trigger a network retrieval (routed
@@ -180,7 +179,7 @@ bounded outstanding request per 10 s tick, only while holding.
 
 ### Where it does not work directly: the symmetric free-partition race
 
-Two contenders claiming a *free* partition cannot derive each other's contest address: the
+Two contenders claiming a _free_ partition cannot derive each other's contest address: the
 derivation needs the rival's generation, which is exactly what neither can read (that's the
 premise of the failure). A shared per-round address (e.g. derived from a time epoch) puts
 both writers back on one mutable address — same divergence problem.
@@ -194,7 +193,7 @@ both writers back on one mutable address — same divergence problem.
 > lock-SOC `refreshFromSwarm`) reads every known rival's beacon for the current+previous epoch
 > bucket — fresh per-epoch addresses that retrieve on the gateway where the static lock SOC 404s —
 > and marks a partition **held** iff a beacon has `leasedUntil > now`. This closes the original
-> symmetric/displacement gap's *mirror*: a device joining while a peer already holds a partition
+> symmetric/displacement gap's _mirror_: a device joining while a peer already holds a partition
 > now detects that holder and picks another partition (or read-only) instead of colliding. A bare
 > intent (no `leasedUntil`) is a contender, not a holder, and is still resolved by the intent
 > round; an expired beacon is ignored so a lapsed partition can be taken over. `knownDeviceIds` is
@@ -230,7 +229,7 @@ intentId = keccak256("swarm-id-partition-intent-v1" ‖ partition ‖ deviceId �
 ```
 
 - Before (or while guarding) a claim on a free partition, a contender writes its intent at
-  its own address and reads every *other known device's* intent address for the current
+  its own address and reads every _other known device's_ intent address for the current
   (and previous) epoch bucket — all addresses it never wrote → network retrievals.
 - Intents carry the generation; the existing fence decides; the loser backs off before
   binding.
@@ -252,7 +251,7 @@ exists" from "the network failed to find it" (verified — Bee collapses all pee
 into one `storage.ErrNotFound` after exhaustion). Treating timeout as "rival may exist"
 would read-only every flaky single device (unacceptable); treating it as "no rival" keeps
 liveness but means the guarantee is "when the network works, rivals are seen". The honest
-claim for Phase 2 is therefore: it removes *gateway cache staleness* — the systematic,
+claim for Phase 2 is therefore: it removes _gateway cache staleness_ — the systematic,
 silent failure mode — leaving only genuine network partition/timeout, which the existing
 TTL + refresh backstop already bounds.
 
@@ -268,14 +267,14 @@ fallback.**
 
 - **Idle** (`activeUploadCount === 0`): run the existing `yieldIdleLease` path
   (`batch-write-coordinator.ts:710` — publish counter via `lease.release`, write the
-  release sentinel, unbind under the write lock), *skipping* the `IDLE_YIELD_MS` wait. The
+  release sentinel, unbind under the write lock), _skipping_ the `IDLE_YIELD_MS` wait. The
   contest is precisely an explicit version of the signal idle-yield currently infers from
   a 30 s silence, so it reuses the machinery and just accelerates it (worst-case handoff
   drops from ~30 s idle + TTL discovery to ~one refresh tick).
 - **Busy** (upload in flight): ignore the contest. The challenger keeps waiting exactly as
   in today's Case C. No "busy ack" chunk is needed: the holder's 10 s refresh keeps
   overstamping the lock SOC with fresh stamp timestamps, and Bee's conflict rule is
-  *deterministic by stamp timestamp* (newer wins, `reserve.go:141-145`), so within the
+  _deterministic by stamp timestamp_ (newer wins, `reserve.go:141-145`), so within the
   neighborhood the live holder keeps winning over any challenger write automatically.
 - **No generation bump as a denial signal**: refresh already mints a fresh generation
   every tick (`acquirePartitionLock` writes `timestampMs: now()` on each re-acquire), so
@@ -300,7 +299,7 @@ bucket; readers poll the current AND previous bucket.**
   a writer and reader can disagree on the bucket only within ~1 s of a boundary, and the
   previous-bucket poll covers exactly that case (plus write-to-read latency).
 - One write per (device, partition, bucket) also sidesteps Bee's same-address rule —
-  re-writing the same SOC address requires a *strictly newer* stamp timestamp (equal is
+  re-writing the same SOC address requires a _strictly newer_ stamp timestamp (equal is
   rejected, `reserve.go:143-144`); fresh per-bucket addresses never hit that path.
 
 ### 3. Intents: replace or augment the lock-SOC guard?
@@ -311,7 +310,7 @@ bucket; readers poll the current AND previous bucket.**
   brand-new device (not yet in the synced device registry) is invisible to per-device
   intent reads but still participates correctly in the lock protocol.
 - Negative intent checks are inherently ambiguous (timeout ≠ absence), so intents can only
-  ever be an *additional* detection channel, not a correctness foundation.
+  ever be an _additional_ detection channel, not a correctness foundation.
 - The guard verify also covers the same-node case for free — where it is already reliable
   (deterministic stamp-timestamp replacement on one node) and costs nothing extra.
 - Layering: lock SOC for correctness, Phase 1 sampling for own-path integrity, intents for
@@ -372,9 +371,9 @@ but two paths slipped through:
 `writePartitionState` (partition-state.ts:185-252) extracts and uploads the counter
 snapshot (steps 1–2), **then** writes the epoch-feed SOC (step 3,
 `BasicEpochUpdater.update` → `uploadSOC`) — and `clearReservedUtilizationChunks()` runs
-*before* the feed write (line 238), so the feed SOC takes the **data-slot path** in
+_before_ the feed write (line 238), so the feed SOC takes the **data-slot path** in
 `UtilizationAwareStamper.stamp()`: it occupies `slot(j)` in its bucket and bumps the live
-counter to `j+1` — *after* the snapshot was already extracted with `j`.
+counter to `j+1` — _after_ the snapshot was already extracted with `j`.
 
 Consequence: the next holder seeds the published counter and its **first data chunk in
 that bucket lands on the feed chunk's exact slot** → newer stamp evicts the feed-update
@@ -384,7 +383,7 @@ partition's data. Probability per handoff ≈ `n/65536` (n = chunks the next hol
 — small per cycle, but systematic, accumulating, and the failure is severe and silent.
 This also falsifies the docs-site claim that "an orderly hand-off never re-uses a slot."
 
-Fix sketch: the feed SOC's address is computable *before* upload (identifier =
+Fix sketch: the feed SOC's address is computable _before_ upload (identifier =
 f(topic, epoch), owner = backup signer; payload-independent). Snapshot the counter from a
 copy with the feed chunk's bucket pre-incremented (`snapshot[b] = live[b] + 1`), extract
 and upload state chunks from the copy, then let the feed stamp consume `slot(live[b])` —
@@ -393,11 +392,12 @@ slot is the alternative, but needs its bucket added to the publish's `claimedBuc
 before the state chunks are placed.)
 
 ### Gap 2 — utilization saves can evict published partition-state chunks, and the
+
 ### zero-counter fallback amplifies a 1-chunk loss into a full-partition overwrite
 
 Published state chunks (counter chunks + reference chunk) sit at
 `(random bucket, reserved slot p)`. Subsequent utilization saves by the next holder
-(`saveUtilizationState` / `flush`) overstamp reserved slot `p` in *their* buckets,
+(`saveUtilizationState` / `flush`) overstamp reserved slot `p` in _their_ buckets,
 nonce-avoiding clean utilization chunks and lock-SOC buckets — **but not the published
 state chunks' buckets** (unknown to that code). A collision evicts a published state
 chunk (~`33 × 32 / 65536` ≈ 1.6 % per full save, accumulating over a holdership).
@@ -411,6 +411,7 @@ existing data chunks network-wide. A one-chunk eviction becomes a whole-partitio
 loss.
 
 Fix sketch, two independent layers:
+
 1. **Fail safe instead of zero-seeding**: when the feed HAS an entry but its chunks can't
    be read, abort the acquisition (read-only this round, retry later) instead of seeding
    zero. Zero-seed only when the feed provably has no entry. This alone downgrades the
@@ -420,6 +421,7 @@ Fix sketch, two independent layers:
    `claimedBuckets` for `flush()` and `saveUtilizationState`.
 
 ### Gap 3 (minor, verify) — publish chunks can evict the holder's own on-Swarm
+
 ### utilization chunks
 
 The publish's `claimedBuckets` starts from only the lock bucket, so a state chunk can land
@@ -548,14 +550,14 @@ loop with a stubbed RNG or by asserting `claimedBuckets` input).
 
 ## Appendix — key Bee facts (verified in source, bee 2.x)
 
-| Fact | Evidence |
-| --- | --- |
-| Same-address SOC conflict: replace iff strictly newer **postage stamp timestamp**, else `ErrOverwriteNewerChunk`. Deterministic, not arrival order. | `pkg/storer/internal/reserve/reserve.go:139-219` |
-| Stamp-index (overstamp) collision, different addresses: newer stamp timestamp evicts the older chunk's data entirely. | `reserve.go:221-237`, `chunkstore.go:97-119` |
-| Stamp timestamps are minted by the client at stamping time (`Date.now()`), so the network's LWW aligns with the generation fence under the clock-sync assumption. | bee-js `src/stamper/stamper.ts:48` |
-| Reads short-circuit on local store; network retrieval only on local miss. | `pkg/storer/netstore.go:96-105` |
-| Successfully retrieved chunks are cached locally (LRU on access time, **no TTL, no invalidation**) — a gateway's view of a mutable SOC freezes after first contact. | `netstore.go:106-124`, `pkg/storer/internal/cache/cache.go:128-182` |
-| Pull-sync converges replicas on the highest stamp timestamp **within the storage neighborhood only**; non-neighborhood nodes never update their copies. | `pkg/pullsync/pullsync.go:379-390`, `pkg/storer/reserve.go:295` |
-| Push-sync receipt = chunk stored in the reserve of a proximity-verified neighborhood peer; ~3 replicas via multiplexing (`maxMultiplexForwards = 2`). | `pkg/pushsync/pushsync.go:268-287, :456-463, :55, :567-603` |
-| Retrieval of an absent chunk: per-peer timeout 30 s, up to 32 origin attempts, all errors collapse into `storage.ErrNotFound` — absence is indistinguishable from failure. | `pkg/retrieval/retrieval.go:125-130, :269-287` |
-| Bee notifies GSOC subscribers when a SOC push passes through a node responsible for the address — a possible future *notification* channel if contest addresses were mined into the holder's node's neighborhood (requires knowing the holder node's overlay + a gateway exposing the GSOC API; out of scope here, needs its own research). | `pkg/pushsync/pushsync.go:242-248`, `pkg/gsoc` |
+| Fact                                                                                                                                                                                                                                                                                                                                        | Evidence                                                            |
+| ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------- |
+| Same-address SOC conflict: replace iff strictly newer **postage stamp timestamp**, else `ErrOverwriteNewerChunk`. Deterministic, not arrival order.                                                                                                                                                                                         | `pkg/storer/internal/reserve/reserve.go:139-219`                    |
+| Stamp-index (overstamp) collision, different addresses: newer stamp timestamp evicts the older chunk's data entirely.                                                                                                                                                                                                                       | `reserve.go:221-237`, `chunkstore.go:97-119`                        |
+| Stamp timestamps are minted by the client at stamping time (`Date.now()`), so the network's LWW aligns with the generation fence under the clock-sync assumption.                                                                                                                                                                           | bee-js `src/stamper/stamper.ts:48`                                  |
+| Reads short-circuit on local store; network retrieval only on local miss.                                                                                                                                                                                                                                                                   | `pkg/storer/netstore.go:96-105`                                     |
+| Successfully retrieved chunks are cached locally (LRU on access time, **no TTL, no invalidation**) — a gateway's view of a mutable SOC freezes after first contact.                                                                                                                                                                         | `netstore.go:106-124`, `pkg/storer/internal/cache/cache.go:128-182` |
+| Pull-sync converges replicas on the highest stamp timestamp **within the storage neighborhood only**; non-neighborhood nodes never update their copies.                                                                                                                                                                                     | `pkg/pullsync/pullsync.go:379-390`, `pkg/storer/reserve.go:295`     |
+| Push-sync receipt = chunk stored in the reserve of a proximity-verified neighborhood peer; ~3 replicas via multiplexing (`maxMultiplexForwards = 2`).                                                                                                                                                                                       | `pkg/pushsync/pushsync.go:268-287, :456-463, :55, :567-603`         |
+| Retrieval of an absent chunk: per-peer timeout 30 s, up to 32 origin attempts, all errors collapse into `storage.ErrNotFound` — absence is indistinguishable from failure.                                                                                                                                                                  | `pkg/retrieval/retrieval.go:125-130, :269-287`                      |
+| Bee notifies GSOC subscribers when a SOC push passes through a node responsible for the address — a possible future _notification_ channel if contest addresses were mined into the holder's node's neighborhood (requires knowing the holder node's overlay + a gateway exposing the GSOC API; out of scope here, needs its own research). | `pkg/pushsync/pushsync.go:242-248`, `pkg/gsoc`                      |
