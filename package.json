@@ -17,7 +17,7 @@
     "dev:demo:new": "PUBLIC_ID_DOMAIN=http://localhost:5500 pnpm --filter @swarm-id/demo exec vite dev --port 3500",
     "dev:demo:legacy": "PUBLIC_ID_DOMAIN=http://localhost:5510 pnpm dev:demo",
     "dev:lib": "pnpm --filter @snaha/swarm-id build:watch",
-    "dev:ui:legacy": "pnpm --filter swarm-identity dev",
+    "dev:ui:legacy": "VITE_POSTAGE_STAMP_CONTRACT_ADDRESS=0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512 pnpm --filter swarm-identity dev",
     "dev:ui:new": "pnpm --filter @swarm-id/ui dev",
     "dev:docs": "pnpm --filter @swarm-id/docs dev",
     "build": "pnpm -r --workspace-concurrency=1 build",

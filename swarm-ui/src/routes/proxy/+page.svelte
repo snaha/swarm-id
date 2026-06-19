@@ -6,12 +6,15 @@
 <script lang="ts">
   import { onMount } from 'svelte'
   import { initProxy } from '@snaha/swarm-id'
+  import { postageStampContractAddress } from '$lib/constants'
 
   let authButtonContainer: HTMLDivElement
 
   onMount(() => {
-    // Initialize the proxy - it reads Bee API URL from network settings internally
-    const proxy = initProxy()
+    // Initialize the proxy - it reads Bee API URL from network settings
+    // internally. The PostageStamp contract address comes from a build-time env
+    // so on-chain stamp-TTL reads target the right chain (mainnet vs local).
+    const proxy = initProxy({ postageStampContractAddress })
 
     // Set the container for auth button
     if (authButtonContainer) {
