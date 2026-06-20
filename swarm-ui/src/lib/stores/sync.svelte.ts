@@ -8,8 +8,6 @@ import {
   UtilizationStoreDB,
   DebouncedUtilizationUploader,
 } from '@snaha/swarm-id'
-import { identitiesStore } from './identities.svelte'
-import { connectedAppsStore } from './connected-apps.svelte'
 import { postageStampsStore } from './postage-stamps.svelte'
 import { accountsStore } from './accounts.svelte'
 import { networkSettingsStore } from './network-settings.svelte'
@@ -65,8 +63,6 @@ const getSyncAccount = () => {
     syncAccountFn = createSyncAccount({
       bee: new Bee(currentUrl),
       accountsStore,
-      identitiesStore,
-      connectedAppsStore,
       postageStampsStore,
       utilizationStore: utilStore,
       utilizationUploader: utilUploader,

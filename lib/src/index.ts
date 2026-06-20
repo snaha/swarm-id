@@ -207,6 +207,12 @@ export {
   backupKeyToPrivateKey,
   serializeAccountState,
   deserializeAccountState,
+  // Snapshot merge primitives (shared by publish + refresh)
+  mergeSnapshotWithRemote,
+  mergeConnectedApps,
+  mergePostageStamps,
+  mergeDevicesList,
+  snapshotContainsContribution,
   // Sync account
   createSyncAccount,
   ACCOUNT_SYNC_TOPIC_PREFIX,

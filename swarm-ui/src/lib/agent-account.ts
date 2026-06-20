@@ -101,6 +101,8 @@ export function createAgentAccount(options: CreateAgentAccountOptions): CreateAg
       createdAt: Date.now(),
       type: 'agent',
       devices: mergeDevices([], getOrCreateDeviceId()),
+      connectedApps: [],
+      postageStamps: [],
     },
     masterKey,
   }

@@ -10,7 +10,7 @@ import { z } from 'zod'
 // Re-export types from lib
 // ============================================================================
 
-export type { Account, Identity, ConnectedApp, PostageStamp } from '@snaha/swarm-id'
+export type { Account, ConnectedApp, PostageStamp } from '@snaha/swarm-id'
 
 export type AccountSyncType = 'local' | 'synced'
 
