@@ -57,10 +57,34 @@ swarm.ts` merges into the one account reusing the lib primitives `mergeConnected
 - `stores/sync.svelte.ts` passes only `accountsStore` + `postageStampsStore` to `createSyncAccount`.
 - `lib`: the snapshot merge primitives are now exported from the `@snaha/swarm-id` barrel.
 
-**Pending (plan commit 5 — UI green):** the remaining ~70 `svelte-check` errors are all routes/components.
-Rename `routes/(app)/identity/[id]/*` → `account/[id]/*` (+ `lib/routes.ts`); rewrite `connect` (account
-chooser via `getRecentConnections`, `deriveSecret(master, appOrigin)`, fill `setSecret` from the
-account); `home` (account list); `(app)/+layout.svelte` + `drawer` (account switcher, no "create
-identity"); `app-list` (account-scoped); `add-postage-stamp` (`derivePostageSignerKey(derivationKey)`);
-delete `(create)/identity/new` + `(create)/stamps/identity/new`; update signin/import/create flows + the
-`dev` page. Then `pnpm check:all` green.
+**Commit `213b3989` — `feat(ui): single-level account UI (collapse identity tier)`.** Plan commit 5 —
+the UI. **`pnpm check:all` is green across lib, swarm-ui, `@swarm-id/ui`, and demo.** Phase 0 complete.
+
+swarm-ui:
+
+- Route subtree `routes/(app)/identity/[id]/*` → `account/[id]/*` (Apps | Stamps | Settings tabs);
+  `lib/routes.ts` constants renamed (`ACCOUNT`, `ACCOUNT_APPS/STAMPS/STAMPS_NEW/SETTINGS`).
+- `home` lists accounts; `connect` picks an **account** (recently-used first via
+  `accountsStore.getRecentConnections`), derives the app secret from the account master
+  (`deriveSecret(master, appOrigin)`), and fills the `setSecret` `identity*` fields from the account.
+- `(app)/+layout.svelte` + `drawer`: account-only header, account switcher, no "create identity";
+  delete/sign-out drop the whole nested account (which owns apps + stamps).
+- New `account-list` / `create-account-button` replace `identity-list` / `create-identity-button` +
+  `account-selector` (deleted); `app-list` and `add-postage-stamp` are account-scoped
+  (`derivePostageSignerKey(derivationKey)`).
+- Stamps screen: single account default (the identity/"separate stamp" concept removed); `stamps/new`
+  and `(create)/stamps/account/new` add the stamp to the account and set it as default.
+- Deleted `(create)/identity/new` and `(create)/stamps/identity/new` (+ the now-orphaned
+  `docker-name.ts`); the create/signin/import flows build/restore the **nested** account; `dev` page
+  account-scoped.
+
+`ui/` (new UI): `connect-handshake.ts` mirrors into the single nested shared-account document (apps +
+stamps inline) via `createAccountsStorageManager` instead of the removed flat managers; the app secret
+derives from the account master.
+
+### Status
+
+Phase 0 (nested single-level account model, #339 + #313 collapse) is **done and green** end-to-end.
+Not yet run: the multi-device E2E walkthrough (create account → connect demo app → stamp → 2nd-device
+convergence) from the design doc's verification section. Phases 1–3 (real tombstones for the read path
+beyond what landed, broader read/pull triggers, per-device-log CRDT) remain as future work.
