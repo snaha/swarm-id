@@ -1,0 +1,830 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="UTF-8" />
+    <title>Session Keys Research Report: Technical Approaches for SwarmID</title>
+    <style>
+      body {
+        font-family: Arial, sans-serif;
+        line-height: 1.6;
+        max-width: 900px;
+        margin: 0 auto;
+        padding: 20px;
+      }
+      h1 {
+        color: #1a1a1a;
+        border-bottom: 2px solid #333;
+        padding-bottom: 10px;
+      }
+      h2 {
+        color: #2a2a2a;
+        margin-top: 30px;
+        border-bottom: 1px solid #ccc;
+        padding-bottom: 5px;
+      }
+      h3 {
+        color: #3a3a3a;
+        margin-top: 25px;
+      }
+      table {
+        border-collapse: collapse;
+        width: 100%;
+        margin: 15px 0;
+      }
+      th,
+      td {
+        border: 1px solid #ddd;
+        padding: 10px;
+        text-align: left;
+      }
+      th {
+        background-color: #f5f5f5;
+        font-weight: bold;
+      }
+      pre {
+        background-color: #f4f4f4;
+        padding: 15px;
+        border-radius: 5px;
+        overflow-x: auto;
+        font-family: 'Courier New', monospace;
+        font-size: 13px;
+      }
+      code {
+        background-color: #f4f4f4;
+        padding: 2px 5px;
+        border-radius: 3px;
+        font-family: 'Courier New', monospace;
+      }
+      hr {
+        border: none;
+        border-top: 1px solid #ccc;
+        margin: 30px 0;
+      }
+      ul,
+      ol {
+        margin: 10px 0;
+      }
+      li {
+        margin: 5px 0;
+      }
+      strong {
+        color: #1a1a1a;
+      }
+    </style>
+  </head>
+  <body>
+    <h1>Session Keys Research Report: Technical Approaches for SwarmID</h1>
+
+    <h2>Executive Summary</h2>
+
+    <p>
+      This report analyzes technical approaches for implementing <strong>Session Keys</strong> in
+      SwarmID - temporary cryptographic keys that are time-bound, revokable, and act as proxies for
+      a Persona's authority. The challenge is significant because Swarm's content-addressed storage
+      is inherently <strong>immutable</strong>, making time-based access and revocation non-trivial.
+    </p>
+
+    <hr />
+
+    <h2>1. Requirements Analysis</h2>
+
+    <p>From the requirements document, Session Keys must support:</p>
+
+    <table>
+      <tr>
+        <th>Requirement</th>
+        <th>Description</th>
+        <th>Difficulty</th>
+      </tr>
+      <tr>
+        <td><strong>Time-Bound Validity</strong></td>
+        <td>Valid only within [Start_Time, End_Time]</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>Automatic Expiry</strong></td>
+        <td>Invalid after End_Time</td>
+        <td>Medium</td>
+      </tr>
+      <tr>
+        <td><strong>Explicit Revocation</strong></td>
+        <td>Revokable before expiry</td>
+        <td>High</td>
+      </tr>
+      <tr>
+        <td><strong>ACT Compatibility</strong></td>
+        <td>Decrypt content on behalf of Persona</td>
+        <td>High</td>
+      </tr>
+      <tr>
+        <td><strong>State Permanence</strong></td>
+        <td>Actions persist after session ends</td>
+        <td>Low</td>
+      </tr>
+      <tr>
+        <td><strong>Verification</strong></td>
+        <td>Any client can verify Session Key → Persona chain</td>
+        <td>Medium</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <h2>2. Technical Approaches</h2>
+
+    <h3>Approach A: Signed Authorization Certificate (Recommended)</h3>
+
+    <p>
+      <strong>Concept</strong>: The Persona signs a "delegation certificate" containing the Session
+      Key's public key, validity window, and permissions.
+    </p>
+
+    <pre>
+Authorization Certificate = {
+    sessionPublicKey: bytes32,
+    personaPublicKey: bytes32,
+    validFrom: timestamp,
+    validUntil: timestamp,
+    permissions: string[],  // optional: "read", "write", "grant"
+    nonce: bytes32
+}
+signature = sign(keccak256(certificate), personaPrivateKey)
+</pre
+    >
+
+    <p><strong>Implementation</strong>:</p>
+    <ol>
+      <li>
+        <strong>Creation</strong>: Persona signs certificate, stores on Swarm (SOC or manifest)
+      </li>
+      <li>
+        <strong>Verification</strong>: Any verifier checks:
+        <ul>
+          <li>Signature matches Persona's public key</li>
+          <li>Current time is within [validFrom, validUntil]</li>
+          <li>Permissions include required action</li>
+        </ul>
+      </li>
+      <li><strong>Revocation</strong>: Persona publishes revocation entry to a feed</li>
+    </ol>
+
+    <p><strong>Revocation Feed Structure</strong>:</p>
+    <pre>
+topic = keccak256("revocation-list-" + personaAddress)
+payload = [sessionKeyHash1, sessionKeyHash2, ...]
+</pre
+    >
+
+    <p><strong>Pros</strong>:</p>
+    <ul>
+      <li>Simple to implement with existing Swarm primitives</li>
+      <li>Certificate can be stored once and referenced</li>
+      <li>Verification is O(1) for time check, O(n) for revocation list</li>
+      <li>Works with existing ACT infrastructure</li>
+    </ul>
+
+    <p><strong>Cons</strong>:</p>
+    <ul>
+      <li>Revocation requires polling the revocation feed</li>
+      <li>Time-based expiry is client-enforced, not cryptographic</li>
+    </ul>
+
+    <p><strong>Use Case Fit</strong>: All four use cases from requirements document</p>
+
+    <hr />
+
+    <h3>Approach B: ACT with Session Key as Grantee</h3>
+
+    <p>
+      <strong>Concept</strong>: Add the Session Key's public key directly to the ACT's grantee list
+      with metadata indicating validity period.
+    </p>
+
+    <p><strong>Current ACT Structure</strong> (from lib/src/proxy/act/index.ts):</p>
+    <pre>
+// Each grantee gets: lookupKey → encryptedAccessKey
+entries: Map&lt;lookupKey, encryptedAccessKey&gt;
+</pre
+    >
+
+    <p><strong>Extended Structure</strong>:</p>
+    <pre>
+entries: Map&lt;lookupKey, {
+    encryptedAccessKey: bytes,
+    validFrom?: timestamp,
+    validUntil?: timestamp,
+    isSessionKey?: boolean
+}&gt;
+</pre
+    >
+
+    <p><strong>Verification Logic</strong>:</p>
+    <pre>
+function canAccess(lookupKey: bytes, currentTime: number): boolean {
+    const entry = act.get(lookupKey)
+    if (!entry) return false
+    if (entry.validFrom && currentTime &lt; entry.validFrom) return false
+    if (entry.validUntil && currentTime &gt; entry.validUntil) return false
+    return true
+}
+</pre
+    >
+
+    <p><strong>Pros</strong>:</p>
+    <ul>
+      <li>Integrated with existing ACT mechanism</li>
+      <li>Per-grantee expiration metadata</li>
+    </ul>
+
+    <p><strong>Cons</strong>:</p>
+    <ul>
+      <li>Requires ACT format extension (breaks Bee compatibility)</li>
+      <li>Time enforcement is still client-side</li>
+      <li>Revocation requires full ACT key rotation (expensive)</li>
+      <li>No true cryptographic time-locking</li>
+    </ul>
+
+    <p>
+      <strong>Use Case Fit</strong>: Use Cases 1, 3 (read/grant) | Use Cases 2, 4 (write requires
+      different approach)
+    </p>
+
+    <hr />
+
+    <h3>Approach C: Epoch-Based Session Feeds</h3>
+
+    <p>
+      <strong>Concept</strong>: Leverage SwarmID's existing epoch-based feed system to publish
+      session validity states.
+    </p>
+
+    <p>From lib/src/proxy/feeds/epochs/, the system already supports:</p>
+    <ul>
+      <li>Time-indexed updates via binary tree epochs</li>
+      <li>Efficient lookup at arbitrary timestamps</li>
+      <li>Monotonic updates</li>
+    </ul>
+
+    <p><strong>Session State Feed</strong>:</p>
+    <pre>
+topic = keccak256("sessions-" + personaAddress)
+
+// Each update contains:
+payload = {
+    activeSessionKeys: Map&lt;sessionKeyHash, {
+        publicKey: bytes,
+        validUntil: timestamp,
+        permissions: string[]
+    }&gt;,
+    revokedSessionKeys: sessionKeyHash[]
+}
+</pre
+    >
+
+    <p><strong>Verification Flow</strong>:</p>
+    <ol>
+      <li>Look up latest feed entry at current timestamp</li>
+      <li>Check if sessionKeyHash exists and isn't revoked</li>
+      <li>Verify time bounds</li>
+    </ol>
+
+    <p><strong>Pros</strong>:</p>
+    <ul>
+      <li>Uses proven feed infrastructure</li>
+      <li>Natural time-based indexing</li>
+      <li>Efficient updates via epochs</li>
+      <li>Immediate revocation visibility</li>
+    </ul>
+
+    <p><strong>Cons</strong>:</p>
+    <ul>
+      <li>Requires network lookup for every verification</li>
+      <li>Session state is mutable (not immutable proof)</li>
+      <li>Complexity in multi-device scenarios</li>
+    </ul>
+
+    <p>
+      <strong>Use Case Fit</strong>: All four use cases, especially Use Case 4 (collaborative
+      editing with revocation)
+    </p>
+
+    <hr />
+
+    <h3>Approach D: Proxy Re-Encryption (PRE)</h3>
+
+    <p>
+      <strong>Concept</strong>: Use cryptographic proxy re-encryption to delegate decryption rights
+      with time attributes.
+    </p>
+
+    <p>Based on academic research:</p>
+    <pre>
+1. Content encrypted with content key K
+2. K encrypted with Persona's public key → CK_persona
+3. Persona generates re-encryption key: reKey = f(personaPriv, sessionPub, validUntil)
+4. Proxy transforms: CK_persona → CK_session (valid only until validUntil)
+5. Session key can decrypt K, then decrypt content
+</pre
+    >
+
+    <p>
+      <strong>The Challenge</strong>: Standard PRE doesn't enforce time - it's a trust assumption on
+      the proxy.
+    </p>
+
+    <p><strong>Blockchain-Enhanced PRE</strong>:</p>
+    <ul>
+      <li>Smart contract holds re-encryption keys</li>
+      <li>Time-release via smart contract conditions</li>
+      <li>Revocation by removing re-encryption key from contract</li>
+    </ul>
+
+    <p><strong>Pros</strong>:</p>
+    <ul>
+      <li>Cryptographically enforced delegation</li>
+      <li>Clean separation of duties</li>
+      <li>Can integrate with blockchain for time enforcement</li>
+    </ul>
+
+    <p><strong>Cons</strong>:</p>
+    <ul>
+      <li>Complex implementation</li>
+      <li>Requires additional infrastructure (proxy service or smart contract)</li>
+      <li>Not native to Swarm's current architecture</li>
+      <li>Performance overhead</li>
+    </ul>
+
+    <p><strong>Use Case Fit</strong>: Theoretical fit but high implementation complexity</p>
+
+    <hr />
+
+    <h3>Approach E: Derived Session Keys with Time Epochs</h3>
+
+    <p>
+      <strong>Concept</strong>: Deterministically derive session keys from master key + time epoch,
+      so only the current epoch's keys are valid.
+    </p>
+
+    <pre>
+epochKey = HKDF(masterKey, "session" || floor(timestamp / epochDuration))
+sessionKey = derive(epochKey, sessionNonce)
+</pre
+    >
+
+    <p><strong>How it works</strong>:</p>
+    <ol>
+      <li>Both Persona and verifier can compute current epoch's valid keys</li>
+      <li>Old epoch keys automatically become invalid (not derivable from current state)</li>
+      <li>No explicit revocation needed - just stop including key in derivation</li>
+    </ol>
+
+    <p><strong>Pros</strong>:</p>
+    <ul>
+      <li>Automatic expiry without revocation mechanism</li>
+      <li>Deterministic - anyone can verify</li>
+      <li>No storage of session state needed</li>
+    </ul>
+
+    <p><strong>Cons</strong>:</p>
+    <ul>
+      <li>Fixed epoch boundaries (can't expire at arbitrary times)</li>
+      <li>No fine-grained revocation within an epoch</li>
+      <li>Requires shared secret (epoch key) distribution</li>
+    </ul>
+
+    <p>
+      <strong>Use Case Fit</strong>: Works for fixed-duration sessions, not arbitrary time windows
+    </p>
+
+    <hr />
+
+    <h3>Approach F: Time-Lock Encryption</h3>
+
+    <p>
+      <strong>Concept</strong>: Encrypt session authorization in a time-locked puzzle that becomes
+      solvable only at start time.
+    </p>
+
+    <p>Based on Rivest-Shamir-Wagner time-lock puzzles:</p>
+    <pre>
+puzzle = encrypt(sessionAuth, puzzleKey)
+// puzzleKey requires T sequential computations to derive
+// Anyone can start computing, but takes fixed wall-clock time
+</pre
+    >
+
+    <p><strong>Modern approaches</strong> use blockchain-based time-release:</p>
+    <ul>
+      <li>Future block hash as decryption key</li>
+      <li>Smart contract releases key at specified block height</li>
+    </ul>
+
+    <p><strong>Pros</strong>:</p>
+    <ul>
+      <li>Cryptographically enforced "not before" time</li>
+      <li>Decentralized time oracle (blockchain)</li>
+    </ul>
+
+    <p><strong>Cons</strong>:</p>
+    <ul>
+      <li>Only handles start time, not end time</li>
+      <li>Doesn't solve revocation</li>
+      <li>Requires blockchain integration</li>
+    </ul>
+
+    <p><strong>Use Case Fit</strong>: Incomplete solution (only handles delayed start)</p>
+
+    <hr />
+
+    <h2>3. Proposed Architecture: Hybrid Approach</h2>
+
+    <p>Based on the analysis, we recommend a <strong>hybrid approach</strong> combining:</p>
+
+    <ol>
+      <li><strong>Signed Authorization Certificates</strong> (Approach A) for delegation proof</li>
+      <li><strong>Epoch-Based Session Feeds</strong> (Approach C) for revocation</li>
+      <li><strong>Modified ACT Integration</strong> for content access</li>
+    </ol>
+
+    <h3>Architecture Overview</h3>
+
+    <pre>
+┌───────────────────────────────────────────────────────────────┐
+│                        PERSONA WALLET                         │
+│  ┌─────────────┐  ┌──────────────────┐  ┌──────────────────┐  │
+│  │ Master Key  │─▶│ Sign Certificate │─▶│ Publish to Feed  │  │
+│  └─────────────┘  └──────────────────┘  └──────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│                   AUTHORIZATION CERTIFICATE                   │
+│                                                               │
+│  {                                                            │
+│    sessionPublicKey: "0x...",                                 │
+│    persona: "0x...",                                          │
+│    validFrom: 1739800000,                                     │
+│    validUntil: 1739807200,  // +2 hours                       │
+│    permissions: ["act:decrypt", "feed:write"],                │
+│    signature: "0x..."                                         │
+│  }                                                            │
+│                                                               │
+│  Stored at: SOC(persona, "auth-cert-" + hash(sessionPub))     │
+└───────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│                      SESSION STATE FEED                       │
+│                                                               │
+│  Topic: keccak256("sessions-" + personaAddress)               │
+│  ┌─────────────────────────────────────────────────────────┐  │
+│  │ Epoch Update:                                           │  │
+│  │   activeSessions: [sessionKeyHash1, sessionKeyHash2]    │  │
+│  │   revokedSessions: [sessionKeyHash3]                    │  │
+│  └─────────────────────────────────────────────────────────┘  │
+└───────────────────────────────────────────────────────────────┘
+                              │
+                              ▼
+┌───────────────────────────────────────────────────────────────┐
+│                       VERIFICATION FLOW                       │
+│                                                               │
+│  1. App presents: sessionPrivateKey + authCertificate         │
+│  2. Verifier checks:                                          │
+│     a. Certificate signature valid (persona signed it)        │
+│     b. currentTime ∈ [validFrom, validUntil]                  │
+│     c. sessionKeyHash not in revokedSessions (feed lookup)    │
+│  3. If valid: Session key can perform permitted operations    │
+└───────────────────────────────────────────────────────────────┘
+</pre
+    >
+
+    <h3>ACT Integration</h3>
+
+    <p>For ACT decryption with session keys:</p>
+
+    <p><strong>Option 1: Persona pre-authorizes session key in ACT</strong></p>
+    <pre>
+// Persona adds session key as temporary grantee
+await addGranteeToAct(actReference, sessionPublicKey, {
+    validUntil: certificate.validUntil,
+    delegatedFrom: personaPublicKey
+})
+</pre
+    >
+
+    <p><strong>Option 2: Session key derives access via certificate chain</strong></p>
+    <pre>
+// Session key doesn't need to be in ACT directly
+// Verification: Session → Certificate → Persona → ACT
+if (certificate.permissions.includes("act:decrypt")) {
+    // Use ECDH: sessionPriv × actPublisher to derive access
+    // But only if persona is in ACT grantee list
+}
+</pre
+    >
+
+    <p>The second option is more elegant but requires client-side enforcement.</p>
+
+    <hr />
+
+    <h2>4. Implementation Considerations</h2>
+
+    <h3>4.1 Storage Locations</h3>
+
+    <table>
+      <tr>
+        <th>Data</th>
+        <th>Storage</th>
+        <th>Reason</th>
+      </tr>
+      <tr>
+        <td>Authorization Certificate</td>
+        <td>SOC (Single Owner Chunk)</td>
+        <td>Immutable proof, content-addressed</td>
+      </tr>
+      <tr>
+        <td>Session State Feed</td>
+        <td>Epoch-based Feed</td>
+        <td>Mutable, time-indexed, efficient updates</td>
+      </tr>
+      <tr>
+        <td>Revocation List</td>
+        <td>Same feed or separate</td>
+        <td>Fast lookup for revocation checks</td>
+      </tr>
+      <tr>
+        <td>Certificate Index</td>
+        <td>Manifest/Mantaray</td>
+        <td>Discovery of all issued certificates</td>
+      </tr>
+    </table>
+
+    <h3>4.2 Verification Performance</h3>
+
+    <pre>
+Verification Cost:
+- Certificate signature check: O(1) - local crypto
+- Time bounds check: O(1) - local comparison
+- Revocation check: O(1) to O(n) - depends on implementation
+  - Feed lookup: ~100-500ms network latency
+  - Cached revocation list: O(1) local lookup
+</pre
+    >
+
+    <p>
+      <strong>Recommendation</strong>: Cache revocation list with configurable refresh interval.
+    </p>
+
+    <h3>4.3 Multi-Device Scenarios</h3>
+
+    <p>
+      For Use Case 4 (collaborative editing), multiple devices need coordinated view of session
+      state:
+    </p>
+
+    <pre>
+Device A (Alice's laptop): Creates session, publishes cert
+Device B (Alice's phone): Can revoke session, publishes to feed
+Device C (Bob's browser): Verifies Alice's session via feed lookup
+</pre
+    >
+
+    <p><strong>Challenge</strong>: Feed updates have propagation delay. Solutions:</p>
+    <ol>
+      <li>Push notifications via PSS (Postal Service over Swarm)</li>
+      <li>Polling with exponential backoff</li>
+      <li>Websocket connection to gateway for real-time updates</li>
+    </ol>
+
+    <h3>4.4 Security Considerations</h3>
+
+    <table>
+      <tr>
+        <th>Threat</th>
+        <th>Mitigation</th>
+      </tr>
+      <tr>
+        <td>Certificate replay after revocation</td>
+        <td>Always check revocation feed</td>
+      </tr>
+      <tr>
+        <td>Session key extraction from browser</td>
+        <td>Short validity windows, immediate revocation capability</td>
+      </tr>
+      <tr>
+        <td>Clock skew between parties</td>
+        <td>Use blockchain block number as authoritative time, or tolerance window</td>
+      </tr>
+      <tr>
+        <td>Fake revocation (DoS)</td>
+        <td>Only persona can sign revocation (signature required)</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <h2>5. Comparison with Requirements</h2>
+
+    <table>
+      <tr>
+        <th>Requirement</th>
+        <th>Proposed Solution</th>
+        <th>Enforcement Level</th>
+      </tr>
+      <tr>
+        <td>Time-Bound Validity</td>
+        <td>Certificate timestamps</td>
+        <td>Client-enforced</td>
+      </tr>
+      <tr>
+        <td>Automatic Expiry</td>
+        <td>validUntil check</td>
+        <td>Client-enforced</td>
+      </tr>
+      <tr>
+        <td>Explicit Revocation</td>
+        <td>Revocation feed</td>
+        <td>Network-verified</td>
+      </tr>
+      <tr>
+        <td>ACT Compatibility</td>
+        <td>Session key as delegated grantee or certificate chain</td>
+        <td>Protocol extension</td>
+      </tr>
+      <tr>
+        <td>State Permanence</td>
+        <td>Actions use persona's authority at execution time</td>
+        <td>Inherent</td>
+      </tr>
+      <tr>
+        <td>Verification</td>
+        <td>Certificate signature + feed check</td>
+        <td>Cryptographic + network</td>
+      </tr>
+    </table>
+
+    <p><strong>Key Insight</strong>: True cryptographic time-enforcement would require:</p>
+    <ul>
+      <li>Blockchain smart contracts (adds dependency)</li>
+      <li>Time-lock puzzles (only handles start time)</li>
+      <li>Trusted time server (centralization)</li>
+    </ul>
+
+    <p>
+      The proposed solution accepts <strong>client-enforced time bounds</strong> with
+      <strong>cryptographic revocation verification</strong> as a practical tradeoff.
+    </p>
+
+    <hr />
+
+    <h2>6. Alternative: Blockchain-Backed Session Keys</h2>
+
+    <p>For stronger guarantees, integrate with smart contracts:</p>
+
+    <pre>
+contract SessionKeyRegistry {
+    mapping(bytes32 => Session) public sessions;
+
+    struct Session {
+        address persona;
+        bytes32 sessionKeyHash;
+        uint256 validFrom;
+        uint256 validUntil;
+        bool revoked;
+    }
+
+    function registerSession(bytes32 keyHash, uint256 duration) external {
+        sessions[keyHash] = Session(
+            msg.sender,
+            keyHash,
+            block.timestamp,
+            block.timestamp + duration,
+            false
+        );
+    }
+
+    function revoke(bytes32 keyHash) external {
+        require(sessions[keyHash].persona == msg.sender);
+        sessions[keyHash].revoked = true;
+    }
+
+    function isValid(bytes32 keyHash) external view returns (bool) {
+        Session memory s = sessions[keyHash];
+        return !s.revoked &&
+               block.timestamp >= s.validFrom &&
+               block.timestamp <= s.validUntil;
+    }
+}
+</pre
+    >
+
+    <p>
+      <strong>Pros</strong>: Authoritative time source, atomic revocation<br />
+      <strong>Cons</strong>: Gas costs, blockchain dependency, latency
+    </p>
+
+    <hr />
+
+    <h2>7. Recommendations</h2>
+
+    <h3>Short-Term (PoC)</h3>
+    <ol>
+      <li>Implement <strong>Signed Authorization Certificates</strong> stored as SOCs</li>
+      <li>Add <strong>time bounds checking</strong> to verification flow</li>
+      <li>Implement <strong>revocation feed</strong> using existing epoch-based feeds</li>
+      <li>Client-side enforcement is acceptable for PoC</li>
+    </ol>
+
+    <h3>Medium-Term (Production)</h3>
+    <ol>
+      <li>Extend ACT format to support <strong>session key metadata</strong></li>
+      <li>Add <strong>PSS-based push notifications</strong> for revocation</li>
+      <li>Consider <strong>caching layer</strong> for revocation lists</li>
+      <li>Document security model clearly</li>
+    </ol>
+
+    <h3>Long-Term (Future Research)</h3>
+    <ol>
+      <li>Evaluate <strong>Proxy Re-Encryption</strong> for stronger cryptographic guarantees</li>
+      <li>Investigate <strong>blockchain integration</strong> for authoritative time</li>
+      <li>Research <strong>Attribute-Based Encryption</strong> for granular permissions</li>
+    </ol>
+
+    <hr />
+
+    <h2>8. Relevant Codebase Files</h2>
+
+    <p>The following existing files in SwarmID are relevant to session key implementation:</p>
+
+    <table>
+      <tr>
+        <th>File</th>
+        <th>Relevance</th>
+      </tr>
+      <tr>
+        <td>lib/src/proxy/act/index.ts</td>
+        <td>ACT implementation, grantee management, revocation</td>
+      </tr>
+      <tr>
+        <td>lib/src/proxy/act/history.ts</td>
+        <td>Time-based history with reversed timestamps</td>
+      </tr>
+      <tr>
+        <td>lib/src/proxy/act/crypto.ts</td>
+        <td>ECDH key derivation, CTR encryption</td>
+      </tr>
+      <tr>
+        <td>lib/src/proxy/feeds/epochs/</td>
+        <td>Epoch-based feed system for time-indexed updates</td>
+      </tr>
+      <tr>
+        <td>lib/src/proxy/upload-encrypted-data.ts</td>
+        <td>SOC creation and signing</td>
+      </tr>
+      <tr>
+        <td>lib/src/proxy/download-data.ts</td>
+        <td>SOC verification and decryption</td>
+      </tr>
+      <tr>
+        <td>lib/src/utils/ttl.ts</td>
+        <td>TTL calculation utilities</td>
+      </tr>
+    </table>
+
+    <hr />
+
+    <h2>Sources</h2>
+
+    <ul>
+      <li>
+        <a href="https://www.mdpi.com/2076-3417/12/9/4260"
+          >Proxy Re-Encryption for Decentralized Storage Networks</a
+        >
+      </li>
+      <li>
+        <a href="https://people.csail.mit.edu/rivest/pubs/RSW96.pdf"
+          >Time-lock puzzles and timed-release Crypto (Rivest, Shamir, Wagner)</a
+        >
+      </li>
+      <li>
+        <a href="https://arxiv.org/html/2401.05947v1"
+          >Blockchain-based Decentralized Time Lock Machines</a
+        >
+      </li>
+      <li>
+        <a href="https://www.mdpi.com/1424-8220/19/7/1695"
+          >Survey on Revocation in Ciphertext-Policy Attribute-Based Encryption</a
+        >
+      </li>
+      <li><a href="https://eprint.iacr.org/2018/330.pdf">Time-Based Direct Revocable CP-ABE</a></li>
+      <li>
+        <a
+          href="https://journalofcloudcomputing.springeropen.com/articles/10.1186/s13677-023-00575-8"
+          >Blockchain-enabled supervised secure data sharing</a
+        >
+      </li>
+      <li><a href="https://gwern.net/self-decrypting">Time-lock encryption overview (Gwern)</a></li>
+      <li>The Book of Swarm - Swarm protocol documentation</li>
+    </ul>
+  </body>
+</html>
