@@ -27,13 +27,10 @@ import {
   calculateUtilization,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
-import { collectAccountStampBatchIds } from "../utils/postage-stamp-association"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import type {
   AccountsStoreInterface,
-  IdentitiesStoreInterface,
-  ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
 } from "./store-interfaces"
 import type { SyncResult } from "./types"
@@ -66,16 +63,10 @@ export interface SyncAccountOptions {
   /** Bee client for Swarm operations */
   bee: Bee
 
-  /** Store providing account data */
+  /** Store providing account data (the account owns its apps + stamps) */
   accountsStore: AccountsStoreInterface
 
-  /** Store providing identity data */
-  identitiesStore: IdentitiesStoreInterface
-
-  /** Store providing connected app data */
-  connectedAppsStore: ConnectedAppsStoreInterface
-
-  /** Store providing postage stamp data */
+  /** Store providing postage stamp runtime access (stamper/utilization) */
   postageStampsStore: PostageStampsStoreInterface
 
   /** Utilization store for browser-based utilization tracking */
@@ -126,8 +117,6 @@ export function createSyncAccount(
   const {
     bee,
     accountsStore,
-    identitiesStore,
-    connectedAppsStore,
     postageStampsStore,
     utilizationStore,
     utilizationUploader,
@@ -148,10 +137,7 @@ export function createSyncAccount(
     }
 
     // Resolve default stamp
-    const defaultStamp =
-      account.defaultPostageStampBatchID ??
-      identitiesStore.getIdentitiesByAccount(account.id)[0]
-        ?.defaultPostageStampBatchID
+    const defaultStamp = account.defaultPostageStampBatchID
 
     if (!defaultStamp) {
       console.warn("[SyncCoordinator] No default stamp, skipping utilization")
@@ -262,11 +248,8 @@ export function createSyncAccount(
       return undefined
     }
 
-    // Resolve default stamp (account or first identity)
-    const defaultStampBatchID =
-      account.defaultPostageStampBatchID ??
-      identitiesStore.getIdentitiesByAccount(account.id)[0]
-        ?.defaultPostageStampBatchID
+    // Resolve default stamp (account-scoped)
+    const defaultStampBatchID = account.defaultPostageStampBatchID
 
     if (!defaultStampBatchID) {
       console.warn("[SyncCoordinator] No default stamp for account", accountId)
@@ -282,15 +265,7 @@ export function createSyncAccount(
     // Derive swarm encryption key from stored derivation key
     const encryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
 
-    // Collect account state
-    const identities = identitiesStore.getIdentitiesByAccount(account.id)
-    const apps = identities.flatMap((identity) =>
-      connectedAppsStore.getAppsByIdentityId(identity.id),
-    )
-    const stamps = collectAccountStampBatchIds(account, identities)
-      .map((batchId) => postageStampsStore.getStamp(batchId))
-      .filter((stamp): stamp is PostageStamp => stamp !== undefined)
-
+    // Account state is read straight off the nested account document.
     const snapshot: AccountStateSnapshot = {
       version: 1,
       timestamp: Date.now(),
@@ -298,14 +273,15 @@ export function createSyncAccount(
       metadata: {
         accountName: account.name,
         defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+        publicKey: account.publicKey,
+        settings: account.settings,
         createdAt: account.createdAt,
         lastModified: Date.now(),
         devices: account.devices,
         partitionCount: account.partitionCount ?? 1,
       },
-      identities,
-      connectedApps: apps,
-      postageStamps: stamps,
+      connectedApps: account.connectedApps,
+      postageStamps: account.postageStamps,
     }
 
     return {

@@ -8,18 +8,14 @@ import { deserializeAccountState, serializeAccountState } from "./serialization"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type {
   AccountsStoreInterface,
-  IdentitiesStoreInterface,
-  ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
 } from "./store-interfaces"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
 import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader"
 import {
   TEST_ETH_ADDRESS_HEX,
-  TEST_IDENTITY_ADDRESS_HEX,
   TEST_BATCH_ID_HEX,
   createPasskeyAccount,
-  createIdentity,
   createConnectedApp,
   createPostageStamp,
   createDevice,
@@ -31,30 +27,19 @@ import { PartitionContendedError } from "./batch-write-coordinator"
 // ============================================================================
 
 function createMockStores() {
+  const connectedApp = createConnectedApp({ appSecret: undefined })
+  const stamp = createPostageStamp()
   const account = createPasskeyAccount({
     credentialId: "test-credential",
     name: "Test Account",
     defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+    connectedApps: [connectedApp],
+    postageStamps: [stamp],
   })
-  const identity = createIdentity()
-  const connectedApp = createConnectedApp({ appSecret: undefined })
-  const stamp = createPostageStamp()
 
   const accountsStore: AccountsStoreInterface = {
     getAccount: vi.fn((id: EthAddress) =>
       id.toHex() === TEST_ETH_ADDRESS_HEX ? account : undefined,
-    ),
-  }
-
-  const identitiesStore: IdentitiesStoreInterface = {
-    getIdentitiesByAccount: vi.fn((accountId: EthAddress) =>
-      accountId.toHex() === TEST_ETH_ADDRESS_HEX ? [identity] : [],
-    ),
-  }
-
-  const connectedAppsStore: ConnectedAppsStoreInterface = {
-    getAppsByIdentityId: vi.fn((identityId: string) =>
-      identityId === TEST_IDENTITY_ADDRESS_HEX ? [connectedApp] : [],
     ),
   }
 
@@ -86,8 +71,6 @@ function createMockStores() {
 
   return {
     accountsStore,
-    identitiesStore,
-    connectedAppsStore,
     postageStampsStore,
     mockStamper,
   }
@@ -314,8 +297,6 @@ describe("createSyncAccount", () => {
       TEST_BATCH_ID_HEX,
     )
     expect(deserialized.metadata.createdAt).toBe(1700000000000)
-    expect(deserialized.identities).toHaveLength(1)
-    expect(deserialized.identities[0].name).toBe("Default Identity")
     expect(deserialized.connectedApps).toHaveLength(1)
     expect(deserialized.connectedApps[0].appName).toBe("Test App")
     expect(deserialized.postageStamps).toHaveLength(1)
@@ -353,11 +334,6 @@ describe("createSyncAccount", () => {
       ...account,
       defaultPostageStampBatchID: undefined,
     })
-    ;(
-      stores.identitiesStore.getIdentitiesByAccount as ReturnType<typeof vi.fn>
-    ).mockReturnValue([
-      { ...createIdentity(), defaultPostageStampBatchID: undefined },
-    ])
 
     const syncAccount = createSyncAccount({
       bee: createMockBee(),
@@ -530,7 +506,6 @@ describe("createSyncAccount", () => {
         devices: [],
         partitionCount: 1,
       },
-      identities: [createIdentity()],
       connectedApps: [peerApp],
       postageStamps: [createPostageStamp()],
     }

@@ -15,14 +15,12 @@
 import type { z } from "zod"
 import { AccountStateSnapshotSchemaV1 } from "../schemas"
 import type {
-  Identity,
   ConnectedApp,
   PostageStamp,
   AccountMetadata,
   AccountStateSnapshot,
 } from "../schemas"
 import {
-  serializeIdentity,
   serializeConnectedApp,
   serializePostageStamp,
 } from "./storage-managers"
@@ -55,7 +53,6 @@ export type AccountStateSnapshotResult =
 export function serializeAccountStateSnapshot(input: {
   accountId: string
   metadata: AccountMetadata
-  identities: Identity[]
   connectedApps: ConnectedApp[]
   postageStamps: PostageStamp[]
   timestamp: number
@@ -67,12 +64,13 @@ export function serializeAccountStateSnapshot(input: {
     metadata: {
       accountName: input.metadata.accountName,
       defaultPostageStampBatchID: input.metadata.defaultPostageStampBatchID,
+      publicKey: input.metadata.publicKey,
+      settings: input.metadata.settings,
       createdAt: input.metadata.createdAt,
       lastModified: input.metadata.lastModified,
       devices: input.metadata.devices,
       partitionCount: input.metadata.partitionCount,
     },
-    identities: input.identities.map(serializeIdentity),
     connectedApps: input.connectedApps.map(serializeConnectedApp),
     postageStamps: input.postageStamps.map(serializePostageStamp),
   }

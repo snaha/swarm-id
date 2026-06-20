@@ -44,11 +44,10 @@ export type {
 
 export const SWARM_SECRET_PREFIX = "swarm-secret-"
 
-// Storage keys for versioned storage managers
+// Storage keys for versioned storage managers. The account is the single nested
+// document of record (it owns its connected apps and postage stamps inline), so
+// there are no longer separate identity/app/stamp collection keys.
 export const STORAGE_KEY_ACCOUNTS = "swarm-id-accounts"
-export const STORAGE_KEY_IDENTITIES = "swarm-id-identities"
-export const STORAGE_KEY_CONNECTED_APPS = "swarm-id-connected-apps"
-export const STORAGE_KEY_POSTAGE_STAMPS = "swarm-id-postage-stamps"
 export const STORAGE_KEY_NETWORK_SETTINGS = "swarm-id-network-settings"
 export const STORAGE_CHALLENGE_KEY = "swarm-storage-challenge"
 export const STORAGE_KEY_LEASE_CACHE_PREFIX = "swarm-id-lease-v2"
@@ -1707,7 +1706,6 @@ export type {
   EthereumAccount,
   AgentAccount,
   Account,
-  Identity,
   ConnectedApp,
   PostageStamp,
 } from "./schemas"

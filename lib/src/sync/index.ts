@@ -26,8 +26,6 @@ export type { RestoreAccountResult } from "./restore-account"
 // Store interfaces
 export type {
   AccountsStoreInterface,
-  IdentitiesStoreInterface,
-  ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
   StamperOptions,
   FlushableStamper,

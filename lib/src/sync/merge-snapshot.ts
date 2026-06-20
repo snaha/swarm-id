@@ -13,9 +13,8 @@
  *
  * - `devices`: union by `deviceId`. On conflict prefer the entry with the
  *   larger `lastSignedInAt` (recent sign-ins win).
- * - `identities` / `connectedApps` / `postageStamps`: union by their
- *   natural keys; local entries win on overlap (user actions on this
- *   device are most recent for those entities).
+ * - `connectedApps`: last-writer-wins per `appUrl` (with `revokedAt` tombstone).
+ * - `postageStamps`: union by `batchID`; local entries win on overlap.
  * - `metadata.accountName`, `metadata.defaultPostageStampBatchID`,
  *   `metadata.partitionCount`: local wins. These are scalar fields set
  *   by user actions.
@@ -23,13 +22,14 @@
  *   should be identical anyway).
  * - `timestamp` / `metadata.lastModified`: refreshed to `Date.now()`.
  *
- * The function is pure and deterministic so it's easy to unit-test.
+ * The function is pure and deterministic so it's easy to unit-test. The
+ * per-collection primitives are exported so the read/refresh path can reuse the
+ * exact same rules instead of redefining them.
  */
 
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type {
   Device,
-  Identity,
   ConnectedApp,
   PostageStamp,
   AccountMetadata,
@@ -51,7 +51,6 @@ export function mergeSnapshotWithRemote(
     ...local,
     timestamp: Date.now(),
     metadata,
-    identities: mergeIdentities(local.identities, remote.identities),
     connectedApps: mergeConnectedApps(
       local.connectedApps,
       remote.connectedApps,
@@ -63,7 +62,7 @@ export function mergeSnapshotWithRemote(
   }
 }
 
-function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
+export function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
   const merged = new Map<string, Device>()
   for (const d of remote) merged.set(d.deviceId, d)
   for (const d of local) {
@@ -81,18 +80,11 @@ function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
   return Array.from(merged.values())
 }
 
-function mergeIdentities(local: Identity[], remote: Identity[]): Identity[] {
-  const merged = new Map<string, Identity>()
-  for (const i of remote) merged.set(i.id, i)
-  for (const i of local) merged.set(i.id, i) // local wins on collision
-  return Array.from(merged.values())
-}
-
-function mergeConnectedApps(
+export function mergeConnectedApps(
   local: ConnectedApp[],
   remote: ConnectedApp[],
 ): ConnectedApp[] {
-  const keyOf = (a: ConnectedApp) => `${a.identityId}:${a.appUrl}`
+  const keyOf = (a: ConnectedApp) => a.appUrl
   // Last-writer-wins per app so updates AND removals propagate: a revoke is a
   // tombstone (`revokedAt`) carrying a fresh `updatedAt`, so it supersedes an
   // older active copy. `updatedAt` falls back to `lastConnectedAt` for records
@@ -108,7 +100,7 @@ function mergeConnectedApps(
   return Array.from(merged.values())
 }
 
-function mergePostageStamps(
+export function mergePostageStamps(
   local: PostageStamp[],
   remote: PostageStamp[],
 ): PostageStamp[] {
@@ -128,7 +120,7 @@ function listContainsAll<T>(
 }
 
 /**
- * True when `latest` already includes every device / identity / connected-app /
+ * True when `latest` already includes every device / connected-app /
  * postage-stamp present in `mine` (compared by their natural keys — the same
  * keys `mergeSnapshotWithRemote` unions on; timestamps and scalar metadata are
  * ignored).
@@ -152,13 +144,10 @@ export function snapshotContainsContribution(
       mine.metadata.devices,
       (d) => d.deviceId,
     ) &&
-    // identity.id is a hex string (AddressSchema); String() also normalises the
-    // EthAddress instances some callers/tests construct.
-    listContainsAll(latest.identities, mine.identities, (i) => String(i.id)) &&
     listContainsAll(
       latest.connectedApps,
       mine.connectedApps,
-      (a) => `${a.identityId}:${a.appUrl}`,
+      (a) => a.appUrl,
     ) &&
     listContainsAll(latest.postageStamps, mine.postageStamps, (s) =>
       s.batchID.toHex(),

@@ -4,42 +4,43 @@
 import { describe, it, expect } from "vitest"
 import { BatchId } from "@ethersphere/bee-js"
 import {
-  resolveStampForIdentity,
+  resolveStampForApp,
   collectAccountStampBatchIds,
 } from "./postage-stamp-association"
 import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   createPostageStamp,
+  createConnectedApp,
 } from "../test-fixtures"
 
 const accountBatch = new BatchId(TEST_BATCH_ID_HEX)
-const identityBatch = new BatchId(TEST_BATCH_ID_2_HEX)
+const appBatch = new BatchId(TEST_BATCH_ID_2_HEX)
 const accountStamp = createPostageStamp({ batchID: accountBatch })
-const identityStamp = createPostageStamp({ batchID: identityBatch })
+const appStamp = createPostageStamp({ batchID: appBatch })
 
-describe("resolveStampForIdentity", () => {
-  it("prefers the identity's own stamp", () => {
-    const result = resolveStampForIdentity(
-      { defaultPostageStampBatchID: identityBatch },
+describe("resolveStampForApp", () => {
+  it("prefers the app's own batch override", () => {
+    const result = resolveStampForApp(
+      { postageStampBatchID: appBatch },
       { defaultPostageStampBatchID: accountBatch },
-      [accountStamp, identityStamp],
+      [accountStamp, appStamp],
     )
     expect(result?.batchID.toHex()).toBe(TEST_BATCH_ID_2_HEX)
   })
 
-  it("falls through to the account stamp when the identity pointer is stale", () => {
-    const result = resolveStampForIdentity(
-      { defaultPostageStampBatchID: identityBatch },
+  it("falls through to the account default when the app override is stale", () => {
+    const result = resolveStampForApp(
+      { postageStampBatchID: appBatch },
       { defaultPostageStampBatchID: accountBatch },
-      [accountStamp], // identity's stamp is missing
+      [accountStamp], // the app's override batch is missing
     )
     expect(result?.batchID.toHex()).toBe(TEST_BATCH_ID_HEX)
   })
 
-  it("uses the account stamp when the identity has no pointer", () => {
-    const result = resolveStampForIdentity(
-      { defaultPostageStampBatchID: undefined },
+  it("uses the account default when the app has no override", () => {
+    const result = resolveStampForApp(
+      { postageStampBatchID: undefined },
       { defaultPostageStampBatchID: accountBatch },
       [accountStamp],
     )
@@ -47,52 +48,55 @@ describe("resolveStampForIdentity", () => {
   })
 
   it("returns undefined when every pointer is stale", () => {
-    const result = resolveStampForIdentity(
-      { defaultPostageStampBatchID: identityBatch },
+    const result = resolveStampForApp(
+      { postageStampBatchID: appBatch },
       { defaultPostageStampBatchID: accountBatch },
       [], // neither stamp exists
     )
     expect(result).toBeUndefined()
   })
 
-  it("returns undefined when neither identity nor account has a pointer", () => {
-    const result = resolveStampForIdentity(
+  it("returns undefined when neither app nor account has a pointer", () => {
+    const result = resolveStampForApp(
+      { postageStampBatchID: undefined },
       { defaultPostageStampBatchID: undefined },
-      { defaultPostageStampBatchID: undefined },
-      [accountStamp, identityStamp],
+      [accountStamp, appStamp],
     )
     expect(result).toBeUndefined()
   })
 })
 
 describe("collectAccountStampBatchIds", () => {
-  it("collects the account stamp and each identity stamp", () => {
-    const result = collectAccountStampBatchIds(
-      { defaultPostageStampBatchID: accountBatch },
-      [
-        { defaultPostageStampBatchID: identityBatch },
-        { defaultPostageStampBatchID: undefined },
-      ],
+  it("collects the default, owned stamps, and per-app overrides", () => {
+    const result = collectAccountStampBatchIds({
+      defaultPostageStampBatchID: accountBatch,
+      postageStamps: [accountStamp, appStamp],
+      connectedApps: [createConnectedApp({ postageStampBatchID: appBatch })],
+    })
+    expect(result.map((b) => b.toHex()).sort()).toEqual(
+      [TEST_BATCH_ID_HEX, TEST_BATCH_ID_2_HEX].sort(),
     )
-    expect(result.map((b) => b.toHex())).toEqual([
-      TEST_BATCH_ID_HEX,
-      TEST_BATCH_ID_2_HEX,
-    ])
   })
 
-  it("deduplicates a stamp shared by the account and an identity", () => {
-    const result = collectAccountStampBatchIds(
-      { defaultPostageStampBatchID: accountBatch },
-      [{ defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX) }],
-    )
+  it("deduplicates a batch referenced multiple ways", () => {
+    const result = collectAccountStampBatchIds({
+      defaultPostageStampBatchID: accountBatch,
+      postageStamps: [accountStamp],
+      connectedApps: [
+        createConnectedApp({
+          postageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+        }),
+      ],
+    })
     expect(result.map((b) => b.toHex())).toEqual([TEST_BATCH_ID_HEX])
   })
 
   it("returns an empty array when nothing references a stamp", () => {
-    const result = collectAccountStampBatchIds(
-      { defaultPostageStampBatchID: undefined },
-      [{ defaultPostageStampBatchID: undefined }],
-    )
+    const result = collectAccountStampBatchIds({
+      defaultPostageStampBatchID: undefined,
+      postageStamps: [],
+      connectedApps: [],
+    })
     expect(result).toEqual([])
   })
 })

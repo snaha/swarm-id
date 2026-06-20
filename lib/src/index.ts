@@ -18,7 +18,6 @@ export type { ProxyConfig } from "./swarm-id-proxy"
 // Key derivation utilities
 export {
   deriveSecret,
-  deriveIdentityKey,
   generateMasterKey,
   hexToUint8Array,
   uint8ArrayToHex,
@@ -66,9 +65,6 @@ export type { UtilizationChunkKey } from "./utils/batch-utilization"
 // Storage key constants (for cross-frame localStorage listeners)
 export {
   STORAGE_KEY_ACCOUNTS,
-  STORAGE_KEY_IDENTITIES,
-  STORAGE_KEY_CONNECTED_APPS,
-  STORAGE_KEY_POSTAGE_STAMPS,
   STORAGE_KEY_NETWORK_SETTINGS,
   STORAGE_KEY_LEASE_CACHE_PREFIX,
   leaseCacheStorageKey,
@@ -140,16 +136,11 @@ export {
 // Storage managers for entities
 export {
   createAccountsStorageManager,
-  createIdentitiesStorageManager,
-  createConnectedAppsStorageManager,
-  createPostageStampsStorageManager,
   createNetworkSettingsStorageManager,
   serializeAccount,
-  serializeIdentity,
   serializeConnectedApp,
   serializePostageStamp,
   serializeNetworkSettings,
-  disconnectApp,
 } from "./utils/storage-managers"
 
 // Storage manager types
@@ -232,8 +223,6 @@ export type {
   SyncAccountFunction,
   // Store interfaces
   AccountsStoreInterface,
-  IdentitiesStoreInterface,
-  ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
   StamperOptions,
   FlushableStamper,
@@ -331,7 +320,6 @@ export type {
   PasskeyAccount,
   EthereumAccount,
   AgentAccount,
-  Identity,
   ConnectedApp,
   PostageStamp,
   AccountMetadata,
@@ -546,8 +534,8 @@ export type {
   BatchResolution,
 } from "./utils/postage-contract"
 
-// Postage stamp <-> account/identity association
+// Postage stamp <-> account/app association
 export {
-  resolveStampForIdentity,
+  resolveStampForApp,
   collectAccountStampBatchIds,
 } from "./utils/postage-stamp-association"
