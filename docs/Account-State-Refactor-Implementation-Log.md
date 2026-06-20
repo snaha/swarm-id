@@ -37,3 +37,30 @@ one compilation unit). `pnpm --filter @snaha/swarm-id check:all` passes (782 tes
 `sync.svelte.ts` / `agent-account.ts`; remove the `routes/(app)/identity/[id]/*` subtree; rework the
 connect / home / create / stamps flows + `add-postage-stamp` / `drawer` / `app-list`. Target:
 `pnpm check:all` green. (~55 `svelte-check` errors at the lib-green checkpoint.)
+
+**Commit `7a01467e` — `feat(swarm-ui): account aggregate store + nested restore/refresh (WIP)`.**
+swarm-ui data layer (plan commit 4). **Branch does not compile yet** — routes & components (commit 5)
+still reference the old identity tier. Decisions for the UI pass: account default stamp only (defer
+multi-batch UI), stateless (no persistent "current account"), keep 3 tabs at `/account/[id]`.
+
+- `stores/accounts.svelte.ts` is now the single aggregate: account-scoped CRUD for connected apps (LWW
+  `updatedAt` + `revokedAt` tombstone, `connectedUntil` validity), postage stamps, `settings`, and
+  `applyRefreshed` — every mutation maps the nested account doc, persists, and triggers sync (except
+  refresh/utilization which skip sync). Added `getRecentConnections()` for the connect-popup ordering.
+- Deleted `stores/identities.svelte.ts` and `stores/connected-apps.svelte.ts`.
+- `stores/postage-stamps.svelte.ts` reduced to a batchID-keyed runtime view over the account
+  (`getStamp` searches accounts, `getStamper` builds the `UtilizationAwareStamper`,
+  `updateStampUtilization`) — satisfies the lib `PostageStampsStoreInterface` for `createSyncAccount`.
+- `utils/restore-account.ts` adds one nested account (resets app sessions); `utils/refresh-account-from-
+swarm.ts` merges into the one account reusing the lib primitives `mergeConnectedApps` /
+  `mergePostageStamps` / `mergeDevicesList` (kills the duplicated merge rules — #337 for the read path).
+- `stores/sync.svelte.ts` passes only `accountsStore` + `postageStampsStore` to `createSyncAccount`.
+- `lib`: the snapshot merge primitives are now exported from the `@snaha/swarm-id` barrel.
+
+**Pending (plan commit 5 — UI green):** the remaining ~70 `svelte-check` errors are all routes/components.
+Rename `routes/(app)/identity/[id]/*` → `account/[id]/*` (+ `lib/routes.ts`); rewrite `connect` (account
+chooser via `getRecentConnections`, `deriveSecret(master, appOrigin)`, fill `setSecret` from the
+account); `home` (account list); `(app)/+layout.svelte` + `drawer` (account switcher, no "create
+identity"); `app-list` (account-scoped); `add-postage-stamp` (`derivePostageSignerKey(derivationKey)`);
+delete `(create)/identity/new` + `(create)/stamps/identity/new`; update signin/import/create flows + the
+`dev` page. Then `pnpm check:all` green.
