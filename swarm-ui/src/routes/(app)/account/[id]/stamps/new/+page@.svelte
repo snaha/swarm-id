@@ -9,19 +9,33 @@
   import AddPostageStamp, {
     type PageState,
     type PurchaseState,
+    type StampVariant,
   } from '$lib/components/add-postage-stamp.svelte'
   import AddPostageStampButtons from '$lib/components/add-postage-stamp-buttons.svelte'
-  import { navigateToConnectOrHome } from '$lib/utils/navigation'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { goto } from '$app/navigation'
+  import { resolve } from '$app/paths'
+  import { page } from '$app/stores'
+  import routes from '$lib/routes'
+  import { EthAddress } from '@ethersphere/bee-js'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { PostageStamp } from '@snaha/swarm-id'
 
-  const account = $derived(sessionStore.data.account)
-  const currentIdentityId = $derived(sessionStore.data.currentIdentityId)
-  const identity = $derived(
-    currentIdentityId ? identitiesStore.getIdentity(currentIdentityId) : undefined,
+  const accountId = $derived($page.params.id)
+  const account = $derived(
+    accountId ? accountsStore.getAccount(new EthAddress(accountId)) : undefined,
   )
+
+  // Determine variant based on whether user came from external app
   const appData = $derived(sessionStore.data.appData)
+  const variant = $derived<StampVariant>(appData ? 'external-app' : 'dashboard')
+
+  // Check if this is an upgrade (local account getting its first stamp)
+  const isUpgrade = $derived(!account?.defaultPostageStampBatchID)
+
+  function handleGoToApp() {
+    window.close()
+  }
 
   // Bindable state from AddPostageStamp component
   let pageState = $state<PageState>('select')
@@ -31,43 +45,51 @@
   // Reference to AddPostageStamp component
   let addPostageStampRef = $state<AddPostageStamp>()
 
+  function navigateBack() {
+    if (account) {
+      goto(resolve(routes.ACCOUNT_STAMPS, { id: account.id.toHex() }))
+    } else {
+      history.back()
+    }
+  }
+
   function handleClose() {
     if (pageState === 'select') {
-      navigateToConnectOrHome()
+      navigateBack()
     } else {
       pageState = 'select'
     }
   }
 
   function handleSuccess(stamp: PostageStamp) {
-    if (!currentIdentityId) return
-
-    // Set as default stamp for the identity
-    identitiesStore.setDefaultStamp(currentIdentityId, stamp.batchID)
-
-    navigateToConnectOrHome()
+    if (!account) return
+    // AddPostageStamp already added the stamp to the account; make it the default
+    // (the account default pays for account data + app uploads).
+    accountsStore.setDefaultStamp(account.id, stamp.batchID)
+    navigateBack()
   }
+
+  const introText =
+    'Synced accounts let you upload content to Swarm and access your account from any device.'
 </script>
 
 <CreationLayout
-  title="Add postage stamp (for identity)"
+  title={isUpgrade ? 'Upgrade account' : 'Add postage stamp'}
   onClose={handleClose}
+  fullPage
   busy={pageState === 'purchase'}
 >
   {#snippet content()}
-    {#if !account || !currentIdentityId}
+    {#if !account}
       <Typography>No account data found. Please start from the home page.</Typography>
     {:else}
       <AddPostageStamp
         bind:this={addPostageStampRef}
         accountId={account.id.toHex()}
-        identityId={currentIdentityId}
         onSuccess={handleSuccess}
-        introText="You chose to use a separate stamp for this identity."
-        variant="account-creation"
-        identityName={identity?.name}
-        identityValue={identity?.id}
-        autoNavigateOnSuccess={!!appData}
+        onSkip={isUpgrade ? undefined : navigateBack}
+        {introText}
+        {variant}
         bind:pageState
         bind:purchaseState
         bind:isFormDisabled
@@ -76,13 +98,15 @@
   {/snippet}
 
   {#snippet buttonContent()}
-    {#if account && currentIdentityId && addPostageStampRef}
+    {#if account && addPostageStampRef}
       <AddPostageStampButtons
         {pageState}
         {purchaseState}
         {isFormDisabled}
         stampRef={addPostageStampRef}
-        variant="account-creation"
+        {variant}
+        appName={appData?.appName}
+        onGoToApp={handleGoToApp}
       />
     {/if}
   {/snippet}

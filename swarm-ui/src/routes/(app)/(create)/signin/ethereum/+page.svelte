@@ -88,26 +88,24 @@
         const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
 
         account = restoreAccountToStores({
-          account: {
-            id: masterAddress,
-            createdAt: result.snapshot.metadata.createdAt,
-            name: result.snapshot.metadata.accountName,
-            type: 'ethereum',
-            ethereumAddress: new EthAddress(signed.address),
-            encryptedMasterKey,
-            encryptionSalt,
-            encryptedSecretSeed,
-            derivationKey,
-            defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
-              ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
-              : undefined,
-            devices: [],
-            partitionCount: result.snapshot.metadata.partitionCount,
-          },
-          identities: result.snapshot.identities,
+          id: masterAddress,
+          createdAt: result.snapshot.metadata.createdAt,
+          name: result.snapshot.metadata.accountName,
+          type: 'ethereum',
+          ethereumAddress: new EthAddress(signed.address),
+          encryptedMasterKey,
+          encryptionSalt,
+          encryptedSecretSeed,
+          derivationKey,
+          publicKey: result.snapshot.metadata.publicKey,
+          defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
+            ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
+            : undefined,
+          devices: result.snapshot.metadata.devices,
           connectedApps: result.snapshot.connectedApps,
           postageStamps: result.snapshot.postageStamps,
-          devices: result.snapshot.metadata.devices,
+          settings: result.snapshot.metadata.settings,
+          partitionCount: result.snapshot.metadata.partitionCount,
         })
       }
 

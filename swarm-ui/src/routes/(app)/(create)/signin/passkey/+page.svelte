@@ -71,25 +71,23 @@
         return
       }
 
-      // Restore account to local stores
+      // Restore the nested account to local stores
       const restoredAccount = restoreAccountToStores({
-        account: {
-          id: passkeyAccount.ethereumAddress,
-          createdAt: result.snapshot.metadata.createdAt,
-          name: result.snapshot.metadata.accountName,
-          type: 'passkey',
-          credentialId: passkeyAccount.credentialId,
-          derivationKey: result.derivationKey,
-          defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
-            ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
-            : undefined,
-          devices: [],
-          partitionCount: result.snapshot.metadata.partitionCount,
-        },
-        identities: result.snapshot.identities,
+        id: passkeyAccount.ethereumAddress,
+        createdAt: result.snapshot.metadata.createdAt,
+        name: result.snapshot.metadata.accountName,
+        type: 'passkey',
+        credentialId: passkeyAccount.credentialId,
+        derivationKey: result.derivationKey,
+        publicKey: result.snapshot.metadata.publicKey,
+        defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
+          ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
+          : undefined,
+        devices: result.snapshot.metadata.devices,
         connectedApps: result.snapshot.connectedApps,
         postageStamps: result.snapshot.postageStamps,
-        devices: result.snapshot.metadata.devices,
+        settings: result.snapshot.metadata.settings,
+        partitionCount: result.snapshot.metadata.partitionCount,
       })
 
       sessionStore.setAccount(restoredAccount)

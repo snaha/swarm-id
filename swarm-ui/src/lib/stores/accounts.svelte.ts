@@ -133,9 +133,7 @@ export const accountsStore = {
   getRecentConnections(): { account: Account; app: ConnectedApp }[] {
     return accounts
       .flatMap((account) =>
-        account.connectedApps
-          .filter((app) => !app.revokedAt)
-          .map((app) => ({ account, app })),
+        account.connectedApps.filter((app) => !app.revokedAt).map((app) => ({ account, app })),
       )
       .sort((a, b) => b.app.lastConnectedAt - a.app.lastConnectedAt)
   },

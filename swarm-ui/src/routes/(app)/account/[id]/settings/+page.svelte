@@ -12,29 +12,24 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
   import { page } from '$app/state'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { EthAddress } from '@ethersphere/bee-js'
   import Polycon from '$lib/components/polycon.svelte'
   import CopyButton from '$lib/components/copy-button.svelte'
-  import Divider from '$lib/components/ui/divider.svelte'
-  import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
 
-  const identityId = $derived(page.params.id)
-  const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
-  const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+  const account = $derived(
+    page.params.id ? accountsStore.getAccount(new EthAddress(page.params.id)) : undefined,
+  )
 
-  let identityName = $state('')
+  // eslint-disable-next-line svelte/prefer-writable-derived
+  let accountName = $state('')
 
   $effect(() => {
-    if (identity) {
-      identityName = identity.name
-    } else {
-      identityName = ''
-    }
+    accountName = account?.name ?? ''
   })
 
   function onNameChange() {
-    if (identity) {
-      identitiesStore.updateIdentity(identity.id, { name: identityName })
+    if (account) {
+      accountsStore.setAccountName(account.id, accountName)
     }
   }
 </script>
@@ -46,29 +41,7 @@
       --responsive-justify-content="stretch"
       --responsive-gap="var(--quarter-padding)"
     >
-      <Horizontal
-        class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-        --horizontal-gap="var(--half-padding)"><Typography>Account</Typography></Horizontal
-      >
-      <Input
-        variant="outline"
-        dimension="compact"
-        name="account"
-        value={account?.name}
-        disabled
-        class="flex50"
-      />
-    </ResponsiveLayout>
-
-    <ResponsiveLayout
-      --responsive-align-items="start"
-      --responsive-justify-content="stretch"
-      --responsive-gap="var(--quarter-padding)"
-    >
-      <!-- Row 2 -->
-      <Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-        >Identity display name</Typography
-      >
+      <Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}>Account name</Typography>
       <Vertical
         class={!layoutStore.mobile ? 'flex50' : ''}
         --vertical-gap="var(--quarter-gap)"
@@ -78,13 +51,13 @@
           <Input
             variant="outline"
             dimension="compact"
-            name="id-name"
-            bind:value={identityName}
+            name="account-name"
+            bind:value={accountName}
             class="grower"
             oninput={onNameChange}
           />
-          {#if identity}
-            <Polycon value={identity.id} size={40} />
+          {#if account}
+            <Polycon value={account.id.toHex()} size={40} />
           {/if}
         </Horizontal>
       </Vertical>
@@ -96,7 +69,7 @@
       --responsive-gap="var(--quarter-padding)"
     >
       <Typography class={!layoutStore.mobile ? 'flex50 input-layout' : ''}
-        >Identity address</Typography
+        >Account address</Typography
       >
       <Vertical
         class={!layoutStore.mobile ? 'flex50' : ''}
@@ -107,29 +80,19 @@
           <Input
             variant="outline"
             dimension="compact"
-            name="id-name"
-            value={identity?.id}
+            name="account-address"
+            value={account?.id.toHex()}
             class="grower"
             disabled
           />
-          {#if identity}
-            <CopyButton text={identity.id} />
+          {#if account}
+            <CopyButton text={account.id.toHex()} />
           {/if}
         </Horizontal>
-        <Typography variant="small">Used to buy and own stamps</Typography>
+        <Typography variant="small">The address apps connect to and that owns stamps</Typography>
       </Vertical>
     </ResponsiveLayout>
   </Vertical>
-
-  <Divider --margin="0" />
-
-  <ResponsiveLayout
-    --responsive-align-items="start"
-    --responsive-justify-content="stretch"
-    --responsive-gap="var(--quarter-padding)"
-  >
-    <CreateIdentityButton {account} showIcon={false} />
-  </ResponsiveLayout>
 </Vertical>
 
 <style>

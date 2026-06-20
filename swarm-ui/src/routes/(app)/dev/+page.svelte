@@ -12,10 +12,8 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-  import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
   import { syncStore } from '$lib/stores/sync.svelte'
   import { devSettingsStore, type MockStampResult } from '$lib/stores/dev-settings.svelte'
   import Tabs from './tabs.svelte'
@@ -55,6 +53,9 @@
     return `${formatTTL(batchTTL)} (${date})`
   }
 
+  // Every stamp across all accounts (the account owns its stamps now).
+  const allStamps = $derived(accountsStore.accounts.flatMap((a) => a.postageStamps))
+
   // Tab state
   type Tab = 'overview' | 'stamps' | 'sync' | 'devices'
   let activeTab = $state<Tab>('overview')
@@ -89,34 +90,24 @@
   let assignError = $state('')
   let selectedStampId = $state<string | undefined>(undefined)
   let selectedAccountId = $state<string | undefined>(undefined)
-  let selectedIdentityId = $state<string | undefined>(undefined)
 
   // Derived postage signer key + owner address for the selected account/identity.
   // Use the owner address to buy a stamp online, then paste the private key into
   // the "Use existing one" screen as the signer key.
   let accountSigner = $state<{ privateKey: string; owner: string } | undefined>(undefined)
-  let identitySigner = $state<{ privateKey: string; owner: string } | undefined>(undefined)
 
   $effect(() => {
     const acct = selectedAccountId
       ? accountsStore.getAccount(new EthAddress(selectedAccountId))
       : undefined
-    const identityId = selectedIdentityId
     if (!acct) {
       accountSigner = undefined
-      identitySigner = undefined
       return
     }
     // ponytail: fire-and-forget derive; effect re-runs when the selection changes
     void (async () => {
       const k = await derivePostageSignerKey(acct.derivationKey)
       accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
-      if (identityId) {
-        const ik = await derivePostageSignerKey(acct.derivationKey, identityId)
-        identitySigner = { privateKey: ik, owner: new PrivateKey(ik).publicKey().address().toHex() }
-      } else {
-        identitySigner = undefined
-      }
     })()
   })
   let beeStamps = $state<
@@ -219,7 +210,7 @@
       selfCheckLog = [...log]
     }
     try {
-      const stamp = postageStampsStore.stamps.find((s) => s.batchID.toHex() === selfCheckStampId)
+      const stamp = allStamps.find((s) => s.batchID.toHex() === selfCheckStampId)
       if (!stamp) {
         push('❌ Select a stored stamp to pay for the test chunk.')
         return
@@ -407,7 +398,7 @@
   )
   // Stored stamps (with signerKey) usable to pay for the retrievability check.
   const storedStampOptions = $derived(
-    postageStampsStore.stamps.map((stamp) => ({
+    allStamps.map((stamp) => ({
       value: stamp.batchID.toHex(),
       label: `${stamp.batchID.toHex().slice(0, 10)}… (depth ${stamp.depth})`,
     })),
@@ -426,19 +417,7 @@
   const selectedAccount = $derived(
     selectedAccountId ? accountsStore.getAccount(new EthAddress(selectedAccountId)) : undefined,
   )
-  const identityOptions = $derived(
-    selectedAccount
-      ? identitiesStore.getIdentitiesByAccount(selectedAccount.id).map((identity) => ({
-          value: identity.id,
-          label: `${identity.name} (${identity.id.slice(0, 8)}…)`,
-        }))
-      : [],
-  )
   const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
-  const selectedIdentity = $derived(
-    selectedIdentityId ? identitiesStore.getIdentity(selectedIdentityId) : undefined,
-  )
-  const identityHasStamp = $derived(!!selectedIdentity?.defaultPostageStampBatchID)
   const stampAssignments = $derived(
     (() => {
       const map = new SvelteMap<string, { account?: string; identity?: string }>()
@@ -446,18 +425,6 @@
         const batch = account.defaultPostageStampBatchID?.toHex()
         if (batch) {
           map.set(batch, { ...(map.get(batch) ?? {}), account: account.name })
-        }
-      }
-      for (const identity of identitiesStore.identities) {
-        const batch = identity.defaultPostageStampBatchID?.toHex()
-        if (batch) {
-          const existing = map.get(batch) ?? {}
-          const accountName = existing.account ?? accountsStore.getAccount(identity.accountId)?.name
-          map.set(batch, {
-            ...existing,
-            account: accountName,
-            identity: identity.name,
-          })
         }
       }
       return map
@@ -486,25 +453,10 @@
     }
   })
 
-  $effect(() => {
-    if (identityOptions.length && !selectedIdentityId) {
-      selectedIdentityId = identityOptions[0].value
-    } else if (
-      selectedIdentityId &&
-      !identityOptions.some((option) => option.value === selectedIdentityId)
-    ) {
-      selectedIdentityId = identityOptions[0]?.value
-    }
-  })
-
   async function triggerManualSync() {
-    // Get all accounts with default stamps (account-level or via identities)
+    // Get all accounts with a default stamp.
     const accountsToSync = accountsStore.accounts.filter(
-      (account) =>
-        account.defaultPostageStampBatchID ||
-        identitiesStore
-          .getIdentitiesByAccount(account.id)
-          .some((id) => id.defaultPostageStampBatchID),
+      (account) => account.defaultPostageStampBatchID,
     )
 
     if (accountsToSync.length === 0) {
@@ -535,26 +487,19 @@
         }
 
         // Get default stamp to show utilization
-        const defaultStamp =
-          account.defaultPostageStampBatchID ??
-          identitiesStore.getIdentitiesByAccount(account.id)[0]?.defaultPostageStampBatchID
-
+        const defaultStamp = account.defaultPostageStampBatchID
         const stamp = defaultStamp ? postageStampsStore.getStamp(defaultStamp) : undefined
         const utilization = stamp ? stamp.utilization.toFixed(2) : 'unknown'
 
-        const identityCount = identitiesStore.getIdentitiesByAccount(account.id).length
-
         if (result.status === 'success-unverified') {
           results.push(
-            `⚠️ ${account.name} (${identityCount} identities): synced, but root chunk not retrievable — ${result.warning}`,
+            `⚠️ ${account.name}: synced, but root chunk not retrievable — ${result.warning}`,
           )
           errorCount++
           continue
         }
 
-        results.push(
-          `✅ ${account.name} (${identityCount} identities): ${utilization}% utilization`,
-        )
+        results.push(`✅ ${account.name}: ${utilization}% utilization`)
         successCount++
       } catch (error) {
         results.push(
@@ -600,12 +545,9 @@ Check console logs for details:
     }
   }
 
-  // Clear just this browser's account stores (identities, apps, stamps).
+  // Clear this browser's accounts (which own their apps + stamps).
   function clearAccount() {
     accountsStore.clear()
-    identitiesStore.clear()
-    connectedAppsStore.clear()
-    postageStampsStore.clear()
   }
 
   // Full reset: every swarm* localStorage key + the IndexedDB utilization DB,
@@ -697,25 +639,22 @@ Check console logs for details:
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        postageStampsStore.addStamp(
-          {
-            batchID: batchId,
-            signerKey: signerKeyToUse,
-            utilization: Utils.getStampUsage(
-              beeStamp.utilization,
-              beeStamp.depth,
-              beeStamp.bucketDepth,
-            ),
-            usable: beeStamp.usable,
-            depth: beeStamp.depth,
-            amount: BigInt(beeStamp.amount),
-            bucketDepth: beeStamp.bucketDepth,
-            blockNumber: beeStamp.blockNumber,
-            immutableFlag: beeStamp.immutableFlag,
-            exists: beeStamp.exists,
-          },
-          selectedAccountId,
-        )
+        accountsStore.addStamp(accountId, {
+          batchID: batchId,
+          signerKey: signerKeyToUse,
+          utilization: Utils.getStampUsage(
+            beeStamp.utilization,
+            beeStamp.depth,
+            beeStamp.bucketDepth,
+          ),
+          usable: beeStamp.usable,
+          depth: beeStamp.depth,
+          amount: BigInt(beeStamp.amount),
+          bucketDepth: beeStamp.bucketDepth,
+          blockNumber: beeStamp.blockNumber,
+          immutableFlag: beeStamp.immutableFlag,
+          exists: beeStamp.exists,
+        })
       } else if (useCustomSigner) {
         const beeStamp = postageStampsStore.getStamp(batchId)
         if (!beeStamp) {
@@ -723,14 +662,8 @@ Check console logs for details:
           return
         }
         if (beeStamp.signerKey !== signerKeyToUse) {
-          postageStampsStore.removeStamp(batchId, selectedAccountId)
-          postageStampsStore.addStamp(
-            {
-              ...beeStamp,
-              signerKey: signerKeyToUse,
-            },
-            selectedAccountId,
-          )
+          accountsStore.removeStamp(accountId, batchId)
+          accountsStore.addStamp(accountId, { ...beeStamp, signerKey: signerKeyToUse })
         }
       }
 
@@ -741,87 +674,11 @@ Check console logs for details:
     }
   }
 
-  function assignIdentityStamp() {
-    assignError = ''
-    assignMessage = ''
-    if (!accountHasDefaultStamp) {
-      assignError = 'Account must have a default stamp before assigning identity stamp.'
-      return
-    }
-    if (!selectedStampId || !selectedIdentityId || !selectedAccountId) {
-      assignError = 'Select a stamp, account, and identity first.'
-      return
-    }
-
-    // Validate custom signer if enabled
-    if (useCustomSigner && customSignerError) {
-      assignError = customSignerError
-      return
-    }
-
-    try {
-      const batchId = new BatchId(selectedStampId)
-
-      // Determine which signer key to use
-      const signerKeyToUse =
-        useCustomSigner && customSignerKey
-          ? new PrivateKey(customSignerKey)
-          : new PrivateKey(selectedSigner)
-
-      if (!postageStampsStore.getStamp(batchId)) {
-        const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
-        if (!beeStamp) {
-          assignError = 'Stamp data not found. Reload stamps first.'
-          return
-        }
-        postageStampsStore.addStamp(
-          {
-            batchID: batchId,
-            signerKey: signerKeyToUse,
-            utilization: Utils.getStampUsage(
-              beeStamp.utilization,
-              beeStamp.depth,
-              beeStamp.bucketDepth,
-            ),
-            usable: beeStamp.usable,
-            depth: beeStamp.depth,
-            amount: BigInt(beeStamp.amount),
-            bucketDepth: beeStamp.bucketDepth,
-            blockNumber: beeStamp.blockNumber,
-            immutableFlag: beeStamp.immutableFlag,
-            exists: beeStamp.exists,
-          },
-          selectedAccountId,
-        )
-      }
-
-      identitiesStore.setDefaultStamp(selectedIdentityId, batchId)
-      assignMessage = `✅ Set identity stamp for ${selectedIdentityId.slice(0, 8)}…`
-    } catch (error) {
-      assignError = error instanceof Error ? error.message : String(error)
-    }
-  }
-
-  function removeIdentityStamp() {
-    assignError = ''
-    assignMessage = ''
-    if (!selectedIdentityId) {
-      assignError = 'Select an identity first.'
-      return
-    }
-    identitiesStore.setDefaultStamp(selectedIdentityId, undefined)
-    assignMessage = `✅ Removed identity stamp from ${selectedIdentityId.slice(0, 8)}…`
-  }
-
   function removeAccountStamp() {
     assignError = ''
     assignMessage = ''
     if (!selectedAccountId) {
       assignError = 'Select an account first.'
-      return
-    }
-    if (identityHasStamp) {
-      assignError = 'Remove identity stamp first before removing account stamp.'
       return
     }
     accountsStore.setDefaultStamp(new EthAddress(selectedAccountId), undefined)
@@ -867,9 +724,11 @@ Check console logs for details:
   <!-- Overview Tab -->
   {#if activeTab === 'overview'}
     {@const accountCount = accountsStore.accounts.length}
-    {@const identityCount = identitiesStore.identities.length}
-    {@const connectionCount = connectedAppsStore.apps.length}
-    {@const stampCount = postageStampsStore.stamps.length}
+    {@const connectionCount = accountsStore.accounts.reduce(
+      (n, a) => n + a.connectedApps.length,
+      0,
+    )}
+    {@const stampCount = allStamps.length}
     <Vertical --vertical-gap="var(--padding)">
       <Vertical --vertical-gap="var(--half-padding)">
         <Typography variant="h4">Local Bee Endpoints</Typography>
@@ -924,7 +783,7 @@ Check console logs for details:
       <Vertical --vertical-gap="var(--half-padding)" --vertical-align-items="start">
         <Typography variant="h4">Local Data</Typography>
         <Typography>
-          {accountCount} accounts, {identityCount} identities, {connectionCount} connections, {stampCount}
+          {accountCount} accounts, {connectionCount} connections, {stampCount}
           stamps
         </Typography>
         <Horizontal --horizontal-gap="var(--half-padding)">
@@ -1081,13 +940,13 @@ Check console logs for details:
         them into the "Use existing one" screen to re-adopt the same batch on a fresh identity (the
         owner is derived from the signer key).
       </Typography>
-      {#if postageStampsStore.stamps.length === 0}
+      {#if allStamps.length === 0}
         <Typography variant="small" style="color: var(--colors-medium);">
           No stamps stored locally.
         </Typography>
       {:else}
         <Vertical --vertical-gap="var(--half-padding)">
-          {#each postageStampsStore.stamps as stamp (stamp.batchID.toHex())}
+          {#each allStamps as stamp (stamp.batchID.toHex())}
             {@const assignment = stampAssignments.get(stamp.batchID.toHex())}
             <Vertical
               --vertical-gap="var(--half-padding)"
@@ -1310,9 +1169,6 @@ Check console logs for details:
                 <Typography variant="small" style="color: var(--colors-medium);">
                   Account: {assignment?.account ?? '—'}
                 </Typography>
-                <Typography variant="small" style="color: var(--colors-medium);">
-                  Identity: {assignment?.identity ?? '—'}
-                </Typography>
               </Horizontal>
             </Vertical>
           {/each}
@@ -1325,12 +1181,6 @@ Check console logs for details:
       <Vertical --vertical-gap="var(--half-padding)">
         <Select label="Stamp" items={stampOptions} bind:value={selectedStampId} />
         <Select label="Account" items={accountOptions} bind:value={selectedAccountId} />
-        <Select
-          label="Identity"
-          items={identityOptions}
-          bind:value={selectedIdentityId}
-          disabled={!accountHasDefaultStamp}
-        />
 
         <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
           <label class="checkbox-label">
@@ -1354,29 +1204,12 @@ Check console logs for details:
           Set Account Stamp
         </Button>
         <Button
-          onclick={assignIdentityStamp}
-          disabled={!accountHasDefaultStamp || !selectedStampId || !selectedIdentityId}
-        >
-          Set Identity Stamp
-        </Button>
-      </Horizontal>
-
-      <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
-        <Button
           variant="secondary"
           danger
           onclick={removeAccountStamp}
-          disabled={!accountHasDefaultStamp || identityHasStamp}
+          disabled={!accountHasDefaultStamp}
         >
           Remove Account Stamp
-        </Button>
-        <Button
-          variant="secondary"
-          danger
-          onclick={removeIdentityStamp}
-          disabled={!identityHasStamp}
-        >
-          Remove Identity Stamp
         </Button>
       </Horizontal>
 
@@ -1405,9 +1238,6 @@ Check console logs for details:
         <Vertical --vertical-gap="var(--half-padding)">
           {#if accountSigner}
             {@render signerCard('Account-level signer', accountSigner)}
-          {/if}
-          {#if identitySigner}
-            {@render signerCard('Identity-level signer', identitySigner)}
           {/if}
         </Vertical>
       {/if}

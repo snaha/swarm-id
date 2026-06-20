@@ -28,9 +28,7 @@ const getUtilizationStore = () => {
 }
 
 /** Locate a stamp by batchID across all accounts, with its owning account id. */
-function findStamp(
-  batchID: BatchId,
-): { stamp: PostageStamp; accountId: EthAddress } | undefined {
+function findStamp(batchID: BatchId): { stamp: PostageStamp; accountId: EthAddress } | undefined {
   for (const account of accountsStore.accounts) {
     const stamp = account.postageStamps.find((s) => s.batchID.equals(batchID))
     if (stamp) return { stamp, accountId: account.id }

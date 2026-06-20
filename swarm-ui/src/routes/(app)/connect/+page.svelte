@@ -7,22 +7,18 @@
   import { onMount } from 'svelte'
   import ConnectedAppHeader from '$lib/components/connected-app-header.svelte'
   import CreateNewAccount from '$lib/components/create-new-account.svelte'
-  import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
-  import IdentityList from '$lib/components/identity-list.svelte'
+  import CreateAccountButton from '$lib/components/create-account-button.svelte'
+  import AccountList from '$lib/components/account-list.svelte'
   import SegmentedTabs from '$lib/components/segmented-tabs.svelte'
-  import AccountSelector from '$lib/components/account-selector.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
-  import { deriveIdentityKey, deriveSecret, STORAGE_CHALLENGE_KEY } from '@snaha/swarm-id'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { deriveSecret, STORAGE_CHALLENGE_KEY } from '@snaha/swarm-id'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { EthAddress } from '@ethersphere/bee-js'
   import { DEFAULT_SESSION_DURATION } from '@snaha/swarm-id'
   import { AppDataSchema } from '$lib/types'
-  import type { Account, Identity } from '$lib/types'
-  import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import type { Account } from '$lib/types'
   import { layoutStore } from '$lib/stores/layout.svelte'
   import Polycon from '$lib/components/polycon.svelte'
   import { ArrowRight } from 'carbon-icons-svelte'
@@ -35,13 +31,10 @@
   import Confirmation from '$lib/components/confirmation.svelte'
   import EnterSeedModal from '$lib/components/enter-seed-modal.svelte'
 
-  let selectedIdentity = $state<Identity | undefined>(undefined)
+  // The account the user picked to connect this app to.
+  let selected = $state<Account | undefined>(undefined)
   let error = $state<string | undefined>(undefined)
   let authenticated = $state(false)
-  let selectedAccountId = $state<EthAddress | undefined>(undefined)
-  const selectedAccount = $derived(
-    selectedAccountId ? accountsStore.getAccount(selectedAccountId) : undefined,
-  )
   let isAuthenticating = $state(false)
   let showSeedModal = $state(false)
   let pendingAgentAccount = $state<Account | undefined>(undefined)
@@ -50,45 +43,38 @@
   let storageChallenge = $state<string | undefined>(undefined)
   let lastAppSecret = $state<string | undefined>(undefined)
 
-  const allIdentities = $derived(identitiesStore.identities)
-  const identities = $derived.by(() => {
-    const accountId = selectedAccountId
-    if (!accountId) return allIdentities
-    return allIdentities.filter((identity) => identity.accountId.equals(accountId))
-  })
-  const hasAccounts = $derived(accountsStore.accounts.length > 0)
+  const accounts = $derived(accountsStore.accounts)
+  const hasAccounts = $derived(accounts.length > 0)
   const origin = window.location.origin
 
-  // Identities previously used to connect to this app, most-recently-used first.
-  const previouslyUsedIdentities = $derived.by(() => {
+  // Accounts previously used to connect to this app, most-recently-used first.
+  const previouslyUsedAccounts = $derived.by(() => {
     const appUrl = sessionStore.data.appOrigin
     if (!appUrl) return []
-    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- Set is ephemeral, used only for deduplication
+    // eslint-disable-next-line svelte/prefer-svelte-reactivity -- ephemeral dedupe set
     const seen = new Set<string>()
-    const ordered: Identity[] = []
-    for (const app of connectedAppsStore.getRecentApps()) {
-      if (app.appUrl !== appUrl || seen.has(app.identityId)) continue
-      const identity = allIdentities.find((i) => i.id === app.identityId)
-      if (identity) {
-        seen.add(app.identityId)
-        ordered.push(identity)
-      }
+    const ordered: Account[] = []
+    for (const { account, app } of accountsStore.getRecentConnections()) {
+      const key = account.id.toHex()
+      if (app.appUrl !== appUrl || seen.has(key)) continue
+      seen.add(key)
+      ordered.push(account)
     }
     return ordered
   })
 
-  const hasPreviouslyUsed = $derived(previouslyUsedIdentities.length > 0)
+  const hasPreviouslyUsed = $derived(previouslyUsedAccounts.length > 0)
 
-  type ConnectTab = 'previously-used' | 'all-identities'
+  type ConnectTab = 'previously-used' | 'all-accounts'
   const TABS: readonly { value: ConnectTab; label: string }[] = [
     { value: 'previously-used', label: 'Previously used' },
-    { value: 'all-identities', label: 'All identities' },
+    { value: 'all-accounts', label: 'All accounts' },
   ]
 
   // Defaults to "Previously used" when available, but a user selection takes precedence.
   let selectedTab = $state<ConnectTab | undefined>(undefined)
   const activeTab = $derived(
-    selectedTab ?? (hasPreviouslyUsed ? 'previously-used' : 'all-identities'),
+    selectedTab ?? (hasPreviouslyUsed ? 'previously-used' : 'all-accounts'),
   )
 
   // Parse hash params (e.g., #origin=foo&appName=bar)
@@ -114,11 +100,11 @@
         // Storage is partitioned — use postMessage fallback
         storagePartitioned = true
         storageChallenge = challenge
-        // Persist so it survives in-popup navigation (e.g. identity creation flow)
+        // Persist so it survives in-popup navigation (e.g. account creation flow)
         sessionStore.setStoragePartitioned(challenge)
       }
     } else if (sessionStore.data.storagePartitioned && sessionStore.data.storageChallenge) {
-      // Restore partitioning state after in-popup navigation (e.g. back from identity creation)
+      // Restore partitioning state after in-popup navigation
       storagePartitioned = true
       storageChallenge = sessionStore.data.storageChallenge
     }
@@ -138,7 +124,6 @@
 
     if (!sessionStore.data.appData) {
       // Get app metadata from URL hash parameters (if provided)
-      const hashParams = getHashParams()
       const urlAppName = hashParams.get('appName')
       const urlAppDescription = hashParams.get('appDescription')
       const urlAppIcon = hashParams.get('appIcon')
@@ -159,14 +144,6 @@
 
       sessionStore.setAppData(validationResult.data)
     }
-
-    // If there is a new identity set it up
-    if (sessionStore.data.currentIdentityId) {
-      const identity = identitiesStore.getIdentity(sessionStore.data.currentIdentityId)
-      if (identity) {
-        selectIdentityForConnection(identity)
-      }
-    }
   })
 
   function tryGetAppName(urlAppName: string | null) {
@@ -183,19 +160,19 @@
     }
   }
 
-  async function selectIdentityForConnection(identity: Identity) {
+  async function selectAccountForConnection(account: Account) {
     error = undefined
-    selectedIdentity = identity
+    selected = account
 
     // Check if there's a valid existing connection
     if (sessionStore.data.appOrigin) {
-      const validConnection = connectedAppsStore.getValidConnection(
+      const validConnection = accountsStore.getValidConnection(
+        account.id,
         sessionStore.data.appOrigin,
-        identity.id,
       )
       if (validConnection?.appSecret) {
         // Reuse the existing connection
-        updateSelectedIdentity(validConnection.appSecret)
+        updateSelected(validConnection.appSecret)
         authenticated = true
         closeWindowWithSessionCleanup()
         return
@@ -204,36 +181,28 @@
 
     await handleAuthenticate()
 
-    // If this was an existing identity (not from creation flow), close automatically
-    // But don't close if we're waiting for seed phrase input (agent accounts)
-    if (!error && !sessionStore.data.currentIdentityId && !showSeedModal) {
+    // Close automatically once authenticated, unless we're waiting for a seed
+    // phrase (agent accounts).
+    if (!error && !showSeedModal) {
       closeWindowWithSessionCleanup()
     }
   }
 
-  function updateSelectedIdentity(appSecret: string) {
-    if (!selectedIdentity) {
-      return
-    }
-
-    if (!sessionStore.data.appOrigin) {
-      return
-    }
-
-    if (!sessionStore.data.appData) {
+  function updateSelected(appSecret: string) {
+    if (!selected || !sessionStore.data.appOrigin || !sessionStore.data.appData) {
       return
     }
 
     // Store for potential storage partitioning postMessage fallback
     lastAppSecret = appSecret
 
-    // Write to localStorage - this triggers storage events in the iframe
-    // which will detect the new connection and authenticate
-    connectedAppsStore.addOrUpdateApp(
+    // Write to the account's nested apps — this triggers a storage event in the
+    // iframe which detects the new connection and authenticates.
+    accountsStore.addOrUpdateApp(
+      selected.id,
       {
         appUrl: sessionStore.data.appOrigin,
         appName: sessionStore.data.appData.appName,
-        identityId: selectedIdentity.id,
         appIcon: sessionStore.data.appData.appIcon,
         appDescription: sessionStore.data.appData.appDescription,
         appSecret,
@@ -244,8 +213,7 @@
 
   /**
    * Send app secret to the iframe via postMessage (storage partitioning fallback).
-   * When storage is partitioned, the iframe can't receive the secret via storage events,
-   * so we send it directly via window.opener (which points to the iframe that opened this popup).
+   * The `identity*` fields carry the ACCOUNT's info (single-level model).
    */
   function sendSecretToOpener(appSecret: string) {
     if (!window.opener) {
@@ -253,7 +221,7 @@
       return
     }
 
-    if (!sessionStore.data.appOrigin || !selectedIdentity || !storageChallenge) {
+    if (!sessionStore.data.appOrigin || !selected || !storageChallenge) {
       return
     }
 
@@ -264,10 +232,10 @@
         challenge: storageChallenge,
         data: {
           secret: appSecret,
-          identityId: selectedIdentity.id,
-          identityName: selectedIdentity.name,
-          identityAddress: selectedIdentity.id,
-          identityPublicKey: selectedIdentity.publicKey,
+          identityId: selected.id.toHex(),
+          identityName: selected.name,
+          identityAddress: selected.id.toHex(),
+          identityPublicKey: selected.publicKey,
         },
       },
       window.location.origin,
@@ -309,8 +277,11 @@
       pendingAgentAccount = undefined
 
       // Re-trigger the authentication flow
-      if (selectedIdentity) {
+      if (selected) {
         await handleAuthenticate()
+        if (!error && !showSeedModal) {
+          closeWindowWithSessionCleanup()
+        }
       }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Invalid seed phrase'
@@ -324,14 +295,8 @@
   }
 
   async function handleAuthenticate() {
-    if (!selectedIdentity) {
-      error = 'No identity selected. Please select an identity first.'
-      return
-    }
-
-    const account = accountsStore.getAccount(selectedIdentity.accountId)
-    if (!account) {
-      error = 'Account not found for selected identity.'
+    if (!selected) {
+      error = 'No account selected. Please select an account first.'
       return
     }
 
@@ -342,21 +307,18 @@
 
     try {
       // Retrieve masterKey based on account type
-      const masterKey = await tryGetMasterKeyFromAccount(account)
+      const masterKey = await tryGetMasterKeyFromAccount(selected)
 
       // If masterKey is undefined, we're waiting for seed phrase input
       if (!masterKey) {
         return
       }
 
-      // Hierarchical key derivation: Account → Identity → App
-      // Step 1: Derive identity-specific master key
-      const identityMasterKey = await deriveIdentityKey(masterKey.toHex(), selectedIdentity.id)
+      // App-specific secret derived directly from the account master key
+      // (the account is the single-level app-facing identity).
+      const appSecret = await deriveSecret(masterKey.toHex(), sessionStore.data.appOrigin)
 
-      // Step 2: Derive app-specific secret from identity master key
-      const appSecret = await deriveSecret(identityMasterKey, sessionStore.data.appOrigin)
-
-      updateSelectedIdentity(appSecret)
+      updateSelected(appSecret)
 
       authenticated = true
     } catch (err) {
@@ -380,25 +342,24 @@
     <Typography variant="h3">Error</Typography>
     <Typography>{error}</Typography>
   </Vertical>
-{:else if isAuthenticating && selectedAccount}
-  <Confirmation authenticationType={selectedAccount.type} />
-{:else if selectedIdentity && authenticated}
+{:else if isAuthenticating && selected}
+  <Confirmation authenticationType={selected.type} />
+{:else if selected && authenticated}
   <Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
     <Vertical --vertical-gap="var(--half-padding)">
-      <Polycon value={selectedIdentity.id} size={80} />
-      <Typography>{selectedIdentity.name}</Typography>
+      <Polycon value={selected.id.toHex()} size={80} />
+      <Typography>{selected.name}</Typography>
     </Vertical>
     <Vertical --vertical-gap="var(--half-padding)">
       <Typography variant="large">✅ All set!</Typography>
-      <Typography>Your identity is ready to use.</Typography>
+      <Typography>Your account is ready to use.</Typography>
     </Vertical>
     <Button variant="strong" dimension="compact" onclick={closeWindowWithSessionCleanup}
       >Continue to app<ArrowRight size={20} /></Button
     >
     <!-- eslint-disable svelte/no-navigation-without-resolve -- full URL, not a route -->
     <Typography variant="small"
-      >Manage your account and create more identities at <a href={origin}>id.ethswarm.org</a
-      ></Typography
+      >Manage your accounts at <a href={origin}>id.ethswarm.org</a></Typography
     >
     <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </Vertical>
@@ -414,22 +375,21 @@
 
   {#if hasAccounts}
     {@render connectedAppHeader()}
-    <!-- Show identity list -->
+    <!-- Pick an account to connect -->
     <Vertical --vertical-gap="var(--double-padding)">
       {#if hasPreviouslyUsed}
         <SegmentedTabs tabs={TABS} active={activeTab} onchange={(value) => (selectedTab = value)} />
       {/if}
 
       {#if activeTab === 'previously-used'}
-        <IdentityList
-          identities={previouslyUsedIdentities}
-          onIdentityClick={selectIdentityForConnection}
+        <AccountList
+          accounts={previouslyUsedAccounts}
+          onAccountClick={selectAccountForConnection}
         />
       {:else}
-        <AccountSelector bind:selectedAccount={selectedAccountId} />
-        <IdentityList {identities} onIdentityClick={selectIdentityForConnection} />
+        <AccountList {accounts} onAccountClick={selectAccountForConnection} />
         <Horizontal --horizontal-justify-content={layoutStore.mobile ? 'center' : 'flex-start'}>
-          <CreateIdentityButton account={selectedAccount} bind:isAuthenticating />
+          <CreateAccountButton />
         </Horizontal>
       {/if}
     </Vertical>

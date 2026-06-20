@@ -95,26 +95,24 @@
       const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
 
       const account = restoreAccountToStores({
-        account: {
-          id: masterAddress,
-          createdAt: result.data.metadata.createdAt,
-          name: result.data.metadata.accountName,
-          type: 'ethereum',
-          ethereumAddress: new EthAddress(signed.address),
-          encryptedMasterKey,
-          encryptionSalt,
-          encryptedSecretSeed,
-          derivationKey,
-          defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
-            ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
-            : undefined,
-          devices: [],
-          partitionCount: result.data.metadata.partitionCount,
-        },
-        identities: result.data.identities,
+        id: masterAddress,
+        createdAt: result.data.metadata.createdAt,
+        name: result.data.metadata.accountName,
+        type: 'ethereum',
+        ethereumAddress: new EthAddress(signed.address),
+        encryptedMasterKey,
+        encryptionSalt,
+        encryptedSecretSeed,
+        derivationKey,
+        publicKey: result.data.metadata.publicKey,
+        defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
+          ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
+          : undefined,
+        devices: result.data.metadata.devices,
         connectedApps: result.data.connectedApps,
         postageStamps: result.data.postageStamps,
-        devices: result.data.metadata.devices,
+        settings: result.data.metadata.settings,
+        partitionCount: result.data.metadata.partitionCount,
       })
 
       sessionStore.setAccount(account)

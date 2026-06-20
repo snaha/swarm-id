@@ -77,23 +77,21 @@
       }
 
       const account = restoreAccountToStores({
-        account: {
-          id: passkeyAccount.ethereumAddress,
-          createdAt: result.data.metadata.createdAt,
-          name: result.data.metadata.accountName,
-          type: 'passkey',
-          credentialId: passkeyAccount.credentialId,
-          derivationKey,
-          defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
-            ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
-            : undefined,
-          devices: [],
-          partitionCount: result.data.metadata.partitionCount,
-        },
-        identities: result.data.identities,
+        id: passkeyAccount.ethereumAddress,
+        createdAt: result.data.metadata.createdAt,
+        name: result.data.metadata.accountName,
+        type: 'passkey',
+        credentialId: passkeyAccount.credentialId,
+        derivationKey,
+        publicKey: result.data.metadata.publicKey,
+        defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
+          ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
+          : undefined,
+        devices: result.data.metadata.devices,
         connectedApps: result.data.connectedApps,
         postageStamps: result.data.postageStamps,
-        devices: result.data.metadata.devices,
+        settings: result.data.metadata.settings,
+        partitionCount: result.data.metadata.partitionCount,
       })
 
       sessionStore.setAccount(account)

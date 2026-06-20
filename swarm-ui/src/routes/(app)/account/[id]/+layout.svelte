@@ -11,15 +11,15 @@
 
   let { children } = $props()
 
-  const identityId = $derived(page.params.id)
+  const accountId = $derived(page.params.id)
   const currentPath = $derived(page.url.pathname)
 
   const tabs = $derived(
-    identityId
+    accountId
       ? [
-          { label: 'Apps', href: resolve(routes.IDENTITY_APPS, { id: identityId }) },
-          { label: 'Stamps', href: resolve(routes.IDENTITY_STAMPS, { id: identityId }) },
-          { label: 'Identity', href: resolve(routes.IDENTITY_SETTINGS, { id: identityId }) },
+          { label: 'Apps', href: resolve(routes.ACCOUNT_APPS, { id: accountId }) },
+          { label: 'Stamps', href: resolve(routes.ACCOUNT_STAMPS, { id: accountId }) },
+          { label: 'Settings', href: resolve(routes.ACCOUNT_SETTINGS, { id: accountId }) },
         ]
       : [],
   )

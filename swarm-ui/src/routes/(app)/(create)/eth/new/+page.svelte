@@ -126,6 +126,8 @@
         encryptedSecretSeed: encryptedSecretSeed,
         derivationKey,
         devices: mergeDevices([], deviceId, detectDeviceName()),
+        connectedApps: [],
+        postageStamps: [],
         // Multi-device partition lease: opt new accounts into K=2 sharing
         // from day one. Lock SOCs are claimed on demand by the proxy.
         partitionCount: PARTITION_COUNT,
@@ -133,11 +135,12 @@
       sessionStore.setAccount(newAccount)
       sessionStore.setSyncedCreation(accountType === 'synced')
 
-      // Keep unencrypted masterKey in session temporarily for identity creation
-      sessionStore.setTemporaryMasterKey(masterKey)
-
-      // Navigate to identity creation page
-      goto(resolve(routes.IDENTITY_NEW))
+      // Synced accounts buy a default stamp next; local accounts are ready.
+      if (accountType === 'synced') {
+        goto(resolve(routes.STAMPS_ACCOUNT_NEW))
+      } else {
+        navigateToConnectOrHome()
+      }
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to connect wallet'
       console.error('❌ Wallet connection failed:', err)

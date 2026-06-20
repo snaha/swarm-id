@@ -13,7 +13,6 @@
   import Polycon from '$lib/components/polycon.svelte'
   import Launch from 'carbon-icons-svelte/lib/Launch.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
-  import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { BatchId, PrivateKey } from '@ethersphere/bee-js'
   import { openStampPurchaseWidget, type BatchEvent } from '$lib/services/multichain-widget'
   import { derivePostageSignerKey, hexToUint8Array } from '@snaha/swarm-id'
@@ -40,7 +39,6 @@
 
   interface Props {
     accountId: string
-    identityId?: string
     onSuccess: (stamp: PostageStamp) => void
     onSkip?: () => void
     introText?: string
@@ -59,7 +57,6 @@
 
   let {
     accountId,
-    identityId,
     onSuccess,
     onSkip,
     introText = 'Synced accounts require a Swarm postage stamp.',
@@ -98,21 +95,18 @@
     submitError = undefined
 
     try {
-      const stamp = postageStampsStore.addStamp(
-        {
-          batchID: new BatchId(batchID),
-          signerKey: new PrivateKey(signerKey),
-          utilization: 0,
-          usable: true,
-          depth,
-          amount,
-          bucketDepth: 16,
-          blockNumber,
-          immutableFlag: false,
-          exists: true,
-        },
-        accountId,
-      )
+      const stamp = accountsStore.addStamp(new EthAddress(accountId), {
+        batchID: new BatchId(batchID),
+        signerKey: new PrivateKey(signerKey),
+        utilization: 0,
+        usable: true,
+        depth,
+        amount,
+        bucketDepth: 16,
+        blockNumber,
+        immutableFlag: false,
+        exists: true,
+      })
 
       onSuccess(stamp)
     } catch (error) {
@@ -128,12 +122,8 @@
       console.error('[AddPostageStamp] Account not found', accountId)
       return
     }
-    // The purchased stamp becomes the ACCOUNT default when the account has none
-    // yet (an upgrade); only when an account default already exists is it a
-    // per-identity stamp. Derive the signer to match where the stamp is stored
-    // — see handleSuccess in the stamp pages.
-    const signerIdentityId = account.defaultPostageStampBatchID ? identityId : undefined
-    const signerKeyHex = await derivePostageSignerKey(account.derivationKey, signerIdentityId)
+    // Account-level signer key (the account owns its stamps).
+    const signerKeyHex = await derivePostageSignerKey(account.derivationKey)
     signerKeyBytes = hexToUint8Array(signerKeyHex)
     derivedSignerKeyHex = signerKeyHex
     const signerKeyPrivate = new PrivateKey(signerKeyBytes)
@@ -165,21 +155,18 @@
 
     try {
       // Create postage stamp from widget response
-      const stamp = postageStampsStore.addStamp(
-        {
-          batchID: new BatchId(batch.batchId),
-          signerKey: new PrivateKey(signerKeyBytes),
-          depth: batch.depth,
-          amount: BigInt(batch.amount),
-          blockNumber: parseBlockNumber(batch.blockNumber),
-          utilization: 0,
-          usable: true,
-          bucketDepth: 16,
-          immutableFlag: false,
-          exists: true,
-        },
-        accountId,
-      )
+      const stamp = accountsStore.addStamp(new EthAddress(accountId), {
+        batchID: new BatchId(batch.batchId),
+        signerKey: new PrivateKey(signerKeyBytes),
+        depth: batch.depth,
+        amount: BigInt(batch.amount),
+        blockNumber: parseBlockNumber(batch.blockNumber),
+        utilization: 0,
+        usable: true,
+        bucketDepth: 16,
+        immutableFlag: false,
+        exists: true,
+      })
 
       // In auto-navigate mode, call onSuccess immediately (skip success screen)
       if (autoNavigateOnSuccess) {

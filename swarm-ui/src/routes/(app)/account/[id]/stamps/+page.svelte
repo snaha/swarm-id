@@ -10,14 +10,12 @@
   import Typography from '$lib/components/ui/typography.svelte'
   import Badge from '$lib/components/ui/badge.svelte'
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
   import { page } from '$app/state'
-  import Divider from '$lib/components/ui/divider.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
-  import type { BatchId } from '@ethersphere/bee-js'
+  import { BatchId, EthAddress } from '@ethersphere/bee-js'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import CopyButton from '$lib/components/copy-button.svelte'
   import type { PostageStamp } from '$lib/types'
@@ -49,17 +47,13 @@
   const EXPIRY_SOON_LIFETIME_FRACTION = 0.1
   const BEEPORT_TOPUP_URL = 'https://beeport.eth.limo/?topup='
 
-  const identityId = $derived(page.params.id)
-  const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
-  const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+  const accountId = $derived(page.params.id)
+  const account = $derived(
+    accountId ? accountsStore.getAccount(new EthAddress(accountId)) : undefined,
+  )
   const accountStamp = $derived(
     account?.defaultPostageStampBatchID
       ? postageStampsStore.getStamp(account.defaultPostageStampBatchID)
-      : undefined,
-  )
-  const identityStamp = $derived(
-    identity?.defaultPostageStampBatchID
-      ? postageStampsStore.getStamp(identity.defaultPostageStampBatchID)
       : undefined,
   )
 
@@ -115,7 +109,7 @@
   onMount(() => {
     // Start the authoritative chain/Bee batchTTL + block-timestamp fetches
     // first; they don't depend on the Swarmscan price and shouldn't wait on it.
-    const stamps = [accountStamp, identityStamp].filter(Boolean) as PostageStamp[]
+    const stamps = [accountStamp].filter(Boolean) as PostageStamp[]
     for (const stamp of stamps) {
       if (stamp.blockNumber > 0) {
         fetchBlockTimestamp(stamp.blockNumber)
@@ -226,15 +220,10 @@
   }
 </script>
 
-{#snippet stampDetails(stamp: PostageStamp, isAccountStamp: boolean)}
+{#snippet stampDetails(stamp: PostageStamp)}
   <Vertical --vertical-gap="var(--padding)">
     <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="center">
       <Typography bold>{formatBatchId(stamp.batchID)}</Typography>
-      {#if isAccountStamp}
-        <Badge dimension="small">Account stamp</Badge>
-      {:else}
-        <Badge dimension="small">Identity stamp</Badge>
-      {/if}
     </Horizontal>
 
     <Vertical --vertical-gap="var(--half-padding)">
@@ -332,33 +321,9 @@
 {/snippet}
 
 <Vertical --vertical-gap="var(--double-padding)" style="padding-top: var(--double-padding);">
-  {#if identityStamp}
-    <Typography>This identity uses a separate postage stamp for extra privacy.</Typography>
-
-    {@render stampDetails(identityStamp, false)}
-
-    <Divider --margin="0" />
-
-    {#if accountStamp}
-      {@render stampDetails(accountStamp, true)}
-    {/if}
-  {:else if accountStamp}
-    <Typography>This identity uses your account's postage stamp.</Typography>
-    {@render stampDetails(accountStamp, true)}
-
-    <Divider --margin="0" />
-    <Vertical --vertical-gap="var(--half-padding)" --vertical-align-items="start">
-      <Button
-        variant="ghost"
-        dimension="compact"
-        onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
-      >
-        Use separate stamp
-      </Button>
-      <Typography variant="small">
-        Use a separate stamp to keep this identity's activity private from your other identities.
-      </Typography>
-    </Vertical>
+  {#if accountStamp}
+    <Typography>This account's default postage stamp pays for its uploads.</Typography>
+    {@render stampDetails(accountStamp)}
   {:else}
     <Vertical --vertical-gap="var(--half-padding)">
       <Typography bold center>No stamps yet.</Typography>
@@ -371,7 +336,7 @@
       <Button
         variant="strong"
         dimension="compact"
-        onclick={() => identityId && goto(resolve(routes.IDENTITY_STAMPS_NEW, { id: identityId }))}
+        onclick={() => accountId && goto(resolve(routes.ACCOUNT_STAMPS_NEW, { id: accountId }))}
       >
         Add postage stamp
       </Button>
