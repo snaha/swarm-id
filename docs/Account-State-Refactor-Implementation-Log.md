@@ -82,9 +82,43 @@ swarm-ui:
 stamps inline) via `createAccountsStorageManager` instead of the removed flat managers; the app secret
 derives from the account master.
 
+## Multi-device partition fixes (concern B, pre-existing `fix/intent-soc-gateway` code)
+
+Surfaced during Phase 0 multi-device testing; not part of the account refactor but fixed to make it
+usable. All in `lib/src/sync`.
+
+- **`739405a4` — bucket-fresh liveness grace.** A live partition holder was misread as departed when its
+  fresh beacon hadn't propagated cross-device and its retrievable previous-bucket beacon's `leasedUntil`
+  had lapsed. Treat a found beacon as live while `leasedUntil > now - INTENT_LIVENESS_GRACE_MS` (one
+  epoch) at the three beacon gates (intent-round sweep, `refreshHoldersFromPresence`,
+  `foreignBeaconBeatsUs`); lock-SOC lease checks unchanged.
+- **`658140fa` — stop dual-acquire when the creator doesn't know its peer.** A device that created the
+  account had `knownDevices=1`, so it skipped both the intent round AND the beacon (both rival-gated) →
+  claimed its home partition invisibly; a peer that knew it found no beacon and took the same partition.
+  Fix: always publish the beacon while holding a K>1 partition (drop the rival gate); add a
+  `refreshKnownDeviceIds` hook on `BatchWriteCoordinator.acquire()` implemented by the proxy
+  (`refreshDeviceRegistryFromSwarm`, throttled) so a fresh claim sees a peer that signed in after account
+  creation. Verified working with 3 accounts.
+- **Parked — partition-acquire latency.** Exclusivity is correct but acquiring is slow (multiple full
+  intent-round cycles per upload × 12s guard window, amplified by stale devices + gateway 404s). Candidate
+  fixes (cap rivals to live devices, sticky single acquire, lower guard defaults) deferred until after the
+  account refactor.
+
+## Phase 2 — #338 read/pull triggers (swarm-ui)
+
+- **Agent restore** (`routes/(app)/(create)/agent/new/+page.svelte`): re-entering a seed now (1) reuses
+  the account if already local, else (2) `restoreAccountFromSwarm` (credentialId `""`) →
+  `restoreAccountToStores` to adopt a 2nd device's published apps/stamps/devices/settings (snapshot name
+  wins), else (3) the prior blank create + synced-stamp flow. Errors surface like the passkey sign-in.
+- **Refresh on load / account switch** (`routes/(app)/account/[id]/+layout.svelte`): an `$effect` keyed on
+  `page.params.id` calls `refreshAccountFromSwarm(id)` once per account so a signed-in device converges on
+  a peer's changes without opening the Devices view. Best-effort (no-backup/error ignored).
+- Out of scope this pass: the new `ui/` package and Phase 1 (#337 stamp-deletion tombstones).
+- `pnpm check:all` green.
+
 ### Status
 
-Phase 0 (nested single-level account model, #339 + #313 collapse) is **done and green** end-to-end.
-Not yet run: the multi-device E2E walkthrough (create account → connect demo app → stamp → 2nd-device
-convergence) from the design doc's verification section. Phases 1–3 (real tombstones for the read path
-beyond what landed, broader read/pull triggers, per-device-log CRDT) remain as future work.
+Phase 0 (nested single-level model) **done & green**. Phase 2 (#338) **done & green** (swarm-ui). Still
+open: Phase 1 (#337 stamp-deletion tombstones), the parked partition-acquire latency, Phase 3 (per-device
+-log CRDT), and the `ui/` package's agent-restore / refresh triggers. Multi-device exclusivity verified
+manually with 3 accounts; the Phase 2 convergence walkthrough not yet re-run end-to-end.

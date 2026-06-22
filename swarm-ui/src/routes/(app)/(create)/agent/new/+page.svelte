@@ -24,14 +24,19 @@
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
+  import { restoreAccountToStores } from '$lib/utils/restore-account'
   import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
   import {
     deriveAccountDerivationKey,
     getOrCreateDeviceId,
     mergeDevices,
     detectDeviceName,
+    restoreAccountFromSwarm,
+    SnapshotDataUnavailableError,
     PARTITION_COUNT,
   } from '@snaha/swarm-id'
+  import { Bee, BatchId } from '@ethersphere/bee-js'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -88,16 +93,66 @@
       isProcessing = true
       error = undefined
 
-      // Create agent account from seed phrase using validated/normalized phrase
+      // Derive the deterministic account from the seed phrase (same address on
+      // every device). The seed phrase is NOT stored — re-entered each time.
       const { account, masterKey } = createAgentAccount({
         name: accountName.trim(),
         seedPhrase: validation.phrase,
       })
 
-      // Derive derivationKey from master key
-      const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
+      // Already on this device → just re-enter (don't blank or re-restore it).
+      const existing = accountsStore.getAccount(account.id)
+      if (existing) {
+        sessionStore.setAccount(existing)
+        sessionStore.setTemporaryMasterKey(masterKey)
+        navigateToConnectOrHome()
+        return
+      }
 
-      // Store account (seed phrase is NOT stored - must be re-entered each time)
+      // Not local: this seed may already own a synced account on Swarm (a 2nd
+      // device). Restore its published apps/stamps/devices instead of starting
+      // blank. Agent accounts have no credentialId.
+      const bee = new Bee(networkSettingsStore.beeNodeUrl)
+      let restored: Awaited<ReturnType<typeof restoreAccountFromSwarm>>
+      try {
+        restored = await restoreAccountFromSwarm(bee, masterKey, account.id, '')
+      } catch (err) {
+        console.error('Agent restore from Swarm failed:', err)
+        error =
+          err instanceof SnapshotDataUnavailableError
+            ? "Found this account's backup but couldn't retrieve it from Swarm yet. Check your Bee node / connection and try again."
+            : 'Could not reach the Swarm network. Please check your connection and try again.'
+        isProcessing = false
+        return
+      }
+
+      if (restored) {
+        // 2nd device: adopt the published account (its name/stamp/apps win).
+        const meta = restored.snapshot.metadata
+        const restoredAccount = restoreAccountToStores({
+          id: account.id,
+          name: meta.accountName,
+          createdAt: meta.createdAt,
+          type: 'agent',
+          derivationKey: restored.derivationKey,
+          publicKey: meta.publicKey,
+          defaultPostageStampBatchID: meta.defaultPostageStampBatchID
+            ? new BatchId(meta.defaultPostageStampBatchID)
+            : undefined,
+          devices: meta.devices,
+          connectedApps: restored.snapshot.connectedApps,
+          postageStamps: restored.snapshot.postageStamps,
+          settings: meta.settings,
+          partitionCount: meta.partitionCount,
+        })
+        sessionStore.setAccount(restoredAccount)
+        sessionStore.setTemporaryMasterKey(masterKey)
+        navigateToConnectOrHome()
+        return
+      }
+
+      // No backup on Swarm → fresh account on this device.
+      const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
       const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
         id: account.id,

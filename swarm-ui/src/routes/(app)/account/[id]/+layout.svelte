@@ -8,11 +8,26 @@
   import { page } from '$app/state'
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
+  import { refreshAccountFromSwarm } from '$lib/utils/refresh-account-from-swarm'
 
   let { children } = $props()
 
   const accountId = $derived(page.params.id)
   const currentPath = $derived(page.url.pathname)
+
+  // Pull the latest published account state from Swarm whenever we land on (or
+  // switch to) an account — so a device that's already signed in converges on a
+  // peer's changes (new app / stamp / device) without opening the Devices view
+  // (#338). Keyed on the account id so it fires once per account, not on the
+  // store mutations it triggers (refresh applies via `applyRefreshed`, no sync).
+  // Best-effort background pull: a no-backup / network failure is ignored here.
+  let lastRefreshedId: string | undefined
+  $effect(() => {
+    const id = accountId
+    if (!id || id === lastRefreshedId) return
+    lastRefreshedId = id
+    void refreshAccountFromSwarm(id)
+  })
 
   const tabs = $derived(
     accountId
