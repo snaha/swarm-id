@@ -111,6 +111,18 @@ export const INTENT_GUARD_WINDOW_MS = 12_000
 /** Interval between rival re-reads within the guard window. */
 export const INTENT_GUARD_POLL_MS = 2500
 
+/**
+ * Grace applied to a found beacon's `leasedUntil` when deciding liveness. A
+ * beacon is only ever read at the current/previous epoch bucket, so a found one
+ * was written ≤ ~2 epochs ago — bounded-fresh by its rotating address. Its
+ * `leasedUntil` (writeTime + lock TTL ≈ 30s) can still lapse before the holder's
+ * NEXT beacon becomes cross-device retrievable, so a live holder whose freshest
+ * beacon hasn't propagated would be misread as departed. Treating a beacon as
+ * live while `leasedUntil > now - GRACE` bridges that propagation gap; the
+ * bucket-bounded read window means this can never resurrect an aged-out beacon.
+ */
+export const INTENT_LIVENESS_GRACE_MS = INTENT_EPOCH_MS
+
 /** Internal marker so a timed-out read is distinguishable from a real error. */
 const INTENT_TIMEOUT_MESSAGE = "intent read timed out"
 
@@ -353,11 +365,13 @@ export async function resolveIntentRound(opts: {
 
   // One sweep: read every rival's intent for both buckets in parallel (each
   // read individually time-bounded), and return the first rival that beats us:
-  //  - a LIVE holder (beacon with `leasedUntil > now`) — already holds it,
-  //    regardless of generation; or
+  //  - a LIVE holder (beacon with `leasedUntil > now - GRACE`) — already holds
+  //    it, regardless of generation; or
   //  - a contender ordering strictly below us (a pre-claim intent, no
   //    `leasedUntil`, smaller generation).
-  // An EXPIRED beacon (`leasedUntil <= now`) is a departed holder — ignored.
+  // A beacon lapsed beyond the grace window is a departed holder — ignored. The
+  // grace covers a live holder whose freshest beacon hasn't propagated yet (its
+  // still-retrievable previous-bucket beacon's TTL lapsed seconds ago).
   const sweep = async (): Promise<
     { rivalId: string; reason: "live-beacon" | "earlier-intent" } | undefined
   > => {
@@ -381,7 +395,7 @@ export async function resolveIntentRound(opts: {
       const intent = r.intent
       if (!intent) continue
       if (intent.leasedUntil !== undefined) {
-        if (intent.leasedUntil > opts.now)
+        if (intent.leasedUntil > opts.now - INTENT_LIVENESS_GRACE_MS)
           return { rivalId: r.rivalId, reason: "live-beacon" }
         continue
       }

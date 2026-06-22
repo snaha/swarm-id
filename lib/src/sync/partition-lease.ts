@@ -47,6 +47,7 @@ import {
 import {
   INTENT_GUARD_POLL_MS,
   INTENT_GUARD_WINDOW_MS,
+  INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
   readPartitionIntent,
   resolveIntentRound,
@@ -308,8 +309,13 @@ export class PartitionLease {
       // A holder beacon carries `leasedUntil`; a pre-claim intent (the
       // symmetric-race announce) does NOT. Only a beacon means "this partition
       // is HELD" — a bare intent is a contender, left for the intent round to
-      // resolve, so it must NOT mark the partition held here.
-      if (intent.leasedUntil === undefined || intent.leasedUntil <= now)
+      // resolve, so it must NOT mark the partition held here. The grace covers a
+      // live holder whose freshest beacon hasn't propagated (see
+      // INTENT_LIVENESS_GRACE_MS).
+      if (
+        intent.leasedUntil === undefined ||
+        intent.leasedUntil <= now - INTENT_LIVENESS_GRACE_MS
+      )
         continue
       const leasedUntil = intent.leasedUntil
 
@@ -719,7 +725,7 @@ export class PartitionLease {
     return results.some(
       (intent) =>
         intent?.leasedUntil !== undefined &&
-        intent.leasedUntil > now &&
+        intent.leasedUntil > now - INTENT_LIVENESS_GRACE_MS &&
         compareGenerations(intent.generation, ourGeneration) < 0,
     )
   }
