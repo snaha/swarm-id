@@ -735,17 +735,21 @@ export class PartitionLease {
    * CURRENT epoch (the intent SOC, with `leasedUntil` set). A joiner's
    * `refreshHoldersFromPresence` reads this at a fresh per-epoch address (forced
    * network retrieval), which works on a gateway that 404s the static lock SOC.
-   * Gated on a known rival (no one to inform otherwise) and best-effort — never
-   * fails the refresh; the ~10s refresh cadence < INTENT_EPOCH_MS (30s) keeps
-   * the current bucket continuously populated for a live holder.
+   * Best-effort — never fails the refresh; the ~10s refresh cadence <
+   * INTENT_EPOCH_MS (30s) keeps the current bucket continuously populated for a
+   * live holder.
+   *
+   * Published UNCONDITIONALLY while holding (this method is only reached for a
+   * K>1 partition). It must NOT be gated on knowing a rival: a device that
+   * created the account hasn't synced its peer into the registry yet, so a
+   * rival-gated beacon would leave that holder invisible and a peer who DOES
+   * know it would find no beacon and dual-acquire the same partition.
    */
   private async publishPresenceBeacon(
     partition: number,
     generation: PartitionLockGeneration,
     leasedUntil: number,
   ): Promise<void> {
-    const knownDeviceIds = this.opts.knownDeviceIds?.() ?? []
-    if (!knownDeviceIds.some((id) => id !== this.opts.deviceId)) return
     const { stamper } = this.requireWriteContext()
     try {
       await writePartitionIntent({

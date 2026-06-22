@@ -1317,7 +1317,10 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     expect(beacon?.leasedUntil).toBeGreaterThan(NOW)
   })
 
-  it("does not publish a beacon for a single-device account (no rival)", async () => {
+  it("publishes a beacon even with no known rivals (so a later-arriving peer can detect it)", async () => {
+    // The dual-acquire fix: a device that created the account (knows no peers
+    // yet) must still beacon while holding, or a peer who DOES know it finds no
+    // beacon and claims the same partition.
     const solo = makeLease({
       deviceId: DEVICE_A,
       bee: bee as unknown as Bee,
@@ -1336,7 +1339,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
     })
-    expect(beacon).toBeUndefined()
+    expect(beacon?.leasedUntil).toBeGreaterThan(NOW)
   })
 
   it("refresh yields when an earlier-generation peer holds the same partition (deconfliction backstop)", async () => {

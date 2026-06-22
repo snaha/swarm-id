@@ -59,6 +59,7 @@ import {
   PrivateKey,
   Identifier,
   Topic,
+  Reference,
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
@@ -86,12 +87,19 @@ import { resolveStampForApp } from "./utils/postage-stamp-association"
 import {
   publishAccountState,
   remoteFeedHasDevice,
+  ACCOUNT_SYNC_TOPIC_PREFIX,
 } from "./sync/publish-account-state"
+import { deserializeAccountState } from "./sync/serialization"
+import { mergeDevicesList } from "./sync/merge-snapshot"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
-import { getOrCreateDeviceId } from "./utils/device-id"
+import {
+  getOrCreateDeviceId,
+  mergeDevices,
+  detectDeviceName,
+} from "./utils/device-id"
 import {
   createNetworkSettingsStorageManager,
   createAccountsStorageManager,
@@ -142,6 +150,10 @@ import {
  * triggers (lease acquisition + storage changes) into a single feed write.
  */
 const PUBLISH_DEBOUNCE_MS = 1500
+
+/** Min interval between pre-acquire device-registry pulls (throttles the
+ *  slot-wait loop's repeated acquires from hammering the feed). */
+const DEVICE_REGISTRY_REFRESH_THROTTLE_MS = 8_000
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -676,6 +688,14 @@ export class SwarmIdProxy {
       deviceId: this.requireDeviceId(),
       knownDeviceIds: () =>
         this.knownDeviceIdsForAccount(accountInfo.accountId),
+      // Pull the latest device registry before a fresh acquire so a peer that
+      // signed in after we created the account is known (else we never read its
+      // beacon and dual-acquire). Throttled + best-effort inside.
+      refreshKnownDeviceIds: () =>
+        this.refreshDeviceRegistryFromSwarm(
+          accountInfo.accountId,
+          accountInfo.encryptionKey,
+        ),
       intentReadTimeoutMs: tuning?.readTimeoutMs,
       intentGuardWindowMs: tuning?.guardWindowMs,
       intentGuardPollMs: tuning?.guardPollMs,
@@ -1232,6 +1252,75 @@ export class SwarmIdProxy {
       return account?.devices.map((d) => d.deviceId) ?? []
     } catch {
       return []
+    }
+  }
+
+  private lastDeviceRegistryRefreshAt = 0
+
+  /**
+   * Pull the latest account snapshot from the shared feed and union its
+   * `metadata.devices` into the locally-stored account, so `knownDeviceIds`
+   * reflects a peer that signed in AFTER this device created the account (else
+   * the claimer never reads the peer's beacon and they dual-acquire). Throttled
+   * (the slot-wait loop re-acquires) and best-effort — on any failure the
+   * current registry is used as-is.
+   */
+  private async refreshDeviceRegistryFromSwarm(
+    accountId: string,
+    encryptionKey: Uint8Array,
+  ): Promise<void> {
+    const nowMs = Date.now()
+    if (
+      nowMs - this.lastDeviceRegistryRefreshAt <
+      DEVICE_REGISTRY_REFRESH_THROTTLE_MS
+    ) {
+      return
+    }
+    this.lastDeviceRegistryRefreshAt = nowMs
+    try {
+      const manager = createAccountsStorageManager()
+      const accounts = manager.load()
+      const account = accounts.find((a) => a.id.toHex() === accountId)
+      if (!account) return
+
+      // Feed owner = backup signer (derived from the swarm encryption key). Feed
+      // SOCs are unencrypted, so the finder takes no encryption key; the snapshot
+      // chunks it points to ARE encrypted (downloadDataWithChunkAPI infers that).
+      const backupKey = new PrivateKey(
+        await deriveSecret(uint8ArrayToHex(encryptionKey), "backup-key"),
+      )
+      const owner = backupKey.publicKey().address()
+      const topic = Topic.fromString(
+        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${account.id.toHex()}`,
+      )
+      const finder = createAsyncEpochFinder({ bee: this.bee, topic, owner })
+      const refBytes = await finder.findAt(BigInt(Math.floor(nowMs / 1000)))
+      if (!refBytes) return
+      const data = await downloadDataWithChunkAPI(
+        this.bee,
+        new Reference(refBytes).toHex(),
+      )
+      const snapshot = deserializeAccountState(data)
+
+      const mergedDevices = mergeDevices(
+        mergeDevicesList(account.devices, snapshot.metadata.devices),
+        this.requireDeviceId(),
+        detectDeviceName(),
+      )
+      // Only persist when a peer actually appeared, to avoid needless cross-tab
+      // storage-event churn.
+      if (mergedDevices.length !== account.devices.length) {
+        manager.save(
+          accounts.map((a) =>
+            a.id.toHex() === accountId ? { ...a, devices: mergedDevices } : a,
+          ),
+        )
+      }
+    } catch (error) {
+      console.warn(
+        "[Proxy] Device-registry refresh failed (using current registry):",
+        error,
+      )
     }
   }
 
