@@ -93,6 +93,29 @@ export interface AcquireResult {
 }
 
 /**
+ * Outcome of a `refresh()` tick. Distinguishes the two ways a refresh can fail
+ * to keep the lease, because the coordinator must react to them differently:
+ *
+ * - `"held"`     — the lease is still ours and was extended.
+ * - `"lost"`     — could not confirm via write+verify (no lease, or the lock
+ *                  protocol returned `blocked`/`lost-race`/`aborted`). The
+ *                  caller should re-check the static lock SOC before demoting
+ *                  (a transient read-your-writes hiccup must not demote — the
+ *                  Phase-1 optimism).
+ * - `"displaced"` — a foreign PRESENCE BEACON with an earlier generation proved
+ *                  a peer already holds this partition. The beacon is read at a
+ *                  fresh per-epoch address — the channel that stays readable on
+ *                  a disjoint gateway where the static lock SOC is frozen — so
+ *                  this is a CONFIRMED displacement. The caller MUST demote
+ *                  directly and must NOT re-gate on the static lock SOC: by the
+ *                  time `refresh()` returns, it has already rewritten our own
+ *                  claim to that address, so a re-read there would see SELF and
+ *                  never confirm (the no-op the deconfliction backstop existed
+ *                  to avoid).
+ */
+export type LeaseRefreshOutcome = "held" | "lost" | "displaced"
+
+/**
  * Serialised form of the lease state, used as the local persistence cache.
  * Never trusted on its own — callers re-validate `self` against the lock
  * SOC before acting on it.
@@ -594,12 +617,14 @@ export class PartitionLease {
 
   /**
    * Re-run the lock protocol on the currently-held partition to bump
-   * `leasedUntil`. Returns `false` when we don't hold a lease (legacy mode)
-   * or the lock protocol returned `blocked` / `lost-race` / `aborted` — the
-   * caller should treat that as "lease lost".
+   * `leasedUntil`. Returns `"lost"` when we don't hold a lease (legacy mode)
+   * or the lock protocol returned `blocked` / `lost-race` / `aborted`,
+   * `"displaced"` when a foreign presence beacon proves a peer holds the
+   * partition (the deconfliction backstop), else `"held"`. See
+   * `LeaseRefreshOutcome` for how the coordinator must react to each.
    */
-  async refresh(): Promise<boolean> {
-    if (!this.self) return false
+  async refresh(): Promise<LeaseRefreshOutcome> {
+    if (!this.self) return "lost"
     const partition = this.self.partition
     const { stamper } = this.requireWriteContext()
     const lockResult = await acquirePartitionLock({
@@ -619,12 +644,12 @@ export class PartitionLease {
     })
     // `release()` can complete during the guard window above and null
     // `this.self` — re-check before dereferencing it.
-    if (!this.self) return false
+    if (!this.self) return "lost"
     if (lockResult.outcome !== "acquired" || !lockResult.payload) {
       console.warn(
         `[PartitionLease] Refresh on partition ${partition} returned ${lockResult.outcome}.`,
       )
-      return false
+      return "lost"
     }
     const payload = lockResult.payload
     this.self = {
@@ -646,13 +671,18 @@ export class PartitionLease {
     // poll-guard (propagation outran the window), two devices can briefly hold
     // the same partition. Once both beacons have propagated, the one with the
     // LATER generation yields here so the pair resolves to a single holder.
+    // This is a CONFIRMED displacement (read via the fresh per-epoch beacon
+    // address, which stays readable on a disjoint gateway) — reported as
+    // `"displaced"` so the coordinator demotes WITHOUT re-checking the static
+    // lock SOC, which we just rewrote with our own claim above and which is the
+    // frozen read the beacon channel exists to bypass.
     if (await this.foreignBeaconBeatsUs(partition, payload.generation)) {
       console.warn(
         `[PartitionLease] Refresh on partition ${partition}: an earlier-generation peer holds it; yielding.`,
       )
-      return false
+      return "displaced"
     }
-    return true
+    return "held"
   }
 
   /**

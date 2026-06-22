@@ -42,6 +42,7 @@ import {
   type BatchWriteCoordinatorDeps,
 } from "./batch-write-coordinator"
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
+import type { LeaseRefreshOutcome } from "./partition-lease"
 import { LEASE_REFRESH_MS, LEASE_TTL_MS } from "../utils/batch-utilization"
 
 const SELF = "self-device"
@@ -75,7 +76,7 @@ function makeLease(
     }
     /** Make `acquire` reject — an operational failure, not contention. */
     acquireError?: Error
-    refreshResult?: boolean
+    refreshResult?: LeaseRefreshOutcome
   } = {},
 ) {
   let partition = opts.partition
@@ -94,7 +95,7 @@ function makeLease(
       if (r.partition !== undefined) partition = r.partition
       return r
     }),
-    refresh: vi.fn(async () => opts.refreshResult ?? true),
+    refresh: vi.fn(async () => opts.refreshResult ?? "held"),
     release: vi.fn(async () => {}),
     bumpLocalLease: vi.fn(),
     serialize: vi.fn(() => ({ v: 1 })),
@@ -312,7 +313,7 @@ describe("BatchWriteCoordinator — displacement-during-upload race fix", () => 
     // Seed a held lease on partition 0 that fails its refresh (so the tick
     // falls back to the displacement read), and make the lock SOC name a live
     // peer. Keep the lease "active" so the idle-yield branch is skipped.
-    const lease = makeLease({ partition: 0, refreshResult: false })
+    const lease = makeLease({ partition: 0, refreshResult: "lost" })
     internals.partitionLease = lease
     internals.lastLeaseActivityAt = Date.now()
     internals.activeUploadCount = 1
@@ -346,7 +347,7 @@ describe("BatchWriteCoordinator — displacement-during-upload race fix", () => 
       }),
     )
     const internals = coordinator as unknown as Internals
-    const lease = makeLease({ partition: 0, refreshResult: false })
+    const lease = makeLease({ partition: 0, refreshResult: "lost" })
     internals.partitionLease = lease
     internals.lastLeaseActivityAt = Date.now()
     internals.activeUploadCount = 1
@@ -361,6 +362,52 @@ describe("BatchWriteCoordinator — displacement-during-upload race fix", () => 
     expect(stamper.unbindPartition).not.toHaveBeenCalled()
     expect(coordinator.currentPartition).toBe(0)
     expect(lease.bumpLocalLease).toHaveBeenCalled()
+  })
+
+  it("demotes on a beacon-confirmed displacement, even though the static lock SOC still shows us live", async () => {
+    // The refresh-time deconfliction backstop: `PartitionLease.refresh()` reads
+    // a rival's presence beacon at a fresh per-epoch address — the channel that
+    // stays readable on a disjoint gateway where the static lock SOC is frozen —
+    // and, finding an earlier-generation foreign holder, reports `"displaced"`.
+    //
+    // Regression guard for the no-op the backstop existed to avoid: `refresh()`
+    // ALSO just rewrote our own claim to the static lock SOC, so re-gating the
+    // demote on `readPartitionLock` would read SELF (live) and never confirm —
+    // and the device would keep a partition a peer already holds (dual-hold →
+    // silent overstamp). The coordinator must trust the beacon verdict directly.
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const onLeaseChange = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        onLeaseChange,
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0, refreshResult: "displaced" })
+    internals.partitionLease = lease
+    internals.lastLeaseActivityAt = Date.now()
+    internals.activeUploadCount = 1
+    // The frozen-gateway view: the static lock SOC shows OURSELVES as the live
+    // holder (we just rewrote it on this very refresh). Pre-fix, the coordinator
+    // re-gated on this read and so kept the lease — the bug.
+    lockController.payload = {
+      holderDeviceId: SELF,
+      leasedUntil: Date.now() + 10_000,
+    }
+
+    await internals.refreshTick(lease)
+
+    // Mirrors the displacement-race fix: invalidate the breaker, then unbind.
+    expect(calls).toEqual(["invalidate", "unbind"])
+    expect(coordinator.currentPartition).toBeUndefined()
+    expect(coordinator.isReadOnly).toBe(true)
+    expect(internals.pendingAcquire).toBe(true)
+    expect(onLeaseChange).toHaveBeenLastCalledWith({
+      currentPartition: undefined,
+      isReadOnly: true,
+    })
   })
 })
 
@@ -386,7 +433,7 @@ describe("BatchWriteCoordinator — sentinel re-assert at upload start", () => {
   }
 
   it("re-asserts the claim when a sentinel is visible while holding", async () => {
-    const lease = makeLease({ partition: 0, refreshResult: true })
+    const lease = makeLease({ partition: 0, refreshResult: "held" })
     const { internals, stamper, writeLeaseCache } = setup(lease)
 
     await internals.ensureLeaseStillValid()
@@ -398,7 +445,7 @@ describe("BatchWriteCoordinator — sentinel re-assert at upload start", () => {
   })
 
   it("demotes and throws when the re-assert loses to a peer", async () => {
-    const lease = makeLease({ partition: 0, refreshResult: false })
+    const lease = makeLease({ partition: 0, refreshResult: "lost" })
     const { coordinator, internals, stamper } = setup(lease)
 
     await expect(internals.ensureLeaseStillValid()).rejects.toThrow(/reclaimed/)
@@ -799,7 +846,7 @@ describe("BatchWriteCoordinator — stale refresh-tick guards", () => {
 
     // Lease A on partition 0: refresh fails, lock SOC names a live peer →
     // the tick confirms displacement and queues finalizeDemote on the lock.
-    const leaseA = makeLease({ partition: 0, refreshResult: false })
+    const leaseA = makeLease({ partition: 0, refreshResult: "lost" })
     internals.partitionLease = leaseA
     internals.lastLeaseActivityAt = Date.now()
     internals.activeUploadCount = 1 // skip the idle-yield branch

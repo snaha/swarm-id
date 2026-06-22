@@ -46,7 +46,10 @@ import {
 } from "../utils/batch-utilization"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { PartitionLease } from "./partition-lease"
-import type { PartitionLeaseStateSnapshot } from "./partition-lease"
+import type {
+  LeaseRefreshOutcome,
+  PartitionLeaseStateSnapshot,
+} from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
@@ -598,7 +601,7 @@ export class BatchWriteCoordinator {
       payload !== undefined &&
       payload.holderDeviceId === NO_HOLDER_DEVICE_ID
     ) {
-      let reasserted: boolean
+      let reasserted: LeaseRefreshOutcome
       try {
         reasserted = await this.partitionLease.refresh()
       } catch (err) {
@@ -610,9 +613,10 @@ export class BatchWriteCoordinator {
         )
         return
       }
-      if (!reasserted) {
-        // blocked / lost-race — a peer claimed after the sentinel. Mirror
-        // the displaced branch exactly (we are under the write lock).
+      if (reasserted !== "held") {
+        // blocked / lost-race (`"lost"`) or a beacon-confirmed peer
+        // (`"displaced"`) — a peer claimed after the sentinel. Mirror the
+        // displaced branch exactly (we are under the write lock).
         console.warn(
           `[BatchWriteCoordinator] Sentinel re-assert: partition ${partition} taken by a peer; demoting.`,
         )
@@ -724,8 +728,17 @@ export class BatchWriteCoordinator {
 
     let confirmedDisplaced = false
     try {
-      const ok = await lease.refresh()
-      if (!ok) {
+      const outcome = await lease.refresh()
+      if (outcome === "displaced") {
+        // The lease read a foreign presence beacon (earlier generation) at a
+        // fresh per-epoch address and confirmed a peer holds this partition.
+        // That beacon channel is exactly what the static lock SOC cannot show
+        // on a disjoint gateway, so trust the verdict directly. Re-reading the
+        // lock SOC here would be the no-op the backstop exists to avoid:
+        // refresh() just rewrote our own claim to that address, so the read
+        // would return SELF and never confirm the displacement.
+        confirmedDisplaced = true
+      } else if (outcome === "lost") {
         // Couldn't confirm via write+verify — check for ACTUAL displacement
         // with one read. A 500 here returns undefined → not displaced.
         const payload = await readPartitionLock({

@@ -819,7 +819,7 @@ describe("PartitionLease.refresh", () => {
 
     nowValue = NOW1 + 10_000
     const ok = await lease.refresh()
-    expect(ok).toBe(true)
+    expect(ok).toBe("held")
 
     const observed = await readPartitionLock({
       bee: bee as unknown as Bee,
@@ -831,9 +831,9 @@ describe("PartitionLease.refresh", () => {
     expect(observed?.leasedUntil).toBe(nowValue + LEASE_TTL_MS)
   })
 
-  it("returns false when no lease is held", async () => {
+  it("returns 'lost' when no lease is held", async () => {
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
-    expect(await lease.refresh()).toBe(false)
+    expect(await lease.refresh()).toBe("lost")
   })
 })
 
@@ -975,7 +975,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
 
     // A refresh tick that slipped past teardown: must abort (no ghost claim
     // the fenced release would refuse to clear), not throw.
-    await expect(leaseA.refresh()).resolves.toBe(false)
+    await expect(leaseA.refresh()).resolves.toBe("lost")
 
     unblock()
     await releasing
@@ -1343,7 +1343,12 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     })
 
     // On refresh, DEVICE_A (later generation) detects DEVICE_B and yields.
-    expect(await lease.refresh()).toBe(false)
+    // The verdict comes from the per-epoch beacon channel, so it is reported as
+    // a CONFIRMED `"displaced"` (not a plain `"lost"`): the coordinator must
+    // demote on this without re-reading the static lock SOC, which DEVICE_A
+    // just rewrote with its own claim. See the BatchWriteCoordinator test
+    // "demotes on a beacon-confirmed displacement …" for the end-to-end guard.
+    expect(await lease.refresh()).toBe("displaced")
   })
 
   it("refresh keeps the lease when only a LATER-generation peer is present", async () => {
@@ -1368,6 +1373,6 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       genTimestamp: NOW + 1000,
     })
     // DEVICE_A is the earlier holder → keeps the lease.
-    expect(await lease.refresh()).toBe(true)
+    expect(await lease.refresh()).toBe("held")
   })
 })
