@@ -7,10 +7,16 @@ Web-based identity and key management for decentralized applications on the Swar
 ## Architecture
 
 1. **Trusted Domain Model**: A trusted domain (e.g., `id.ethswarm.org`) hosts keystore UI and management
-2. **OAuth-style Popup Flow**: dApps trigger authentication popups that derive app-specific secrets from a master key
+2. **OAuth-style Popup Flow**: dApps trigger authentication popups that derive app-specific secrets from the account's master key
 3. **Iframe Proxy**: Hidden iframe handles secure communication and proxies Bee API calls
 
 **Security**: Master key in first-party context only, HMAC-SHA256 key derivation, all postMessage validated with Zod schemas.
+
+### Account Model
+
+A single-level **account** is the unit apps connect to — there is no separate "identity" tier. The account is the aggregate root and owns, as one nested document, its **connected apps** and **postage stamps**. `account.id` is the address apps connect to; the account private key is mnemonic-equivalent and stays first-party only (apps get a derived per-app secret, never the master key, and must request permission for high-stakes signing). Want independent keypairs? Create separate accounts. An account may hold multiple postage batches — a default one (stores account data + app data by default) with optional per-app overrides.
+
+Account state syncs across a user's devices via a snapshot published to a Swarm feed, merged with last-writer-wins per app and a union of stamps/devices ([#337](https://github.com/snaha/swarm-id/issues/337)/[#338](https://github.com/snaha/swarm-id/issues/338)/[#339](https://github.com/snaha/swarm-id/issues/339)).
 
 ### Authentication
 
