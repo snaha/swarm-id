@@ -1,0 +1,1 @@
+import{f as l,a as m}from"./DpJpTnGs.js";import{t as f}from"./ByOJwSXx.js";import{c as p}from"./BwHCAFC8.js";import{p as a}from"./USYOln7H.js";var d=l("<div></div>");function w(s,o){let i=a(o,"dimension",3,"default"),t=a(o,"color",3,"low");var e=d();let r;f(()=>r=p(e,1,`loader ${i()??""}`,"svelte-1s0jpt4",r,{high:t()==="high",low:t()==="low"})),m(s,e)}export{w as L};
