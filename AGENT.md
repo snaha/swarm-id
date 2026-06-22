@@ -115,8 +115,10 @@ Authentication uses storage events: popup writes to localStorage → storage eve
 
 ## Version control conventions
 
-- Use conventional commits
-- Don't use the issue number in branch names
+- Use [conventional commits](https://www.conventionalcommits.org/) (e.g. `feat:`, `fix:`, `chore:`)
+- Keep PR titles and descriptions concise
+- Omit the issue number from branch names and titles
+- When a PR resolves an issue, reference it with a closing keyword (e.g. `Closes #53`) so GitHub closes the issue automatically on merge
 
 ## Deployment
 
