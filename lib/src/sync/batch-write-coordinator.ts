@@ -46,7 +46,10 @@ import {
 } from "../utils/batch-utilization"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
 import { PartitionLease } from "./partition-lease"
-import type { PartitionLeaseStateSnapshot } from "./partition-lease"
+import type {
+  LeaseRefreshOutcome,
+  PartitionLeaseStateSnapshot,
+} from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
@@ -119,6 +122,21 @@ export interface BatchWriteCoordinatorDeps {
   stamper: UtilizationAwareStamper
   /** This device's identity, captured once by the caller. */
   deviceId: string
+  /**
+   * Current known device IDs for this account (from the synced device
+   * registry). Read fresh per acquire so it reflects late-announced devices.
+   * Drives the Phase-2 intent round that lets disjoint-gateway contenders for
+   * a free partition agree on one winner (see partition-intent.ts). Omit for
+   * single-device / legacy callers — acquire falls back to guard+TTL only.
+   */
+  knownDeviceIds?: () => string[]
+  /**
+   * Gateway-propagation tuning for the intent round (optional overrides; default
+   * to the `INTENT_*` constants). Lets the proxy pass runtime-tunable values.
+   */
+  intentReadTimeoutMs?: number
+  intentGuardWindowMs?: number
+  intentGuardPollMs?: number
   accountId: string
   /** Owns the per-partition lock SOCs (derived from the account key). */
   backupSigner: PrivateKey
@@ -403,6 +421,10 @@ export class BatchWriteCoordinator {
         batchDepth: stamper.depth,
         swarmEncryptionKey,
         stamper,
+        knownDeviceIds: this.deps.knownDeviceIds,
+        intentReadTimeoutMs: this.deps.intentReadTimeoutMs,
+        intentGuardWindowMs: this.deps.intentGuardWindowMs,
+        intentGuardPollMs: this.deps.intentGuardPollMs,
       })
       if (this.leaseEpoch !== epoch) return
       const cached = this.deps.readLeaseCache?.()
@@ -414,6 +436,12 @@ export class BatchWriteCoordinator {
       // reconciles with Swarm and demotes only on a confirmed foreign holder.
       const adopted = lease.adoptIfLive()
       if (adopted !== undefined) {
+        // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
+        // intent round. If two devices both adopt partition 0 from stale
+        // caches, that's a dual-hold the intent round never gets to arbitrate.
+        console.log(
+          `[BatchWriteCoordinator] Adopted cached lease p=${adopted} (no acquire/intent round) for device=${this.deps.deviceId}`,
+        )
         this.partitionLease = lease
         this.readOnly = false
         stamper.bindPartition({
@@ -573,7 +601,7 @@ export class BatchWriteCoordinator {
       payload !== undefined &&
       payload.holderDeviceId === NO_HOLDER_DEVICE_ID
     ) {
-      let reasserted: boolean
+      let reasserted: LeaseRefreshOutcome
       try {
         reasserted = await this.partitionLease.refresh()
       } catch (err) {
@@ -585,9 +613,10 @@ export class BatchWriteCoordinator {
         )
         return
       }
-      if (!reasserted) {
-        // blocked / lost-race — a peer claimed after the sentinel. Mirror
-        // the displaced branch exactly (we are under the write lock).
+      if (reasserted !== "held") {
+        // blocked / lost-race (`"lost"`) or a beacon-confirmed peer
+        // (`"displaced"`) — a peer claimed after the sentinel. Mirror the
+        // displaced branch exactly (we are under the write lock).
         console.warn(
           `[BatchWriteCoordinator] Sentinel re-assert: partition ${partition} taken by a peer; demoting.`,
         )
@@ -699,8 +728,17 @@ export class BatchWriteCoordinator {
 
     let confirmedDisplaced = false
     try {
-      const ok = await lease.refresh()
-      if (!ok) {
+      const outcome = await lease.refresh()
+      if (outcome === "displaced") {
+        // The lease read a foreign presence beacon (earlier generation) at a
+        // fresh per-epoch address and confirmed a peer holds this partition.
+        // That beacon channel is exactly what the static lock SOC cannot show
+        // on a disjoint gateway, so trust the verdict directly. Re-reading the
+        // lock SOC here would be the no-op the backstop exists to avoid:
+        // refresh() just rewrote our own claim to that address, so the read
+        // would return SELF and never confirm the displacement.
+        confirmedDisplaced = true
+      } else if (outcome === "lost") {
         // Couldn't confirm via write+verify — check for ACTUAL displacement
         // with one read. A 500 here returns undefined → not displaced.
         const payload = await readPartitionLock({

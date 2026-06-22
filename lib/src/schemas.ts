@@ -328,6 +328,28 @@ export type PartitionLockGeneration = z.infer<
 >
 export type PartitionLockPayload = z.infer<typeof PartitionLockPayloadSchemaV1>
 
+/**
+ * Payload stored (as encrypted JSON) in a per-device partition-INTENT SOC,
+ * which doubles as a holder PRESENCE BEACON. Written before a fresh claim so
+ * rival contenders agree on a single winner by `generation`, AND re-published
+ * by the holder on every refresh tick so a later joiner can detect the live
+ * holder — both via a fresh per-epoch address that forces a network retrieval
+ * (bypassing the gateway's frozen lock-SOC cache). `deviceId` is carried for
+ * diagnostics (the address already encodes it). `leasedUntil` is present on a
+ * heartbeat so a reader can apply the same `leasedUntil > now` liveness test
+ * the lock SOC uses; it is omitted on a legacy pre-claim intent (then the
+ * reader falls back to epoch-bucket freshness).
+ */
+export const PartitionIntentPayloadSchemaV1 = z.object({
+  deviceId: z.string(),
+  generation: PartitionLockGenerationSchemaV1,
+  leasedUntil: z.number().int().nonnegative().optional(),
+})
+
+export type PartitionIntentPayload = z.infer<
+  typeof PartitionIntentPayloadSchemaV1
+>
+
 // ============================================================================
 // Network Settings Schema
 // ============================================================================

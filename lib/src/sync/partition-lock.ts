@@ -103,6 +103,28 @@ export function makeDeviceTiebreaker(deviceId: string): string {
 }
 
 /**
+ * Deterministic per-device starting partition: `keccak256(deviceId) mod
+ * partitionCount`. Distinct devices map to distinct home partitions with high
+ * probability, so they spread across slots even when none can read peers' lock
+ * SOCs (the disjoint-gateway frozen-cache case — see
+ * docs/Partition-Lock-Hardening-Plan.md). Only changes the selection scan
+ * ORDER; visibly-held slots are still skipped, so behaviour under working
+ * reads is unchanged.
+ *
+ * ponytail: probabilistic spread, not mutual exclusion — colliding home
+ * partitions still race. The complete cross-gateway fix is the Phase 2
+ * intent-SOC protocol in the hardening plan.
+ */
+export function deviceHomePartition(
+  deviceId: string,
+  partitionCount: number,
+): number {
+  const hash = Binary.keccak256(new TextEncoder().encode(deviceId))
+  const n = ((hash[0] << 24) | (hash[1] << 16) | (hash[2] << 8) | hash[3]) >>> 0
+  return n % partitionCount
+}
+
+/**
  * Lexicographic comparison of two generations: timestamp first, then
  * tiebreaker. Returns -1 / 0 / 1.
  */
@@ -144,11 +166,21 @@ export async function readPartitionLock(opts: {
     )
     // A payload that doesn't match the schema (foreign/corrupt/old format)
     // is treated the same as a missing lock — see the catch below.
-    return parsed.success ? parsed.data : undefined
-  } catch {
+    if (!parsed.success) {
+      console.warn(
+        `[partition-lock] read p=${partition}: SOC present but payload failed schema validation — treating as no lock`,
+      )
+      return undefined
+    }
+    return parsed.data
+  } catch (error) {
     // Missing chunk, decryption failure, or malformed JSON — treat all
     // as "lock unobserved". Callers (acquirePartitionLock) treat undefined
-    // as "first acquire".
+    // as "first acquire". Log the reason: a gateway read failure (404/timeout)
+    // for a lock another device DID write is the suspected cross-device
+    // dual-acquire cause, and must be distinguishable from a genuine "no lock".
+    const reason = error instanceof Error ? error.message : String(error)
+    console.warn(`[partition-lock] read p=${partition}: unreadable — ${reason}`)
     return undefined
   }
 }
@@ -171,6 +203,10 @@ export async function writePartitionLock(opts: {
   const identifier = makePartitionLockIdentifier(partition)
   const data = new TextEncoder().encode(JSON.stringify(payload))
   const target: UploadTarget = { mode: "stamper", bee, stamper }
+  // No `deferred` flag: Bee's /soc handler hardcodes Deferred:false and ignores
+  // the Swarm-Deferred-Upload header (bee 2.8.0 pkg/api/soc.go), so SOC writes
+  // are always synchronous / receipt-backed regardless. (Replication still
+  // depends on node reachability — see .claude/rules/bee-cluster.md.)
   await uploadSOC(target, backupSigner, identifier, data, {
     encryptionKey: swarmEncryptionKey,
   })
@@ -195,6 +231,12 @@ export async function acquirePartitionLock(opts: {
   guardMs: number
   now?: () => number
   wait?: (ms: number) => Promise<void>
+  /**
+   * Pre-built generation to claim with. Pass the SAME generation already
+   * advertised in a Phase-2 intent round so the winner's lock claim and its
+   * intent order identically. Defaults to a fresh `(now, tiebreaker)`.
+   */
+  generation?: PartitionLockGeneration
   /**
    * Checked immediately before the claim write. When it returns true the
    * acquire aborts WITHOUT writing — used by `PartitionLease` to stop a
@@ -228,7 +270,7 @@ export async function acquirePartitionLock(opts: {
 
   // Lock is empty, expired, released, or already ours. Write our claim
   // and verify after the guard window.
-  const ourGeneration: PartitionLockGeneration = {
+  const ourGeneration: PartitionLockGeneration = opts.generation ?? {
     timestampMs: t,
     tiebreaker: makeDeviceTiebreaker(opts.deviceId),
   }

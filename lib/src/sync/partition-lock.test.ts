@@ -15,6 +15,7 @@ import { Binary } from "cafe-utility"
 import {
   acquirePartitionLock,
   compareGenerations,
+  deviceHomePartition,
   lockSocAddress,
   lockSocBucket,
   makeDeviceTiebreaker,
@@ -168,6 +169,38 @@ describe("makeDeviceTiebreaker", () => {
 
   it("is 16-hex (8 bytes)", () => {
     expect(makeDeviceTiebreaker(DEVICE_A)).toMatch(/^[0-9a-f]{16}$/)
+  })
+})
+
+describe("deviceHomePartition", () => {
+  it("is stable for the same deviceId", () => {
+    expect(deviceHomePartition(DEVICE_A, 8)).toBe(
+      deviceHomePartition(DEVICE_A, 8),
+    )
+  })
+
+  it("is always within [0, partitionCount)", () => {
+    for (const device of [DEVICE_A, DEVICE_B, DEVICE_C]) {
+      for (const count of [2, 3, 8, 100]) {
+        const p = deviceHomePartition(device, count)
+        expect(p).toBeGreaterThanOrEqual(0)
+        expect(p).toBeLessThan(count)
+        expect(Number.isInteger(p)).toBe(true)
+      }
+    }
+  })
+
+  it("spreads devices across slots instead of all landing on 0", () => {
+    // The bug: every device picked partition 0 when none could see peers'
+    // locks. Per-device home offsets break that systematic collision — the
+    // home partitions span more than one slot (not a uniqueness guarantee;
+    // birthday collisions remain, which is why this is a mitigation, not a
+    // fix — see deviceHomePartition).
+    const PARTITION_COUNT = 3
+    const homes = [DEVICE_A, DEVICE_B, DEVICE_C].map((d) =>
+      deviceHomePartition(d, PARTITION_COUNT),
+    )
+    expect(new Set(homes).size).toBeGreaterThan(1)
   })
 })
 

@@ -366,6 +366,13 @@ export function createSyncAccount(
       stamper,
       deviceId: getOrCreateDeviceId(),
       accountId,
+      // Read fresh so the presence/intent rounds see the current device
+      // registry — without this the background-sync acquire has no rivals to
+      // check and can collide with a live holder on another device.
+      knownDeviceIds: () =>
+        accountsStore
+          .getAccount(new EthAddress(accountId))
+          ?.devices.map((d) => d.deviceId) ?? [],
       backupSigner: accountKey,
       swarmEncryptionKey: hexToUint8Array(encryptionKey),
       partitionCount,

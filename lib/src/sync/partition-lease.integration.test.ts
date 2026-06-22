@@ -48,6 +48,11 @@ import {
   readPartitionLock,
   writePartitionLock,
 } from "./partition-lock"
+import {
+  intentEpochBucket,
+  readPartitionIntent,
+  writePartitionIntent,
+} from "./partition-intent"
 import { Binary } from "cafe-utility"
 import {
   LEASE_TTL_MS,
@@ -73,7 +78,12 @@ import {
 const TEST_BATCH_ID = new BatchId("ab".repeat(32))
 const TEST_BATCH_DEPTH = 24
 const TEST_ENC_KEY = new Uint8Array(32).map((_, i) => (i * 7 + 3) & 0xff)
-const DEVICE_A = "device-alpha-111"
+// Selection scans from each device's deterministic home partition
+// (`deviceHomePartition`). These device IDs are chosen so DEVICE_A's home is
+// partition 0 at PARTITION_COUNT (2), keeping the selection/fencing scenarios
+// below readable in natural partition order. The home-offset spread itself is
+// covered directly in partition-lock.test.ts.
+const DEVICE_A = "device-alpha-1" // home partition 0 (keccak256 mod 2)
 const DEVICE_B = "device-beta-222"
 
 const BACKUP_SIGNER = createTestSigner() as PrivateKey
@@ -124,6 +134,9 @@ function makeLease(opts: {
   deviceId: string
   bee: Bee
   now?: () => number
+  knownDeviceIds?: () => string[]
+  intentReadTimeoutMs?: number
+  intentGuardWindowMs?: number
 }): PartitionLease {
   return new PartitionLease({
     bee: opts.bee,
@@ -135,6 +148,12 @@ function makeLease(opts: {
     stamper: createMockStamper() as unknown as Stamper,
     now: opts.now,
     guardMs: GUARD_MS,
+    knownDeviceIds: opts.knownDeviceIds,
+    intentReadTimeoutMs: opts.intentReadTimeoutMs,
+    // Default the intent-round poll-guard to a single immediate read in tests
+    // (MockBee has perfect visibility; the production ~12s window would just
+    // stall the suite). Individual tests can override.
+    intentGuardWindowMs: opts.intentGuardWindowMs ?? 0,
   })
 }
 
@@ -800,7 +819,7 @@ describe("PartitionLease.refresh", () => {
 
     nowValue = NOW1 + 10_000
     const ok = await lease.refresh()
-    expect(ok).toBe(true)
+    expect(ok).toBe("held")
 
     const observed = await readPartitionLock({
       bee: bee as unknown as Bee,
@@ -812,9 +831,9 @@ describe("PartitionLease.refresh", () => {
     expect(observed?.leasedUntil).toBe(nowValue + LEASE_TTL_MS)
   })
 
-  it("returns false when no lease is held", async () => {
+  it("returns 'lost' when no lease is held", async () => {
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
-    expect(await lease.refresh()).toBe(false)
+    expect(await lease.refresh()).toBe("lost")
   })
 })
 
@@ -956,7 +975,7 @@ describe("PartitionLease.release — generation fencing (#349)", () => {
 
     // A refresh tick that slipped past teardown: must abort (no ghost claim
     // the fenced release would refuse to clear), not throw.
-    await expect(leaseA.refresh()).resolves.toBe(false)
+    await expect(leaseA.refresh()).resolves.toBe("lost")
 
     unblock()
     await releasing
@@ -1028,5 +1047,332 @@ describe("PartitionLease.serialize / hydrate", () => {
     const other = makeLease({ deviceId: DEVICE_B, bee: bee as unknown as Bee })
     other.hydrate(snap)
     expect(other.currentPartition).toBeUndefined()
+  })
+})
+
+describe("PartitionLease.acquire — intent round (Phase 2)", () => {
+  // DEVICE_A's home partition is 0 (see the constant above), so a fresh claim
+  // targets partition 0 and the intent round consults rivals for partition 0.
+  const NOW = 5_000_000
+
+  it("backs off to read-only when a rival advertises an earlier intent", async () => {
+    // A rival announced intent for partition 0 with a SMALLER generation than
+    // DEVICE_A will use (timestampMs NOW). No lock SOC exists, so without the
+    // intent round DEVICE_A would bind partition 0 — the disjoint-gateway bug.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW - 1,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+    })
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(result.isReadOnly).toBe(true)
+    expect(result.partition).toBeUndefined()
+    // Crucially: no lock claim was written over the contested partition.
+    const lock = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(lock?.holderDeviceId).not.toBe(DEVICE_A)
+  })
+
+  it("wins and binds when a rival advertises a later intent", async () => {
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW + 1,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+    })
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(result.isReadOnly).toBe(false)
+    expect(result.partition).toBe(0)
+    const lock = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(lock?.holderDeviceId).toBe(DEVICE_A)
+  })
+
+  it("does not run an intent round when re-acquiring our own partition", async () => {
+    // First claim with no rivals.
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // A rival now advertises an earlier intent — but a re-acquire of a
+    // partition we already hold must NOT be gated by the intent round.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW - 1,
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+    })
+
+    const reacquire = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(reacquire.partition).toBe(0)
+    expect(reacquire.isReadOnly).toBe(false)
+  })
+})
+
+describe("PartitionLease.acquire — holder presence beacons (gateway holder-exists)", () => {
+  // DEVICE_A's home partition is 0. To simulate the gateway (static lock SOC
+  // unreadable) we write NO lock SOC, only a foreign holder's presence beacon
+  // (an intent SOC carrying `leasedUntil`), and assert the joiner detects it
+  // and avoids that partition — the 3-device "join against an existing holder"
+  // collision the rework fixes.
+  const NOW = 5_000_000
+
+  function writeBeacon(opts: {
+    partition: number
+    deviceId: string
+    epochBucket: number
+    leasedUntil: number
+    genTimestamp?: number
+  }) {
+    return writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: opts.partition,
+      deviceId: opts.deviceId,
+      epochBucket: opts.epochBucket,
+      generation: {
+        timestampMs: opts.genTimestamp ?? NOW - 1000,
+        tiebreaker: makeDeviceTiebreaker(opts.deviceId),
+      },
+      leasedUntil: opts.leasedUntil,
+    })
+  }
+
+  function joinerLease() {
+    return makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+  }
+
+  it("detects a live holder's beacon on its home partition and picks another", async () => {
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      leasedUntil: NOW + LEASE_TTL_MS,
+    })
+
+    const result = await joinerLease().acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+
+    expect(result.isReadOnly).toBe(false)
+    expect(result.partition).toBe(1) // avoided the held partition 0
+    // No claim written on partition 0 by the joiner.
+    const p0 = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(p0?.holderDeviceId).not.toBe(DEVICE_A)
+  })
+
+  it("treats an expired beacon (leasedUntil <= now) as free", async () => {
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      leasedUntil: NOW - 1,
+    })
+
+    const result = await joinerLease().acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+    expect(result.partition).toBe(0) // expired → partition is free → home wins
+  })
+
+  it("detects a live beacon left in the previous epoch bucket (boundary)", async () => {
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW) - 1,
+      leasedUntil: NOW + LEASE_TTL_MS,
+    })
+
+    const result = await joinerLease().acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+    expect(result.partition).toBe(1) // detected via the previous-bucket read
+  })
+
+  it("a bare pre-claim intent (no leasedUntil) does NOT mark a partition held", async () => {
+    // Same address/bucket as a beacon but WITHOUT leasedUntil — a contender,
+    // not a holder. The joiner must still claim the partition (resolved by the
+    // intent round), not treat it as held.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      generation: {
+        timestampMs: NOW + 1000, // later → joiner wins the intent round
+        tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+      },
+      // no leasedUntil
+    })
+
+    const result = await joinerLease().acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+    expect(result.partition).toBe(0) // claimed p0 (won the intent round), not avoided
+  })
+
+  it("a holder publishes a beacon on acquire (and not when it has no rival)", async () => {
+    const withRival = await joinerLease().acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+    expect(withRival.partition).toBe(0)
+    const beacon = await readPartitionIntent({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+    })
+    expect(beacon?.leasedUntil).toBeGreaterThan(NOW)
+  })
+
+  it("does not publish a beacon for a single-device account (no rival)", async () => {
+    const solo = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A],
+      intentReadTimeoutMs: 50,
+    })
+    expect(
+      (await solo.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+    const beacon = await readPartitionIntent({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+    })
+    expect(beacon).toBeUndefined()
+  })
+
+  it("refresh yields when an earlier-generation peer holds the same partition (deconfliction backstop)", async () => {
+    // DEVICE_A claims p0 cleanly (no rival beacon yet at acquire).
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // A collision slipped past the guard: DEVICE_B holds p0 too, with an EARLIER
+    // generation (claimed first). Its beacon has now propagated.
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      leasedUntil: NOW + LEASE_TTL_MS,
+    })
+
+    // On refresh, DEVICE_A (later generation) detects DEVICE_B and yields.
+    // The verdict comes from the per-epoch beacon channel, so it is reported as
+    // a CONFIRMED `"displaced"` (not a plain `"lost"`): the coordinator must
+    // demote on this without re-reading the static lock SOC, which DEVICE_A
+    // just rewrote with its own claim. See the BatchWriteCoordinator test
+    // "demotes on a beacon-confirmed displacement …" for the end-to-end guard.
+    expect(await lease.refresh()).toBe("displaced")
+  })
+
+  it("refresh keeps the lease when only a LATER-generation peer is present", async () => {
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // DEVICE_B's beacon is LATER than DEVICE_A's claim (DEVICE_A's generation
+    // is NOW; give B a later timestamp).
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      leasedUntil: NOW + LEASE_TTL_MS,
+      genTimestamp: NOW + 1000,
+    })
+    // DEVICE_A is the earlier holder → keeps the lease.
+    expect(await lease.refresh()).toBe("held")
   })
 })

@@ -436,6 +436,15 @@ export {
 // Download data utility
 export { downloadDataWithChunkAPI } from "./proxy/download-data"
 
+// SOC write/read primitives (used by dev tooling, e.g. the gateway
+// retrievability self-check: write a SOC then read it back).
+export { downloadEncryptedSOC } from "./proxy/download-data"
+export {
+  uploadSOC,
+  type UploadTarget,
+  type UploadSOCOptions,
+} from "./proxy/upload"
+
 // ACT (Access Control Tries) exports
 export {
   createActForContent,

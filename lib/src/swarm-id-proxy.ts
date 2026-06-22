@@ -154,6 +154,36 @@ const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
 
 /**
+ * localStorage key holding optional partition-coordination timing overrides
+ * (`{ guardWindowMs?, guardPollMs?, readTimeoutMs? }`). Lets the gateway's
+ * propagation tuning be adjusted at runtime (set by the /dev "Partition tuning"
+ * panel) and picked up on the next connect — no rebuild. Absent → code defaults.
+ */
+const PARTITION_TUNING_KEY = "swarm-id-partition-tuning"
+
+function readPartitionTuningOverride():
+  | { guardWindowMs?: number; guardPollMs?: number; readTimeoutMs?: number }
+  | undefined {
+  try {
+    if (typeof localStorage === "undefined") return undefined
+    const raw = localStorage.getItem(PARTITION_TUNING_KEY)
+    if (!raw) return undefined
+    const parsed: unknown = JSON.parse(raw)
+    if (typeof parsed !== "object" || parsed === null) return undefined
+    const pick = (v: unknown): number | undefined =>
+      typeof v === "number" && Number.isFinite(v) && v >= 0 ? v : undefined
+    const o = parsed as Record<string, unknown>
+    return {
+      guardWindowMs: pick(o.guardWindowMs),
+      guardPollMs: pick(o.guardPollMs),
+      readTimeoutMs: pick(o.readTimeoutMs),
+    }
+  } catch {
+    return undefined
+  }
+}
+
+/**
  * Swarm ID Proxy - Runs inside the iframe
  *
  * Responsibilities:
@@ -688,11 +718,17 @@ export class SwarmIdProxy {
       uint8ArrayToHex(accountInfo.encryptionKey),
       "backup-key",
     )
+    const tuning = readPartitionTuningOverride()
     this.coordinator = new BatchWriteCoordinator({
       bee: this.bee,
       batchId: this.postageBatchId,
       stamper: this.stamper,
       deviceId: this.requireDeviceId(),
+      knownDeviceIds: () =>
+        this.knownDeviceIdsForAccount(accountInfo.accountId),
+      intentReadTimeoutMs: tuning?.readTimeoutMs,
+      intentGuardWindowMs: tuning?.guardWindowMs,
+      intentGuardPollMs: tuning?.guardPollMs,
       accountId: accountInfo.accountId,
       backupSigner: new PrivateKey(backupKeyHex),
       swarmEncryptionKey: accountInfo.encryptionKey,
@@ -1275,6 +1311,22 @@ export class SwarmIdProxy {
     } catch (error) {
       console.error("[Proxy] Error looking up account:", error)
       return undefined
+    }
+  }
+
+  /**
+   * Current device IDs registered for `accountId`, read fresh from shared
+   * storage so the partition-intent round (Phase 2) reflects devices that
+   * announced after the coordinator was built. Returns [] on any error — the
+   * lease then falls back to the guard+TTL acquire path.
+   */
+  private knownDeviceIdsForAccount(accountId: string): string[] {
+    try {
+      const accounts = createAccountsStorageManager().load()
+      const account = accounts.find((a) => a.id.toHex() === accountId)
+      return account?.devices.map((d) => d.deviceId) ?? []
+    } catch {
+      return []
     }
   }
 
