@@ -12,8 +12,6 @@
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import IdentityList from '$lib/components/identity-list.svelte'
-  import CreateIdentityButton from '$lib/components/create-identity-button.svelte'
   import { notImplemented } from '$lib/utils/not-implemented'
   import Add from 'carbon-icons-svelte/lib/Add.svelte'
   import Checkmark from 'carbon-icons-svelte/lib/Checkmark.svelte'
@@ -34,17 +32,13 @@
   import FlexItem from '$lib/components/ui/flex-item.svelte'
   import Divider from '$lib/components/ui/divider.svelte'
   import Badge from '$lib/components/ui/badge.svelte'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import {
     createEncryptedExport,
     deriveSwarmEncryptionKey,
     SWARM_SECRET_PREFIX,
-    collectAccountStampBatchIds,
   } from '@snaha/swarm-id'
-  import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-  import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
-  import type { Account, Identity, PostageStamp } from '$lib/types'
+  import type { Account } from '$lib/types'
   import type { Bytes } from '@ethersphere/bee-js'
   import { deriveSecretSeedEncryptionKey, decryptSecretSeed } from '$lib/utils/encryption'
   import {
@@ -65,11 +59,10 @@
   type Props = {
     drawerOpen: boolean
     account: Account
-    identities: Identity[]
-    identityId?: string
+    accounts: Account[]
   }
 
-  let { drawerOpen = $bindable(), identities, account, identityId }: Props = $props()
+  let { drawerOpen = $bindable(), account, accounts }: Props = $props()
 
   let screen = $state<'main' | 'all-accounts' | 'account-details' | 'generation-details'>('main')
   // eslint-disable-next-line svelte/prefer-writable-derived
@@ -97,26 +90,15 @@
     accountName = account.name
   })
 
-  function handleIdentityClick(clickedIdentity: (typeof identities)[number]) {
-    const currentPath = page.url.pathname
-
-    // Determine which page we're on and navigate to the same page type with the new identity
-    if (currentPath.includes('/apps')) {
-      goto(resolve(routes.IDENTITY_APPS, { id: clickedIdentity.id }))
-    } else if (currentPath.includes('/stamps')) {
-      goto(resolve(routes.IDENTITY_STAMPS, { id: clickedIdentity.id }))
-    } else if (currentPath.includes('/settings')) {
-      goto(resolve(routes.IDENTITY_SETTINGS, { id: clickedIdentity.id }))
-    } else {
-      goto(resolve(routes.IDENTITY_APPS, { id: clickedIdentity.id }))
-    }
-  }
-
   function selectAccount(acc: Account) {
-    const firstAccountIdentity = identities.find((identity) => identity.accountId === acc.id)
-    if (firstAccountIdentity) {
-      handleIdentityClick(firstAccountIdentity)
-    }
+    // Navigate to the clicked account, keeping the same sub-page where possible.
+    const currentPath = page.url.pathname
+    const target = currentPath.includes('/stamps')
+      ? routes.ACCOUNT_STAMPS
+      : currentPath.includes('/settings')
+        ? routes.ACCOUNT_SETTINGS
+        : routes.ACCOUNT_APPS
+    goto(resolve(target, { id: acc.id.toHex() }))
   }
 
   function onAccountNameChange() {
@@ -124,19 +106,12 @@
   }
 
   async function performAccountDeletion() {
-    const accountId = account.id
-    const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
-    // Collect stamp batch ids before removing identities, since the
-    // association is derived from the account/identity pointers.
-    const stampBatchIds = collectAccountStampBatchIds(account, accountIdentities)
-    for (const identity of accountIdentities) {
-      connectedAppsStore.removeAppsByIdentityId(identity.id)
-      identitiesStore.removeIdentity(identity.id)
+    // The account owns its apps + stamps, so removing it drops the whole tree.
+    // Clear any local app secrets the proxy reads first.
+    for (const app of account.connectedApps) {
+      localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
     }
-    for (const batchId of stampBatchIds) {
-      postageStampsStore.removeStamp(batchId, accountId.toHex())
-    }
-    accountsStore.removeAccount(accountId)
+    accountsStore.removeAccount(account.id)
     sessionStore.clearAccount()
     showDeleteModal = false
     drawerOpen = false
@@ -191,18 +166,8 @@
   async function handleExportAccount() {
     let url: string | undefined
     try {
-      const accountIdentities = identitiesStore.getIdentitiesByAccount(account.id)
-      const connectedApps = accountIdentities.flatMap((identity) =>
-        connectedAppsStore.getAppsByIdentityId(identity.id),
-      )
-      const postageStamps = collectAccountStampBatchIds(account, accountIdentities)
-        .map((batchId) => postageStampsStore.getStamp(batchId))
-        .filter((stamp): stamp is PostageStamp => stamp !== undefined)
       const encrypted = await createEncryptedExport(
         account,
-        accountIdentities,
-        connectedApps,
-        postageStamps,
         await deriveSwarmEncryptionKey(account.derivationKey),
       )
       const json = JSON.stringify(encrypted, undefined, 2)
@@ -239,25 +204,12 @@
   }
 
   async function handleSignOut() {
-    const accountId = account.id
-    const accountIdentities = identitiesStore.getIdentitiesByAccount(accountId)
-    // Collect stamp batch ids before removing identities, since the
-    // association is derived from the account/identity pointers.
-    const stampBatchIds = collectAccountStampBatchIds(account, accountIdentities)
-
-    for (const identity of accountIdentities) {
-      const apps = connectedAppsStore.getAppsByIdentityId(identity.id)
-      for (const app of apps) {
-        localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
-      }
-      connectedAppsStore.removeAppsByIdentityId(identity.id)
-      identitiesStore.removeIdentity(identity.id)
+    // Clear local app secrets, then drop the whole account (it owns its apps +
+    // stamps).
+    for (const app of account.connectedApps) {
+      localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
     }
-    for (const batchId of stampBatchIds) {
-      postageStampsStore.removeStamp(batchId, accountId.toHex())
-    }
-    accountsStore.removeAccount(accountId)
-
+    accountsStore.removeAccount(account.id)
     sessionStore.clearAccount()
     drawerOpen = false
     await goto(resolve(routes.HOME))
@@ -336,22 +288,11 @@
           >
         </Horizontal>
 
-        <div style="padding: 0 var(--padding);">
-          <IdentityList
-            {identities}
-            currentIdentityId={identityId}
-            onIdentityClick={handleIdentityClick}
-            showBorder={false}
-            showArrow={false}
-          />
-        </div>
-
         <Vertical
           --vertical-gap="0"
           --vertical-align-items="stretch"
           style="padding: var(--padding)"
         >
-          <CreateIdentityButton {account} showIcon={false} />
           <Button variant="ghost" dimension="compact" onclick={() => (screen = 'account-details')}>
             <Horizontal
               --horizontal-gap="var(--half-padding)"
@@ -441,7 +382,7 @@
           >
         </Horizontal>
         <Vertical --vertical-gap="0" style="padding: var(--padding)">
-          {#each accountsStore.accounts as acc (acc.id)}
+          {#each accounts as acc (acc.id.toHex())}
             <Button variant="ghost" dimension="compact" onclick={() => selectAccount(acc)}>
               <Horizontal
                 --horizontal-gap="var(--half-padding)"
@@ -458,7 +399,7 @@
                 {/if}
                 {acc.name}
                 <FlexItem />
-                {#if account.id === acc.id}
+                {#if account.id.equals(acc.id)}
                   <Checkmark size={20} />
                 {/if}
               </Horizontal>

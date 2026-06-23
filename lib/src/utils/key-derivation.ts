@@ -89,45 +89,6 @@ export async function verifySecret(
 }
 
 /**
- * Derive an identity-specific master key from account master key and identity ID
- *
- * Uses HMAC-SHA256 to create a deterministic, unique key for each identity.
- * This enables hierarchical key derivation: Account → Identity → App.
- * The same account master key + identity ID will always produce the same identity key.
- *
- * @param accountMasterKey - The account's master key (hex string)
- * @param identityId - The identity's unique identifier
- * @returns The derived identity master key as a hex string
- */
-export async function deriveIdentityKey(
-  accountMasterKey: string,
-  identityId: string,
-): Promise<string> {
-  const encoder = new TextEncoder()
-
-  // Convert account master key to Uint8Array
-  const keyData = hexToUint8Array(accountMasterKey)
-  const message = encoder.encode(identityId)
-
-  // Import the account master key for HMAC
-  const cryptoKey = await crypto.subtle.importKey(
-    "raw",
-    keyData,
-    { name: "HMAC", hash: "SHA-256" },
-    false,
-    ["sign"],
-  )
-
-  // Sign the identity ID with the account master key
-  const signature = await crypto.subtle.sign("HMAC", cryptoKey, message)
-
-  // Convert to hex string
-  const identityKeyHex = uint8ArrayToHex(new Uint8Array(signature))
-
-  return identityKeyHex
-}
-
-/**
  * Derive account backup key from account master key
  *
  * Used for signing account feed updates
@@ -174,22 +135,16 @@ export async function deriveSwarmEncryptionKey(
 }
 
 /**
- * Derive postage batch signer key from account derivation key
- *
- * Used as the PrivateKey for signing chunks uploaded with a postage batch.
- * When identityId is provided, derives a unique signer key per identity;
- * otherwise derives an account-level signer key.
+ * Derive the account-level postage batch signer key from the account derivation
+ * key. Used as the PrivateKey for signing chunks uploaded with a postage batch.
  *
  * @param derivationKey - Account derivation key (hex string)
- * @param identityId - Optional identity ID for per-identity signer keys
  * @returns 32-byte signer key (as hex string)
  */
 export async function derivePostageSignerKey(
   derivationKey: string,
-  identityId?: string,
 ): Promise<string> {
-  const context = identityId ? `postage-signer:${identityId}` : `postage-signer`
-  return deriveSecret(derivationKey, context)
+  return deriveSecret(derivationKey, `postage-signer`)
 }
 
 /**

@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Session store for tracking current account/identity creation flow
+// Session store for tracking the current account creation/connect flow
 
 import type { Account, AppData } from '$lib/types'
 import type { EncryptedSwarmIdExport } from '@snaha/swarm-id'
@@ -11,19 +11,15 @@ export type SessionData = {
   // Account during creation flow (ready to be persisted)
   account?: Account
 
-  // Temporary masterKey during account/identity creation flow
-  // Cleared immediately after identity is created
+  // Temporary masterKey during the account creation flow
+  // Cleared immediately after the account is created
   temporaryMasterKey?: Bytes
 
-  // Active account and identity
+  // Active account
   currentAccountId?: string
-  currentIdentityId?: string
 
   // Creation flow: whether account is being created as synced
   isSyncedCreation?: boolean
-
-  // Stamp flow: tracks whether user chose 'account' or 'separate' stamp
-  selectedStampOption?: 'account' | 'separate'
 
   // App data
   appData?: AppData
@@ -52,16 +48,11 @@ export const sessionStore = {
   clearAccount() {
     session = {
       currentAccountId: session.currentAccountId,
-      currentIdentityId: session.currentIdentityId,
     }
   },
 
   setCurrentAccount(accountId: string) {
     session = { ...session, currentAccountId: accountId }
-  },
-
-  setCurrentIdentity(identityId: string) {
-    session = { ...session, currentIdentityId: identityId }
   },
 
   setTemporaryMasterKey(masterKey: Bytes | string) {
@@ -99,14 +90,6 @@ export const sessionStore = {
 
   setSyncedCreation(synced: boolean) {
     session = { ...session, isSyncedCreation: synced }
-  },
-
-  setStampOption(option: 'account' | 'separate') {
-    session = { ...session, selectedStampOption: option }
-  },
-
-  clearStampOption() {
-    session = { ...session, selectedStampOption: undefined }
   },
 
   setStoragePartitioned(challenge: string) {

@@ -12,6 +12,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { PrivateKey, type Bee, type Stamper } from "@ethersphere/bee-js"
 import {
   INTENT_EPOCH_MS,
+  INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
   makePartitionIntentIdentifier,
   readPartitionIntent,
@@ -279,6 +280,55 @@ describe("resolveIntentRound", () => {
       guardPollMs: 40,
     })
     expect(outcome).toBe("lose")
+  })
+
+  it("yields to a beacon whose leasedUntil lapsed WITHIN the liveness grace", async () => {
+    // The propagation-lag case: the holder's freshest beacon hasn't surfaced, so
+    // only its previous-bucket beacon (TTL lapsed seconds ago) is retrievable. It
+    // must still count as a live holder, or both devices bind the partition.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(1000, DEVICE_A),
+      leasedUntil: NOW - 1, // lapsed, but within grace
+    })
+    const outcome = await resolveIntentRound({
+      ...common(),
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B],
+      guardWindowMs: 120,
+      guardPollMs: 40,
+    })
+    expect(outcome).toBe("lose")
+  })
+
+  it("wins over a beacon whose leasedUntil lapsed BEYOND the liveness grace", async () => {
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(1000, DEVICE_A),
+      leasedUntil: NOW - INTENT_LIVENESS_GRACE_MS - 1, // departed
+    })
+    const outcome = await resolveIntentRound({
+      ...common(),
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B],
+      guardWindowMs: 120,
+      guardPollMs: 40,
+    })
+    expect(outcome).toBe("win")
   })
 
   it("polls the full guard window then wins when no rival surfaces", async () => {

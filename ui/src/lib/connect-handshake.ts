@@ -3,28 +3,26 @@
 /**
  * Completing a dApp connection from the connect popup.
  *
- * The proxy iframe embedded in the dApp authenticates from records in shared
- * localStorage (written through the @snaha/swarm-id storage managers): a
- * `connectedApps` entry carrying the app secret, plus the `identities` and
- * `accounts` records it resolves the connection against. Writing the
- * connected-app entry fires a storage event in the iframe, which picks up the
- * session — same handshake as the legacy UI. When storage is partitioned the
- * secret is handed to the iframe via a `setSecret` postMessage instead.
+ * The proxy iframe embedded in the dApp authenticates from the shared
+ * localStorage account document (written through the @snaha/swarm-id storage
+ * manager): a nested account record that owns the `connectedApps` entry carrying
+ * the app secret. Writing it fires a storage event in the iframe, which picks up
+ * the session. When storage is partitioned the secret is handed to the iframe
+ * via a `setSecret` postMessage instead.
  *
- * Key hierarchy (master key = the account wallet's private key, matching
- * legacy agent accounts): master key → identity key → per-app secret.
+ * Key model (master key = the account wallet's private key): the account is the
+ * single app-facing identity, so the per-app secret derives straight from the
+ * master key (`deriveSecret(master, appOrigin)`).
  */
 import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import {
   DEFAULT_SESSION_DURATION,
   PARTITION_COUNT,
+  type Account as SharedAccount,
   type ConnectedApp as SharedConnectedApp,
+  type PostageStamp as SharedPostageStamp,
   createAccountsStorageManager,
-  createConnectedAppsStorageManager,
-  createIdentitiesStorageManager,
-  createPostageStampsStorageManager,
   deriveAccountDerivationKey,
-  deriveIdentityKey,
   deriveSecret,
 } from '@snaha/swarm-id'
 
@@ -52,142 +50,111 @@ function defaultBatchId(account: Account): BatchId | undefined {
   return batchId === undefined ? undefined : new BatchId(batchId)
 }
 
-/** Mirror the account's stamps into the shared postage-stamps store the proxy reads. */
-function saveSharedStamps(account: Account): void {
-  if (account.stamps.length === 0) {
-    return
-  }
-  const manager = createPostageStampsStorageManager()
-  const mine = new Set(account.stamps.map((stamp) => bareHex(stamp.batchId)))
-  const others = manager.load().filter((stamp) => !mine.has(bareHex(stamp.batchID.toHex())))
-  manager.save([
-    ...others,
-    ...account.stamps.map((stamp) => ({
-      batchID: new BatchId(stamp.batchId),
-      signerKey: new PrivateKey(stamp.signerKey),
-      utilization: stamp.utilization,
-      usable: stamp.usable,
-      depth: stamp.depth,
-      amount: BigInt(stamp.amount),
-      bucketDepth: stamp.bucketDepth,
-      blockNumber: stamp.blockNumber,
-      immutableFlag: stamp.immutableFlag,
-      exists: stamp.exists,
-      batchTTL: stamp.batchTTL,
-      createdAt: stamp.createdAt,
-    })),
-  ])
+/** The account's stamps in the shared (@snaha/swarm-id) PostageStamp shape. */
+function sharedStamps(account: Account): SharedPostageStamp[] {
+  return account.stamps.map((stamp) => ({
+    batchID: new BatchId(stamp.batchId),
+    signerKey: new PrivateKey(stamp.signerKey),
+    utilization: stamp.utilization,
+    usable: stamp.usable,
+    depth: stamp.depth,
+    amount: BigInt(stamp.amount),
+    bucketDepth: stamp.bucketDepth,
+    blockNumber: stamp.blockNumber,
+    immutableFlag: stamp.immutableFlag,
+    exists: stamp.exists,
+    batchTTL: stamp.batchTTL,
+    createdAt: stamp.createdAt,
+  }))
+}
+
+/** Upsert the matching shared account record via `mutate`, persisting the result. */
+function updateSharedAccount(
+  accountId: EthAddress,
+  mutate: (account: SharedAccount) => SharedAccount,
+): void {
+  const manager = createAccountsStorageManager()
+  manager.save(
+    manager.load().map((account) => (account.id.equals(accountId) ? mutate(account) : account)),
+  )
 }
 
 /**
- * Upsert the shared `accounts`, `identities`, and `postageStamps` records the
- * proxy resolves a connection (and its upload stamp) against. The new UI has
- * no separate identity concept, so the account doubles as its single identity
- * (identity id = account address).
+ * Upsert the shared nested account record the proxy resolves a connection (and
+ * its upload stamp) against. The account is its own single identity, owning its
+ * connected apps and postage stamps inline.
  */
 async function saveSharedRecords(account: Account, masterKey: string): Promise<void> {
   const accountId = new EthAddress(account.id)
-  const identityId = bareHex(account.id)
   const stampBatchId = defaultBatchId(account)
+  const publicKey = bareHex(account.publicKey)
 
-  const accountsManager = createAccountsStorageManager()
-  const sharedAccounts = accountsManager.load()
-  if (sharedAccounts.some((shared) => shared.id.equals(accountId))) {
-    accountsManager.save(
-      sharedAccounts.map((shared) =>
+  const manager = createAccountsStorageManager()
+  const accounts = manager.load()
+  const existing = accounts.find((shared) => shared.id.equals(accountId))
+
+  if (existing) {
+    manager.save(
+      accounts.map((shared) =>
         shared.id.equals(accountId)
           ? {
               ...shared,
               name: account.name,
+              publicKey,
               defaultPostageStampBatchID: stampBatchId ?? shared.defaultPostageStampBatchID,
+              postageStamps: sharedStamps(account),
             }
           : shared,
       ),
     )
   } else {
-    accountsManager.save([
-      ...sharedAccounts,
+    manager.save([
+      ...accounts,
       {
         type: 'agent',
         id: accountId,
         name: account.name,
         createdAt: account.createdAt,
         derivationKey: await deriveAccountDerivationKey(masterKey),
+        publicKey,
         defaultPostageStampBatchID: stampBatchId,
         devices: [],
+        connectedApps: [],
+        postageStamps: sharedStamps(account),
         partitionCount: PARTITION_COUNT,
       },
     ])
   }
-
-  const identitiesManager = createIdentitiesStorageManager()
-  const identities = identitiesManager.load()
-  const publicKey = bareHex(account.publicKey)
-  const existing = identities.find((identity) => identity.id === identityId)
-  if (existing) {
-    identitiesManager.save(
-      identities.map((identity) =>
-        identity.id === identityId
-          ? {
-              ...identity,
-              name: account.name,
-              publicKey,
-              defaultPostageStampBatchID: stampBatchId ?? identity.defaultPostageStampBatchID,
-            }
-          : identity,
-      ),
-    )
-  } else {
-    identitiesManager.save([
-      ...identities,
-      {
-        id: identityId,
-        accountId,
-        name: account.name,
-        publicKey,
-        defaultPostageStampBatchID: stampBatchId,
-        createdAt: account.createdAt,
-      },
-    ])
-  }
-
-  saveSharedStamps(account)
 }
 
 /**
- * Write the connected-app entry to shared storage (this is what fires the
- * storage event the proxy iframe authenticates from) and mirror the
+ * Write the connected-app entry into the shared account record (this is what
+ * fires the storage event the proxy iframe authenticates from) and mirror the
  * connection into the UI's own account record.
  */
 function saveConnection(account: Account, request: ConnectRequest, appSecret: string): void {
-  const identityId = bareHex(account.id)
+  const accountId = new EthAddress(account.id)
   const now = Date.now()
   const connection: SharedConnectedApp = {
     appUrl: request.appOrigin,
     appName: request.appName,
     appIcon: request.appIcon,
     appDescription: request.appDescription,
-    identityId,
     appSecret,
     lastConnectedAt: now,
     connectedUntil: now + connectionDuration(account),
     updatedAt: now,
   }
 
-  const manager = createConnectedAppsStorageManager()
-  const apps = manager.load()
-  const existing = apps.some(
-    (app) => app.appUrl === connection.appUrl && app.identityId === identityId,
-  )
-  manager.save(
-    existing
-      ? apps.map((app) =>
-          app.appUrl === connection.appUrl && app.identityId === identityId
-            ? { ...app, ...connection, revokedAt: undefined }
-            : app,
+  updateSharedAccount(accountId, (shared) => {
+    const has = shared.connectedApps.some((app) => app.appUrl === connection.appUrl)
+    const connectedApps = has
+      ? shared.connectedApps.map((app) =>
+          app.appUrl === connection.appUrl ? { ...app, ...connection, revokedAt: undefined } : app,
         )
-      : [...apps, connection],
-  )
+      : [...shared.connectedApps, connection]
+    return { ...shared, connectedApps }
+  })
 
   accountsStore.connectApp(account.id, {
     appUrl: request.appOrigin,
@@ -201,7 +168,8 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
 
 /**
  * Storage-partitioning fallback: hand the secret straight to the proxy
- * iframe (our window.opener) since it can't see our localStorage.
+ * iframe (our window.opener) since it can't see our localStorage. The
+ * `identity*` fields carry the account's info (single-level model).
  */
 function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret: string): void {
   if (!request.partitionChallenge || !window.opener) {
@@ -236,8 +204,7 @@ export async function completeConnect(
 ): Promise<void> {
   const masterKey = bareHex(privateKeyFromEntropy(entropy))
   await saveSharedRecords(account, masterKey)
-  const identityKey = await deriveIdentityKey(masterKey, bareHex(account.id))
-  const appSecret = await deriveSecret(identityKey, request.appOrigin)
+  const appSecret = await deriveSecret(masterKey, request.appOrigin)
   saveConnection(account, request, appSecret)
   sendSecretToOpener(account, request, appSecret)
 }
@@ -248,36 +215,23 @@ export async function completeConnect(
  * unlock + derivation is required.
  */
 export function reuseConnection(account: Account, request: ConnectRequest): boolean {
-  const identityId = bareHex(account.id)
-  const existing = createConnectedAppsStorageManager()
+  const accountId = new EthAddress(account.id)
+  const shared = createAccountsStorageManager()
     .load()
-    .find(
-      (app) =>
-        app.appUrl === request.appOrigin &&
-        app.identityId === identityId &&
-        app.appSecret !== undefined &&
-        app.revokedAt === undefined &&
-        (app.connectedUntil ?? 0) > Date.now(),
-    )
+    .find((a) => a.id.equals(accountId))
+  const existing = shared?.connectedApps.find(
+    (app) =>
+      app.appUrl === request.appOrigin &&
+      app.appSecret !== undefined &&
+      app.revokedAt === undefined &&
+      (app.connectedUntil ?? 0) > Date.now(),
+  )
   if (!existing?.appSecret) {
     return false
   }
   saveConnection(account, request, existing.appSecret)
   sendSecretToOpener(account, request, existing.appSecret)
   return true
-}
-
-function updateSharedConnections(
-  identityId: string,
-  matches: (app: SharedConnectedApp) => boolean,
-  change: (app: SharedConnectedApp) => SharedConnectedApp,
-): void {
-  const manager = createConnectedAppsStorageManager()
-  manager.save(
-    manager
-      .load()
-      .map((app) => (app.identityId === identityId && matches(app) ? change(app) : app)),
-  )
 }
 
 function revoked(app: SharedConnectedApp, tombstone: boolean): SharedConnectedApp {
@@ -298,48 +252,31 @@ function revoked(app: SharedConnectedApp, tombstone: boolean): SharedConnectedAp
  * needs a fresh unlock ceremony.
  */
 export function disconnectSharedConnection(account: Account, appUrl: string): void {
-  updateSharedConnections(
-    bareHex(account.id),
-    (app) => app.appUrl === appUrl,
-    (app) => revoked(app, false),
-  )
+  updateSharedAccount(new EthAddress(account.id), (shared) => ({
+    ...shared,
+    connectedApps: shared.connectedApps.map((app) =>
+      app.appUrl === appUrl ? revoked(app, false) : app,
+    ),
+  }))
 }
 
 /** Disconnect and tombstone the shared record so the removal propagates to sync. */
 export function removeSharedConnection(account: Account, appUrl: string): void {
-  updateSharedConnections(
-    bareHex(account.id),
-    (app) => app.appUrl === appUrl,
-    (app) => revoked(app, true),
-  )
+  updateSharedAccount(new EthAddress(account.id), (shared) => ({
+    ...shared,
+    connectedApps: shared.connectedApps.map((app) =>
+      app.appUrl === appUrl ? revoked(app, true) : app,
+    ),
+  }))
 }
 
 /**
- * Erase the account's shared-storage footprint: revoke every connected app
- * (de-authenticating their proxy iframes), then drop the identity, account,
- * and postage-stamp records.
+ * Erase the account's shared-storage footprint: removing the nested account
+ * record drops its connected apps and stamps with it, and the storage event
+ * de-authenticates any dApp proxy iframes.
  */
 export function removeSharedAccountRecords(account: Account): void {
   const accountId = new EthAddress(account.id)
-  const identityId = bareHex(account.id)
-
-  updateSharedConnections(
-    identityId,
-    () => true,
-    (app) => revoked(app, true),
-  )
-
-  const identitiesManager = createIdentitiesStorageManager()
-  identitiesManager.save(identitiesManager.load().filter((identity) => identity.id !== identityId))
-
-  const accountsManager = createAccountsStorageManager()
-  accountsManager.save(accountsManager.load().filter((shared) => !shared.id.equals(accountId)))
-
-  if (account.stamps.length > 0) {
-    const mine = new Set(account.stamps.map((stamp) => bareHex(stamp.batchId)))
-    const stampsManager = createPostageStampsStorageManager()
-    stampsManager.save(
-      stampsManager.load().filter((stamp) => !mine.has(bareHex(stamp.batchID.toHex()))),
-    )
-  }
+  const manager = createAccountsStorageManager()
+  manager.save(manager.load().filter((shared) => !shared.id.equals(accountId)))
 }

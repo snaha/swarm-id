@@ -7,9 +7,9 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
-  import type { ConnectedApp, Identity } from '$lib/types'
+  import type { Account, ConnectedApp } from '$lib/types'
   import { DEFAULT_SESSION_DURATION } from '@snaha/swarm-id'
-  import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
   import Badge from './ui/badge.svelte'
   import Dropdown from './ui/dropdown.svelte'
   import { OverflowMenuVertical, TrashCan, Unlink } from 'carbon-icons-svelte'
@@ -20,10 +20,10 @@
 
   interface Props {
     apps: ConnectedApp[]
-    identity: Identity
+    account: Account
   }
 
-  let { apps, identity }: Props = $props()
+  let { apps, account }: Props = $props()
 
   let showConfirmRevokeApp = $state(false)
   let appToBeRevoked = $state<ConnectedApp | undefined>()
@@ -31,12 +31,12 @@
   function isAppConnected(app: ConnectedApp, now = Date.now()) {
     return app.connectedUntil
       ? app.connectedUntil > now
-      : app.lastConnectedAt + (identity.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION) >
+      : app.lastConnectedAt + (account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION) >
           now
   }
 
   function disconnectApp(app: ConnectedApp) {
-    connectedAppsStore.disconnectApp(app.appUrl, app.identityId)
+    accountsStore.disconnectApp(account.id, app.appUrl)
     localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
   }
 
@@ -50,7 +50,7 @@
     // the revocation propagates to other devices (a hard delete can't — the
     // merge would re-add it from a peer snapshot).
     localStorage.removeItem(`${SWARM_SECRET_PREFIX}${app.appUrl}`)
-    connectedAppsStore.revokeApp(app.appUrl, app.identityId)
+    accountsStore.revokeApp(account.id, app.appUrl)
   }
 </script>
 

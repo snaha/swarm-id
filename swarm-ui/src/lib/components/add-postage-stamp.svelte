@@ -13,7 +13,6 @@
   import Polycon from '$lib/components/polycon.svelte'
   import Launch from 'carbon-icons-svelte/lib/Launch.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
-  import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { BatchId, PrivateKey } from '@ethersphere/bee-js'
   import { openStampPurchaseWidget, type BatchEvent } from '$lib/services/multichain-widget'
   import { derivePostageSignerKey, hexToUint8Array } from '@snaha/swarm-id'
@@ -40,15 +39,14 @@
 
   interface Props {
     accountId: string
-    identityId?: string
     onSuccess: (stamp: PostageStamp) => void
     onSkip?: () => void
     introText?: string
     // Variant determines success/error screen layout
     variant?: StampVariant
     // For account-creation variant
-    identityName?: string
-    identityValue?: string
+    accountName?: string
+    accountValue?: string
     // Bindable state for parent to read
     pageState?: PageState
     purchaseState?: PurchaseState
@@ -59,13 +57,12 @@
 
   let {
     accountId,
-    identityId,
     onSuccess,
     onSkip,
     introText = 'Synced accounts require a Swarm postage stamp.',
     variant = 'dashboard',
-    identityName,
-    identityValue,
+    accountName,
+    accountValue,
     pageState = $bindable<PageState>('select'),
     purchaseState = $bindable<PurchaseState>('waiting'),
     isFormDisabled = $bindable(true),
@@ -98,21 +95,18 @@
     submitError = undefined
 
     try {
-      const stamp = postageStampsStore.addStamp(
-        {
-          batchID: new BatchId(batchID),
-          signerKey: new PrivateKey(signerKey),
-          utilization: 0,
-          usable: true,
-          depth,
-          amount,
-          bucketDepth: 16,
-          blockNumber,
-          immutableFlag: false,
-          exists: true,
-        },
-        accountId,
-      )
+      const stamp = accountsStore.addStamp(new EthAddress(accountId), {
+        batchID: new BatchId(batchID),
+        signerKey: new PrivateKey(signerKey),
+        utilization: 0,
+        usable: true,
+        depth,
+        amount,
+        bucketDepth: 16,
+        blockNumber,
+        immutableFlag: false,
+        exists: true,
+      })
 
       onSuccess(stamp)
     } catch (error) {
@@ -128,12 +122,8 @@
       console.error('[AddPostageStamp] Account not found', accountId)
       return
     }
-    // The purchased stamp becomes the ACCOUNT default when the account has none
-    // yet (an upgrade); only when an account default already exists is it a
-    // per-identity stamp. Derive the signer to match where the stamp is stored
-    // — see handleSuccess in the stamp pages.
-    const signerIdentityId = account.defaultPostageStampBatchID ? identityId : undefined
-    const signerKeyHex = await derivePostageSignerKey(account.derivationKey, signerIdentityId)
+    // Account-level signer key (the account owns its stamps).
+    const signerKeyHex = await derivePostageSignerKey(account.derivationKey)
     signerKeyBytes = hexToUint8Array(signerKeyHex)
     derivedSignerKeyHex = signerKeyHex
     const signerKeyPrivate = new PrivateKey(signerKeyBytes)
@@ -165,21 +155,18 @@
 
     try {
       // Create postage stamp from widget response
-      const stamp = postageStampsStore.addStamp(
-        {
-          batchID: new BatchId(batch.batchId),
-          signerKey: new PrivateKey(signerKeyBytes),
-          depth: batch.depth,
-          amount: BigInt(batch.amount),
-          blockNumber: parseBlockNumber(batch.blockNumber),
-          utilization: 0,
-          usable: true,
-          bucketDepth: 16,
-          immutableFlag: false,
-          exists: true,
-        },
-        accountId,
-      )
+      const stamp = accountsStore.addStamp(new EthAddress(accountId), {
+        batchID: new BatchId(batch.batchId),
+        signerKey: new PrivateKey(signerKeyBytes),
+        depth: batch.depth,
+        amount: BigInt(batch.amount),
+        blockNumber: parseBlockNumber(batch.blockNumber),
+        utilization: 0,
+        usable: true,
+        bucketDepth: 16,
+        immutableFlag: false,
+        exists: true,
+      })
 
       // In auto-navigate mode, call onSuccess immediately (skip success screen)
       if (autoNavigateOnSuccess) {
@@ -277,10 +264,10 @@
       --vertical-justify-content="center"
       style="flex: 1;"
     >
-      {#if variant === 'account-creation' && identityValue}
-        <Polycon value={identityValue} size={POLYCON_SIZE} />
-        {#if identityName}
-          <Typography variant="small" center>{identityName}</Typography>
+      {#if variant === 'account-creation' && accountValue}
+        <Polycon value={accountValue} size={POLYCON_SIZE} />
+        {#if accountName}
+          <Typography variant="small" center>{accountName}</Typography>
         {/if}
       {/if}
 
@@ -296,7 +283,7 @@
 
       <Typography center>
         {#if variant === 'account-creation'}
-          Your Swarm identity is ready to use.
+          Your Swarm account is ready to use.
         {:else if variant === 'external-app'}
           Your postage stamp was added to your account
         {:else}
@@ -306,7 +293,7 @@
 
       {#if variant === 'account-creation'}
         <Typography variant="small" center class="footer-text">
-          Manage your account and create more identities at
+          Manage your account at
           <a href={resolve(routes.ROOT)} target="_blank">{window.location.hostname}</a>
         </Typography>
       {/if}

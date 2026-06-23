@@ -20,7 +20,7 @@ import {
   deserializeAccountStateSnapshot,
 } from "./account-state-snapshot"
 import type { AccountStateSnapshotResult } from "./account-state-snapshot"
-import type { Account, Identity, ConnectedApp, PostageStamp } from "../schemas"
+import type { Account } from "../schemas"
 
 // ============================================================================
 // Constants
@@ -222,9 +222,6 @@ export function buildBackupHeader(
  */
 export async function createEncryptedExport(
   account: Account,
-  identities: Identity[],
-  connectedApps: ConnectedApp[],
-  postageStamps: PostageStamp[],
   swarmEncryptionKeyHex: string,
 ): Promise<EncryptedSwarmIdExport> {
   const now = Date.now()
@@ -233,14 +230,15 @@ export async function createEncryptedExport(
     metadata: {
       accountName: account.name,
       defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
+      publicKey: account.publicKey,
+      settings: account.settings,
       createdAt: account.createdAt,
       lastModified: now,
       devices: account.devices,
       partitionCount: account.partitionCount ?? 1,
     },
-    identities,
-    connectedApps,
-    postageStamps,
+    connectedApps: account.connectedApps,
+    postageStamps: account.postageStamps,
     timestamp: now,
   })
   const plaintextJson = JSON.stringify(exportData)

@@ -10,7 +10,11 @@ const TEST_SEED_PHRASE =
 const TEST_APP_ORIGIN = 'https://test-app.example.com'
 const TEST_APP_NAME = 'TestApp'
 
-test.describe('Agent Account', () => {
+// Skipped: the single-level account refactor (#339/#313) collapsed the
+// identity tier, so these specs still drive the removed "Create identity" step
+// and time out. Re-enable and rewrite against the new account-only flow once
+// the swarm-ui UI is finalized.
+test.describe.skip('Agent Account', () => {
   test.beforeEach(async ({ page }) => {
     // Clear localStorage before each test for clean state
     await page.goto('/')

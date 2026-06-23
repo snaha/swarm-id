@@ -4,8 +4,9 @@
 /**
  * Pre-configured Storage Managers for Entity Types
  *
- * Provides ready-to-use storage managers for accounts, identities,
- * connected apps, and postage stamps with versioning support.
+ * The account is the single nested document of record: it owns its connected
+ * apps and postage stamps inline (no separate per-collection storage keys).
+ * Only the accounts document and the network-settings singleton are persisted.
  */
 
 import { z } from "zod"
@@ -14,19 +15,10 @@ import {
   createLocalStorageManager,
   type VersionParser,
 } from "./versioned-storage"
-import type { Account, Identity, ConnectedApp, PostageStamp } from "../types"
-import {
-  STORAGE_KEY_ACCOUNTS,
-  STORAGE_KEY_IDENTITIES,
-  STORAGE_KEY_CONNECTED_APPS,
-  STORAGE_KEY_POSTAGE_STAMPS,
-  STORAGE_KEY_NETWORK_SETTINGS,
-} from "../types"
+import type { Account, ConnectedApp, PostageStamp } from "../types"
+import { STORAGE_KEY_ACCOUNTS, STORAGE_KEY_NETWORK_SETTINGS } from "../types"
 import {
   AccountSchemaV1,
-  IdentitySchemaV1,
-  ConnectedAppSchemaV1,
-  PostageStampSchemaV1,
   NetworkSettingsSchemaV1,
   type NetworkSettings,
 } from "../schemas"
@@ -58,54 +50,13 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
   })
 }
 
-/**
- * Parse identities - Zod transforms handle type conversion
- */
-const parseIdentitiesV1: VersionParser<Identity> = (data: unknown) => {
-  const result = z.array(IdentitySchemaV1).safeParse(data)
-
-  if (!result.success) {
-    console.error("Parse failed:", result.error.format())
-    return []
-  }
-
-  return result.data
-}
-
-/**
- * Parse connected apps
- */
-const parseConnectedAppsV1: VersionParser<ConnectedApp> = (data: unknown) => {
-  const result = z.array(ConnectedAppSchemaV1).safeParse(data)
-
-  if (!result.success) {
-    console.error("Parse failed:", result.error.format())
-    return []
-  }
-
-  return result.data
-}
-
-/**
- * Parse postage stamps - Zod transforms handle type conversion
- */
-const parsePostageStampsV1: VersionParser<PostageStamp> = (data: unknown) => {
-  const result = z.array(PostageStampSchemaV1).safeParse(data)
-
-  if (!result.success) {
-    console.error("Parse failed:", result.error.format())
-    return []
-  }
-
-  return result.data
-}
-
 // ============================================================================
 // Serializers
 // ============================================================================
 
 /**
- * Serialize Account for storage
+ * Serialize Account for storage (nested: includes its connected apps and
+ * postage stamps inline).
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
   const common = {
@@ -114,8 +65,13 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     createdAt: account.createdAt,
     type: account.type,
     derivationKey: account.derivationKey,
+    publicKey: account.publicKey,
     defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toString(),
     devices: account.devices,
+    connectedApps: account.connectedApps.map(serializeConnectedApp),
+    postageStamps: account.postageStamps.map(serializePostageStamp),
+    settings: account.settings,
+    lastModified: account.lastModified,
     partitionCount: account.partitionCount,
   }
 
@@ -137,21 +93,6 @@ export function serializeAccount(account: Account): Record<string, unknown> {
 }
 
 /**
- * Serialize Identity for storage
- */
-export function serializeIdentity(identity: Identity): Record<string, unknown> {
-  return {
-    id: identity.id,
-    accountId: identity.accountId.toString(),
-    name: identity.name,
-    publicKey: identity.publicKey,
-    defaultPostageStampBatchID: identity.defaultPostageStampBatchID?.toString(),
-    createdAt: identity.createdAt,
-    settings: identity.settings,
-  }
-}
-
-/**
  * Serialize ConnectedApp for storage
  */
 export function serializeConnectedApp(
@@ -161,11 +102,11 @@ export function serializeConnectedApp(
     appUrl: app.appUrl,
     appName: app.appName,
     lastConnectedAt: app.lastConnectedAt,
-    identityId: app.identityId,
     appIcon: app.appIcon,
     appDescription: app.appDescription,
     connectedUntil: app.connectedUntil,
     appSecret: app.appSecret,
+    postageStampBatchID: app.postageStampBatchID?.toString(),
     updatedAt: app.updatedAt,
     revokedAt: app.revokedAt,
   }
@@ -209,67 +150,6 @@ export function createAccountsStorageManager(): VersionedStorageManager<Account>
     },
     serializer: serializeAccount,
     loggerName: "AccountsStorage",
-  })
-}
-
-/**
- * Create storage manager for identities
- */
-export function createIdentitiesStorageManager(): VersionedStorageManager<Identity> {
-  return createLocalStorageManager<Identity>({
-    key: STORAGE_KEY_IDENTITIES,
-    currentVersion: 1,
-    parsers: {
-      1: parseIdentitiesV1,
-    },
-    serializer: serializeIdentity,
-    loggerName: "IdentitiesStorage",
-  })
-}
-
-/**
- * Create storage manager for connected apps
- */
-export function createConnectedAppsStorageManager(): VersionedStorageManager<ConnectedApp> {
-  return createLocalStorageManager<ConnectedApp>({
-    key: STORAGE_KEY_CONNECTED_APPS,
-    currentVersion: 1,
-    parsers: {
-      1: parseConnectedAppsV1,
-    },
-    serializer: serializeConnectedApp,
-    loggerName: "ConnectedAppsStorage",
-  })
-}
-
-/**
- * Invalidate all connected app entries for a given app URL.
- * Sets lastConnectedAt to 0 and connectedUntil to undefined so
- * isConnectionValid() returns false and reconnect won't happen on refresh.
- */
-export function disconnectApp(appUrl: string): void {
-  const manager = createConnectedAppsStorageManager()
-  const apps = manager.load()
-  const updated = apps.map((app) =>
-    app.appUrl === appUrl
-      ? { ...app, lastConnectedAt: 0, connectedUntil: undefined }
-      : app,
-  )
-  manager.save(updated)
-}
-
-/**
- * Create storage manager for postage stamps
- */
-export function createPostageStampsStorageManager(): VersionedStorageManager<PostageStamp> {
-  return createLocalStorageManager<PostageStamp>({
-    key: STORAGE_KEY_POSTAGE_STAMPS,
-    currentVersion: 1,
-    parsers: {
-      1: parsePostageStampsV1,
-    },
-    serializer: serializePostageStamp,
-    loggerName: "PostageStampsStorage",
   })
 }
 

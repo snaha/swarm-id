@@ -12,17 +12,18 @@
   import { page } from '$app/state'
   import { resolve } from '$app/paths'
   import routes from '$lib/routes'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
+  import { EthAddress } from '@ethersphere/bee-js'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import Drawer from '$lib/components/drawer.svelte'
   import PreAuthSettingsMenu from '$lib/components/pre-auth-settings-menu.svelte'
 
   let { children } = $props()
 
-  const identityId = $derived(page.params.id)
-  const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
-  const identities = $derived(identitiesStore.identities)
-  const account = $derived(identity ? accountsStore.getAccount(identity.accountId) : undefined)
+  const accountId = $derived(page.params.id)
+  const account = $derived(
+    accountId ? accountsStore.getAccount(new EthAddress(accountId)) : undefined,
+  )
+  const accounts = $derived(accountsStore.accounts)
 
   // Initialize drawer state from localStorage
   let drawerOpen = $state(
@@ -55,17 +56,16 @@
         </a>
       </div>
 
-      {#if identity && account}
+      {#if account}
         <Horizontal
           --horizontal-gap="var(--half-padding)"
           --horizontal-align-items="center"
           onclick={() => (drawerOpen = true)}
           class="clickable"
         >
-          <Polycon value={identity.id} size={32} />
+          <Polycon value={account.id.toHex()} size={32} />
           <Vertical --vertical-gap="0">
-            <Typography variant="small">{account.name}</Typography>
-            <Typography>{identity.name}</Typography>
+            <Typography>{account.name}</Typography>
           </Vertical>
         </Horizontal>
       {:else}
@@ -80,8 +80,8 @@
     </div>
   </Vertical>
 
-  {#if identity && account}
-    <Drawer bind:drawerOpen {account} {identities} {identityId} />
+  {#if account}
+    <Drawer bind:drawerOpen {account} {accounts} />
   {/if}
 </div>
 

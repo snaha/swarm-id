@@ -49,6 +49,7 @@ import {
   writePartitionLock,
 } from "./partition-lock"
 import {
+  INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
   readPartitionIntent,
   writePartitionIntent,
@@ -1229,7 +1230,11 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     expect(p0?.holderDeviceId).not.toBe(DEVICE_A)
   })
 
-  it("treats an expired beacon (leasedUntil <= now) as free", async () => {
+  it("treats a beacon lapsed WITHIN the liveness grace as still held (propagation lag)", async () => {
+    // The bug: a live holder's freshest beacon hasn't propagated cross-device,
+    // leaving only its previous-bucket beacon whose TTL lapsed seconds ago. A
+    // beacon lapsed within grace must keep the partition held so a joiner backs
+    // off (else both devices bind the same partition).
     await writeBeacon({
       partition: 0,
       deviceId: DEVICE_B,
@@ -1240,7 +1245,21 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     const result = await joinerLease().acquire({
       partitionCount: PARTITION_COUNT,
     })
-    expect(result.partition).toBe(0) // expired → partition is free → home wins
+    expect(result.partition).toBe(1) // within grace → p0 held → joiner avoids it
+  })
+
+  it("treats a beacon lapsed BEYOND the liveness grace as free", async () => {
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      leasedUntil: NOW - INTENT_LIVENESS_GRACE_MS - 1,
+    })
+
+    const result = await joinerLease().acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+    expect(result.partition).toBe(0) // beyond grace → departed → home wins
   })
 
   it("detects a live beacon left in the previous epoch bucket (boundary)", async () => {
@@ -1298,7 +1317,10 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     expect(beacon?.leasedUntil).toBeGreaterThan(NOW)
   })
 
-  it("does not publish a beacon for a single-device account (no rival)", async () => {
+  it("publishes a beacon even with no known rivals (so a later-arriving peer can detect it)", async () => {
+    // The dual-acquire fix: a device that created the account (knows no peers
+    // yet) must still beacon while holding, or a peer who DOES know it finds no
+    // beacon and claims the same partition.
     const solo = makeLease({
       deviceId: DEVICE_A,
       bee: bee as unknown as Bee,
@@ -1317,7 +1339,7 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       deviceId: DEVICE_A,
       epochBucket: intentEpochBucket(NOW),
     })
-    expect(beacon).toBeUndefined()
+    expect(beacon?.leasedUntil).toBeGreaterThan(NOW)
   })
 
   it("refresh yields when an earlier-generation peer holds the same partition (deconfliction backstop)", async () => {

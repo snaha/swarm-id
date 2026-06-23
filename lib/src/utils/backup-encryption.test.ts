@@ -21,7 +21,6 @@ import {
   createPasskeyAccount,
   createEthereumAccount,
   createAgentAccount,
-  createIdentity,
   createConnectedApp,
   createPostageStamp,
 } from "../test-fixtures"
@@ -32,16 +31,13 @@ import {
 
 describe("round-trip: encrypt → decrypt for each account type", () => {
   it("should round-trip a passkey account", async () => {
-    const account = createPasskeyAccount()
-    const identities = [createIdentity()]
-    const connectedApps = [createConnectedApp()]
-    const postageStamps = [createPostageStamp()]
+    const account = createPasskeyAccount({
+      connectedApps: [createConnectedApp()],
+      postageStamps: [createPostageStamp()],
+    })
 
     const encrypted = await createEncryptedExport(
       account,
-      identities,
-      connectedApps,
-      postageStamps,
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -50,7 +46,6 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     expect(typeof encrypted.ciphertext).toBe("string")
     // No plaintext account data in the outer object
     expect(encrypted).not.toHaveProperty("account")
-    expect(encrypted).not.toHaveProperty("identities")
     expect(encrypted).not.toHaveProperty("postageStamps")
 
     const result = await decryptEncryptedExport(
@@ -63,7 +58,6 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
     expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
     expect(result.data.metadata.accountName).toBe("Test Passkey Account")
-    expect(result.data.identities).toHaveLength(1)
     expect(result.data.connectedApps).toHaveLength(1)
     expect(result.data.postageStamps).toHaveLength(1)
     expect(result.data.postageStamps[0].batchID).toBeInstanceOf(BatchId)
@@ -71,13 +65,9 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
   it("should round-trip an ethereum account", async () => {
     const account = createEthereumAccount()
-    const identities = [createIdentity()]
 
     const encrypted = await createEncryptedExport(
       account,
-      identities,
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -98,13 +88,9 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
   it("should round-trip an agent account", async () => {
     const account = createAgentAccount()
-    const identities = [createIdentity()]
 
     const encrypted = await createEncryptedExport(
       account,
-      identities,
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -124,18 +110,13 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
   it("should survive JSON serialization (file I/O simulation)", async () => {
     const account = createPasskeyAccount({
       defaultPostageStampBatchID: new BatchId("c".repeat(64)),
+      settings: { appSessionDuration: 3600 },
+      connectedApps: [createConnectedApp()],
+      postageStamps: [createPostageStamp({ batchTTL: 86400 })],
     })
-    const identities = [
-      createIdentity({ settings: { appSessionDuration: 3600 } }),
-    ]
-    const connectedApps = [createConnectedApp()]
-    const postageStamps = [createPostageStamp({ batchTTL: 86400 })]
 
     const encrypted = await createEncryptedExport(
       account,
-      identities,
-      connectedApps,
-      postageStamps,
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -152,7 +133,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     if (!result.success) return
 
     expect(result.data.metadata.defaultPostageStampBatchID).toBe("c".repeat(64))
-    expect(result.data.identities[0].settings?.appSessionDuration).toBe(3600)
+    expect(result.data.metadata.settings?.appSessionDuration).toBe(3600)
     expect(result.data.postageStamps[0].batchTTL).toBe(86400)
   })
 })
@@ -163,14 +144,12 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
 describe("appSecret preservation in encrypted export", () => {
   it("should preserve appSecret in connected apps through encrypted export", async () => {
-    const account = createPasskeyAccount()
-    const connectedApps = [createConnectedApp({ appSecret: "my-secret-value" })]
+    const account = createPasskeyAccount({
+      connectedApps: [createConnectedApp({ appSecret: "my-secret-value" })],
+    })
 
     const encrypted = await createEncryptedExport(
       account,
-      [],
-      connectedApps,
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -223,9 +202,6 @@ describe("wrong key rejection", () => {
 
     const encrypted = await createEncryptedExport(
       account,
-      [createIdentity()],
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -298,9 +274,6 @@ describe("schema validation", () => {
   it("should accept a valid passkey encrypted export", async () => {
     const encrypted = await createEncryptedExport(
       createPasskeyAccount(),
-      [],
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -311,9 +284,6 @@ describe("schema validation", () => {
   it("should accept a valid ethereum encrypted export", async () => {
     const encrypted = await createEncryptedExport(
       createEthereumAccount(),
-      [],
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -324,9 +294,6 @@ describe("schema validation", () => {
   it("should accept a valid agent encrypted export", async () => {
     const encrypted = await createEncryptedExport(
       createAgentAccount(),
-      [],
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -378,9 +345,6 @@ describe("parseEncryptedExportHeader", () => {
   it("should parse a valid passkey header", async () => {
     const encrypted = await createEncryptedExport(
       createPasskeyAccount(),
-      [],
-      [],
-      [],
       TEST_DERIVATION_KEY_HEX,
     )
 

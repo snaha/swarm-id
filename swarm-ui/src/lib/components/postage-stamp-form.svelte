@@ -93,7 +93,7 @@
       bind:value={batchID}
       error={batchIDErrorShown}
       label="Stamp ID"
-      helperText="Don't reuse stamps across accounts and identities"
+      helperText="Don't reuse stamps across accounts"
     />
   </div>
   {#if batchIDErrorShown}

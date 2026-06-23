@@ -10,7 +10,7 @@
  */
 
 import type { EthAddress, BatchId, Stamper } from "@ethersphere/bee-js"
-import type { Account, Identity, ConnectedApp, PostageStamp } from "../schemas"
+import type { Account, PostageStamp } from "../schemas"
 
 /**
  * Options for creating a stamper with utilization tracking
@@ -37,24 +37,11 @@ export interface FlushableStamper extends Stamper {
 }
 
 /**
- * Interface for accessing account data
+ * Interface for accessing account data. The account is the aggregate root and
+ * owns its connected apps and postage stamps inline.
  */
 export interface AccountsStoreInterface {
   getAccount(id: EthAddress): Account | undefined
-}
-
-/**
- * Interface for accessing identity data
- */
-export interface IdentitiesStoreInterface {
-  getIdentitiesByAccount(accountId: EthAddress): Identity[]
-}
-
-/**
- * Interface for accessing connected app data
- */
-export interface ConnectedAppsStoreInterface {
-  getAppsByIdentityId(identityId: string): ConnectedApp[]
 }
 
 /**

@@ -117,19 +117,94 @@ export const DeviceSchemaV1 = z.object({
 })
 
 // ============================================================================
+// Connected App Schema
+// ============================================================================
+
+/**
+ * Connected App Schema V1.
+ *
+ * Account-owned: keyed by `appUrl` within its owning account (the `identityId`
+ * pointer was removed when the identity tier was collapsed into the account).
+ */
+export const ConnectedAppSchemaV1 = z.object({
+  appUrl: z.string(),
+  appName: z.string(),
+  lastConnectedAt: z.number(),
+  appIcon: z.string().optional(),
+  appDescription: z.string().optional(),
+  connectedUntil: z.number().optional(),
+  appSecret: z.string().optional(),
+  // Optional per-app postage-batch override. Absent → the account default
+  // (`account.defaultPostageStampBatchID`) pays for this app's uploads.
+  postageStampBatchID: StoredBatchId.optional(),
+  // Last-writer-wins clock for cross-device merge (set on any change). Absent
+  // on pre-existing records → merge falls back to `lastConnectedAt`.
+  updatedAt: z.number().optional(),
+  // Tombstone marker. A revoked app is kept in the snapshot (so the removal
+  // propagates to other devices) but hidden from the UI and invalid for auth.
+  revokedAt: z.number().optional(),
+})
+
+// ============================================================================
+// Postage Stamp Schema
+// ============================================================================
+
+/**
+ * Postage Stamp Schema V1
+ */
+export const PostageStampSchemaV1 = z.object({
+  batchID: StoredBatchId,
+  signerKey: StoredPrivateKey,
+  utilization: z.number(),
+  usable: z.boolean(),
+  depth: z.number(),
+  amount: z.string().transform((val) => BigInt(val)),
+  bucketDepth: z.number(),
+  blockNumber: z.number(),
+  immutableFlag: z.boolean(),
+  exists: z.boolean(),
+  batchTTL: z.number().optional(),
+  createdAt: z.number(),
+})
+
+// ============================================================================
 // Account Schemas
 // ============================================================================
 
 /**
- * Common fields shared by all account types
+ * Common fields shared by all account types.
+ *
+ * The account is the single-level aggregate root (the identity tier was
+ * collapsed into it). It is the app-facing identity: `id` is the address apps
+ * connect to and `publicKey` is surfaced to dApps. Apps receive a per-app
+ * DERIVED key (`deriveSecret(masterKey, appOrigin)` → app key) — never the
+ * account private key, which is the mnemonic-equivalent root and is exposed only
+ * after an explicit permission/signing request. The account OWNS its connected
+ * apps and postage stamps as nested collections rather than via foreign-key
+ * pointers.
  */
 const CommonAccountSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
   derivationKey: z.string().length(64), // derived key for deterministic sub-key generation (64-char hex)
+  // App-facing public key (compressed secp256k1). Surfaced to dApps as the
+  // identity public key in ConnectionInfo. Was previously on the identity.
+  publicKey: CompressedPublicKeySchema.optional(),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
+  // Account-owned nested collections (replace the old flat identities/apps/
+  // stamps stores joined by accountId/identityId pointers).
+  connectedApps: z.array(ConnectedAppSchemaV1).default([]),
+  postageStamps: z.array(PostageStampSchemaV1).default([]),
+  // Per-account settings (was identity.settings).
+  settings: z
+    .object({
+      appSessionDuration: z.number().optional(),
+    })
+    .optional(),
+  // Last-writer-wins clock for cross-device metadata merge (set on any change).
+  lastModified: z.number().optional(),
   /**
    * Number of partitions the postage-batch slot space is divided into.
    * Optional on the local account record (omitted → `1` = single-device
@@ -177,73 +252,6 @@ export const AccountSchemaV1 = z.discriminatedUnion("type", [
 ])
 
 // ============================================================================
-// Identity Schema
-// ============================================================================
-
-/**
- * Identity Schema V1
- */
-export const IdentitySchemaV1 = z.object({
-  id: AddressSchema,
-  accountId: StoredEthAddress,
-  name: z.string(),
-  publicKey: CompressedPublicKeySchema.optional(),
-  defaultPostageStampBatchID: StoredBatchId.optional(),
-  createdAt: z.number(),
-  settings: z
-    .object({
-      appSessionDuration: z.number().optional(),
-    })
-    .optional(),
-})
-
-// ============================================================================
-// Connected App Schema
-// ============================================================================
-
-/**
- * Connected App Schema V1 (no transforms needed - all primitives)
- */
-export const ConnectedAppSchemaV1 = z.object({
-  appUrl: z.string(),
-  appName: z.string(),
-  lastConnectedAt: z.number(),
-  identityId: z.string(),
-  appIcon: z.string().optional(),
-  appDescription: z.string().optional(),
-  connectedUntil: z.number().optional(),
-  appSecret: z.string().optional(),
-  // Last-writer-wins clock for cross-device merge (set on any change). Absent
-  // on pre-existing records → merge falls back to `lastConnectedAt`.
-  updatedAt: z.number().optional(),
-  // Tombstone marker. A revoked app is kept in the snapshot (so the removal
-  // propagates to other devices) but hidden from the UI and invalid for auth.
-  revokedAt: z.number().optional(),
-})
-
-// ============================================================================
-// Postage Stamp Schema
-// ============================================================================
-
-/**
- * Postage Stamp Schema V1
- */
-export const PostageStampSchemaV1 = z.object({
-  batchID: StoredBatchId,
-  signerKey: StoredPrivateKey,
-  utilization: z.number(),
-  usable: z.boolean(),
-  depth: z.number(),
-  amount: z.string().transform((val) => BigInt(val)),
-  bucketDepth: z.number(),
-  blockNumber: z.number(),
-  immutableFlag: z.boolean(),
-  exists: z.boolean(),
-  batchTTL: z.number().optional(),
-  createdAt: z.number(),
-})
-
-// ============================================================================
 // Sync State Snapshot Schemas
 // ============================================================================
 
@@ -253,6 +261,14 @@ export const PostageStampSchemaV1 = z.object({
 export const AccountMetadataSchemaV1 = z.object({
   accountName: z.string(),
   defaultPostageStampBatchID: z.string().length(64).optional(), // BatchId hex string
+  // App-facing public key (compressed secp256k1 hex). Mirrors account.publicKey.
+  publicKey: CompressedPublicKeySchema.optional(),
+  // Per-account settings (was identity.settings).
+  settings: z
+    .object({
+      appSessionDuration: z.number().optional(),
+    })
+    .optional(),
   createdAt: z.number(),
   lastModified: z.number(),
   devices: z.array(DeviceSchemaV1).default([]),
@@ -269,14 +285,17 @@ const ACCOUNT_STATE_SNAPSHOT_VERSION = 1
 
 /**
  * Unified account state snapshot schema used by both file export and Swarm sync.
- * Contains minimal metadata instead of the full Account object.
+ *
+ * Wire/export projection of the nested account: metadata (non-secret account
+ * fields) plus the account-owned `connectedApps` and `postageStamps`. Account
+ * secrets (`derivationKey`, `credentialId`, ethereum encrypted fields) are
+ * deliberately excluded — only `metadata` + the nested collections travel.
  */
 export const AccountStateSnapshotSchemaV1 = z.object({
   version: z.literal(ACCOUNT_STATE_SNAPSHOT_VERSION),
   timestamp: z.number(),
   accountId: z.string().length(40),
   metadata: AccountMetadataSchemaV1,
-  identities: z.array(IdentitySchemaV1),
   connectedApps: z.array(ConnectedAppSchemaV1),
   postageStamps: z.array(PostageStampSchemaV1),
 })
@@ -290,7 +309,6 @@ export type PasskeyAccount = z.infer<typeof PasskeyAccountSchemaV1>
 export type EthereumAccount = z.infer<typeof EthereumAccountSchemaV1>
 export type AgentAccount = z.infer<typeof AgentAccountSchemaV1>
 export type Account = z.infer<typeof AccountSchemaV1>
-export type Identity = z.infer<typeof IdentitySchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>

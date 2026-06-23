@@ -8,34 +8,29 @@
   import Typography from '$lib/components/ui/typography.svelte'
   import AppList from '$lib/components/app-list.svelte'
   import { DEFAULT_SESSION_DURATION, DAY, HOUR } from '@snaha/swarm-id'
-  import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
+  import { EthAddress } from '@ethersphere/bee-js'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
   import { page } from '$app/state'
   import Grid from '$lib/components/ui/grid.svelte'
   import Select from '$lib/components/ui/select/select.svelte'
-  import { identitiesStore } from '$lib/stores/identities.svelte'
 
-  const identityId = $derived(page.params.id)
-  const apps = $derived(identityId ? connectedAppsStore.getActiveAppsByIdentityId(identityId) : [])
-  const identity = $derived(identityId ? identitiesStore.getIdentity(identityId) : undefined)
+  const account = $derived(
+    page.params.id ? accountsStore.getAccount(new EthAddress(page.params.id)) : undefined,
+  )
+  const apps = $derived(account ? accountsStore.getActiveApps(account.id) : [])
 
   let sessionDurationValue = $state(sessionDurationToValue(DEFAULT_SESSION_DURATION))
 
   $effect(() => {
-    if (identity) {
-      const appSessionDuration = identity.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION
+    if (account) {
+      const appSessionDuration = account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION
       sessionDurationValue = sessionDurationToValue(appSessionDuration)
     }
   })
 
   function onSessionDurationChange() {
-    if (identity) {
-      const appSessionDuration = valueToSessionDuration(sessionDurationValue)
-      identitiesStore.updateIdentity(identity.id, {
-        settings: {
-          ...identity.settings,
-          appSessionDuration,
-        },
-      })
+    if (account) {
+      accountsStore.setSessionDuration(account.id, valueToSessionDuration(sessionDurationValue))
     }
   }
 
@@ -71,7 +66,7 @@
 </script>
 
 <Vertical --vertical-gap="var(--padding)" style="padding-top: var(--double-padding);">
-  {#if apps.length > 0 && identity}
+  {#if apps.length > 0 && account}
     <Grid>
       <!-- Row 1-->
       <Typography>Keep apps connected for</Typography>
@@ -87,7 +82,7 @@
         onchange={onSessionDurationChange}
       ></Select>
     </Grid>
-    <AppList {apps} {identity} />
+    <AppList {apps} {account} />
   {:else}
     <Vertical --vertical-gap="var(--half-padding)">
       <Typography bold center>No connected apps yet.</Typography>

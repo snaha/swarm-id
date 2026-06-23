@@ -2,13 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
+import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
   mergeSnapshotWithRemote,
   snapshotContainsContribution,
 } from "./merge-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
-import type { Device, Identity, ConnectedApp, PostageStamp } from "../schemas"
+import type { Device, ConnectedApp, PostageStamp } from "../schemas"
 
 const SELF_DEVICE_ID = "device-self-111"
 const OTHER_DEVICE_ID = "device-other-222"
@@ -20,18 +20,6 @@ function makeDevice(deviceId: string, lastSignedInAt = 1_000_000): Device {
     name: `Device ${deviceId.slice(-3)}`,
     createdAt: 1_000_000,
     lastSignedInAt,
-  }
-}
-
-function makeIdentity(id: string): Identity {
-  return {
-    id: new EthAddress(id),
-    accountId: new EthAddress(ACCOUNT_ID),
-    name: `Identity ${id.slice(0, 6)}`,
-    publicKey: new PrivateKey("11".repeat(32))
-      .publicKey()
-      .toCompressedUint8Array(),
-    createdAt: 1_000_000,
   }
 }
 
@@ -50,18 +38,16 @@ function makeStamp(batchHex: string): PostageStamp {
   }
 }
 
-function makeConnectedApp(identityId: string, appUrl: string): ConnectedApp {
+function makeConnectedApp(appUrl: string): ConnectedApp {
   return {
     appUrl,
     appName: appUrl,
     lastConnectedAt: 1_000_000,
-    identityId,
   }
 }
 
 function makeSnapshot(overrides: {
   devices?: Device[]
-  identities?: Identity[]
   connectedApps?: ConnectedApp[]
   postageStamps?: PostageStamp[]
   accountName?: string
@@ -79,7 +65,6 @@ function makeSnapshot(overrides: {
       devices: overrides.devices ?? [],
       partitionCount: overrides.partitionCount ?? 4,
     },
-    identities: overrides.identities ?? [],
     connectedApps: overrides.connectedApps ?? [],
     postageStamps: overrides.postageStamps ?? [],
   }
@@ -128,18 +113,7 @@ describe("mergeSnapshotWithRemote — devices union", () => {
   })
 })
 
-describe("mergeSnapshotWithRemote — identities / apps / stamps", () => {
-  it("unions identities by id with local winning on conflict", () => {
-    const localOnly = makeIdentity("aa".padEnd(40, "0"))
-    const remoteOnly = makeIdentity("bb".padEnd(40, "0"))
-    const result = mergeSnapshotWithRemote(
-      makeSnapshot({ identities: [localOnly] }),
-      makeSnapshot({ identities: [remoteOnly] }),
-    )
-    const ids = result.identities.map((i) => i.id.toHex()).sort()
-    expect(ids).toEqual([localOnly.id.toHex(), remoteOnly.id.toHex()].sort())
-  })
-
+describe("mergeSnapshotWithRemote — apps / stamps", () => {
   it("unions postage stamps by batchID, local wins on duplicate", () => {
     const localStamp = makeStamp("aa".repeat(32))
     const remoteStamp = makeStamp("bb".repeat(32))
@@ -152,10 +126,10 @@ describe("mergeSnapshotWithRemote — identities / apps / stamps", () => {
     )
   })
 
-  it("unions connectedApps by (identityId, appUrl)", () => {
-    const a = makeConnectedApp("ident-1", "https://app-a.example")
-    const b = makeConnectedApp("ident-1", "https://app-b.example")
-    const c = makeConnectedApp("ident-2", "https://app-a.example") // same appUrl, different identity
+  it("unions connectedApps by appUrl", () => {
+    const a = makeConnectedApp("https://app-a.example")
+    const b = makeConnectedApp("https://app-b.example")
+    const c = makeConnectedApp("https://app-c.example")
     const result = mergeSnapshotWithRemote(
       makeSnapshot({ connectedApps: [a] }),
       makeSnapshot({ connectedApps: [b, c] }),
@@ -168,11 +142,11 @@ describe("mergeSnapshotWithRemote — identities / apps / stamps", () => {
     // device 2 still has the app active. The newer tombstone must win so the
     // revocation propagates.
     const active = {
-      ...makeConnectedApp("ident-1", "https://app.example"),
+      ...makeConnectedApp("https://app.example"),
       updatedAt: 1_000_000,
     }
     const tombstone = {
-      ...makeConnectedApp("ident-1", "https://app.example"),
+      ...makeConnectedApp("https://app.example"),
       updatedAt: 5_000_000,
       revokedAt: 5_000_000,
       connectedUntil: undefined,
@@ -190,12 +164,12 @@ describe("mergeSnapshotWithRemote — identities / apps / stamps", () => {
     // The publish case: device 1 revoked locally; the remote snapshot still has
     // the app active (older). The union used to re-add it — LWW keeps the tombstone.
     const tombstone = {
-      ...makeConnectedApp("ident-1", "https://app.example"),
+      ...makeConnectedApp("https://app.example"),
       updatedAt: 5_000_000,
       revokedAt: 5_000_000,
     }
     const staleActive = {
-      ...makeConnectedApp("ident-1", "https://app.example"),
+      ...makeConnectedApp("https://app.example"),
       updatedAt: 1_000_000,
     }
     const result = mergeSnapshotWithRemote(
@@ -228,9 +202,6 @@ describe("mergeSnapshotWithRemote — scalar metadata fields", () => {
 })
 
 describe("snapshotContainsContribution", () => {
-  const idA = "aa".padEnd(40, "0")
-  const idB = "bb".padEnd(40, "0")
-
   it("is true when latest is a superset of mine (co-writer published us)", () => {
     const mine = makeSnapshot({ devices: [makeDevice(SELF_DEVICE_ID)] })
     const latest = makeSnapshot({
@@ -242,11 +213,11 @@ describe("snapshotContainsContribution", () => {
   it("is true for equal sets (ignoring timestamps)", () => {
     const mine = makeSnapshot({
       devices: [makeDevice(SELF_DEVICE_ID, 1_000_000)],
-      identities: [makeIdentity(idA)],
+      connectedApps: [makeConnectedApp("https://app.example")],
     })
     const latest = makeSnapshot({
       devices: [makeDevice(SELF_DEVICE_ID, 9_000_000)],
-      identities: [makeIdentity(idA)],
+      connectedApps: [makeConnectedApp("https://app.example")],
     })
     expect(snapshotContainsContribution(mine, latest)).toBe(true)
   })
@@ -257,17 +228,9 @@ describe("snapshotContainsContribution", () => {
     expect(snapshotContainsContribution(mine, latest)).toBe(false)
   })
 
-  it("is false when latest is missing one of my identities", () => {
-    const mine = makeSnapshot({
-      identities: [makeIdentity(idA), makeIdentity(idB)],
-    })
-    const latest = makeSnapshot({ identities: [makeIdentity(idA)] })
-    expect(snapshotContainsContribution(mine, latest)).toBe(false)
-  })
-
   it("is false when latest is missing one of my connected apps", () => {
     const mine = makeSnapshot({
-      connectedApps: [makeConnectedApp("ident-1", "https://app.example")],
+      connectedApps: [makeConnectedApp("https://app.example")],
     })
     const latest = makeSnapshot({ connectedApps: [] })
     expect(snapshotContainsContribution(mine, latest)).toBe(false)

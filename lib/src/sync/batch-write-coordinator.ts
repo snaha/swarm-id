@@ -131,6 +131,14 @@ export interface BatchWriteCoordinatorDeps {
    */
   knownDeviceIds?: () => string[]
   /**
+   * Pull the latest device registry from Swarm into local state before a fresh
+   * acquire, so `knownDeviceIds` reflects a peer that signed in after this device
+   * created the account (otherwise the claimer is "blind" — never reads the
+   * peer's beacon — and dual-acquires). Best-effort; the provider throttles.
+   * Omit for node/oneshot callers.
+   */
+  refreshKnownDeviceIds?: () => Promise<void>
+  /**
    * Gateway-propagation tuning for the intent round (optional overrides; default
    * to the `INTENT_*` constants). Lets the proxy pass runtime-tunable values.
    */
@@ -413,6 +421,19 @@ export class BatchWriteCoordinator {
     // then abort instead of re-binding a partition and arming a refresh timer
     // the coordinator no longer tracks.
     const epoch = this.leaseEpoch
+    // Pull the latest device registry first so `knownDeviceIds` includes a peer
+    // that signed in after we created the account — otherwise we never read its
+    // beacon and dual-acquire. Best-effort + provider-throttled; a stale epoch
+    // after the await aborts below.
+    try {
+      await this.deps.refreshKnownDeviceIds?.()
+    } catch (error) {
+      console.warn(
+        "[BatchWriteCoordinator] Device-registry refresh before acquire failed (using current registry):",
+        error,
+      )
+    }
+    if (this.leaseEpoch !== epoch || this.disposed) return
     try {
       const lease = await PartitionLease.fromSwarmEncryptionKey({
         bee: this.deps.bee,

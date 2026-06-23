@@ -10,7 +10,6 @@ import type {
   PasskeyAccount,
   EthereumAccount,
   AgentAccount,
-  Identity,
   ConnectedApp,
   PostageStamp,
 } from "./schemas"
@@ -46,6 +45,8 @@ export function createPasskeyAccount(
     credentialId: "credential-abc-123",
     derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
+    connectedApps: [],
+    postageStamps: [],
     ...overrides,
   }
 }
@@ -64,6 +65,8 @@ export function createEthereumAccount(
     encryptedSecretSeed: new Bytes(new Uint8Array([9, 10, 11, 12])),
     derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
+    connectedApps: [],
+    postageStamps: [],
     ...overrides,
   }
 }
@@ -78,16 +81,8 @@ export function createAgentAccount(
     type: "agent" as const,
     derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
-    ...overrides,
-  }
-}
-
-export function createIdentity(overrides?: Partial<Identity>): Identity {
-  return {
-    id: TEST_IDENTITY_ADDRESS_HEX,
-    accountId: new EthAddress(TEST_ETH_ADDRESS_HEX),
-    name: "Default Identity",
-    createdAt: 1700000000000,
+    connectedApps: [],
+    postageStamps: [],
     ...overrides,
   }
 }
@@ -99,7 +94,6 @@ export function createConnectedApp(
     appUrl: "https://app.example.com",
     appName: "Test App",
     lastConnectedAt: 1700000000000,
-    identityId: TEST_IDENTITY_ADDRESS_HEX,
     appSecret: "secret-should-be-stripped",
     ...overrides,
   }

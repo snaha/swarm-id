@@ -15,62 +15,20 @@ import { Bee, PrivateKey, Reference, Topic, EthAddress } from '@ethersphere/bee-
 import {
   ACCOUNT_SYNC_TOPIC_PREFIX,
   AsyncEpochFinder,
-  collectAccountStampBatchIds,
   deriveSecret,
   deriveSwarmEncryptionKey,
   deserializeAccountState,
   detectDeviceName,
   downloadDataWithChunkAPI,
   getOrCreateDeviceId,
+  mergeConnectedApps,
   mergeDevices,
+  mergeDevicesList,
+  mergePostageStamps,
   SnapshotDataUnavailableError,
-  type ConnectedApp,
-  type Device,
-  type PostageStamp,
 } from '@snaha/swarm-id'
 import { accountsStore } from '$lib/stores/accounts.svelte'
-import { identitiesStore } from '$lib/stores/identities.svelte'
-import { connectedAppsStore } from '$lib/stores/connected-apps.svelte'
-import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-
-// Union two lists by a natural key, local winning on collision — mirrors the
-// array merge in `lib/src/sync/merge-snapshot.ts`.
-function unionByKey<T>(local: T[], remote: T[], key: (item: T) => string): T[] {
-  const merged = new Map<string, T>()
-  for (const item of remote) merged.set(key(item), item)
-  for (const item of local) merged.set(key(item), item) // local wins
-  return Array.from(merged.values())
-}
-
-// Merge connected apps last-writer-wins per app so updates AND removals
-// propagate (a revoke is a tombstone carrying a fresh `updatedAt`). Mirrors
-// `mergeConnectedApps` in merge-snapshot.ts. `updatedAt` falls back to
-// `lastConnectedAt` for pre-existing records.
-function mergeConnectedAppsLww(local: ConnectedApp[], remote: ConnectedApp[]): ConnectedApp[] {
-  const keyOf = (a: ConnectedApp) => `${a.identityId}:${a.appUrl}`
-  const recency = (a: ConnectedApp) => a.updatedAt ?? a.lastConnectedAt ?? 0
-  const merged = new Map<string, ConnectedApp>()
-  for (const a of [...remote, ...local]) {
-    const existing = merged.get(keyOf(a))
-    if (!existing || recency(a) >= recency(existing)) merged.set(keyOf(a), a)
-  }
-  return Array.from(merged.values())
-}
-
-// Union device lists by deviceId, preferring the larger `lastSignedInAt`
-// (local wins on a tie) — mirrors `mergeDevicesList` in merge-snapshot.ts.
-function mergeDeviceLists(local: Device[], remote: Device[]): Device[] {
-  const merged = new Map<string, Device>()
-  for (const d of remote) merged.set(d.deviceId, d)
-  for (const d of local) {
-    const existing = merged.get(d.deviceId)
-    if (!existing || (d.lastSignedInAt ?? 0) >= (existing.lastSignedInAt ?? 0)) {
-      merged.set(d.deviceId, d)
-    }
-  }
-  return Array.from(merged.values())
-}
 
 export type RefreshResult =
   | { ok: true; refreshedAt: number }
@@ -129,40 +87,30 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
     const snapshot = deserializeAccountState(data)
 
     console.debug(
-      `[RefreshAccount] devices=${snapshot.metadata.devices.length} identities=${snapshot.identities.length} apps=${snapshot.connectedApps.length} stamps=${snapshot.postageStamps.length} bee=${bee.url}`,
+      `[RefreshAccount] devices=${snapshot.metadata.devices.length} apps=${snapshot.connectedApps.length} stamps=${snapshot.postageStamps.length} bee=${bee.url}`,
     )
 
-    // Merge the remote snapshot into this account's local state and apply every
-    // part to the stores WITHOUT re-publishing. Previously only `devices` was
-    // applied, so connectedApps/identities/stamps added on another device never
-    // reached an already-known device. Union semantics mirror the publish merge
-    // (`lib/src/sync/merge-snapshot.ts`): union by natural key, local wins on
-    // collision; devices prefer the larger `lastSignedInAt`.
-    const localIdentities = identitiesStore.getIdentitiesByAccount(account.id)
-    const localApps = localIdentities.flatMap((i) => connectedAppsStore.getAppsByIdentityId(i.id))
-    const localStamps = collectAccountStampBatchIds(account, localIdentities)
-      .map((batchId) => postageStampsStore.getStamp(batchId))
-      .filter((s): s is PostageStamp => s !== undefined)
-
-    const mergedIdentities = unionByKey(localIdentities, snapshot.identities, (i) => i.id)
-    const mergedApps = mergeConnectedAppsLww(localApps, snapshot.connectedApps)
-    const mergedStamps = unionByKey(localStamps, snapshot.postageStamps, (s) => s.batchID.toHex())
+    // Merge the remote snapshot into this account's nested local state and apply
+    // it WITHOUT re-publishing (refresh data shouldn't be re-uploaded). Reuses
+    // the exact publish-side merge primitives from the lib so the rules can't
+    // drift (#337): apps LWW by appUrl (tombstone-aware), stamps union by
+    // batchID (local wins), devices prefer the larger `lastSignedInAt`.
+    const mergedApps = mergeConnectedApps(account.connectedApps, snapshot.connectedApps)
+    const mergedStamps = mergePostageStamps(account.postageStamps, snapshot.postageStamps)
 
     // Keep *this* device first-class even if the snapshot was written by a peer
     // that doesn't know about us yet.
     const mergedDevices = mergeDevices(
-      mergeDeviceLists(account.devices, snapshot.metadata.devices),
+      mergeDevicesList(account.devices, snapshot.metadata.devices),
       getOrCreateDeviceId(),
       detectDeviceName(),
     )
 
-    accountsStore.applyRefreshedSnapshot(ethAddress, { devices: mergedDevices })
-    identitiesStore.applyRefreshed(account.id, mergedIdentities)
-    connectedAppsStore.applyRefreshed(
-      mergedIdentities.map((i) => i.id),
-      mergedApps,
-    )
-    postageStampsStore.applyRefreshed(mergedStamps)
+    accountsStore.applyRefreshed(ethAddress, {
+      devices: mergedDevices,
+      connectedApps: mergedApps,
+      postageStamps: mergedStamps,
+    })
 
     return { ok: true, refreshedAt: Date.now() }
   } catch (err) {

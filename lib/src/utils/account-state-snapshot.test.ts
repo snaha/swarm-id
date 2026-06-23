@@ -2,54 +2,44 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
-import { EthAddress, BatchId, PrivateKey } from "@ethersphere/bee-js"
+import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
   serializeAccountStateSnapshot,
   deserializeAccountStateSnapshot,
   AccountStateSnapshotSchemaV1,
 } from "./account-state-snapshot"
-import type { Account, ConnectedApp, PostageStamp } from "../schemas"
+import type { Account } from "../schemas"
 import {
   TEST_ETH_ADDRESS_HEX,
-  TEST_IDENTITY_ADDRESS_HEX,
-  TEST_IDENTITY_ADDRESS_2_HEX,
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
   createPasskeyAccount,
   createEthereumAccount,
   createAgentAccount,
-  createIdentity,
   createConnectedApp,
   createPostageStamp,
   createDevice,
 } from "../test-fixtures"
 
 /**
- * Helper: extract metadata from an Account and serialize via the snapshot function.
+ * Helper: build a snapshot from a nested account (apps + stamps are read off
+ * the account; the wire snapshot strips secrets).
  */
-function serializeFromAccount(
-  account: Account,
-  identities: Parameters<typeof serializeAccountStateSnapshot>[0]["identities"],
-  connectedApps: Parameters<
-    typeof serializeAccountStateSnapshot
-  >[0]["connectedApps"],
-  postageStamps: Parameters<
-    typeof serializeAccountStateSnapshot
-  >[0]["postageStamps"],
-) {
+function serializeFromAccount(account: Account) {
   return serializeAccountStateSnapshot({
     accountId: account.id.toHex(),
     metadata: {
       accountName: account.name,
       defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
+      publicKey: account.publicKey,
+      settings: account.settings,
       createdAt: account.createdAt,
       lastModified: Date.now(),
       devices: account.devices,
     },
-    identities,
-    connectedApps,
-    postageStamps,
+    connectedApps: account.connectedApps,
+    postageStamps: account.postageStamps,
     timestamp: Date.now(),
   })
 }
@@ -59,18 +49,13 @@ function serializeFromAccount(
 // ============================================================================
 
 describe("round-trip: serialize → JSON → deserialize", () => {
-  it("should round-trip a passkey account with identities, apps, and stamps", () => {
-    const account = createPasskeyAccount()
-    const identities = [createIdentity()]
-    const connectedApps = [createConnectedApp()]
-    const postageStamps = [createPostageStamp()]
+  it("should round-trip a passkey account with apps and stamps", () => {
+    const account = createPasskeyAccount({
+      connectedApps: [createConnectedApp()],
+      postageStamps: [createPostageStamp()],
+    })
 
-    const serialized = serializeFromAccount(
-      account,
-      identities,
-      connectedApps,
-      postageStamps,
-    )
+    const serialized = serializeFromAccount(account)
     const json = JSON.stringify(serialized)
     const parsed = JSON.parse(json)
     const result = deserializeAccountStateSnapshot(parsed)
@@ -80,8 +65,6 @@ describe("round-trip: serialize → JSON → deserialize", () => {
 
     expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
     expect(result.data.metadata.accountName).toBe("Test Passkey Account")
-    expect(result.data.identities).toHaveLength(1)
-    expect(result.data.identities[0].accountId).toBeInstanceOf(EthAddress)
     expect(result.data.connectedApps).toHaveLength(1)
     expect(result.data.connectedApps[0].appName).toBe("Test App")
     expect(result.data.postageStamps).toHaveLength(1)
@@ -91,19 +74,11 @@ describe("round-trip: serialize → JSON → deserialize", () => {
 
   it("should round-trip an ethereum account with metadata", () => {
     const account = createEthereumAccount()
-    const identities = [createIdentity()]
-    const connectedApps: ConnectedApp[] = []
-    const postageStamps: PostageStamp[] = []
 
-    const serialized = serializeFromAccount(
-      account,
-      identities,
-      connectedApps,
-      postageStamps,
+    const serialized = serializeFromAccount(account)
+    const result = deserializeAccountStateSnapshot(
+      JSON.parse(JSON.stringify(serialized)),
     )
-    const json = JSON.stringify(serialized)
-    const parsed = JSON.parse(json)
-    const result = deserializeAccountStateSnapshot(parsed)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -115,19 +90,11 @@ describe("round-trip: serialize → JSON → deserialize", () => {
 
   it("should round-trip an agent account", () => {
     const account = createAgentAccount()
-    const identities = [createIdentity()]
-    const connectedApps: ConnectedApp[] = []
-    const postageStamps: PostageStamp[] = []
 
-    const serialized = serializeFromAccount(
-      account,
-      identities,
-      connectedApps,
-      postageStamps,
+    const serialized = serializeFromAccount(account)
+    const result = deserializeAccountStateSnapshot(
+      JSON.parse(JSON.stringify(serialized)),
     )
-    const json = JSON.stringify(serialized)
-    const parsed = JSON.parse(json)
-    const result = deserializeAccountStateSnapshot(parsed)
 
     expect(result.success).toBe(true)
     if (!result.success) return
@@ -138,25 +105,18 @@ describe("round-trip: serialize → JSON → deserialize", () => {
   it("should produce valid JSON for actual file I/O simulation", () => {
     const account = createPasskeyAccount({
       defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
+      settings: { appSessionDuration: 3600 },
+      connectedApps: [
+        createConnectedApp({
+          appIcon: "https://example.com/icon.png",
+          appDescription: "A test app",
+          connectedUntil: 1700100000000,
+        }),
+      ],
+      postageStamps: [createPostageStamp({ batchTTL: 86400 })],
     })
-    const identities = [
-      createIdentity({ settings: { appSessionDuration: 3600 } }),
-    ]
-    const connectedApps = [
-      createConnectedApp({
-        appIcon: "https://example.com/icon.png",
-        appDescription: "A test app",
-        connectedUntil: 1700100000000,
-      }),
-    ]
-    const postageStamps = [createPostageStamp({ batchTTL: 86400 })]
 
-    const serialized = serializeFromAccount(
-      account,
-      identities,
-      connectedApps,
-      postageStamps,
-    )
+    const serialized = serializeFromAccount(account)
 
     // Simulate file write + read
     const fileContent = JSON.stringify(serialized, undefined, 2)
@@ -169,7 +129,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     expect(result.data.metadata.defaultPostageStampBatchID).toBe(
       TEST_BATCH_ID_HEX,
     )
-    expect(result.data.identities[0].settings?.appSessionDuration).toBe(3600)
+    expect(result.data.metadata.settings?.appSessionDuration).toBe(3600)
     expect(result.data.connectedApps[0].appIcon).toBe(
       "https://example.com/icon.png",
     )
@@ -185,7 +145,7 @@ describe("device tracking in metadata", () => {
   it("should round-trip devices through metadata", () => {
     const device = createDevice()
     const account = createPasskeyAccount({ devices: [device] })
-    const serialized = serializeFromAccount(account, [], [], [])
+    const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
@@ -211,7 +171,6 @@ describe("device tracking in metadata", () => {
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
-      identities: [],
       connectedApps: [],
       postageStamps: [],
     }
@@ -231,10 +190,11 @@ describe("device tracking in metadata", () => {
 
 describe("appSecret in snapshots", () => {
   it("should include appSecret in serialized export when present on input", () => {
-    const account = createPasskeyAccount()
-    const connectedApps = [createConnectedApp({ appSecret: "my-secret-value" })]
+    const account = createPasskeyAccount({
+      connectedApps: [createConnectedApp({ appSecret: "my-secret-value" })],
+    })
 
-    const serialized = serializeFromAccount(account, [], connectedApps, [])
+    const serialized = serializeFromAccount(account)
 
     const apps = serialized.connectedApps as Record<string, unknown>[]
     expect(apps[0]).toHaveProperty("appSecret", "my-secret-value")
@@ -242,7 +202,7 @@ describe("appSecret in snapshots", () => {
 
   it("should preserve appSecret through round-trip", () => {
     const account = createPasskeyAccount()
-    const serialized = serializeFromAccount(account, [], [], [])
+    const serialized = serializeFromAccount(account)
 
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.connectedApps = [
@@ -250,7 +210,6 @@ describe("appSecret in snapshots", () => {
         appUrl: "https://example.com",
         appName: "Test App",
         lastConnectedAt: 1700000000000,
-        identityId: TEST_IDENTITY_ADDRESS_HEX,
         appSecret: "preserved-secret",
       },
     ]
@@ -269,9 +228,9 @@ describe("appSecret in snapshots", () => {
 // ============================================================================
 
 describe("edge cases", () => {
-  it("should handle empty arrays for identities, connectedApps, and postageStamps", () => {
+  it("should handle empty arrays for connectedApps and postageStamps", () => {
     const account = createPasskeyAccount()
-    const serialized = serializeFromAccount(account, [], [], [])
+    const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
@@ -279,22 +238,13 @@ describe("edge cases", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.identities).toEqual([])
     expect(result.data.connectedApps).toEqual([])
     expect(result.data.postageStamps).toEqual([])
   })
 
-  it("should handle optional fields absent on identity", () => {
-    const identity = createIdentity({
-      settings: undefined,
-      defaultPostageStampBatchID: undefined,
-    })
-    const serialized = serializeFromAccount(
-      createPasskeyAccount(),
-      [identity],
-      [],
-      [],
-    )
+  it("should handle account settings absent", () => {
+    const account = createPasskeyAccount({ settings: undefined })
+    const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
@@ -302,8 +252,7 @@ describe("edge cases", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.identities[0].settings).toBeUndefined()
-    expect(result.data.identities[0].defaultPostageStampBatchID).toBeUndefined()
+    expect(result.data.metadata.settings).toBeUndefined()
   })
 
   it("should handle optional fields absent on connected app", () => {
@@ -314,10 +263,7 @@ describe("edge cases", () => {
       appSecret: undefined,
     })
     const serialized = serializeFromAccount(
-      createPasskeyAccount(),
-      [],
-      [app],
-      [],
+      createPasskeyAccount({ connectedApps: [app] }),
     )
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -334,10 +280,7 @@ describe("edge cases", () => {
   it("should handle optional fields absent on postage stamp", () => {
     const stamp = createPostageStamp({ batchTTL: undefined })
     const serialized = serializeFromAccount(
-      createPasskeyAccount(),
-      [],
-      [],
-      [stamp],
+      createPasskeyAccount({ postageStamps: [stamp] }),
     )
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -353,7 +296,7 @@ describe("edge cases", () => {
     const account = createPasskeyAccount({
       defaultPostageStampBatchID: undefined,
     })
-    const serialized = serializeFromAccount(account, [], [], [])
+    const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
@@ -365,33 +308,18 @@ describe("edge cases", () => {
   })
 
   it("should handle multiple entities of each type", () => {
-    const account = createPasskeyAccount()
-    const identities = [
-      createIdentity({ id: TEST_IDENTITY_ADDRESS_HEX, name: "Identity One" }),
-      createIdentity({ id: TEST_IDENTITY_ADDRESS_2_HEX, name: "Identity Two" }),
-      createIdentity({ id: "3".repeat(40), name: "Identity Three" }),
-    ]
-    const connectedApps = [
-      createConnectedApp({
-        appUrl: "https://app1.example.com",
-        identityId: TEST_IDENTITY_ADDRESS_HEX,
-      }),
-      createConnectedApp({
-        appUrl: "https://app2.example.com",
-        identityId: TEST_IDENTITY_ADDRESS_2_HEX,
-      }),
-    ]
-    const postageStamps = [
-      createPostageStamp({ batchID: new BatchId(TEST_BATCH_ID_HEX) }),
-      createPostageStamp({ batchID: new BatchId(TEST_BATCH_ID_2_HEX) }),
-    ]
+    const account = createPasskeyAccount({
+      connectedApps: [
+        createConnectedApp({ appUrl: "https://app1.example.com" }),
+        createConnectedApp({ appUrl: "https://app2.example.com" }),
+      ],
+      postageStamps: [
+        createPostageStamp({ batchID: new BatchId(TEST_BATCH_ID_HEX) }),
+        createPostageStamp({ batchID: new BatchId(TEST_BATCH_ID_2_HEX) }),
+      ],
+    })
 
-    const serialized = serializeFromAccount(
-      account,
-      identities,
-      connectedApps,
-      postageStamps,
-    )
+    const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
     )
@@ -399,7 +327,6 @@ describe("edge cases", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.identities).toHaveLength(3)
     expect(result.data.connectedApps).toHaveLength(2)
     expect(result.data.postageStamps).toHaveLength(2)
   })
@@ -411,7 +338,7 @@ describe("edge cases", () => {
 
 describe("invalid data rejection", () => {
   it("should reject wrong version number", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.version = 2
 
@@ -420,7 +347,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject missing version", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.version
 
@@ -429,7 +356,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject missing accountId", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.accountId
 
@@ -438,7 +365,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject missing metadata", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.metadata
 
@@ -447,7 +374,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject invalid accountId hex length", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.accountId = "abc" // too short
 
@@ -465,7 +392,6 @@ describe("invalid data rejection", () => {
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
-      identities: [],
       connectedApps: [],
       postageStamps: [
         {
@@ -498,7 +424,6 @@ describe("invalid data rejection", () => {
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
-      identities: [],
       connectedApps: [],
       postageStamps: [
         {
@@ -522,7 +447,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject number where string is expected", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.metadata.accountName = 12345
 
@@ -531,9 +456,9 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject string where array is expected", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount(), [], [], [])
+    const serialized = serializeFromAccount(createPasskeyAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
-    raw.identities = "not-an-array"
+    raw.connectedApps = "not-an-array"
 
     const result = deserializeAccountStateSnapshot(raw)
     expect(result.success).toBe(false)
@@ -560,36 +485,6 @@ describe("invalid data rejection", () => {
 // ============================================================================
 
 describe("bee-js type conversions", () => {
-  it("should convert hex strings to EthAddress instances in identities", () => {
-    const raw = {
-      version: 1,
-      timestamp: Date.now(),
-      accountId: TEST_ETH_ADDRESS_HEX,
-      metadata: {
-        accountName: "Test",
-        createdAt: 1700000000000,
-        lastModified: Date.now(),
-      },
-      identities: [
-        {
-          id: TEST_IDENTITY_ADDRESS_HEX,
-          accountId: TEST_ETH_ADDRESS_HEX,
-          name: "Identity",
-          createdAt: 1700000000000,
-        },
-      ],
-      connectedApps: [],
-      postageStamps: [],
-    }
-
-    const result = deserializeAccountStateSnapshot(raw)
-
-    expect(result.success).toBe(true)
-    if (!result.success) return
-
-    expect(result.data.identities[0].accountId).toBeInstanceOf(EthAddress)
-  })
-
   it("should convert hex strings to BatchId and PrivateKey instances", () => {
     const raw = {
       version: 1,
@@ -600,7 +495,6 @@ describe("bee-js type conversions", () => {
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
-      identities: [],
       connectedApps: [],
       postageStamps: [
         {

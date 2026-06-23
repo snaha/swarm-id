@@ -12,6 +12,16 @@ export {
 } from "../utils/key-derivation"
 export { serializeAccountState, deserializeAccountState } from "./serialization"
 
+// Snapshot merge primitives (shared by the publish and refresh paths so the
+// rules can't drift — #337).
+export {
+  mergeSnapshotWithRemote,
+  mergeConnectedApps,
+  mergePostageStamps,
+  mergeDevicesList,
+  snapshotContainsContribution,
+} from "./merge-snapshot"
+
 // Sync account
 export { createSyncAccount, ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
 export type { SyncAccountOptions, SyncAccountFunction } from "./sync-account"
@@ -26,8 +36,6 @@ export type { RestoreAccountResult } from "./restore-account"
 // Store interfaces
 export type {
   AccountsStoreInterface,
-  IdentitiesStoreInterface,
-  ConnectedAppsStoreInterface,
   PostageStampsStoreInterface,
   StamperOptions,
   FlushableStamper,

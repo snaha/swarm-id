@@ -39,6 +39,7 @@ import type {
   GetPostageBatchMessage,
   CreateFeedManifestMessage,
   AppMetadata,
+  Account,
   PostageStamp,
   PostageBatch,
   ConnectedApp,
@@ -58,6 +59,7 @@ import {
   PrivateKey,
   Identifier,
   Topic,
+  Reference,
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
@@ -81,26 +83,26 @@ import {
   saveMantarayTree,
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
-import {
-  resolveStampForIdentity,
-  collectAccountStampBatchIds,
-} from "./utils/postage-stamp-association"
+import { resolveStampForApp } from "./utils/postage-stamp-association"
 import {
   publishAccountState,
   remoteFeedHasDevice,
+  ACCOUNT_SYNC_TOPIC_PREFIX,
 } from "./sync/publish-account-state"
+import { deserializeAccountState } from "./sync/serialization"
+import { mergeDevicesList } from "./sync/merge-snapshot"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
-import { getOrCreateDeviceId } from "./utils/device-id"
 import {
-  createConnectedAppsStorageManager,
-  createIdentitiesStorageManager,
-  createPostageStampsStorageManager,
+  getOrCreateDeviceId,
+  mergeDevices,
+  detectDeviceName,
+} from "./utils/device-id"
+import {
   createNetworkSettingsStorageManager,
   createAccountsStorageManager,
-  disconnectApp,
 } from "./utils/storage-managers"
 import {
   hexToUint8Array,
@@ -148,6 +150,10 @@ import {
  * triggers (lease acquisition + storage changes) into a single feed write.
  */
 const PUBLISH_DEBOUNCE_MS = 1500
+
+/** Min interval between pre-acquire device-registry pulls (throttles the
+ *  slot-wait loop's repeated acquires from hammering the feed). */
+const DEVICE_REGISTRY_REFRESH_THROTTLE_MS = 8_000
 
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
@@ -321,106 +327,62 @@ export class SwarmIdProxy {
       )
     }
 
-    const connectedAppsManager = createConnectedAppsStorageManager()
-    this.unsubscribeStorageListeners.push(
-      connectedAppsManager.subscribe((connectedApps) => {
-        enqueue("handleConnectedAppsChange", () =>
-          this.handleConnectedAppsChange(connectedApps),
-        )
-      }),
-    )
-
-    const identitiesManager = createIdentitiesStorageManager()
-    this.unsubscribeStorageListeners.push(
-      identitiesManager.subscribe(() => {
-        enqueue("handleAuxiliaryStorageChange", () =>
-          this.handleAuxiliaryStorageChange(),
-        )
-      }),
-    )
-
+    // The account is the single nested document of record (it owns its
+    // connected apps and postage stamps), so one subscription covers every
+    // change that can affect auth or derived ConnectionInfo.
     const accountsManager = createAccountsStorageManager()
     this.unsubscribeStorageListeners.push(
       accountsManager.subscribe(() => {
-        enqueue("handleAuxiliaryStorageChange", () =>
-          this.handleAuxiliaryStorageChange(),
-        )
-      }),
-    )
-
-    const postageStampsManager = createPostageStampsStorageManager()
-    this.unsubscribeStorageListeners.push(
-      postageStampsManager.subscribe(() => {
-        enqueue("handleAuxiliaryStorageChange", () =>
-          this.handleAuxiliaryStorageChange(),
+        enqueue("handleAccountStorageChange", () =>
+          this.handleAccountStorageChange(),
         )
       }),
     )
   }
 
   /**
-   * Handle changes to connected apps storage (triggered by storage events from other windows).
-   * Handles new connections, identity changes, and disconnections.
+   * Handle changes to the nested account document (triggered by storage events
+   * from other windows). Covers auth transitions (connect / secret change /
+   * disconnect) AND derived-ConnectionInfo changes (default-stamp change, new
+   * stamp purchased, account rename) — all of which now live in one document.
    */
-  private async handleConnectedAppsChange(
-    connectedApps: ConnectedApp[],
-  ): Promise<void> {
+  private async handleAccountStorageChange(): Promise<void> {
     if (!this.parentOrigin) {
       return
     }
 
-    const connectedApp = this.findMostRecentConnection(connectedApps)
+    const connection = this.findConnectionForParent()
 
-    if (connectedApp) {
-      if (!this.authenticated) {
-        // New connection
-        await this.authenticateFromStorage(connectedApp)
-      } else if (connectedApp.appSecret !== this.appSecret) {
-        // Identity changed - update to new identity
-        await this.authenticateFromStorage(connectedApp)
+    if (connection) {
+      const { app } = connection
+      if (!this.authenticated || app.appSecret !== this.appSecret) {
+        // New connection, or the connected account / secret changed.
+        await this.authenticateFromStorage(app)
       } else {
-        // Same connection — but related metadata (e.g. defaultPostageStampBatchID
-        // on the ConnectedApp record) may have changed.
-        await this.refreshStampFromStorage()
+        // Same connection — related metadata (default stamp, per-app batch
+        // override, rename) may have changed.
+        if (!this.storagePartitioned) {
+          await this.refreshStampFromStorage()
+        }
         this.emitConnectionInfoIfChanged()
+      }
+
+      // If we hold a partition, propagate the account-state change to peers.
+      // Debounced so a burst collapses into one feed write.
+      if (this.coordinator?.currentPartition !== undefined) {
+        this.schedulePublish("change")
       }
     } else if (this.authenticated && !this.storagePartitioned) {
       // No valid connection in storage, but we're authenticated - disconnect.
-      // Skip when storage is partitioned: the iframe
-      // can't see connected apps, but auth was established via postMessage.
-      // `clearAuthData` emits the ConnectionInfo update; no need to do so again.
+      // Skip when storage is partitioned: the iframe can't see connected apps,
+      // but auth was established via postMessage. `clearAuthData` emits the
+      // ConnectionInfo update; no need to do so again.
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
         requestId: "storage-event",
         success: true,
       })
-    }
-  }
-
-  /**
-   * Handle changes to identities/accounts/postageStamps storage.
-   * These don't flip auth state but can change the derived ConnectionInfo
-   * (e.g. identity rename, default stamp change, local→synced migration,
-   * new stamp purchased that should become canUpload=true).
-   */
-  private async handleAuxiliaryStorageChange(): Promise<void> {
-    if (!this.parentOrigin || !this.authenticated) {
-      return
-    }
-
-    // Re-resolve postage stamp in case the default changed or a new one was added.
-    if (!this.storagePartitioned) {
-      await this.refreshStampFromStorage()
-    }
-
-    this.emitConnectionInfoIfChanged()
-
-    // If we hold a partition, an account-state change (new identity / stamp /
-    // rename) should propagate to peers. Debounced so a burst collapses into one
-    // feed write.
-    if (this.coordinator?.currentPartition !== undefined) {
-      this.schedulePublish("change")
     }
   }
 
@@ -726,6 +688,14 @@ export class SwarmIdProxy {
       deviceId: this.requireDeviceId(),
       knownDeviceIds: () =>
         this.knownDeviceIdsForAccount(accountInfo.accountId),
+      // Pull the latest device registry before a fresh acquire so a peer that
+      // signed in after we created the account is known (else we never read its
+      // beacon and dual-acquire). Throttled + best-effort inside.
+      refreshKnownDeviceIds: () =>
+        this.refreshDeviceRegistryFromSwarm(
+          accountInfo.accountId,
+          accountInfo.encryptionKey,
+        ),
       intentReadTimeoutMs: tuning?.readTimeoutMs,
       intentGuardWindowMs: tuning?.guardWindowMs,
       intentGuardPollMs: tuning?.guardPollMs,
@@ -1210,40 +1180,16 @@ export class SwarmIdProxy {
     }
 
     try {
-      // Load connected apps to find which identity is connected to this app
-      const connectedAppsManager = createConnectedAppsStorageManager()
-      const connectedApps = connectedAppsManager.load()
-      const connectedApp = this.findMostRecentConnection(connectedApps)
-
-      if (!connectedApp) {
+      const connection = this.findConnectionForParent()
+      if (!connection) {
         return undefined
       }
+      const { account, app } = connection
 
-      // Load identities to find the account for this identity
-      const identitiesManager = createIdentitiesStorageManager()
-      const identities = identitiesManager.load()
-      const identity = identities.find((i) => i.id === connectedApp.identityId)
-
-      if (!identity) {
-        return undefined
-      }
-
-      // Load the account so we can fall back to its default stamp
-      const accountsManager = createAccountsStorageManager()
-      const accounts = accountsManager.load()
-      const account = accounts.find((a) => a.id.equals(identity.accountId))
-
-      if (!account) {
-        return undefined
-      }
-
-      // Resolve the stamp this identity should use: its own stamp if set,
+      // Resolve the stamp this app should use: its per-app override if set,
       // otherwise the account default — skipping a pointer whose stamp is
       // missing so a stale pointer falls through instead of failing.
-      const postageStampsManager = createPostageStampsStorageManager()
-      const stamps = postageStampsManager.load()
-
-      return resolveStampForIdentity(identity, account, stamps)
+      return resolveStampForApp(app, account, account.postageStamps)
     } catch (error) {
       console.error("[Proxy] Error looking up postage stamp:", error)
       return undefined
@@ -1270,32 +1216,11 @@ export class SwarmIdProxy {
     }
 
     try {
-      // Load connected apps to find which identity is connected to this app
-      const connectedAppsManager = createConnectedAppsStorageManager()
-      const connectedApps = connectedAppsManager.load()
-      const connectedApp = this.findMostRecentConnection(connectedApps)
-
-      if (!connectedApp) {
+      const connection = this.findConnectionForParent()
+      if (!connection) {
         return undefined
       }
-
-      // Load identities to find the account for this identity
-      const identitiesManager = createIdentitiesStorageManager()
-      const identities = identitiesManager.load()
-      const identity = identities.find((i) => i.id === connectedApp.identityId)
-
-      if (!identity) {
-        return undefined
-      }
-
-      // Load accounts and find the one for this identity
-      const accountsManager = createAccountsStorageManager()
-      const accounts = accountsManager.load()
-      const account = accounts.find((a) => a.id.equals(identity.accountId))
-
-      if (!account) {
-        return undefined
-      }
+      const { account } = connection
 
       // Derive swarm encryption key from stored derivation key
       const swarmEncryptionKey = await deriveSwarmEncryptionKey(
@@ -1330,6 +1255,75 @@ export class SwarmIdProxy {
     }
   }
 
+  private lastDeviceRegistryRefreshAt = 0
+
+  /**
+   * Pull the latest account snapshot from the shared feed and union its
+   * `metadata.devices` into the locally-stored account, so `knownDeviceIds`
+   * reflects a peer that signed in AFTER this device created the account (else
+   * the claimer never reads the peer's beacon and they dual-acquire). Throttled
+   * (the slot-wait loop re-acquires) and best-effort — on any failure the
+   * current registry is used as-is.
+   */
+  private async refreshDeviceRegistryFromSwarm(
+    accountId: string,
+    encryptionKey: Uint8Array,
+  ): Promise<void> {
+    const nowMs = Date.now()
+    if (
+      nowMs - this.lastDeviceRegistryRefreshAt <
+      DEVICE_REGISTRY_REFRESH_THROTTLE_MS
+    ) {
+      return
+    }
+    this.lastDeviceRegistryRefreshAt = nowMs
+    try {
+      const manager = createAccountsStorageManager()
+      const accounts = manager.load()
+      const account = accounts.find((a) => a.id.toHex() === accountId)
+      if (!account) return
+
+      // Feed owner = backup signer (derived from the swarm encryption key). Feed
+      // SOCs are unencrypted, so the finder takes no encryption key; the snapshot
+      // chunks it points to ARE encrypted (downloadDataWithChunkAPI infers that).
+      const backupKey = new PrivateKey(
+        await deriveSecret(uint8ArrayToHex(encryptionKey), "backup-key"),
+      )
+      const owner = backupKey.publicKey().address()
+      const topic = Topic.fromString(
+        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${account.id.toHex()}`,
+      )
+      const finder = createAsyncEpochFinder({ bee: this.bee, topic, owner })
+      const refBytes = await finder.findAt(BigInt(Math.floor(nowMs / 1000)))
+      if (!refBytes) return
+      const data = await downloadDataWithChunkAPI(
+        this.bee,
+        new Reference(refBytes).toHex(),
+      )
+      const snapshot = deserializeAccountState(data)
+
+      const mergedDevices = mergeDevices(
+        mergeDevicesList(account.devices, snapshot.metadata.devices),
+        this.requireDeviceId(),
+        detectDeviceName(),
+      )
+      // Only persist when a peer actually appeared, to avoid needless cross-tab
+      // storage-event churn.
+      if (mergedDevices.length !== account.devices.length) {
+        manager.save(
+          accounts.map((a) =>
+            a.id.toHex() === accountId ? { ...a, devices: mergedDevices } : a,
+          ),
+        )
+      }
+    } catch (error) {
+      console.warn(
+        "[Proxy] Device-registry refresh failed (using current registry):",
+        error,
+      )
+    }
+  }
+
   /**
    * Assemble the current account-state snapshot for the connected app's account
    * from shared localStorage (the same shape `sync-account` builds from its DI
@@ -1349,36 +1343,12 @@ export class SwarmIdProxy {
       return undefined
     }
     try {
-      const connectedApps = createConnectedAppsStorageManager().load()
-      const connectedApp = this.findMostRecentConnection(connectedApps)
-      if (!connectedApp) return undefined
+      const connection = this.findConnectionForParent()
+      if (!connection) return undefined
+      const { account } = connection
 
-      const allIdentities = createIdentitiesStorageManager().load()
-      const connectedIdentity = allIdentities.find(
-        (i) => i.id === connectedApp.identityId,
-      )
-      if (!connectedIdentity) return undefined
-
-      const account = createAccountsStorageManager()
-        .load()
-        .find((a) => a.id.equals(connectedIdentity.accountId))
-      if (!account) return undefined
-
-      const identities = allIdentities.filter((i) =>
-        i.accountId.equals(account.id),
-      )
-      const defaultStampBatchID =
-        account.defaultPostageStampBatchID ??
-        identities[0]?.defaultPostageStampBatchID
+      const defaultStampBatchID = account.defaultPostageStampBatchID
       if (!defaultStampBatchID) return undefined
-
-      const apps = identities.flatMap((identity) =>
-        connectedApps.filter((a) => a.identityId === identity.id),
-      )
-      const allStamps = createPostageStampsStorageManager().load()
-      const postageStamps = collectAccountStampBatchIds(account, identities)
-        .map((batchId) => allStamps.find((s) => s.batchID.equals(batchId)))
-        .filter((stamp): stamp is PostageStamp => stamp !== undefined)
 
       const encryptionKey = await deriveSwarmEncryptionKey(
         account.derivationKey,
@@ -1395,14 +1365,15 @@ export class SwarmIdProxy {
         metadata: {
           accountName: account.name,
           defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+          publicKey: account.publicKey,
+          settings: account.settings,
           createdAt: account.createdAt,
           lastModified: Date.now(),
           devices: account.devices,
           partitionCount: account.partitionCount ?? 1,
         },
-        identities,
-        connectedApps: apps,
-        postageStamps,
+        connectedApps: account.connectedApps,
+        postageStamps: account.postageStamps,
       }
       return { snapshot, encryptionKey, accountKey, owner }
     } catch (error) {
@@ -1520,49 +1491,47 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Find the most recently connected valid entry for the current parent origin.
-   * Resolves ambiguity when multiple identities are connected to the same app
-   * by sorting by lastConnectedAt descending and returning the first valid one.
+   * Find the account + connected-app pair for the current parent origin, reading
+   * the nested account documents. Resolves ambiguity (the same app connected
+   * under multiple accounts) by sorting valid entries by `lastConnectedAt`
+   * descending and returning the most recent.
    */
-  private findMostRecentConnection(
-    connectedApps: ConnectedApp[],
-  ): ConnectedApp | undefined {
-    return connectedApps
-      .filter(
-        (app) =>
-          app.appUrl === this.parentOrigin && this.isConnectionValid(app),
-      )
-      .sort((a, b) => b.lastConnectedAt - a.lastConnectedAt)[0]
+  private findConnectionForParent():
+    | { account: Account; app: ConnectedApp }
+    | undefined {
+    if (!this.parentOrigin) {
+      return undefined
+    }
+    const accounts = createAccountsStorageManager().load()
+    const matches: { account: Account; app: ConnectedApp }[] = []
+    for (const account of accounts) {
+      for (const app of account.connectedApps) {
+        if (app.appUrl === this.parentOrigin && this.isConnectionValid(app)) {
+          matches.push({ account, app })
+        }
+      }
+    }
+    return matches.sort(
+      (a, b) => b.app.lastConnectedAt - a.app.lastConnectedAt,
+    )[0]
   }
 
   /**
    * Look up the app secret from shared storage for the current parent origin.
-   * Returns the secret and identityId if found and connection is valid.
+   * Returns the secret if a valid connection is found.
    */
-  private lookupAppSecretFromSharedStorage():
-    | { secret: string; identityId: string }
-    | undefined {
+  private lookupAppSecretFromSharedStorage(): { secret: string } | undefined {
     if (!this.parentOrigin) {
       return undefined
     }
 
     try {
-      const connectedAppsManager = createConnectedAppsStorageManager()
-      const connectedApps = connectedAppsManager.load()
-      const connectedApp = this.findMostRecentConnection(connectedApps)
-
-      if (!connectedApp) {
+      const connection = this.findConnectionForParent()
+      if (!connection?.app.appSecret) {
         return undefined
       }
 
-      if (!connectedApp.appSecret) {
-        return undefined
-      }
-
-      return {
-        secret: connectedApp.appSecret,
-        identityId: connectedApp.identityId,
-      }
+      return { secret: connection.app.appSecret }
     } catch (error) {
       console.error(
         "[Proxy] Error looking up app secret from shared storage:",
@@ -1584,9 +1553,23 @@ export class SwarmIdProxy {
     const stamperKey = `swarm-stamper-${this.parentOrigin}-${this.postageBatchId}`
     localStorage.removeItem(stamperKey)
 
-    // Invalidate connected app entries in shared storage so reconnect doesn't happen on refresh
+    // Invalidate matching connected-app entries in the nested account documents
+    // so reconnect doesn't happen on refresh (lastConnectedAt=0, no session).
     try {
-      disconnectApp(this.parentOrigin)
+      const manager = createAccountsStorageManager()
+      const accounts = manager.load()
+      let changed = false
+      const updated = accounts.map((account) => {
+        const connectedApps = account.connectedApps.map((app) => {
+          if (app.appUrl === this.parentOrigin) {
+            changed = true
+            return { ...app, lastConnectedAt: 0, connectedUntil: undefined }
+          }
+          return app
+        })
+        return { ...account, connectedApps }
+      })
+      if (changed) manager.save(updated)
     } catch (error) {
       console.error(
         "[Proxy] Error invalidating connected app in shared storage:",
@@ -1729,24 +1712,15 @@ export class SwarmIdProxy {
         identity = this.storagePartitionedIdentity
       } else {
         try {
-          const connectedAppsManager = createConnectedAppsStorageManager()
-          const connectedApps = connectedAppsManager.load()
-          const connectedApp = this.findMostRecentConnection(connectedApps)
-
-          if (connectedApp) {
-            const identitiesManager = createIdentitiesStorageManager()
-            const identities = identitiesManager.load()
-            const foundIdentity = identities.find(
-              (i) => i.id === connectedApp.identityId,
-            )
-
-            if (foundIdentity) {
-              identity = {
-                id: foundIdentity.id,
-                name: foundIdentity.name,
-                address: foundIdentity.id,
-                publicKey: foundIdentity.publicKey,
-              }
+          const connection = this.findConnectionForParent()
+          if (connection) {
+            // The account IS the app-facing identity (single-level model).
+            const { account } = connection
+            identity = {
+              id: account.id.toHex(),
+              name: account.name,
+              address: account.id.toHex(),
+              publicKey: account.publicKey,
             }
           }
         } catch (error) {
