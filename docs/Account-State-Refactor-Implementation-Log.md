@@ -2,7 +2,7 @@
 
 Living record of what each phase/commit actually landed for the multi-device account-state refactor
 (#337, #338, #339). Design rationale lives in
-[`Account-State-Refactor-337-338-339.md`](./Account-State-Refactor-337-338-339.md). Branch:
+[`Account-State-Refactor-Plan.md`](./Account-State-Refactor-Plan.md). Branch:
 `feat/nested-account-model`.
 
 ## Phase 0 — nested single-level account model
