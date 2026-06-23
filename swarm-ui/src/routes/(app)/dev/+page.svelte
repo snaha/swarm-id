@@ -56,6 +56,24 @@
   // Every stamp across all accounts (the account owns its stamps now).
   const allStamps = $derived(accountsStore.accounts.flatMap((a) => a.postageStamps))
 
+  // Same set, but carrying the owning account — the Stored Stamps list needs the
+  // account id to delete a stamp from its nested collection.
+  const storedStampRows = $derived(
+    accountsStore.accounts.flatMap((a) =>
+      a.postageStamps.map((stamp) => ({ accountId: a.id, accountName: a.name, stamp })),
+    ),
+  )
+  let storedStampMessage = $state('')
+
+  // Delete a single stored stamp from local state only (dev cleanup — replaces
+  // the old hand-edit of localStorage). Local-only on purpose: a synced stamp
+  // delete is futile (no stamp tombstone yet — #337 — so a peer's union merge
+  // re-adds it).
+  function deleteStoredStamp(accountId: EthAddress, batchID: BatchId) {
+    accountsStore.removeStamp(accountId, batchID, { skipSync: true })
+    storedStampMessage = `🗑️ Deleted ${batchID.toHex().slice(0, 12)}… locally`
+  }
+
   // Tab state
   type Tab = 'overview' | 'stamps' | 'sync' | 'devices'
   let activeTab = $state<Tab>('overview')
@@ -938,16 +956,18 @@ Check console logs for details:
       <Typography variant="small" style="color: var(--colors-medium);">
         The postage batches saved in this browser. Copy these fields before clearing storage — paste
         them into the "Use existing one" screen to re-adopt the same batch on a fresh account (the
-        owner is derived from the signer key).
+        owner is derived from the signer key). Delete removes the stamp locally only (no sync).
       </Typography>
-      {#if allStamps.length === 0}
+      {#if storedStampMessage}
+        <Typography font="mono" variant="small">{storedStampMessage}</Typography>
+      {/if}
+      {#if storedStampRows.length === 0}
         <Typography variant="small" style="color: var(--colors-medium);">
           No stamps stored locally.
         </Typography>
       {:else}
         <Vertical --vertical-gap="var(--half-padding)">
-          {#each allStamps as stamp (stamp.batchID.toHex())}
-            {@const assignment = stampAssignments.get(stamp.batchID.toHex())}
+          {#each storedStampRows as { accountId, accountName, stamp } (stamp.batchID.toHex())}
             <Vertical
               --vertical-gap="var(--half-padding)"
               style="background: var(--colors-card-bg); padding: var(--padding); border: 1px solid var(--colors-low);"
@@ -1020,9 +1040,21 @@ Check console logs for details:
                 </Vertical>
               </Horizontal>
 
-              <Typography variant="small" style="color: var(--colors-medium);">
-                Account: {assignment?.account ?? '—'}
-              </Typography>
+              <Horizontal
+                --horizontal-gap="var(--half-padding)"
+                --horizontal-justify-content="space-between"
+                --horizontal-align-items="center"
+              >
+                <Typography variant="small" style="color: var(--colors-medium);">
+                  Account: {accountName}
+                </Typography>
+                <Button
+                  variant="secondary"
+                  danger
+                  dimension="compact"
+                  onclick={() => deleteStoredStamp(accountId, stamp.batchID)}>Delete</Button
+                >
+              </Horizontal>
             </Vertical>
           {/each}
         </Vertical>

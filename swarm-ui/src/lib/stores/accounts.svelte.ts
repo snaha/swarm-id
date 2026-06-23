@@ -242,11 +242,19 @@ export const accountsStore = {
     return newStamp
   },
 
-  removeStamp(id: EthAddress, batchID: BatchId) {
-    update(id, (account) => ({
-      ...account,
-      postageStamps: account.postageStamps.filter((s) => !s.batchID.equals(batchID)),
-    }))
+  removeStamp(id: EthAddress, batchID: BatchId, { skipSync = false }: { skipSync?: boolean } = {}) {
+    update(
+      id,
+      (account) => ({
+        ...account,
+        postageStamps: account.postageStamps.filter((s) => !s.batchID.equals(batchID)),
+        // Never leave a default pointing at a stamp we just removed.
+        defaultPostageStampBatchID: account.defaultPostageStampBatchID?.equals(batchID)
+          ? undefined
+          : account.defaultPostageStampBatchID,
+      }),
+      { skipSync },
+    )
   },
 
   /** Update a stamp's volatile utilization in place, WITHOUT firing sync. */
