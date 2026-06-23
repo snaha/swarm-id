@@ -15,7 +15,7 @@
   import { postageStampsStore } from '$lib/stores/postage-stamps.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { syncStore } from '$lib/stores/sync.svelte'
-  import { devSettingsStore, type MockStampResult } from '$lib/stores/dev-settings.svelte'
+  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import Tabs from './tabs.svelte'
   import CopyButton from './copy-button.svelte'
   import StatusDot from './status-dot.svelte'
@@ -379,17 +379,8 @@
   let customSignerKey = $state('')
   let customSignerError = $state<string | undefined>(undefined)
 
-  // Mock stamp widget settings
-  let mockStampEnabled = $state(devSettingsStore.data.mockStampEnabled)
-  let mockStampResult = $state<MockStampResult>(devSettingsStore.data.mockStampResult)
-
-  $effect(() => {
-    devSettingsStore.setMockStampEnabled(mockStampEnabled)
-  })
-
-  $effect(() => {
-    devSettingsStore.setMockStampResult(mockStampResult)
-  })
+  // Mock stamp widget settings — the store is the single source of truth
+  // (durable + cross-tab); the controls below read/write it directly.
 
   // Validate custom signer key when enabled
   $effect(() => {
@@ -824,20 +815,32 @@ Check console logs for details:
 
         <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
           <label class="checkbox-label">
-            <input type="checkbox" bind:checked={mockStampEnabled} />
+            <input
+              type="checkbox"
+              checked={devSettingsStore.data.mockStampEnabled}
+              onchange={(e) => devSettingsStore.setMockStampEnabled(e.currentTarget.checked)}
+            />
             Enable mock mode
           </label>
         </Horizontal>
 
-        {#if mockStampEnabled}
+        {#if devSettingsStore.data.mockStampEnabled}
           <Horizontal --horizontal-gap="var(--padding)" --horizontal-align-items="center">
             <Typography variant="small">Mock result:</Typography>
             <label class="radio-label">
-              <input type="radio" value="success" bind:group={mockStampResult} />
+              <input
+                type="radio"
+                checked={devSettingsStore.data.mockStampResult === 'success'}
+                onchange={() => devSettingsStore.setMockStampResult('success')}
+              />
               Success
             </label>
             <label class="radio-label">
-              <input type="radio" value="error" bind:group={mockStampResult} />
+              <input
+                type="radio"
+                checked={devSettingsStore.data.mockStampResult === 'error'}
+                onchange={() => devSettingsStore.setMockStampResult('error')}
+              />
               Error
             </label>
           </Horizontal>
