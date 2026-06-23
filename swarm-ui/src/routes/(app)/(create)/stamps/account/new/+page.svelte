@@ -59,8 +59,8 @@
         onSkip={handleSkip}
         introText="Synced accounts require a Swarm postage stamp."
         variant="account-creation"
-        identityName={account.name}
-        identityValue={account.id.toHex()}
+        accountName={account.name}
+        accountValue={account.id.toHex()}
         autoNavigateOnSuccess={!!appData}
         bind:pageState
         bind:purchaseState

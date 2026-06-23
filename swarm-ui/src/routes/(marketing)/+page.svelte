@@ -45,7 +45,7 @@
       </a>
       <Horizontal --horizontal-gap="var(--half-padding)">
         <Button variant="strong" dimension="compact" mode="dark" href={resolve(routes.ACCOUNT_NEW)}>
-          Create identity
+          Create account
         </Button>
         <span class="docs-link">
           <Button
@@ -76,7 +76,7 @@
               mode="dark"
               href={resolve(routes.ACCOUNT_NEW)}
             >
-              Create identity
+              Create account
             </Button>
             <Button
               variant="secondary"

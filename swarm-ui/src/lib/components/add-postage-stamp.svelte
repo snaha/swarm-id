@@ -45,8 +45,8 @@
     // Variant determines success/error screen layout
     variant?: StampVariant
     // For account-creation variant
-    identityName?: string
-    identityValue?: string
+    accountName?: string
+    accountValue?: string
     // Bindable state for parent to read
     pageState?: PageState
     purchaseState?: PurchaseState
@@ -61,8 +61,8 @@
     onSkip,
     introText = 'Synced accounts require a Swarm postage stamp.',
     variant = 'dashboard',
-    identityName,
-    identityValue,
+    accountName,
+    accountValue,
     pageState = $bindable<PageState>('select'),
     purchaseState = $bindable<PurchaseState>('waiting'),
     isFormDisabled = $bindable(true),
@@ -264,10 +264,10 @@
       --vertical-justify-content="center"
       style="flex: 1;"
     >
-      {#if variant === 'account-creation' && identityValue}
-        <Polycon value={identityValue} size={POLYCON_SIZE} />
-        {#if identityName}
-          <Typography variant="small" center>{identityName}</Typography>
+      {#if variant === 'account-creation' && accountValue}
+        <Polycon value={accountValue} size={POLYCON_SIZE} />
+        {#if accountName}
+          <Typography variant="small" center>{accountName}</Typography>
         {/if}
       {/if}
 
@@ -283,7 +283,7 @@
 
       <Typography center>
         {#if variant === 'account-creation'}
-          Your Swarm identity is ready to use.
+          Your Swarm account is ready to use.
         {:else if variant === 'external-app'}
           Your postage stamp was added to your account
         {:else}
@@ -293,7 +293,7 @@
 
       {#if variant === 'account-creation'}
         <Typography variant="small" center class="footer-text">
-          Manage your account and create more identities at
+          Manage your account at
           <a href={resolve(routes.ROOT)} target="_blank">{window.location.hostname}</a>
         </Typography>
       {/if}

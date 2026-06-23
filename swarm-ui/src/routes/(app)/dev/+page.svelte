@@ -91,7 +91,7 @@
   let selectedStampId = $state<string | undefined>(undefined)
   let selectedAccountId = $state<string | undefined>(undefined)
 
-  // Derived postage signer key + owner address for the selected account/identity.
+  // Derived postage signer key + owner address for the selected account.
   // Use the owner address to buy a stamp online, then paste the private key into
   // the "Use existing one" screen as the signer key.
   let accountSigner = $state<{ privateKey: string; owner: string } | undefined>(undefined)
@@ -420,7 +420,7 @@
   const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
   const stampAssignments = $derived(
     (() => {
-      const map = new SvelteMap<string, { account?: string; identity?: string }>()
+      const map = new SvelteMap<string, { account?: string }>()
       for (const account of accountsStore.accounts) {
         const batch = account.defaultPostageStampBatchID?.toHex()
         if (batch) {
@@ -937,7 +937,7 @@ Check console logs for details:
       <Typography variant="h3">Stored Stamps (local)</Typography>
       <Typography variant="small" style="color: var(--colors-medium);">
         The postage batches saved in this browser. Copy these fields before clearing storage — paste
-        them into the "Use existing one" screen to re-adopt the same batch on a fresh identity (the
+        them into the "Use existing one" screen to re-adopt the same batch on a fresh account (the
         owner is derived from the signer key).
       </Typography>
       {#if allStamps.length === 0}
@@ -1021,7 +1021,7 @@ Check console logs for details:
               </Horizontal>
 
               <Typography variant="small" style="color: var(--colors-medium);">
-                Account: {assignment?.account ?? '—'} · Identity: {assignment?.identity ?? '—'}
+                Account: {assignment?.account ?? '—'}
               </Typography>
             </Vertical>
           {/each}
@@ -1227,7 +1227,7 @@ Check console logs for details:
       <Typography variant="h3">Signer Key / Owner Address</Typography>
       <Typography variant="small" style="color: var(--colors-medium);">
         Buy a stamp online under the owner address, then paste the private key as the signer key in
-        the "Use existing one" screen. Reflects the account/identity selected above.
+        the "Use existing one" screen. Reflects the account selected above.
       </Typography>
 
       {#if !selectedAccountId}

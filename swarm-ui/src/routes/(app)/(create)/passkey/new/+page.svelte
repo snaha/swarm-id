@@ -107,7 +107,7 @@
         navigateToConnectOrHome()
       }
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Failed to create passkey identity'
+      error = err instanceof Error ? err.message : 'Failed to create passkey account'
       console.error('❌ Passkey creation failed:', err)
       isProcessing = false
     }
