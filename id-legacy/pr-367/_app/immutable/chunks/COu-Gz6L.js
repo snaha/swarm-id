@@ -1,1 +1,0 @@
-import{D as c,av as t,al as a,A as o}from"./Bekcx1ar.js";function l(e){throw new Error("https://svelte.dev/e/lifecycle_outside_component")}function u(e){t===null&&l(),a&&t.l!==null?i(t).m.push(e):c(()=>{const n=o(e);if(typeof n=="function")return n})}function f(e){t===null&&l(),u(()=>()=>o(e))}function i(e){var n=e.l;return n.u??={a:[],b:[],m:[]}}export{f as a,u as o};
