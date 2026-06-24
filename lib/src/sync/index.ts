@@ -33,6 +33,35 @@ export {
 } from "./restore-account"
 export type { RestoreAccountResult } from "./restore-account"
 
+// Phase 3a: per-device snapshot feeds + device-registry discovery
+export {
+  deviceStateTopic,
+  writeDeviceState,
+  readLatestDeviceState,
+  foldAccount,
+  deserializeDeviceState,
+  DeviceStateSnapshotSchemaV1,
+  DEVICE_STATE_TOPIC_PREFIX,
+} from "./device-state"
+export type {
+  DeviceStateSnapshot,
+  DeviceStateView,
+  FoldedAccount,
+  AccountSettings,
+} from "./device-state"
+export {
+  deviceRegistryTopic,
+  readDeviceRegistry,
+  writeDeviceRegistry,
+  upsertDevice,
+  deserializeRegistry,
+  DeviceRegistrySchemaV1,
+  DEVICE_REGISTRY_TOPIC_PREFIX,
+} from "./device-registry"
+export type { DeviceRegistry } from "./device-registry"
+export { foldAccountFromSwarm } from "./fold-account-from-swarm"
+export type { FoldAccountResult } from "./fold-account-from-swarm"
+
 // Store interfaces
 export type {
   AccountsStoreInterface,
