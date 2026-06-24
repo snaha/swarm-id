@@ -9,7 +9,7 @@ interface SetupDraft {
   flow: 'create' | 'sign-in' | 'restore'
   name: string
   phrase?: string
-  /** Account data carried over by a restore (stamps, apps, original name). */
+  /** Account data carried over by a restore (drives, apps, original name). */
   restored?: AccountData
 }
 

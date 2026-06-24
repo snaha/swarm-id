@@ -104,7 +104,7 @@
   let toastMessage = $state<string | undefined>(undefined)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-  const isLocal = $derived(account.stamps.length === 0)
+  const isLocal = $derived(account.drives.length === 0)
   const accessLabel = $derived(methodLabel(account.access.type))
   const AccessIcon: Component = $derived(
     account.access.type === 'passkey'
@@ -372,12 +372,12 @@
 
 <div class="flex w-full flex-col gap-6">
   {#if isLocal}
-    <!-- Local account banner: no stamps yet, so the account is view-only. -->
+    <!-- Local account banner: no drives yet, so the account is view-only. -->
     <div class="bg-muted flex w-full flex-col gap-2 rounded-lg px-4 py-2">
       <div class="flex w-full items-center gap-2">
         <Info class="size-4 shrink-0" />
         <p class="flex-1 text-sm">Local account (view-only)</p>
-        <!-- Stamp purchase flow is still TBD in the design. -->
+        <!-- Drive purchase flow is still TBD in the design. -->
         <Button size="xs" onclick={notImplemented}>Upgrade</Button>
         <Button size="xs" variant="ghost" onclick={() => (bannerInfoShown = !bannerInfoShown)}>
           Info
@@ -385,8 +385,8 @@
       </div>
       {#if bannerInfoShown}
         <p class="text-muted-foreground pl-6 text-sm">
-          This is a local account, view-only and not synced. Upgrade by adding a postage stamp to
-          upload data and use your Swarm ID across all your devices.
+          This is a local account, view-only and not synced. Upgrade by adding a drive to upload
+          data and use your Swarm ID across all your devices.
         </p>
       {/if}
     </div>

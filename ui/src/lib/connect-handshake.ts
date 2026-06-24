@@ -43,27 +43,27 @@ function connectionDuration(account: Account): number {
     : DEFAULT_SESSION_DURATION
 }
 
-/** The stamp the proxy should upload with: the account default or its first stamp. */
+/** The drive the proxy should upload with: the account default or its first drive. */
 function defaultBatchId(account: Account): BatchId | undefined {
-  const batchId = account.defaultStampBatchId ?? account.stamps[0]?.batchId
+  const batchId = account.defaultDriveBatchId ?? account.drives[0]?.batchId
   return batchId === undefined ? undefined : new BatchId(batchId)
 }
 
-/** The account's stamps in the shared (@snaha/swarm-id) PostageStamp shape. */
+/** The account's drives in the shared (@snaha/swarm-id) PostageStamp shape. */
 function sharedStamps(account: Account): SharedPostageStamp[] {
-  return account.stamps.map((stamp) => ({
-    batchID: new BatchId(stamp.batchId),
-    signerKey: new PrivateKey(stamp.signerKey),
-    utilization: stamp.utilization,
-    usable: stamp.usable,
-    depth: stamp.depth,
-    amount: BigInt(stamp.amount),
-    bucketDepth: stamp.bucketDepth,
-    blockNumber: stamp.blockNumber,
-    immutableFlag: stamp.immutableFlag,
-    exists: stamp.exists,
-    batchTTL: stamp.batchTTL,
-    createdAt: stamp.createdAt,
+  return account.drives.map((drive) => ({
+    batchID: new BatchId(drive.batchId),
+    signerKey: new PrivateKey(drive.signerKey),
+    utilization: drive.utilization,
+    usable: drive.usable,
+    depth: drive.depth,
+    amount: BigInt(drive.amount),
+    bucketDepth: drive.bucketDepth,
+    blockNumber: drive.blockNumber,
+    immutableFlag: drive.immutableFlag,
+    exists: drive.exists,
+    batchTTL: drive.batchTTL,
+    createdAt: drive.createdAt,
   }))
 }
 
@@ -80,12 +80,12 @@ function updateSharedAccount(
 
 /**
  * Upsert the shared nested account record the proxy resolves a connection (and
- * its upload stamp) against. The account is its own single identity, owning its
- * connected apps and postage stamps inline.
+ * its upload drive) against. The account is its own single identity, owning its
+ * connected apps and drives inline.
  */
 async function saveSharedRecords(account: Account, masterKey: string): Promise<void> {
   const accountId = new EthAddress(account.id)
-  const stampBatchId = defaultBatchId(account)
+  const driveBatchId = defaultBatchId(account)
   const publicKey = bareHex(account.publicKey)
 
   const manager = createAccountsStorageManager()
@@ -100,7 +100,7 @@ async function saveSharedRecords(account: Account, masterKey: string): Promise<v
               ...shared,
               name: account.name,
               publicKey,
-              defaultPostageStampBatchID: stampBatchId ?? shared.defaultPostageStampBatchID,
+              defaultPostageStampBatchID: driveBatchId ?? shared.defaultPostageStampBatchID,
               postageStamps: sharedStamps(account),
             }
           : shared,
@@ -116,7 +116,7 @@ async function saveSharedRecords(account: Account, masterKey: string): Promise<v
         createdAt: account.createdAt,
         derivationKey: await deriveAccountDerivationKey(masterKey),
         publicKey,
-        defaultPostageStampBatchID: stampBatchId,
+        defaultPostageStampBatchID: driveBatchId,
         devices: [],
         connectedApps: [],
         postageStamps: sharedStamps(account),
@@ -271,7 +271,7 @@ export function removeSharedConnection(account: Account, appUrl: string): void {
 
 /**
  * Erase the account's shared-storage footprint: removing the nested account
- * record drops its connected apps and stamps with it, and the storage event
+ * record drops its connected apps and drives with it, and the storage event
  * de-authenticates any dApp proxy iframes.
  */
 export function removeSharedAccountRecords(account: Account): void {

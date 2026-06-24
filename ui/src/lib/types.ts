@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The account is the aggregate root: it owns its postage stamps and connected
- * apps directly (nested), rather than referencing them across flat collections.
+ * The account is the aggregate root: it owns its drives and connected apps
+ * directly (nested), rather than referencing them across flat collections.
  * All values are plain JSON so the whole account serializes as-is.
  */
 
@@ -13,7 +13,11 @@ export type AccessMethod =
   | { type: 'eth-wallet'; walletAddress: string; encryptionSalt: string }
   | { type: 'password'; kdfSalt: string; kdfIterations: number }
 
-export interface PostageStamp {
+/**
+ * A drive: an account's unit of owned Swarm storage, backed by a postage stamp
+ * batch on the Bee node. Batch-level fields mirror the node's stamp object.
+ */
+export interface Drive {
   batchId: string
   signerKey: string
   depth: number
@@ -50,8 +54,8 @@ export interface AccountData {
   createdAt: number
   /** How long app connections stay valid, in days. */
   appConnectionDays?: number
-  defaultStampBatchId?: string
-  stamps: PostageStamp[]
+  defaultDriveBatchId?: string
+  drives: Drive[]
   connectedApps: ConnectedApp[]
 }
 
@@ -66,7 +70,7 @@ export interface AccountRecord extends AccountData {
  * The live account object the app works with: {@link AccountRecord} fields as
  * reactive state plus the mutation methods that own them. Defined with the
  * collection store and re-exported here so `$lib/types` stays the one type entry
- * point. Account-state changes are methods on the object (`account.addStamp(…)`),
+ * point. Account-state changes are methods on the object (`account.addDrive(…)`),
  * never store calls that take an id and look the account up.
  */
 export type { Account } from './stores/accounts.svelte'

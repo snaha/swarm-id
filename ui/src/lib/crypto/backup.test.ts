@@ -19,7 +19,7 @@ function accountFor(phrase: string): AccountRecord {
     access: { type: 'password', kdfSalt: '00', kdfIterations: 1 },
     encryptedSeed: '00',
     appConnectionDays: 30,
-    stamps: [],
+    drives: [],
     connectedApps: [
       { appUrl: 'https://coucou.mail', appName: 'Coucou', lastConnectedAt: 1765000000000 },
     ],

@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * .swarmid backup files. The portable account data (name, stamps, connected
+ * .swarmid backup files. The portable account data (name, drives, connected
  * apps — never the access method or encrypted seed) is AES-GCM encrypted with
  * a key derived from the recovery-phrase entropy, so the file is useless
  * without the phrase and restoring needs exactly: file + phrase.
@@ -51,8 +51,8 @@ export async function createBackup(account: AccountData, entropy: Uint8Array): P
     publicKey: account.publicKey,
     createdAt: account.createdAt,
     appConnectionDays: account.appConnectionDays,
-    defaultStampBatchId: account.defaultStampBatchId,
-    stamps: account.stamps,
+    defaultDriveBatchId: account.defaultDriveBatchId,
+    drives: account.drives,
     connectedApps: account.connectedApps,
   }
 

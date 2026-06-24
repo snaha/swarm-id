@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import type { AccessMethod, AccountRecord, ConnectedApp, PostageStamp } from '$lib/types'
+import type { AccessMethod, AccountRecord, ConnectedApp, Drive } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-id-accounts-v2'
 
@@ -8,8 +8,8 @@ const STORAGE_KEY = 'swarm-id-accounts-v2'
  * The account aggregate root. Fields are reactive (`$state`) so component reads
  * update on mutation, and every mutator is a method on the object that persists
  * the whole collection through the injected `onChange` — callers mutate the
- * account they already hold (`account.addStamp(…)`), never a store method that
- * takes an id and looks the account up. The account owns its postage stamps and
+ * account they already hold (`account.addDrive(…)`), never a store method that
+ * takes an id and looks the account up. The account owns its drives and
  * connected apps inline (nested model). `toJSON()` is the plain serialized form.
  */
 export class Account {
@@ -22,8 +22,8 @@ export class Account {
   access = $state<AccessMethod>({ type: 'password', kdfSalt: '', kdfIterations: 0 })
   encryptedSeed = $state('')
   appConnectionDays = $state<number | undefined>(undefined)
-  defaultStampBatchId = $state<string | undefined>(undefined)
-  stamps = $state<PostageStamp[]>([])
+  defaultDriveBatchId = $state<string | undefined>(undefined)
+  drives = $state<Drive[]>([])
   connectedApps = $state<ConnectedApp[]>([])
   readonly #onChange: () => void
 
@@ -35,8 +35,8 @@ export class Account {
     this.access = record.access
     this.encryptedSeed = record.encryptedSeed
     this.appConnectionDays = record.appConnectionDays
-    this.defaultStampBatchId = record.defaultStampBatchId
-    this.stamps = record.stamps
+    this.defaultDriveBatchId = record.defaultDriveBatchId
+    this.drives = record.drives
     this.connectedApps = record.connectedApps
     this.#onChange = onChange
   }
@@ -77,27 +77,27 @@ export class Account {
   }
 
   /**
-   * Add or replace a postage stamp (deduped by batch id). The first stamp added
-   * becomes the account default so uploads have something to spend against.
+   * Add or replace a drive (deduped by batch id). The first drive added becomes
+   * the account default so uploads have something to spend against.
    */
-  addStamp(stamp: PostageStamp) {
-    this.stamps = [...this.stamps.filter((existing) => existing.batchId !== stamp.batchId), stamp]
-    this.defaultStampBatchId ??= stamp.batchId
+  addDrive(drive: Drive) {
+    this.drives = [...this.drives.filter((existing) => existing.batchId !== drive.batchId), drive]
+    this.defaultDriveBatchId ??= drive.batchId
     this.#onChange()
   }
 
-  removeStamp(batchId: string) {
-    this.stamps = this.stamps.filter((stamp) => stamp.batchId !== batchId)
-    // Drop the default when it points at the removed stamp; fall back to
+  removeDrive(batchId: string) {
+    this.drives = this.drives.filter((drive) => drive.batchId !== batchId)
+    // Drop the default when it points at the removed drive; fall back to
     // whatever remains so the account never references a missing batch.
-    if (this.defaultStampBatchId === batchId) {
-      this.defaultStampBatchId = this.stamps[0]?.batchId
+    if (this.defaultDriveBatchId === batchId) {
+      this.defaultDriveBatchId = this.drives[0]?.batchId
     }
     this.#onChange()
   }
 
-  setDefaultStamp(batchId: string | undefined) {
-    this.defaultStampBatchId = batchId
+  setDefaultDrive(batchId: string | undefined) {
+    this.defaultDriveBatchId = batchId
     this.#onChange()
   }
 
@@ -111,8 +111,8 @@ export class Account {
       access: this.access,
       encryptedSeed: this.encryptedSeed,
       appConnectionDays: this.appConnectionDays,
-      defaultStampBatchId: this.defaultStampBatchId,
-      stamps: this.stamps,
+      defaultDriveBatchId: this.defaultDriveBatchId,
+      drives: this.drives,
       connectedApps: this.connectedApps,
     }
   }
@@ -131,6 +131,22 @@ function hydrate(record: AccountRecord): Account {
   return new Account(record, persist)
 }
 
+// Records persisted before the stamp→drive rename used `stamps` /
+// `defaultStampBatchId`. Accept either spelling on load and rewrite in the
+// current shape on the next persist.
+type StoredRecord = AccountRecord & {
+  stamps?: Drive[]
+  defaultStampBatchId?: string
+}
+
+function normalize(record: StoredRecord): AccountRecord {
+  return {
+    ...record,
+    drives: record.drives ?? record.stamps ?? [],
+    defaultDriveBatchId: record.defaultDriveBatchId ?? record.defaultStampBatchId,
+  }
+}
+
 function load(): Account[] {
   if (typeof localStorage === 'undefined') {
     return []
@@ -140,7 +156,7 @@ function load(): Account[] {
     return []
   }
   try {
-    return (JSON.parse(raw) as AccountRecord[]).map(hydrate)
+    return (JSON.parse(raw) as StoredRecord[]).map((record) => hydrate(normalize(record)))
   } catch {
     return []
   }

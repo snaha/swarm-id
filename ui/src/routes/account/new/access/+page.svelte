@@ -83,7 +83,7 @@
     }
     const wallet = walletFromPhrase(draft.phrase)
     // Carry over data from a restore, or from an existing record for the same
-    // address — re-importing a phrase must not wipe stamps or connected apps.
+    // address — re-importing a phrase must not wipe drives or connected apps.
     const carried = draft.restored ?? accountsStore.get(wallet.address)
     const account = accountsStore.add({
       id: wallet.address,
@@ -93,8 +93,8 @@
       access,
       encryptedSeed: await encryptSeed(wallet.entropy, key),
       appConnectionDays: carried?.appConnectionDays,
-      defaultStampBatchId: carried?.defaultStampBatchId,
-      stamps: carried?.stamps ?? [],
+      defaultDriveBatchId: carried?.defaultDriveBatchId,
+      drives: carried?.drives ?? [],
       connectedApps: carried?.connectedApps ?? [],
     })
     sessionStore.setCurrentAccount(wallet.address)

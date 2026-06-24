@@ -21,7 +21,7 @@
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { PostageStamp } from '$lib/types'
+  import type { Drive } from '$lib/types'
   import { truncateAddress } from '$lib/utils'
 
   import { type BeeStamp, type EndpointProbe, beeDev } from './bee'
@@ -115,8 +115,8 @@
 
   // ── Overview counts ──────────────────────────────────────────────────────────
   const accountCount = $derived(accountsStore.accounts.length)
-  const stampCount = $derived(
-    accountsStore.accounts.reduce((total, account) => total + account.stamps.length, 0),
+  const driveCount = $derived(
+    accountsStore.accounts.reduce((total, account) => total + account.drives.length, 0),
   )
   const connectionCount = $derived(
     accountsStore.accounts.reduce((total, account) => total + account.connectedApps.length, 0),
@@ -139,13 +139,13 @@
     selectedAccountId ? accountsStore.get(selectedAccountId) : undefined,
   )
 
-  // batchId → which account holds it (and whether it is that account's default).
-  const stampAssignments = $derived.by(() => {
+  // batchId → which account holds it as a drive (and whether it is that account's default).
+  const driveAssignments = $derived.by(() => {
     const map = new SvelteMap<string, string>()
     for (const account of accountsStore.accounts) {
-      for (const stamp of account.stamps) {
-        const isDefault = account.defaultStampBatchId === stamp.batchId
-        map.set(stamp.batchId, isDefault ? `${account.name} (default)` : account.name)
+      for (const drive of account.drives) {
+        const isDefault = account.defaultDriveBatchId === drive.batchId
+        map.set(drive.batchId, isDefault ? `${account.name} (default)` : account.name)
       }
     }
     return map
@@ -223,7 +223,7 @@
     }
   }
 
-  function assignStamp() {
+  function assignDrive() {
     assignError = ''
     assignMessage = ''
     const account = selectedAccount
@@ -243,7 +243,7 @@
     }
 
     const signerKey = useCustomSigner ? customSignerKey.toLowerCase() : selectedSigner
-    const stamp: PostageStamp = {
+    const drive: Drive = {
       batchId: beeStamp.batchID,
       signerKey,
       depth: beeStamp.depth,
@@ -257,12 +257,12 @@
       batchTTL: beeStamp.batchTTL,
       createdAt: Date.now(),
     }
-    account.addStamp(stamp)
-    account.setDefaultStamp(beeStamp.batchID)
-    assignMessage = `Assigned stamp to ${truncateAddress(account.id)} and set as default.`
+    account.addDrive(drive)
+    account.setDefaultDrive(beeStamp.batchID)
+    assignMessage = `Assigned drive to ${truncateAddress(account.id)} and set as default.`
   }
 
-  function removeStamp() {
+  function removeDrive() {
     assignError = ''
     assignMessage = ''
     const account = selectedAccount
@@ -270,12 +270,12 @@
       assignError = 'Select a stamp and an account first.'
       return
     }
-    account.removeStamp(selectedStampId)
-    assignMessage = `Removed stamp from ${truncateAddress(account.id)}.`
+    account.removeDrive(selectedStampId)
+    assignMessage = `Removed drive from ${truncateAddress(account.id)}.`
   }
 
   function clearAllData() {
-    if (!confirm('Delete all accounts, stamps and connections on this device?')) {
+    if (!confirm('Delete all accounts, drives and connections on this device?')) {
       return
     }
     accountsStore.clear()
@@ -340,7 +340,7 @@
         <section class="flex flex-col items-start gap-3">
           <h2 class="text-sm font-bold">Local data</h2>
           <p class="text-sm">
-            {accountCount} accounts · {stampCount} stamps · {connectionCount} connections
+            {accountCount} accounts · {driveCount} drives · {connectionCount} connections
           </p>
           <Button variant="destructive" onclick={clearAllData}>Clear all data</Button>
         </section>
@@ -440,7 +440,7 @@
                   <div class="text-muted-foreground flex flex-wrap gap-x-4 text-xs">
                     <span>Depth: {stamp.depth}</span>
                     <span>Usable: {stamp.usable ? 'yes' : 'no'}</span>
-                    <span>Assigned: {stampAssignments.get(stamp.batchID) ?? '—'}</span>
+                    <span>Assigned: {driveAssignments.get(stamp.batchID) ?? '—'}</span>
                   </div>
                 </div>
               {/each}
@@ -451,10 +451,10 @@
         <div class="bg-border h-px w-full"></div>
 
         <section class="flex flex-col gap-3">
-          <h2 class="text-sm font-bold">Assign stamp to account</h2>
+          <h2 class="text-sm font-bold">Assign drive to account</h2>
 
           {#if accountOptions.length === 0}
-            <p class="text-muted-foreground text-sm">Create an account first to assign a stamp.</p>
+            <p class="text-muted-foreground text-sm">Create an account first to assign a drive.</p>
           {:else if stampOptions.length === 0}
             <p class="text-muted-foreground text-sm">No stamps on the node to assign yet.</p>
           {:else}
@@ -482,13 +482,13 @@
             {/if}
 
             <div class="flex gap-2">
-              <Button disabled={useCustomSigner && !!customSignerError} onclick={assignStamp}>
+              <Button disabled={useCustomSigner && !!customSignerError} onclick={assignDrive}>
                 Assign and set default
               </Button>
               <Button
                 variant="destructive"
-                disabled={!selectedAccount?.stamps.some((s) => s.batchId === selectedStampId)}
-                onclick={removeStamp}
+                disabled={!selectedAccount?.drives.some((d) => d.batchId === selectedStampId)}
+                onclick={removeDrive}
               >
                 Remove from account
               </Button>
