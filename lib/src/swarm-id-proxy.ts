@@ -1360,6 +1360,9 @@ export class SwarmIdProxy {
           defaultPostageStampBatchID: defaultStampBatchID.toHex(),
           publicKey: account.publicKey,
           settings: account.settings,
+          accountNameAt: account.accountNameAt ?? account.lastModified,
+          defaultStampAt: account.defaultStampAt ?? account.lastModified,
+          settingsAt: account.settingsAt ?? account.lastModified,
           createdAt: account.createdAt,
           lastModified: Date.now(),
           devices: account.devices,
@@ -1467,12 +1470,18 @@ export class SwarmIdProxy {
       const view: DeviceStateView = {
         connectedApps: snapshot.connectedApps,
         postageStamps: snapshot.postageStamps,
-        accountName: { value: snapshot.metadata.accountName, at: scalarAt },
+        accountName: {
+          value: snapshot.metadata.accountName,
+          at: snapshot.metadata.accountNameAt ?? scalarAt,
+        },
         defaultPostageStampBatchID: {
           value: snapshot.metadata.defaultPostageStampBatchID,
-          at: scalarAt,
+          at: snapshot.metadata.defaultStampAt ?? scalarAt,
         },
-        settings: { value: snapshot.metadata.settings, at: scalarAt },
+        settings: {
+          value: snapshot.metadata.settings,
+          at: snapshot.metadata.settingsAt ?? scalarAt,
+        },
         accountPublicKey: snapshot.metadata.publicKey,
         accountCreatedAt: snapshot.metadata.createdAt,
         partitionCount: snapshot.metadata.partitionCount ?? 1,

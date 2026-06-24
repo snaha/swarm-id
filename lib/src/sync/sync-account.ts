@@ -276,6 +276,9 @@ export function createSyncAccount(
         defaultPostageStampBatchID: defaultStampBatchID.toHex(),
         publicKey: account.publicKey,
         settings: account.settings,
+        accountNameAt: account.accountNameAt ?? account.lastModified,
+        defaultStampAt: account.defaultStampAt ?? account.lastModified,
+        settingsAt: account.settingsAt ?? account.lastModified,
         createdAt: account.createdAt,
         lastModified: Date.now(),
         devices: account.devices,
@@ -390,12 +393,18 @@ export function createSyncAccount(
     const view: DeviceStateView = {
       connectedApps: state.connectedApps,
       postageStamps: state.postageStamps,
-      accountName: { value: state.metadata.accountName, at: scalarAt },
+      accountName: {
+        value: state.metadata.accountName,
+        at: state.metadata.accountNameAt ?? scalarAt,
+      },
       defaultPostageStampBatchID: {
         value: state.metadata.defaultPostageStampBatchID,
-        at: scalarAt,
+        at: state.metadata.defaultStampAt ?? scalarAt,
       },
-      settings: { value: state.metadata.settings, at: scalarAt },
+      settings: {
+        value: state.metadata.settings,
+        at: state.metadata.settingsAt ?? scalarAt,
+      },
       accountPublicKey: state.metadata.publicKey,
       accountCreatedAt: state.metadata.createdAt,
       partitionCount,

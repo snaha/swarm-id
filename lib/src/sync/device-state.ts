@@ -101,6 +101,11 @@ export interface FoldedAccount {
   accountName: string
   defaultPostageStampBatchID: BatchId | undefined
   settings: AccountSettings | undefined
+  // Per-field LWW clock of each scalar's winning value, so refresh/restore can
+  // apply it by LWW against the local clock.
+  accountNameAt: number
+  defaultStampAt: number
+  settingsAt: number
   createdAt: number
   publicKey?: string
   partitionCount: number
@@ -295,6 +300,9 @@ export function foldAccount(
       ? new BatchId(defaultBatch.value)
       : undefined,
     settings: settings.value,
+    accountNameAt: accountName.at,
+    defaultStampAt: defaultBatch.at,
+    settingsAt: settings.at,
     createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
     publicKey: meta?.accountPublicKey,
     partitionCount: meta?.partitionCount ?? 1,

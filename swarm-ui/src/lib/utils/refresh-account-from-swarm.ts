@@ -9,9 +9,10 @@
  * snapshot. Uses the local account's `derivationKey` (stored after sign-in) to
  * derive the feed owner / encryption key, so it's safe from any signed-in page.
  *
- * Scalars (name / default stamp / settings) are NOT applied here — local wins,
- * as before. Cross-device scalar propagation is a follow-up tied to per-field
- * clocks (the wire format already carries them).
+ * Scalars (name / default stamp / settings) carry per-field LWW clocks; we pass
+ * the folded value + its `at` to `applyRefreshed`, which applies each only when
+ * the folded clock beats the local one — so a peer's change propagates while a
+ * local-unpublished newer change is preserved.
  */
 
 import { Bee, EthAddress } from '@ethersphere/bee-js'
@@ -81,6 +82,12 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
       devices: mergedDevices,
       connectedApps: mergedApps,
       postageStamps: mergedStamps,
+      name: { value: remote.accountName, at: remote.accountNameAt },
+      defaultPostageStampBatchID: {
+        value: remote.defaultPostageStampBatchID,
+        at: remote.defaultStampAt,
+      },
+      settings: { value: remote.settings, at: remote.settingsAt },
     })
 
     return { ok: true, refreshedAt: Date.now() }

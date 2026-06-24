@@ -213,6 +213,12 @@ const CommonAccountSchemaV1 = z.object({
       appSessionDuration: z.number().optional(),
     })
     .optional(),
+  // Per-field LWW clocks for the scalar account fields, so a concurrent change to
+  // a *different* scalar on another device is not dropped wholesale, and a peer's
+  // change propagates on refresh. Absent → fall back to `lastModified`/`createdAt`.
+  accountNameAt: z.number().optional(),
+  defaultStampAt: z.number().optional(),
+  settingsAt: z.number().optional(),
   // Last-writer-wins clock for cross-device metadata merge (set on any change).
   lastModified: z.number().optional(),
   /**
@@ -279,6 +285,10 @@ export const AccountMetadataSchemaV1 = z.object({
       appSessionDuration: z.number().optional(),
     })
     .optional(),
+  // Per-field LWW clocks for the scalar fields (see `CommonAccountSchemaV1`).
+  accountNameAt: z.number().optional(),
+  defaultStampAt: z.number().optional(),
+  settingsAt: z.number().optional(),
   createdAt: z.number(),
   lastModified: z.number(),
   devices: z.array(DeviceSchemaV1).default([]),

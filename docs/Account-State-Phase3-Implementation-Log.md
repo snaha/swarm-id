@@ -107,6 +107,27 @@ Known follow-ups: (1) per-field scalar clocks + scalar propagation on refresh; (
 still on the old read/write path; (3) optionally reduce the fresh-entry gateway latency further (address
 rotation / GSOC); (4) Phase 3c (OR-Set/VV GC).
 
+## Follow-up #1 — per-field scalar clocks + scalar propagation on refresh
+
+The three account scalars (`name`, `defaultPostageStampBatchID`, `settings`) previously shared the
+snapshot's single `lastModified` as their LWW clock, and `refreshAccountFromSwarm` did **not** apply the
+folded scalars (local always won). So a peer's rename / default-stamp / settings change never propagated,
+and two concurrent edits to _different_ scalars couldn't both be timed correctly.
+
+- Added three optional per-field clocks — `accountNameAt` / `defaultStampAt` / `settingsAt` — that travel
+  account → snapshot metadata → device-state view → fold → restore/refresh. All optional
+  (backward-compatible); fall back to `lastModified`.
+- `foldAccount` already tracked each scalar's winning `{value, at}`; it now **exposes** the winning `at`
+  on `FoldedAccount`.
+- swarm-ui setters (`setAccountName` / `setDefaultStamp` / `setSessionDuration`, and `removeStamp` when it
+  clears the default) stamp the matching `*At = Date.now()`.
+- `applyRefreshed` takes the folded clocked scalars and applies each **only when `at > local *At`**
+  (per-field LWW) — peer changes propagate; a local-unpublished newer change is preserved.
+- The 5 sign-in/import create flows are untouched: a restored account leaves `*At` undefined (→ `0`), so
+  the first refresh harmlessly re-applies the folded value and the first local edit stamps a real clock.
+
+Unit: `device-state.test.ts` per-field-LWW test asserts the exposed winning `*At`. `check:all` green.
+
 ## 3c — OR-Set / version-vector GC
 
 _(pending)_

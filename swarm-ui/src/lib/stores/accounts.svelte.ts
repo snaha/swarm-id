@@ -85,7 +85,7 @@ export const accountsStore = {
   },
 
   setAccountName(id: EthAddress, name: string) {
-    update(id, (account) => ({ ...account, name }))
+    update(id, (account) => ({ ...account, name, accountNameAt: Date.now() }))
   },
 
   updateDevices(id: EthAddress, devices: Device[]) {
@@ -115,13 +115,18 @@ export const accountsStore = {
   },
 
   setDefaultStamp(id: EthAddress, batchID: BatchId | undefined) {
-    update(id, (account) => ({ ...account, defaultPostageStampBatchID: batchID }))
+    update(id, (account) => ({
+      ...account,
+      defaultPostageStampBatchID: batchID,
+      defaultStampAt: Date.now(),
+    }))
   },
 
   setSessionDuration(id: EthAddress, appSessionDuration: number | undefined) {
     update(id, (account) => ({
       ...account,
       settings: { ...account.settings, appSessionDuration },
+      settingsAt: Date.now(),
     }))
   },
 
@@ -281,6 +286,9 @@ export const accountsStore = {
         defaultPostageStampBatchID: account.defaultPostageStampBatchID?.equals(batchID)
           ? undefined
           : account.defaultPostageStampBatchID,
+        defaultStampAt: account.defaultPostageStampBatchID?.equals(batchID)
+          ? now
+          : account.defaultStampAt,
       }),
       { skipSync },
     )
@@ -315,16 +323,40 @@ export const accountsStore = {
       devices?: Device[]
       connectedApps?: ConnectedApp[]
       postageStamps?: PostageStamp[]
+      // Clocked scalars: applied only when the folded clock beats the local one
+      // (per-field LWW), so a peer's rename/default-stamp/settings change
+      // propagates while a local-unpublished newer change is preserved.
+      name?: { value: string; at: number }
+      defaultPostageStampBatchID?: { value: BatchId | undefined; at: number }
+      settings?: { value: Account['settings']; at: number }
     },
   ): void {
     update(
       id,
-      (account) => ({
-        ...account,
-        devices: fields.devices ?? account.devices,
-        connectedApps: fields.connectedApps ?? account.connectedApps,
-        postageStamps: fields.postageStamps ?? account.postageStamps,
-      }),
+      (account) => {
+        const next = {
+          ...account,
+          devices: fields.devices ?? account.devices,
+          connectedApps: fields.connectedApps ?? account.connectedApps,
+          postageStamps: fields.postageStamps ?? account.postageStamps,
+        }
+        if (fields.name && fields.name.at > (account.accountNameAt ?? 0)) {
+          next.name = fields.name.value
+          next.accountNameAt = fields.name.at
+        }
+        if (
+          fields.defaultPostageStampBatchID &&
+          fields.defaultPostageStampBatchID.at > (account.defaultStampAt ?? 0)
+        ) {
+          next.defaultPostageStampBatchID = fields.defaultPostageStampBatchID.value
+          next.defaultStampAt = fields.defaultPostageStampBatchID.at
+        }
+        if (fields.settings && fields.settings.at > (account.settingsAt ?? 0)) {
+          next.settings = fields.settings.value
+          next.settingsAt = fields.settings.at
+        }
+        return next
+      },
       { skipSync: true },
     )
   },

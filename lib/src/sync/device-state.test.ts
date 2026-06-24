@@ -167,6 +167,10 @@ describe("foldAccount — per-field scalar LWW", () => {
     )
     expect(folded.accountName).toBe("renamed-on-A")
     expect(folded.defaultPostageStampBatchID?.toHex()).toBe("ee".repeat(32))
+    // The winning per-field clock is exposed so refresh/restore can LWW it.
+    expect(folded.accountNameAt).toBe(10)
+    expect(folded.defaultStampAt).toBe(10)
+    expect(folded.settingsAt).toBe(1)
   })
 
   it("devices come from the registry, not the views", () => {

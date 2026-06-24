@@ -71,6 +71,9 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     connectedApps: account.connectedApps.map(serializeConnectedApp),
     postageStamps: account.postageStamps.map(serializePostageStamp),
     settings: account.settings,
+    accountNameAt: account.accountNameAt,
+    defaultStampAt: account.defaultStampAt,
+    settingsAt: account.settingsAt,
     lastModified: account.lastModified,
     partitionCount: account.partitionCount,
   }
