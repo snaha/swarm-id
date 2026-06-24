@@ -5,7 +5,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
 import { deserializeDeviceState } from "./device-state"
-import { deserializeRegistry } from "./device-registry"
+import { ensureInRoster } from "./device-roster"
 import type {
   AccountsStoreInterface,
   PostageStampsStoreInterface,
@@ -201,6 +201,14 @@ vi.mock("./batch-write-coordinator", () => ({
   },
 }))
 
+// The append-only roster does its own Swarm I/O (sequential feed + makeSOCReader)
+// that the bee mock here doesn't cover; mock it so these tests focus on the
+// device-state write. Roster behaviour is exercised by the integration test.
+vi.mock("./device-roster", () => ({
+  ensureInRoster: vi.fn(async () => {}),
+  readRoster: vi.fn(async () => []),
+}))
+
 // device-id uses localStorage which isn't available in this test environment;
 // stub it out with a fixed value.
 vi.mock("../utils/device-id", () => ({
@@ -262,12 +270,11 @@ describe("createSyncAccount", () => {
     expect(result!.status).toBe("success")
     if (result!.status !== "success") return
 
-    // Phase 3a writes the device-state feed AND announces the device in the
-    // registry on the first sync → two uploads + two epoch updates.
-    expect(uploadCallCount).toBe(2)
+    // Phase 3a writes the device-state feed (the roster append is mocked here).
+    expect(uploadCallCount).toBe(1)
     expect(capturedUploadData).toBeDefined()
     expect(capturedEncryptionKey).toBeDefined()
-    expect(epochUpdateCallCount).toBe(2)
+    expect(epochUpdateCallCount).toBe(1)
     expect(capturedEpochReference).toBeDefined()
 
     // Verify result contains reference and chunk addresses (data chunk + SOC).
@@ -347,7 +354,7 @@ describe("createSyncAccount", () => {
     expect(uploadCallCount).toBe(0)
   })
 
-  it("announces the publishing device in the device-registry feed", async () => {
+  it("announces the publishing device in the roster", async () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
@@ -361,10 +368,10 @@ describe("createSyncAccount", () => {
 
     await syncAccount(TEST_ETH_ADDRESS_HEX)
 
-    // Second upload is the registry blob (no remote registry yet → it's written).
-    const registry = deserializeRegistry(capturedUploads[1])
-    expect(registry.devices.map((d) => d.deviceId)).toContain(
-      "test-device-self",
+    expect(ensureInRoster).toHaveBeenCalledWith(
+      expect.objectContaining({
+        device: expect.objectContaining({ deviceId: "test-device-self" }),
+      }),
     )
   })
 
@@ -416,8 +423,8 @@ describe("createSyncAccount", () => {
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeDefined()
     expect(result!.status).toBe("success")
-    // device-state write + registry announce.
-    expect(uploadCallCount).toBe(2)
+    // device-state write (roster append mocked).
+    expect(uploadCallCount).toBe(1)
   })
 
   it("skips sync (returns undefined, no upload) when the coordinator reports contention", async () => {

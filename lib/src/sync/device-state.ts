@@ -11,10 +11,11 @@
  * is gone. Convergence happens at READ time: `foldAccount` merges every device's
  * latest view with the Phase 1 merge primitives.
  *
- * Device membership (the `deviceId` set) lives in the separate device-registry
- * feed (`device-registry.ts`), not here. Scalar account fields carry per-field
- * LWW clocks so a concurrent change to a different scalar on another device is
- * not dropped wholesale (design §9.3).
+ * Device membership (the `deviceId` set) lives in the append-only device roster
+ * (`device-roster.ts`), not here; account-level immutables (publicKey, createdAt,
+ * partitionCount) ride this robust per-device feed so the fold reconstructs them
+ * without a shared doc. Scalar account fields carry per-field LWW clocks so a
+ * concurrent change to a different scalar on another device is not dropped (§9.3).
  */
 
 import {
@@ -42,12 +43,7 @@ import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { mergeConnectedApps, mergePostageStamps } from "./merge-snapshot"
-import {
-  readDeviceRegistry,
-  writeDeviceRegistry,
-  upsertDevice,
-  type DeviceRegistry,
-} from "./device-registry"
+import { ensureInRoster } from "./device-roster"
 import type { SyncResult } from "./types"
 
 export const DEVICE_STATE_TOPIC_PREFIX = "swarm-id-devstate-v1"
@@ -75,17 +71,26 @@ export const DeviceStateSnapshotSchemaV1 = z.object({
   accountName: ClockedSchema(z.string()),
   defaultPostageStampBatchID: ClockedSchema(z.string().length(64).optional()),
   settings: ClockedSchema(SettingsSchema.optional()),
+  // Account-level immutables — carried on the robust per-device feed (not the
+  // roster), so the fold reconstructs them without a shared doc. Identical
+  // across devices.
+  accountPublicKey: z.string().optional(),
+  accountCreatedAt: z.number(),
+  partitionCount: z.number().int().min(1).default(1),
 })
 
 export type DeviceStateSnapshot = z.infer<typeof DeviceStateSnapshotSchemaV1>
 
-/** The mutable per-collection + scalar view a device contributes. */
+/** The per-device view a device contributes (mutable collections/scalars + account immutables). */
 export interface DeviceStateView {
   connectedApps: ConnectedApp[]
   postageStamps: PostageStamp[]
   accountName: { value: string; at: number }
   defaultPostageStampBatchID: { value: string | undefined; at: number }
   settings: { value: AccountSettings | undefined; at: number }
+  accountPublicKey?: string
+  accountCreatedAt: number
+  partitionCount: number
 }
 
 /** Folded account state — the shape `applyRefreshed` / the proxy consume. */
@@ -122,6 +127,9 @@ export function serializeDeviceState(
     accountName: view.accountName,
     defaultPostageStampBatchID: view.defaultPostageStampBatchID,
     settings: view.settings,
+    accountPublicKey: view.accountPublicKey,
+    accountCreatedAt: view.accountCreatedAt,
+    partitionCount: view.partitionCount,
   }
 }
 
@@ -163,10 +171,10 @@ export async function writeDeviceState(opts: {
 }
 
 /**
- * Write this device's view AND ensure the device-registry lists it. The single
- * write entry point for both `sync-account` (UI-triggered) and the proxy
- * (publish-on-acquire). The registry write is skipped when this device is
- * already present and not removed — keeping the shared registry a rare write.
+ * Write this device's view AND ensure it's in the append-only device roster. The
+ * single write entry point for both `sync-account` (UI-triggered) and the proxy
+ * (publish-on-acquire). `ensureInRoster` appends only when this device is absent
+ * or its removed-state changed — keeping the roster a rare, clobber-free write.
  */
 export async function publishDeviceState(opts: {
   bee: Bee
@@ -176,11 +184,6 @@ export async function publishDeviceState(opts: {
   owner: EthAddress
   encryptionKey: string
   view: DeviceStateView
-  registryBase: {
-    createdAt: number
-    publicKey?: string
-    partitionCount: number
-  }
   target: UploadTarget
   /** Per-chunk utilisation hook (mirrors the old publish path). */
   onChunksUploaded?: (chunkAddresses: Uint8Array[]) => Promise<void>
@@ -201,33 +204,15 @@ export async function publishDeviceState(opts: {
     })
   }
 
-  const remote = await readDeviceRegistry({
+  await ensureInRoster({
     bee: opts.bee,
-    accountId: opts.accountId,
+    accountKey: opts.accountKey,
     owner: opts.owner,
-  }).catch(() => undefined)
-  const existing = remote?.devices.find(
-    (d) => d.deviceId === opts.device.deviceId,
-  )
-  // Already listed and live → nothing to announce (rare-write registry).
-  if (!existing || existing.removedAt) {
-    const base: DeviceRegistry = remote ?? {
-      version: 1,
-      accountId: opts.accountId,
-      createdAt: opts.registryBase.createdAt,
-      publicKey: opts.registryBase.publicKey,
-      partitionCount: opts.registryBase.partitionCount,
-      devices: [],
-    }
-    await writeDeviceRegistry({
-      bee: opts.bee,
-      accountKey: opts.accountKey,
-      owner: opts.owner,
-      encryptionKey: opts.encryptionKey,
-      localRegistry: upsertDevice(base, opts.device),
-      target: opts.target,
-    })
-  }
+    encryptionKey: opts.encryptionKey,
+    accountId: opts.accountId,
+    device: opts.device,
+    target: opts.target,
+  })
 
   return {
     status: "success",
@@ -266,7 +251,8 @@ function pickLatest<T extends { at: number }>(a: T, b: T): T {
 /**
  * Merge every device's latest view into one account state, reusing the Phase 1
  * primitives for the collections and per-field LWW for the scalars. The device
- * set comes from the registry (the discovery source of truth).
+ * set (`rosterDevices`) comes from the append-only roster (discovery); account
+ * immutables come from any device view (identical across devices).
  *
  * Equivalent by construction to today's `mergeSnapshotWithRemote` over the same
  * data (see the differential test) — convergence and deletion semantics are
@@ -274,7 +260,7 @@ function pickLatest<T extends { at: number }>(a: T, b: T): T {
  */
 export function foldAccount(
   views: DeviceStateSnapshot[],
-  registry: DeviceRegistry,
+  rosterDevices: Device[],
 ): FoldedAccount {
   let connectedApps: ConnectedApp[] = []
   let postageStamps: PostageStamp[] = []
@@ -290,8 +276,18 @@ export function foldAccount(
     settings = pickLatest(settings, v.settings)
   }
 
+  // Account immutables from any view; fall back to the roster (min createdAt) so
+  // a fold with reachable roster but no readable device feed still has them.
+  const meta = views[0]
+  const createdAt =
+    meta?.accountCreatedAt ??
+    rosterDevices.reduce(
+      (min, d) => Math.min(min, d.createdAt),
+      Number.MAX_SAFE_INTEGER,
+    )
+
   return {
-    devices: registry.devices,
+    devices: rosterDevices,
     connectedApps,
     postageStamps,
     accountName: accountName.value,
@@ -299,8 +295,8 @@ export function foldAccount(
       ? new BatchId(defaultBatch.value)
       : undefined,
     settings: settings.value,
-    createdAt: registry.createdAt,
-    publicKey: registry.publicKey,
-    partitionCount: registry.partitionCount,
+    createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
+    publicKey: meta?.accountPublicKey,
+    partitionCount: meta?.partitionCount ?? 1,
   }
 }

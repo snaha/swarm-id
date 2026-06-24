@@ -33,7 +33,7 @@ export {
 } from "./restore-account"
 export type { RestoreAccountResult } from "./restore-account"
 
-// Phase 3a: per-device snapshot feeds + device-registry discovery
+// Phase 3a: per-device snapshot feeds + append-only roster discovery
 export {
   deviceStateTopic,
   writeDeviceState,
@@ -51,15 +51,11 @@ export type {
   AccountSettings,
 } from "./device-state"
 export {
-  deviceRegistryTopic,
-  readDeviceRegistry,
-  writeDeviceRegistry,
-  upsertDevice,
-  deserializeRegistry,
-  DeviceRegistrySchemaV1,
-  DEVICE_REGISTRY_TOPIC_PREFIX,
-} from "./device-registry"
-export type { DeviceRegistry } from "./device-registry"
+  rosterTopic,
+  readRoster,
+  ensureInRoster,
+  ROSTER_TOPIC_PREFIX,
+} from "./device-roster"
 export { foldAccountFromSwarm } from "./fold-account-from-swarm"
 export type { FoldAccountResult } from "./fold-account-from-swarm"
 

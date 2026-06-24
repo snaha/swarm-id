@@ -83,11 +83,7 @@ import {
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForApp } from "./utils/postage-stamp-association"
-import {
-  publishDeviceState,
-  readDeviceRegistry,
-  type DeviceStateView,
-} from "./sync"
+import { publishDeviceState, readRoster, type DeviceStateView } from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -1287,20 +1283,20 @@ export class SwarmIdProxy {
       if (!account) return
 
       // Feed owner = backup signer (derived from the swarm encryption key).
-      // Phase 3a: discovery is the device-registry feed, not the shared snapshot.
+      // Phase 3a: discovery is the append-only device roster, not a shared doc.
       const backupKey = new PrivateKey(
         await deriveSecret(uint8ArrayToHex(encryptionKey), "backup-key"),
       )
       const owner = backupKey.publicKey().address()
-      const registry = await readDeviceRegistry({
+      const rosterDevices = await readRoster({
         bee: this.bee,
         accountId: account.id.toHex(),
         owner,
       })
-      if (!registry) return
+      if (rosterDevices.length === 0) return
 
       const mergedDevices = mergeDevices(
-        mergeDevicesList(account.devices, registry.devices),
+        mergeDevicesList(account.devices, rosterDevices),
         this.requireDeviceId(),
         detectDeviceName(),
       )
@@ -1439,21 +1435,21 @@ export class SwarmIdProxy {
 
       // Announce-once: a publish triggered purely by acquiring the lease (e.g.
       // every page reload) has nothing new once this device is already in the
-      // registry. Skip it. A "change" publish carries a real delta and always
+      // roster. Skip it. A "change" publish carries a real delta and always
       // re-writes this device's own state feed (no shared contention).
       const deviceId = this.requireDeviceId()
       if (reason === "acquired") {
-        const registry = await readDeviceRegistry({
+        const rosterDevices = await readRoster({
           bee: this.bee,
           accountId: snapshot.accountId,
           owner,
-        })
-        const alreadyAnnounced = registry?.devices.some(
+        }).catch(() => [])
+        const alreadyAnnounced = rosterDevices.some(
           (d) => d.deviceId === deviceId && !d.removedAt,
         )
         if (alreadyAnnounced) {
           console.info(
-            `[Proxy] Device already in registry for ${snapshot.accountId}; skipping announce publish.`,
+            `[Proxy] Device already in roster for ${snapshot.accountId}; skipping announce publish.`,
           )
           return
         }
@@ -1477,10 +1473,8 @@ export class SwarmIdProxy {
           at: scalarAt,
         },
         settings: { value: snapshot.metadata.settings, at: scalarAt },
-      }
-      const registryBase = {
-        createdAt: snapshot.metadata.createdAt,
-        publicKey: snapshot.metadata.publicKey,
+        accountPublicKey: snapshot.metadata.publicKey,
+        accountCreatedAt: snapshot.metadata.createdAt,
         partitionCount: snapshot.metadata.partitionCount ?? 1,
       }
 
@@ -1493,7 +1487,6 @@ export class SwarmIdProxy {
           owner,
           encryptionKey,
           view,
-          registryBase,
           target,
         }),
       )

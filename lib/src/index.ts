@@ -219,7 +219,7 @@ export {
   // Restore account from Swarm
   restoreAccountFromSwarm,
   SnapshotDataUnavailableError,
-  // Phase 3a: per-device snapshot feeds + device-registry discovery
+  // Phase 3a: per-device snapshot feeds + append-only roster discovery
   deviceStateTopic,
   writeDeviceState,
   publishDeviceState,
@@ -228,13 +228,10 @@ export {
   deserializeDeviceState,
   DeviceStateSnapshotSchemaV1,
   DEVICE_STATE_TOPIC_PREFIX,
-  deviceRegistryTopic,
-  readDeviceRegistry,
-  writeDeviceRegistry,
-  upsertDevice,
-  deserializeRegistry,
-  DeviceRegistrySchemaV1,
-  DEVICE_REGISTRY_TOPIC_PREFIX,
+  rosterTopic,
+  readRoster,
+  ensureInRoster,
+  ROSTER_TOPIC_PREFIX,
   foldAccountFromSwarm,
 } from "./sync"
 
@@ -256,7 +253,6 @@ export type {
   DeviceStateView,
   FoldedAccount,
   AccountSettings,
-  DeviceRegistry,
   FoldAccountResult,
 } from "./sync"
 

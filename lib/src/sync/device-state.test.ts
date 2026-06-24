@@ -59,6 +59,8 @@ function makeView(overrides: Partial<DeviceStateView> = {}): DeviceStateView {
     accountName: { value: "acct", at: 1 },
     defaultPostageStampBatchID: { value: undefined, at: 1 },
     settings: { value: undefined, at: 1 },
+    accountCreatedAt: 1_000_000,
+    partitionCount: 2,
     ...overrides,
   }
 }
@@ -80,14 +82,6 @@ function viewToSnapshot(v: DeviceStateView): AccountStateSnapshot {
     postageStamps: v.postageStamps,
   }
 }
-
-const registry = (devices: Device[]) => ({
-  version: 1 as const,
-  accountId: ACCOUNT_ID,
-  createdAt: 1_000_000,
-  partitionCount: 2,
-  devices,
-})
 
 describe("device-state serialization", () => {
   it("round-trips a view (BatchId / bigint / tombstones preserved)", () => {
@@ -124,7 +118,7 @@ describe("foldAccount — differential equivalence with mergeSnapshotWithRemote"
 
     const folded = foldAccount(
       [viewA, viewB] as unknown as DeviceStateSnapshot[],
-      registry([makeDevice("dev-a"), makeDevice("dev-b")]),
+      [makeDevice("dev-a"), makeDevice("dev-b")],
     )
     const merged = mergeSnapshotWithRemote(
       viewToSnapshot(viewA),
@@ -149,7 +143,7 @@ describe("foldAccount — differential equivalence with mergeSnapshotWithRemote"
     })
     const folded = foldAccount(
       [active, deleted] as unknown as DeviceStateSnapshot[],
-      registry([makeDevice("dev-a")]),
+      [makeDevice("dev-a")],
     )
     expect(folded.postageStamps).toHaveLength(1)
     expect(folded.postageStamps[0].deletedAt).toBe(5)
@@ -169,7 +163,7 @@ describe("foldAccount — per-field scalar LWW", () => {
     })
     const folded = foldAccount(
       [viewA, viewB] as unknown as DeviceStateSnapshot[],
-      registry([]),
+      [],
     )
     expect(folded.accountName).toBe("renamed-on-A")
     expect(folded.defaultPostageStampBatchID?.toHex()).toBe("ee".repeat(32))
@@ -178,7 +172,7 @@ describe("foldAccount — per-field scalar LWW", () => {
   it("devices come from the registry, not the views", () => {
     const folded = foldAccount(
       [makeView()] as unknown as DeviceStateSnapshot[],
-      registry([makeDevice("dev-x"), makeDevice("dev-y")]),
+      [makeDevice("dev-x"), makeDevice("dev-y")],
     )
     expect(folded.devices.map((d) => d.deviceId).sort()).toEqual([
       "dev-x",

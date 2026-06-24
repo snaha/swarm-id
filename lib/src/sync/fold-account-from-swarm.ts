@@ -3,31 +3,31 @@
 
 /**
  * Read entry point for Phase 3a: reconstruct account state from Swarm by
- * reading the device-registry feed (discovery) and folding every device's
+ * scanning the append-only device roster (discovery) and folding every device's
  * latest state feed. Replaces the single shared-snapshot fetch used by restore
  * / refresh / the proxy.
  */
 
 import { Bee, PrivateKey } from "@ethersphere/bee-js"
 import { deriveSwarmEncryptionKey, deriveSecret } from "../utils/key-derivation"
-import { readDeviceRegistry, type DeviceRegistry } from "./device-registry"
+import { readRoster } from "./device-roster"
 import {
   readLatestDeviceState,
   foldAccount,
   type DeviceStateSnapshot,
   type FoldedAccount,
 } from "./device-state"
+import type { Device } from "../schemas"
 
 export interface FoldAccountResult {
   account: FoldedAccount
-  registry: DeviceRegistry
+  devices: Device[]
 }
 
 /**
  * Derive the feed owner + encryption key from the account derivation key, read
- * the registry, fold all device-state feeds. Returns `undefined` when no
- * registry exists yet (no device has published — equivalent to today's
- * "no-backup").
+ * the roster, fold all device-state feeds. Returns `undefined` when the roster
+ * is empty (no device has published — equivalent to today's "no-backup").
  */
 export async function foldAccountFromSwarm(opts: {
   bee: Bee
@@ -38,18 +38,18 @@ export async function foldAccountFromSwarm(opts: {
   const backupKeyHex = await deriveSecret(swarmEncryptionKey, "backup-key")
   const owner = new PrivateKey(backupKeyHex).publicKey().address()
 
-  const registry = await readDeviceRegistry({
+  const devices = await readRoster({
     bee: opts.bee,
     accountId: opts.accountId,
     owner,
   })
-  if (!registry) return undefined
+  if (devices.length === 0) return undefined
 
   // Fold the latest view of every non-removed device. A device whose feed is
   // unreachable is skipped (best-effort), not fatal — its peers' views still
   // converge the shared entities.
   const views: DeviceStateSnapshot[] = []
-  for (const device of registry.devices) {
+  for (const device of devices) {
     if (device.removedAt) continue
     const view = await readLatestDeviceState({
       bee: opts.bee,
@@ -60,5 +60,5 @@ export async function foldAccountFromSwarm(opts: {
     if (view) views.push(view)
   }
 
-  return { account: foldAccount(views, registry), registry }
+  return { account: foldAccount(views, devices), devices }
 }

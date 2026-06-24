@@ -396,10 +396,8 @@ export function createSyncAccount(
         at: scalarAt,
       },
       settings: { value: state.metadata.settings, at: scalarAt },
-    }
-    const registryBase = {
-      createdAt: state.metadata.createdAt,
-      publicKey: state.metadata.publicKey,
+      accountPublicKey: state.metadata.publicKey,
+      accountCreatedAt: state.metadata.createdAt,
       partitionCount,
     }
 
@@ -415,7 +413,6 @@ export function createSyncAccount(
               owner,
               encryptionKey,
               view,
-              registryBase,
               target,
               onChunksUploaded: (addresses) =>
                 handleUtilizationUpdate(accountId, addresses),
