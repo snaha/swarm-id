@@ -36,10 +36,6 @@ export const DEVICE_REGISTRY_TOPIC_PREFIX = "swarm-id-devreg-v1"
 
 const DEVICE_REGISTRY_VERSION = 1
 
-// Re-announce retry budget: after writing, re-read and confirm our devices
-// survived; a concurrent same-epoch writer is folded in and we retry.
-const MAX_REGISTRY_RETRIES = 3
-
 export const DeviceRegistrySchemaV1 = z.object({
   version: z.literal(DEVICE_REGISTRY_VERSION),
   accountId: z.string().length(40),
@@ -128,9 +124,13 @@ async function writeRegistryOnce(opts: {
 
 /**
  * Upsert `localRegistry` into the shared registry feed: read the freshest
- * remote, merge (device-union), write, then verify our devices survived —
- * retrying on a same-epoch collision. Runs inside the caller's
- * `BatchWriteCoordinator.withWrite`.
+ * remote, merge (device-union), write once. Runs inside the caller's
+ * `BatchWriteCoordinator.withWrite`. No tight verify-retry: the registry is a
+ * rare write, and a device that a same-epoch collision dropped re-announces on
+ * its next sync (it finds itself absent), so convergence holds across syncs
+ * without re-introducing the verifyWon read-after-write churn this refactor
+ * removed. ponytail: single write; add a verify-retry only if collisions are
+ * ever measured to matter.
  */
 export async function writeDeviceRegistry(opts: {
   bee: Bee
@@ -140,33 +140,21 @@ export async function writeDeviceRegistry(opts: {
   localRegistry: DeviceRegistry
   target: UploadTarget
 }): Promise<void> {
-  const myDeviceIds = new Set(opts.localRegistry.devices.map((d) => d.deviceId))
-  for (let attempt = 0; attempt <= MAX_REGISTRY_RETRIES; attempt++) {
-    const remote = await readDeviceRegistry({
-      bee: opts.bee,
-      accountId: opts.localRegistry.accountId,
-      owner: opts.owner,
-    }).catch(() => undefined)
-    const merged = remote
-      ? mergeRegistries(opts.localRegistry, remote)
-      : opts.localRegistry
-    await writeRegistryOnce({
-      bee: opts.bee,
-      accountKey: opts.accountKey,
-      encryptionKey: opts.encryptionKey,
-      registry: merged,
-      target: opts.target,
-    })
-    // Confirm our devices landed; a concurrent writer's union still contains
-    // us, so only a genuine drop triggers a retry.
-    const after = await readDeviceRegistry({
-      bee: opts.bee,
-      accountId: opts.localRegistry.accountId,
-      owner: opts.owner,
-    }).catch(() => undefined)
-    const present = new Set((after?.devices ?? []).map((d) => d.deviceId))
-    if ([...myDeviceIds].every((id) => present.has(id))) return
-  }
+  const remote = await readDeviceRegistry({
+    bee: opts.bee,
+    accountId: opts.localRegistry.accountId,
+    owner: opts.owner,
+  }).catch(() => undefined)
+  const merged = remote
+    ? mergeRegistries(opts.localRegistry, remote)
+    : opts.localRegistry
+  await writeRegistryOnce({
+    bee: opts.bee,
+    accountKey: opts.accountKey,
+    encryptionKey: opts.encryptionKey,
+    registry: merged,
+    target: opts.target,
+  })
 }
 
 /** Add/refresh a single device in a registry value (pure helper for callers). */

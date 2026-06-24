@@ -4,8 +4,8 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { EthAddress, BatchId, type Bee } from "@ethersphere/bee-js"
 import { createSyncAccount } from "./sync-account"
-import { deserializeAccountState, serializeAccountState } from "./serialization"
-import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
+import { deserializeDeviceState } from "./device-state"
+import { deserializeRegistry } from "./device-registry"
 import type {
   AccountsStoreInterface,
   PostageStampsStoreInterface,
@@ -18,7 +18,6 @@ import {
   createPasskeyAccount,
   createConnectedApp,
   createPostageStamp,
-  createDevice,
 } from "../test-fixtures"
 import { PartitionContendedError } from "./batch-write-coordinator"
 
@@ -90,7 +89,10 @@ function createMockBee(): Bee {
 // Upload & Epoch Mock Setup
 // ============================================================================
 
-// Track what was uploaded
+// Track what was uploaded. Phase 3a writes TWO feeds per sync (the device-state
+// blob, then the device-registry blob), so capture every upload in order;
+// `capturedUploadData` keeps the last for back-compat.
+let capturedUploads: Uint8Array[]
 let capturedUploadData: Uint8Array | undefined
 let capturedEncryptionKey: Uint8Array | undefined
 let uploadCallCount: number
@@ -107,6 +109,7 @@ vi.mock("../proxy/upload", () => ({
       data: Uint8Array,
       options?: { encryptionKey?: Uint8Array | boolean },
     ) => {
+      capturedUploads.push(data)
       capturedUploadData = data
       capturedEncryptionKey = options?.encryptionKey as Uint8Array | undefined
       uploadCallCount++
@@ -213,6 +216,7 @@ vi.mock("../utils/device-id", () => ({
 
 describe("createSyncAccount", () => {
   beforeEach(() => {
+    capturedUploads = []
     capturedUploadData = undefined
     capturedEncryptionKey = undefined
     capturedEpochReference = undefined
@@ -258,21 +262,20 @@ describe("createSyncAccount", () => {
     expect(result!.status).toBe("success")
     if (result!.status !== "success") return
 
-    // Verify upload happened
-    expect(uploadCallCount).toBe(1)
+    // Phase 3a writes the device-state feed AND announces the device in the
+    // registry on the first sync → two uploads + two epoch updates.
+    expect(uploadCallCount).toBe(2)
     expect(capturedUploadData).toBeDefined()
     expect(capturedEncryptionKey).toBeDefined()
-
-    // Verify epoch feed was updated
-    expect(epochUpdateCallCount).toBe(1)
+    expect(epochUpdateCallCount).toBe(2)
     expect(capturedEpochReference).toBeDefined()
 
-    // Verify result contains reference and chunk addresses
+    // Verify result contains reference and chunk addresses (data chunk + SOC).
     expect(result.reference).toBe(FAKE_UPLOAD_REFERENCE)
-    expect(result.chunkAddresses.length).toBeGreaterThanOrEqual(2) // data chunks + SOC
+    expect(result.chunkAddresses.length).toBeGreaterThanOrEqual(2)
   })
 
-  it("should serialize account state with all fields including accountName", async () => {
+  it("writes this device's view to its own device-state feed", async () => {
     const stores = createMockStores()
 
     const syncAccount = createSyncAccount({
@@ -286,21 +289,16 @@ describe("createSyncAccount", () => {
 
     await syncAccount(TEST_ETH_ADDRESS_HEX)
 
-    // Deserialize the captured upload data to verify contents
-    expect(capturedUploadData).toBeDefined()
-    const deserialized = deserializeAccountState(capturedUploadData!)
-
-    expect(deserialized.version).toBe(1)
-    expect(deserialized.accountId).toBe(TEST_ETH_ADDRESS_HEX)
-    expect(deserialized.metadata.accountName).toBe("Test Account")
-    expect(deserialized.metadata.defaultPostageStampBatchID).toBe(
-      TEST_BATCH_ID_HEX,
-    )
-    expect(deserialized.metadata.createdAt).toBe(1700000000000)
-    expect(deserialized.connectedApps).toHaveLength(1)
-    expect(deserialized.connectedApps[0].appName).toBe("Test App")
-    expect(deserialized.postageStamps).toHaveLength(1)
-    expect(deserialized.postageStamps[0].depth).toBe(20)
+    // First upload is the device-state blob (the second is the registry).
+    const view = deserializeDeviceState(capturedUploads[0])
+    expect(view.version).toBe(1)
+    expect(view.accountId).toBe(TEST_ETH_ADDRESS_HEX)
+    expect(view.accountName.value).toBe("Test Account")
+    expect(view.defaultPostageStampBatchID.value).toBe(TEST_BATCH_ID_HEX)
+    expect(view.connectedApps).toHaveLength(1)
+    expect(view.connectedApps[0].appName).toBe("Test App")
+    expect(view.postageStamps).toHaveLength(1)
+    expect(view.postageStamps[0].depth).toBe(20)
   })
 
   it("should return undefined when account not found", async () => {
@@ -349,17 +347,8 @@ describe("createSyncAccount", () => {
     expect(uploadCallCount).toBe(0)
   })
 
-  it("should include account devices in synced metadata", async () => {
-    const device = createDevice()
+  it("announces the publishing device in the device-registry feed", async () => {
     const stores = createMockStores()
-    ;(
-      stores.accountsStore.getAccount as ReturnType<typeof vi.fn>
-    ).mockReturnValue(
-      createPasskeyAccount({
-        defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
-        devices: [device],
-      }),
-    )
 
     const syncAccount = createSyncAccount({
       bee: createMockBee(),
@@ -372,11 +361,11 @@ describe("createSyncAccount", () => {
 
     await syncAccount(TEST_ETH_ADDRESS_HEX)
 
-    expect(capturedUploadData).toBeDefined()
-    const deserialized = deserializeAccountState(capturedUploadData!)
-
-    expect(deserialized.metadata.devices).toHaveLength(1)
-    expect(deserialized.metadata.devices[0].deviceId).toBe(device.deviceId)
+    // Second upload is the registry blob (no remote registry yet → it's written).
+    const registry = deserializeRegistry(capturedUploads[1])
+    expect(registry.devices.map((d) => d.deviceId)).toContain(
+      "test-device-self",
+    )
   })
 
   it("should include SOC address in returned chunk addresses", async () => {
@@ -427,7 +416,8 @@ describe("createSyncAccount", () => {
     const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
     expect(result).toBeDefined()
     expect(result!.status).toBe("success")
-    expect(uploadCallCount).toBe(1)
+    // device-state write + registry announce.
+    expect(uploadCallCount).toBe(2)
   })
 
   it("skips sync (returns undefined, no upload) when the coordinator reports contention", async () => {
@@ -486,95 +476,8 @@ describe("createSyncAccount", () => {
     expect(uploadCallCount).toBe(0)
   })
 
-  // A peer snapshot already on Swarm, carrying a connected app we don't hold
-  // locally. A correct retry must fold this in (union) rather than drop it.
-  function makePeerSnapshot(): AccountStateSnapshot {
-    const peerApp = createConnectedApp({
-      appUrl: "https://peer.example.com",
-      appName: "Peer App",
-      appSecret: undefined,
-    })
-    return {
-      version: 1,
-      timestamp: 1700000000000,
-      accountId: TEST_ETH_ADDRESS_HEX,
-      metadata: {
-        accountName: "Test Account",
-        defaultPostageStampBatchID: TEST_BATCH_ID_HEX,
-        createdAt: 1700000000000,
-        lastModified: 1700000000000,
-        devices: [],
-        partitionCount: 1,
-      },
-      connectedApps: [peerApp],
-      postageStamps: [createPostageStamp()],
-    }
-  }
-
-  it("re-merges and republishes when a peer overwrites the feed between write and verify", async () => {
-    const stores = createMockStores()
-    mockDownloadData.mockResolvedValue(
-      serializeAccountState(makePeerSnapshot()),
-    )
-
-    // FAKE_UPLOAD_REFERENCE is 32 bytes of 0xab; the verify compares the
-    // feed's current reference against the one we wrote.
-    const ourRef = new Uint8Array(32).fill(0xab)
-    const peerRef = new Uint8Array(32).fill(0xcd)
-    mockFindAt
-      .mockResolvedValueOnce(undefined) // publish #1 pre-write fetch: no remote
-      .mockResolvedValueOnce(peerRef) // verify #1: a peer overwrote us
-      .mockResolvedValueOnce(peerRef) // publish #2 pre-write fetch: peer snapshot
-      .mockResolvedValueOnce(ourRef) // verify #2: our write won
-      .mockResolvedValue(ourRef)
-
-    const syncAccount = createSyncAccount({
-      bee: createMockBee(),
-      ...stores,
-      utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
-    })
-
-    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
-
-    expect(result).toBeDefined()
-    expect(result!.status).toBe("success")
-    // One initial publish + one retry.
-    expect(uploadCallCount).toBe(2)
-    expect(epochUpdateCallCount).toBe(2)
-    // The re-published snapshot is the union of our local app and the peer's.
-    expect(capturedUploadData).toBeDefined()
-    const republished = deserializeAccountState(capturedUploadData!)
-    const appNames = republished.connectedApps.map((a) => a.appName).sort()
-    expect(appNames).toEqual(["Peer App", "Test App"])
-  })
-
-  it("gives up with success-unverified after the retry budget when a peer keeps winning", async () => {
-    const stores = createMockStores()
-    mockDownloadData.mockResolvedValue(
-      serializeAccountState(makePeerSnapshot()),
-    )
-
-    // The verify never sees our reference, so every attempt looks lost.
-    mockFindAt.mockResolvedValue(new Uint8Array(32).fill(0xcd))
-
-    const syncAccount = createSyncAccount({
-      bee: createMockBee(),
-      ...stores,
-      utilizationStore: {} as UtilizationStoreDB,
-      utilizationUploader: {
-        scheduleUpload: vi.fn().mockResolvedValue(undefined),
-      } as unknown as DebouncedUtilizationUploader,
-    })
-
-    const result = await syncAccount(TEST_ETH_ADDRESS_HEX)
-
-    expect(result).toBeDefined()
-    expect(result!.status).toBe("success-unverified")
-    // 1 initial publish + MAX_PUBLISH_RETRIES (3) retries.
-    expect(uploadCallCount).toBe(4)
-    expect(epochUpdateCallCount).toBe(4)
-  })
+  // (Removed: the shared-feed verifyWon re-merge/republish + success-unverified
+  // tests — Phase 3a writes each device's own feed, so there is no shared-feed
+  // collision to verify against. Per-device convergence is covered by
+  // device-state.test.ts (differential fold) and the integration test.)
 })

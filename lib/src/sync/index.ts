@@ -37,6 +37,7 @@ export type { RestoreAccountResult } from "./restore-account"
 export {
   deviceStateTopic,
   writeDeviceState,
+  publishDeviceState,
   readLatestDeviceState,
   foldAccount,
   deserializeDeviceState,

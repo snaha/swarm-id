@@ -222,6 +222,7 @@ export {
   // Phase 3a: per-device snapshot feeds + device-registry discovery
   deviceStateTopic,
   writeDeviceState,
+  publishDeviceState,
   readLatestDeviceState,
   foldAccount,
   deserializeDeviceState,

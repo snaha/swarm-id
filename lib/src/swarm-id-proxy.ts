@@ -59,7 +59,6 @@ import {
   PrivateKey,
   Identifier,
   Topic,
-  Reference,
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
@@ -85,11 +84,10 @@ import {
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForApp } from "./utils/postage-stamp-association"
 import {
-  publishAccountState,
-  remoteFeedHasDevice,
-  ACCOUNT_SYNC_TOPIC_PREFIX,
-} from "./sync/publish-account-state"
-import { deserializeAccountState } from "./sync/serialization"
+  publishDeviceState,
+  readDeviceRegistry,
+  type DeviceStateView,
+} from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -1288,27 +1286,21 @@ export class SwarmIdProxy {
       const account = accounts.find((a) => a.id.toHex() === accountId)
       if (!account) return
 
-      // Feed owner = backup signer (derived from the swarm encryption key). Feed
-      // SOCs are unencrypted, so the finder takes no encryption key; the snapshot
-      // chunks it points to ARE encrypted (downloadDataWithChunkAPI infers that).
+      // Feed owner = backup signer (derived from the swarm encryption key).
+      // Phase 3a: discovery is the device-registry feed, not the shared snapshot.
       const backupKey = new PrivateKey(
         await deriveSecret(uint8ArrayToHex(encryptionKey), "backup-key"),
       )
       const owner = backupKey.publicKey().address()
-      const topic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${account.id.toHex()}`,
-      )
-      const finder = createAsyncEpochFinder({ bee: this.bee, topic, owner })
-      const refBytes = await finder.findAt(BigInt(Math.floor(nowMs / 1000)))
-      if (!refBytes) return
-      const data = await downloadDataWithChunkAPI(
-        this.bee,
-        new Reference(refBytes).toHex(),
-      )
-      const snapshot = deserializeAccountState(data)
+      const registry = await readDeviceRegistry({
+        bee: this.bee,
+        accountId: account.id.toHex(),
+        owner,
+      })
+      if (!registry) return
 
       const mergedDevices = mergeDevices(
-        mergeDevicesList(account.devices, snapshot.metadata.devices),
+        mergeDevicesList(account.devices, registry.devices),
         this.requireDeviceId(),
         detectDeviceName(),
       )
@@ -1446,39 +1438,67 @@ export class SwarmIdProxy {
       }
 
       // Announce-once: a publish triggered purely by acquiring the lease (e.g.
-      // every page reload) has nothing to announce once this device is already
-      // in the published feed. Skip it — that's what caused the redundant
-      // publish + verify-retry storm. A "change" publish carries a real delta
-      // and is never gated. The pre-write feed read here is reliable even when
-      // post-write read-back lags.
+      // every page reload) has nothing new once this device is already in the
+      // registry. Skip it. A "change" publish carries a real delta and always
+      // re-writes this device's own state feed (no shared contention).
+      const deviceId = this.requireDeviceId()
       if (reason === "acquired") {
-        const alreadyAnnounced = await remoteFeedHasDevice({
+        const registry = await readDeviceRegistry({
           bee: this.bee,
           accountId: snapshot.accountId,
           owner,
-          deviceId: this.requireDeviceId(),
         })
+        const alreadyAnnounced = registry?.devices.some(
+          (d) => d.deviceId === deviceId && !d.removedAt,
+        )
         if (alreadyAnnounced) {
           console.info(
-            `[Proxy] Device already in feed for ${snapshot.accountId}; skipping announce publish.`,
+            `[Proxy] Device already in registry for ${snapshot.accountId}; skipping announce publish.`,
           )
           return
         }
       }
+
+      const thisDevice = snapshot.metadata.devices.find(
+        (d) => d.deviceId === deviceId,
+      ) ?? {
+        deviceId,
+        name: detectDeviceName(),
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+      }
+      const scalarAt = snapshot.metadata.lastModified
+      const view: DeviceStateView = {
+        connectedApps: snapshot.connectedApps,
+        postageStamps: snapshot.postageStamps,
+        accountName: { value: snapshot.metadata.accountName, at: scalarAt },
+        defaultPostageStampBatchID: {
+          value: snapshot.metadata.defaultPostageStampBatchID,
+          at: scalarAt,
+        },
+        settings: { value: snapshot.metadata.settings, at: scalarAt },
+      }
+      const registryBase = {
+        createdAt: snapshot.metadata.createdAt,
+        publicKey: snapshot.metadata.publicKey,
+        partitionCount: snapshot.metadata.partitionCount ?? 1,
+      }
+
       await coordinator.withWrite((target) =>
-        publishAccountState({
+        publishDeviceState({
           bee: this.bee,
           accountId: snapshot.accountId,
+          device: thisDevice,
           accountKey,
           owner,
           encryptionKey,
-          localSnapshot: snapshot,
+          view,
+          registryBase,
           target,
-          logLabel: "[Proxy publish]",
         }),
       )
       console.info(
-        `[Proxy] Published account state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
+        `[Proxy] Published device state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
       )
     } catch (error) {
       console.warn("[Proxy] Account-state publish failed:", error)

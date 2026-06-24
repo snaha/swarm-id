@@ -41,11 +41,12 @@ import {
   BatchWriteCoordinator,
   PartitionContendedError,
 } from "./batch-write-coordinator"
-import { publishAccountState } from "./publish-account-state"
-import { getOrCreateDeviceId } from "../utils/device-id"
+import { publishDeviceState, type DeviceStateView } from "./device-state"
+import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
 
 // Re-exported from its new home so existing importers of `./sync-account`
-// (restore-account, the SwarmUI refresh util) keep working.
+// (the legacy shared-feed topic, retained for the cutover invariant test) keep
+// working.
 export { ACCOUNT_SYNC_TOPIC_PREFIX } from "./publish-account-state"
 
 // Timeout for utilization upload in milliseconds
@@ -373,21 +374,51 @@ export function createSyncAccount(
       }, SYNC_TIMEOUT_MS)
     })
 
+    // Build this device's view + registry seed from the captured snapshot.
+    // Phase 3a: scalars share the snapshot's `lastModified` clock; true per-field
+    // clocks are a follow-up (the wire format already carries them).
+    const deviceId = getOrCreateDeviceId()
+    const thisDevice = state.metadata.devices.find(
+      (d) => d.deviceId === deviceId,
+    ) ?? {
+      deviceId,
+      name: detectDeviceName(),
+      createdAt: Date.now(),
+      lastSignedInAt: Date.now(),
+    }
+    const scalarAt = state.metadata.lastModified
+    const view: DeviceStateView = {
+      connectedApps: state.connectedApps,
+      postageStamps: state.postageStamps,
+      accountName: { value: state.metadata.accountName, at: scalarAt },
+      defaultPostageStampBatchID: {
+        value: state.metadata.defaultPostageStampBatchID,
+        at: scalarAt,
+      },
+      settings: { value: state.metadata.settings, at: scalarAt },
+    }
+    const registryBase = {
+      createdAt: state.metadata.createdAt,
+      publicKey: state.metadata.publicKey,
+      partitionCount,
+    }
+
     try {
       const result = await Promise.race([
         coordinator.withWrite(
           (target) =>
-            publishAccountState({
+            publishDeviceState({
               bee,
               accountId,
+              device: thisDevice,
               accountKey,
               owner,
               encryptionKey,
-              localSnapshot: state,
+              view,
+              registryBase,
               target,
               onChunksUploaded: (addresses) =>
                 handleUtilizationUpdate(accountId, addresses),
-              logLabel: "[SyncCoordinator]",
             }),
           { wait: "skip" },
         ),

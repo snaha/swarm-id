@@ -42,7 +42,13 @@ import { AsyncEpochFinder, BasicEpochUpdater } from "../proxy/feeds/epochs"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { mergeConnectedApps, mergePostageStamps } from "./merge-snapshot"
-import type { DeviceRegistry } from "./device-registry"
+import {
+  readDeviceRegistry,
+  writeDeviceRegistry,
+  upsertDevice,
+  type DeviceRegistry,
+} from "./device-registry"
+import type { SyncResult } from "./types"
 
 export const DEVICE_STATE_TOPIC_PREFIX = "swarm-id-devstate-v1"
 
@@ -137,21 +143,98 @@ export async function writeDeviceState(opts: {
   encryptionKey: string
   view: DeviceStateView
   target: UploadTarget
-}): Promise<{ reference: string }> {
+}): Promise<{ reference: string; chunkAddresses: Uint8Array[] }> {
   const topic = deviceStateTopic(opts.accountId, opts.deviceId)
   const json = serializeDeviceState(opts.accountId, opts.deviceId, opts.view)
   const bytes = new TextEncoder().encode(JSON.stringify(json))
   const uploadResult = await uploadData(opts.target, bytes, {
     encryptionKey: hexToUint8Array(opts.encryptionKey),
   })
+  const chunkAddresses = uploadResult.chunkAddresses ?? []
   const refBytes = new Reference(uploadResult.reference).toUint8Array()
   const updater = new BasicEpochUpdater(topic, opts.accountKey)
-  await updater.update(
+  const updateResult = await updater.update(
     BigInt(Math.floor(Date.now() / 1000)),
     refBytes,
     opts.target,
   )
-  return { reference: uploadResult.reference }
+  chunkAddresses.push(updateResult.socAddress)
+  return { reference: uploadResult.reference, chunkAddresses }
+}
+
+/**
+ * Write this device's view AND ensure the device-registry lists it. The single
+ * write entry point for both `sync-account` (UI-triggered) and the proxy
+ * (publish-on-acquire). The registry write is skipped when this device is
+ * already present and not removed — keeping the shared registry a rare write.
+ */
+export async function publishDeviceState(opts: {
+  bee: Bee
+  accountId: string
+  device: Device
+  accountKey: PrivateKey
+  owner: EthAddress
+  encryptionKey: string
+  view: DeviceStateView
+  registryBase: {
+    createdAt: number
+    publicKey?: string
+    partitionCount: number
+  }
+  target: UploadTarget
+  /** Per-chunk utilisation hook (mirrors the old publish path). */
+  onChunksUploaded?: (chunkAddresses: Uint8Array[]) => Promise<void>
+}): Promise<SyncResult> {
+  const written = await writeDeviceState({
+    accountId: opts.accountId,
+    deviceId: opts.device.deviceId,
+    accountKey: opts.accountKey,
+    encryptionKey: opts.encryptionKey,
+    view: opts.view,
+    target: opts.target,
+  })
+
+  if (opts.onChunksUploaded && written.chunkAddresses.length > 0) {
+    // Don't fail the write if utilisation tracking throws.
+    await opts.onChunksUploaded(written.chunkAddresses).catch((err) => {
+      console.error("[publishDeviceState] utilisation hook failed:", err)
+    })
+  }
+
+  const remote = await readDeviceRegistry({
+    bee: opts.bee,
+    accountId: opts.accountId,
+    owner: opts.owner,
+  }).catch(() => undefined)
+  const existing = remote?.devices.find(
+    (d) => d.deviceId === opts.device.deviceId,
+  )
+  // Already listed and live → nothing to announce (rare-write registry).
+  if (!existing || existing.removedAt) {
+    const base: DeviceRegistry = remote ?? {
+      version: 1,
+      accountId: opts.accountId,
+      createdAt: opts.registryBase.createdAt,
+      publicKey: opts.registryBase.publicKey,
+      partitionCount: opts.registryBase.partitionCount,
+      devices: [],
+    }
+    await writeDeviceRegistry({
+      bee: opts.bee,
+      accountKey: opts.accountKey,
+      owner: opts.owner,
+      encryptionKey: opts.encryptionKey,
+      localRegistry: upsertDevice(base, opts.device),
+      target: opts.target,
+    })
+  }
+
+  return {
+    status: "success",
+    reference: written.reference,
+    timestamp: BigInt(Math.floor(Date.now() / 1000)),
+    chunkAddresses: written.chunkAddresses,
+  }
 }
 
 /**
