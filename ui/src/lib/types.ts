@@ -37,16 +37,17 @@ export interface ConnectedApp {
   connectedUntil?: number
 }
 
-export interface Account {
+/**
+ * The portable part of an account — carried by sign-in sync and backup files.
+ * Holds no device unlock secrets (access method / encrypted seed).
+ */
+export interface AccountData {
   /** 0x-prefixed Ethereum address derived from the recovery phrase. */
   id: string
   name: string
   /** Compressed secp256k1 public key (0x-prefixed hex). */
   publicKey: string
   createdAt: number
-  access: AccessMethod
-  /** BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext). */
-  encryptedSeed: string
   /** How long app connections stay valid, in days. */
   appConnectionDays?: number
   defaultStampBatchId?: string
@@ -54,5 +55,18 @@ export interface Account {
   connectedApps: ConnectedApp[]
 }
 
-/** The portable part of an account carried by sign-in sync and backup files. */
-export type AccountData = Omit<Account, 'access' | 'encryptedSeed'>
+/** A full persisted account record: portable data plus this device's unlock secrets. */
+export interface AccountRecord extends AccountData {
+  access: AccessMethod
+  /** BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext). */
+  encryptedSeed: string
+}
+
+/**
+ * The live account object the app works with: {@link AccountRecord} fields as
+ * reactive state plus the mutation methods that own them. Defined with the
+ * collection store and re-exported here so `$lib/types` stays the one type entry
+ * point. Account-state changes are methods on the object (`account.addStamp(…)`),
+ * never store calls that take an id and look the account up.
+ */
+export type { Account } from './stores/accounts.svelte'

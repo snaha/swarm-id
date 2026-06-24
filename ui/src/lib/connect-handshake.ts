@@ -27,7 +27,6 @@ import {
 } from '@snaha/swarm-id'
 
 import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
-import { accountsStore } from '$lib/stores/accounts.svelte'
 import type { ConnectRequest } from '$lib/stores/connect.svelte'
 import type { Account } from '$lib/types'
 
@@ -156,7 +155,7 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
     return { ...shared, connectedApps }
   })
 
-  accountsStore.connectApp(account.id, {
+  account.connectApp({
     appUrl: request.appOrigin,
     appName: request.appName,
     appIcon: request.appIcon,

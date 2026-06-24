@@ -9,7 +9,7 @@
 import { decryptSeed, deriveKeyFromSecret, encryptSeed } from '$lib/crypto/encryption'
 import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
 import { walletFromPhrase } from '$lib/crypto/mnemonic'
-import type { Account, AccountData } from '$lib/types'
+import type { AccountData } from '$lib/types'
 
 const BACKUP_VERSION = 1
 const BACKUP_KEY_INFO = 'swarm-id-backup-v1'
@@ -44,7 +44,7 @@ function parseEnvelope(fileContents: string): BackupEnvelope | undefined {
 }
 
 /** Serialize and encrypt an account into .swarmid file contents. */
-export async function createBackup(account: Account, entropy: Uint8Array): Promise<string> {
+export async function createBackup(account: AccountData, entropy: Uint8Array): Promise<string> {
   const data: AccountData = {
     id: account.id,
     name: account.name,

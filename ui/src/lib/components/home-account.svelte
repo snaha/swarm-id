@@ -142,7 +142,7 @@
   function onNameChange() {
     const trimmed = name.trim()
     if (trimmed.length > 0 && trimmed !== account.name) {
-      accountsStore.rename(account.id, trimmed)
+      account.rename(trimmed)
     }
   }
 
@@ -268,7 +268,7 @@
       if (myAttempt !== attempt) {
         return
       }
-      accountsStore.setAccess(account.id, access, await encryptSeed(entropy, key))
+      account.setAccess(access, await encryptSeed(entropy, key))
       dialog = undefined
       newPassword = ''
       verifyNewPassword = ''

@@ -2,14 +2,14 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
 
-import type { Account } from '../types'
+import type { AccountRecord } from '../types'
 import { backupFilename, createBackup, restoreBackup } from './backup'
 import { walletFromPhrase } from './mnemonic'
 
 const PHRASE = 'test test test test test test test test test test test junk'
 const OTHER_PHRASE = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
 
-function accountFor(phrase: string): Account {
+function accountFor(phrase: string): AccountRecord {
   const wallet = walletFromPhrase(phrase)
   return {
     id: wallet.address,

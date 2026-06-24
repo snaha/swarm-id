@@ -226,7 +226,8 @@
   function assignStamp() {
     assignError = ''
     assignMessage = ''
-    if (!selectedStampId || !selectedAccountId) {
+    const account = selectedAccount
+    if (!selectedStampId || !account) {
       assignError = 'Select a stamp and an account first.'
       return
     }
@@ -256,20 +257,21 @@
       batchTTL: beeStamp.batchTTL,
       createdAt: Date.now(),
     }
-    accountsStore.addStamp(selectedAccountId, stamp)
-    accountsStore.setDefaultStamp(selectedAccountId, beeStamp.batchID)
-    assignMessage = `Assigned stamp to ${truncateAddress(selectedAccountId)} and set as default.`
+    account.addStamp(stamp)
+    account.setDefaultStamp(beeStamp.batchID)
+    assignMessage = `Assigned stamp to ${truncateAddress(account.id)} and set as default.`
   }
 
   function removeStamp() {
     assignError = ''
     assignMessage = ''
-    if (!selectedStampId || !selectedAccountId) {
+    const account = selectedAccount
+    if (!selectedStampId || !account) {
       assignError = 'Select a stamp and an account first.'
       return
     }
-    accountsStore.removeStamp(selectedAccountId, selectedStampId)
-    assignMessage = `Removed stamp from ${truncateAddress(selectedAccountId)}.`
+    account.removeStamp(selectedStampId)
+    assignMessage = `Removed stamp from ${truncateAddress(account.id)}.`
   }
 
   function clearAllData() {

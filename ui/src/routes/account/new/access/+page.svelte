@@ -85,7 +85,7 @@
     // Carry over data from a restore, or from an existing record for the same
     // address — re-importing a phrase must not wipe stamps or connected apps.
     const carried = draft.restored ?? accountsStore.get(wallet.address)
-    const account = {
+    const account = accountsStore.add({
       id: wallet.address,
       name: draft.name,
       publicKey: wallet.publicKey,
@@ -96,8 +96,7 @@
       defaultStampBatchId: carried?.defaultStampBatchId,
       stamps: carried?.stamps ?? [],
       connectedApps: carried?.connectedApps ?? [],
-    }
-    accountsStore.add(account)
+    })
     sessionStore.setCurrentAccount(wallet.address)
     const flow = draft.flow
 

@@ -12,7 +12,6 @@
   import { Button } from '$lib/components/ui/button'
   import { Select } from '$lib/components/ui/select'
   import { disconnectSharedConnection, removeSharedConnection } from '$lib/connect-handshake'
-  import { accountsStore } from '$lib/stores/accounts.svelte'
   import type { Account } from '$lib/types'
 
   const DEFAULT_CONNECTION_DAYS = 30
@@ -48,13 +47,13 @@
     // Revoke the shared record too — it holds the app secret the dApp's proxy
     // iframe authenticates from; the UI-local store is just the display copy.
     disconnectSharedConnection(account, appUrl)
-    accountsStore.disconnectApp(account.id, appUrl)
+    account.disconnectApp(appUrl)
     openMenuFor = undefined
   }
 
   function remove(appUrl: string) {
     removeSharedConnection(account, appUrl)
-    accountsStore.removeApp(account.id, appUrl)
+    account.removeApp(appUrl)
     openMenuFor = undefined
   }
 </script>
@@ -68,7 +67,7 @@
       options={DURATION_OPTIONS}
       bind:value={connectionDays}
       class="w-70"
-      onchange={(value) => accountsStore.setAppConnectionDays(account.id, Number(value))}
+      onchange={(value) => account.setAppConnectionDays(Number(value))}
     />
   </div>
 
