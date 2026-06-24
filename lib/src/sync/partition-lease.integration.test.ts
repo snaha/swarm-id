@@ -807,6 +807,79 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
   })
 })
 
+describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regression)", () => {
+  // Reproduces the live failure where Chrome (B) and Brave (C) both held p=1.
+  // Timeline from the logs: A holds p0; C takes p1; B comes back NOT knowing C
+  // (its device roster hadn't synced C yet) and reads its OWN stale, expired
+  // lock for p1 from the frozen gateway cache — so on every knownDeviceIds-keyed
+  // channel (lock / intent / presence) B is blind to C and re-claims p1.
+  //
+  // The invariant: a device must NOT bind a partition a live peer holds, even
+  // when that peer is absent from knownDeviceIds AND the static lock read is
+  // stale. Today B has no deviceId-independent way to detect C, so this FAILS
+  // (B binds p1). The per-partition occupancy beacon is what makes it pass.
+  it("does not bind a partition a live UNKNOWN peer holds when the static lock read is stale", async () => {
+    const NOW = 5_000_000
+    const DEVICE_C = "device-gamma-333"
+
+    // A holds p0 (live, and known to B below).
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    expect(
+      (await leaseA.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // C takes p1 (p0 is A's). C is a freshly-joined device B hasn't discovered.
+    const leaseC = makeLease({
+      deviceId: DEVICE_C,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_C],
+    })
+    expect(
+      (await leaseC.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(1)
+
+    // Frozen-cache simulation: B's gateway still serves B's OWN stale, expired
+    // lock for p1 instead of C's live one (the logs show B reading "EXPIRED
+    // holder <self>"). After this overwrite, C's hold survives only on the
+    // deviceId-independent occupancy channel the fix adds.
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 1,
+      payload: {
+        holderDeviceId: DEVICE_B,
+        generation: {
+          timestampMs: NOW - 10_000,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+        },
+        acquiredAt: NOW - 10_000,
+        leasedUntil: NOW, // expired by B's clock (NOW + 2000) below
+      },
+    })
+
+    // B re-acquires while A is still live on p0. It does NOT know C, and its p1
+    // lock read is the stale self-claim → it thinks p1 is free. It must detect
+    // C and fall back to read-only instead of binding p1.
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 2000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B], // C absent — the bug condition
+    })
+    const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(rB.partition).toBeUndefined()
+    expect(rB.isReadOnly).toBe(true)
+  })
+})
+
 describe("PartitionLease.refresh", () => {
   it("returns true and extends leasedUntil", async () => {
     const NOW1 = 1_000_000

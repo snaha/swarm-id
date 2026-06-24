@@ -141,6 +141,72 @@ describe("readPartitionIntent / writePartitionIntent round-trip", () => {
   // client flag. The deferred flag is only meaningful for /bytes data uploads.
 })
 
+describe("readPartitionIntent — a transient 5xx is not 'no intent'", () => {
+  // A gateway 500 storm previously read as "rival absent" and let the
+  // dual-acquire through. A 5xx is retried once; a 404 is genuine absence.
+  it("retries once on a 5xx and returns the payload on the retry", async () => {
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(1000, DEVICE_A),
+    })
+
+    const real = bee.downloadChunk.bind(bee)
+    let calls = 0
+    vi.spyOn(bee, "downloadChunk").mockImplementation(((...args: unknown[]) => {
+      calls++
+      if (calls === 1) {
+        return Promise.reject(
+          new Error("Request failed with status code 500"),
+        ) as never
+      }
+      return (real as (...a: unknown[]) => unknown)(...args) as never
+    }) as never)
+
+    const read = await readPartitionIntent({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+    })
+
+    expect(read).toEqual({
+      deviceId: DEVICE_A,
+      generation: gen(1000, DEVICE_A),
+    })
+    expect(calls).toBe(2) // initial 500 + one retry
+  })
+
+  it("does NOT retry a 404 (genuine absence → no intent)", async () => {
+    let calls = 0
+    vi.spyOn(bee, "downloadChunk").mockImplementation((() => {
+      calls++
+      return Promise.reject(
+        new Error("Request failed with status code 404"),
+      ) as never
+    }) as never)
+
+    const read = await readPartitionIntent({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+    })
+
+    expect(read).toBeUndefined()
+    expect(calls).toBe(1) // no retry on a 404
+  })
+})
+
 describe("resolveIntentRound", () => {
   const common = () => ({
     bee: bee as unknown as Bee,

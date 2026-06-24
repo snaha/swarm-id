@@ -50,8 +50,10 @@ import {
   INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
   readPartitionIntent,
+  readPartitionOccupancy,
   resolveIntentRound,
   writePartitionIntent,
+  writePartitionOccupancy,
 } from "./partition-intent"
 import { readPartitionState, writePartitionState } from "./partition-state"
 
@@ -131,6 +133,14 @@ export class PartitionLease {
   private self: SelfLease | undefined
   /** Per-partition holders observed by the last `refreshFromSwarm()`. */
   private holders = new Map<number, PartitionHolderEntry>()
+  /**
+   * Partitions whose lock SOC carried an explicit NO_HOLDER release sentinel in
+   * the last `refreshFromSwarm()`. An authoritative "free" — distinct from a
+   * stale/expired lock — so `refreshHoldersFromOccupancy` must NOT let a
+   * lingering occupancy beacon (the just-released holder's, still within TTL)
+   * re-mark it held and block an immediate takeover after release.
+   */
+  private releasedPartitions = new Set<number>()
   /**
    * Set at the start of `release()` (the lease session is closing) and
    * cleared by the next `acquire()`. While set, an overlapping `refresh()`
@@ -220,6 +230,7 @@ export class PartitionLease {
   async refreshFromSwarm(partitionCount: number): Promise<void> {
     const now = this.now()
     this.holders.clear()
+    this.releasedPartitions.clear()
     for (let p = 0; p < partitionCount; p++) {
       const lock = await readPartitionLock({
         bee: this.opts.bee,
@@ -237,6 +248,7 @@ export class PartitionLease {
       }
       if (lock.holderDeviceId === NO_HOLDER_DEVICE_ID) {
         console.log(`[PartitionLease] refresh p=${p}: released sentinel`)
+        this.releasedPartitions.add(p)
         continue
       }
       const self = lock.holderDeviceId === this.opts.deviceId ? " (self)" : ""
@@ -337,6 +349,68 @@ export class PartitionLease {
     }
   }
 
+  /**
+   * Union in holders from the deviceId-INDEPENDENT occupancy beacons. For each
+   * partition, read the current + previous epoch bucket (covering the rotation
+   * boundary); a foreign beacon still in lease marks the partition held — even
+   * when we don't know the holder's deviceId (the registry-lag case the per-device
+   * channels miss). No-op once a self-claim is recorded for the partition.
+   *
+   * Liveness uses a STRICT `leasedUntil > now` (not the propagation GRACE the
+   * per-device beacon uses): an actively-refreshing holder always has a current
+   * beacon with `leasedUntil > now`, while a DEPARTED holder's last beacon has
+   * genuinely lapsed — so a device legitimately taking over an expired slot
+   * isn't falsely blocked by a lingering within-grace beacon (which the lock
+   * SOC, when accurate, would already show as expired).
+   */
+  async refreshHoldersFromOccupancy(partitionCount: number): Promise<void> {
+    const now = this.now()
+    const currentBucket = intentEpochBucket(now)
+    const buckets = [currentBucket, currentBucket - 1]
+
+    const results = await Promise.all(
+      Array.from({ length: partitionCount }).flatMap((_unused, p) =>
+        buckets.map(async (bucket) => ({
+          partition: p,
+          occupancy: await readPartitionOccupancy({
+            bee: this.opts.bee,
+            backupSigner: this.opts.backupSigner,
+            swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            partition: p,
+            epochBucket: bucket,
+            timeoutMs: this.opts.intentReadTimeoutMs,
+          }),
+        })),
+      ),
+    )
+
+    for (const { partition, occupancy } of results) {
+      if (!occupancy || occupancy.leasedUntil === undefined) continue
+      if (occupancy.leasedUntil <= now) continue // genuinely expired holder
+      if (occupancy.deviceId === this.opts.deviceId) continue // our own beacon
+      // An explicit release sentinel on the lock authoritatively freed this
+      // partition; ignore the just-released holder's lingering occupancy beacon
+      // so a peer can take over immediately (the lock release is the truth here,
+      // unlike a stale/expired lock which the occupancy beacon is meant to
+      // override).
+      if (this.releasedPartitions.has(partition)) continue
+      const existing = this.holders.get(partition)
+      // Don't let a foreign beacon shadow our own live self-claim.
+      if (existing && existing.deviceId === this.opts.deviceId) continue
+      if (!existing || occupancy.leasedUntil > existing.leasedUntil) {
+        this.holders.set(partition, {
+          deviceId: occupancy.deviceId,
+          generation: occupancy.generation,
+          acquiredAt: existing?.acquiredAt ?? 0,
+          leasedUntil: occupancy.leasedUntil,
+        })
+        console.log(
+          `[PartitionLease] occupancy p=${partition}: live holder ${occupancy.deviceId} (leasedUntil ${occupancy.leasedUntil})`,
+        )
+      }
+    }
+  }
+
   /** True if `deviceId` is a live holder of any partition (post-refresh). */
   isActive(deviceId: string): boolean {
     for (const holder of this.holders.values()) {
@@ -414,6 +488,11 @@ export class PartitionLease {
     // that work on the gateway where the static lock SOC is unreadable). This
     // is what lets us detect a peer that ALREADY holds a partition.
     await this.refreshHoldersFromPresence(partitionCount)
+    // Also union in the deviceId-INDEPENDENT occupancy beacons. Unlike the two
+    // channels above (keyed on `knownDeviceIds`), this detects a live holder we
+    // have NEVER heard of — the registry-lag dual-acquire where a re-claiming
+    // device hasn't synced a peer yet and is blind to it on every keyed channel.
+    await this.refreshHoldersFromOccupancy(partitionCount)
 
     // Prefer the partition we already hold; otherwise the first free/expired.
     // A re-acquire of our own partition is not a contended claim — skip the
@@ -751,7 +830,11 @@ export class PartitionLease {
     leasedUntil: number,
   ): Promise<void> {
     const { stamper } = this.requireWriteContext()
+    const epochBucket = intentEpochBucket(this.now())
     try {
+      // Per-device beacon (generation tiebreak / displacement backstop) AND the
+      // deviceId-independent occupancy beacon (lets a peer that doesn't know us
+      // detect we hold this partition). Both unconditional while holding.
       await writePartitionIntent({
         bee: this.opts.bee,
         stamper,
@@ -759,7 +842,18 @@ export class PartitionLease {
         swarmEncryptionKey: this.opts.swarmEncryptionKey,
         partition,
         deviceId: this.opts.deviceId,
-        epochBucket: intentEpochBucket(this.now()),
+        epochBucket,
+        generation,
+        leasedUntil,
+      })
+      await writePartitionOccupancy({
+        bee: this.opts.bee,
+        stamper,
+        backupSigner: this.opts.backupSigner,
+        swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        partition,
+        deviceId: this.opts.deviceId,
+        epochBucket,
         generation,
         leasedUntil,
       })

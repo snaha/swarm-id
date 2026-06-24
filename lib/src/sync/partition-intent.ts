@@ -81,6 +81,17 @@ export type { PartitionIntentPayload }
 const PARTITION_INTENT_DOMAIN = "swarm-id-partition-intent-v1"
 
 /**
+ * Domain tag for the per-(partition, epoch) OCCUPANCY beacon — deliberately
+ * NOT keyed by deviceId. A holder publishes it on claim/refresh; any contender
+ * reads it during `acquire` to detect a live holder **it has never heard of**
+ * (the registry-lag dual-acquire: a re-claiming device whose roster hasn't yet
+ * synced a peer is blind to that peer on every deviceId-keyed channel). The
+ * address still rotates per epoch, so the read forces a network retrieval that
+ * bypasses the frozen static-lock cache.
+ */
+const PARTITION_OCCUPANCY_DOMAIN = "swarm-id-partition-occupancy-v1"
+
+/**
  * Epoch length for the rotating intent address. TTL-sized so a contention
  * round and its immediate retries share a bucket (and the previous bucket
  * covers the boundary), while every fresh round rotates to an address no node
@@ -173,6 +184,31 @@ export function intentSocAddress(
   )
 }
 
+/** Build the deviceId-INDEPENDENT occupancy identifier for (partition, epoch). */
+export function makePartitionOccupancyIdentifier(
+  partition: number,
+  epochBucket: number,
+): Identifier {
+  const hash = Binary.keccak256(
+    new TextEncoder().encode(
+      `${PARTITION_OCCUPANCY_DOMAIN}:${partition}:${epochBucket}`,
+    ),
+  )
+  return new Identifier(hash)
+}
+
+/** 32-byte SOC address for an occupancy beacon (for stamper slot reservation). */
+export function partitionOccupancyAddress(
+  partition: number,
+  epochBucket: number,
+  owner: EthAddress,
+): Uint8Array {
+  const identifier = makePartitionOccupancyIdentifier(partition, epochBucket)
+  return Binary.keccak256(
+    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
+  )
+}
+
 /**
  * Write this device's intent for (partition, epochBucket). The payload carries
  * the generation the device intends to claim with, so rivals can order against
@@ -200,6 +236,13 @@ export async function writePartitionIntent(opts: {
     opts.deviceId,
     opts.epochBucket,
   )
+  const owner = opts.backupSigner.publicKey().address()
+  const address = intentSocAddress(
+    opts.partition,
+    opts.deviceId,
+    opts.epochBucket,
+    owner,
+  )
   const payload: PartitionIntentPayload = {
     deviceId: opts.deviceId,
     generation: opts.generation,
@@ -207,29 +250,91 @@ export async function writePartitionIntent(opts: {
       ? { leasedUntil: opts.leasedUntil }
       : {}),
   }
-  const data = new TextEncoder().encode(JSON.stringify(payload))
+  await writeReservedPartitionSoc({
+    bee: opts.bee,
+    stamper: opts.stamper,
+    backupSigner: opts.backupSigner,
+    swarmEncryptionKey: opts.swarmEncryptionKey,
+    partition: opts.partition,
+    identifier,
+    address,
+    payload,
+  })
+}
+
+/**
+ * Publish this device's OCCUPANCY beacon for (partition, epochBucket) — same
+ * payload as a presence beacon but at the deviceId-independent occupancy
+ * address, so a contender that doesn't know this device can still detect it
+ * holds the partition. Always carries `leasedUntil` (it only ever announces a
+ * live hold).
+ */
+export async function writePartitionOccupancy(opts: {
+  bee: Bee
+  stamper: Stamper
+  backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  partition: number
+  deviceId: string
+  epochBucket: number
+  generation: PartitionLockGeneration
+  leasedUntil: number
+}): Promise<void> {
+  const identifier = makePartitionOccupancyIdentifier(
+    opts.partition,
+    opts.epochBucket,
+  )
+  const owner = opts.backupSigner.publicKey().address()
+  const address = partitionOccupancyAddress(
+    opts.partition,
+    opts.epochBucket,
+    owner,
+  )
+  const payload: PartitionIntentPayload = {
+    deviceId: opts.deviceId,
+    generation: opts.generation,
+    leasedUntil: opts.leasedUntil,
+  }
+  await writeReservedPartitionSoc({
+    bee: opts.bee,
+    stamper: opts.stamper,
+    backupSigner: opts.backupSigner,
+    swarmEncryptionKey: opts.swarmEncryptionKey,
+    partition: opts.partition,
+    identifier,
+    address,
+    payload,
+  })
+}
+
+/**
+ * Upload a partition SOC (intent / occupancy / beacon) routed to the contended
+ * partition's RESERVED slot so it can never land in a data lane and overstamp
+ * user data (see module header). Only the partition-aware stamper can reserve;
+ * a plain stamper (legacy single-device) never contends, so a normal upload is
+ * fine there.
+ */
+async function writeReservedPartitionSoc(opts: {
+  bee: Bee
+  stamper: Stamper
+  backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  partition: number
+  identifier: Identifier
+  address: Uint8Array
+  payload: PartitionIntentPayload
+}): Promise<void> {
+  const data = new TextEncoder().encode(JSON.stringify(opts.payload))
   const target: UploadTarget = {
     mode: "stamper",
     bee: opts.bee,
     stamper: opts.stamper,
   }
-
-  // Route the intent to the contended partition's reserved slot so it can
-  // never land in a data lane and overstamp user data (see module header).
-  // Only the partition-aware stamper can do this; a plain stamper (legacy
-  // single-device) never contends, so a normal upload is fine there.
   const stamper = opts.stamper
   if (stamper instanceof UtilizationAwareStamper) {
-    const owner = opts.backupSigner.publicKey().address()
-    const address = intentSocAddress(
-      opts.partition,
-      opts.deviceId,
-      opts.epochBucket,
-      owner,
-    )
-    stamper.reserveIntentSocSlot(address, opts.partition)
+    stamper.reserveIntentSocSlot(opts.address, opts.partition)
     try {
-      await uploadSOC(target, opts.backupSigner, identifier, data, {
+      await uploadSOC(target, opts.backupSigner, opts.identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
       })
     } finally {
@@ -237,17 +342,83 @@ export async function writePartitionIntent(opts: {
     }
     return
   }
-
-  await uploadSOC(target, opts.backupSigner, identifier, data, {
+  await uploadSOC(target, opts.backupSigner, opts.identifier, data, {
     encryptionKey: opts.swarmEncryptionKey,
   })
 }
 
+/** A 5xx is a transient gateway error, not proof the chunk is absent. */
+const isServerError = (error: unknown): boolean =>
+  error instanceof Error && /status code 5\d\d/.test(error.message)
+
 /**
- * Read a single rival's intent for (partition, epochBucket), bounded by
+ * Download + parse an intent/occupancy SOC at `identifier`, bounded by
  * `timeoutMs`. Returns `undefined` when the chunk is missing, the read times
  * out (treated as "no intent" — see module header), or the payload is
- * malformed.
+ * malformed. A 5xx server error is RETRIED once before concluding absence: a
+ * transient 500 is not evidence the chunk is gone, and treating it as such is
+ * what let the dual-acquire slip through under a gateway 500 storm. A 404 /
+ * timeout keeps the documented "absence assumed" (genuine for the rotating
+ * address; preserves liveness).
+ */
+async function readPartitionSoc(opts: {
+  bee: Bee
+  owner: EthAddress
+  identifier: Identifier
+  swarmEncryptionKey: Uint8Array
+  timeoutMs?: number
+  logLabel: string
+}): Promise<PartitionIntentPayload | undefined> {
+  const download = () =>
+    Promise.race([
+      downloadEncryptedSOC(
+        opts.bee,
+        opts.owner,
+        opts.identifier,
+        opts.swarmEncryptionKey,
+      ),
+      rejectAfter(
+        opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS,
+        INTENT_TIMEOUT_MESSAGE,
+      ),
+    ])
+
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const soc = await download()
+      const parsed = PartitionIntentPayloadSchemaV1.safeParse(
+        JSON.parse(new TextDecoder().decode(soc.payload)),
+      )
+      if (!parsed.success) {
+        console.log(`[partition-intent] ${opts.logLabel}: malformed`)
+        return undefined
+      }
+      console.log(
+        `[partition-intent] ${opts.logLabel}: FOUND (gen ts=${parsed.data.generation.timestampMs} leasedUntil=${parsed.data.leasedUntil ?? "none"})`,
+      )
+      return parsed.data
+    } catch (error) {
+      // Retry once on a transient 5xx; a too-short timeout or a real 404 are
+      // treated as absence so a single flaky device can't deadlock the round.
+      if (isServerError(error) && attempt === 0) continue
+      const timedOut =
+        error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE
+      console.log(
+        `[partition-intent] ${opts.logLabel}: ${
+          timedOut
+            ? `TIMEOUT (>${opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS}ms)`
+            : `missing (${error instanceof Error ? error.message : String(error)})`
+        }${isServerError(error) ? " after 5xx retry" : ""} — treated as no-intent`,
+      )
+      return undefined
+    }
+  }
+  return undefined
+}
+
+/**
+ * Read a single rival's intent for (partition, epochBucket). Returns `undefined`
+ * when missing / timed out / malformed (treated as "no intent" — see header).
  */
 export async function readPartitionIntent(opts: {
   bee: Bee
@@ -258,54 +429,43 @@ export async function readPartitionIntent(opts: {
   epochBucket: number
   timeoutMs?: number
 }): Promise<PartitionIntentPayload | undefined> {
-  const identifier = makePartitionIntentIdentifier(
-    opts.partition,
-    opts.deviceId,
-    opts.epochBucket,
-  )
-  const owner = opts.backupSigner.publicKey().address()
-  try {
-    const soc = await Promise.race([
-      downloadEncryptedSOC(
-        opts.bee,
-        owner,
-        identifier,
-        opts.swarmEncryptionKey,
-      ),
-      rejectAfter(
-        opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS,
-        INTENT_TIMEOUT_MESSAGE,
-      ),
-    ])
-    const parsed = PartitionIntentPayloadSchemaV1.safeParse(
-      JSON.parse(new TextDecoder().decode(soc.payload)),
-    )
-    if (!parsed.success) {
-      console.log(
-        `[partition-intent] read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}: malformed`,
-      )
-      return undefined
-    }
-    console.log(
-      `[partition-intent] read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}: FOUND (gen ts=${parsed.data.generation.timestampMs} leasedUntil=${parsed.data.leasedUntil ?? "none"})`,
-    )
-    return parsed.data
-  } catch (error) {
-    // Distinguish a timeout (the rival's chunk may well exist but the gateway
-    // didn't retrieve it within the budget) from a genuine not-found — a
-    // too-short timeout would silently re-enable the dual-acquire this whole
-    // mechanism exists to prevent.
-    const timedOut =
-      error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE
-    console.log(
-      `[partition-intent] read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}: ${
-        timedOut
-          ? `TIMEOUT (>${opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS}ms)`
-          : `missing (${error instanceof Error ? error.message : String(error)})`
-      } — treated as no-intent`,
-    )
-    return undefined
-  }
+  return readPartitionSoc({
+    bee: opts.bee,
+    owner: opts.backupSigner.publicKey().address(),
+    identifier: makePartitionIntentIdentifier(
+      opts.partition,
+      opts.deviceId,
+      opts.epochBucket,
+    ),
+    swarmEncryptionKey: opts.swarmEncryptionKey,
+    timeoutMs: opts.timeoutMs,
+    logLabel: `read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}`,
+  })
+}
+
+/**
+ * Read the deviceId-INDEPENDENT occupancy beacon for (partition, epochBucket).
+ * Lets a contender detect a live holder it doesn't know about.
+ */
+export async function readPartitionOccupancy(opts: {
+  bee: Bee
+  backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  partition: number
+  epochBucket: number
+  timeoutMs?: number
+}): Promise<PartitionIntentPayload | undefined> {
+  return readPartitionSoc({
+    bee: opts.bee,
+    owner: opts.backupSigner.publicKey().address(),
+    identifier: makePartitionOccupancyIdentifier(
+      opts.partition,
+      opts.epochBucket,
+    ),
+    swarmEncryptionKey: opts.swarmEncryptionKey,
+    timeoutMs: opts.timeoutMs,
+    logLabel: `occupancy p=${opts.partition} bucket=${opts.epochBucket}`,
+  })
 }
 
 /**
