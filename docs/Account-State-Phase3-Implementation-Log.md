@@ -9,21 +9,21 @@ Format mirrors the Phase 0/1/2 log: one entry per commit/checkpoint, what change
 
 ## Status
 
-**Design approved; implementation not started.** Phase 3 builds on Phase 1 (#337, PR #372) — its merge
-primitives are reused by the fold. Sub-phases:
+**Design approved (per-device snapshot-feed model); implementation not started.** Phase 3 builds on
+Phase 1 (#337, PR #372) — its merge primitives are reused by the fold. Sub-phases:
 
-- **3a** — device-registry feed + per-device op-log write/fold + cutover (retire the shared-snapshot
-  `verifyWon` publish). _Not started._
-- **3b** — per-device compaction. _Not started._
+- **3a** — device-registry feed + per-device **snapshot** feed write/fold + cutover (retire the
+  shared-snapshot `verifyWon` publish). Keep Phase 1 tombstones. _Not started._
 - **3c** _(optional)_ — OR-Set / version-vector tombstone GC. _Not started._
+- _(optional, later)_ — op-log/delta feeds if per-change bandwidth is measured to matter
+  (Design §4). _Not started._
 
-## 3a — per-device op-log write/fold + cutover
+> The snapshot-feed model is self-compacting (each feed is a latest-pointer), so the originally-planned
+> "3b compaction" phase is dropped. See [`Account-State-Phase3-Design.md`](./Account-State-Phase3-Design.md) §2, §4, §11.
+
+## 3a — per-device snapshot feed write/fold + cutover
 
 _(entries added as commits land)_
-
-## 3b — compaction
-
-_(pending)_
 
 ## 3c — OR-Set / version-vector GC
 

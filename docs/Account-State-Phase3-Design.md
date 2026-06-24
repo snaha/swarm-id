@@ -1,4 +1,4 @@
-# Account State — Phase 3 Design: per-device op-log CRDT
+# Account State — Phase 3 Design: per-device snapshot-feed CRDT
 
 Status: **proposal / for review.** Builds on Phase 0–2 + Phase 1 (#337, PR #372). Design rationale and
 the phased north star this expands live in
@@ -20,10 +20,10 @@ write the same SOC address; Bee is last-writer-wins, so the publisher does a
 - **contention-prone** — a single shared feed serialised by retries, amplified by the partition guard
   window and cross-gateway 404s (the "parked partition-acquire latency" in the impl log).
 
-Phase 3 removes concern A's shared write: **each device writes only its own append-only change-log
-feed**, and convergence moves from write time to **read/fold** time. Cross-device write contention on
-account state drops to ~zero. Concern **B** (postage-batch slot partitioning) is unchanged and still
-required.
+Phase 3 removes concern A's shared write: **each device writes only its own per-device feed** (holding
+that device's latest full view), and convergence moves from write time to **read/fold** time.
+Cross-device write contention on account state drops to ~zero. Concern **B** (postage-batch slot
+partitioning) is unchanged and still required.
 
 ## 2. Architecture: three layers
 
@@ -32,12 +32,12 @@ required.
   discovery   ─────▶│  Device-registry feed   H("swarm-id-devreg-v1" ‖ accountId)         │  shared, RARE writes
                     │     { deviceId, name, createdAt, lastSignedInAt, removedAt }[]       │
                     ├─────────────────────────────────────────────────────────────────────┤
-  hot path    ─────▶│  Op-log feed (device A)  H("swarm-id-oplog-v1" ‖ accountId ‖ A)      │  per-device, FREQUENT
-                    │  Op-log feed (device B)  H("swarm-id-oplog-v1" ‖ accountId ‖ B)      │  writes, NO contention
-                    │     seq 0,1,2,…  each entry = delta of ops                           │
+  hot path    ─────▶│  Device-state feed (A)  H("swarm-id-devstate-v1" ‖ accountId ‖ A)    │  per-device, FREQUENT
+                    │  Device-state feed (B)  H("swarm-id-devstate-v1" ‖ accountId ‖ B)    │  writes, NO contention
+                    │     epoch feed, latest-pointer = that device's full current view     │
                     └─────────────────────────────────────────────────────────────────────┘
-  read        ─────▶  fold = read registry → for each device read its log from lastIndex →
-                       reconstruct per-device collections → merge across devices (Phase 1 rules)
+  read        ─────▶  fold = read registry → for each device fetch its LATEST view →
+                       merge views across devices (Phase 1 rules) → applyRefreshed
 ```
 
 All feeds share **one owner** — the account backup key,
@@ -65,140 +65,154 @@ Complementary signal (already present, not a replacement): partition **lock SOCs
 now", but incomplete (≤K holders, misses read-only/departed devices), so the registry feed remains the
 authoritative membership source.
 
-### 2.2 Op-log feeds (the hot path)
+### 2.2 Per-device snapshot feeds (the hot path)
 
-`topic = H("swarm-id-oplog-v1" ‖ accountId ‖ deviceId)`, a **sequential** feed
-(`lib/src/proxy/feeds/sequence/` — `BasicSequentialUpdater`, identifier = `keccak256(topic ‖ indexBE)`,
-index 0,1,2…). Sequential (not epoch) because we need "read all entries since X", not "find latest".
+> **Model choice.** We use a per-device **snapshot** feed (each device publishes its full current view
+> to its own feed), not an append-only op-log. This is the model `swarm-collaborative-docs` uses for Yjs
+> (§Related work): it reuses today's epoch feed + snapshot serialization + Phase 1 merge almost verbatim,
+> is **self-compacting** (only the latest entry matters → no compaction phase), and is the minimal change
+> from today. The op-log/delta variant is kept as an optional future bandwidth optimization (§5).
 
-Each feed entry is a **delta** — a batch of ops accumulated since the last write:
+`topic = H("swarm-id-devstate-v1" ‖ accountId ‖ deviceId)`, the existing **epoch feed**
+(`BasicEpochUpdater`/`AsyncEpochFinder`, latest-pointer). Each device writes its **full current account
+view** to its **own** feed using the existing `serializeAccountState` (the payload references a chunked
+blob exactly as the shared snapshot does today — no new wire format):
 
 ```ts
-LogEntry = {
-  v: 1
-  deviceId: string          // author (redundant with topic, but self-describing)
-  seq: number               // feed index
-  ts: number                // wall-clock ms of this batch
-  ops: Op[]
+DeviceStateSnapshot = {           // == today's AccountStateSnapshot, minus metadata.devices
+  connectedApps:  ConnectedApp[]  // carries updatedAt / revokedAt (Phase 1)
+  postageStamps:  PostageStamp[]  // carries createdAt / deletedAt (Phase 1)
+  settings, defaultPostageStampBatchID, accountName, lastModified
 }
-
-Op =
-  | { t: "app.upsert",   app: ConnectedApp }                       // carries updatedAt
-  | { t: "app.revoke",   appUrl: string, revokedAt, updatedAt }
-  | { t: "stamp.upsert", stamp: PostageStamp }                     // carries createdAt
-  | { t: "stamp.delete", batchID: string, deletedAt }
-  | { t: "settings.set", settings: AccountSettings }
-  | { t: "account.setDefaultStamp", batchID: string | undefined, at }
-  | { t: "account.setName", name: string, at }
 ```
 
-Ops carry the **same LWW/tombstone clocks as Phase 1** (`updatedAt`, `revokedAt`, `deletedAt`), so the
-fold can reuse the Phase 1 merge verbatim (§2.3). Device metadata (name/lastSignedInAt/removedAt) lives
-in the registry, **not** the op-log.
+It is the device's **merged view** (its own edits folded with whatever it has read from peers), à la a
+Yjs peer writing its full state — so any single device's feed can reconstruct everything it has seen.
+Device membership (`deviceId, name, lastSignedInAt, removedAt`) lives in the **registry** (§2.1), not
+here.
 
-**Size.** A delta of a handful of ops is far under the 4 KB SOC payload limit
-(`lib/src/chunk/constants.ts:MAX_PAYLOAD_SIZE = 4096`) → encoded inline in the SOC payload. If an entry
-would exceed the limit (e.g. a large initial state), encode the ops as a chunked blob via the existing
-`uploadData` and store the blob reference as the entry payload (mirrors how the snapshot feed references
-its blob today). 3a may simply cap/inline and add blob-spill only if needed.
-
-**Exclusivity.** A device appends **only to its own** feed at the next index. There is no shared SOC
-address across devices, so **the merge-read-rewrite + `verifyWon` retry loop disappears.** A write is:
-encode delta → `BasicSequentialUpdater.update(payload, stamper, encKey)` at `nextIndex`.
+**Exclusivity.** A device writes **only its own** feed. There is no shared SOC address across devices,
+so **`publishAccountState`'s merge-read-rewrite + `verifyWon` retry loop disappears** — a write is just
+"upload my snapshot blob, advance my epoch feed". Per-device writes still ride the partition lease (§3),
+so two devices' feeds are slot-disjoint.
 
 ### 2.3 Fold-on-read
 
 ```
 fold(account):
-  registry  = readDeviceRegistry(accountId)              # Device[]  (discovery)
-  perDevice = []
+  registry = readDeviceRegistry(accountId)                       # Device[]  (discovery)
+  views    = []
   for d in registry.devices where !d.removedAt:
-     entries = readOpLogFrom(accountId, d.deviceId, lastIndex[d.deviceId])   # forward until 404/gap
-     lastIndex[d.deviceId] = highest index read                              # cache for next time
-     perDevice.push( replayOps(entries) )                # → { connectedApps, postageStamps, settings, default, name }
-  merged = perDevice.reduce(mergeCollections)            # mergeConnectedApps / mergePostageStamps (Phase 1)
-  return { devices: registry.devices, ...merged }        # same shape applyRefreshed() already consumes
+     views.push( readLatestDeviceState(accountId, d.deviceId) )  # ONE epoch-finder lookup per device
+  merged = views.reduce(mergeViews)                              # mergeConnectedApps / mergePostageStamps (Phase 1)
+  return { devices: registry.devices, ...merged }                # same shape applyRefreshed() already consumes
 ```
 
-- `replayOps` reduces one device's ops to its latest contribution per entity (LWW per key within the
-  device), yielding partial collections.
-- Cross-device merge is **exactly the Phase 1 primitives** (`mergeConnectedApps`, `mergePostageStamps`,
-  and `mergeDevicesList` for the registry) — recency = `max(tombstone, activity)`. Convergence and
-  deletion semantics are therefore identical to Phase 1 by construction (see §6 differential test).
-- Scalar account fields (name, default stamp, settings) fold by LWW on their `at` clock across devices.
-- **Steady-state cost** is O(new ops) because `lastIndex[deviceId]` is cached locally; cold start reads
-  each device's whole log (bounded by compaction, §4 / 3b).
+- Cross-device merge is **exactly the Phase 1 primitives** (`mergeConnectedApps`, `mergePostageStamps`;
+  `mergeDevicesList` for the registry) — recency = `max(tombstone, activity)`. Convergence and deletion
+  semantics are therefore **identical to Phase 1 by construction** (see §6 differential test).
+- Scalar account fields (name, default stamp, settings) fold by LWW on `lastModified`/an `at` clock.
+- **Cost** = K epoch-finder lookups (one per device, ~log each) + blob fetches. No `lastIndex` state, no
+  compaction — each feed is a single latest-pointer.
 
-The output shape is `{ devices, connectedApps, postageStamps, settings, defaultPostageStampBatchID,
-accountName }` — what `accountsStore.applyRefreshed(...)` (`swarm-ui/.../accounts.svelte.ts`) and the
-proxy's `buildConnectionInfo` already consume. **The plug point is unchanged.**
+The output `{ devices, connectedApps, postageStamps, settings, defaultPostageStampBatchID, accountName }`
+is what `accountsStore.applyRefreshed(...)` (`swarm-ui/.../accounts.svelte.ts`) and the proxy's
+`buildConnectionInfo` already consume. **The plug point is unchanged.**
 
 ## 3. Partition interaction (concern B stays)
 
-Per-device op-log writes still consume bucket slots on the shared **mutable** postage batch, so they
+Per-device snapshot writes still consume bucket slots on the shared **mutable** postage batch, so they
 still route through `BatchWriteCoordinator.withWrite` (cross-tab Web Lock + partition lease;
 `lib/src/sync/batch-write-coordinator.ts`). The lease guarantees **two devices never hold the same
 partition at once**, so two devices writing their own feeds are automatically slot-disjoint — the
 "device → partition → own feed" alignment §6.5/§7 predicted, achieved with **no stable device→index
-binding**: a device writes under whatever partition it currently holds.
+binding**: a device writes under whatever partition it currently holds. The registry feed and
+device-state feeds are written under the held partition just like the shared snapshot is today.
+
+### 3.1 How a device with no partition acquires one (the intent mechanism)
+
+This is concern B's existing machinery, inherited unchanged; Phase 3 doesn't alter it. A device that
+holds no partition cannot write its own feed until it wins a slot:
+
+1. **Pick a target partition** — `pickFreeOrExpired` (`partition-lease.ts:378`) scans from the device's
+   deterministic `deviceHomePartition(deviceId, K)` offset and returns the first partition with no live
+   holder. If all are live-and-foreign-held → `acquire()` returns `{ isReadOnly: true }`
+   (`partition-lease.ts:430`). A read-only device **folds/reads fully**; it just can't write.
+2. **Signal intent** — before claiming a free/expired partition `p`, it runs an **intent round**
+   (`partition-intent.ts`): it writes an **intent SOC**,
+   `identifier = keccak256("swarm-id-partition-intent-v1:{p}:{deviceId}:{epochBucket}")`, payload
+   `{ deviceId, generation }`. The address **rotates every `INTENT_EPOCH_MS = 30 s`** (fresh per round),
+   and it polls rivals over `INTENT_GUARD_WINDOW_MS = 12 s`; the highest `generation`/tiebreaker wins and
+   claims `p`'s lock SOC.
+3. **Which slot/index** — the intent SOC is forced into the **reserved slot equal to the partition index
+   `p`** it contends (`stamper.reserveIntentSocSlot(address, p)`, `batch-utilization.ts:1418`), in
+   whatever bucket its rotating address maps to. Reserved slots are `[0, K)` (one per partition, slot
+   index = partition; `Postage-Batch-Partitioning.md` §2–3): mutable-overwritten, **never a data slot**,
+   never counting toward utilisation. So the "I want partition `p`" signal lives in the same reserved
+   lane (slot `p`) as `p`'s lock SOC.
+4. **The wait** — a read-only device polls `acquireWithSlotWait` (`batch-write-coordinator.ts:544`) every
+   `LEASE_REFRESH_MS = 10 s`. It only wins when a holder **idle-yields** (`IDLE_YIELD_MS = 30 s`) or its
+   **lease lapses** (`LEASE_TTL_MS = 30 s`); else it eventually throws `PartitionContendedError` and the
+   write is deferred.
 
 **Inherited ceiling:** `PARTITION_COUNT = 2` (`lib/src/utils/batch-utilization.ts:76`) ⇒ at most **2
-concurrent writers**. A 3rd+ device is a read-only extra: it can **fold/read** fully, but cannot append
-to its own log until it gets a partition slot (today's behaviour). Raising K (more concurrent writers)
-is a separate lever, out of scope for Phase 3. The registry feed and op-log feeds are written under the
-held partition just like the snapshot is today.
+concurrent writers**. A 3rd+ device is a read-only extra (folds/reads fine, writes only once it wins a
+slot via the above). Raising K is a separate lever, out of scope for Phase 3.
 
-## 4. Compaction (sub-phase 3b)
+## 4. Optional future optimization: per-device op-log (delta) feeds
 
-Logs grow unbounded; cold-start fold reads each from index 0. Bound both with **per-device compaction**:
-periodically (every N ops or T) a device writes a **checkpoint entry** capturing the net effect of its
-own ops so far (latest op per entity it has touched) and advances a small per-device "fold-from" pointer
-so readers can start at the checkpoint instead of index 0. This is the Automerge
-"snapshot + incremental chunks" model applied per device; it keeps each device's effective log to
-O(entities it touches). Deferred to 3b — 3a ships without it (logs are small pre-production; `lastIndex`
-caching already makes steady-state cheap).
+The snapshot-feed model re-uploads a device's **full current view** on every change. For our small
+account state that is cheap and contention-free, so **no compaction is needed** — each feed is a single
+latest-pointer that self-compacts. If per-change bandwidth ever matters (large state), the snapshot feed
+can be swapped for a per-device **op-log**: a sequential feed of small deltas
+(`app.upsert`/`stamp.delete`/…), folded with a cached `lastIndex` per device, plus periodic per-device
+checkpoints (Automerge "snapshot + incremental chunks"). This is a drop-in replacement for §2.2 behind
+the same fold/`applyRefreshed` boundary — deferred until measured need, not part of 3a.
 
 ## 5. Deletes (sub-phase 3c, optional)
 
 3a keeps the **Phase 1 LWW tombstones** (`deletedAt`/`removedAt`/`revokedAt`): simple, already proven,
 already converge. The rigorous upgrade (§6.3 of the plan) — **OR-Set** (observed-remove, add-wins via
 per-add dots) and **version vectors** with **causal-stability tombstone GC** — is the optional tail 3c,
-warranted only once tombstone accretion becomes a measured problem. The op-log structure is naturally
-compatible: each op already is/can-carry a dot (`deviceId × seq`).
+warranted only once tombstone accretion in the full-view snapshots becomes a measured problem (a dot is
+naturally `deviceId × a per-device counter`).
 
 ## 6. Verification
 
 - **Unit (lib):**
-  - op encode/decode round-trip (incl. blob-spill if added).
-  - **Differential fold equivalence** — for a generated op set, `fold(per-device logs)` ≡ the Phase 0–2
-    snapshot merge of the same operations. This _locks Phase 3 to today's observable behaviour_ and is
-    the key correctness gate.
+  - device-state snapshot encode/decode round-trip (reuses `serializeAccountState`).
+  - **Differential fold equivalence** — for a generated set of per-device views, `fold(K device states)`
+    ≡ the Phase 0–2 snapshot merge of the same data. This _locks Phase 3 to today's observable
+    behaviour_ and is the key correctness gate.
   - registry merge — reuses the Phase 1 `mergeDevicesList` tests.
 - **Integration (real Swarm):** adapt the proven `scripts/deletion-sync-test.ts` harness (two devices,
-  one feed each). Assert: device B folds device A's appends and converges; deletions propagate;
+  one feed each). Assert: device B folds device A's latest view and converges; deletions propagate;
   resurrection works; and **the shared `swarm-id-backup-v1` feed is never written** (the §7 invariant).
   Runs on the local bee-compose cluster and the public gateway (both validated during Phase 1).
 - Each sub-phase leaves `pnpm check:all` green.
 
 ## 7. Sub-phase plan
 
-| Sub-phase      | Scope                                                                                                                                                                                                                                  | Exit                                                                                                          |
-| -------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **3a**         | Device-registry feed + per-device op-log write/fold; cut `createSyncAccount`/refresh/restore/proxy over to it; **delete** the shared-snapshot publish + `verifyWon` loop. Keep Phase 1 tombstones. Hard cutover, new versioned topics. | `check:all` green; differential fold test passes; two-device gateway run converges with no shared-feed write. |
-| **3b**         | Per-device compaction (checkpoints + fold-from pointer).                                                                                                                                                                               | Bounded cold-start fold; equivalence preserved.                                                               |
-| **3c** _(opt)_ | OR-Set / version-vector + causal-stability tombstone GC.                                                                                                                                                                               | Tombstones GC'd once causally stable; differential test extended.                                             |
+| Sub-phase      | Scope                                                                                                                                                                                                                                             | Exit                                                                                                          |
+| -------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **3a**         | Device-registry feed + per-device **snapshot** feed write/fold; cut `createSyncAccount`/refresh/restore/proxy over to it; **delete** the shared-snapshot publish + `verifyWon` loop. Keep Phase 1 tombstones. Hard cutover, new versioned topics. | `check:all` green; differential fold test passes; two-device gateway run converges with no shared-feed write. |
+| **3c** _(opt)_ | OR-Set / version-vector + causal-stability tombstone GC.                                                                                                                                                                                          | Tombstones GC'd once causally stable; differential test extended.                                             |
+| _(opt, later)_ | Op-log/delta feeds (§4) if per-change bandwidth is ever measured to matter.                                                                                                                                                                       | Same fold boundary; bounded per-device log.                                                                   |
 
 ## 8. Critical files
 
 **New (lib):**
 
-- `lib/src/sync/op-log.ts` — `Op`/`LogEntry` schema (Zod), encode/decode, `replayOps`, `foldAccount`.
+- `lib/src/sync/device-state.ts` — per-device snapshot feed read/write (`writeDeviceState`,
+  `readLatestDeviceState`) + `foldAccount(views, registry)`.
 - `lib/src/sync/device-registry.ts` — registry feed read/write + merge (wraps `mergeDevicesList`).
 
 **Reuse:**
 
-- `lib/src/proxy/feeds/sequence/*` (sequential feed updater/finder), `lib/src/proxy/feeds/epochs/*`
-  (registry latest-pointer).
+- `lib/src/proxy/feeds/epochs/*` (epoch feed — latest-pointer, for both the device-state and registry
+  feeds).
+- `lib/src/sync/serialization.ts` (`serializeAccountState`/`deserializeAccountState`) +
+  `account-state-snapshot.ts` for the device-state payload.
 - `lib/src/sync/merge-snapshot.ts` — `mergeConnectedApps`/`mergePostageStamps`/`mergeDevicesList` for the
   fold (Phase 1).
 - `lib/src/proxy/upload.ts` (`uploadData`, `UploadTarget`), `download-data.ts`,
@@ -206,12 +220,13 @@ compatible: each op already is/can-carry a dot (`deviceId × seq`).
 
 **Modify:**
 
-- `lib/src/sync/sync-account.ts` — write ops to the device's own feed via the coordinator instead of
-  calling `publishAccountState`.
-- `lib/src/sync/restore-account.ts` + `swarm-ui/src/lib/utils/refresh-account-from-swarm.ts` — fold
-  instead of fetching the snapshot; same `applyRefreshed` output.
+- `lib/src/sync/sync-account.ts` — write the device's own state snapshot to its own feed via the
+  coordinator instead of calling the shared `publishAccountState`.
+- `lib/src/sync/restore-account.ts` + `swarm-ui/src/lib/utils/refresh-account-from-swarm.ts` — fold the K
+  device-state feeds (+ registry) instead of fetching the one shared snapshot; same `applyRefreshed`
+  output.
 - `lib/src/swarm-id-proxy.ts` — registry-based discovery (`refreshDeviceRegistryFromSwarm`,
-  `knownDeviceIdsForAccount`); publish-on-acquire → append an op + announce in the registry.
+  `knownDeviceIdsForAccount`); publish-on-acquire → write own device-state + announce in the registry.
 
 **Retire:** the shared-feed merge/`verifyWon` core of `lib/src/sync/publish-account-state.ts`
 (`mergeSnapshotWithRemote` / `snapshotContainsContribution` keep their unit value for the differential
@@ -219,14 +234,17 @@ test but leave the write path).
 
 ## 9. Open questions
 
-1. **Registry feed vs pure per-device discovery** — recommended: dedicated registry feed (robust);
-   alternative is deriving peers from lock SOCs (no new shared feed, but ≤K live holders only).
-2. **Blob-spill in 3a or defer** — inline-only first, add blob-spill when an entry first exceeds 4 KB.
-3. **Scalar fields (name/default/settings) clock** — per-op `at` LWW across devices; confirm that's
-   sufficient vs a dedicated "account meta" lane.
-4. **>2 devices** — accept read-only extras (inherited K=2) for Phase 3; revisit raising K separately.
-5. **Tombstone GC** — adopt 3c (OR-Set/VV) only when accretion is measured; otherwise rely on 3b
-   compaction.
+1. **Registry feed vs pure per-device discovery** — recommended: dedicated registry feed (robust), now
+   with external precedent (the `swarm-collaborative-docs` members feed, §11). Alternative: derive peers
+   from the partition lock SOCs (no new shared feed, but ≤K currently-active holders only).
+2. **Device-state payload = full merged view vs own-contribution-only** — recommend **full merged view**
+   (à la a Yjs peer writing its whole state): any one feed can reconstruct everything that device has
+   seen, and the fold is trivially idempotent. Own-contribution-only is leaner but loses that property.
+3. **Scalar fields (name/default/settings) clock** — LWW on `lastModified`/an `at` clock across devices;
+   confirm sufficient vs a dedicated "account meta" lane.
+4. **>2 devices** — accept read-only extras (inherited `K=2`, §3.1) for Phase 3; revisit raising K
+   separately.
+5. **Tombstone GC** — adopt 3c (OR-Set/VV) only when full-view-snapshot accretion is measured to matter.
 
 ## 10. References
 
@@ -236,3 +254,24 @@ test but leave the write path).
   Phase 0/1/2 record; Phase 1 (#337) tombstones this fold reuses.
 - Psaras & Sanjuán, _Merkle-CRDTs_; Almeida et al., _Delta-State CRDTs_; Shapiro et al., _OR-Set_;
   Automerge 2.0 incremental format (all linked in the refactor plan §10).
+
+## 11. Related work — `swarm-collaborative-docs`
+
+[`Solar-Punk-Ltd/swarm-collaborative-docs`](https://github.com/Solar-Punk-Ltd/swarm-collaborative-docs)
+(collaborative editing — **Yjs** CRDT over Swarm) independently arrives at the same shape and motivated
+the snapshot-feed model above.
+
+- **Validates:** _per-user (per-device) Swarm feeds_ — each peer writes to its **own** feed (no shared
+  write contention); and a **shared `<topic>_members` consensus feed** for peer discovery — direct
+  precedent for our **device-registry feed** (§2.1) over lock-SOC discovery.
+- **What we adopt:** each peer's feed holds its **full latest snapshot** (not an op-log). Late joiners
+  read the members list, fetch each peer's latest snapshot, and merge. This is exactly §2.2/§2.3.
+- **Where we differ:**
+  - _Structured LWW state, not free-form text_ → we use the Phase 1 merge primitives, **not** a general
+    CRDT engine (Yjs/Automerge). Our entities (apps/stamps/devices) converge under simple
+    LWW + tombstones; a text CRDT would be over-engineering.
+  - _No real-time transport._ They add a pluggable WebRTC/pubsub/Waku delta channel for low-latency
+    co-editing + cursor awareness. Account state changes are infrequent and non-collaborative, so Swarm
+    feeds alone suffice; presence is already covered by the partition lock SOCs (and could use Bee GSOC
+    later) — out of scope here.
+  - _Postage._ Same model: one batch covers all of a session's writes.
