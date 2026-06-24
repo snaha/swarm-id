@@ -1,0 +1,1 @@
+import{A as c,E as n,x as r}from"./CS5lf1-5.js";import{a as d}from"./CPdlBS5L.js";function a(o){const e=c(o.devices??[],r(),n()),t=o.connectedApps.map(s=>({...s,connectedUntil:void 0}));return d.addAccount({...o,devices:e,connectedApps:t})}export{a as r};
