@@ -66,18 +66,30 @@ cluster. On `feat/account-deletion-tombstones` (PR #372).
 
 **Integration (`scripts/per-device-sync-test.ts`, untracked).** Two devices each publish their own feed
 
-- registry; a reader folds and converges. On the local bee-compose cluster, **9/9 checks pass**:
-  cross-device convergence (A's stamp + B's app + both devices), stamp-delete tombstone propagation,
-  device removal + resurrection, and the **§7 invariant** — the old shared `swarm-id-backup-v1` feed is
-  never written. (A propagation delay sequences the two devices: the shared registry can race on
-  simultaneous announces; production self-heals via repeated syncs.)
+- registry; a reader folds and converges. **9/9 checks pass on BOTH the local bee-compose cluster AND the
+  public gateway** (`api.gateway.ethswarm.org`, real Gnosis batch): cross-device convergence (A's stamp +
+  B's app + both devices), stamp-delete tombstone propagation, device removal + resurrection, and the
+  **§7 invariant** — the old shared `swarm-id-backup-v1` feed is never written. Runners:
+  `scripts/run-gateway.sh <tsx-script>` (env-setup once; drives any integration script).
+
+**Gateway finding — registry negative-caching.** The per-device device-state feeds propagate fine on the
+gateway, but the **device-registry** (the one residual shared feed) is slow there: it has a _static_
+feed address, and `publishDeviceState` READS it (to decide whether to announce) before WRITING it. The
+gateway negative-caches the 404 for ~50 s, so a fresh announce isn't readable until the cache clears
+(measured t+56 s vs t+8 s for a write with no pre-read). Two consequences on the gateway: (a) ~50 s read
+latency for a new device; (b) a second device announcing inside that window can't see the first and its
+read-merge-write **clobbers** the peer. Spacing announces beyond the window (`PROP_DELAY_MS≈70 s`, the
+gateway runner's default) makes it converge 9/9. This is the same gateway 404-caching the partition
+intent-SOCs rotate addresses to avoid — it validates killing shared-feed reliance (the hot path is now
+robust) and flags the registry as the next thing to harden.
 
 ### Status (3a)
 
-Phase 3a **done & green** (cutover landed + verified locally). Known follow-ups: per-field scalar clocks
-
-- scalar propagation on refresh; registry concurrent-announce robustness (currently self-heals across
-  syncs); the new `ui/` package still on the old read/write path; gateway run of the per-device test.
+Phase 3a **done & green** — cutover landed + verified on the local cluster **and the public gateway**
+(9/9 both). Known follow-ups: (1) **harden the registry for high-latency/caching gateways** — a
+verifyWon-style read-back retry, address rotation, or per-device registry feeds (so a static-address
+read-before-write can't negative-cache/clobber); (2) per-field scalar clocks + scalar propagation on
+refresh; (3) the new `ui/` package still on the old read/write path; (4) Phase 3c (OR-Set/VV GC).
 
 ## 3c — OR-Set / version-vector GC
 
