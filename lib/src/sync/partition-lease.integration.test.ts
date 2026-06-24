@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   BatchId,
   PrivateKey,
+  Reference,
   type Bee,
   type Stamper,
 } from "@ethersphere/bee-js"
@@ -43,11 +44,13 @@ vi.mock("./partition-state", async (importOriginal) => {
 })
 import { PartitionLease } from "./partition-lease"
 import {
+  acquirePartitionLock,
   makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
   readPartitionLock,
   writePartitionLock,
 } from "./partition-lock"
+import { makePartitionLockIdentifier } from "../utils/lock-soc"
 import {
   INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
@@ -804,6 +807,81 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
       partition: 0,
     })
     expect(p0?.holderDeviceId).toBe(DEVICE_C)
+  })
+})
+
+describe("acquirePartitionLock — self-refresh through a frozen-cache read (regression)", () => {
+  // On a gateway that serves a partition's static lock SOC from a frozen cache,
+  // a holder refreshing its OWN lock writes leasedUntil = now + TTL but the
+  // verify-read returns the STALE old chunk. acquirePartitionLock must trust the
+  // fresh claim it just wrote, not the stale read-back — otherwise the lease
+  // silently never extends (leasedUntil pinned to the old value), the holder
+  // believes it still holds while peers see it expire, and a contender takes the
+  // slot → both believe they hold it. (Surfaced by the gateway idle-then-reacquire
+  // beat in scripts/partition-acquire-3-test.ts.)
+  it("returns the freshly-written leasedUntil, not the stale read-back", async () => {
+    const T_CLAIM = 1_000_000
+    const T_NOW = T_CLAIM + 5_000
+
+    // Seed our own (older-generation) claim on p0.
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      payload: {
+        holderDeviceId: DEVICE_A,
+        generation: {
+          timestampMs: T_CLAIM,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+        },
+        acquiredAt: T_CLAIM,
+        leasedUntil: T_CLAIM + LEASE_TTL_MS,
+      },
+    })
+
+    // Freeze every read of the lock SOC address at that seeded chunk, so the
+    // verify-read inside acquirePartitionLock returns the stale claim no matter
+    // what we write (the gateway frozen-cache effect). Other reads pass through.
+    const lockId = makePartitionLockIdentifier(0)
+    const lockAddr = new Reference(
+      Binary.keccak256(
+        Binary.concatBytes(lockId.toUint8Array(), OWNER.toUint8Array()),
+      ),
+    )
+      .toHex()
+      .toLowerCase()
+    const realDownload = bee.downloadChunk.bind(bee)
+    const frozen = await realDownload(lockAddr)
+    vi.spyOn(bee, "downloadChunk").mockImplementation(((
+      addr: unknown,
+      ...rest: unknown[]
+    ) => {
+      if (typeof addr === "string" && addr.toLowerCase() === lockAddr) {
+        return Promise.resolve(frozen) as never
+      }
+      return (realDownload as (...a: unknown[]) => unknown)(
+        addr,
+        ...rest,
+      ) as never
+    }) as never)
+
+    const result = await acquirePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_A,
+      ttlMs: LEASE_TTL_MS,
+      guardMs: GUARD_MS,
+      now: () => T_NOW,
+    })
+
+    expect(result.outcome).toBe("acquired")
+    // The lease must extend to now + TTL, NOT stay pinned at the stale read-back.
+    expect(result.payload?.leasedUntil).toBe(T_NOW + LEASE_TTL_MS)
   })
 })
 
