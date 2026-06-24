@@ -1249,7 +1249,12 @@ export class SwarmIdProxy {
     try {
       const accounts = createAccountsStorageManager().load()
       const account = accounts.find((a) => a.id.toHex() === accountId)
-      return account?.devices.map((d) => d.deviceId) ?? []
+      // Removed devices (tombstones) won't write — exclude them from the
+      // partition rival set so they don't slow acquisition.
+      return (
+        account?.devices.filter((d) => !d.removedAt).map((d) => d.deviceId) ??
+        []
+      )
     } catch {
       return []
     }

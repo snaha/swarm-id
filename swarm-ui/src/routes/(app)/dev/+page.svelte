@@ -53,25 +53,28 @@
     return `${formatTTL(batchTTL)} (${date})`
   }
 
-  // Every stamp across all accounts (the account owns its stamps now).
-  const allStamps = $derived(accountsStore.accounts.flatMap((a) => a.postageStamps))
+  // Every (non-deleted) stamp across all accounts (the account owns its stamps now).
+  const allStamps = $derived(
+    accountsStore.accounts.flatMap((a) => a.postageStamps.filter((s) => !s.deletedAt)),
+  )
 
   // Same set, but carrying the owning account — the Stored Stamps list needs the
   // account id to delete a stamp from its nested collection.
   const storedStampRows = $derived(
     accountsStore.accounts.flatMap((a) =>
-      a.postageStamps.map((stamp) => ({ accountId: a.id, accountName: a.name, stamp })),
+      a.postageStamps
+        .filter((stamp) => !stamp.deletedAt)
+        .map((stamp) => ({ accountId: a.id, accountName: a.name, stamp })),
     ),
   )
   let storedStampMessage = $state('')
 
-  // Delete a single stored stamp from local state only (dev cleanup — replaces
-  // the old hand-edit of localStorage). Local-only on purpose: a synced stamp
-  // delete is futile (no stamp tombstone yet — #337 — so a peer's union merge
-  // re-adds it).
+  // Delete a single stored stamp. Now a real synced delete: `removeStamp` writes
+  // a `deletedAt` tombstone (#337) and we publish it, so the removal propagates
+  // to other devices instead of a peer's merge re-adding it.
   function deleteStoredStamp(accountId: EthAddress, batchID: BatchId) {
-    accountsStore.removeStamp(accountId, batchID, { skipSync: true })
-    storedStampMessage = `🗑️ Deleted ${batchID.toHex().slice(0, 12)}… locally`
+    accountsStore.removeStamp(accountId, batchID)
+    storedStampMessage = `🗑️ Deleted ${batchID.toHex().slice(0, 12)}…`
   }
 
   // Tab state

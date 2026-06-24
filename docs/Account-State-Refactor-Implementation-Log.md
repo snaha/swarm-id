@@ -116,9 +116,44 @@ usable. All in `lib/src/sync`.
 - Out of scope this pass: the new `ui/` package and Phase 1 (#337 stamp-deletion tombstones).
 - `pnpm check:all` green.
 
+## Phase 1 — real, uniform deletions across account-held collections (#337)
+
+The "one merge source of truth" half already landed (the refresh path imports the lib merge primitives).
+This pass closes the **deletion** half: extend the `revokedAt` tombstone pattern apps already use to the
+two collections that lacked it — **postage stamps** and **devices**. The merge layer is now uniform:
+every collection is keyed-LWW with recency = `max(tombstone, last-activity)`, keeping tombstones in the
+published snapshot so removals keep propagating. **Mechanism only** — no new user-facing screens; deletes
+are exercised via the dev page and the existing app-revoke button. `pnpm check:all` green; 16 new merge
+unit tests (stamps + devices, both merge directions + resurrection).
+
+lib:
+
+- **Schema** (`schemas.ts`): `PostageStampSchemaV1` += `deletedAt?`, `DeviceSchemaV1` += `removedAt?`
+  (both commented like `ConnectedApp.revokedAt`).
+- **Merge** (`sync/merge-snapshot.ts`): `mergePostageStamps` is now LWW by `deletedAt ?? createdAt`
+  (a `batchID` is immutable so a tombstone always supersedes the add); `mergeDevicesList` is LWW by
+  `max(removedAt, lastSignedInAt)` — a removal beats an older sign-in, a newer sign-in re-activates a
+  removed device. Both keep tombstones. `snapshotContainsContribution` unchanged (membership-by-key).
+- **Helpers**: `resolveStampForApp` / `collectAccountStampBatchIds` skip `deletedAt` stamps (no upload,
+  no partition slot); `swarm-id-proxy.ts` `knownDeviceIdsForAccount` excludes `removedAt` devices from the
+  partition rival set; `device-id.ts` `mergeDevices` clears the current device's `removedAt` on sign-in
+  (self re-activation); `storage-managers.ts` `serializePostageStamp` carries `deletedAt` (devices are
+  serialized whole, so `removedAt` passes through already).
+
+swarm-ui:
+
+- `stores/accounts.svelte.ts`: `removeStamp` writes a `deletedAt` tombstone (was a local filter) and
+  publishes; `getStamps` hides tombstones; new `removeDevice(id, deviceId)` writes a `removedAt` tombstone
+  and publishes — the method a future **"sign-out removes this device"** path will call for the current
+  device. `stores/postage-stamps.svelte.ts` `findStamp` skips tombstones (stamper/resolution/utilization).
+- `routes/(app)/dev/+page.svelte`: stamp delete is now a real synced delete (dropped `skipSync`, fixed the
+  stale "#337 futile" comment); `routes/(app)/dev/device-list.svelte`: hides removed devices + a per-peer
+  "Remove" button (the current device is removed via sign-out, not here).
+
 ### Status
 
-Phase 0 (nested single-level model) **done & green**. Phase 2 (#338) **done & green** (swarm-ui). Still
-open: Phase 1 (#337 stamp-deletion tombstones), the parked partition-acquire latency, Phase 3 (per-device
--log CRDT), and the `ui/` package's agent-restore / refresh triggers. Multi-device exclusivity verified
-manually with 3 accounts; the Phase 2 convergence walkthrough not yet re-run end-to-end.
+Phase 0 (nested single-level model) **done & green**. Phase 1 (#337 real deletions: stamps + devices)
+**done & green**. Phase 2 (#338) **done & green** (swarm-ui). Still open: the parked partition-acquire
+latency, Phase 3 (per-device-log CRDT), and the `ui/` package's agent-restore / refresh triggers.
+Multi-device exclusivity verified manually with 3 accounts; the Phase 1/2 convergence + deletion-propagation
+walkthrough not yet re-run end-to-end.

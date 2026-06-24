@@ -92,6 +92,28 @@ export const accountsStore = {
     update(id, (account) => ({ ...account, devices }), { skipSync: true })
   },
 
+  // Tombstone a device (set `removedAt`) so the removal propagates to other
+  // devices (#337). A later sign-in on that device re-activates it (the merge
+  // clock is max(removedAt, lastSignedInAt)). This is the method a future
+  // "sign-out removes this device" path would call for the current device.
+  removeDevice(
+    id: EthAddress,
+    deviceId: string,
+    { skipSync = false }: { skipSync?: boolean } = {},
+  ) {
+    const now = Date.now()
+    update(
+      id,
+      (account) => ({
+        ...account,
+        devices: account.devices.map((d) =>
+          d.deviceId === deviceId ? { ...d, removedAt: now } : d,
+        ),
+      }),
+      { skipSync },
+    )
+  },
+
   setDefaultStamp(id: EthAddress, batchID: BatchId | undefined) {
     update(id, (account) => ({ ...account, defaultPostageStampBatchID: batchID }))
   },
@@ -227,8 +249,9 @@ export const accountsStore = {
   // Postage stamps (account-owned set; the default is `defaultPostageStampBatchID`)
   // --------------------------------------------------------------------------
 
+  /** Displayable (non-deleted) stamps for an account. */
   getStamps(id: EthAddress): PostageStamp[] {
-    return this.getAccount(id)?.postageStamps ?? []
+    return (this.getAccount(id)?.postageStamps ?? []).filter((s) => !s.deletedAt)
   },
 
   addStamp(id: EthAddress, stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {
@@ -242,12 +265,18 @@ export const accountsStore = {
     return newStamp
   },
 
+  // Tombstone the stamp (set `deletedAt`) instead of dropping it, so the removal
+  // propagates to other devices (#337). `skipSync` controls immediate publish
+  // only; a skipped tombstone still propagates on the next sync.
   removeStamp(id: EthAddress, batchID: BatchId, { skipSync = false }: { skipSync?: boolean } = {}) {
+    const now = Date.now()
     update(
       id,
       (account) => ({
         ...account,
-        postageStamps: account.postageStamps.filter((s) => !s.batchID.equals(batchID)),
+        postageStamps: account.postageStamps.map((s) =>
+          s.batchID.equals(batchID) ? { ...s, deletedAt: now } : s,
+        ),
         // Never leave a default pointing at a stamp we just removed.
         defaultPostageStampBatchID: account.defaultPostageStampBatchID?.equals(batchID)
           ? undefined

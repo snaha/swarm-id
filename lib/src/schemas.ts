@@ -114,6 +114,11 @@ export const DeviceSchemaV1 = z.object({
   createdAt: z.number(),
   lastSignedInAt: z.number(),
   name: z.string().optional(),
+  // Tombstone marker. A removed device is kept in the snapshot (so the removal
+  // propagates to other devices) but hidden from the UI. A later sign-in with a
+  // larger `lastSignedInAt` re-activates it (the merge clock is the max of the
+  // two), mirroring app reconnect-after-revoke.
+  removedAt: z.number().optional(),
 })
 
 // ============================================================================
@@ -165,6 +170,11 @@ export const PostageStampSchemaV1 = z.object({
   exists: z.boolean(),
   batchTTL: z.number().optional(),
   createdAt: z.number(),
+  // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal
+  // propagates to other devices) but hidden from the UI and unusable for
+  // uploads. A `batchID` is immutable and stamps are never edited in place, so
+  // `deletedAt` always supersedes the original `createdAt` in the merge.
+  deletedAt: z.number().optional(),
 })
 
 // ============================================================================
