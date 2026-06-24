@@ -280,3 +280,11 @@ export function removeSharedAccountRecords(account: Account): void {
   const manager = createAccountsStorageManager()
   manager.save(manager.load().filter((shared) => !shared.id.equals(accountId)))
 }
+
+/**
+ * Erase every shared-storage account record (developer reset). De-authenticates
+ * all dApp proxy iframes on this origin via the resulting storage event.
+ */
+export function removeAllSharedAccountRecords(): void {
+  createAccountsStorageManager().clear()
+}

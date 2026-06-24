@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import type { Account, ConnectedApp } from '$lib/types'
+import type { Account, ConnectedApp, PostageStamp } from '$lib/types'
 
 const STORAGE_KEY = 'swarm-id-accounts-v2'
 
@@ -89,6 +89,36 @@ function createAccountsStore() {
         ...account,
         connectedApps: account.connectedApps.filter((app) => app.appUrl !== appUrl),
       }))
+    },
+    /**
+     * Add or replace a postage stamp on the account (deduped by batch id). The
+     * first stamp added becomes the account default so uploads have something
+     * to spend against without a separate assignment step.
+     */
+    addStamp(id: string, stamp: PostageStamp) {
+      update(id, (account) => ({
+        ...account,
+        stamps: [...account.stamps.filter((existing) => existing.batchId !== stamp.batchId), stamp],
+        defaultStampBatchId: account.defaultStampBatchId ?? stamp.batchId,
+      }))
+    },
+    removeStamp(id: string, batchId: string) {
+      update(id, (account) => {
+        const stamps = account.stamps.filter((stamp) => stamp.batchId !== batchId)
+        // Drop the default when it points at the removed stamp; fall back to
+        // whatever remains so the account never references a missing batch.
+        const defaultStampBatchId =
+          account.defaultStampBatchId === batchId ? stamps[0]?.batchId : account.defaultStampBatchId
+        return { ...account, stamps, defaultStampBatchId }
+      })
+    },
+    setDefaultStamp(id: string, batchId: string | undefined) {
+      update(id, (account) => ({ ...account, defaultStampBatchId: batchId }))
+    },
+    /** Wipe every account from this device (developer reset). */
+    clear() {
+      accounts = []
+      persist()
     },
   }
 }

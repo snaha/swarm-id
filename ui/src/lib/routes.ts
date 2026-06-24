@@ -14,6 +14,7 @@ const routes = {
   ACCOUNT_READY: '/account/ready' as const,
   ACCOUNT_IMPORT: '/account/import' as const,
   ACCOUNT_RESTORE: '/account/restore' as const,
+  DEV: '/dev' as const,
 }
 
 export default routes
