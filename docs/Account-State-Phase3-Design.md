@@ -26,6 +26,36 @@ that device's latest full view), and convergence moves from write time to **read
 Cross-device write contention on account state drops to ~zero. Concern **B** (postage-batch slot
 partitioning) is unchanged and still required.
 
+## 1a. Assumptions (multi-device)
+
+These shape the whole multi-device scheme and apply to **both** concern A (account-state convergence,
+this doc) and concern B (postage-batch partitioning, `Postage-Batch-Partitioning.md`).
+
+1. **Cooperative, non-malicious devices.** Every device belongs to one user and holds the account key
+   (`derivationKey`), so any device can sign any of the account's feeds (the lock SOCs, the per-device
+   state feeds, the roster). The scheme guarantees **convergence**, not Byzantine fault tolerance: a peer
+   that holds the key but ignores the cooperative protocol can corrupt state, and defending against that
+   is explicitly out of scope (the partition lock makes the same call —
+   `lib/src/sync/partition-lock.test.ts` "assumes cooperative non-malicious devices … out of the
+   iteration-2 threat model"). This is what lets feeds be **topic-namespaced under one shared owner**
+   rather than needing per-device signing keys (§2).
+
+2. **Loosely-synchronized clocks (within ~seconds).** Convergence and exclusivity both lean on
+   wall-clock timestamps: the LWW merge (`updatedAt` / `revokedAt` / `deletedAt` / `removedAt`, and the
+   per-field scalar `at`) and the partition lease TTLs (`LEASE_TTL_MS = 30 s`) / rotating intent epoch
+   buckets. Devices must agree on the time to within a few seconds. Large skew can mis-order an LWW
+   resolution or mis-judge a lease's liveness; the lock tolerates **bounded** skew (see the clock-skew
+   test in `partition-lock.test.ts`) but not arbitrary drift.
+
+3. **Adding/removing a device is far rarer than using existing ones.** Membership changes (a new
+   sign-in, a removal/sign-out) are infrequent compared with routine account-state writes (connecting an
+   app, buying/deleting a stamp). The design leans on this:
+   - the **device roster** (§2.1) is an append-only feed touched **only** on a membership change — the
+     hot path (apps/stamps) never reads or writes it;
+   - the per-device **state feeds** carry all the high-frequency data and are individually robust;
+   - so the residual ~50 s gateway negative-cache latency for a **fresh** roster entry is acceptable — a
+     newly-added device becomes discoverable within ~a minute, while already-known devices are immediate.
+
 ## 2. Architecture: three layers
 
 ```
