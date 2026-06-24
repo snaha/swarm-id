@@ -48,11 +48,16 @@ export const ROSTER_TOPIC_PREFIX = "swarm-id-roster-v1"
 // any realistic device × re-announce count for one account.
 const MAX_ROSTER_SCAN = 256
 
+// How many roster indices to probe in parallel per round. The roster is small
+// and contiguous, so one window of this size usually resolves the whole scan in
+// a single round-trip instead of K+1 serial ones.
+const ROSTER_SCAN_WINDOW = 16
+
 export function rosterTopic(accountId: string): Topic {
   return Topic.fromString(`${ROSTER_TOPIC_PREFIX}:${accountId}`)
 }
 
-function rosterIdentifier(topic: Topic, index: bigint): Identifier {
+export function rosterIdentifier(topic: Topic, index: bigint): Identifier {
   const indexBytes = Binary.numberToUint64(index, "BE")
   return new Identifier(
     Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), indexBytes)),
@@ -102,15 +107,28 @@ export async function readRoster(opts: {
 }): Promise<Device[]> {
   const topic = rosterTopic(opts.accountId)
   let devices: Device[] = []
-  for (let index = 0n; index < BigInt(MAX_ROSTER_SCAN); index++) {
-    const entry = await readRosterEntry({
-      bee: opts.bee,
-      topic,
-      owner: opts.owner,
-      index,
-    })
-    if (!entry) break
-    devices = mergeDevicesList(devices, [entry])
+  // Scan in parallel windows. The roster is append-only and contiguous, so the
+  // "stop at the first empty slot" semantics are preserved by folding the
+  // contiguous present prefix of each window and stopping at the first gap.
+  for (let base = 0; base < MAX_ROSTER_SCAN; base += ROSTER_SCAN_WINDOW) {
+    const indices = Array.from(
+      { length: Math.min(ROSTER_SCAN_WINDOW, MAX_ROSTER_SCAN - base) },
+      (_, i) => BigInt(base + i),
+    )
+    const entries = await Promise.all(
+      indices.map((index) =>
+        readRosterEntry({ bee: opts.bee, topic, owner: opts.owner, index }),
+      ),
+    )
+    let hitGap = false
+    for (const entry of entries) {
+      if (!entry) {
+        hitGap = true
+        break
+      }
+      devices = mergeDevicesList(devices, [entry])
+    }
+    if (hitGap) break
   }
   return devices
 }

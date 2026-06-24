@@ -128,6 +128,29 @@ and two concurrent edits to _different_ scalars couldn't both be timed correctly
 
 Unit: `device-state.test.ts` per-field-LWW test asserts the exposed winning `*At`. `check:all` green.
 
+## Follow-up #3 — parallelize the account-state read path
+
+The fold read path was serial at the feed level: `foldAccountFromSwarm` read each device's state feed one
+at a time, and `readRoster` scanned roster indices one at a time. Each device read is an
+`AsyncEpochFinder.findAt` epoch-tree traversal — itself several sequential chunk round-trips (its
+"parallel" docstring is aspirational; the traversal is inherently sequential since each level depends on
+the previous). Chunk-level download was already parallel (`downloadDataWithChunkAPI`, batches of 64), and
+bee-js has no websocket/streaming chunk _download_ API — so the only real lever is overlapping the
+independent per-device / per-roster-index reads.
+
+- `foldAccountFromSwarm` — device-state reads now run under one `Promise.all` over non-removed devices
+  (failures still swallowed per-device). Overlaps every device's multi-round-trip traversal: N×latency → ≈1×.
+- `readRoster` — windowed-parallel scan: probe `ROSTER_SCAN_WINDOW = 16` indices per round via
+  `Promise.all`, fold the contiguous present prefix, stop at the first gap. Append-only + contiguous
+  roster ⇒ same result as the old break-on-first-empty, usually in one round-trip instead of K+1.
+- Left sequential (intentional): the epoch-tree traversal inside a single `findAt` (each level depends on
+  the previous). A future per-device "last update" hint into the finder's fast path could cut a single
+  device to ~1 round-trip — bigger wire change, deferred.
+
+Unit: new `device-roster.test.ts` covers the windowed scan (contiguous, gap-in-window, cross-window,
+empty). `check:all` green. **Gateway (3 devices), steady-state `foldAccountFromSwarm`: avg 5906ms → 2584ms,
+min 3412ms → 1320ms (~2.3×).**
+
 ## 3c — OR-Set / version-vector GC
 
 _(pending)_

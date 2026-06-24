@@ -45,20 +45,27 @@ export async function foldAccountFromSwarm(opts: {
   })
   if (devices.length === 0) return undefined
 
-  // Fold the latest view of every non-removed device. A device whose feed is
-  // unreachable is skipped (best-effort), not fatal — its peers' views still
-  // converge the shared entities.
-  const views: DeviceStateSnapshot[] = []
-  for (const device of devices) {
-    if (device.removedAt) continue
-    const view = await readLatestDeviceState({
-      bee: opts.bee,
-      accountId: opts.accountId,
-      deviceId: device.deviceId,
-      owner,
-    }).catch(() => undefined)
-    if (view) views.push(view)
-  }
+  // Fold the latest view of every non-removed device. Reads run in parallel:
+  // each device feed is independent and each lookup is a multi-round-trip epoch
+  // traversal, so overlapping them collapses N×latency into ≈1×. A device whose
+  // feed is unreachable is skipped (best-effort), not fatal — its peers' views
+  // still converge the shared entities.
+  // ponytail: plain Promise.all — device count is tiny; add a concurrency pool
+  // only if rosters ever grow large.
+  const views = (
+    await Promise.all(
+      devices
+        .filter((device) => !device.removedAt)
+        .map((device) =>
+          readLatestDeviceState({
+            bee: opts.bee,
+            accountId: opts.accountId,
+            deviceId: device.deviceId,
+            owner,
+          }).catch(() => undefined),
+        ),
+    )
+  ).filter((view): view is DeviceStateSnapshot => view !== undefined)
 
   return { account: foldAccount(views, devices), devices }
 }
