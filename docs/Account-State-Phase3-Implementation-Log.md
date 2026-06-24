@@ -83,13 +83,30 @@ gateway runner's default) makes it converge 9/9. This is the same gateway 404-ca
 intent-SOCs rotate addresses to avoid — it validates killing shared-feed reliance (the hot path is now
 robust) and flags the registry as the next thing to harden.
 
+**Commit `c8dbfa01` — `feat(sync): append-only device roster — fix gateway clobber/negative-caching`.**
+Registry hardening (follow-up #1 below). `pnpm check:all` green; **9/9 on the public gateway**.
+
+- Replaced the single shared **mutable** registry doc (read-merge-overwrite → clobber on a caching
+  gateway) with an **append-only roster** (`device-roster.ts`): a sequential feed where each device
+  appends ONLY its own `Device` record at the next free index and never touches a peer's slot. Concurrent
+  announces can't clobber an **existing** entry; worst case is two devices racing a fresh index (one
+  append lost, re-added next sync). Readers scan + fold by `deviceId` (`mergeDevicesList`). Entries are
+  encrypted blobs referenced by the sequential SOC.
+- Account immutables (publicKey/createdAt/partitionCount) moved onto the robust per-device state feed;
+  `foldAccount(views, rosterDevices)` reads immutables from any view. `publishDeviceState` →
+  `ensureInRoster`; discovery (`fold-account-from-swarm`, proxy) → `readRoster`. `device-registry.ts`
+  deleted.
+- **Residual gateway latency (not a clobber):** a _fresh_ roster entry still has ~50 s read-latency on
+  the gateway (static-address negative cache), so two devices announcing simultaneously still need
+  spacing to avoid a same-index race — but an **existing** entry can no longer be dropped. The gateway
+  runner defaults to ~70 s spacing.
+
 ### Status (3a)
 
-Phase 3a **done & green** — cutover landed + verified on the local cluster **and the public gateway**
-(9/9 both). Known follow-ups: (1) **harden the registry for high-latency/caching gateways** — a
-verifyWon-style read-back retry, address rotation, or per-device registry feeds (so a static-address
-read-before-write can't negative-cache/clobber); (2) per-field scalar clocks + scalar propagation on
-refresh; (3) the new `ui/` package still on the old read/write path; (4) Phase 3c (OR-Set/VV GC).
+Phase 3a **done & green** — cutover + registry hardening landed; verified on the public gateway (9/9).
+Known follow-ups: (1) per-field scalar clocks + scalar propagation on refresh; (2) the new `ui/` package
+still on the old read/write path; (3) optionally reduce the fresh-entry gateway latency further (address
+rotation / GSOC); (4) Phase 3c (OR-Set/VV GC).
 
 ## 3c — OR-Set / version-vector GC
 
