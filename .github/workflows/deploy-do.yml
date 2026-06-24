@@ -1,9 +1,10 @@
 name: Deploy to Digital Ocean
 
+# Manual-only: the DigitalOcean id/demo apps are pinned to a hand-picked
+# deployment. Auto-deploy on push to main is intentionally disabled so the
+# canonical legacy domains aren't overwritten on every merge. Trigger this
+# workflow from the Actions tab (workflow_dispatch) to publish a new build.
 on:
-  push:
-    branches:
-      - main
   workflow_dispatch:
 
 jobs:
