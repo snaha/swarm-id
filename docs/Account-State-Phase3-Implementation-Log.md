@@ -43,10 +43,41 @@ tests). On `feat/account-deletion-tombstones` (PR #372).
   scalar LWW (concurrent name-vs-default both survive); registry-sourced device list.
 - Barrel exports added (`sync/index.ts`, `index.ts`).
 
-**Pending — commit 2 (cutover, hard switch):** `sync-account.ts` write → `writeDeviceState`;
-`restore-account.ts` + `refresh-account-from-swarm.ts` read → `foldAccountFromSwarm`; `swarm-id-proxy.ts`
-registry discovery + publish-on-acquire announce; retire the shared-feed `verifyWon` core of
-`publish-account-state.ts`. Then the adapted multi-device integration run (local + gateway).
+**Commit `122d65cf` — `feat(sync): cut over to per-device snapshot feeds; retire shared publish (Phase
+3a)`.** The hard switch. `pnpm check:all` green (784 lib tests); verified end-to-end on the local
+cluster. On `feat/account-deletion-tombstones` (PR #372).
+
+- **Write** — `device-state.ts` gains `publishDeviceState` (writes this device's own feed via
+  `writeDeviceState`, then ensures the registry lists it — a single read-merge-write, skipped once
+  present; a dropped announce re-adds on the next sync). `sync-account.ts` and
+  `swarm-id-proxy.ts:runAccountStatePublish` call it instead of `publishAccountState`. Utilisation
+  tracking preserved via the returned chunk addresses.
+- **Read** — `restore-account.ts` + `swarm-ui/.../refresh-account-from-swarm.ts` use
+  `foldAccountFromSwarm` (registry → fold all device feeds). Restore projects the fold onto the legacy
+  `AccountStateSnapshot` shape, so the swarm-ui sign-in/import callers are unchanged.
+- **Proxy** — `refreshDeviceRegistryFromSwarm` reads the registry feed for discovery; the announce-once
+  gate is now "registry already lists me".
+- **Retire** — `publish-account-state.ts` keeps only the legacy topic constant (for the invariant test);
+  `publishAccountState`/`verifyWon`/`remoteFeedHasDevice` + their test removed. `sync-account.test.ts`
+  rewritten to the per-device path.
+- **Deferred** — scalars (name/default/settings) ride the snapshot's `lastModified` clock; true
+  per-field clocks + cross-device scalar propagation on refresh are a follow-up (the wire format already
+  carries per-field clocks).
+
+**Integration (`scripts/per-device-sync-test.ts`, untracked).** Two devices each publish their own feed
+
+- registry; a reader folds and converges. On the local bee-compose cluster, **9/9 checks pass**:
+  cross-device convergence (A's stamp + B's app + both devices), stamp-delete tombstone propagation,
+  device removal + resurrection, and the **§7 invariant** — the old shared `swarm-id-backup-v1` feed is
+  never written. (A propagation delay sequences the two devices: the shared registry can race on
+  simultaneous announces; production self-heals via repeated syncs.)
+
+### Status (3a)
+
+Phase 3a **done & green** (cutover landed + verified locally). Known follow-ups: per-field scalar clocks
+
+- scalar propagation on refresh; registry concurrent-announce robustness (currently self-heals across
+  syncs); the new `ui/` package still on the old read/write path; gateway run of the per-device test.
 
 ## 3c — OR-Set / version-vector GC
 
