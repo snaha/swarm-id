@@ -9,8 +9,9 @@ Format mirrors the Phase 0/1/2 log: one entry per commit/checkpoint, what change
 
 ## Status
 
-**Design approved (per-device snapshot-feed model); implementation not started.** Phase 3 builds on
-Phase 1 (#337, PR #372) — its merge primitives are reused by the fold. Sub-phases:
+**Design settled (per-device snapshot-feed model; all §9 decisions resolved); implementation not
+started.** Phase 3 builds on Phase 1 (#337, PR #372) — its merge primitives are reused by the fold.
+Sub-phases:
 
 - **3a** — device-registry feed + per-device **snapshot** feed write/fold + cutover (retire the
   shared-snapshot `verifyWon` publish). Keep Phase 1 tombstones. _Not started._

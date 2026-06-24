@@ -1,6 +1,7 @@
 # Account State — Phase 3 Design: per-device snapshot-feed CRDT
 
-Status: **proposal / for review.** Builds on Phase 0–2 + Phase 1 (#337, PR #372). Design rationale and
+Status: **settled — ready to implement 3a.** All §9 decisions resolved. Builds on Phase 0–2 + Phase 1
+(#337, PR #372). Design rationale and
 the phased north star this expands live in
 [`Account-State-Refactor-Plan.md`](./Account-State-Refactor-Plan.md) (§6–§7); the phase-by-phase record
 of what lands goes in [`Account-State-Phase3-Implementation-Log.md`](./Account-State-Phase3-Implementation-Log.md).
@@ -79,17 +80,21 @@ view** to its **own** feed using the existing `serializeAccountState` (the paylo
 blob exactly as the shared snapshot does today — no new wire format):
 
 ```ts
-DeviceStateSnapshot = {           // == today's AccountStateSnapshot, minus metadata.devices
-  connectedApps:  ConnectedApp[]  // carries updatedAt / revokedAt (Phase 1)
-  postageStamps:  PostageStamp[]  // carries createdAt / deletedAt (Phase 1)
-  settings, defaultPostageStampBatchID, accountName, lastModified
+DeviceStateSnapshot = {           // ≈ today's AccountStateSnapshot, minus metadata.devices
+  connectedApps:  ConnectedApp[]  // each carries updatedAt / revokedAt (Phase 1)
+  postageStamps:  PostageStamp[]  // each carries createdAt / deletedAt (Phase 1)
+  // scalars fold by PER-FIELD LWW (each carries its own `at` — see §9 decision 3):
+  accountName:                { value: string, at: number }
+  defaultPostageStampBatchID: { value: string | undefined, at: number }
+  settings:                   { value: AccountSettings, at: number }
 }
 ```
 
-It is the device's **merged view** (its own edits folded with whatever it has read from peers), à la a
-Yjs peer writing its full state — so any single device's feed can reconstruct everything it has seen.
-Device membership (`deviceId, name, lastSignedInAt, removedAt`) lives in the **registry** (§2.1), not
-here.
+It is the device's **full merged view** (its own edits folded with whatever it has read from peers), à
+la a Yjs peer writing its full state — so any single device's feed can reconstruct everything it has
+seen, and the fold is idempotent. A device re-writes its view only on a **local mutation**, not on every
+read/fold, so write amplification is bounded. Device membership (`deviceId, name, lastSignedInAt,
+removedAt`) lives in the **registry** (§2.1), not here.
 
 **Exclusivity.** A device writes **only its own** feed. There is no shared SOC address across devices,
 so **`publishAccountState`'s merge-read-rewrite + `verifyWon` retry loop disappears** — a write is just
@@ -111,7 +116,8 @@ fold(account):
 - Cross-device merge is **exactly the Phase 1 primitives** (`mergeConnectedApps`, `mergePostageStamps`;
   `mergeDevicesList` for the registry) — recency = `max(tombstone, activity)`. Convergence and deletion
   semantics are therefore **identical to Phase 1 by construction** (see §6 differential test).
-- Scalar account fields (name, default stamp, settings) fold by LWW on `lastModified`/an `at` clock.
+- Scalar account fields fold by **per-field** LWW (each scalar carries its own `at`), so a concurrent
+  name change on A and default-stamp change on B both survive (§9 decision 3).
 - **Cost** = K epoch-finder lookups (one per device, ~log each) + blob fetches. No `lastIndex` state, no
   compaction — each feed is a single latest-pointer.
 
@@ -232,19 +238,30 @@ naturally `deviceId × a per-device counter`).
 (`mergeSnapshotWithRemote` / `snapshotContainsContribution` keep their unit value for the differential
 test but leave the write path).
 
-## 9. Open questions
+## 9. Resolved decisions
 
-1. **Registry feed vs pure per-device discovery** — recommended: dedicated registry feed (robust), now
-   with external precedent (the `swarm-collaborative-docs` members feed, §11). Alternative: derive peers
-   from the partition lock SOCs (no new shared feed, but ≤K currently-active holders only).
-2. **Device-state payload = full merged view vs own-contribution-only** — recommend **full merged view**
-   (à la a Yjs peer writing its whole state): any one feed can reconstruct everything that device has
-   seen, and the fold is trivially idempotent. Own-contribution-only is leaner but loses that property.
-3. **Scalar fields (name/default/settings) clock** — LWW on `lastModified`/an `at` clock across devices;
-   confirm sufficient vs a dedicated "account meta" lane.
-4. **>2 devices** — accept read-only extras (inherited `K=2`, §3.1) for Phase 3; revisit raising K
-   separately.
-5. **Tombstone GC** — adopt 3c (OR-Set/VV) only when full-view-snapshot accretion is measured to matter.
+1. **Discovery = dedicated device-registry feed.** Complete (all devices, including read-only and
+   departed) and robust, with external precedent (the `swarm-collaborative-docs` members feed, §11). The
+   partition lock SOCs stay a complementary "who is live now" signal, **not** the membership source.
+2. **Device-state payload = full merged view** (not own-contribution-only). Each device writes its entire
+   current account view, à la a Yjs peer. Any single feed reconstructs everything that device has seen
+   (redundancy), the fold is idempotent, and it reuses `serializeAccountState` with **no per-entity
+   ownership tracking**. A device re-writes only on a **local mutation**, so write amplification is
+   bounded; convergence still holds via the fold even if a device never re-writes (its peers' feeds carry
+   the change).
+3. **Scalars use per-field LWW clocks.** `accountName`, `defaultPostageStampBatchID`, and `settings` each
+   carry their own `at` and fold independently (max `at` wins per field) — **not** one account-wide
+   `lastModified`. This prevents a concurrent change to a _different_ scalar on another device from being
+   dropped wholesale. It is the same LWW pattern the collections use, applied to three tiny "scalar
+   entities". (Per-field is cheap — three timestamps — and the concurrent name-vs-default-stamp case is
+   realistic, so the correctness is worth it.)
+4. **>2 devices = read-only extras; `K=2` accepted.** Inherited from concern B (§3.1). A read-only device
+   folds/reads fully and writes once it wins a slot via the intent mechanism. Raising `PARTITION_COUNT`
+   (or a writer-rotation scheme) is a separate, out-of-scope lever.
+5. **Tombstone GC deferred to 3c, triggered by measurement.** 3a keeps the Phase 1 LWW tombstones.
+   Full-view snapshots carry tombstones in every device's feed (K× copies), but for a single user's
+   account (a handful of apps/stamps over its lifetime) growth is slow. Adopt OR-Set / version-vector +
+   causal-stability GC (3c) only once accretion is measured to matter.
 
 ## 10. References
 
