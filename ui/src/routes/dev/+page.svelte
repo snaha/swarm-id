@@ -629,7 +629,7 @@ Check console logs for details:
     }
   })
 
-  function assignAccountStamp() {
+  function assignAccountDrive() {
     assignError = ''
     assignMessage = ''
     if (!selectedStampId || !selectedAccountId) {
@@ -699,7 +699,7 @@ Check console logs for details:
     }
   }
 
-  function removeAccountStamp() {
+  function removeAccountDrive() {
     assignError = ''
     assignMessage = ''
     if (!selectedAccountId) {
@@ -1106,15 +1106,15 @@ Check console logs for details:
       </div>
 
       <div class="flex items-center gap-2">
-        <Button onclick={assignAccountStamp} disabled={!selectedStampId || !selectedAccountId}>
-          Set Account Stamp
+        <Button onclick={assignAccountDrive} disabled={!selectedStampId || !selectedAccountId}>
+          Set account drive
         </Button>
         <Button
           variant="destructive"
-          onclick={removeAccountStamp}
+          onclick={removeAccountDrive}
           disabled={!accountHasDefaultDrive}
         >
-          Remove Account Stamp
+          Remove account drive
         </Button>
       </div>
 
