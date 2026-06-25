@@ -105,7 +105,7 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
       detectDeviceName(),
     )
 
-    sharedAccountsStore.applyRefreshed(ethAddress, {
+    account.applyRefreshed({
       devices: mergedDevices,
       connectedApps: mergedApps,
       postageStamps: mergedStamps,

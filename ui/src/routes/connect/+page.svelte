@@ -25,11 +25,11 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { Account, LocalAccount } from '$lib/types'
+  import type { Account } from '$lib/types'
   import { display0x, notImplemented, truncateAddress } from '$lib/utils'
 
   let missingRequest = $state(false)
-  let unlocking = $state<LocalAccount | undefined>(undefined)
+  let unlocking = $state<Account | undefined>(undefined)
   let pendingCeremony = $state(false)
   let busy = $state(false)
   let password = $state('')
@@ -76,7 +76,7 @@
   })
 
   async function select(account: Account) {
-    if (!request || account.type !== 'local') {
+    if (!request) {
       return
     }
     // A still-valid prior connection carries the secret — no unlock needed.

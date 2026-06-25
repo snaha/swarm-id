@@ -79,7 +79,7 @@
   // delete is futile (no stamp tombstone yet — #337 — so a peer's union merge
   // re-adds it).
   function deleteStoredStamp(accountId: EthAddress, batchID: BatchId) {
-    sharedAccountsStore.removeDrive(accountId, batchID, { skipSync: true })
+    sharedAccountsStore.getAccount(accountId)?.removeDrive(batchID, { skipSync: true })
     storedStampMessage = `🗑️ Deleted ${batchID.toHex().slice(0, 12)}… locally`
   }
 
@@ -646,6 +646,11 @@ Check console logs for details:
     try {
       const batchId = new BatchId(selectedStampId)
       const accountId = new EthAddress(selectedAccountId)
+      const account = sharedAccountsStore.getAccount(accountId)
+      if (!account) {
+        assignError = 'Account not found.'
+        return
+      }
 
       // Determine which signer key to use
       const signerKeyToUse =
@@ -659,7 +664,7 @@ Check console logs for details:
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        sharedAccountsStore.addDrive(accountId, {
+        account.addDrive({
           batchID: batchId,
           signerKey: signerKeyToUse,
           utilization: Utils.getStampUsage(
@@ -682,12 +687,12 @@ Check console logs for details:
           return
         }
         if (beeStamp.signerKey !== signerKeyToUse) {
-          sharedAccountsStore.removeDrive(accountId, batchId)
-          sharedAccountsStore.addDrive(accountId, { ...beeStamp, signerKey: signerKeyToUse })
+          account.removeDrive(batchId)
+          account.addDrive({ ...beeStamp, signerKey: signerKeyToUse })
         }
       }
 
-      sharedAccountsStore.setDefaultDrive(accountId, batchId)
+      account.setDefaultDrive(batchId)
       assignMessage = `✅ Set account drive for ${accountId.toHex().slice(0, 8)}…`
     } catch (error) {
       assignError = error instanceof Error ? error.message : String(error)
@@ -702,7 +707,7 @@ Check console logs for details:
       return
     }
     const accountId = new EthAddress(selectedAccountId)
-    sharedAccountsStore.setDefaultDrive(accountId, undefined)
+    sharedAccountsStore.getAccount(accountId)?.setDefaultDrive(undefined)
     assignMessage = `✅ Removed account drive from ${selectedAccountId.slice(0, 8)}…`
   }
 

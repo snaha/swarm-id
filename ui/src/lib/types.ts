@@ -3,16 +3,19 @@
 import type { LocalAccount } from '@snaha/swarm-id'
 
 /**
- * The UI's account model IS the shared `@snaha/swarm-id` Zod model — a single,
- * validated source of truth (no parallel hand-rolled interface). The identity
- * UI only ever creates `local` accounts: the discriminated-union member whose
- * BIP-39 entropy is encrypted at rest with a device-local access method
- * (passkey / eth-wallet / password). Byte-typed fields (`id`, `postageStamps`,
- * …) are bee-js classes at runtime and serialize to hex via the lib storage
- * manager.
+ * `Account` is the live, rich aggregate the app works with: a reactive class
+ * (its fields are `$state`) whose mutators are methods on the object
+ * (`account.addDrive(…)`, `account.rename(…)`). It wraps the shared
+ * `@snaha/swarm-id` `LocalAccount` shape (byte-class fields serialized to hex by
+ * the lib storage manager) and is type-only re-exported here so `$lib/types`
+ * stays the one type entry point with no runtime cycle.
+ *
+ * `LocalAccount` (+ the nested entity types) is the portable, validated DATA the
+ * account is built from / serialized to.
  */
+export type { Account } from '$lib/stores/accounts.svelte'
+
 export type {
-  Account,
   LocalAccount,
   AccessMethod,
   PostageStamp,

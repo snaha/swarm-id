@@ -107,8 +107,9 @@
       postageStamps: carried?.postageStamps ?? [],
       partitionCount: carried?.partitionCount ?? PARTITION_COUNT,
     }
-    accountsStore.add(account)
-    sessionStore.setCurrentAccount(account.id.toHex())
+    // `add` returns the live reactive account; the handshake mutates it.
+    const liveAccount = accountsStore.add(account)
+    sessionStore.setCurrentAccount(liveAccount.id.toHex())
     const flow = draft.flow
 
     // Came from a dApp connect popup — finish the handshake and hand back.
@@ -116,7 +117,7 @@
     // leaves the Confirm buttons functional for a retry.
     const request = connectStore.request
     if (request) {
-      await completeConnect(account, wallet.entropy, request)
+      await completeConnect(liveAccount, wallet.entropy, request)
       sessionStore.setCompletedFlow(flow)
       sessionStore.clearDraft()
       goto(resolve(routes.CONNECT_DONE))

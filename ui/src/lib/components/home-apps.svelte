@@ -11,8 +11,6 @@
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select } from '$lib/components/ui/select'
-  import { disconnectSharedConnection, removeSharedConnection } from '$lib/connect-handshake'
-  import { accountsStore } from '$lib/stores/accounts.svelte'
   import type { Account } from '$lib/types'
 
   const DEFAULT_CONNECTION_DAYS = 30
@@ -42,7 +40,7 @@
     ),
   )
   // Revoked tombstones stay in the record for sync; only show live entries.
-  const activeApps = $derived(account.connectedApps.filter((app) => !app.revokedAt))
+  const activeApps = $derived(account.activeApps)
   let openMenuFor = $state<string | undefined>(undefined)
 
   function isConnected(connectedUntil: number | undefined): boolean {
@@ -57,12 +55,12 @@
 
   function disconnect(appUrl: string) {
     // Drops the app secret the dApp's proxy iframe authenticates from.
-    disconnectSharedConnection(account, appUrl)
+    account.disconnectApp(appUrl)
     openMenuFor = undefined
   }
 
   function remove(appUrl: string) {
-    removeSharedConnection(account, appUrl)
+    account.removeApp(appUrl)
     openMenuFor = undefined
   }
 </script>
@@ -76,7 +74,7 @@
       options={DURATION_OPTIONS}
       bind:value={connectionDays}
       class="w-70"
-      onchange={(value) => accountsStore.setAppConnectionDays(account.id, Number(value))}
+      onchange={(value) => account.setAppConnectionDays(Number(value))}
     />
   </div>
 

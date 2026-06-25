@@ -33,7 +33,6 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
-  import { removeSharedAccountRecords } from '$lib/connect-handshake'
   import { backupFilename, createBackup } from '$lib/crypto/backup'
   import {
     PASSWORD_KDF_ITERATIONS,
@@ -49,7 +48,7 @@
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { AccessMethod, LocalAccount } from '$lib/types'
+  import type { AccessMethod, Account } from '$lib/types'
   import { copyToClipboard, display0x, notImplemented, truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
@@ -62,7 +61,7 @@
   ]
 
   interface Props {
-    account: LocalAccount
+    account: Account
   }
 
   let { account }: Props = $props()
@@ -143,7 +142,7 @@
   function onNameChange() {
     const trimmed = name.trim()
     if (trimmed.length > 0 && trimmed !== account.name) {
-      accountsStore.rename(account.id, trimmed)
+      account.rename(trimmed)
     }
   }
 
@@ -269,7 +268,7 @@
       if (myAttempt !== attempt) {
         return
       }
-      accountsStore.setAccess(account.id, access, await encryptSeed(entropy, key))
+      account.setAccess(access, await encryptSeed(entropy, key))
       dialog = undefined
       newPassword = ''
       verifyNewPassword = ''
@@ -321,7 +320,9 @@
   }
 
   function deleteAccount() {
-    removeSharedAccountRecords(account)
+    // Removing the record drops its connected apps and drives with it, and the
+    // storage event de-authenticates any dApp proxy iframes.
+    accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
     if (next) {
       sessionStore.setCurrentAccount(next.id.toHex())

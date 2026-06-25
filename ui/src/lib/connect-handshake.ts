@@ -16,7 +16,6 @@
 import { type ConnectedApp, DEFAULT_SESSION_DURATION, deriveSecret } from '@snaha/swarm-id'
 
 import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
-import { accountsStore } from '$lib/stores/accounts.svelte'
 import type { ConnectRequest } from '$lib/stores/connect.svelte'
 import type { Account } from '$lib/types'
 import { bareHex } from '$lib/utils'
@@ -41,7 +40,7 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
     connectedUntil: now + connectionDuration(account),
     updatedAt: now,
   }
-  accountsStore.connectApp(account.id, connection)
+  account.connectApp(connection)
 }
 
 /**
@@ -106,27 +105,4 @@ export function reuseConnection(account: Account, request: ConnectRequest): bool
   saveConnection(account, request, existing.appSecret)
   sendSecretToOpener(account, request, existing.appSecret)
   return true
-}
-
-/**
- * Invalidate the app's connected-app record: drops the app secret so the dApp's
- * proxy iframe de-authenticates (storage event) and a reconnect needs a fresh
- * unlock ceremony.
- */
-export function disconnectSharedConnection(account: Account, appUrl: string): void {
-  accountsStore.disconnectApp(account.id, appUrl)
-}
-
-/** Disconnect and tombstone the record so the removal propagates to sync. */
-export function removeSharedConnection(account: Account, appUrl: string): void {
-  accountsStore.removeApp(account.id, appUrl)
-}
-
-/**
- * Erase the account's storage footprint: removing the record drops its
- * connected apps and drives with it, and the storage event de-authenticates any
- * dApp proxy iframes.
- */
-export function removeSharedAccountRecords(account: Account): void {
-  accountsStore.remove(account.id)
 }

@@ -3,9 +3,9 @@
 import { BatchId, EthAddress } from '@ethersphere/bee-js'
 import {
   type AccessMethod,
-  type Account,
   type ConnectedApp,
   type Device,
+  type LocalAccount,
   type PostageStamp,
   STORAGE_KEY_ACCOUNTS,
   createAccountsStorageManager,
@@ -13,81 +13,176 @@ import {
 
 import { browser } from '$app/environment'
 
-// ============================================================================
-// Accounts store — the single source of truth
-//
-// Wraps the `@snaha/swarm-id` Zod-validated storage manager (persisted under
-// `STORAGE_KEY_ACCOUNTS`): the SAME nested-account document the proxy iframe and
-// sync engine read. The product UI, the /dev tooling, and the sync subsystem all
-// drive off this one reactive store — there is no separate display model.
-//
-// The UI only ever creates `local` accounts. Mutations that touch `access` /
-// `encryptedSeed` therefore guard on `type === 'local'`.
-// ============================================================================
-
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-const storageManager = createAccountsStorageManager()
-
-function loadAccounts(): Account[] {
-  if (!browser) return []
-  return storageManager.load()
-}
-
-let accounts = $state<Account[]>(loadAccounts())
-
-if (browser) {
-  // Cross-tab refresh: another tab mutating the account document (sign-in,
-  // app connect, stamp purchase) updates this tab's reactive state too.
-  window.addEventListener('storage', (e) => {
-    if (e.key !== STORAGE_KEY_ACCOUNTS) return
-    accounts = loadAccounts()
-  })
-}
-
 /**
- * Optional sync hook. The /dev sync subsystem injects `triggerSync` so its
- * mutations publish to Swarm; the plain product app leaves it unset, so a
- * rename or app-connect never attempts a network publish.
+ * The account aggregate root. Fields are reactive (`$state`) so component reads
+ * update on mutation, and every mutator is a method **on the object** that
+ * persists the whole collection through the injected `onChange` — callers mutate
+ * the account they already hold (`account.addDrive(…)`), never a store method
+ * that takes an id and looks the account up.
+ *
+ * The shape is the shared `@snaha/swarm-id` `LocalAccount` (byte-class fields,
+ * serialized to hex by the lib storage manager). A drive is an account's owned
+ * Swarm storage, persisted as the lib `postageStamps` field. The private
+ * `#onChange` makes the class nominal, so plain `LocalAccount` data can't be
+ * mistaken for a live account.
  */
-let syncHook: ((accountIdHex: string) => void) | undefined
+export class Account {
+  readonly type = 'local' as const
+  readonly id: EthAddress
+  readonly createdAt: number
+  readonly derivationKey: string
+  // Initialized here so the runes compiler tracks them; real values are set
+  // from the record in the constructor.
+  name = $state('')
+  publicKey = $state<string | undefined>(undefined)
+  access = $state<AccessMethod>({ type: 'password', kdfSalt: '', kdfIterations: 0 })
+  encryptedSeed = $state('')
+  settings = $state<{ appSessionDuration?: number } | undefined>(undefined)
+  defaultPostageStampBatchID = $state<BatchId | undefined>(undefined)
+  devices = $state<Device[]>([])
+  connectedApps = $state<ConnectedApp[]>([])
+  postageStamps = $state<PostageStamp[]>([])
+  lastModified = $state<number | undefined>(undefined)
+  partitionCount = $state<number | undefined>(undefined)
+  readonly #onChange: (account: Account, options?: { skipSync?: boolean }) => void
 
-export function setAccountsSyncHook(hook: (accountIdHex: string) => void): void {
-  syncHook = hook
-}
+  constructor(
+    record: LocalAccount,
+    onChange: (account: Account, options?: { skipSync?: boolean }) => void,
+  ) {
+    this.id = record.id
+    this.createdAt = record.createdAt
+    this.derivationKey = record.derivationKey
+    this.name = record.name
+    this.publicKey = record.publicKey
+    this.access = record.access
+    this.encryptedSeed = record.encryptedSeed
+    this.settings = record.settings
+    this.defaultPostageStampBatchID = record.defaultPostageStampBatchID
+    this.devices = record.devices
+    this.connectedApps = record.connectedApps
+    this.postageStamps = record.postageStamps
+    this.lastModified = record.lastModified
+    this.partitionCount = record.partitionCount
+    this.#onChange = onChange
+  }
 
-function toEthAddress(id: string | EthAddress): EthAddress {
-  return typeof id === 'string' ? new EthAddress(id) : id
-}
+  #persist(options?: { skipSync?: boolean }) {
+    this.#onChange(this, options)
+  }
 
-function persist(): void {
-  storageManager.save(accounts)
-}
+  /** Active (non-revoked) connected apps — what the UI displays. */
+  get activeApps(): ConnectedApp[] {
+    return this.connectedApps.filter((app) => !app.revokedAt)
+  }
 
-function getById(id: string | EthAddress): Account | undefined {
-  const ethId = toEthAddress(id)
-  return accounts.find((account) => account.id.equals(ethId))
-}
+  rename(name: string) {
+    this.name = name
+    this.#persist()
+  }
 
-/**
- * Map the matching account through `fn`, persist, and (unless `skipSync`) fire
- * the sync hook for it. The single mutation primitive.
- */
-function update(
-  id: string | EthAddress,
-  fn: (account: Account) => Account,
-  { skipSync = false }: { skipSync?: boolean } = {},
-): void {
-  const ethId = toEthAddress(id)
-  let changed = false
-  accounts = accounts.map((account) => {
-    if (!account.id.equals(ethId)) return account
-    changed = true
-    return fn(account)
-  })
-  if (!changed) return
-  persist()
-  if (!skipSync) syncHook?.(ethId.toHex())
+  /** Swap the unlock method: new access metadata + seed re-encrypted for it. */
+  setAccess(access: AccessMethod, encryptedSeed: string) {
+    this.access = access
+    this.encryptedSeed = encryptedSeed
+    this.#persist()
+  }
+
+  /** How long app connections stay valid, set in days (stored as ms). */
+  setAppConnectionDays(days: number) {
+    this.settings = { ...this.settings, appSessionDuration: days * MS_PER_DAY }
+    this.#persist()
+  }
+
+  // --------------------------------------------------------------------------
+  // Connected apps (keyed by appUrl)
+  // --------------------------------------------------------------------------
+
+  /** Record a (re)connection — replaces any previous entry for the same app. */
+  connectApp(app: ConnectedApp) {
+    const has = this.connectedApps.some((existing) => existing.appUrl === app.appUrl)
+    this.connectedApps = has
+      ? this.connectedApps.map((existing) =>
+          existing.appUrl === app.appUrl ? { ...existing, ...app, revokedAt: undefined } : existing,
+        )
+      : [...this.connectedApps, app]
+    this.#persist()
+  }
+
+  disconnectApp(appUrl: string) {
+    this.connectedApps = this.connectedApps.map((app) =>
+      app.appUrl === appUrl ? revoked(app, false) : app,
+    )
+    this.#persist()
+  }
+
+  /** Disconnect and tombstone so the removal propagates to sync. */
+  removeApp(appUrl: string) {
+    this.connectedApps = this.connectedApps.map((app) =>
+      app.appUrl === appUrl ? revoked(app, true) : app,
+    )
+    this.#persist()
+  }
+
+  // --------------------------------------------------------------------------
+  // Drives — owned Swarm storage, each backed by a postage stamp batch (the lib
+  // `postageStamps` field). The default is `defaultPostageStampBatchID`.
+  // --------------------------------------------------------------------------
+
+  /**
+   * Add or replace a drive (deduped by batch id). The first drive added becomes
+   * the account default so uploads have something to spend against.
+   */
+  addDrive(drive: Omit<PostageStamp, 'createdAt'>): PostageStamp {
+    const newDrive: PostageStamp = { ...drive, createdAt: Date.now() }
+    this.postageStamps = [
+      ...this.postageStamps.filter((existing) => !existing.batchID.equals(drive.batchID)),
+      newDrive,
+    ]
+    this.defaultPostageStampBatchID ??= newDrive.batchID
+    this.#persist()
+    return newDrive
+  }
+
+  removeDrive(batchID: BatchId, { skipSync = false }: { skipSync?: boolean } = {}) {
+    this.postageStamps = this.postageStamps.filter((drive) => !drive.batchID.equals(batchID))
+    // Never leave a default pointing at a drive we just removed; fall back to
+    // whatever remains so the account never references a missing batch.
+    if (this.defaultPostageStampBatchID?.equals(batchID)) {
+      this.defaultPostageStampBatchID = this.postageStamps[0]?.batchID
+    }
+    this.#persist({ skipSync })
+  }
+
+  /** Update a drive's volatile utilization in place, WITHOUT firing sync. */
+  updateDriveUtilization(batchID: BatchId, utilization: number) {
+    this.postageStamps = this.postageStamps.map((drive) =>
+      drive.batchID.equals(batchID) ? { ...drive, utilization } : drive,
+    )
+    this.#persist({ skipSync: true })
+  }
+
+  setDefaultDrive(batchID: BatchId | undefined) {
+    this.defaultPostageStampBatchID = batchID
+    this.#persist()
+  }
+
+  /**
+   * Apply state merged from a Swarm refresh, WITHOUT re-publishing (the data
+   * came from Swarm).
+   */
+  applyRefreshed(fields: {
+    devices?: Device[]
+    connectedApps?: ConnectedApp[]
+    postageStamps?: PostageStamp[]
+  }) {
+    if (fields.devices) this.devices = fields.devices
+    if (fields.connectedApps) this.connectedApps = fields.connectedApps
+    if (fields.postageStamps) this.postageStamps = fields.postageStamps
+    this.#persist({ skipSync: true })
+  }
 }
 
 /** Revoke an app connection: drop the secret so the dApp proxy de-authenticates. */
@@ -103,6 +198,69 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
   }
 }
 
+// ============================================================================
+// Collection store — create / look up / remove whole accounts. Per-account
+// state changes live on the Account object itself.
+//
+// Backed by the `@snaha/swarm-id` Zod storage manager (key STORAGE_KEY_ACCOUNTS)
+// — the SAME nested-account document the proxy iframe and sync engine read. The
+// product UI, the /dev tooling and sync all drive off this one reactive store.
+// ============================================================================
+
+const storageManager = createAccountsStorageManager()
+
+/**
+ * Optional sync hook. The /dev sync subsystem injects `triggerSync` so its
+ * mutations publish to Swarm; the plain product app leaves it unset, so a
+ * rename or app-connect never attempts a network publish.
+ */
+let syncHook: ((accountIdHex: string) => void) | undefined
+
+export function setAccountsSyncHook(hook: (accountIdHex: string) => void): void {
+  syncHook = hook
+}
+
+let accounts = $state<Account[]>([])
+
+function persist(): void {
+  // Class instances are structurally `LocalAccount`; the lib serializer reads
+  // their fields and converts byte classes to hex.
+  storageManager.save(accounts)
+}
+
+/** Persist the collection and (unless skipped) publish the changed account. */
+function onChange(account: Account, options?: { skipSync?: boolean }): void {
+  persist()
+  if (!options?.skipSync) syncHook?.(account.id.toHex())
+}
+
+function hydrate(record: LocalAccount): Account {
+  return new Account(record, onChange)
+}
+
+function load(): Account[] {
+  if (!browser) return []
+  // The product UI only manages `local` accounts; ignore any other variant.
+  return storageManager
+    .load()
+    .filter((record): record is LocalAccount => record.type === 'local')
+    .map(hydrate)
+}
+
+accounts = load()
+
+if (browser) {
+  // Cross-tab refresh: another tab mutating the account document (sign-in,
+  // app connect, drive purchase) updates this tab's reactive state too.
+  window.addEventListener('storage', (event) => {
+    if (event.key === STORAGE_KEY_ACCOUNTS) accounts = load()
+  })
+}
+
+function toEthAddress(id: string | EthAddress): EthAddress {
+  return typeof id === 'string' ? new EthAddress(id) : id
+}
+
 export const accountsStore = {
   get accounts(): Account[] {
     return accounts
@@ -110,27 +268,25 @@ export const accountsStore = {
 
   /** Re-read from shared storage (e.g. after a direct storage manager write). */
   reload(): void {
-    accounts = loadAccounts()
+    accounts = load()
   },
 
   get(id: string | EthAddress): Account | undefined {
-    return getById(id)
+    const ethId = toEthAddress(id)
+    return accounts.find((account) => account.id.equals(ethId))
   },
 
   /** Alias used by the sync engine / dev tooling (keyed by EthAddress). */
   getAccount(id: EthAddress): Account | undefined {
-    return getById(id)
+    return accountsStore.get(id)
   },
 
-  add(account: Account): Account {
-    // Replace any previous record for the same address (sign-in / restore).
+  /** Create — or replace, for sign-in / restore — an account; returns the live object. */
+  add(record: LocalAccount): Account {
+    const account = hydrate(record)
     accounts = [...accounts.filter((existing) => !existing.id.equals(account.id)), account]
     persist()
     return account
-  },
-
-  addAccount(account: Account): Account {
-    return accountsStore.add(account)
   },
 
   remove(id: string | EthAddress): void {
@@ -139,177 +295,9 @@ export const accountsStore = {
     persist()
   },
 
-  removeAccount(id: EthAddress): void {
-    accountsStore.remove(id)
-  },
-
-  /** Drop every account from this browser (used by the /dev "Clear all data" tool). */
+  /** Wipe every account from this device (developer reset). */
   clear(): void {
     accounts = []
     storageManager.clear()
-  },
-
-  rename(id: string | EthAddress, name: string): void {
-    update(id, (account) => ({ ...account, name }))
-  },
-
-  setAccountName(id: EthAddress, name: string): void {
-    accountsStore.rename(id, name)
-  },
-
-  /** Swap the unlock method: new access metadata + seed re-encrypted for it. */
-  setAccess(id: string | EthAddress, access: AccessMethod, encryptedSeed: string): void {
-    update(id, (account) =>
-      account.type === 'local' ? { ...account, access, encryptedSeed } : account,
-    )
-  },
-
-  /** How long app connections stay valid, set in days (stored as ms). */
-  setAppConnectionDays(id: string | EthAddress, days: number): void {
-    update(id, (account) => ({
-      ...account,
-      settings: { ...account.settings, appSessionDuration: days * MS_PER_DAY },
-    }))
-  },
-
-  setSessionDuration(id: EthAddress, appSessionDuration: number | undefined): void {
-    update(id, (account) => ({
-      ...account,
-      settings: { ...account.settings, appSessionDuration },
-    }))
-  },
-
-  // --------------------------------------------------------------------------
-  // Connected apps (account-owned, keyed by appUrl)
-  // --------------------------------------------------------------------------
-
-  /** All apps for an account, INCLUDING revoked tombstones (for the synced snapshot). */
-  getApps(id: EthAddress): ConnectedApp[] {
-    return getById(id)?.connectedApps ?? []
-  },
-
-  /** Displayable (non-revoked) apps for an account. */
-  getActiveApps(id: EthAddress): ConnectedApp[] {
-    return accountsStore.getApps(id).filter((app) => !app.revokedAt)
-  },
-
-  /** Record a (re)connection — replaces any previous entry for the app. */
-  connectApp(id: string | EthAddress, app: ConnectedApp): void {
-    update(id, (account) => {
-      const has = account.connectedApps.some((existing) => existing.appUrl === app.appUrl)
-      const connectedApps = has
-        ? account.connectedApps.map((existing) =>
-            existing.appUrl === app.appUrl
-              ? { ...existing, ...app, revokedAt: undefined }
-              : existing,
-          )
-        : [...account.connectedApps, app]
-      return { ...account, connectedApps }
-    })
-  },
-
-  disconnectApp(id: string | EthAddress, appUrl: string): void {
-    update(id, (account) => ({
-      ...account,
-      connectedApps: account.connectedApps.map((app) =>
-        app.appUrl === appUrl ? revoked(app, false) : app,
-      ),
-    }))
-  },
-
-  /** Disconnect and tombstone so the removal propagates to sync. */
-  removeApp(id: string | EthAddress, appUrl: string): void {
-    update(id, (account) => ({
-      ...account,
-      connectedApps: account.connectedApps.map((app) =>
-        app.appUrl === appUrl ? revoked(app, true) : app,
-      ),
-    }))
-  },
-
-  // --------------------------------------------------------------------------
-  // Drives — an account's owned Swarm storage, each backed by a postage stamp
-  // batch on the Bee node (persisted as the lib `postageStamps` field; the
-  // default is `defaultPostageStampBatchID`).
-  // --------------------------------------------------------------------------
-
-  getDrives(id: EthAddress): PostageStamp[] {
-    return getById(id)?.postageStamps ?? []
-  },
-
-  addDrive(id: EthAddress, drive: Omit<PostageStamp, 'createdAt'>): PostageStamp {
-    const newDrive: PostageStamp = { ...drive, createdAt: Date.now() }
-    update(id, (account) => {
-      if (account.postageStamps.some((existing) => existing.batchID.equals(drive.batchID))) {
-        throw new Error(`Drive with batch ID ${drive.batchID.toHex()} already exists`)
-      }
-      return { ...account, postageStamps: [...account.postageStamps, newDrive] }
-    })
-    return newDrive
-  },
-
-  removeDrive(
-    id: EthAddress,
-    batchID: BatchId,
-    { skipSync = false }: { skipSync?: boolean } = {},
-  ): void {
-    update(
-      id,
-      (account) => ({
-        ...account,
-        postageStamps: account.postageStamps.filter((drive) => !drive.batchID.equals(batchID)),
-        // Never leave a default pointing at a drive we just removed.
-        defaultPostageStampBatchID: account.defaultPostageStampBatchID?.equals(batchID)
-          ? undefined
-          : account.defaultPostageStampBatchID,
-      }),
-      { skipSync },
-    )
-  },
-
-  /** Update a drive's volatile utilization in place, WITHOUT firing sync. */
-  updateDriveUtilization(id: EthAddress, batchID: BatchId, utilization: number): void {
-    update(
-      id,
-      (account) => ({
-        ...account,
-        postageStamps: account.postageStamps.map((drive) =>
-          drive.batchID.equals(batchID) ? { ...drive, utilization } : drive,
-        ),
-      }),
-      { skipSync: true },
-    )
-  },
-
-  setDefaultDrive(id: string | EthAddress, batchID: BatchId | undefined): void {
-    update(id, (account) => ({ ...account, defaultPostageStampBatchID: batchID }))
-  },
-
-  updateDevices(id: EthAddress, devices: Device[]): void {
-    update(id, (account) => ({ ...account, devices }), { skipSync: true })
-  },
-
-  /**
-   * Apply state merged from a Swarm refresh to one account, WITHOUT re-publishing
-   * (the data came from Swarm).
-   */
-  applyRefreshed(
-    id: EthAddress,
-    fields: {
-      devices?: Device[]
-      connectedApps?: ConnectedApp[]
-      postageStamps?: PostageStamp[]
-    },
-  ): void {
-    update(
-      id,
-      (account) => ({
-        ...account,
-        devices: fields.devices ?? account.devices,
-        connectedApps: fields.connectedApps ?? account.connectedApps,
-        postageStamps: fields.postageStamps ?? account.postageStamps,
-      }),
-      { skipSync: true },
-    )
   },
 }

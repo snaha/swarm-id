@@ -65,6 +65,6 @@ export const postageStampsStore = {
       console.warn('[PostageStamps] Cannot update utilization: stamp not found')
       return
     }
-    sharedAccountsStore.updateDriveUtilization(found.accountId, batchID, newUtilization)
+    sharedAccountsStore.getAccount(found.accountId)?.updateDriveUtilization(batchID, newUtilization)
   },
 }
