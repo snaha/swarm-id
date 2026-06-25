@@ -238,6 +238,39 @@ describe("resolveIntentRound", () => {
     expect(outcome).toBe("win")
   })
 
+  it("bounds the round to the guard window when rival reads are slow (no fixed-count overrun)", async () => {
+    // Reproduces the "Partition lease timed out after 45000ms" cause: a flaky
+    // gateway makes each rival read slow, and the fixed poll-count loop runs the
+    // FULL count regardless, so a single round overruns its window by multiples.
+    const READ_DELAY_MS = 80
+    let reads = 0
+    vi.spyOn(bee, "downloadChunk").mockImplementation((() => {
+      reads++
+      return new Promise((_resolve, reject) =>
+        setTimeout(
+          () => reject(new Error("Request failed with status code 404")),
+          READ_DELAY_MS,
+        ),
+      ) as never
+    }) as never)
+
+    const outcome = await resolveIntentRound({
+      ...common(),
+      timeoutMs: 1000, // longer than READ_DELAY_MS so the mock 404 (absent) wins
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B], // 1 rival → 2 reads (2 buckets) per sweep
+      guardWindowMs: 150,
+      guardPollMs: 40,
+    })
+
+    expect(outcome).toBe("win") // the rival has no intent → win
+    // The fixed-count loop runs floor(150/40)+1 = 4 sweeps no matter how slow the
+    // reads are → 4 × 2 = 8 reads. A deadline-bounded round stops once the 150ms
+    // window elapses (~2 sweeps at 80ms/read), so it must do strictly fewer reads.
+    expect(reads).toBeLessThan(8)
+  })
+
   it("loses to a rival advertising an earlier (smaller) generation", async () => {
     // DEVICE_A advertised first (smaller timestamp) in the same epoch.
     await writePartitionIntent({

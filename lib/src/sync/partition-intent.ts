@@ -368,6 +368,14 @@ async function readPartitionSoc(opts: {
   swarmEncryptionKey: Uint8Array
   timeoutMs?: number
   logLabel: string
+  /**
+   * Retry once on a 5xx (default true). The intent ROUND polls — its own loop
+   * already re-reads each sweep — so it passes false to avoid doubling per-read
+   * latency + gateway load on a 500-storming node. Single-shot callers (holder
+   * presence/occupancy reads) keep the retry so a transient 500 isn't misread as
+   * "absent" (the dual-acquire guard).
+   */
+  retryOn5xx?: boolean
 }): Promise<PartitionIntentPayload | undefined> {
   const download = () =>
     Promise.race([
@@ -400,7 +408,8 @@ async function readPartitionSoc(opts: {
     } catch (error) {
       // Retry once on a transient 5xx; a too-short timeout or a real 404 are
       // treated as absence so a single flaky device can't deadlock the round.
-      if (isServerError(error) && attempt === 0) continue
+      if (isServerError(error) && attempt === 0 && opts.retryOn5xx !== false)
+        continue
       const timedOut =
         error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE
       console.log(
@@ -428,6 +437,8 @@ export async function readPartitionIntent(opts: {
   deviceId: string
   epochBucket: number
   timeoutMs?: number
+  /** See `readPartitionSoc`. The polling round passes false. */
+  retryOn5xx?: boolean
 }): Promise<PartitionIntentPayload | undefined> {
   return readPartitionSoc({
     bee: opts.bee,
@@ -439,6 +450,7 @@ export async function readPartitionIntent(opts: {
     ),
     swarmEncryptionKey: opts.swarmEncryptionKey,
     timeoutMs: opts.timeoutMs,
+    retryOn5xx: opts.retryOn5xx,
     logLabel: `read device=${opts.deviceId} p=${opts.partition} bucket=${opts.epochBucket}`,
   })
 }
@@ -547,6 +559,8 @@ export async function resolveIntentRound(opts: {
             deviceId: rivalId,
             epochBucket: bucket,
             timeoutMs: opts.timeoutMs,
+            // The round polls; don't double per-read latency/load with a retry.
+            retryOn5xx: false,
           }),
         })),
       ),
@@ -569,15 +583,22 @@ export async function resolveIntentRound(opts: {
   // a few seconds to become cross-device-retrievable on a gateway, so a single
   // immediate read races ahead of propagation. We back off as soon as ANY sweep
   // finds a beating rival; we only win after the whole window stays clear.
+  // Poll until an ABSOLUTE deadline, not a fixed count: each sweep's reads are
+  // unbounded (an absent read on a flaky gateway blocks up to the read timeout),
+  // so a fixed poll count lets one round overrun its window by multiples and
+  // blow the acquire budget. A wall-clock deadline keeps the round ≈ the guard
+  // window (+ one in-flight sweep) regardless of read latency or rival count.
   const guardWindowMs = opts.guardWindowMs ?? 0
   const guardPollMs = opts.guardPollMs ?? INTENT_GUARD_POLL_MS
-  const polls = Math.max(1, Math.floor(guardWindowMs / guardPollMs) + 1)
+  const end = Date.now() + guardWindowMs
   let beatenBy: Awaited<ReturnType<typeof sweep>>
-  for (let i = 0; i < polls; i++) {
-    if (i > 0) await sleep(guardPollMs)
+  let polls = 0
+  do {
+    if (polls > 0) await sleep(guardPollMs)
+    polls++
     beatenBy = await sweep()
     if (beatenBy) break
-  }
+  } while (Date.now() < end)
 
   const outcome = beatenBy ? "lose" : "win"
   console.log(

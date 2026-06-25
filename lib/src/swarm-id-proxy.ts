@@ -106,6 +106,10 @@ import {
 } from "./utils/key-derivation"
 import { connectionInfoEqual } from "./utils/connection-info"
 import {
+  activeDeviceIds,
+  KNOWN_DEVICE_MAX_AGE_MS,
+} from "./utils/active-devices"
+import {
   createAsyncEpochFinder,
   createEpochUpdater,
 } from "./proxy/feeds/epochs"
@@ -1243,11 +1247,18 @@ export class SwarmIdProxy {
     try {
       const accounts = createAccountsStorageManager().load()
       const account = accounts.find((a) => a.id.toHex() === accountId)
-      // Removed devices (tombstones) won't write — exclude them from the
-      // partition rival set so they don't slow acquisition.
-      return (
-        account?.devices.filter((d) => !d.removedAt).map((d) => d.deviceId) ??
-        []
+      if (!account) return []
+      // Bound the partition rival set to recently-active devices: removed
+      // (tombstoned) devices won't write, and long-dead ghosts from old sessions
+      // (the device list is append-only) would each add an absent intent read to
+      // every acquire — on a flaky gateway that can push a single acquire past
+      // its timeout, so a live device can't claim even a FREE partition. A
+      // genuinely-live holder is still caught by the deviceId-independent
+      // occupancy beacon, so pruning here only removes dead-device cost.
+      return activeDeviceIds(
+        account.devices,
+        Date.now(),
+        KNOWN_DEVICE_MAX_AGE_MS,
       )
     } catch {
       return []
