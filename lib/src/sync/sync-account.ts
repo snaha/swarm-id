@@ -41,7 +41,7 @@ import {
   BatchWriteCoordinator,
   PartitionContendedError,
 } from "./batch-write-coordinator"
-import { publishDeviceState, type DeviceStateView } from "./device-state"
+import { accountStateToDeviceView, publishDeviceState } from "./device-state"
 import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
 
 // Re-exported from its new home so existing importers of `./sync-account`
@@ -377,9 +377,9 @@ export function createSyncAccount(
       }, SYNC_TIMEOUT_MS)
     })
 
-    // Build this device's view + registry seed from the captured snapshot. Each
-    // scalar carries its own per-field LWW clock (set by the store on edit); the
-    // snapshot's `lastModified` is only the fallback for a never-edited field.
+    // Build this device's view + registry seed from the captured snapshot. The
+    // per-field scalar clocks (incl. the stable-`createdAt` fallback for a
+    // never-edited field) are derived by `accountStateToDeviceView`.
     const deviceId = getOrCreateDeviceId()
     const thisDevice = state.metadata.devices.find(
       (d) => d.deviceId === deviceId,
@@ -389,26 +389,7 @@ export function createSyncAccount(
       createdAt: Date.now(),
       lastSignedInAt: Date.now(),
     }
-    const scalarAt = state.metadata.lastModified
-    const view: DeviceStateView = {
-      connectedApps: state.connectedApps,
-      postageStamps: state.postageStamps,
-      accountName: {
-        value: state.metadata.accountName,
-        at: state.metadata.accountNameAt ?? scalarAt,
-      },
-      defaultPostageStampBatchID: {
-        value: state.metadata.defaultPostageStampBatchID,
-        at: state.metadata.defaultStampAt ?? scalarAt,
-      },
-      settings: {
-        value: state.metadata.settings,
-        at: state.metadata.settingsAt ?? scalarAt,
-      },
-      accountPublicKey: state.metadata.publicKey,
-      accountCreatedAt: state.metadata.createdAt,
-      partitionCount,
-    }
+    const view = accountStateToDeviceView(state)
 
     try {
       const result = await Promise.race([

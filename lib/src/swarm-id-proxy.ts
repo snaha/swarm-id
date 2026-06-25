@@ -83,7 +83,11 @@ import {
 } from "./proxy/mantaray"
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForApp } from "./utils/postage-stamp-association"
-import { publishDeviceState, readRoster, type DeviceStateView } from "./sync"
+import {
+  accountStateToDeviceView,
+  publishDeviceState,
+  readRoster,
+} from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -1477,26 +1481,9 @@ export class SwarmIdProxy {
         createdAt: Date.now(),
         lastSignedInAt: Date.now(),
       }
-      const scalarAt = snapshot.metadata.lastModified
-      const view: DeviceStateView = {
-        connectedApps: snapshot.connectedApps,
-        postageStamps: snapshot.postageStamps,
-        accountName: {
-          value: snapshot.metadata.accountName,
-          at: snapshot.metadata.accountNameAt ?? scalarAt,
-        },
-        defaultPostageStampBatchID: {
-          value: snapshot.metadata.defaultPostageStampBatchID,
-          at: snapshot.metadata.defaultStampAt ?? scalarAt,
-        },
-        settings: {
-          value: snapshot.metadata.settings,
-          at: snapshot.metadata.settingsAt ?? scalarAt,
-        },
-        accountPublicKey: snapshot.metadata.publicKey,
-        accountCreatedAt: snapshot.metadata.createdAt,
-        partitionCount: snapshot.metadata.partitionCount ?? 1,
-      }
+      // Per-field scalar clocks (incl. the stable-`createdAt` fallback for a
+      // never-edited field) are derived by `accountStateToDeviceView`.
+      const view = accountStateToDeviceView(snapshot)
 
       await coordinator.withWrite((target) =>
         publishDeviceState({

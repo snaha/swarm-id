@@ -30,6 +30,7 @@ import { z } from "zod"
 import {
   ConnectedAppSchemaV1,
   PostageStampSchemaV1,
+  type AccountStateSnapshot,
   type ConnectedApp,
   type Device,
   type PostageStamp,
@@ -109,6 +110,38 @@ export interface FoldedAccount {
   createdAt: number
   publicKey?: string
   partitionCount: number
+}
+
+/**
+ * Build this device's `DeviceStateView` from the local account snapshot — the
+ * single derivation shared by both publish paths (`sync-account` and the proxy).
+ *
+ * Each scalar carries its own per-field LWW clock. A field that was never
+ * explicitly edited (no `*At` clock on the snapshot) falls back to the account's
+ * STABLE `createdAt` — NEVER a fresh `Date.now()`. Re-stamping an unchanged
+ * name / default-stamp / settings with a new timestamp on every publish would
+ * let a device that never touched the field clobber a peer's genuine concurrent
+ * edit under per-field LWW (§9.3). `createdAt` is identical across devices and
+ * predates every edit, so any real change always wins.
+ */
+export function accountStateToDeviceView(
+  snapshot: AccountStateSnapshot,
+): DeviceStateView {
+  const m = snapshot.metadata
+  const stableAt = m.createdAt
+  return {
+    connectedApps: snapshot.connectedApps,
+    postageStamps: snapshot.postageStamps,
+    accountName: { value: m.accountName, at: m.accountNameAt ?? stableAt },
+    defaultPostageStampBatchID: {
+      value: m.defaultPostageStampBatchID,
+      at: m.defaultStampAt ?? stableAt,
+    },
+    settings: { value: m.settings, at: m.settingsAt ?? stableAt },
+    accountPublicKey: m.publicKey,
+    accountCreatedAt: m.createdAt,
+    partitionCount: m.partitionCount ?? 1,
+  }
 }
 
 export function deviceStateTopic(accountId: string, deviceId: string): Topic {

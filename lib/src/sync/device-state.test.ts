@@ -6,6 +6,7 @@ import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
   serializeDeviceState,
   deserializeDeviceState,
+  accountStateToDeviceView,
   foldAccount,
   type DeviceStateView,
   type DeviceStateSnapshot,
@@ -102,6 +103,52 @@ describe("device-state serialization", () => {
     expect(back.postageStamps[0].deletedAt).toBe(7)
     expect(back.connectedApps[0].revokedAt).toBe(5)
     expect(back.accountName).toEqual({ value: "my account", at: 9 })
+  })
+})
+
+describe("accountStateToDeviceView — never-edited scalar clocks", () => {
+  const CREATED_AT = 1_700_000_000_000
+
+  function newAccountSnapshot(
+    overrides: Partial<AccountStateSnapshot["metadata"]> = {},
+  ): AccountStateSnapshot {
+    return {
+      version: 1,
+      timestamp: 1_700_000_001_000,
+      accountId: ACCOUNT_ID,
+      metadata: {
+        accountName: "Account-A",
+        defaultPostageStampBatchID: undefined,
+        createdAt: CREATED_AT,
+        // Always freshly stamped at publish time — the trap the old fallback
+        // (`?? lastModified`) fell into, re-clocking unedited fields every sync.
+        lastModified: 1_700_000_999_000,
+        devices: [],
+        partitionCount: 2,
+        ...overrides,
+      },
+      connectedApps: [],
+      postageStamps: [],
+    }
+  }
+
+  it("clocks a never-edited field at the stable createdAt, not a fresh lastModified", () => {
+    // The create page sets `accountName` but no `*At` clocks — this is that state.
+    const view = accountStateToDeviceView(newAccountSnapshot())
+    expect(view.accountName.at).toBe(CREATED_AT)
+    expect(view.defaultPostageStampBatchID.at).toBe(CREATED_AT)
+    expect(view.settings.at).toBe(CREATED_AT)
+    // Regression guard: must NOT pick up the fresh publish-time `lastModified`,
+    // which would let an unchanged default name clobber a peer's real rename.
+    expect(view.accountName.at).not.toBe(1_700_000_999_000)
+  })
+
+  it("preserves an explicit edit clock (a real rename outranks a peer's createdAt)", () => {
+    const renameAt = CREATED_AT + 5_000
+    const view = accountStateToDeviceView(
+      newAccountSnapshot({ accountName: "Renamed", accountNameAt: renameAt }),
+    )
+    expect(view.accountName.at).toBe(renameAt)
   })
 })
 

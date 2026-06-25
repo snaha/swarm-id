@@ -36,6 +36,7 @@ export type { RestoreAccountResult } from "./restore-account"
 // Phase 3a: per-device snapshot feeds + append-only roster discovery
 export {
   deviceStateTopic,
+  accountStateToDeviceView,
   writeDeviceState,
   publishDeviceState,
   readLatestDeviceState,
