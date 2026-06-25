@@ -236,13 +236,22 @@ export class PartitionLease {
     const now = this.now()
     this.holders.clear()
     this.releasedPartitions.clear()
+    // Read every partition's lock SOC in parallel — each is an independent
+    // multi-round-trip retrieval, so overlapping them collapses N×latency into
+    // ≈1×. Classification below is order-independent (holders/releasedPartitions
+    // are partition-keyed).
+    const locks = await Promise.all(
+      Array.from({ length: partitionCount }, (_unused, p) =>
+        readPartitionLock({
+          bee: this.opts.bee,
+          backupSigner: this.opts.backupSigner,
+          swarmEncryptionKey: this.opts.swarmEncryptionKey,
+          partition: p,
+        }),
+      ),
+    )
     for (let p = 0; p < partitionCount; p++) {
-      const lock = await readPartitionLock({
-        bee: this.opts.bee,
-        backupSigner: this.opts.backupSigner,
-        swarmEncryptionKey: this.opts.swarmEncryptionKey,
-        partition: p,
-      })
+      const lock = locks[p]
       // Per-partition outcome — this is the line that reveals whether a joining
       // device can actually SEE the current holder's lock SOC (the suspected
       // cross-device dual-acquire cause). "no readable lock" here for a
