@@ -184,3 +184,22 @@ describe("foldAccount — per-field scalar LWW", () => {
     ])
   })
 })
+
+describe("foldAccount — account immutables from any defining view", () => {
+  it("takes partitionCount/publicKey from a later view when views[0] omits them", () => {
+    // views[0] is an older/partial feed: partitionCount defaulted to 1 (which
+    // would disable partition locking) and no publicKey. A later view carries the
+    // real values — the fold must prefer those, not views[0].
+    const partial = makeView({ partitionCount: 1, accountPublicKey: undefined })
+    const full = makeView({
+      partitionCount: 4,
+      accountPublicKey: "ab".repeat(32),
+    })
+    const folded = foldAccount(
+      [partial, full] as unknown as DeviceStateSnapshot[],
+      [makeDevice("dev-a")],
+    )
+    expect(folded.partitionCount).toBe(4)
+    expect(folded.publicKey).toBe("ab".repeat(32))
+  })
+})

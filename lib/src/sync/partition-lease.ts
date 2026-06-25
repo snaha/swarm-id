@@ -761,7 +761,10 @@ export class PartitionLease {
     // `"displaced"` so the coordinator demotes WITHOUT re-checking the static
     // lock SOC, which we just rewrote with our own claim above and which is the
     // frozen read the beacon channel exists to bypass.
-    if (await this.foreignBeaconBeatsUs(partition, payload.generation)) {
+    if (
+      (await this.foreignBeaconBeatsUs(partition, payload.generation)) ||
+      (await this.occupancyBeaconBeatsUs(partition, payload.generation))
+    ) {
       console.warn(
         `[PartitionLease] Refresh on partition ${partition}: an earlier-generation peer holds it; yielding.`,
       )
@@ -806,6 +809,49 @@ export class PartitionLease {
         intent?.leasedUntil !== undefined &&
         intent.leasedUntil > now - INTENT_LIVENESS_GRACE_MS &&
         compareGenerations(intent.generation, ourGeneration) < 0,
+    )
+  }
+
+  /**
+   * Like `foreignBeaconBeatsUs`, but reads the deviceId-INDEPENDENT occupancy
+   * beacon (current + previous epoch bucket). This resolves a dual-acquire with a
+   * peer that is NOT in `knownDeviceIds` — e.g. a live device pruned from the
+   * rival set by `activeDeviceIds` (its `lastSignedInAt` aged past
+   * `KNOWN_DEVICE_MAX_AGE_MS` even though it never signed out). Without this,
+   * `refresh()`'s deviceId-keyed `foreignBeaconBeatsUs` is blind to that peer and
+   * a symmetric fresh-claim dual-acquire would stay sticky.
+   *
+   * The occupancy SOC is a single shared address per (partition, epoch), so two
+   * holders clobber each other's writes; only the later-generation loser yields,
+   * and it converges within a few refresh ticks (whenever it reads a tick where
+   * the earlier-generation winner wrote last). True when a foreign live occupancy
+   * beacon orders strictly before our generation.
+   */
+  private async occupancyBeaconBeatsUs(
+    partition: number,
+    ourGeneration: PartitionLockGeneration,
+  ): Promise<boolean> {
+    const now = this.now()
+    const currentBucket = intentEpochBucket(now)
+    const results = await Promise.all(
+      [currentBucket, currentBucket - 1].map((bucket) =>
+        readPartitionOccupancy({
+          bee: this.opts.bee,
+          backupSigner: this.opts.backupSigner,
+          swarmEncryptionKey: this.opts.swarmEncryptionKey,
+          partition,
+          epochBucket: bucket,
+          timeoutMs: this.opts.intentReadTimeoutMs,
+        }),
+      ),
+    )
+    return results.some(
+      (occupancy) =>
+        occupancy !== undefined &&
+        occupancy.deviceId !== this.opts.deviceId &&
+        occupancy.leasedUntil !== undefined &&
+        occupancy.leasedUntil > now - INTENT_LIVENESS_GRACE_MS &&
+        compareGenerations(occupancy.generation, ourGeneration) < 0,
     )
   }
 

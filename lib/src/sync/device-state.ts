@@ -281,8 +281,11 @@ export function foldAccount(
     settings = pickLatest(settings, v.settings)
   }
 
-  // Account immutables from any view; fall back to the roster (min createdAt) so
-  // a fold with reachable roster but no readable device feed still has them.
+  // Account immutables from any view that defines them — NOT just views[0],
+  // whose feed could be older/partial and omit one (publicKey is optional;
+  // partitionCount defaults to 1, which would silently disable partition locking
+  // for a multi-partition account). Fall back to the roster (min createdAt) so a
+  // fold with reachable roster but no readable device feed still has createdAt.
   const meta = views[0]
   const createdAt =
     meta?.accountCreatedAt ??
@@ -290,6 +293,11 @@ export function foldAccount(
       (min, d) => Math.min(min, d.createdAt),
       Number.MAX_SAFE_INTEGER,
     )
+  const publicKey = views.find((v) => v.accountPublicKey)?.accountPublicKey
+  const partitionCount =
+    views.find((v) => v.partitionCount > 1)?.partitionCount ??
+    meta?.partitionCount ??
+    1
 
   return {
     devices: rosterDevices,
@@ -304,9 +312,9 @@ export function foldAccount(
     defaultStampAt: defaultBatch.at,
     settingsAt: settings.at,
     createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
-    publicKey: meta?.accountPublicKey,
+    publicKey,
     // No per-field clock needed: partitionCount is a fixed constant
     // (PARTITION_COUNT, set once at account creation), identical across devices.
-    partitionCount: meta?.partitionCount ?? 1,
+    partitionCount,
   }
 }

@@ -89,8 +89,10 @@ async function readRosterEntry(opts: {
     )
     return DeviceSchemaV1.parse(JSON.parse(new TextDecoder().decode(data)))
   } catch {
-    // Reachable SOC but unretrievable/garbage blob — skip this entry, keep going
-    // is unsafe (we can't advance past a gap), so treat as end. Rare.
+    // Reachable SOC but unretrievable/garbage blob. Returns `undefined` like an
+    // empty slot; `readRoster` treats a hole inside an otherwise-present window
+    // as a transient (skippable) read failure — exactly the caching-gateway case
+    // this roster exists to survive — and only stops on a fully-empty window.
     return undefined
   }
 }

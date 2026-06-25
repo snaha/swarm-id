@@ -13,12 +13,17 @@
  * timeout, so a live device can't even claim a FREE partition. A non-active
  * device must not be able to influence an active one.
  *
- * Filtering by `lastSignedInAt` recency is SAFE (not a correctness mechanism):
- * a genuinely-live holder is still detected by the deviceId-INDEPENDENT
- * occupancy beacon (`PartitionLease.refreshHoldersFromOccupancy`), which is not
- * gated on this set; and a true simultaneous claimer is active right now, so its
- * `lastSignedInAt` is fresh and it is never pruned. Pruning only removes the
- * dead-device cost.
+ * Filtering by `lastSignedInAt` recency is SAFE (not a correctness mechanism)
+ * because the deviceId-INDEPENDENT occupancy beacon, which is NOT gated on this
+ * set, is the real dual-acquire backstop for a live peer that this prune drops:
+ *   - `PartitionLease.refreshHoldersFromOccupancy` (in `acquire`) catches a peer
+ *     that already HOLDS a partition; and
+ *   - `PartitionLease.occupancyBeaconBeatsUs` (in `refresh`) resolves a symmetric
+ *     fresh-claim dual-acquire with such a peer.
+ * Note `lastSignedInAt` advances only on an actual SIGN-IN, not on a device's
+ * ongoing publish/lease-refresh — so a long-running device IS eventually pruned
+ * here; the occupancy channel (not this set) is what keeps that safe. Pruning
+ * only removes the per-acquire absent-read cost of dead ghosts.
  */
 
 import type { Device } from "../schemas"

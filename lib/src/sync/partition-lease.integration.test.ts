@@ -56,6 +56,7 @@ import {
   intentEpochBucket,
   readPartitionIntent,
   writePartitionIntent,
+  writePartitionOccupancy,
 } from "./partition-intent"
 import { Binary } from "cafe-utility"
 import {
@@ -1546,6 +1547,98 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       genTimestamp: NOW + 1000,
     })
     // DEVICE_A is the earlier holder → keeps the lease.
+    expect(await lease.refresh()).toBe("held")
+  })
+})
+
+describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", () => {
+  // The dual-acquire that survives `activeDeviceIds` pruning: a live peer whose
+  // `lastSignedInAt` aged past KNOWN_DEVICE_MAX_AGE_MS is dropped from
+  // `knownDeviceIds`, so the deviceId-keyed `foreignBeaconBeatsUs` is blind to
+  // it. The deviceId-INDEPENDENT occupancy beacon is what still resolves the
+  // collision in `refresh()`. Here DEVICE_B is deliberately NOT in knownDeviceIds.
+  const NOW = 7_000_000
+
+  function writeOccupancy(opts: {
+    partition: number
+    deviceId: string
+    epochBucket: number
+    leasedUntil: number
+    genTimestamp?: number
+  }) {
+    return writePartitionOccupancy({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: opts.partition,
+      deviceId: opts.deviceId,
+      epochBucket: opts.epochBucket,
+      generation: {
+        timestampMs: opts.genTimestamp ?? NOW - 1000,
+        tiebreaker: makeDeviceTiebreaker(opts.deviceId),
+      },
+      leasedUntil: opts.leasedUntil,
+    })
+  }
+
+  function selfOnlyLease() {
+    // DEVICE_B intentionally absent → it's the pruned/unknown peer.
+    return makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A],
+      intentReadTimeoutMs: 50,
+    })
+  }
+
+  it("yields when an earlier-generation occupancy beacon from a pruned peer is live", async () => {
+    const lease = selfOnlyLease()
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // DEVICE_B holds p0 too with an EARLIER generation. Its occupancy beacon sits
+    // in the PREVIOUS bucket — refresh()'s own beacon publish overwrites the
+    // shared current-bucket occupancy SOC with DEVICE_A, so the previous-bucket
+    // read is what surfaces the rival (the convergent interleaving the shared
+    // address guarantees within a few ticks).
+    await writeOccupancy({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW) - 1,
+      leasedUntil: NOW + LEASE_TTL_MS,
+    })
+
+    // foreignBeaconBeatsUs can't see DEVICE_B (not a known rival); only the
+    // deviceId-independent occupancy channel catches it.
+    expect(await lease.refresh()).toBe("displaced")
+  })
+
+  it("keeps the lease when the pruned peer's occupancy beacon is LATER-generation", async () => {
+    const lease = selfOnlyLease()
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    await writeOccupancy({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW) - 1,
+      leasedUntil: NOW + LEASE_TTL_MS,
+      genTimestamp: NOW + 1000, // later than DEVICE_A's claim → we win
+    })
+
+    expect(await lease.refresh()).toBe("held")
+  })
+
+  it("keeps the lease when only our OWN occupancy beacon is present (no false displacement)", async () => {
+    const lease = selfOnlyLease()
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+    // No foreign beacon written; acquire + refresh only publish DEVICE_A's own.
     expect(await lease.refresh()).toBe("held")
   })
 })
