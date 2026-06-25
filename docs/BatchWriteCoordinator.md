@@ -181,24 +181,24 @@ guaranteed-persistent context that can publish account state. Two triggers, both
 a debounced scheduler (`schedulePublish`, `PUBLISH_DEBOUNCE_MS`) so the publish runs **outside**
 the lease callback's write lock (the publish re-enters the lock via `coordinator.withWrite`):
 
-- **`"acquired"`** — `onLeaseAcquired`. Announces a newly joining device: the published snapshot
-  includes this device in `metadata.devices`, which is what makes all peers' device lists converge.
-  Gated by **announce-once**: if `remoteFeedHasDevice` already finds this device in the feed (e.g.
-  every page reload re-acquires), the publish is skipped — this avoids redundant publish +
-  verify-retry churn on every reload.
+- **`"acquired"`** — `onLeaseAcquired`. Announces a newly joining device by publishing this device's
+  own state feed and appending it to the roster (`ensureInRoster`), which is what makes all peers'
+  device lists converge on the next fold. `ensureInRoster` is itself the **announce-once** gate: it
+  appends only when this device is absent from the roster or its `removedAt` state changed, so a page
+  reload that merely re-acquires doesn't re-write the roster.
 - **`"change"`** — `handleAuxiliaryStorageChange` while a partition is held: a new identity /
   stamp / rename should propagate to peers. A `"change"` carries a real delta and is never gated;
   within a debounce window `"change"` dominates a coalesced `"acquired"`.
 
-The publisher re-arms itself if a publish is already in flight, and bails if the coordinator was
-torn down or replaced while the (async) snapshot assembly ran.
+The publisher (`runAccountStatePublish`) re-arms itself if a publish is already in flight, and bails if
+the coordinator was torn down or replaced while the (async) snapshot assembly ran.
 
 ### `sync-account` (`lib/src/sync/sync-account.ts`) — oneshot
 
 The SwarmID UI's sync builds a oneshot coordinator per sync (stamper from
 `postageStampsStore.getStamper`; for a shared, partitioned batch this is always a
 `UtilizationAwareStamper`) and publishes via
-`coordinator.withWrite(target => publishAccountState(...), { wait: "skip" })` — the **same** Web
+`coordinator.withWrite(target => publishDeviceState(...), { wait: "skip" })` — the **same** Web
 Lock and the same partition acquire the proxy uses, so a UI-driven change is published under the
 identical safety guarantees. Outcomes are split:
 
@@ -209,32 +209,19 @@ identical safety guarantees. Outcomes are split:
 
 The whole publish races a 60 s timeout (Bee client requests have no built-in timeout).
 
-## Shared publish core (`lib/src/sync/publish-account-state.ts`)
+## The published account state (`lib/src/sync/device-state.ts`)
 
-`publishAccountState(deps)` is the merge/upload/verify core shared by both writers. It takes **no
-lock and no lease** — the caller runs it inside `coordinator.withWrite`, which hands in the upload
-`target`. Steps:
+The write the coordinator brackets is `publishDeviceState`: each device writes its **own full current
+view** to its **own** epoch feed (no shared SOC address, so no read-merge-rewrite and no verify-won
+retry), then `ensureInRoster`. Convergence happens later at READ time, where a fold merges every device's
+latest view. That whole account-state model — the per-device feeds, the append-only roster, fold-on-read,
+the LWW/tombstone merges — is documented in [`Account-State.md`](./Account-State.md). (This replaced an
+earlier single shared snapshot feed with a `publishAccountState` merge-read-rewrite + verify-won loop; see
+that doc's "Retired / legacy" note.)
 
-1. **Merge.** Fetch the latest remote snapshot and merge the local one onto it
-   (`mergeSnapshotWithRemote`). Every retry re-merges the _original_ local state onto the freshest
-   remote, so a retry folds in whatever a peer published in between without dropping our changes.
-2. **Upload** the merged snapshot (encrypted), then run the caller's optional per-chunk
-   utilisation hook (sync-account: `handleUtilizationUpdate`; a hook failure never fails the
-   publish).
-3. **Feed write + verify-won.** Write the epoch feed, then re-read it. The shared feed is
-   last-writer-wins at the SOC level with no compare-and-swap, so a concurrent writer can stomp
-   the slot. A different winning reference counts as a loss **only if it dropped our entities**
-   (`snapshotContainsContribution`) — a co-writer publishing the same account writes a union that
-   still contains us, and comparing exact refs would mis-read that as a loss and storm. Losers
-   retry with jittered backoff up to 3 times; still-overwritten → `success-unverified`.
-4. **Root-chunk probe.** Confirm the uploaded root chunk is actually retrievable (catches Bee
-   accepting a write without retaining the data); probe failure/timeout → `success-unverified`
-   with a warning, not an error.
-
-`remoteFeedHasDevice` (same file) is the proxy's announce-once gate: true when the published
-feed's latest snapshot already lists the device. It reads pre-write, which is reliable even when
-post-write read-back lags; read failures return `false` so an unannounced device is never silently
-dropped.
+What the coordinator guarantees for it is unchanged: the per-device write rides the cross-tab lock +
+partition lease, so two devices' feeds are slot-disjoint on the shared batch, and stamper state is flushed
+in the lock's `finally`.
 
 ## Counter coherence across instances
 
@@ -250,13 +237,13 @@ the other — they cooperate on the same partition rather than contend.
 | File                                                   | Role                                                            |
 | ------------------------------------------------------ | --------------------------------------------------------------- |
 | `lib/src/sync/batch-write-coordinator.ts`              | The coordinator                                                 |
-| `lib/src/sync/publish-account-state.ts`                | Shared publish core + `remoteFeedHasDevice`                     |
+| `lib/src/sync/device-state.ts`                         | `publishDeviceState` — the per-device write the coordinator brackets (see `Account-State.md`) |
 | `lib/src/sync/partition-lease.ts`, `partition-lock.ts` | The layers below (claim + lock SOCs)                            |
 | `lib/src/utils/batch-write-lock.ts`                    | `withBatchWriteLock` (Web Lock + no-`navigator.locks` fallback) |
 | `lib/src/swarm-id-proxy.ts`                            | Persistent consumer + publish triggers                          |
 | `lib/src/sync/sync-account.ts`                         | Oneshot consumer                                                |
 
 The living spec is the test suite: `batch-write-coordinator.test.ts` (block-vs-skip, contention,
-lifecycle, the displacement race), `publish-account-state.test.ts` (merge/verify/retry),
-`sync-account.test.ts` (use of the coordinator: publish, skip-on-contention, error split),
-`merge-snapshot.test.ts`, `partition-lock.test.ts`, and `partition-lease.integration.test.ts`.
+lifecycle, the displacement race), `sync-account.test.ts` (use of the coordinator: publish,
+skip-on-contention, error split), `device-state.test.ts` / `merge-snapshot.test.ts` (the published
+per-device view + the fold/merge), `partition-lock.test.ts`, and `partition-lease.integration.test.ts`.
