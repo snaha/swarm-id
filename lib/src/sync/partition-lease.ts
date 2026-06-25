@@ -248,22 +248,22 @@ export class PartitionLease {
       // cross-device dual-acquire cause). "no readable lock" here for a
       // partition a peer holds = the lock SOC is invisible to us.
       if (!lock) {
-        console.log(`[PartitionLease] refresh p=${p}: no readable lock`)
+        console.debug(`[PartitionLease] refresh p=${p}: no readable lock`)
         continue
       }
       if (lock.holderDeviceId === NO_HOLDER_DEVICE_ID) {
-        console.log(`[PartitionLease] refresh p=${p}: released sentinel`)
+        console.debug(`[PartitionLease] refresh p=${p}: released sentinel`)
         this.releasedPartitions.set(p, lock.generation)
         continue
       }
       const self = lock.holderDeviceId === this.opts.deviceId ? " (self)" : ""
       if (lock.leasedUntil <= now) {
-        console.log(
+        console.debug(
           `[PartitionLease] refresh p=${p}: EXPIRED holder ${lock.holderDeviceId}${self} (until ${lock.leasedUntil} <= now ${now})`,
         )
         continue
       }
-      console.log(
+      console.debug(
         `[PartitionLease] refresh p=${p}: held by ${lock.holderDeviceId}${self} until ${lock.leasedUntil}`,
       )
       this.holders.set(p, {
@@ -276,7 +276,7 @@ export class PartitionLease {
     const summary = Array.from(this.holders.entries())
       .map(([p, h]) => `${p}->${h.deviceId}`)
       .join(",")
-    console.log(
+    console.debug(
       `[PartitionLease] refresh: live holders={${summary}} self=${this.opts.deviceId}`,
     )
   }
@@ -354,7 +354,7 @@ export class PartitionLease {
           acquiredAt: existing?.acquiredAt ?? 0,
           leasedUntil,
         })
-        console.log(
+        console.debug(
           `[PartitionLease] presence p=${partition}: live holder ${deviceId} (bucket ${bucket}, leasedUntil ${leasedUntil})`,
         )
       }
@@ -416,7 +416,7 @@ export class PartitionLease {
           acquiredAt: existing?.acquiredAt ?? 0,
           leasedUntil: occupancy.leasedUntil,
         })
-        console.log(
+        console.debug(
           `[PartitionLease] occupancy p=${partition}: live holder ${occupancy.deviceId} (leasedUntil ${occupancy.leasedUntil})`,
         )
       }
@@ -514,7 +514,7 @@ export class PartitionLease {
     // Why this partition was chosen — `home` is our deterministic scan start,
     // `liveHolders` the count refreshFromSwarm saw. If we pick a partition a
     // peer actually holds, that means we couldn't read its lock SOC above.
-    console.log(
+    console.debug(
       `[PartitionLease] acquire: chosen=${chosenPartition} via=${held !== undefined ? "held(re-acquire)" : "pickFreeOrExpired"} home=${deviceHomePartition(this.opts.deviceId, partitionCount)} liveHolders=${this.holders.size} partitionCount=${partitionCount}`,
     )
 
@@ -574,7 +574,7 @@ export class PartitionLease {
     // back to read-only WITHOUT writing the lock SOC; the coordinator's
     // slot-wait / next-upload acquire retries shortly.
     if (stateResult.readFailed) {
-      console.warn(
+      console.debug(
         `[PartitionLease] Partition ${partition} state read failed; falling back to read-only without claiming.`,
       )
       return {
@@ -606,7 +606,7 @@ export class PartitionLease {
     // Diagnostic: shows whether the intent round even runs, and on how many
     // peers. The dual-acquire failure is "freshClaim + no rival seen at acquire
     // time" (registry not yet synced) or "round ran but found nothing".
-    console.log(
+    console.debug(
       `[PartitionLease] claim p=${partition} self=${this.opts.deviceId} freshClaim=${freshClaim} knownDevices=${knownDeviceIds.length} intentRound=${freshClaim && hasRival}`,
     )
     if (freshClaim && hasRival) {
@@ -629,7 +629,7 @@ export class PartitionLease {
         releasedGeneration: this.releasedPartitions.get(partition),
       })
       if (outcome === "lose") {
-        console.warn(
+        console.debug(
           `[PartitionLease] Lost intent round for partition ${partition}; falling back to read-only.`,
         )
         return {
@@ -655,7 +655,7 @@ export class PartitionLease {
     })
 
     if (lockResult.outcome !== "acquired" || !lockResult.payload) {
-      console.warn(
+      console.debug(
         `[PartitionLease] Lock acquire for partition ${partition} outcome=${lockResult.outcome}; falling back to read-only.`,
       )
       return {
@@ -747,7 +747,7 @@ export class PartitionLease {
     // `this.self` — re-check before dereferencing it.
     if (!this.self) return "lost"
     if (lockResult.outcome !== "acquired" || !lockResult.payload) {
-      console.warn(
+      console.debug(
         `[PartitionLease] Refresh on partition ${partition} returned ${lockResult.outcome}.`,
       )
       return "lost"
@@ -781,7 +781,7 @@ export class PartitionLease {
       (await this.foreignBeaconBeatsUs(partition, payload.generation)) ||
       (await this.occupancyBeaconBeatsUs(partition, payload.generation))
     ) {
-      console.warn(
+      console.debug(
         `[PartitionLease] Refresh on partition ${partition}: an earlier-generation peer holds it; yielding.`,
       )
       return "displaced"
@@ -945,7 +945,7 @@ export class PartitionLease {
         leasedUntil,
       })
     } catch (error) {
-      console.warn(
+      console.debug(
         `[PartitionLease] presence beacon publish failed for p=${partition} (self-heals next tick):`,
         error,
       )

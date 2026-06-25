@@ -398,10 +398,10 @@ async function readPartitionSoc(opts: {
         JSON.parse(new TextDecoder().decode(soc.payload)),
       )
       if (!parsed.success) {
-        console.log(`[partition-intent] ${opts.logLabel}: malformed`)
+        console.debug(`[partition-intent] ${opts.logLabel}: malformed`)
         return undefined
       }
-      console.log(
+      console.debug(
         `[partition-intent] ${opts.logLabel}: FOUND (gen ts=${parsed.data.generation.timestampMs} leasedUntil=${parsed.data.leasedUntil ?? "none"})`,
       )
       return parsed.data
@@ -412,7 +412,7 @@ async function readPartitionSoc(opts: {
         continue
       const timedOut =
         error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE
-      console.log(
+      console.debug(
         `[partition-intent] ${opts.logLabel}: ${
           timedOut
             ? `TIMEOUT (>${opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS}ms)`
@@ -620,7 +620,7 @@ export async function resolveIntentRound(opts: {
   } while (Date.now() < end)
 
   const outcome = beatenBy ? "lose" : "win"
-  console.log(
+  console.debug(
     `[partition-intent] round p=${opts.partition} self=${opts.deviceId} rivals=${rivals.length} polls=${polls} → ${outcome}` +
       (beatenBy
         ? ` (beaten by ${beatenBy.rivalId} via ${beatenBy.reason})`

@@ -25,7 +25,9 @@ import { PartitionContendedError } from "./batch-write-coordinator"
 // Mock Factories
 // ============================================================================
 
-function createMockStores() {
+function createMockStores(
+  accountOverrides?: Partial<ReturnType<typeof createPasskeyAccount>>,
+) {
   const connectedApp = createConnectedApp({ appSecret: undefined })
   const stamp = createPostageStamp()
   const account = createPasskeyAccount({
@@ -34,6 +36,7 @@ function createMockStores() {
     defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
     connectedApps: [connectedApp],
     postageStamps: [stamp],
+    ...accountOverrides,
   })
 
   const accountsStore: AccountsStoreInterface = {
@@ -306,6 +309,38 @@ describe("createSyncAccount", () => {
     expect(view.connectedApps[0].appName).toBe("Test App")
     expect(view.postageStamps).toHaveLength(1)
     expect(view.postageStamps[0].depth).toBe(20)
+  })
+
+  it("keeps an unedited scalar's clock at createdAt, not lastModified", async () => {
+    // The account was created long ago and NEVER renamed (accountNameAt unset),
+    // but a later edit to a different field bumped lastModified. The published
+    // view's scalar clocks must stay at the stable createdAt — restamping them
+    // with a fresh lastModified would let this device clobber a peer's genuine
+    // concurrent rename / default-stamp / settings change under per-field LWW
+    // (§9.3, the hazard accountStateToDeviceView's createdAt fallback guards).
+    const CREATED_AT = 1_000
+    const LAST_MODIFIED = 5_000
+    const stores = createMockStores({
+      createdAt: CREATED_AT,
+      lastModified: LAST_MODIFIED,
+      // accountNameAt / defaultStampAt / settingsAt intentionally unset.
+    })
+
+    const syncAccount = createSyncAccount({
+      bee: createMockBee(),
+      ...stores,
+      utilizationStore: {} as UtilizationStoreDB,
+      utilizationUploader: {
+        scheduleUpload: vi.fn().mockResolvedValue(undefined),
+      } as unknown as DebouncedUtilizationUploader,
+    })
+
+    await syncAccount(TEST_ETH_ADDRESS_HEX)
+
+    const view = deserializeDeviceState(capturedUploads[0])
+    expect(view.accountName.at).toBe(CREATED_AT)
+    expect(view.defaultPostageStampBatchID.at).toBe(CREATED_AT)
+    expect(view.settings.at).toBe(CREATED_AT)
   })
 
   it("should return undefined when account not found", async () => {

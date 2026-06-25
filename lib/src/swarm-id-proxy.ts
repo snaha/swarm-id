@@ -1375,9 +1375,12 @@ export class SwarmIdProxy {
           defaultPostageStampBatchID: defaultStampBatchID.toHex(),
           publicKey: account.publicKey,
           settings: account.settings,
-          accountNameAt: account.accountNameAt ?? account.lastModified,
-          defaultStampAt: account.defaultStampAt ?? account.lastModified,
-          settingsAt: account.settingsAt ?? account.lastModified,
+          // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
+          // device editing a *different* field must not restamp an unchanged
+          // scalar and clobber a peer's concurrent edit under per-field LWW (§9.3).
+          accountNameAt: account.accountNameAt ?? account.createdAt,
+          defaultStampAt: account.defaultStampAt ?? account.createdAt,
+          settingsAt: account.settingsAt ?? account.createdAt,
           createdAt: account.createdAt,
           lastModified: Date.now(),
           devices: account.devices,

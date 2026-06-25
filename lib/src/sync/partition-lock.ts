@@ -167,7 +167,7 @@ export async function readPartitionLock(opts: {
     // A payload that doesn't match the schema (foreign/corrupt/old format)
     // is treated the same as a missing lock — see the catch below.
     if (!parsed.success) {
-      console.warn(
+      console.debug(
         `[partition-lock] read p=${partition}: SOC present but payload failed schema validation — treating as no lock`,
       )
       return undefined
@@ -180,7 +180,9 @@ export async function readPartitionLock(opts: {
     // for a lock another device DID write is the suspected cross-device
     // dual-acquire cause, and must be distinguishable from a genuine "no lock".
     const reason = error instanceof Error ? error.message : String(error)
-    console.warn(`[partition-lock] read p=${partition}: unreadable — ${reason}`)
+    console.debug(
+      `[partition-lock] read p=${partition}: unreadable — ${reason}`,
+    )
     return undefined
   }
 }
