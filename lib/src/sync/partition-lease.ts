@@ -318,6 +318,13 @@ export class PartitionLease {
 
     for (const { partition, deviceId, bucket, intent } of results) {
       if (!intent) continue
+      // An explicit release sentinel on the lock authoritatively freed this
+      // partition; ignore the just-released holder's lingering PRESENCE beacon
+      // (still within TTL/grace) so a peer can take over immediately — mirrors
+      // `refreshHoldersFromOccupancy`. Without this, the per-device presence
+      // channel re-marks a released partition held for up to a full lease TTL,
+      // defeating the fast-takeover the release sentinel exists to enable.
+      if (this.releasedPartitions.has(partition)) continue
       // A holder beacon carries `leasedUntil`; a pre-claim intent (the
       // symmetric-race announce) does NOT. Only a beacon means "this partition
       // is HELD" — a bare intent is a contender, left for the intent round to

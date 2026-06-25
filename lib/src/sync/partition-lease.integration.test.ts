@@ -1034,6 +1034,37 @@ describe("PartitionLease.release", () => {
     expect(rB.partition).toBe(0)
   })
 
+  it("a released partition is not re-marked held by the releaser's lingering presence beacon", async () => {
+    // After an explicit release, the releaser's last per-device PRESENCE beacon
+    // is still within its lease TTL at a live per-epoch address. A peer that
+    // KNOWS the releaser reads that beacon in `refreshHoldersFromPresence`; it
+    // must defer to the release sentinel (as the occupancy channel already does)
+    // and NOT show the partition as still held — otherwise the holder view, the
+    // UI Devices tab, and slot selection all treat a freed partition as taken.
+    const NOW = 1_000_000
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    await leaseA.acquire({ partitionCount: PARTITION_COUNT })
+    await leaseA.release(new Uint32Array(NUM_BUCKETS))
+
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    await leaseB.refreshFromSwarm(PARTITION_COUNT)
+    await leaseB.refreshHoldersFromPresence(PARTITION_COUNT)
+    await leaseB.refreshHoldersFromOccupancy(PARTITION_COUNT)
+
+    // DEVICE_A held only partition 0, then released it — no partition is held.
+    expect(leaseB.getHolders()).toEqual([])
+  })
+
   it("no-op when no lease is held", async () => {
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
     await expect(
