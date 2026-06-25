@@ -262,10 +262,20 @@ export const accountsStore = {
   addStamp(id: EthAddress, stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {
     const newStamp: PostageStamp = { ...stamp, createdAt: Date.now() }
     update(id, (account) => {
-      if (account.postageStamps.some((s) => s.batchID.equals(stamp.batchID))) {
+      const existing = account.postageStamps.find((s) => s.batchID.equals(stamp.batchID))
+      // A tombstoned (deleted) record is invisible in the UI, so re-adding the
+      // same on-chain batch must resurrect it, not throw — the fresh `createdAt`
+      // out-ranks the tombstone in `mergePostageStamps` so it re-activates across
+      // devices. Only an ACTIVE duplicate is a genuine conflict.
+      if (existing && !existing.deletedAt) {
         throw new Error(`Postage stamp with batch ID ${stamp.batchID.toHex()} already exists`)
       }
-      return { ...account, postageStamps: [...account.postageStamps, newStamp] }
+      return {
+        ...account,
+        postageStamps: existing
+          ? account.postageStamps.map((s) => (s.batchID.equals(stamp.batchID) ? newStamp : s))
+          : [...account.postageStamps, newStamp],
+      }
     })
     return newStamp
   },

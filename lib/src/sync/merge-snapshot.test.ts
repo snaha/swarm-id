@@ -199,6 +199,25 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     expect(result.postageStamps[0].deletedAt).toBe(5_000_000)
   })
 
+  it("a fresh re-add (createdAt newer than the tombstone) resurrects a deleted stamp", () => {
+    // The stamp was deleted (deletedAt 5M) then the same batch re-added with a
+    // fresh createdAt (9M > 5M). The re-add must win so it re-activates — mirrors
+    // device resurrection via a newer lastSignedInAt.
+    const batchHex = "ff".repeat(32)
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 5_000_000,
+    }
+    const readded = makeStamp(batchHex, 9_000_000)
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [readded] }), // local: re-added (newer)
+      makeSnapshot({ postageStamps: [tombstone] }), // remote: still deleted (older)
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].deletedAt).toBeUndefined()
+    expect(result.postageStamps[0].createdAt).toBe(9_000_000)
+  })
+
   it("unions connectedApps by appUrl", () => {
     const a = makeConnectedApp("https://app-a.example")
     const b = makeConnectedApp("https://app-b.example")

@@ -16,7 +16,8 @@
  *   older sign-in and a newer sign-in re-activates a removed device.
  * - `connectedApps`: last-writer-wins per `appUrl` (with `revokedAt` tombstone).
  * - `postageStamps`: last-writer-wins per `batchID` with a `deletedAt`
- *   tombstone (recency `deletedAt ?? createdAt`), so deletions propagate.
+ *   tombstone (recency `max(deletedAt, createdAt)`), so deletions propagate and
+ *   a fresh re-add (newer `createdAt`) re-activates a deleted stamp.
  * - `metadata.accountName`, `metadata.defaultPostageStampBatchID`,
  *   `metadata.partitionCount`: local wins. These are scalar fields set
  *   by user actions.
@@ -109,10 +110,13 @@ export function mergePostageStamps(
 ): PostageStamp[] {
   const keyOf = (s: PostageStamp) => s.batchID.toHex()
   // Last-writer-wins per batch so deletions propagate: a delete is a tombstone
-  // (`deletedAt`) and a `batchID` is immutable, so `deletedAt` always exceeds
-  // the original `createdAt` and the tombstone supersedes any active copy.
-  // Deleted stamps are kept (the tombstone keeps propagating).
-  const recency = (s: PostageStamp) => s.deletedAt ?? s.createdAt
+  // (`deletedAt`), and the recency clock is `max(deletedAt, createdAt)` —
+  // mirroring `mergeDevicesList`. A delete beats an older add, while a fresh
+  // re-add (a new `createdAt` later than the tombstone) re-activates the stamp,
+  // matching device resurrection. A stale active copy (older `createdAt`) still
+  // loses to the tombstone, so deletions keep propagating. Deleted stamps are
+  // kept (the tombstone keeps propagating until a re-add supersedes it).
+  const recency = (s: PostageStamp) => Math.max(s.deletedAt ?? 0, s.createdAt)
   const merged = new Map<string, PostageStamp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
