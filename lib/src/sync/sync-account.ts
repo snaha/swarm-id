@@ -377,9 +377,9 @@ export function createSyncAccount(
       }, SYNC_TIMEOUT_MS)
     })
 
-    // Build this device's view + registry seed from the captured snapshot.
-    // Phase 3a: scalars share the snapshot's `lastModified` clock; true per-field
-    // clocks are a follow-up (the wire format already carries them).
+    // Build this device's view + registry seed from the captured snapshot. Each
+    // scalar carries its own per-field LWW clock (set by the store on edit); the
+    // snapshot's `lastModified` is only the fallback for a never-edited field.
     const deviceId = getOrCreateDeviceId()
     const thisDevice = state.metadata.devices.find(
       (d) => d.deviceId === deviceId,
