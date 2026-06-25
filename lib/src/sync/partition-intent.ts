@@ -514,6 +514,15 @@ export async function resolveIntentRound(opts: {
   guardWindowMs?: number
   /** Interval between polls within the guard window. */
   guardPollMs?: number
+  /**
+   * Release WATERMARK for this partition, when the caller observed it freed by
+   * an explicit release sentinel. A rival's live presence beacon at or below
+   * this generation is the just-released holder's lingering GHOST (still within
+   * its lease TTL at a live per-epoch address, but no longer a claim), so it
+   * must NOT lose us the round. A genuine post-release claimant has a strictly
+   * newer generation and still beats us. Omitted → every live beacon counts.
+   */
+  releasedGeneration?: PartitionLockGeneration
 }): Promise<"win" | "lose"> {
   const rivals = opts.knownDeviceIds.filter((id) => id !== opts.deviceId)
   if (rivals.length === 0) return "win"
@@ -569,8 +578,18 @@ export async function resolveIntentRound(opts: {
       const intent = r.intent
       if (!intent) continue
       if (intent.leasedUntil !== undefined) {
-        if (intent.leasedUntil > opts.now - INTENT_LIVENESS_GRACE_MS)
+        if (intent.leasedUntil > opts.now - INTENT_LIVENESS_GRACE_MS) {
+          // A beacon at or below an observed release watermark is the
+          // just-released holder's stale ghost — not a live claim. Ignore it so
+          // a peer can take over the freed partition; a genuine post-release
+          // claimant (strictly newer generation) still beats us below.
+          if (
+            opts.releasedGeneration &&
+            compareGenerations(intent.generation, opts.releasedGeneration) <= 0
+          )
+            continue
           return { rivalId: r.rivalId, reason: "live-beacon" }
+        }
         continue
       }
       if (compareGenerations(intent.generation, opts.generation) < 0)

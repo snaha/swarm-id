@@ -45,6 +45,7 @@ vi.mock("./partition-state", async (importOriginal) => {
 import { PartitionLease } from "./partition-lease"
 import {
   acquirePartitionLock,
+  deviceHomePartition,
   makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
   readPartitionLock,
@@ -1063,6 +1064,41 @@ describe("PartitionLease.release", () => {
 
     // DEVICE_A held only partition 0, then released it — no partition is held.
     expect(leaseB.getHolders()).toEqual([])
+  })
+
+  it("a peer that KNOWS the releaser acquires the released partition and keeps it across a refresh", async () => {
+    // End-to-end of the release-ghost problem: after A releases p0, B (which
+    // knows A) must (1) win the intent round despite A's lingering presence
+    // beacon and (2) NOT be displaced by that same ghost on its next refresh.
+    // Both the intent round and the refresh displacement checks must honor the
+    // release watermark (A's ghost generation), not just the holder-detection.
+    // Precondition: B's deterministic scan starts at the released partition, so
+    // it actually contends for p0 (else it would pick a different free slot).
+    expect(deviceHomePartition(DEVICE_B, PARTITION_COUNT)).toBe(0)
+
+    const NOW = 1_000_000
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    await leaseA.acquire({ partitionCount: PARTITION_COUNT })
+    await leaseA.release(new Uint32Array(NUM_BUCKETS))
+
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    // (1) Intent round: B wins p0 rather than backing off to read-only.
+    const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
+    expect(rB.partition).toBe(0)
+    expect(rB.isReadOnly).toBe(false)
+
+    // (2) Displacement check: A's ghost (older generation) must not displace B.
+    expect(await leaseB.refresh()).toBe("held")
   })
 
   it("no-op when no lease is held", async () => {

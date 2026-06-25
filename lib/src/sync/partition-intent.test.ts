@@ -444,4 +444,54 @@ describe("resolveIntentRound", () => {
     // It actually waited out the window (didn't bind on the first immediate read).
     expect(Date.now() - t0).toBeGreaterThanOrEqual(100)
   })
+
+  it("wins over a live beacon at or below the release watermark (stale ghost)", async () => {
+    // DEVICE_A's lingering presence beacon after it released this partition: a
+    // live beacon (leasedUntil > now) carrying the released claim's generation.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(1000, DEVICE_A),
+      leasedUntil: NOW + INTENT_EPOCH_MS,
+    })
+    const outcome = await resolveIntentRound({
+      ...common(),
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B],
+      // The caller observed this partition freed by A's release sentinel at
+      // exactly this generation — A's lingering beacon is its ghost, not a claim.
+      releasedGeneration: gen(1000, DEVICE_A),
+    })
+    expect(outcome).toBe("win")
+  })
+
+  it("loses to a live beacon strictly newer than the release watermark (genuine post-release holder)", async () => {
+    // A different device legitimately claimed the partition AFTER the release we
+    // observed — its beacon outranks the watermark and must still beat us.
+    await writePartitionIntent({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      deviceId: DEVICE_A,
+      epochBucket: intentEpochBucket(NOW),
+      generation: gen(3000, DEVICE_A),
+      leasedUntil: NOW + INTENT_EPOCH_MS,
+    })
+    const outcome = await resolveIntentRound({
+      ...common(),
+      deviceId: DEVICE_B,
+      generation: gen(2000, DEVICE_B),
+      knownDeviceIds: [DEVICE_A, DEVICE_B],
+      releasedGeneration: gen(1000, DEVICE_A),
+    })
+    expect(outcome).toBe("lose")
+  })
 })

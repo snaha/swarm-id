@@ -135,12 +135,17 @@ export class PartitionLease {
   private holders = new Map<number, PartitionHolderEntry>()
   /**
    * Partitions whose lock SOC carried an explicit NO_HOLDER release sentinel in
-   * the last `refreshFromSwarm()`. An authoritative "free" — distinct from a
-   * stale/expired lock — so `refreshHoldersFromOccupancy` must NOT let a
-   * lingering occupancy beacon (the just-released holder's, still within TTL)
-   * re-mark it held and block an immediate takeover after release.
+   * the last `refreshFromSwarm()`, mapped to the RELEASED claim's generation —
+   * the release WATERMARK. An authoritative "free" — distinct from a
+   * stale/expired lock — so the holder-detection paths
+   * (`refreshHoldersFromPresence` / `refreshHoldersFromOccupancy`) must NOT let
+   * a lingering beacon (the just-released holder's, still within TTL) re-mark it
+   * held and block an immediate takeover. The generation watermark additionally
+   * lets the intent round and the `refresh()` displacement checks
+   * (`beaconOutranksRelease`) tell that holder's stale GHOST beacon (gen ≤
+   * watermark) from a genuine post-release claimant (gen > watermark).
    */
-  private releasedPartitions = new Set<number>()
+  private releasedPartitions = new Map<number, PartitionLockGeneration>()
   /**
    * Set at the start of `release()` (the lease session is closing) and
    * cleared by the next `acquire()`. While set, an overlapping `refresh()`
@@ -248,7 +253,7 @@ export class PartitionLease {
       }
       if (lock.holderDeviceId === NO_HOLDER_DEVICE_ID) {
         console.log(`[PartitionLease] refresh p=${p}: released sentinel`)
-        this.releasedPartitions.add(p)
+        this.releasedPartitions.set(p, lock.generation)
         continue
       }
       const self = lock.holderDeviceId === this.opts.deviceId ? " (self)" : ""
@@ -618,6 +623,10 @@ export class PartitionLease {
         timeoutMs: this.opts.intentReadTimeoutMs,
         guardWindowMs: this.opts.intentGuardWindowMs ?? INTENT_GUARD_WINDOW_MS,
         guardPollMs: this.opts.intentGuardPollMs ?? INTENT_GUARD_POLL_MS,
+        // If the chosen partition was just released, its prior holder's lingering
+        // presence beacon must not lose us the round — only a claim NEWER than
+        // the release watermark counts as a live holder.
+        releasedGeneration: this.releasedPartitions.get(partition),
       })
       if (outcome === "lose") {
         console.warn(
@@ -815,7 +824,31 @@ export class PartitionLease {
       (intent) =>
         intent?.leasedUntil !== undefined &&
         intent.leasedUntil > now - INTENT_LIVENESS_GRACE_MS &&
-        compareGenerations(intent.generation, ourGeneration) < 0,
+        compareGenerations(intent.generation, ourGeneration) < 0 &&
+        this.beaconOutranksRelease(partition, intent.generation),
+    )
+  }
+
+  /**
+   * Whether a foreign live beacon represents a real claim rather than the
+   * just-released holder's stale GHOST. A beacon outranks the partition's
+   * observed release only if its generation is STRICTLY NEWER than the released
+   * claim's (the watermark recorded by `refreshFromSwarm`). At or below the
+   * watermark the beacon is the lingering presence/occupancy SOC the releaser
+   * left behind — still within its lease TTL at a live per-epoch address, but no
+   * longer a claim — so it must not block/displace a peer taking over the freed
+   * partition. A genuine post-release claimant always has a newer generation
+   * (current timestamp ≫ the old watermark under the clock-sync assumption), so
+   * it is still honored — no dual-acquire regression. No watermark → outranks.
+   */
+  private beaconOutranksRelease(
+    partition: number,
+    beaconGeneration: PartitionLockGeneration,
+  ): boolean {
+    const releasedGen = this.releasedPartitions.get(partition)
+    return (
+      releasedGen === undefined ||
+      compareGenerations(beaconGeneration, releasedGen) > 0
     )
   }
 
@@ -858,7 +891,8 @@ export class PartitionLease {
         occupancy.deviceId !== this.opts.deviceId &&
         occupancy.leasedUntil !== undefined &&
         occupancy.leasedUntil > now - INTENT_LIVENESS_GRACE_MS &&
-        compareGenerations(occupancy.generation, ourGeneration) < 0,
+        compareGenerations(occupancy.generation, ourGeneration) < 0 &&
+        this.beaconOutranksRelease(partition, occupancy.generation),
     )
   }
 
