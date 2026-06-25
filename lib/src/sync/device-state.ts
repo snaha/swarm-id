@@ -305,6 +305,8 @@ export function foldAccount(
     settingsAt: settings.at,
     createdAt: Number.isFinite(createdAt) ? createdAt : Date.now(),
     publicKey: meta?.accountPublicKey,
+    // No per-field clock needed: partitionCount is a fixed constant
+    // (PARTITION_COUNT, set once at account creation), identical across devices.
     partitionCount: meta?.partitionCount ?? 1,
   }
 }

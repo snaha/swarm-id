@@ -82,15 +82,21 @@ describe("readRoster — windowed-parallel scan", () => {
     ])
   })
 
-  it("stops at the first gap WITHIN the first window", async () => {
-    // 0,1 present, 2 missing, 3 present — must stop at 2 (contiguous prefix only).
+  it("skips a transient hole and keeps later entries (no truncation)", async () => {
+    // 0,1 present, 2 missing (transient read failure), 3 present. A contiguous
+    // roster can't have a real entry past a real gap, so index 2 is transient —
+    // dev-3 must survive instead of being dropped with the rest of the tail.
     const bee = fakeBee(new Set([0, 1, 3]))
     const devices = await readRoster({
       bee: bee as never,
       accountId: ACCOUNT_ID,
       owner: OWNER,
     })
-    expect(devices.map((d) => d.deviceId).sort()).toEqual(["dev-0", "dev-1"])
+    expect(devices.map((d) => d.deviceId).sort()).toEqual([
+      "dev-0",
+      "dev-1",
+      "dev-3",
+    ])
   })
 
   it("crosses a full first window into the second before the gap", async () => {

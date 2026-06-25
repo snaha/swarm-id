@@ -107,9 +107,13 @@ export async function readRoster(opts: {
 }): Promise<Device[]> {
   const topic = rosterTopic(opts.accountId)
   let devices: Device[] = []
-  // Scan in parallel windows. The roster is append-only and contiguous, so the
-  // "stop at the first empty slot" semantics are preserved by folding the
-  // contiguous present prefix of each window and stopping at the first gap.
+  // Scan in parallel windows. Appends are contiguous (the same-index race
+  // re-adds at the new tail, never leaving a permanent hole), so no real entry
+  // lives past the true end. A hole *inside* an otherwise-present window is
+  // therefore a transient read failure — the exact caching-gateway failure this
+  // roster exists to survive — so we skip it and keep folding later entries
+  // rather than truncating every device after it. Only a FULLY empty window
+  // means we have scanned past the end of the feed.
   for (let base = 0; base < MAX_ROSTER_SCAN; base += ROSTER_SCAN_WINDOW) {
     const indices = Array.from(
       { length: Math.min(ROSTER_SCAN_WINDOW, MAX_ROSTER_SCAN - base) },
@@ -120,15 +124,10 @@ export async function readRoster(opts: {
         readRosterEntry({ bee: opts.bee, topic, owner: opts.owner, index }),
       ),
     )
-    let hitGap = false
     for (const entry of entries) {
-      if (!entry) {
-        hitGap = true
-        break
-      }
-      devices = mergeDevicesList(devices, [entry])
+      if (entry) devices = mergeDevicesList(devices, [entry])
     }
-    if (hitGap) break
+    if (entries.every((entry) => !entry)) break
   }
   return devices
 }
