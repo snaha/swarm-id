@@ -53,9 +53,12 @@ export async function getMasterKeyFromAccount(account: Account): Promise<Bytes> 
   } else if (account.type === 'agent') {
     // Agent accounts require the caller to collect the seed phrase via UI
     throw new SeedPhraseRequiredError(account.id.toString())
-  } else {
+  } else if (account.type === 'ethereum') {
     const signed = await connectAndSign()
     const encryptionKey = await deriveEncryptionKey(signed.publicKey, account.encryptionSalt)
     return await decryptMasterKey(account.encryptedMasterKey, encryptionKey)
+  } else {
+    // `local` accounts belong to the new UI and are never created here.
+    throw new Error('Unsupported account type for this app.')
   }
 }

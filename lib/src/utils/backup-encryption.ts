@@ -65,12 +65,22 @@ export const AgentBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
   accountType: z.literal("agent"),
 })
 
+/**
+ * Local account backup header. Like the agent header, it carries no key
+ * material: the seed is re-entered (or re-derived from the recovery phrase) on
+ * import, so only the account name + timestamp travel in plaintext.
+ */
+export const LocalBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
+  accountType: z.literal("local"),
+})
+
 export const EncryptedSwarmIdExportSchemaV1 = z.discriminatedUnion(
   "accountType",
   [
     PasskeyBackupHeaderSchemaV1,
     EthereumBackupHeaderSchemaV1,
     AgentBackupHeaderSchemaV1,
+    LocalBackupHeaderSchemaV1,
   ],
 )
 
@@ -81,6 +91,7 @@ export const EncryptedSwarmIdExportSchemaV1 = z.discriminatedUnion(
 export type PasskeyBackupHeader = z.infer<typeof PasskeyBackupHeaderSchemaV1>
 export type EthereumBackupHeader = z.infer<typeof EthereumBackupHeaderSchemaV1>
 export type AgentBackupHeader = z.infer<typeof AgentBackupHeaderSchemaV1>
+export type LocalBackupHeader = z.infer<typeof LocalBackupHeaderSchemaV1>
 export type EncryptedSwarmIdExport = z.infer<
   typeof EncryptedSwarmIdExportSchemaV1
 >
@@ -178,6 +189,7 @@ export type BackupHeaderWithoutCiphertext =
   | Omit<PasskeyBackupHeader, "ciphertext">
   | Omit<EthereumBackupHeader, "ciphertext">
   | Omit<AgentBackupHeader, "ciphertext">
+  | Omit<LocalBackupHeader, "ciphertext">
 
 export function buildBackupHeader(
   account: Account,
@@ -202,6 +214,11 @@ export function buildBackupHeader(
       accountType: "ethereum" as const,
       ethereumAddress: account.ethereumAddress.toHex(),
     }
+  }
+
+  if (account.type === "local") {
+    // No key material — the seed is re-entered/derived on import (like agent).
+    return { ...base, accountType: "local" as const }
   }
 
   // agent — no extra fields

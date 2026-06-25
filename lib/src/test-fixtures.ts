@@ -10,6 +10,7 @@ import type {
   PasskeyAccount,
   EthereumAccount,
   AgentAccount,
+  LocalAccount,
   ConnectedApp,
   PostageStamp,
 } from "./schemas"
@@ -79,6 +80,24 @@ export function createAgentAccount(
     name: "Test Agent Account",
     createdAt: 1700000000000,
     type: "agent" as const,
+    derivationKey: TEST_DERIVATION_KEY_HEX,
+    devices: [],
+    connectedApps: [],
+    postageStamps: [],
+    ...overrides,
+  }
+}
+
+export function createLocalAccount(
+  overrides?: Partial<LocalAccount>,
+): LocalAccount {
+  return {
+    id: new EthAddress(TEST_ETH_ADDRESS_HEX),
+    name: "Test Local Account",
+    createdAt: 1700000000000,
+    type: "local" as const,
+    access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
+    encryptedSeed: "aabbccdd",
     derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
     connectedApps: [],

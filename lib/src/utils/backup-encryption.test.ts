@@ -21,6 +21,7 @@ import {
   createPasskeyAccount,
   createEthereumAccount,
   createAgentAccount,
+  createLocalAccount,
   createConnectedApp,
   createPostageStamp,
 } from "../test-fixtures"
@@ -105,6 +106,27 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     if (!result.success) return
 
     expect(result.data.metadata.accountName).toBe("Test Agent Account")
+  })
+
+  it("should round-trip a local account", async () => {
+    const account = createLocalAccount()
+
+    const encrypted = await createEncryptedExport(
+      account,
+      TEST_DERIVATION_KEY_HEX,
+    )
+
+    expect(encrypted.accountType).toBe("local")
+
+    const result = await decryptEncryptedExport(
+      encrypted,
+      TEST_DERIVATION_KEY_HEX,
+    )
+
+    expect(result.success).toBe(true)
+    if (!result.success) return
+
+    expect(result.data.metadata.accountName).toBe("Test Local Account")
   })
 
   it("should survive JSON serialization (file I/O simulation)", async () => {
@@ -263,6 +285,16 @@ describe("buildBackupHeader", () => {
     expect(header).not.toHaveProperty("ethereumAddress")
     expect(header).not.toHaveProperty("encryptedMasterKey")
     expect(header).not.toHaveProperty("encryptionSalt")
+  })
+
+  it("should carry no key material for local accounts", () => {
+    const header = buildBackupHeader(createLocalAccount())
+
+    expect(header.accountType).toBe("local")
+    // Device-local access material must never leave in the plaintext header.
+    expect(header).not.toHaveProperty("access")
+    expect(header).not.toHaveProperty("encryptedSeed")
+    expect(header).not.toHaveProperty("credentialId")
   })
 })
 

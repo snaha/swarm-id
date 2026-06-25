@@ -25,11 +25,11 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { Account } from '$lib/types'
-  import { notImplemented, truncateAddress } from '$lib/utils'
+  import type { Account, LocalAccount } from '$lib/types'
+  import { display0x, notImplemented, truncateAddress } from '$lib/utils'
 
   let missingRequest = $state(false)
-  let unlocking = $state<Account | undefined>(undefined)
+  let unlocking = $state<LocalAccount | undefined>(undefined)
   let pendingCeremony = $state(false)
   let busy = $state(false)
   let password = $state('')
@@ -76,12 +76,12 @@
   })
 
   async function select(account: Account) {
-    if (!request) {
+    if (!request || account.type !== 'local') {
       return
     }
     // A still-valid prior connection carries the secret — no unlock needed.
     if (reuseConnection(account, request)) {
-      sessionStore.setCurrentAccount(account.id)
+      sessionStore.setCurrentAccount(account.id.toHex())
       await goto(resolve(routes.CONNECT_DONE))
       return
     }
@@ -111,7 +111,7 @@
         return
       }
       await completeConnect(account, entropy, request)
-      sessionStore.setCurrentAccount(account.id)
+      sessionStore.setCurrentAccount(account.id.toHex())
       unlocking = undefined
       password = ''
       await goto(resolve(routes.CONNECT_DONE))
@@ -170,21 +170,21 @@
               <Tabs tabs={TABS} bind:value={() => activeTab, (value) => (selectedTab = value)} />
             {/if}
             <div class="flex w-full flex-col rounded-lg border p-1">
-              {#each shownAccounts as account (account.id)}
+              {#each shownAccounts as account (account.id.toHex())}
                 <button
                   type="button"
                   class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm outline-none"
                   onclick={() => select(account)}
                 >
                   <Polycon
-                    value={account.id}
+                    value={account.id.toHex()}
                     size={32}
                     class="shrink-0 overflow-hidden rounded-md"
                   />
                   <span class="flex min-w-0 flex-col">
                     <span class="truncate font-medium">{account.name}</span>
                     <span class="text-muted-foreground text-xs">
-                      {truncateAddress(account.id)}
+                      {truncateAddress(display0x(account.id))}
                     </span>
                   </span>
                 </button>

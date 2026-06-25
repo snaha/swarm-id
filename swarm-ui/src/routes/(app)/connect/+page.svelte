@@ -342,7 +342,7 @@
     <Typography variant="h3">Error</Typography>
     <Typography>{error}</Typography>
   </Vertical>
-{:else if isAuthenticating && selected}
+{:else if isAuthenticating && selected && selected.type !== 'local'}
   <Confirmation authenticationType={selected.type} />
 {:else if selected && authenticated}
   <Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">

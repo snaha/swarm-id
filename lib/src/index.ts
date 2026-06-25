@@ -170,6 +170,7 @@ export {
   PasskeyBackupHeaderSchemaV1,
   EthereumBackupHeaderSchemaV1,
   AgentBackupHeaderSchemaV1,
+  LocalBackupHeaderSchemaV1,
   EncryptedSwarmIdExportSchemaV1,
 } from "./utils/backup-encryption"
 
@@ -177,6 +178,7 @@ export type {
   PasskeyBackupHeader,
   EthereumBackupHeader,
   AgentBackupHeader,
+  LocalBackupHeader,
   EncryptedSwarmIdExport,
   BackupHeaderWithoutCiphertext,
   ParseHeaderResult,
@@ -326,6 +328,8 @@ export type {
   PasskeyAccount,
   EthereumAccount,
   AgentAccount,
+  LocalAccount,
+  AccessMethod,
   ConnectedApp,
   PostageStamp,
   AccountMetadata,
@@ -338,6 +342,9 @@ export {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
   NetworkSettingsSchemaV1,
+  AccountSchemaV1,
+  LocalAccountSchemaV1,
+  AccessMethodSchemaV1,
 } from "./schemas"
 
 // Base validation schemas and types

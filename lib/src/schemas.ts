@@ -243,12 +243,50 @@ export const AgentAccountSchemaV1 = CommonAccountSchemaV1.extend({
 })
 
 /**
+ * Access Method Schema V1
+ *
+ * How a `local` account's encrypted seed is unlocked on this device. Mirrors
+ * the identity UI's access methods. Fields are device-local crypto material
+ * (plain hex / numbers) — never bee-js byte classes — so they round-trip as-is.
+ */
+export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("passkey"), credentialId: z.string() }),
+  z.object({
+    type: z.literal("eth-wallet"),
+    walletAddress: z.string(),
+    encryptionSalt: z.string(),
+  }),
+  z.object({
+    type: z.literal("password"),
+    kdfSalt: z.string(),
+    kdfIterations: z.number(),
+  }),
+])
+
+/**
+ * Local Account Schema V1
+ *
+ * A device-local account whose BIP-39 entropy is encrypted at rest with a
+ * device-local access method (passkey / eth-wallet / password). This is the
+ * model the identity UI (`@swarm-id/ui`) creates and unlocks. Like every
+ * account it carries a `derivationKey` (computed from the master key at
+ * creation time); the seed itself is held only as `encryptedSeed`.
+ */
+export const LocalAccountSchemaV1 = CommonAccountSchemaV1.extend({
+  type: z.literal("local"),
+  access: AccessMethodSchemaV1,
+  // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
+  encryptedSeed: z.string(),
+})
+
+/**
  * Account Schema V1 (discriminated union)
  */
 export const AccountSchemaV1 = z.discriminatedUnion("type", [
   PasskeyAccountSchemaV1,
   EthereumAccountSchemaV1,
   AgentAccountSchemaV1,
+  LocalAccountSchemaV1,
 ])
 
 // ============================================================================
@@ -308,6 +346,8 @@ export type Device = z.infer<typeof DeviceSchemaV1>
 export type PasskeyAccount = z.infer<typeof PasskeyAccountSchemaV1>
 export type EthereumAccount = z.infer<typeof EthereumAccountSchemaV1>
 export type AgentAccount = z.infer<typeof AgentAccountSchemaV1>
+export type LocalAccount = z.infer<typeof LocalAccountSchemaV1>
+export type AccessMethod = z.infer<typeof AccessMethodSchemaV1>
 export type Account = z.infer<typeof AccountSchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>

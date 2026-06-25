@@ -16,6 +16,7 @@
   import type { Account } from '$lib/types'
 
   const DEFAULT_CONNECTION_DAYS = 30
+  const MS_PER_DAY = 24 * 60 * 60 * 1000
   const DURATION_OPTIONS = [
     { value: '1', label: '1 day' },
     { value: '7', label: '7 days' },
@@ -31,7 +32,17 @@
 
   let { account }: Props = $props()
 
-  let connectionDays = $derived(String(account.appConnectionDays ?? DEFAULT_CONNECTION_DAYS))
+  // Connection lifetime is stored in ms (`settings.appSessionDuration`); the UI
+  // works in days.
+  let connectionDays = $derived(
+    String(
+      account.settings?.appSessionDuration !== undefined
+        ? Math.round(account.settings.appSessionDuration / MS_PER_DAY)
+        : DEFAULT_CONNECTION_DAYS,
+    ),
+  )
+  // Revoked tombstones stay in the record for sync; only show live entries.
+  const activeApps = $derived(account.connectedApps.filter((app) => !app.revokedAt))
   let openMenuFor = $state<string | undefined>(undefined)
 
   function isConnected(connectedUntil: number | undefined): boolean {
@@ -45,16 +56,13 @@
   }
 
   function disconnect(appUrl: string) {
-    // Revoke the shared record too — it holds the app secret the dApp's proxy
-    // iframe authenticates from; the UI-local store is just the display copy.
+    // Drops the app secret the dApp's proxy iframe authenticates from.
     disconnectSharedConnection(account, appUrl)
-    accountsStore.disconnectApp(account.id, appUrl)
     openMenuFor = undefined
   }
 
   function remove(appUrl: string) {
     removeSharedConnection(account, appUrl)
-    accountsStore.removeApp(account.id, appUrl)
     openMenuFor = undefined
   }
 </script>
@@ -74,11 +82,11 @@
 
   <div class="bg-border h-px w-full"></div>
 
-  {#if account.connectedApps.length === 0}
+  {#if activeApps.length === 0}
     <p class="text-muted-foreground py-8 text-center text-sm">No connected apps yet.</p>
   {:else}
     <div class="flex w-full flex-col">
-      {#each account.connectedApps as app (app.appUrl)}
+      {#each activeApps as app (app.appUrl)}
         <div class="border-border flex w-full items-center gap-3 border-b py-2.5">
           <AppIcon src={app.appIcon} name={app.appName} size={40} />
           <div class="flex min-w-0 flex-1 flex-col">

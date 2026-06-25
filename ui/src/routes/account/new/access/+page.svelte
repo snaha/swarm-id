@@ -6,10 +6,12 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
+  import { EthAddress } from '@ethersphere/bee-js'
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import Eye from '@lucide/svelte/icons/eye'
   import EyeOff from '@lucide/svelte/icons/eye-off'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
+  import { PARTITION_COUNT, deriveAccountDerivationKey } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -27,13 +29,14 @@
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
   import { bytesToHex } from '$lib/crypto/hex'
-  import { walletFromPhrase } from '$lib/crypto/mnemonic'
+  import { privateKeyFromEntropy, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { AccessMethod } from '$lib/types'
+  import type { AccessMethod, LocalAccount } from '$lib/types'
+  import { bareHex } from '$lib/utils'
 
   const MIN_PASSWORD_LENGTH = 8
   const TABS = [
@@ -83,22 +86,29 @@
     }
     const wallet = walletFromPhrase(draft.phrase)
     // Carry over data from a restore, or from an existing record for the same
-    // address — re-importing a phrase must not wipe stamps or connected apps.
+    // address — re-importing a phrase must not wipe drives or connected apps.
     const carried = draft.restored ?? accountsStore.get(wallet.address)
-    const account = {
-      id: wallet.address,
+    // The derivation key is computed from the master key (the wallet private
+    // key) while the entropy is in hand — the same chain the proxy/sync use.
+    const masterKey = bareHex(privateKeyFromEntropy(wallet.entropy))
+    const account: LocalAccount = {
+      type: 'local',
+      id: new EthAddress(bareHex(wallet.address)),
       name: draft.name,
-      publicKey: wallet.publicKey,
+      publicKey: bareHex(wallet.publicKey),
       createdAt: carried?.createdAt ?? Date.now(),
+      derivationKey: await deriveAccountDerivationKey(masterKey),
       access,
       encryptedSeed: await encryptSeed(wallet.entropy, key),
-      appConnectionDays: carried?.appConnectionDays,
-      defaultStampBatchId: carried?.defaultStampBatchId,
-      stamps: carried?.stamps ?? [],
+      settings: carried?.settings,
+      defaultPostageStampBatchID: carried?.defaultPostageStampBatchID,
+      devices: carried?.devices ?? [],
       connectedApps: carried?.connectedApps ?? [],
+      postageStamps: carried?.postageStamps ?? [],
+      partitionCount: carried?.partitionCount ?? PARTITION_COUNT,
     }
     accountsStore.add(account)
-    sessionStore.setCurrentAccount(wallet.address)
+    sessionStore.setCurrentAccount(account.id.toHex())
     const flow = draft.flow
 
     // Came from a dApp connect popup — finish the handshake and hand back.

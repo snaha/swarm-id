@@ -87,6 +87,13 @@ export function serializeAccount(account: Account): Record<string, unknown> {
         account.encryptedSecretSeed.toUint8Array(),
       ),
     }
+  } else if (account.type === "local") {
+    // `access` is plain JSON (no byte classes); persist it and the seed as-is.
+    return {
+      ...common,
+      access: account.access,
+      encryptedSeed: account.encryptedSeed,
+    }
   } else {
     return common
   }

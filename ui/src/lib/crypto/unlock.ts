@@ -17,6 +17,9 @@ import type { Account } from '$lib/types'
  * or wallet.
  */
 export async function unlockAccount(account: Account, password?: string): Promise<Uint8Array> {
+  if (account.type !== 'local') {
+    throw new Error('Account has no device-local access method.')
+  }
   const access = account.access
 
   let key: CryptoKey
