@@ -1,7 +1,7 @@
 # Account state — the nested account document and how it converges across devices
 
 Status: **implemented.** This describes the current account-state model and its multi-device sync. The
-*write coordination* it rides on (the cross-tab lock + partition lease) is documented separately in
+_write coordination_ it rides on (the cross-tab lock + partition lease) is documented separately in
 [`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md); the postage partitioning scheme it shares a
 batch with is in [`Postage-Batch-Partitioning.md`](./Postage-Batch-Partitioning.md).
 
@@ -26,17 +26,17 @@ There is no central authority and no Byzantine tolerance — see [Assumptions](#
 
 `Account` (`lib/src/types.ts` / `schemas.ts`), serialized by `serializeAccount`:
 
-| Field                                              | Notes                                                                            |
-| -------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `id`, `name`, `type`, `createdAt`                  | `type` ∈ passkey / ethereum / agent (+ type-specific fields, e.g. `credentialId`) |
-| `derivationKey`, `publicKey`                       | `derivationKey` is the shared account key every device holds (see Assumptions)    |
-| `devices: Device[]`                                | each: `deviceId, name, createdAt, lastSignedInAt`, tombstone `removedAt?`          |
-| `connectedApps: ConnectedApp[]`                    | each: app fields + `updatedAt`, optional `postageStampBatchID`, tombstone `revokedAt?` |
-| `postageStamps: PostageStamp[]`                    | account-owned set; each: stamp fields + `createdAt`, tombstone `deletedAt?`        |
-| `defaultPostageStampBatchID`                       | the account's default batch (stores account data; default for app uploads)        |
-| `settings`                                         | e.g. `appSessionDuration`                                                         |
-| `accountNameAt`, `defaultStampAt`, `settingsAt`    | **per-field LWW clocks** for the three scalars above (optional; fall back to `lastModified`) |
-| `partitionCount`, `lastModified`                   | partition count for the shared batch; local modified clock                        |
+| Field                                           | Notes                                                                                        |
+| ----------------------------------------------- | -------------------------------------------------------------------------------------------- |
+| `id`, `name`, `type`, `createdAt`               | `type` ∈ passkey / ethereum / agent (+ type-specific fields, e.g. `credentialId`)            |
+| `derivationKey`, `publicKey`                    | `derivationKey` is the shared account key every device holds (see Assumptions)               |
+| `devices: Device[]`                             | each: `deviceId, name, createdAt, lastSignedInAt`, tombstone `removedAt?`                    |
+| `connectedApps: ConnectedApp[]`                 | each: app fields + `updatedAt`, optional `postageStampBatchID`, tombstone `revokedAt?`       |
+| `postageStamps: PostageStamp[]`                 | account-owned set; each: stamp fields + `createdAt`, tombstone `deletedAt?`                  |
+| `defaultPostageStampBatchID`                    | the account's default batch (stores account data; default for app uploads)                   |
+| `settings`                                      | e.g. `appSessionDuration`                                                                    |
+| `accountNameAt`, `defaultStampAt`, `settingsAt` | **per-field LWW clocks** for the three scalars above (optional; fall back to `lastModified`) |
+| `partitionCount`, `lastModified`                | partition count for the shared batch; local modified clock                                   |
 
 Collections converge by **per-entry tombstones** (`removedAt` / `revokedAt` / `deletedAt`); the three
 scalars converge by **per-field LWW** using their `*At` clocks. Tombstones are kept in the document (so a
@@ -117,15 +117,15 @@ immutables come from any view.
 
 ## Convergence rules — `merge-snapshot.ts`
 
-| Collection      | Merge function       | Recency clock                         | Tombstone   |
-| --------------- | -------------------- | ------------------------------------- | ----------- |
-| postage stamps  | `mergePostageStamps` | `deletedAt ?? createdAt`              | `deletedAt` |
-| devices         | `mergeDevicesList`   | `max(removedAt ?? 0, lastSignedInAt)` | `removedAt` |
-| connected apps  | `mergeConnectedApps` | `max(revokedAt ?? 0, updatedAt)`      | `revokedAt` |
+| Collection     | Merge function       | Recency clock                         | Tombstone   |
+| -------------- | -------------------- | ------------------------------------- | ----------- |
+| postage stamps | `mergePostageStamps` | `deletedAt ?? createdAt`              | `deletedAt` |
+| devices        | `mergeDevicesList`   | `max(removedAt ?? 0, lastSignedInAt)` | `removedAt` |
+| connected apps | `mergeConnectedApps` | `max(revokedAt ?? 0, updatedAt)`      | `revokedAt` |
 
 Last-writer-wins by recency; tombstones are retained and a later activity with a larger clock resurrects an
 entry (e.g. a removed device re-signing in). Scalars (`accountName`, `defaultPostageStampBatchID`,
-`settings`) converge by per-field LWW on their `*At` clocks, so concurrent changes to *different* scalars
+`settings`) converge by per-field LWW on their `*At` clocks, so concurrent changes to _different_ scalars
 on different devices both survive.
 
 ## Assumptions
@@ -138,7 +138,7 @@ on different devices both survive.
    wall-clock timestamps; devices must agree to within a few seconds.
 3. **Adding/removing a device is far rarer than using existing ones.** The roster is touched only on a
    membership change; the per-device state feeds carry all high-frequency data. So the residual gateway
-   latency for a *fresh* roster entry (a newly-added device becoming discoverable within ~a minute) is
+   latency for a _fresh_ roster entry (a newly-added device becoming discoverable within ~a minute) is
    acceptable, while already-known devices are immediate.
 
 ## Retired / legacy
@@ -151,18 +151,18 @@ That is **gone** — replaced by the per-device feeds above. `publish-account-st
 
 ## Files & tests
 
-| File                                                | Role                                                              |
-| --------------------------------------------------- | ----------------------------------------------------------------- |
-| `lib/src/sync/device-state.ts`                      | Per-device state feed: write/read, `accountStateToDeviceView`, `foldAccount` |
-| `lib/src/sync/device-roster.ts`                     | Append-only roster: `readRoster`, `ensureInRoster`                |
-| `lib/src/sync/fold-account-from-swarm.ts`           | `foldAccountFromSwarm` (roster + parallel device-feed reads)      |
-| `lib/src/sync/merge-snapshot.ts`                    | LWW + tombstone merge primitives                                  |
-| `lib/src/sync/restore-account.ts`                   | `restoreAccountFromSwarm` (new device)                            |
-| `lib/src/sync/sync-account.ts`                      | Oneshot publish (SwarmID UI)                                      |
-| `lib/src/swarm-id-proxy.ts`                         | Persistent publish (`runAccountStatePublish`) + triggers          |
-| `lib/src/utils/storage-managers.ts`                 | `serializeAccount` (local persistence)                            |
-| `swarm-ui/src/lib/utils/refresh-account-from-swarm.ts` | Refresh an existing device → `applyRefreshed`                  |
-| `swarm-ui/src/lib/stores/accounts.svelte.ts`        | `applyRefreshed`, per-field scalar setters/clocks                 |
+| File                                                   | Role                                                                         |
+| ------------------------------------------------------ | ---------------------------------------------------------------------------- |
+| `lib/src/sync/device-state.ts`                         | Per-device state feed: write/read, `accountStateToDeviceView`, `foldAccount` |
+| `lib/src/sync/device-roster.ts`                        | Append-only roster: `readRoster`, `ensureInRoster`                           |
+| `lib/src/sync/fold-account-from-swarm.ts`              | `foldAccountFromSwarm` (roster + parallel device-feed reads)                 |
+| `lib/src/sync/merge-snapshot.ts`                       | LWW + tombstone merge primitives                                             |
+| `lib/src/sync/restore-account.ts`                      | `restoreAccountFromSwarm` (new device)                                       |
+| `lib/src/sync/sync-account.ts`                         | Oneshot publish (SwarmID UI)                                                 |
+| `lib/src/swarm-id-proxy.ts`                            | Persistent publish (`runAccountStatePublish`) + triggers                     |
+| `lib/src/utils/storage-managers.ts`                    | `serializeAccount` (local persistence)                                       |
+| `swarm-ui/src/lib/utils/refresh-account-from-swarm.ts` | Refresh an existing device → `applyRefreshed`                                |
+| `swarm-ui/src/lib/stores/accounts.svelte.ts`           | `applyRefreshed`, per-field scalar setters/clocks                            |
 
 Tests: `merge-snapshot.test.ts`, `device-state.test.ts`, `device-roster.test.ts`, `sync-account.test.ts`
 (unit/CI), and the opt-in live suite `lib/test/multi-device/` (`per-device-sync`, `per-device-sync-3`:

@@ -234,14 +234,14 @@ the other — they cooperate on the same partition rather than contend.
 
 ## Files and tests
 
-| File                                                   | Role                                                            |
-| ------------------------------------------------------ | --------------------------------------------------------------- |
-| `lib/src/sync/batch-write-coordinator.ts`              | The coordinator                                                 |
+| File                                                   | Role                                                                                          |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------------- |
+| `lib/src/sync/batch-write-coordinator.ts`              | The coordinator                                                                               |
 | `lib/src/sync/device-state.ts`                         | `publishDeviceState` — the per-device write the coordinator brackets (see `Account-State.md`) |
-| `lib/src/sync/partition-lease.ts`, `partition-lock.ts` | The layers below (claim + lock SOCs)                            |
-| `lib/src/utils/batch-write-lock.ts`                    | `withBatchWriteLock` (Web Lock + no-`navigator.locks` fallback) |
-| `lib/src/swarm-id-proxy.ts`                            | Persistent consumer + publish triggers                          |
-| `lib/src/sync/sync-account.ts`                         | Oneshot consumer                                                |
+| `lib/src/sync/partition-lease.ts`, `partition-lock.ts` | The layers below (claim + lock SOCs)                                                          |
+| `lib/src/utils/batch-write-lock.ts`                    | `withBatchWriteLock` (Web Lock + no-`navigator.locks` fallback)                               |
+| `lib/src/swarm-id-proxy.ts`                            | Persistent consumer + publish triggers                                                        |
+| `lib/src/sync/sync-account.ts`                         | Oneshot consumer                                                                              |
 
 The living spec is the test suite: `batch-write-coordinator.test.ts` (block-vs-skip, contention,
 lifecycle, the displacement race), `sync-account.test.ts` (use of the coordinator: publish,
