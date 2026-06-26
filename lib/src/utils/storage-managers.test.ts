@@ -48,7 +48,7 @@ describe("serializeAccount — device-local seed vault", () => {
   it("persists each access method shape", () => {
     for (const access of [
       { type: "passkey", credentialId: "c" },
-      { type: "eth-wallet", walletAddress: "0xabc", encryptionSalt: "ff" },
+      { type: "eth-wallet", encryptionSalt: "ff" },
       { type: "password", kdfSalt: "aa", kdfIterations: 200000 },
     ] as const) {
       const serialized = serializeAccount(createAccount({ access }))
@@ -57,16 +57,5 @@ describe("serializeAccount — device-local seed vault", () => {
       )
       expect(reparsed.access).toEqual(access)
     }
-  })
-
-  it("omits the seed vault for accounts that do not cache a seed", () => {
-    const serialized = serializeAccount(
-      createAccount({ access: undefined, encryptedSeed: undefined }),
-    )
-    const reparsed = AccountSchemaV1.parse(
-      JSON.parse(JSON.stringify(serialized)),
-    )
-    expect(reparsed.access).toBeUndefined()
-    expect(reparsed.encryptedSeed).toBeUndefined()
   })
 })

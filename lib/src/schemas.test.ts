@@ -6,14 +6,17 @@ import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 import { isLocalAccount } from "./schemas"
 import {
   TEST_BATCH_ID_HEX,
+  TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
   createAccount,
   createPostageStamp,
 } from "./test-fixtures"
 
+const DEFAULT_BATCH = new BatchId(TEST_BATCH_ID_HEX)
+
 function drive(overrides?: Parameters<typeof createPostageStamp>[0]) {
   return createPostageStamp({
-    batchID: new BatchId(TEST_BATCH_ID_HEX),
+    batchID: DEFAULT_BATCH,
     signerKey: new PrivateKey(TEST_PRIVATE_KEY_HEX),
     exists: true,
     usable: true,
@@ -21,34 +24,53 @@ function drive(overrides?: Parameters<typeof createPostageStamp>[0]) {
   })
 }
 
+/** Account whose default drive is the given stamp. */
+function withDefaultDrive(stamp: ReturnType<typeof drive>) {
+  return createAccount({
+    defaultPostageStampBatchID: DEFAULT_BATCH,
+    postageStamps: [stamp],
+  })
+}
+
 describe("isLocalAccount", () => {
-  it("is local when it owns no postage stamps", () => {
-    expect(isLocalAccount(createAccount({ postageStamps: [] }))).toBe(true)
+  it("is local when it has no default drive", () => {
+    expect(
+      isLocalAccount(
+        createAccount({
+          defaultPostageStampBatchID: undefined,
+          postageStamps: [],
+        }),
+      ),
+    ).toBe(true)
   })
 
-  it("is not local once it owns a usable, on-chain stamp", () => {
-    const account = createAccount({ postageStamps: [drive()] })
-    expect(isLocalAccount(account)).toBe(false)
-  })
-
-  it("stays local while its only stamp is not yet usable", () => {
+  it("is local when the default points at a batch it does not own", () => {
     const account = createAccount({
-      postageStamps: [drive({ usable: false })],
+      defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_2_HEX),
+      postageStamps: [drive()],
     })
     expect(isLocalAccount(account)).toBe(true)
   })
 
-  it("stays local while its only stamp does not yet exist on-chain", () => {
-    const account = createAccount({
-      postageStamps: [drive({ exists: false })],
-    })
-    expect(isLocalAccount(account)).toBe(true)
+  it("is not local once its default drive is a usable, on-chain stamp", () => {
+    expect(isLocalAccount(withDefaultDrive(drive()))).toBe(false)
   })
 
-  it("treats a tombstoned (deleted) stamp as no drive", () => {
-    const account = createAccount({
-      postageStamps: [drive({ deletedAt: 1700000000001 })],
-    })
-    expect(isLocalAccount(account)).toBe(true)
+  it("stays local while the default drive is not yet usable", () => {
+    expect(isLocalAccount(withDefaultDrive(drive({ usable: false })))).toBe(
+      true,
+    )
+  })
+
+  it("stays local while the default drive does not yet exist on-chain", () => {
+    expect(isLocalAccount(withDefaultDrive(drive({ exists: false })))).toBe(
+      true,
+    )
+  })
+
+  it("treats a tombstoned (deleted) default drive as no drive", () => {
+    expect(
+      isLocalAccount(withDefaultDrive(drive({ deletedAt: 1700000000001 }))),
+    ).toBe(true)
   })
 })

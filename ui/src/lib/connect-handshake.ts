@@ -116,6 +116,10 @@ async function saveSharedRecords(account: Account, masterKey: string): Promise<v
         createdAt: account.createdAt,
         derivationKey: await deriveAccountDerivationKey(masterKey),
         publicKey,
+        // The shared account carries the device-local seed vault (every account
+        // is a BIP-39 seed account); pass it through from the UI's own record.
+        access: account.access,
+        encryptedSeed: account.encryptedSeed,
         defaultPostageStampBatchID: stampBatchId,
         devices: [],
         connectedApps: [],

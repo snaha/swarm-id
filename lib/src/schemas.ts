@@ -180,15 +180,17 @@ export const PostageStampSchemaV1 = z.object({
  * seed is protected/encrypted at rest on this device (and thus how it is
  * unlocked). Fields are device-local crypto material (plain hex / numbers) —
  * never bee-js byte classes — so they round-trip as-is. Paired with
- * `encryptedSeed` on the account: the two travel together (both present on an
- * interactive UI account; both absent on a headless/programmatic account that
- * holds its seed in memory).
+ * `encryptedSeed` on the account.
+ *
+ * The eth-wallet method stores only the encryption salt — NOT the wallet
+ * address: a wrong wallet simply fails to decrypt the seed, and the account's
+ * own `id` is already the address of its (BIP-39) key, so a separate wallet
+ * address would be redundant.
  */
 export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
   z.object({ type: z.literal("passkey"), credentialId: z.string() }),
   z.object({
     type: z.literal("eth-wallet"),
-    walletAddress: z.string(),
     encryptionSalt: z.string(),
   }),
   z.object({
@@ -204,8 +206,8 @@ export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
  * The single, unified account model. There is exactly one kind of account: a
  * BIP-39 seed account. What used to be distinct `type`s (passkey / ethereum /
  * agent) were really just different ways of protecting the seed — now expressed
- * uniformly by the optional `access` method + `encryptedSeed` vault. No `type`
- * discriminant remains.
+ * uniformly by the `access` method + `encryptedSeed` vault every account carries.
+ * No `type` discriminant remains.
  *
  * The account is the single-level aggregate root (the identity tier was
  * collapsed into it). It is the app-facing identity: `id` is the address apps
@@ -224,15 +226,13 @@ export const AccountSchemaV1 = z.object({
   // App-facing public key (compressed secp256k1). Surfaced to dApps as the
   // identity public key in ConnectionInfo. Was previously on the identity.
   publicKey: CompressedPublicKeySchema.optional(),
-  // Device-local seed vault. Every identity-UI account is a BIP-39 seed account:
-  // `encryptedSeed` holds that seed encrypted at rest and `access` records the
-  // method used to encrypt/unlock it on this device (passkey / eth-wallet /
-  // password). The two travel together (both present on every UI account, both
-  // absent on legacy `swarm-ui` accounts). Device-local: deliberately excluded
-  // from the sync snapshot.
-  access: AccessMethodSchemaV1.optional(),
+  // Device-local seed vault. Every account is a BIP-39 seed account: `access`
+  // records how the seed is protected/unlocked on this device (passkey /
+  // eth-wallet / password) and `encryptedSeed` is that seed encrypted at rest.
+  // Device-local: deliberately excluded from the sync snapshot.
+  access: AccessMethodSchemaV1,
   // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
-  encryptedSeed: z.string().optional(),
+  encryptedSeed: z.string(),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
   // Account-owned nested collections (replace the old flat identities/apps/
@@ -332,18 +332,25 @@ export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
 // ============================================================================
 
 /**
- * An account is "local" when it owns no usable postage batch — it cannot pay
- * for uploads, so it is effectively view-only and has nothing to sync. "Local"
- * is purely this runtime predicate; it is NOT a stored field or account `type`.
+ * An account is "local" when its default drive (`defaultPostageStampBatchID`) is
+ * not a usable postage batch — it cannot pay for uploads, so it is effectively
+ * view-only and has nothing to sync. "Local" is purely this runtime predicate;
+ * it is NOT a stored field or account `type`.
  *
- * A stamp counts as a valid drive when it `exists` on-chain and is `usable`
- * (synced enough to upload against) and is not tombstoned. A freshly
- * purchased-but-not-yet-usable stamp therefore still reads as local until it
- * becomes usable.
+ * The default batch counts as a valid drive when it is set, `exists` on-chain,
+ * is `usable` (synced enough to upload against), and is not tombstoned. An
+ * account with no default, or whose default is freshly-purchased-but-not-yet-
+ * usable, therefore reads as local.
  */
 export function isLocalAccount(account: Account): boolean {
-  return !account.postageStamps.some(
-    (stamp) => stamp.exists && stamp.usable && stamp.deletedAt === undefined,
+  const batchID = account.defaultPostageStampBatchID
+  if (batchID === undefined) return true
+  const stamp = account.postageStamps.find((s) => s.batchID.equals(batchID))
+  return !(
+    stamp !== undefined &&
+    stamp.exists &&
+    stamp.usable &&
+    stamp.deletedAt === undefined
   )
 }
 
