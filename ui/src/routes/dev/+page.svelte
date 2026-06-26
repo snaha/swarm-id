@@ -686,7 +686,9 @@ Check console logs for details:
           assignError = 'Stamp not found in local storage.'
           return
         }
-        if (beeStamp.signerKey !== signerKeyToUse) {
+        // Compare by value — `signerKey` is a bee-js PrivateKey, so `!==` would
+        // always be true (distinct instances) and re-add the drive needlessly.
+        if (!beeStamp.signerKey.equals(signerKeyToUse)) {
           account.removeDrive(batchId)
           account.addDrive({ ...beeStamp, signerKey: signerKeyToUse })
         }
@@ -699,7 +701,10 @@ Check console logs for details:
     }
   }
 
-  function removeAccountDrive() {
+  // Clears the account's DEFAULT-drive pointer only; the stamp stays in the
+  // account's drives (delete it outright in "Stored Stamps" above). Assign is
+  // the symmetric op — it sets the default.
+  function clearDefaultDrive() {
     assignError = ''
     assignMessage = ''
     if (!selectedAccountId) {
@@ -708,7 +713,7 @@ Check console logs for details:
     }
     const accountId = new EthAddress(selectedAccountId)
     sharedAccountsStore.getAccount(accountId)?.setDefaultDrive(undefined)
-    assignMessage = `✅ Removed account drive from ${selectedAccountId.slice(0, 8)}…`
+    assignMessage = `✅ Cleared default drive for ${selectedAccountId.slice(0, 8)}…`
   }
 
   const LABEL_CLASS = 'flex flex-col gap-1.5 text-sm'
@@ -803,8 +808,9 @@ Check console logs for details:
           {accountCount} accounts, {connectionCount} connections, {driveCount} drives
         </p>
         <p class="text-muted-foreground text-xs">
-          Accounts appear here once they have a shared (sync/proxy) record — created the first time
-          an account connects to a dApp.
+          Every account on this device is listed here — the product UI, /dev and sync all read the
+          one shared account store, so accounts show up as soon as they're created (no dApp
+          connection required).
         </p>
         <div class="flex gap-2">
           <Button variant="destructive" onclick={clearAccount}>Clear account</Button>
@@ -1111,10 +1117,10 @@ Check console logs for details:
         </Button>
         <Button
           variant="destructive"
-          onclick={removeAccountDrive}
+          onclick={clearDefaultDrive}
           disabled={!accountHasDefaultDrive}
         >
-          Remove account drive
+          Clear default drive
         </Button>
       </div>
 
