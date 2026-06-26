@@ -9,23 +9,10 @@
  * snapshot stored in Swarm and returns the restored state.
  */
 
-import {
-  Bee,
-  PrivateKey,
-  EthAddress,
-  Topic,
-  Reference,
-  type Bytes,
-} from "@ethersphere/bee-js"
-import {
-  deriveAccountDerivationKey,
-  deriveSwarmEncryptionKey,
-  deriveSecret,
-} from "../utils/key-derivation"
-import { ACCOUNT_SYNC_TOPIC_PREFIX } from "./sync-account"
-import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
-import { downloadDataWithChunkAPI } from "../proxy/download-data"
-import { deserializeAccountState } from "./serialization"
+import { Bee, EthAddress, type Bytes } from "@ethersphere/bee-js"
+import { deriveAccountDerivationKey } from "../utils/key-derivation"
+import { foldAccountFromSwarm } from "./fold-account-from-swarm"
+import type { FoldedAccount } from "./device-state"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 
 /**
@@ -78,45 +65,46 @@ export async function restoreAccountFromSwarm(
 
   console.log(`[RestoreAccount] bee.url=${bee.url} accountId=${accountId}`)
 
-  // 1. Derive the derivation key and swarm encryption key from the master key
+  // Phase 3a: fold the per-device state feeds (discovered via the registry)
+  // instead of reading a single shared snapshot. `undefined` = no registry yet
+  // (nothing published) — today's "no backup".
   const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
-  const swarmEncryptionKey = await deriveSwarmEncryptionKey(derivationKey)
-
-  // 2. Derive the backup key (used as feed owner)
-  const backupKeyHex = await deriveSecret(swarmEncryptionKey, "backup-key")
-  const backupKey = new PrivateKey(backupKeyHex)
-  const owner = backupKey.publicKey().address()
-
-  // 3. Build the feed topic
-  const topic = Topic.fromString(`${ACCOUNT_SYNC_TOPIC_PREFIX}:${accountId}`)
-
-  // 4. Look up the latest epoch feed entry
-  // Note: feed SOCs are uploaded unencrypted (sync-account.ts doesn't pass
-  // encryptionKey to updater.update()), so the finder must NOT use one either.
-  const finder = new AsyncEpochFinder(bee, topic, owner)
-  const now = BigInt(Math.floor(Date.now() / 1000))
-
-  const refBytes = await finder.findAt(now)
-
-  if (!refBytes) {
-    return undefined
-  }
-
-  // 5. Download and decrypt the account snapshot
-  const reference = new Reference(refBytes)
-  let data: Uint8Array
-  try {
-    data = await downloadDataWithChunkAPI(bee, reference.toHex())
-  } catch (error) {
-    throw new SnapshotDataUnavailableError(reference.toHex(), error)
-  }
-
-  // 6. Deserialize the snapshot
-  const snapshot = deserializeAccountState(data)
+  const folded = await foldAccountFromSwarm({ bee, derivationKey, accountId })
+  if (!folded) return undefined
 
   return {
-    snapshot,
+    snapshot: foldedToSnapshot(accountId, folded.account),
     derivationKey,
     credentialId,
+  }
+}
+
+/**
+ * Project a folded account onto the legacy `AccountStateSnapshot` shape so
+ * callers (the swarm-ui sign-in / import flows) consume it unchanged.
+ */
+function foldedToSnapshot(
+  accountId: string,
+  a: FoldedAccount,
+): AccountStateSnapshot {
+  return {
+    version: 1,
+    timestamp: Date.now(),
+    accountId,
+    metadata: {
+      accountName: a.accountName,
+      defaultPostageStampBatchID: a.defaultPostageStampBatchID?.toHex(),
+      publicKey: a.publicKey,
+      settings: a.settings,
+      accountNameAt: a.accountNameAt,
+      defaultStampAt: a.defaultStampAt,
+      settingsAt: a.settingsAt,
+      createdAt: a.createdAt,
+      lastModified: Date.now(),
+      devices: a.devices,
+      partitionCount: a.partitionCount,
+    },
+    connectedApps: a.connectedApps,
+    postageStamps: a.postageStamps,
   }
 }

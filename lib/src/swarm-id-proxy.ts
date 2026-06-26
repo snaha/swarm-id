@@ -59,7 +59,6 @@ import {
   PrivateKey,
   Identifier,
   Topic,
-  Reference,
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
@@ -85,11 +84,10 @@ import {
 import { createFeedManifestDirect } from "./proxy/feed-manifest"
 import { resolveStampForApp } from "./utils/postage-stamp-association"
 import {
-  publishAccountState,
-  remoteFeedHasDevice,
-  ACCOUNT_SYNC_TOPIC_PREFIX,
-} from "./sync/publish-account-state"
-import { deserializeAccountState } from "./sync/serialization"
+  accountStateToDeviceView,
+  publishDeviceState,
+  readRoster,
+} from "./sync"
 import { mergeDevicesList } from "./sync/merge-snapshot"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
@@ -111,6 +109,10 @@ import {
   deriveSwarmEncryptionKey,
 } from "./utils/key-derivation"
 import { connectionInfoEqual } from "./utils/connection-info"
+import {
+  activeDeviceIds,
+  KNOWN_DEVICE_MAX_AGE_MS,
+} from "./utils/active-devices"
 import {
   createAsyncEpochFinder,
   createEpochUpdater,
@@ -1249,7 +1251,19 @@ export class SwarmIdProxy {
     try {
       const accounts = createAccountsStorageManager().load()
       const account = accounts.find((a) => a.id.toHex() === accountId)
-      return account?.devices.map((d) => d.deviceId) ?? []
+      if (!account) return []
+      // Bound the partition rival set to recently-active devices: removed
+      // (tombstoned) devices won't write, and long-dead ghosts from old sessions
+      // (the device list is append-only) would each add an absent intent read to
+      // every acquire — on a flaky gateway that can push a single acquire past
+      // its timeout, so a live device can't claim even a FREE partition. A
+      // genuinely-live holder is still caught by the deviceId-independent
+      // occupancy beacon, so pruning here only removes dead-device cost.
+      return activeDeviceIds(
+        account.devices,
+        Date.now(),
+        KNOWN_DEVICE_MAX_AGE_MS,
+      )
     } catch {
       return []
     }
@@ -1283,27 +1297,21 @@ export class SwarmIdProxy {
       const account = accounts.find((a) => a.id.toHex() === accountId)
       if (!account) return
 
-      // Feed owner = backup signer (derived from the swarm encryption key). Feed
-      // SOCs are unencrypted, so the finder takes no encryption key; the snapshot
-      // chunks it points to ARE encrypted (downloadDataWithChunkAPI infers that).
+      // Feed owner = backup signer (derived from the swarm encryption key).
+      // Phase 3a: discovery is the append-only device roster, not a shared doc.
       const backupKey = new PrivateKey(
         await deriveSecret(uint8ArrayToHex(encryptionKey), "backup-key"),
       )
       const owner = backupKey.publicKey().address()
-      const topic = Topic.fromString(
-        `${ACCOUNT_SYNC_TOPIC_PREFIX}:${account.id.toHex()}`,
-      )
-      const finder = createAsyncEpochFinder({ bee: this.bee, topic, owner })
-      const refBytes = await finder.findAt(BigInt(Math.floor(nowMs / 1000)))
-      if (!refBytes) return
-      const data = await downloadDataWithChunkAPI(
-        this.bee,
-        new Reference(refBytes).toHex(),
-      )
-      const snapshot = deserializeAccountState(data)
+      const rosterDevices = await readRoster({
+        bee: this.bee,
+        accountId: account.id.toHex(),
+        owner,
+      })
+      if (rosterDevices.length === 0) return
 
       const mergedDevices = mergeDevices(
-        mergeDevicesList(account.devices, snapshot.metadata.devices),
+        mergeDevicesList(account.devices, rosterDevices),
         this.requireDeviceId(),
         detectDeviceName(),
       )
@@ -1367,6 +1375,12 @@ export class SwarmIdProxy {
           defaultPostageStampBatchID: defaultStampBatchID.toHex(),
           publicKey: account.publicKey,
           settings: account.settings,
+          // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
+          // device editing a *different* field must not restamp an unchanged
+          // scalar and clobber a peer's concurrent edit under per-field LWW (§9.3).
+          accountNameAt: account.accountNameAt ?? account.createdAt,
+          defaultStampAt: account.defaultStampAt ?? account.createdAt,
+          settingsAt: account.settingsAt ?? account.createdAt,
           createdAt: account.createdAt,
           lastModified: Date.now(),
           devices: account.devices,
@@ -1441,39 +1455,53 @@ export class SwarmIdProxy {
       }
 
       // Announce-once: a publish triggered purely by acquiring the lease (e.g.
-      // every page reload) has nothing to announce once this device is already
-      // in the published feed. Skip it — that's what caused the redundant
-      // publish + verify-retry storm. A "change" publish carries a real delta
-      // and is never gated. The pre-write feed read here is reliable even when
-      // post-write read-back lags.
+      // every page reload) has nothing new once this device is already in the
+      // roster. Skip it. A "change" publish carries a real delta and always
+      // re-writes this device's own state feed (no shared contention).
+      const deviceId = this.requireDeviceId()
       if (reason === "acquired") {
-        const alreadyAnnounced = await remoteFeedHasDevice({
+        const rosterDevices = await readRoster({
           bee: this.bee,
           accountId: snapshot.accountId,
           owner,
-          deviceId: this.requireDeviceId(),
-        })
+        }).catch(() => [])
+        const alreadyAnnounced = rosterDevices.some(
+          (d) => d.deviceId === deviceId && !d.removedAt,
+        )
         if (alreadyAnnounced) {
           console.info(
-            `[Proxy] Device already in feed for ${snapshot.accountId}; skipping announce publish.`,
+            `[Proxy] Device already in roster for ${snapshot.accountId}; skipping announce publish.`,
           )
           return
         }
       }
+
+      const thisDevice = snapshot.metadata.devices.find(
+        (d) => d.deviceId === deviceId,
+      ) ?? {
+        deviceId,
+        name: detectDeviceName(),
+        createdAt: Date.now(),
+        lastSignedInAt: Date.now(),
+      }
+      // Per-field scalar clocks (incl. the stable-`createdAt` fallback for a
+      // never-edited field) are derived by `accountStateToDeviceView`.
+      const view = accountStateToDeviceView(snapshot)
+
       await coordinator.withWrite((target) =>
-        publishAccountState({
+        publishDeviceState({
           bee: this.bee,
           accountId: snapshot.accountId,
+          device: thisDevice,
           accountKey,
           owner,
           encryptionKey,
-          localSnapshot: snapshot,
+          view,
           target,
-          logLabel: "[Proxy publish]",
         }),
       )
       console.info(
-        `[Proxy] Published account state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
+        `[Proxy] Published device state for ${snapshot.accountId} (partition ${coordinator.currentPartition})`,
       )
     } catch (error) {
       console.warn("[Proxy] Account-state publish failed:", error)

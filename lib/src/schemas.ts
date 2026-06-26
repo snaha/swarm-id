@@ -114,6 +114,11 @@ export const DeviceSchemaV1 = z.object({
   createdAt: z.number(),
   lastSignedInAt: z.number(),
   name: z.string().optional(),
+  // Tombstone marker. A removed device is kept in the snapshot (so the removal
+  // propagates to other devices) but hidden from the UI. A later sign-in with a
+  // larger `lastSignedInAt` re-activates it (the merge clock is the max of the
+  // two), mirroring app reconnect-after-revoke.
+  removedAt: z.number().optional(),
 })
 
 // ============================================================================
@@ -165,6 +170,11 @@ export const PostageStampSchemaV1 = z.object({
   exists: z.boolean(),
   batchTTL: z.number().optional(),
   createdAt: z.number(),
+  // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal
+  // propagates to other devices) but hidden from the UI and unusable for
+  // uploads. A `batchID` is immutable and stamps are never edited in place, so
+  // `deletedAt` always supersedes the original `createdAt` in the merge.
+  deletedAt: z.number().optional(),
 })
 
 // ============================================================================
@@ -203,6 +213,12 @@ const CommonAccountSchemaV1 = z.object({
       appSessionDuration: z.number().optional(),
     })
     .optional(),
+  // Per-field LWW clocks for the scalar account fields, so a concurrent change to
+  // a *different* scalar on another device is not dropped wholesale, and a peer's
+  // change propagates on refresh. Absent → fall back to `lastModified`/`createdAt`.
+  accountNameAt: z.number().optional(),
+  defaultStampAt: z.number().optional(),
+  settingsAt: z.number().optional(),
   // Last-writer-wins clock for cross-device metadata merge (set on any change).
   lastModified: z.number().optional(),
   /**
@@ -269,6 +285,10 @@ export const AccountMetadataSchemaV1 = z.object({
       appSessionDuration: z.number().optional(),
     })
     .optional(),
+  // Per-field LWW clocks for the scalar fields (see `CommonAccountSchemaV1`).
+  accountNameAt: z.number().optional(),
+  defaultStampAt: z.number().optional(),
+  settingsAt: z.number().optional(),
   createdAt: z.number(),
   lastModified: z.number(),
   devices: z.array(DeviceSchemaV1).default([]),

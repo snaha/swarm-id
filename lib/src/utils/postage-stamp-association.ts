@@ -26,7 +26,9 @@ export function resolveStampForApp(
   ]
   for (const batchId of candidates) {
     if (!batchId) continue
-    const stamp = stamps.find((s) => s.batchID.equals(batchId))
+    // Skip deleted stamps (tombstones): a deleted default/override must fall
+    // through to the next candidate, same as a missing one.
+    const stamp = stamps.find((s) => !s.deletedAt && s.batchID.equals(batchId))
     if (stamp) return stamp
   }
   return undefined
@@ -44,7 +46,10 @@ export function collectAccountStampBatchIds(
 ): BatchId[] {
   const candidates: (BatchId | undefined)[] = [
     account.defaultPostageStampBatchID,
-    ...account.postageStamps.map((stamp) => stamp.batchID),
+    // Deleted stamps (tombstones) own no slots — exclude them from partitioning.
+    ...account.postageStamps
+      .filter((stamp) => !stamp.deletedAt)
+      .map((stamp) => stamp.batchID),
     ...account.connectedApps.map((app) => app.postageStampBatchID),
   ]
 

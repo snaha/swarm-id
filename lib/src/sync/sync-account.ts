@@ -41,11 +41,12 @@ import {
   BatchWriteCoordinator,
   PartitionContendedError,
 } from "./batch-write-coordinator"
-import { publishAccountState } from "./publish-account-state"
-import { getOrCreateDeviceId } from "../utils/device-id"
+import { accountStateToDeviceView, publishDeviceState } from "./device-state"
+import { getOrCreateDeviceId, detectDeviceName } from "../utils/device-id"
 
 // Re-exported from its new home so existing importers of `./sync-account`
-// (restore-account, the SwarmUI refresh util) keep working.
+// (the legacy shared-feed topic, retained for the cutover invariant test) keep
+// working.
 export { ACCOUNT_SYNC_TOPIC_PREFIX } from "./publish-account-state"
 
 // Timeout for utilization upload in milliseconds
@@ -275,6 +276,12 @@ export function createSyncAccount(
         defaultPostageStampBatchID: defaultStampBatchID.toHex(),
         publicKey: account.publicKey,
         settings: account.settings,
+        // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
+        // device editing a *different* field must not restamp an unchanged scalar
+        // and clobber a peer's genuine concurrent edit under per-field LWW (§9.3).
+        accountNameAt: account.accountNameAt ?? account.createdAt,
+        defaultStampAt: account.defaultStampAt ?? account.createdAt,
+        settingsAt: account.settingsAt ?? account.createdAt,
         createdAt: account.createdAt,
         lastModified: Date.now(),
         devices: account.devices,
@@ -373,21 +380,35 @@ export function createSyncAccount(
       }, SYNC_TIMEOUT_MS)
     })
 
+    // Build this device's view + registry seed from the captured snapshot. The
+    // per-field scalar clocks (incl. the stable-`createdAt` fallback for a
+    // never-edited field) are derived by `accountStateToDeviceView`.
+    const deviceId = getOrCreateDeviceId()
+    const thisDevice = state.metadata.devices.find(
+      (d) => d.deviceId === deviceId,
+    ) ?? {
+      deviceId,
+      name: detectDeviceName(),
+      createdAt: Date.now(),
+      lastSignedInAt: Date.now(),
+    }
+    const view = accountStateToDeviceView(state)
+
     try {
       const result = await Promise.race([
         coordinator.withWrite(
           (target) =>
-            publishAccountState({
+            publishDeviceState({
               bee,
               accountId,
+              device: thisDevice,
               accountKey,
               owner,
               encryptionKey,
-              localSnapshot: state,
+              view,
               target,
               onChunksUploaded: (addresses) =>
                 handleUtilizationUpdate(accountId, addresses),
-              logLabel: "[SyncCoordinator]",
             }),
           { wait: "skip" },
         ),

@@ -167,7 +167,7 @@ export async function readPartitionLock(opts: {
     // A payload that doesn't match the schema (foreign/corrupt/old format)
     // is treated the same as a missing lock — see the catch below.
     if (!parsed.success) {
-      console.warn(
+      console.debug(
         `[partition-lock] read p=${partition}: SOC present but payload failed schema validation — treating as no lock`,
       )
       return undefined
@@ -180,7 +180,9 @@ export async function readPartitionLock(opts: {
     // for a lock another device DID write is the suspected cross-device
     // dual-acquire cause, and must be distinguishable from a genuine "no lock".
     const reason = error instanceof Error ? error.message : String(error)
-    console.warn(`[partition-lock] read p=${partition}: unreadable — ${reason}`)
+    console.debug(
+      `[partition-lock] read p=${partition}: unreadable — ${reason}`,
+    )
     return undefined
   }
 }
@@ -303,6 +305,14 @@ export async function acquirePartitionLock(opts: {
   // stands — don't source our self-lease timestamps (acquiredAt/leasedUntil)
   // from a peer's payload.
   if (verified.holderDeviceId !== opts.deviceId) {
+    return { outcome: "acquired", payload: ourPayload }
+  }
+  // Our own claim, read back at a generation OLDER than the one we just wrote:
+  // the gateway served a frozen cached copy of the lock SOC. Trust the fresh
+  // claim we wrote — otherwise a self-refresh silently keeps the stale
+  // leasedUntil, the lease never extends, and the holder believes it holds
+  // while peers see it expire and take the slot (a dual-acquire).
+  if (compareGenerations(verified.generation, ourGeneration) < 0) {
     return { outcome: "acquired", payload: ourPayload }
   }
   return { outcome: "acquired", payload: verified }

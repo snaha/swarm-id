@@ -25,9 +25,11 @@
   } from '@snaha/swarm-id'
   import { Bee } from '@ethersphere/bee-js'
   import { refreshAccountFromSwarm } from '$lib/utils/refresh-account-from-swarm'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
   import Laptop from 'carbon-icons-svelte/lib/Laptop.svelte'
   import CheckmarkFilled from 'carbon-icons-svelte/lib/CheckmarkFilled.svelte'
   import Renew from 'carbon-icons-svelte/lib/Renew.svelte'
+  import TrashCan from 'carbon-icons-svelte/lib/TrashCan.svelte'
 
   const { account }: { account: Account } = $props()
 
@@ -182,33 +184,37 @@
     // `_tick` so the self lease-expiry check re-evaluates over time.
     void _tick
     const now = Date.now()
-    return (account.devices ?? []).map((d) => {
-      const isThis = d.deviceId === thisDeviceId
-      if (isThis) {
-        // Self: read from the shared localStorage lease cache (proxy is the
-        // sole writer). The cache key is per-account and machine-local, so a
-        // live `self` lease in it means THIS machine holds that partition —
-        // independent of the device-id string stored inside (the proxy's
-        // captured id can differ from this tab's id even when the value is
-        // shared). So don't gate on the inner deviceId; just check liveness.
-        const self = leaseCache?.self
-        const active = self !== undefined && self.leasedUntil > now
+    // Removed devices (tombstones) are hidden — a removal on any device makes
+    // the row disappear here once the snapshot converges.
+    return (account.devices ?? [])
+      .filter((d) => !d.removedAt)
+      .map((d) => {
+        const isThis = d.deviceId === thisDeviceId
+        if (isThis) {
+          // Self: read from the shared localStorage lease cache (proxy is the
+          // sole writer). The cache key is per-account and machine-local, so a
+          // live `self` lease in it means THIS machine holds that partition —
+          // independent of the device-id string stored inside (the proxy's
+          // captured id can differ from this tab's id even when the value is
+          // shared). So don't gate on the inner deviceId; just check liveness.
+          const self = leaseCache?.self
+          const active = self !== undefined && self.leasedUntil > now
+          return {
+            ...d,
+            isThis: true,
+            isActive: active,
+            partition: active ? self!.partition : undefined,
+          }
+        }
+        // Peers: cross-device, only observable via the lock SOC (Swarm).
+        const holderEntry = holders.find((h) => h.deviceId === d.deviceId)
         return {
           ...d,
-          isThis: true,
-          isActive: active,
-          partition: active ? self!.partition : undefined,
+          isThis: false,
+          isActive: holderEntry !== undefined,
+          partition: holderEntry?.partition,
         }
-      }
-      // Peers: cross-device, only observable via the lock SOC (Swarm).
-      const holderEntry = holders.find((h) => h.deviceId === d.deviceId)
-      return {
-        ...d,
-        isThis: false,
-        isActive: holderEntry !== undefined,
-        partition: holderEntry?.partition,
-      }
-    })
+      })
   })
 
   function formatDateTime(ms: number): string {
@@ -225,6 +231,12 @@
   function truncate(id: string): string {
     if (id.length <= 16) return id
     return `${id.slice(0, 8)}…${id.slice(-6)}`
+  }
+
+  // Tombstone a peer device and publish, so the removal propagates (#337). The
+  // current device is removed via sign-out, not here.
+  function removeDevice(deviceId: string) {
+    accountsStore.removeDevice(account.id, deviceId)
   }
 </script>
 
@@ -320,6 +332,18 @@
                 </span>
               {:else}
                 <span class="badge badge-inactive">Inactive</span>
+              {/if}
+              {#if !row.isThis}
+                <Button
+                  variant="ghost"
+                  dimension="compact"
+                  onclick={() => removeDevice(row.deviceId)}
+                >
+                  <Horizontal --horizontal-gap="4px" --horizontal-align-items="center">
+                    <TrashCan size={12} />
+                    Remove
+                  </Horizontal>
+                </Button>
               {/if}
             </Horizontal>
 

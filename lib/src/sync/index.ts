@@ -33,6 +33,33 @@ export {
 } from "./restore-account"
 export type { RestoreAccountResult } from "./restore-account"
 
+// Phase 3a: per-device snapshot feeds + append-only roster discovery
+export {
+  deviceStateTopic,
+  accountStateToDeviceView,
+  writeDeviceState,
+  publishDeviceState,
+  readLatestDeviceState,
+  foldAccount,
+  deserializeDeviceState,
+  DeviceStateSnapshotSchemaV1,
+  DEVICE_STATE_TOPIC_PREFIX,
+} from "./device-state"
+export type {
+  DeviceStateSnapshot,
+  DeviceStateView,
+  FoldedAccount,
+  AccountSettings,
+} from "./device-state"
+export {
+  rosterTopic,
+  readRoster,
+  ensureInRoster,
+  ROSTER_TOPIC_PREFIX,
+} from "./device-roster"
+export { foldAccountFromSwarm } from "./fold-account-from-swarm"
+export type { FoldAccountResult } from "./fold-account-from-swarm"
+
 // Store interfaces
 export type {
   AccountsStoreInterface,

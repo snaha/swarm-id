@@ -23,7 +23,7 @@ function makeDevice(deviceId: string, lastSignedInAt = 1_000_000): Device {
   }
 }
 
-function makeStamp(batchHex: string): PostageStamp {
+function makeStamp(batchHex: string, createdAt = 1_000_000): PostageStamp {
   return {
     batchID: new BatchId(batchHex),
     signerKey: new PrivateKey("22".repeat(32)),
@@ -35,6 +35,7 @@ function makeStamp(batchHex: string): PostageStamp {
     blockNumber: 1,
     immutableFlag: true,
     exists: true,
+    createdAt,
   }
 }
 
@@ -111,6 +112,44 @@ describe("mergeSnapshotWithRemote — devices union", () => {
       result.metadata.devices.find((d) => d.deviceId === SELF_DEVICE_ID)?.name,
     ).toBe("local")
   })
+
+  it("a removal tombstone supersedes an older sign-in (removal propagates)", () => {
+    // device 1 removed device 2 and published the tombstone; device 2's older
+    // snapshot still has itself active. The newer removal must win.
+    const active = makeDevice(OTHER_DEVICE_ID, 1_000_000)
+    const removed = {
+      ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
+      removedAt: 5_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ devices: [active] }), // local: still active
+      makeSnapshot({ devices: [removed] }), // remote: removed (newer)
+    )
+    const entry = result.metadata.devices.find(
+      (d) => d.deviceId === OTHER_DEVICE_ID,
+    )
+    expect(result.metadata.devices).toHaveLength(1) // tombstone retained, not dropped
+    expect(entry?.removedAt).toBe(5_000_000)
+  })
+
+  it("a newer sign-in resurrects a removed device", () => {
+    // device 2 was removed (removedAt 5M) but has since signed in again
+    // (lastSignedInAt 9M). The fresh sign-in re-activates it.
+    const signedInAgain = makeDevice(OTHER_DEVICE_ID, 9_000_000)
+    const removed = {
+      ...makeDevice(OTHER_DEVICE_ID, 1_000_000),
+      removedAt: 5_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ devices: [signedInAgain] }), // local: re-signed-in (no tombstone)
+      makeSnapshot({ devices: [removed] }), // remote: removed (older)
+    )
+    const entry = result.metadata.devices.find(
+      (d) => d.deviceId === OTHER_DEVICE_ID,
+    )
+    expect(entry?.removedAt).toBeUndefined()
+    expect(entry?.lastSignedInAt).toBe(9_000_000)
+  })
 })
 
 describe("mergeSnapshotWithRemote — apps / stamps", () => {
@@ -124,6 +163,59 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     expect(result.postageStamps.map((s) => s.batchID.toHex()).sort()).toEqual(
       [localStamp.batchID.toHex(), remoteStamp.batchID.toHex()].sort(),
     )
+  })
+
+  it("a newer deletedAt tombstone supersedes a stale active stamp (deletion propagates)", () => {
+    // device 1 deleted the stamp and published the tombstone; device 2 still
+    // has it active. The newer tombstone must win so the deletion propagates.
+    const batchHex = "dd".repeat(32)
+    const active = makeStamp(batchHex, 1_000_000)
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 5_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [active] }), // local (device 2): still active
+      makeSnapshot({ postageStamps: [tombstone] }), // remote (device 1): deleted
+    )
+    expect(result.postageStamps).toHaveLength(1) // tombstone retained, not dropped
+    expect(result.postageStamps[0].deletedAt).toBe(5_000_000)
+  })
+
+  it("local deletion is not undone by an older remote active copy (publish merge)", () => {
+    // The publish case: device 1 deleted locally; the remote snapshot still has
+    // the stamp active (older). The union used to re-add it — LWW keeps the tombstone.
+    const batchHex = "ee".repeat(32)
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 5_000_000,
+    }
+    const staleActive = makeStamp(batchHex, 1_000_000)
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [tombstone] }), // local (device 1): deleted
+      makeSnapshot({ postageStamps: [staleActive] }), // remote: still active (older)
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].deletedAt).toBe(5_000_000)
+  })
+
+  it("a fresh re-add (createdAt newer than the tombstone) resurrects a deleted stamp", () => {
+    // The stamp was deleted (deletedAt 5M) then the same batch re-added with a
+    // fresh createdAt (9M > 5M). The re-add must win so it re-activates — mirrors
+    // device resurrection via a newer lastSignedInAt.
+    const batchHex = "ff".repeat(32)
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 5_000_000,
+    }
+    const readded = makeStamp(batchHex, 9_000_000)
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [readded] }), // local: re-added (newer)
+      makeSnapshot({ postageStamps: [tombstone] }), // remote: still deleted (older)
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].deletedAt).toBeUndefined()
+    expect(result.postageStamps[0].createdAt).toBe(9_000_000)
   })
 
   it("unions connectedApps by appUrl", () => {

@@ -11,10 +11,13 @@
  *
  * Strategy per field:
  *
- * - `devices`: union by `deviceId`. On conflict prefer the entry with the
- *   larger `lastSignedInAt` (recent sign-ins win).
+ * - `devices`: last-writer-wins per `deviceId` with a `removedAt` tombstone.
+ *   The recency clock is `max(removedAt, lastSignedInAt)`, so a removal beats an
+ *   older sign-in and a newer sign-in re-activates a removed device.
  * - `connectedApps`: last-writer-wins per `appUrl` (with `revokedAt` tombstone).
- * - `postageStamps`: union by `batchID`; local entries win on overlap.
+ * - `postageStamps`: last-writer-wins per `batchID` with a `deletedAt`
+ *   tombstone (recency `max(deletedAt, createdAt)`), so deletions propagate and
+ *   a fresh re-add (newer `createdAt`) re-activates a deleted stamp.
  * - `metadata.accountName`, `metadata.defaultPostageStampBatchID`,
  *   `metadata.partitionCount`: local wins. These are scalar fields set
  *   by user actions.
@@ -63,19 +66,20 @@ export function mergeSnapshotWithRemote(
 }
 
 export function mergeDevicesList(local: Device[], remote: Device[]): Device[] {
+  // Last-writer-wins per device so removals propagate: a removal is a tombstone
+  // (`removedAt`) and the recency clock is `max(removedAt, lastSignedInAt)`. A
+  // removal therefore beats an older sign-in, while a newer sign-in beats an
+  // older removal (re-activating the device). With nothing removed this reduces
+  // to the old "larger lastSignedInAt wins". Removed devices are kept (the
+  // tombstone keeps propagating).
+  const recency = (d: Device) =>
+    Math.max(d.removedAt ?? 0, d.lastSignedInAt ?? 0)
   const merged = new Map<string, Device>()
-  for (const d of remote) merged.set(d.deviceId, d)
-  for (const d of local) {
+  // Process remote first, then local, so a tie favours local (most recent
+  // observation here); a strictly-newer entry on either side wins.
+  for (const d of [...remote, ...local]) {
     const existing = merged.get(d.deviceId)
-    if (!existing) {
-      merged.set(d.deviceId, d)
-    } else {
-      // Larger lastSignedInAt wins. If equal, local wins (more recent
-      // observation here).
-      const lAt = d.lastSignedInAt ?? 0
-      const eAt = existing.lastSignedInAt ?? 0
-      merged.set(d.deviceId, lAt >= eAt ? d : existing)
-    }
+    if (!existing || recency(d) >= recency(existing)) merged.set(d.deviceId, d)
   }
   return Array.from(merged.values())
 }
@@ -104,9 +108,22 @@ export function mergePostageStamps(
   local: PostageStamp[],
   remote: PostageStamp[],
 ): PostageStamp[] {
+  const keyOf = (s: PostageStamp) => s.batchID.toHex()
+  // Last-writer-wins per batch so deletions propagate: a delete is a tombstone
+  // (`deletedAt`), and the recency clock is `max(deletedAt, createdAt)` —
+  // mirroring `mergeDevicesList`. A delete beats an older add, while a fresh
+  // re-add (a new `createdAt` later than the tombstone) re-activates the stamp,
+  // matching device resurrection. A stale active copy (older `createdAt`) still
+  // loses to the tombstone, so deletions keep propagating. Deleted stamps are
+  // kept (the tombstone keeps propagating until a re-add supersedes it).
+  const recency = (s: PostageStamp) => Math.max(s.deletedAt ?? 0, s.createdAt)
   const merged = new Map<string, PostageStamp>()
-  for (const s of remote) merged.set(s.batchID.toHex(), s)
-  for (const s of local) merged.set(s.batchID.toHex(), s) // local wins
+  // Process remote first, then local, so a tie favours local (most recent
+  // observation here); a strictly-newer entry on either side wins.
+  for (const s of [...remote, ...local]) {
+    const existing = merged.get(keyOf(s))
+    if (!existing || recency(s) >= recency(existing)) merged.set(keyOf(s), s)
+  }
   return Array.from(merged.values())
 }
 

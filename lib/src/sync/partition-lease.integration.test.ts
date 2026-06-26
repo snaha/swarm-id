@@ -16,6 +16,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import {
   BatchId,
   PrivateKey,
+  Reference,
   type Bee,
   type Stamper,
 } from "@ethersphere/bee-js"
@@ -43,16 +44,20 @@ vi.mock("./partition-state", async (importOriginal) => {
 })
 import { PartitionLease } from "./partition-lease"
 import {
+  acquirePartitionLock,
+  deviceHomePartition,
   makeDeviceTiebreaker,
   NO_HOLDER_DEVICE_ID,
   readPartitionLock,
   writePartitionLock,
 } from "./partition-lock"
+import { makePartitionLockIdentifier } from "../utils/lock-soc"
 import {
   INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
   readPartitionIntent,
   writePartitionIntent,
+  writePartitionOccupancy,
 } from "./partition-intent"
 import { Binary } from "cafe-utility"
 import {
@@ -807,6 +812,154 @@ describe("PartitionLease.acquire — turn-taking (3rd device)", () => {
   })
 })
 
+describe("acquirePartitionLock — self-refresh through a frozen-cache read (regression)", () => {
+  // On a gateway that serves a partition's static lock SOC from a frozen cache,
+  // a holder refreshing its OWN lock writes leasedUntil = now + TTL but the
+  // verify-read returns the STALE old chunk. acquirePartitionLock must trust the
+  // fresh claim it just wrote, not the stale read-back — otherwise the lease
+  // silently never extends (leasedUntil pinned to the old value), the holder
+  // believes it still holds while peers see it expire, and a contender takes the
+  // slot → both believe they hold it. (Surfaced by the gateway idle-then-reacquire
+  // beat in scripts/partition-acquire-3-test.ts.)
+  it("returns the freshly-written leasedUntil, not the stale read-back", async () => {
+    const T_CLAIM = 1_000_000
+    const T_NOW = T_CLAIM + 5_000
+
+    // Seed our own (older-generation) claim on p0.
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      payload: {
+        holderDeviceId: DEVICE_A,
+        generation: {
+          timestampMs: T_CLAIM,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+        },
+        acquiredAt: T_CLAIM,
+        leasedUntil: T_CLAIM + LEASE_TTL_MS,
+      },
+    })
+
+    // Freeze every read of the lock SOC address at that seeded chunk, so the
+    // verify-read inside acquirePartitionLock returns the stale claim no matter
+    // what we write (the gateway frozen-cache effect). Other reads pass through.
+    const lockId = makePartitionLockIdentifier(0)
+    const lockAddr = new Reference(
+      Binary.keccak256(
+        Binary.concatBytes(lockId.toUint8Array(), OWNER.toUint8Array()),
+      ),
+    )
+      .toHex()
+      .toLowerCase()
+    const realDownload = bee.downloadChunk.bind(bee)
+    const frozen = await realDownload(lockAddr)
+    vi.spyOn(bee, "downloadChunk").mockImplementation(((
+      addr: unknown,
+      ...rest: unknown[]
+    ) => {
+      if (typeof addr === "string" && addr.toLowerCase() === lockAddr) {
+        return Promise.resolve(frozen) as never
+      }
+      return (realDownload as (...a: unknown[]) => unknown)(
+        addr,
+        ...rest,
+      ) as never
+    }) as never)
+
+    const result = await acquirePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      deviceId: DEVICE_A,
+      ttlMs: LEASE_TTL_MS,
+      guardMs: GUARD_MS,
+      now: () => T_NOW,
+    })
+
+    expect(result.outcome).toBe("acquired")
+    // The lease must extend to now + TTL, NOT stay pinned at the stale read-back.
+    expect(result.payload?.leasedUntil).toBe(T_NOW + LEASE_TTL_MS)
+  })
+})
+
+describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regression)", () => {
+  // Reproduces the live failure where Chrome (B) and Brave (C) both held p=1.
+  // Timeline from the logs: A holds p0; C takes p1; B comes back NOT knowing C
+  // (its device roster hadn't synced C yet) and reads its OWN stale, expired
+  // lock for p1 from the frozen gateway cache — so on every knownDeviceIds-keyed
+  // channel (lock / intent / presence) B is blind to C and re-claims p1.
+  //
+  // The invariant: a device must NOT bind a partition a live peer holds, even
+  // when that peer is absent from knownDeviceIds AND the static lock read is
+  // stale. Today B has no deviceId-independent way to detect C, so this FAILS
+  // (B binds p1). The per-partition occupancy beacon is what makes it pass.
+  it("does not bind a partition a live UNKNOWN peer holds when the static lock read is stale", async () => {
+    const NOW = 5_000_000
+    const DEVICE_C = "device-gamma-333"
+
+    // A holds p0 (live, and known to B below).
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    expect(
+      (await leaseA.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // C takes p1 (p0 is A's). C is a freshly-joined device B hasn't discovered.
+    const leaseC = makeLease({
+      deviceId: DEVICE_C,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_C],
+    })
+    expect(
+      (await leaseC.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(1)
+
+    // Frozen-cache simulation: B's gateway still serves B's OWN stale, expired
+    // lock for p1 instead of C's live one (the logs show B reading "EXPIRED
+    // holder <self>"). After this overwrite, C's hold survives only on the
+    // deviceId-independent occupancy channel the fix adds.
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 1,
+      payload: {
+        holderDeviceId: DEVICE_B,
+        generation: {
+          timestampMs: NOW - 10_000,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+        },
+        acquiredAt: NOW - 10_000,
+        leasedUntil: NOW, // expired by B's clock (NOW + 2000) below
+      },
+    })
+
+    // B re-acquires while A is still live on p0. It does NOT know C, and its p1
+    // lock read is the stale self-claim → it thinks p1 is free. It must detect
+    // C and fall back to read-only instead of binding p1.
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 2000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B], // C absent — the bug condition
+    })
+    const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(rB.partition).toBeUndefined()
+    expect(rB.isReadOnly).toBe(true)
+  })
+})
+
 describe("PartitionLease.refresh", () => {
   it("returns true and extends leasedUntil", async () => {
     const NOW1 = 1_000_000
@@ -880,6 +1033,72 @@ describe("PartitionLease.release", () => {
     })
     const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
     expect(rB.partition).toBe(0)
+  })
+
+  it("a released partition is not re-marked held by the releaser's lingering presence beacon", async () => {
+    // After an explicit release, the releaser's last per-device PRESENCE beacon
+    // is still within its lease TTL at a live per-epoch address. A peer that
+    // KNOWS the releaser reads that beacon in `refreshHoldersFromPresence`; it
+    // must defer to the release sentinel (as the occupancy channel already does)
+    // and NOT show the partition as still held — otherwise the holder view, the
+    // UI Devices tab, and slot selection all treat a freed partition as taken.
+    const NOW = 1_000_000
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    await leaseA.acquire({ partitionCount: PARTITION_COUNT })
+    await leaseA.release(new Uint32Array(NUM_BUCKETS))
+
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    await leaseB.refreshFromSwarm(PARTITION_COUNT)
+    await leaseB.refreshHoldersFromPresence(PARTITION_COUNT)
+    await leaseB.refreshHoldersFromOccupancy(PARTITION_COUNT)
+
+    // DEVICE_A held only partition 0, then released it — no partition is held.
+    expect(leaseB.getHolders()).toEqual([])
+  })
+
+  it("a peer that KNOWS the releaser acquires the released partition and keeps it across a refresh", async () => {
+    // End-to-end of the release-ghost problem: after A releases p0, B (which
+    // knows A) must (1) win the intent round despite A's lingering presence
+    // beacon and (2) NOT be displaced by that same ghost on its next refresh.
+    // Both the intent round and the refresh displacement checks must honor the
+    // release watermark (A's ghost generation), not just the holder-detection.
+    // Precondition: B's deterministic scan starts at the released partition, so
+    // it actually contends for p0 (else it would pick a different free slot).
+    expect(deviceHomePartition(DEVICE_B, PARTITION_COUNT)).toBe(0)
+
+    const NOW = 1_000_000
+    const leaseA = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    await leaseA.acquire({ partitionCount: PARTITION_COUNT })
+    await leaseA.release(new Uint32Array(NUM_BUCKETS))
+
+    const leaseB = makeLease({
+      deviceId: DEVICE_B,
+      bee: bee as unknown as Bee,
+      now: () => NOW + 1000,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    // (1) Intent round: B wins p0 rather than backing off to read-only.
+    const rB = await leaseB.acquire({ partitionCount: PARTITION_COUNT })
+    expect(rB.partition).toBe(0)
+    expect(rB.isReadOnly).toBe(false)
+
+    // (2) Displacement check: A's ghost (older generation) must not displace B.
+    expect(await leaseB.refresh()).toBe("held")
   })
 
   it("no-op when no lease is held", async () => {
@@ -1395,6 +1614,98 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
       genTimestamp: NOW + 1000,
     })
     // DEVICE_A is the earlier holder → keeps the lease.
+    expect(await lease.refresh()).toBe("held")
+  })
+})
+
+describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", () => {
+  // The dual-acquire that survives `activeDeviceIds` pruning: a live peer whose
+  // `lastSignedInAt` aged past KNOWN_DEVICE_MAX_AGE_MS is dropped from
+  // `knownDeviceIds`, so the deviceId-keyed `foreignBeaconBeatsUs` is blind to
+  // it. The deviceId-INDEPENDENT occupancy beacon is what still resolves the
+  // collision in `refresh()`. Here DEVICE_B is deliberately NOT in knownDeviceIds.
+  const NOW = 7_000_000
+
+  function writeOccupancy(opts: {
+    partition: number
+    deviceId: string
+    epochBucket: number
+    leasedUntil: number
+    genTimestamp?: number
+  }) {
+    return writePartitionOccupancy({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: opts.partition,
+      deviceId: opts.deviceId,
+      epochBucket: opts.epochBucket,
+      generation: {
+        timestampMs: opts.genTimestamp ?? NOW - 1000,
+        tiebreaker: makeDeviceTiebreaker(opts.deviceId),
+      },
+      leasedUntil: opts.leasedUntil,
+    })
+  }
+
+  function selfOnlyLease() {
+    // DEVICE_B intentionally absent → it's the pruned/unknown peer.
+    return makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+      knownDeviceIds: () => [DEVICE_A],
+      intentReadTimeoutMs: 50,
+    })
+  }
+
+  it("yields when an earlier-generation occupancy beacon from a pruned peer is live", async () => {
+    const lease = selfOnlyLease()
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // DEVICE_B holds p0 too with an EARLIER generation. Its occupancy beacon sits
+    // in the PREVIOUS bucket — refresh()'s own beacon publish overwrites the
+    // shared current-bucket occupancy SOC with DEVICE_A, so the previous-bucket
+    // read is what surfaces the rival (the convergent interleaving the shared
+    // address guarantees within a few ticks).
+    await writeOccupancy({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW) - 1,
+      leasedUntil: NOW + LEASE_TTL_MS,
+    })
+
+    // foreignBeaconBeatsUs can't see DEVICE_B (not a known rival); only the
+    // deviceId-independent occupancy channel catches it.
+    expect(await lease.refresh()).toBe("displaced")
+  })
+
+  it("keeps the lease when the pruned peer's occupancy beacon is LATER-generation", async () => {
+    const lease = selfOnlyLease()
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    await writeOccupancy({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW) - 1,
+      leasedUntil: NOW + LEASE_TTL_MS,
+      genTimestamp: NOW + 1000, // later than DEVICE_A's claim → we win
+    })
+
+    expect(await lease.refresh()).toBe("held")
+  })
+
+  it("keeps the lease when only our OWN occupancy beacon is present (no false displacement)", async () => {
+    const lease = selfOnlyLease()
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+    // No foreign beacon written; acquire + refresh only publish DEVICE_A's own.
     expect(await lease.refresh()).toBe("held")
   })
 })

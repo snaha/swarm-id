@@ -37,6 +37,9 @@ export function getDeviceId(): string | undefined {
  * Upserts the current device (updates lastSignedInAt if present,
  * creates a new entry if not). The `name` set at first registration is
  * intentionally preserved on subsequent sign-ins so the label is stable.
+ *
+ * Signing in clears any `removedAt` tombstone on the current device: a genuine
+ * sign-in re-activates a device that was removed elsewhere (#337).
  */
 export function mergeDevices(
   existing: Device[],
@@ -48,7 +51,9 @@ export function mergeDevices(
 
   if (found) {
     return existing.map((d) =>
-      d.deviceId === currentDeviceId ? { ...d, lastSignedInAt: now } : d,
+      d.deviceId === currentDeviceId
+        ? { ...d, lastSignedInAt: now, removedAt: undefined }
+        : d,
     )
   }
 

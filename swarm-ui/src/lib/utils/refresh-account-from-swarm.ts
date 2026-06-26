@@ -2,43 +2,38 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Pull the latest account snapshot from Swarm and fold it into local stores.
+ * Pull account state from Swarm and fold it into local stores.
  *
- * Unlike `restoreAccountFromSwarm`, this doesn't need the master key — it
- * uses the local account's `derivationKey` (already stored after sign-in)
- * to derive the snapshot feed's owner and encryption key. So it's safe to
- * call from any signed-in page, including after the temporary master key
- * has been cleared.
+ * Phase 3a: reads the device-registry feed for discovery and folds every
+ * device's own state feed (`foldAccountFromSwarm`) instead of a single shared
+ * snapshot. Uses the local account's `derivationKey` (stored after sign-in) to
+ * derive the feed owner / encryption key, so it's safe from any signed-in page.
+ *
+ * Scalars (name / default stamp / settings) carry per-field LWW clocks; we pass
+ * the folded value + its `at` to `applyRefreshed`, which applies each only when
+ * the folded clock beats the local one — so a peer's change propagates while a
+ * local-unpublished newer change is preserved.
  */
 
-import { Bee, PrivateKey, Reference, Topic, EthAddress } from '@ethersphere/bee-js'
+import { Bee, EthAddress } from '@ethersphere/bee-js'
 import {
-  ACCOUNT_SYNC_TOPIC_PREFIX,
-  AsyncEpochFinder,
-  deriveSecret,
-  deriveSwarmEncryptionKey,
-  deserializeAccountState,
-  detectDeviceName,
-  downloadDataWithChunkAPI,
-  getOrCreateDeviceId,
+  foldAccountFromSwarm,
   mergeConnectedApps,
   mergeDevices,
   mergeDevicesList,
   mergePostageStamps,
-  SnapshotDataUnavailableError,
+  getOrCreateDeviceId,
+  detectDeviceName,
 } from '@snaha/swarm-id'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 export type RefreshResult =
   | { ok: true; refreshedAt: number }
-  // The backup feed has no reachable entry on this node — typically the
-  // previous backup was stamped by a now-expired batch and garbage-
-  // collected, and a republish with the new batch hasn't landed yet.
-  // Benign and self-healing; the UI guides the user to wait / publish.
+  // No device-registry on this node yet — nothing has been published, or the
+  // previous backup expired and the republish hasn't landed. Benign.
   | { ok: false; kind: 'no-backup' }
-  // Invalid id, missing local account, unretrievable chunks, or network
-  // failure — a genuine error the user should see.
+  // Invalid id, missing local account, or network failure.
   | { ok: false; kind: 'error'; error: string }
 
 export async function refreshAccountFromSwarm(accountId: string): Promise<RefreshResult> {
@@ -57,51 +52,28 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
   const bee = new Bee(networkSettingsStore.beeNodeUrl)
 
   try {
-    // Derive the snapshot feed's owner / encryption key. Same derivation
-    // chain as `restoreAccountFromSwarm` but starting from the locally
-    // stored derivationKey instead of the master key.
-    const swarmEncryptionKey = await deriveSwarmEncryptionKey(account.derivationKey)
-    const backupKeyHex = await deriveSecret(swarmEncryptionKey, 'backup-key')
-    const backupKey = new PrivateKey(backupKeyHex)
-    const owner = backupKey.publicKey().address()
-    const topic = Topic.fromString(`${ACCOUNT_SYNC_TOPIC_PREFIX}:${account.id.toHex()}`)
+    const folded = await foldAccountFromSwarm({
+      bee,
+      derivationKey: account.derivationKey,
+      accountId: account.id.toHex(),
+    })
 
-    // Note: feed SOCs are uploaded unencrypted (sync-account.ts doesn't
-    // pass encryptionKey to updater.update()), so the finder must not
-    // use one either.
-    const finder = new AsyncEpochFinder(bee, topic, owner)
-    const now = BigInt(Math.floor(Date.now() / 1000))
-    const refBytes = await finder.findAt(now)
-
-    if (!refBytes) {
+    if (!folded) {
       return { ok: false, kind: 'no-backup' }
     }
 
-    let data: Uint8Array
-    try {
-      data = await downloadDataWithChunkAPI(bee, new Reference(refBytes).toHex())
-    } catch (err) {
-      throw new SnapshotDataUnavailableError(new Reference(refBytes).toHex(), err)
-    }
-
-    const snapshot = deserializeAccountState(data)
-
+    const remote = folded.account
     console.debug(
-      `[RefreshAccount] devices=${snapshot.metadata.devices.length} apps=${snapshot.connectedApps.length} stamps=${snapshot.postageStamps.length} bee=${bee.url}`,
+      `[RefreshAccount] devices=${remote.devices.length} apps=${remote.connectedApps.length} stamps=${remote.postageStamps.length} bee=${bee.url}`,
     )
 
-    // Merge the remote snapshot into this account's nested local state and apply
-    // it WITHOUT re-publishing (refresh data shouldn't be re-uploaded). Reuses
-    // the exact publish-side merge primitives from the lib so the rules can't
-    // drift (#337): apps LWW by appUrl (tombstone-aware), stamps union by
-    // batchID (local wins), devices prefer the larger `lastSignedInAt`.
-    const mergedApps = mergeConnectedApps(account.connectedApps, snapshot.connectedApps)
-    const mergedStamps = mergePostageStamps(account.postageStamps, snapshot.postageStamps)
-
-    // Keep *this* device first-class even if the snapshot was written by a peer
-    // that doesn't know about us yet.
+    // Merge the folded remote state into local (reusing the lib primitives so the
+    // rules can't drift — #337). Keep this device first-class even if no peer
+    // feed lists it yet.
+    const mergedApps = mergeConnectedApps(account.connectedApps, remote.connectedApps)
+    const mergedStamps = mergePostageStamps(account.postageStamps, remote.postageStamps)
     const mergedDevices = mergeDevices(
-      mergeDevicesList(account.devices, snapshot.metadata.devices),
+      mergeDevicesList(account.devices, remote.devices),
       getOrCreateDeviceId(),
       detectDeviceName(),
     )
@@ -110,16 +82,17 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
       devices: mergedDevices,
       connectedApps: mergedApps,
       postageStamps: mergedStamps,
+      name: { value: remote.accountName, at: remote.accountNameAt },
+      defaultPostageStampBatchID: {
+        value: remote.defaultPostageStampBatchID,
+        at: remote.defaultStampAt,
+      },
+      settings: { value: remote.settings, at: remote.settingsAt },
     })
 
     return { ok: true, refreshedAt: Date.now() }
   } catch (err) {
-    const error =
-      err instanceof SnapshotDataUnavailableError
-        ? `Backup feed entry exists but its chunks aren't retrievable from ${bee.url} (ref ${err.reference.slice(0, 8)}…)`
-        : err instanceof Error
-          ? err.message
-          : 'Unknown error'
+    const error = err instanceof Error ? err.message : 'Unknown error'
     return { ok: false, kind: 'error', error }
   }
 }

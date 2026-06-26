@@ -219,6 +219,20 @@ export {
   // Restore account from Swarm
   restoreAccountFromSwarm,
   SnapshotDataUnavailableError,
+  // Phase 3a: per-device snapshot feeds + append-only roster discovery
+  deviceStateTopic,
+  writeDeviceState,
+  publishDeviceState,
+  readLatestDeviceState,
+  foldAccount,
+  deserializeDeviceState,
+  DeviceStateSnapshotSchemaV1,
+  DEVICE_STATE_TOPIC_PREFIX,
+  rosterTopic,
+  readRoster,
+  ensureInRoster,
+  ROSTER_TOPIC_PREFIX,
+  foldAccountFromSwarm,
 } from "./sync"
 
 // State sync types
@@ -234,6 +248,12 @@ export type {
   FlushableStamper,
   // Restore account types
   RestoreAccountResult,
+  // Phase 3a types
+  DeviceStateSnapshot,
+  DeviceStateView,
+  FoldedAccount,
+  AccountSettings,
+  FoldAccountResult,
 } from "./sync"
 
 // Type exports
