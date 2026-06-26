@@ -20,13 +20,10 @@
   import CloseLarge from 'carbon-icons-svelte/lib/CloseLarge.svelte'
   import Export from 'carbon-icons-svelte/lib/Export.svelte'
   import ContentDeliveryNetwork from 'carbon-icons-svelte/lib/ContentDeliveryNetwork.svelte'
-  import IbmCloudHyperProtectCryptoServices from 'carbon-icons-svelte/lib/IbmCloudHyperProtectCryptoServices.svelte'
   import Information from 'carbon-icons-svelte/lib/Information.svelte'
   import Rocket from 'carbon-icons-svelte/lib/Rocket.svelte'
   import TrashCan from 'carbon-icons-svelte/lib/TrashCan.svelte'
   import Logout from 'carbon-icons-svelte/lib/Logout.svelte'
-  import View from 'carbon-icons-svelte/lib/View.svelte'
-  import ViewOff from 'carbon-icons-svelte/lib/ViewOff.svelte'
   import NetworkSettingsModal from './network-settings-modal.svelte'
   import ThemeToggle from './theme-toggle.svelte'
   import FlexItem from '$lib/components/ui/flex-item.svelte'
@@ -39,8 +36,6 @@
     SWARM_SECRET_PREFIX,
   } from '@snaha/swarm-id'
   import type { Account } from '$lib/types'
-  import type { Bytes } from '@ethersphere/bee-js'
-  import { deriveSecretSeedEncryptionKey, decryptSecretSeed } from '$lib/utils/encryption'
   import {
     getMasterKeyFromAccount,
     SeedPhraseRequiredError,
@@ -64,7 +59,7 @@
 
   let { drawerOpen = $bindable(), account, accounts }: Props = $props()
 
-  let screen = $state<'main' | 'all-accounts' | 'account-details' | 'generation-details'>('main')
+  let screen = $state<'main' | 'all-accounts' | 'account-details'>('main')
   // eslint-disable-next-line svelte/prefer-writable-derived
   let accountName = $state('')
   let showUpgradeTooltip = $state(false)
@@ -78,13 +73,6 @@
   // performing deletion so a late-resolving auth promise can't override the
   // user's intent (e.g. reflexive biometric touch after clicking Cancel).
   let deleteCancelled = false
-
-  // Generation details state
-  let isUnmasked = $state(false)
-  let secretSeed = $state('')
-  let generationDetailsError = $state<string | undefined>(undefined)
-  let isAuthenticating = $state(false)
-  let decryptedMasterKey: Bytes | undefined
 
   $effect(() => {
     accountName = account.name
@@ -191,7 +179,7 @@
       a.click()
       document.body.removeChild(a)
 
-      if (account.type === 'passkey') {
+      if (account.access?.type === 'passkey') {
         showPasskeyExportWarning = true
       }
     } catch (err) {
@@ -214,51 +202,6 @@
     drawerOpen = false
     await goto(resolve(routes.HOME))
   }
-
-  async function handleAuthenticate() {
-    if (account.type !== 'ethereum') return
-
-    try {
-      isAuthenticating = true
-      generationDetailsError = undefined
-      decryptedMasterKey = await getMasterKeyFromAccount(account)
-    } catch (err) {
-      generationDetailsError = err instanceof Error ? err.message : 'Authentication failed'
-      console.error('Authentication failed:', err)
-    } finally {
-      isAuthenticating = false
-    }
-  }
-
-  async function handleUnmask() {
-    if (!decryptedMasterKey) {
-      await handleAuthenticate()
-    }
-
-    try {
-      if (decryptedMasterKey && account.type === 'ethereum') {
-        const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(decryptedMasterKey)
-        secretSeed = await decryptSecretSeed(account.encryptedSecretSeed, secretSeedEncryptionKey)
-        isUnmasked = true
-      }
-    } catch (err) {
-      generationDetailsError = err instanceof Error ? err.message : 'Failed to decrypt secret seed'
-      console.error('Failed to decrypt secret seed:', err)
-    }
-  }
-
-  function handleMask() {
-    isUnmasked = false
-    secretSeed = ''
-  }
-
-  function handleGenerationDetailsClose() {
-    isUnmasked = false
-    secretSeed = ''
-    decryptedMasterKey = undefined
-    generationDetailsError = undefined
-    screen = 'account-details'
-  }
 </script>
 
 {#if drawerOpen}
@@ -276,11 +219,11 @@
           style="padding: var(--padding)"
         >
           <Horizontal --horizontal-gap="var(--half-padding)">
-            {account.type === 'ethereum'
+            {account.access?.type === 'eth-wallet'
               ? 'Ethereum'
-              : account.type === 'agent'
-                ? 'Agent'
-                : 'Passkey'}
+              : account.access?.type === 'passkey'
+                ? 'Passkey'
+                : 'Agent'}
             <Badge>{account.defaultPostageStampBatchID ? 'Synced' : 'Local'}</Badge>
           </Horizontal>
           <Button variant="ghost" dimension="compact" onclick={() => (drawerOpen = false)}
@@ -390,12 +333,12 @@
                 --horizontal-justify-content="stretch"
                 style="flex: 1"
               >
-                {#if acc.type === 'ethereum'}
+                {#if acc.access?.type === 'eth-wallet'}
                   <EthereumLogo size={20} />
-                {:else if acc.type === 'agent'}
-                  <Bot size={20} />
-                {:else}
+                {:else if acc.access?.type === 'passkey'}
                   <PasskeyLogo size={20} />
+                {:else}
+                  <Bot size={20} />
                 {/if}
                 {acc.name}
                 <FlexItem />
@@ -460,12 +403,12 @@
               oninput={onAccountNameChange}
             />
             <Horizontal --horizontal-gap="var(--quarter-padding)">
-              {#if account.type === 'ethereum'}
+              {#if account.access?.type === 'eth-wallet'}
                 <EthereumLogo size={20} />Ethereum
-              {:else if account.type === 'agent'}
-                <Bot size={20} />Agent
-              {:else}
+              {:else if account.access?.type === 'passkey'}
                 <PasskeyLogo size={20} />Passkey
+              {:else}
+                <Bot size={20} />Agent
               {/if}
             </Horizontal>
           </Vertical>
@@ -504,18 +447,6 @@
           --vertical-justify-content="stretch"
           style="padding: var(--padding)"
         >
-          {#if account.type === 'ethereum'}
-            <Button
-              variant="ghost"
-              dimension="compact"
-              onclick={() => (screen = 'generation-details')}
-              leftAlign
-            >
-              <IbmCloudHyperProtectCryptoServices size={20} />
-              View Generation Details
-            </Button>
-          {/if}
-
           {#if !account.defaultPostageStampBatchID}
             <Horizontal
               --horizontal-gap="var(--half-padding)"
@@ -626,90 +557,6 @@
             <TrashCan size={20} />
             Delete account
           </Button>
-        </Vertical>
-      {:else if screen === 'generation-details'}
-        <Horizontal
-          --horizontal-gap="var(--double-padding)"
-          --horizontal-justify-content="space-between"
-          --horizontal-align-items="center"
-          style="padding: var(--padding)"
-        >
-          <Horizontal --horizontal-gap="var(--half-padding)">
-            <Button variant="ghost" dimension="compact" onclick={() => (screen = 'account-details')}
-              ><ChevronLeft size={20} /></Button
-            >
-            Account generation details
-          </Horizontal>
-          <Button
-            variant="ghost"
-            dimension="compact"
-            onclick={() => {
-              handleGenerationDetailsClose()
-              drawerOpen = false
-            }}><CloseLarge size={20} /></Button
-          >
-        </Horizontal>
-        <Vertical --vertical-gap="var(--padding)" style="padding: 0 var(--padding)">
-          <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
-            <Input
-              variant="outline"
-              dimension="compact"
-              value={account.type === 'ethereum' ? account.ethereumAddress.toHex() : ''}
-              class="grower"
-              label="Initial wallet address"
-              disabled
-            />
-            <div style="border: 1px solid transparent">
-              <CopyButton
-                text={account.type === 'ethereum' ? account.ethereumAddress.toHex() : ''}
-              />
-            </div>
-          </Horizontal>
-          <Horizontal --horizontal-gap="var(--half-padding)" --horizontal-align-items="end">
-            <Input
-              variant="outline"
-              dimension="compact"
-              value={isUnmasked ? secretSeed : '••••••••'}
-              class="grower"
-              label="Secret seed"
-              disabled
-              type={isUnmasked ? 'text' : 'password'}
-            />
-            <div style="border: 1px solid transparent">
-              {#if !isUnmasked}
-                <Button
-                  dimension="compact"
-                  variant="ghost"
-                  onclick={handleUnmask}
-                  disabled={isAuthenticating}
-                  title="Unmask secret seed"
-                >
-                  <View size={20} />
-                </Button>
-              {:else}
-                <Button
-                  dimension="compact"
-                  variant="ghost"
-                  onclick={handleMask}
-                  title="Mask secret seed"
-                >
-                  <ViewOff size={20} />
-                </Button>
-              {/if}
-            </div>
-          </Horizontal>
-          <Typography>
-            This secret seed is used in combination with your wallet to restore your Swarm ID
-            account. <b
-              >Store it in a password manager or write it down on a piece of paper hidden in a
-              secure location. Never disclose it to anyone.</b
-            >
-          </Typography>
-          {#if generationDetailsError}
-            <Typography style="color: var(--colors-red)"
-              >There was an error during authentication</Typography
-            >
-          {/if}
         </Vertical>
       {/if}
     </Vertical>

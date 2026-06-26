@@ -67,15 +67,9 @@
 
       sessionStore.setImportData(fileData, result.header)
 
-      if (result.header.accountType === 'passkey') {
-        close()
-        goto(resolve(routes.IMPORT_PASSKEY))
-      } else if (result.header.accountType === 'ethereum') {
-        close()
-        goto(resolve(routes.IMPORT_ETHEREUM))
-      } else {
-        fileError = `Import for ${result.header.accountType} accounts is not yet supported`
-      }
+      // Single, type-agnostic import: the user re-enters the recovery phrase.
+      close()
+      goto(resolve(routes.IMPORT_PASSKEY))
     } catch {
       fileError = 'Could not read file. Make sure it is a valid .swarmid file.'
     }

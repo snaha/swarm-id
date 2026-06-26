@@ -5,7 +5,10 @@
 
 <script lang="ts">
   import { goto } from '$app/navigation'
-  import { createPasskeyAccount } from '$lib/passkey'
+  import { createPasskeyKey } from '$lib/crypto/passkey'
+  import { encryptSeed } from '$lib/crypto/encryption'
+  import { generatePhrase, walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import { EthAddress } from '@ethersphere/bee-js'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Button from '$lib/components/ui/button.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
@@ -20,8 +23,6 @@
   import CreationLayout from '$lib/components/creation-layout.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { keccak256 } from 'ethers'
-  import { Bytes } from '@ethersphere/bee-js'
   import Confirmation from '$lib/components/confirmation.svelte'
   import { onMount } from 'svelte'
   import ErrorMessage from '$lib/components/ui/error-message.svelte'
@@ -50,7 +51,7 @@
       (account) => account.name === accountName,
     )
     if (accountNameIsTaken) {
-      accountName = `${accountName} ${accountsStore.accounts.filter((account) => account.type === 'passkey').length + 1}`
+      accountName = `${accountName} ${accountsStore.accounts.length + 1}`
     }
   })
 
@@ -64,31 +65,26 @@
       isProcessing = true
       error = undefined
 
-      // Create a new passkey account using account name as userId
-      // Different names create different credentials on the same authenticator
-      const swarmIdDomain = window.location.hostname
-      const challenge = new Bytes(keccak256(new TextEncoder().encode(swarmIdDomain))).toUint8Array()
+      // Unified seed account: generate a BIP-39 phrase, register a passkey, and
+      // encrypt the seed entropy with the passkey PRF-derived key. The account
+      // id and master key (private key) come from the phrase.
+      const phrase = generatePhrase()
+      const wallet = walletFromPhrase(phrase)
+      const passkey = await createPasskeyKey(accountName.trim())
+      const encryptedSeed = await encryptSeed(wallet.entropy, passkey.key)
 
-      const account = await createPasskeyAccount({
-        rpName: 'Swarm ID',
-        rpId: swarmIdDomain,
-        challenge,
-        userId: accountName.trim(),
-        userName: accountName.trim(),
-        userDisplayName: accountName.trim(),
-      })
+      // Derive derivationKey from master key (the account private key)
+      const masterKeyHex = privateKeyFromEntropy(wallet.entropy)
+      const derivationKey = await deriveAccountDerivationKey(masterKeyHex)
 
-      // Derive derivationKey from master key
-      const derivationKey = await deriveAccountDerivationKey(account.masterKey.toHex())
-
-      // Store account WITHOUT masterKey (passkey accounts never persist masterKey)
       const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
-        id: account.ethereumAddress,
+        id: new EthAddress(wallet.address),
         createdAt: Date.now(),
         name: accountName.trim(),
-        type: 'passkey',
-        credentialId: account.credentialId,
+        publicKey: wallet.publicKey,
+        access: { type: 'passkey', credentialId: passkey.credentialId },
+        encryptedSeed,
         derivationKey,
         devices: mergeDevices([], deviceId, detectDeviceName()),
         connectedApps: [],

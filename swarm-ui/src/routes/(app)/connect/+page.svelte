@@ -343,7 +343,13 @@
     <Typography>{error}</Typography>
   </Vertical>
 {:else if isAuthenticating && selected}
-  <Confirmation authenticationType={selected.type} />
+  <Confirmation
+    authenticationType={selected.access?.type === 'eth-wallet'
+      ? 'ethereum'
+      : selected.access?.type === 'passkey'
+        ? 'passkey'
+        : 'agent'}
+  />
 {:else if selected && authenticated}
   <Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
     <Vertical --vertical-gap="var(--half-padding)">

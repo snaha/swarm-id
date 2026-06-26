@@ -10,7 +10,6 @@
   import Button from '$lib/components/ui/button.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
-  import SecretSeedInput from '$lib/components/secret-seed-input.svelte'
   import ErrorOverlay from '$lib/components/error-overlay.svelte'
   import CreationLayout from '$lib/components/creation-layout.svelte'
   import Confirmation from '$lib/components/confirmation.svelte'
@@ -18,96 +17,31 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
-  import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
-  import { restoreAccountFromSwarm, deriveAccountDerivationKey } from '@snaha/swarm-id'
-  import { Bee, BatchId, EthAddress } from '@ethersphere/bee-js'
-  import { restoreAccountToStores } from '$lib/utils/restore-account'
-  import {
-    generateEncryptionSalt,
-    deriveEncryptionKey,
-    encryptMasterKey,
-    deriveSecretSeedEncryptionKey,
-    encryptSecretSeed,
-  } from '$lib/utils/encryption'
+  import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
 
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
-  let secretSeed = $state('')
-  let isConfirmDisabled = $derived(!secretSeed.trim())
+  let isConfirmDisabled = $derived(false)
 
   async function handleConfirm() {
     try {
       isProcessing = true
       error = undefined
 
-      const signed = await connectAndSign()
-      const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
+      // Unified model: an Ethereum-secured account stores its seed encrypted on
+      // THIS device (the wallet signature only gates the decryption key).
+      // Cross-device restore from a wallet alone is therefore not possible — the
+      // account must already exist locally, or be restored from a .swarmid file.
+      const account = accountsStore.accounts.find((a) => a.access?.type === 'eth-wallet')
 
-      let account = accountsStore.accounts.find(
-        (a) =>
-          a.type === 'ethereum' &&
-          a.ethereumAddress.toHex() === signed.address.toLowerCase().replace('0x', ''),
-      )
-
-      if (account) {
-        error = 'Account already exists on this device. Go back to the home screen to select it.'
+      if (!account) {
+        error =
+          'No Ethereum-secured account found on this device. Sign in is only available on the device where the account was created, or restore from a .swarmid backup file.'
         isProcessing = false
         return
-      } else {
-        // No local account — attempt to restore from Swarm
-        const bee = new Bee(networkSettingsStore.beeNodeUrl)
-        let result: Awaited<ReturnType<typeof restoreAccountFromSwarm>>
-        try {
-          result = await restoreAccountFromSwarm(
-            bee,
-            masterKey,
-            masterAddress,
-            '', // credentialId is passkey-only, not used for ethereum
-          )
-        } catch (err) {
-          console.error('🔑 Swarm restore failed:', err)
-          error = 'Could not reach the Swarm network. Please check your connection and try again.'
-          isProcessing = false
-          return
-        }
-
-        if (!result) {
-          error =
-            'Sign in failed. Make sure you are using the correct wallet and secret seed combination used during account creation.'
-          isProcessing = false
-          return
-        }
-
-        // Re-encrypt keys with fresh salt for local storage
-        const encryptionSalt = generateEncryptionSalt()
-        const encryptionKey = await deriveEncryptionKey(signed.publicKey, encryptionSalt)
-        const encryptedMasterKey = await encryptMasterKey(masterKey, encryptionKey)
-        const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(masterKey)
-        const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
-        const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
-
-        account = restoreAccountToStores({
-          id: masterAddress,
-          createdAt: result.snapshot.metadata.createdAt,
-          name: result.snapshot.metadata.accountName,
-          type: 'ethereum',
-          ethereumAddress: new EthAddress(signed.address),
-          encryptedMasterKey,
-          encryptionSalt,
-          encryptedSecretSeed,
-          derivationKey,
-          publicKey: result.snapshot.metadata.publicKey,
-          defaultPostageStampBatchID: result.snapshot.metadata.defaultPostageStampBatchID
-            ? new BatchId(result.snapshot.metadata.defaultPostageStampBatchID)
-            : undefined,
-          devices: result.snapshot.metadata.devices,
-          connectedApps: result.snapshot.connectedApps,
-          postageStamps: result.snapshot.postageStamps,
-          settings: result.snapshot.metadata.settings,
-          partitionCount: result.snapshot.metadata.partitionCount,
-        })
       }
+
+      const masterKey = await getMasterKeyFromAccount(account)
 
       sessionStore.setAccount(account)
       sessionStore.setTemporaryMasterKey(masterKey)
@@ -117,7 +51,7 @@
     } catch (err) {
       console.error('🔑 Ethereum sign-in failed:', err)
       error =
-        'Sign in failed. Make sure you are using the correct wallet and secret seed combination used during account creation.'
+        'Sign in failed. Make sure you are using the same Ethereum wallet you used during account creation.'
       isProcessing = false
     }
   }
@@ -139,14 +73,9 @@
 {:else}
   <CreationLayout title="Sign in with Ethereum" onClose={handleClose}>
     {#snippet content()}
-      <Vertical --vertical-gap="var(--padding)">
-        <Typography>Enter the secret seed for your Swarm ID account.</Typography>
-
-        <Vertical --vertical-gap="var(--quarter-padding)">
-          <Typography>Secret seed</Typography>
-          <SecretSeedInput bind:value={secretSeed} />
-        </Vertical>
-      </Vertical>
+      <Typography>
+        Sign the message in your Ethereum wallet to unlock your Swarm ID account on this device.
+      </Typography>
     {/snippet}
 
     {#snippet buttonContent()}

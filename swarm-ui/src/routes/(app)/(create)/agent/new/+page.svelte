@@ -26,7 +26,8 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
-  import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
+  import { validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
+  import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import {
     deriveAccountDerivationKey,
     getOrCreateDeviceId,
@@ -36,7 +37,7 @@
     SnapshotDataUnavailableError,
     PARTITION_COUNT,
   } from '@snaha/swarm-id'
-  import { Bee, BatchId } from '@ethersphere/bee-js'
+  import { Bee, BatchId, EthAddress, Bytes } from '@ethersphere/bee-js'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
@@ -56,7 +57,7 @@
       (account) => account.name === accountName,
     )
     if (accountNameIsTaken) {
-      accountName = `${accountName} ${accountsStore.accounts.filter((account) => account.type === 'agent').length + 1}`
+      accountName = `${accountName} ${accountsStore.accounts.length + 1}`
     }
   })
 
@@ -94,14 +95,14 @@
       error = undefined
 
       // Derive the deterministic account from the seed phrase (same address on
-      // every device). The seed phrase is NOT stored — re-entered each time.
-      const { account, masterKey } = createAgentAccount({
-        name: accountName.trim(),
-        seedPhrase: validation.phrase,
-      })
+      // every device). The seed phrase is NOT stored — re-entered each time
+      // (phrase-only account: no `access`/`encryptedSeed`).
+      const wallet = walletFromPhrase(validation.phrase)
+      const accountId = new EthAddress(wallet.address)
+      const masterKey = new Bytes(privateKeyFromEntropy(wallet.entropy))
 
       // Already on this device → just re-enter (don't blank or re-restore it).
-      const existing = accountsStore.getAccount(account.id)
+      const existing = accountsStore.getAccount(accountId)
       if (existing) {
         sessionStore.setAccount(existing)
         sessionStore.setTemporaryMasterKey(masterKey)
@@ -115,7 +116,7 @@
       const bee = new Bee(networkSettingsStore.beeNodeUrl)
       let restored: Awaited<ReturnType<typeof restoreAccountFromSwarm>>
       try {
-        restored = await restoreAccountFromSwarm(bee, masterKey, account.id, '')
+        restored = await restoreAccountFromSwarm(bee, masterKey, accountId, '')
       } catch (err) {
         console.error('Agent restore from Swarm failed:', err)
         error =
@@ -130,10 +131,9 @@
         // 2nd device: adopt the published account (its name/stamp/apps win).
         const meta = restored.snapshot.metadata
         const restoredAccount = restoreAccountToStores({
-          id: account.id,
+          id: accountId,
           name: meta.accountName,
           createdAt: meta.createdAt,
-          type: 'agent',
           derivationKey: restored.derivationKey,
           publicKey: meta.publicKey,
           defaultPostageStampBatchID: meta.defaultPostageStampBatchID
@@ -155,10 +155,10 @@
       const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
       const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
-        id: account.id,
-        name: account.name,
-        createdAt: account.createdAt,
-        type: 'agent',
+        id: accountId,
+        name: accountName.trim(),
+        createdAt: Date.now(),
+        publicKey: wallet.publicKey,
         derivationKey,
         devices: mergeDevices([], deviceId, detectDeviceName()),
         connectedApps: [],

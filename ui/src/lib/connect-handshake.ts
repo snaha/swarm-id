@@ -111,7 +111,6 @@ async function saveSharedRecords(account: Account, masterKey: string): Promise<v
     manager.save([
       ...accounts,
       {
-        type: 'agent',
         id: accountId,
         name: account.name,
         createdAt: account.createdAt,
