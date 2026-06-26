@@ -14,7 +14,7 @@ const AES_GCM = 'AES-GCM'
 const AES_KEY_BITS = 256
 const IV_LENGTH = 12
 const SALT_LENGTH = 32
-const PBKDF2_ITERATIONS = 600_000
+export const PBKDF2_ITERATIONS = 600_000
 const SEED_ENCRYPTION_INFO = 'swarm-id-seed-encryption-v1'
 
 export function randomSalt(): Uint8Array {

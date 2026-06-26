@@ -27,6 +27,7 @@
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
   import { validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
+  import { secureSeedWithPassword } from '$lib/utils/account-auth'
   import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import {
     deriveAccountDerivationKey,
@@ -44,6 +45,7 @@
   let accountName = $state('Agent')
   let accountType = $state<AccountSyncType>('local')
   let seedPhrase = $state('')
+  let password = $state('')
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
 
@@ -75,7 +77,11 @@
   })
 
   const isFormDisabled = $derived(
-    !accountName.trim() || !seedPhrase.trim() || !!seedPhraseError || !seedPhraseValidation?.valid,
+    !accountName.trim() ||
+      !seedPhrase.trim() ||
+      !password ||
+      !!seedPhraseError ||
+      !seedPhraseValidation?.valid,
   )
 
   async function handleConfirm() {
@@ -129,6 +135,9 @@
 
       if (restored) {
         // 2nd device: adopt the published account (its name/stamp/apps win).
+        // Secure the seed locally with the password so this device carries the
+        // required access vault.
+        const vault = await secureSeedWithPassword(wallet.entropy, password)
         const meta = restored.snapshot.metadata
         const restoredAccount = restoreAccountToStores({
           id: accountId,
@@ -136,6 +145,8 @@
           createdAt: meta.createdAt,
           derivationKey: restored.derivationKey,
           publicKey: meta.publicKey,
+          access: vault.access,
+          encryptedSeed: vault.encryptedSeed,
           defaultPostageStampBatchID: meta.defaultPostageStampBatchID
             ? new BatchId(meta.defaultPostageStampBatchID)
             : undefined,
@@ -151,7 +162,9 @@
         return
       }
 
-      // No backup on Swarm → fresh account on this device.
+      // No backup on Swarm → fresh account on this device. Secure the seed with
+      // the password so the account carries the required access vault.
+      const vault = await secureSeedWithPassword(wallet.entropy, password)
       const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
       const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
@@ -160,6 +173,8 @@
         createdAt: Date.now(),
         publicKey: wallet.publicKey,
         derivationKey,
+        access: vault.access,
+        encryptedSeed: vault.encryptedSeed,
         devices: mergeDevices([], deviceId, detectDeviceName()),
         connectedApps: [],
         postageStamps: [],
@@ -269,16 +284,22 @@
         {/if}
       </Vertical>
 
-      <Horizontal
-        --horizontal-gap="var(--quarter-padding)"
-        style="background: var(--colors-yellow-light); padding: var(--half-padding)"
-      >
-        <WarningAlt size={20} />
+      <Vertical --vertical-gap="var(--quarter-padding)">
+        <Input
+          variant="outline"
+          dimension="compact"
+          type="password"
+          name="account-password"
+          bind:value={password}
+          placeholder="Enter a password"
+          disabled={isProcessing}
+          label="Password"
+        />
         <Typography variant="small"
-          ><strong>Security note:</strong> The seed phrase is never stored. You must re-enter it each
-          time you authenticate with this account.</Typography
+          >Your recovery phrase is encrypted on this device with this password. You'll re-enter the
+          password to unlock the account.</Typography
         >
-      </Horizontal>
+      </Vertical>
 
       {#if error}
         <Horizontal

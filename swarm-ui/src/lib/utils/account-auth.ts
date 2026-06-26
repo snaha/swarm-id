@@ -18,10 +18,17 @@
  */
 
 import type { Account } from '$lib/types'
+import type { AccessMethod } from '@snaha/swarm-id'
 import { Bytes } from '@ethersphere/bee-js'
-import { decryptSeed, deriveKeyFromPassword } from '$lib/crypto/encryption'
+import {
+  decryptSeed,
+  deriveKeyFromPassword,
+  encryptSeed,
+  PBKDF2_ITERATIONS,
+  randomSalt,
+} from '$lib/crypto/encryption'
 import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-import { hexToBytes } from '$lib/crypto/hex'
+import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
 import { authenticateWithPasskey } from '$lib/crypto/passkey'
 import { privateKeyFromEntropy, walletFromPhrase } from '$lib/crypto/mnemonic'
 
@@ -40,6 +47,30 @@ export class SeedPhraseRequiredError extends Error {
 /** The account's private key (master key) as Bytes, from decrypted seed entropy. */
 function masterKeyFromEntropy(entropy: Uint8Array): Bytes {
   return new Bytes(privateKeyFromEntropy(entropy))
+}
+
+/**
+ * Secure BIP-39 entropy with a password so the account can carry the required
+ * `access` + `encryptedSeed` vault. Used by phrase-based create/import flows
+ * (agent, backup import): the user already has the recovery phrase in hand; the
+ * password just protects the stored copy on this device. Re-entering the same
+ * password later (password access in getMasterKeyFromAccount) unlocks the seed.
+ */
+export async function secureSeedWithPassword(
+  entropy: Uint8Array,
+  password: string,
+): Promise<{ access: AccessMethod; encryptedSeed: string }> {
+  const salt = randomSalt()
+  const key = await deriveKeyFromPassword(password, salt, PBKDF2_ITERATIONS)
+  const encryptedSeed = await encryptSeed(entropy, key)
+  return {
+    access: {
+      type: 'password',
+      kdfSalt: bytesToHex(salt),
+      kdfIterations: PBKDF2_ITERATIONS,
+    },
+    encryptedSeed,
+  }
 }
 
 /**
@@ -77,9 +108,6 @@ export async function getMasterKeyFromAccount(account: Account, password?: strin
     key = (await authenticateWithPasskey(access.credentialId)).key
   } else if (access.type === 'eth-wallet') {
     const source = await requestWalletKeySource()
-    if (source.walletAddress.toLowerCase() !== access.walletAddress.toLowerCase()) {
-      throw new Error('Connected wallet does not match the one securing this account.')
-    }
     key = await deriveWalletKey(source, hexToBytes(access.encryptionSalt))
   } else {
     if (!password) {

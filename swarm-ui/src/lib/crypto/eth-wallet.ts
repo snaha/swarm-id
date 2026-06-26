@@ -13,6 +13,7 @@ import { Signature, getAddress, verifyMessage } from 'ethers'
 
 import { deriveKeyFromSignature } from '$lib/crypto/encryption'
 import { hexToBytes } from '$lib/crypto/hex'
+import { onboard } from '$lib/crypto/onboard'
 
 interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>
@@ -27,23 +28,28 @@ export interface WalletKeySource {
   signature: string
 }
 
-function getProvider(): EthereumProvider {
-  const provider = (window as { ethereum?: EthereumProvider }).ethereum
-  if (!provider) {
-    throw new Error('No Ethereum wallet detected. Install a browser wallet and try again.')
+/**
+ * Connect a wallet via @web3-onboard (so the user can pick one when several are
+ * installed) and return its EIP-1193 provider plus the selected address.
+ */
+async function connectWallet(): Promise<{ provider: EthereumProvider; walletAddress: string }> {
+  const connected = await onboard.connectWallet()
+  const wallet = connected[0]
+  if (!wallet) {
+    throw new Error('No Ethereum wallet connected. Select a wallet and try again.')
   }
-  return provider
+
+  const walletAddress = wallet.accounts[0]?.address
+  if (!walletAddress) {
+    throw new Error('No wallet account available.')
+  }
+
+  return { provider: wallet.provider as unknown as EthereumProvider, walletAddress }
 }
 
 /** Connect the wallet and obtain the deterministic message signature. */
 export async function requestWalletKeySource(): Promise<WalletKeySource> {
-  const provider = getProvider()
-
-  const accounts = (await provider.request({ method: 'eth_requestAccounts' })) as string[]
-  const walletAddress = accounts[0]
-  if (!walletAddress) {
-    throw new Error('No wallet account available.')
-  }
+  const { provider, walletAddress } = await connectWallet()
 
   const signature = (await provider.request({
     method: 'personal_sign',

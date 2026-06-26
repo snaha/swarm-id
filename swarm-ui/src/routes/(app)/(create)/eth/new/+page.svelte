@@ -91,7 +91,6 @@
         publicKey: wallet.publicKey,
         access: {
           type: 'eth-wallet',
-          walletAddress: source.walletAddress,
           encryptionSalt: bytesToHex(salt),
         },
         encryptedSeed,

@@ -9,6 +9,7 @@
   import { onMount } from 'svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
   import Button from '$lib/components/ui/button.svelte'
+  import Input from '$lib/components/ui/input/input.svelte'
   import Typography from '$lib/components/ui/typography.svelte'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
@@ -21,6 +22,7 @@
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
+  import { secureSeedWithPassword } from '$lib/utils/account-auth'
   import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import {
     decryptEncryptedExport,
@@ -33,6 +35,7 @@
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
   let seedPhrase = $state('')
+  let password = $state('')
 
   const fileData = $derived(sessionStore.data.importFileData)
 
@@ -46,7 +49,7 @@
     if (seedPhraseValidation.valid) return undefined
     return seedPhraseValidation.error
   })
-  const isConfirmDisabled = $derived(!seedPhraseValidation?.valid)
+  const isConfirmDisabled = $derived(!seedPhraseValidation?.valid || !password)
 
   onMount(() => {
     if (!sessionStore.data.importHeader || !fileData) {
@@ -90,14 +93,18 @@
         return
       }
 
-      // Restored as a phrase-only account: the seed is not stored, so the phrase
-      // is re-entered on each authentication.
+      // Secure the recovered seed locally with the password so the imported
+      // account carries the required access vault (unlocked by re-entering the
+      // password on this device).
+      const vault = await secureSeedWithPassword(wallet.entropy, password)
       const account = restoreAccountToStores({
         id: accountId,
         createdAt: result.data.metadata.createdAt,
         name: result.data.metadata.accountName,
         publicKey: result.data.metadata.publicKey ?? wallet.publicKey,
         derivationKey,
+        access: vault.access,
+        encryptedSeed: vault.encryptedSeed,
         defaultPostageStampBatchID: result.data.metadata.defaultPostageStampBatchID
           ? new BatchId(result.data.metadata.defaultPostageStampBatchID)
           : undefined,
@@ -158,6 +165,23 @@
           {#if seedPhraseError}
             <ErrorMessage>{seedPhraseError}</ErrorMessage>
           {/if}
+        </Vertical>
+
+        <Vertical --vertical-gap="var(--quarter-padding)">
+          <Input
+            variant="outline"
+            dimension="compact"
+            type="password"
+            name="account-password"
+            bind:value={password}
+            placeholder="Enter a password"
+            disabled={isProcessing}
+            label="Password"
+          />
+          <Typography variant="small"
+            >Set a password to encrypt the imported recovery phrase on this device. You'll re-enter
+            it to unlock the account.</Typography
+          >
         </Vertical>
       </Vertical>
     {/snippet}
