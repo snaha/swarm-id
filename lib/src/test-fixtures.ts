@@ -4,15 +4,8 @@
 /**
  * Shared test fixtures for backup-encryption, account-state-snapshot, and sync tests.
  */
-import { EthAddress, BatchId, PrivateKey, Bytes } from "@ethersphere/bee-js"
-import type {
-  Device,
-  PasskeyAccount,
-  EthereumAccount,
-  AgentAccount,
-  ConnectedApp,
-  PostageStamp,
-} from "./schemas"
+import { EthAddress, BatchId, PrivateKey } from "@ethersphere/bee-js"
+import type { Account, Device, ConnectedApp, PostageStamp } from "./schemas"
 
 export const TEST_ETH_ADDRESS_HEX = "a".repeat(40)
 export const TEST_ETH_ADDRESS_2_HEX = "b".repeat(40)
@@ -34,51 +27,18 @@ export function createDevice(overrides?: Partial<Device>): Device {
   }
 }
 
-export function createPasskeyAccount(
-  overrides?: Partial<PasskeyAccount>,
-): PasskeyAccount {
+/**
+ * The single account fixture. Every account is a BIP-39 seed account; pass an
+ * `access` + `encryptedSeed` override to model an interactive UI account, or
+ * leave them unset for a headless/programmatic account.
+ */
+export function createAccount(overrides?: Partial<Account>): Account {
   return {
     id: new EthAddress(TEST_ETH_ADDRESS_HEX),
-    name: "Test Passkey Account",
+    name: "Test Account",
     createdAt: 1700000000000,
-    type: "passkey" as const,
-    credentialId: "credential-abc-123",
-    derivationKey: TEST_DERIVATION_KEY_HEX,
-    devices: [],
-    connectedApps: [],
-    postageStamps: [],
-    ...overrides,
-  }
-}
-
-export function createEthereumAccount(
-  overrides?: Partial<EthereumAccount>,
-): EthereumAccount {
-  return {
-    id: new EthAddress(TEST_ETH_ADDRESS_HEX),
-    name: "Test Ethereum Account",
-    createdAt: 1700000000000,
-    type: "ethereum" as const,
-    ethereumAddress: new EthAddress(TEST_ETH_ADDRESS_2_HEX),
-    encryptedMasterKey: new Bytes(new Uint8Array([1, 2, 3, 4])),
-    encryptionSalt: new Bytes(new Uint8Array([5, 6, 7, 8])),
-    encryptedSecretSeed: new Bytes(new Uint8Array([9, 10, 11, 12])),
-    derivationKey: TEST_DERIVATION_KEY_HEX,
-    devices: [],
-    connectedApps: [],
-    postageStamps: [],
-    ...overrides,
-  }
-}
-
-export function createAgentAccount(
-  overrides?: Partial<AgentAccount>,
-): AgentAccount {
-  return {
-    id: new EthAddress(TEST_ETH_ADDRESS_HEX),
-    name: "Test Agent Account",
-    createdAt: 1700000000000,
-    type: "agent" as const,
+    access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
+    encryptedSeed: "aabbccdd",
     derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
     connectedApps: [],

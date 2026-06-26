@@ -13,7 +13,6 @@ import { z } from "zod"
 import {
   EthAddress,
   BatchId as BeeBatchId,
-  Bytes,
   PrivateKey as BeePrivateKey,
 } from "@ethersphere/bee-js"
 
@@ -93,13 +92,6 @@ const StoredPrivateKey = z
   .string()
   .length(64)
   .transform((s) => new BeePrivateKey(s))
-
-/**
- * Schema for Bytes - validates number array, transforms to Bytes
- */
-const StoredBytes = z
-  .array(z.number())
-  .transform((arr) => new Bytes(new Uint8Array(arr)))
 
 // ============================================================================
 // Device Schema
@@ -182,7 +174,38 @@ export const PostageStampSchemaV1 = z.object({
 // ============================================================================
 
 /**
- * Common fields shared by all account types.
+ * Access Method Schema V1
+ *
+ * Every account is a BIP-39 seed account; the access method is simply HOW that
+ * seed is protected/encrypted at rest on this device (and thus how it is
+ * unlocked). Fields are device-local crypto material (plain hex / numbers) —
+ * never bee-js byte classes — so they round-trip as-is. Paired with
+ * `encryptedSeed` on the account: the two travel together (both present on an
+ * interactive UI account; both absent on a headless/programmatic account that
+ * holds its seed in memory).
+ */
+export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
+  z.object({ type: z.literal("passkey"), credentialId: z.string() }),
+  z.object({
+    type: z.literal("eth-wallet"),
+    walletAddress: z.string(),
+    encryptionSalt: z.string(),
+  }),
+  z.object({
+    type: z.literal("password"),
+    kdfSalt: z.string(),
+    kdfIterations: z.number(),
+  }),
+])
+
+/**
+ * Account Schema V1
+ *
+ * The single, unified account model. There is exactly one kind of account: a
+ * BIP-39 seed account. What used to be distinct `type`s (passkey / ethereum /
+ * agent) were really just different ways of protecting the seed — now expressed
+ * uniformly by the optional `access` method + `encryptedSeed` vault. No `type`
+ * discriminant remains.
  *
  * The account is the single-level aggregate root (the identity tier was
  * collapsed into it). It is the app-facing identity: `id` is the address apps
@@ -193,7 +216,7 @@ export const PostageStampSchemaV1 = z.object({
  * apps and postage stamps as nested collections rather than via foreign-key
  * pointers.
  */
-const CommonAccountSchemaV1 = z.object({
+export const AccountSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
@@ -201,6 +224,15 @@ const CommonAccountSchemaV1 = z.object({
   // App-facing public key (compressed secp256k1). Surfaced to dApps as the
   // identity public key in ConnectionInfo. Was previously on the identity.
   publicKey: CompressedPublicKeySchema.optional(),
+  // Device-local seed vault. Every identity-UI account is a BIP-39 seed account:
+  // `encryptedSeed` holds that seed encrypted at rest and `access` records the
+  // method used to encrypt/unlock it on this device (passkey / eth-wallet /
+  // password). The two travel together (both present on every UI account, both
+  // absent on legacy `swarm-ui` accounts). Device-local: deliberately excluded
+  // from the sync snapshot.
+  access: AccessMethodSchemaV1.optional(),
+  // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
+  encryptedSeed: z.string().optional(),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
   // Account-owned nested collections (replace the old flat identities/apps/
@@ -230,43 +262,6 @@ const CommonAccountSchemaV1 = z.object({
   partitionCount: z.number().int().min(1).optional(),
 })
 
-/**
- * Passkey Account Schema V1
- */
-export const PasskeyAccountSchemaV1 = CommonAccountSchemaV1.extend({
-  type: z.literal("passkey"),
-  credentialId: z.string(),
-})
-
-/**
- * Ethereum Account Schema V1
- */
-export const EthereumAccountSchemaV1 = CommonAccountSchemaV1.extend({
-  type: z.literal("ethereum"),
-  ethereumAddress: StoredEthAddress,
-  encryptedMasterKey: StoredBytes,
-  encryptionSalt: StoredBytes,
-  encryptedSecretSeed: StoredBytes,
-})
-
-/**
- * Agent Account Schema V1
- * For automated testing and programmatic use with BIP39 seed phrases
- * Seed phrase is NOT stored - must be re-entered on each authentication (like passkey)
- */
-export const AgentAccountSchemaV1 = CommonAccountSchemaV1.extend({
-  type: z.literal("agent"),
-})
-
-/**
- * Account Schema V1 (discriminated union)
- */
-export const AccountSchemaV1 = z.discriminatedUnion("type", [
-  PasskeyAccountSchemaV1,
-  EthereumAccountSchemaV1,
-  AgentAccountSchemaV1,
-])
-
 // ============================================================================
 // Sync State Snapshot Schemas
 // ============================================================================
@@ -285,7 +280,7 @@ export const AccountMetadataSchemaV1 = z.object({
       appSessionDuration: z.number().optional(),
     })
     .optional(),
-  // Per-field LWW clocks for the scalar fields (see `CommonAccountSchemaV1`).
+  // Per-field LWW clocks for the scalar fields (see `AccountSchemaV1`).
   accountNameAt: z.number().optional(),
   defaultStampAt: z.number().optional(),
   settingsAt: z.number().optional(),
@@ -325,14 +320,32 @@ export const AccountStateSnapshotSchemaV1 = z.object({
 // ============================================================================
 
 export type Device = z.infer<typeof DeviceSchemaV1>
-export type PasskeyAccount = z.infer<typeof PasskeyAccountSchemaV1>
-export type EthereumAccount = z.infer<typeof EthereumAccountSchemaV1>
-export type AgentAccount = z.infer<typeof AgentAccountSchemaV1>
+export type AccessMethod = z.infer<typeof AccessMethodSchemaV1>
 export type Account = z.infer<typeof AccountSchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
 export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
+
+// ============================================================================
+// Account Predicates
+// ============================================================================
+
+/**
+ * An account is "local" when it owns no usable postage batch — it cannot pay
+ * for uploads, so it is effectively view-only and has nothing to sync. "Local"
+ * is purely this runtime predicate; it is NOT a stored field or account `type`.
+ *
+ * A stamp counts as a valid drive when it `exists` on-chain and is `usable`
+ * (synced enough to upload against) and is not tombstoned. A freshly
+ * purchased-but-not-yet-usable stamp therefore still reads as local until it
+ * becomes usable.
+ */
+export function isLocalAccount(account: Account): boolean {
+  return !account.postageStamps.some(
+    (stamp) => stamp.exists && stamp.usable && stamp.deletedAt === undefined,
+  )
+}
 
 // ============================================================================
 // Partition-Lease Wire Formats

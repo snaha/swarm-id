@@ -1701,11 +1701,4 @@ export interface ConnectOptions {
 // Entity Types (derived from Zod schemas for type safety)
 // ============================================================================
 
-export type {
-  PasskeyAccount,
-  EthereumAccount,
-  AgentAccount,
-  Account,
-  ConnectedApp,
-  PostageStamp,
-} from "./schemas"
+export type { Account, ConnectedApp, PostageStamp } from "./schemas"

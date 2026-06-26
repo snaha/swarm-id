@@ -15,7 +15,7 @@ import type { DebouncedUtilizationUploader } from "../storage/debounced-uploader
 import {
   TEST_ETH_ADDRESS_HEX,
   TEST_BATCH_ID_HEX,
-  createPasskeyAccount,
+  createAccount,
   createConnectedApp,
   createPostageStamp,
 } from "../test-fixtures"
@@ -26,12 +26,11 @@ import { PartitionContendedError } from "./batch-write-coordinator"
 // ============================================================================
 
 function createMockStores(
-  accountOverrides?: Partial<ReturnType<typeof createPasskeyAccount>>,
+  accountOverrides?: Partial<ReturnType<typeof createAccount>>,
 ) {
   const connectedApp = createConnectedApp({ appSecret: undefined })
   const stamp = createPostageStamp()
-  const account = createPasskeyAccount({
-    credentialId: "test-credential",
+  const account = createAccount({
     name: "Test Account",
     defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
     connectedApps: [connectedApp],
@@ -365,7 +364,7 @@ describe("createSyncAccount", () => {
 
   it("should return undefined when no default stamp available", async () => {
     const stores = createMockStores()
-    const account = createPasskeyAccount({
+    const account = createAccount({
       defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
     })
     ;(

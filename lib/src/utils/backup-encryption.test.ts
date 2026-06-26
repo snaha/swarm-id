@@ -15,12 +15,9 @@ import {
 } from "./backup-encryption"
 import {
   TEST_ETH_ADDRESS_HEX,
-  TEST_ETH_ADDRESS_2_HEX,
   TEST_DERIVATION_KEY_HEX,
   DIFFERENT_DERIVATION_KEY_HEX,
-  createPasskeyAccount,
-  createEthereumAccount,
-  createAgentAccount,
+  createAccount,
   createConnectedApp,
   createPostageStamp,
 } from "../test-fixtures"
@@ -29,9 +26,11 @@ import {
 // Round-trip Tests
 // ============================================================================
 
-describe("round-trip: encrypt → decrypt for each account type", () => {
-  it("should round-trip a passkey account", async () => {
-    const account = createPasskeyAccount({
+describe("round-trip: encrypt → decrypt", () => {
+  it("should round-trip an account, exporting no key or seed-vault material", async () => {
+    const account = createAccount({
+      access: { type: "passkey", credentialId: "cred-xyz" },
+      encryptedSeed: "deadbeef",
       connectedApps: [createConnectedApp()],
       postageStamps: [createPostageStamp()],
     })
@@ -41,10 +40,13 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
       TEST_DERIVATION_KEY_HEX,
     )
 
-    expect(encrypted.accountType).toBe("passkey")
-    expect(encrypted.credentialId).toBe("credential-abc-123")
     expect(typeof encrypted.ciphertext).toBe("string")
-    // No plaintext account data in the outer object
+    // No account-type discriminant, no key material, no plaintext account data,
+    // and never the device-local seed vault in the outer (plaintext) object.
+    expect(encrypted).not.toHaveProperty("accountType")
+    expect(encrypted).not.toHaveProperty("credentialId")
+    expect(encrypted).not.toHaveProperty("access")
+    expect(encrypted).not.toHaveProperty("encryptedSeed")
     expect(encrypted).not.toHaveProperty("account")
     expect(encrypted).not.toHaveProperty("postageStamps")
 
@@ -57,58 +59,14 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
     if (!result.success) return
 
     expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
-    expect(result.data.metadata.accountName).toBe("Test Passkey Account")
+    expect(result.data.metadata.accountName).toBe("Test Account")
     expect(result.data.connectedApps).toHaveLength(1)
     expect(result.data.postageStamps).toHaveLength(1)
     expect(result.data.postageStamps[0].batchID).toBeInstanceOf(BatchId)
   })
 
-  it("should round-trip an ethereum account", async () => {
-    const account = createEthereumAccount()
-
-    const encrypted = await createEncryptedExport(
-      account,
-      TEST_DERIVATION_KEY_HEX,
-    )
-
-    expect(encrypted.accountType).toBe("ethereum")
-    expect(encrypted.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
-
-    const result = await decryptEncryptedExport(
-      encrypted,
-      TEST_DERIVATION_KEY_HEX,
-    )
-
-    expect(result.success).toBe(true)
-    if (!result.success) return
-
-    expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
-    expect(result.data.metadata.accountName).toBe("Test Ethereum Account")
-  })
-
-  it("should round-trip an agent account", async () => {
-    const account = createAgentAccount()
-
-    const encrypted = await createEncryptedExport(
-      account,
-      TEST_DERIVATION_KEY_HEX,
-    )
-
-    expect(encrypted.accountType).toBe("agent")
-
-    const result = await decryptEncryptedExport(
-      encrypted,
-      TEST_DERIVATION_KEY_HEX,
-    )
-
-    expect(result.success).toBe(true)
-    if (!result.success) return
-
-    expect(result.data.metadata.accountName).toBe("Test Agent Account")
-  })
-
   it("should survive JSON serialization (file I/O simulation)", async () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       defaultPostageStampBatchID: new BatchId("c".repeat(64)),
       settings: { appSessionDuration: 3600 },
       connectedApps: [createConnectedApp()],
@@ -144,7 +102,7 @@ describe("round-trip: encrypt → decrypt for each account type", () => {
 
 describe("appSecret preservation in encrypted export", () => {
   it("should preserve appSecret in connected apps through encrypted export", async () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       connectedApps: [createConnectedApp({ appSecret: "my-secret-value" })],
     })
 
@@ -198,7 +156,7 @@ describe("key derivation determinism", () => {
 
 describe("wrong key rejection", () => {
   it("should fail to decrypt with a different swarmEncryptionKey", async () => {
-    const account = createPasskeyAccount()
+    const account = createAccount()
 
     const encrypted = await createEncryptedExport(
       account,
@@ -232,37 +190,23 @@ describe("wrong key rejection", () => {
 // ============================================================================
 
 describe("buildBackupHeader", () => {
-  it("should include credentialId for passkey accounts", () => {
-    const header = buildBackupHeader(createPasskeyAccount())
+  it("carries only plaintext metadata — no type, key, or seed-vault material", () => {
+    const header = buildBackupHeader(
+      createAccount({
+        access: { type: "passkey", credentialId: "cred-xyz" },
+        encryptedSeed: "deadbeef",
+      }),
+    )
 
     expect(header.version).toBe(1)
-    expect(header.accountType).toBe("passkey")
-    expect(header.accountName).toBe("Test Passkey Account")
-    expect(header.credentialId).toBe("credential-abc-123")
+    expect(header.accountName).toBe("Test Account")
     expect(typeof header.exportedAt).toBe("number")
-    // No ethereum-specific fields
-    expect(header).not.toHaveProperty("ethereumAddress")
-    expect(header).not.toHaveProperty("encryptedMasterKey")
-    expect(header).not.toHaveProperty("encryptionSalt")
-  })
-
-  it("should include ethereum-specific fields for ethereum accounts", () => {
-    const header = buildBackupHeader(createEthereumAccount())
-
-    expect(header.accountType).toBe("ethereum")
-    expect(header.ethereumAddress).toBe(TEST_ETH_ADDRESS_2_HEX)
-    // No passkey-specific fields
-    expect(header).not.toHaveProperty("credentialId")
-  })
-
-  it("should have no extra fields for agent accounts", () => {
-    const header = buildBackupHeader(createAgentAccount())
-
-    expect(header.accountType).toBe("agent")
+    // No account-type discriminant, no key material, no device-local seed vault.
+    expect(header).not.toHaveProperty("accountType")
     expect(header).not.toHaveProperty("credentialId")
     expect(header).not.toHaveProperty("ethereumAddress")
-    expect(header).not.toHaveProperty("encryptedMasterKey")
-    expect(header).not.toHaveProperty("encryptionSalt")
+    expect(header).not.toHaveProperty("access")
+    expect(header).not.toHaveProperty("encryptedSeed")
   })
 })
 
@@ -271,29 +215,9 @@ describe("buildBackupHeader", () => {
 // ============================================================================
 
 describe("schema validation", () => {
-  it("should accept a valid passkey encrypted export", async () => {
+  it("should accept a valid encrypted export", async () => {
     const encrypted = await createEncryptedExport(
-      createPasskeyAccount(),
-      TEST_DERIVATION_KEY_HEX,
-    )
-
-    const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
-    expect(result.success).toBe(true)
-  })
-
-  it("should accept a valid ethereum encrypted export", async () => {
-    const encrypted = await createEncryptedExport(
-      createEthereumAccount(),
-      TEST_DERIVATION_KEY_HEX,
-    )
-
-    const result = EncryptedSwarmIdExportSchemaV1.safeParse(encrypted)
-    expect(result.success).toBe(true)
-  })
-
-  it("should accept a valid agent encrypted export", async () => {
-    const encrypted = await createEncryptedExport(
-      createAgentAccount(),
+      createAccount(),
       TEST_DERIVATION_KEY_HEX,
     )
 
@@ -304,22 +228,9 @@ describe("schema validation", () => {
   it("should reject missing ciphertext", () => {
     const result = EncryptedSwarmIdExportSchemaV1.safeParse({
       version: 1,
-      accountType: "passkey",
       accountName: "Test",
-      credentialId: "cred-123",
       exportedAt: Date.now(),
       // missing ciphertext
-    })
-    expect(result.success).toBe(false)
-  })
-
-  it("should reject invalid accountType", () => {
-    const result = EncryptedSwarmIdExportSchemaV1.safeParse({
-      version: 1,
-      accountType: "invalid",
-      accountName: "Test",
-      exportedAt: Date.now(),
-      ciphertext: "abc",
     })
     expect(result.success).toBe(false)
   })
@@ -327,9 +238,7 @@ describe("schema validation", () => {
   it("should reject wrong version number", () => {
     const result = EncryptedSwarmIdExportSchemaV1.safeParse({
       version: 2,
-      accountType: "passkey",
       accountName: "Test",
-      credentialId: "cred",
       exportedAt: Date.now(),
       ciphertext: "abc",
     })
@@ -342,16 +251,16 @@ describe("schema validation", () => {
 // ============================================================================
 
 describe("parseEncryptedExportHeader", () => {
-  it("should parse a valid passkey header", async () => {
+  it("should parse a valid header", async () => {
     const encrypted = await createEncryptedExport(
-      createPasskeyAccount(),
+      createAccount(),
       TEST_DERIVATION_KEY_HEX,
     )
 
     const result = parseEncryptedExportHeader(encrypted)
     expect(result.success).toBe(true)
     if (!result.success) return
-    expect(result.header.accountType).toBe("passkey")
+    expect(result.header.accountName).toBe("Test Account")
   })
 
   it("should reject non-object input (string)", () => {
