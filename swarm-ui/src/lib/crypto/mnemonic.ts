@@ -14,7 +14,10 @@ const ENTROPY_LENGTH = 16
 export interface DerivedWallet {
   /** 0x-prefixed Ethereum address — the account id. */
   address: string
-  /** Compressed secp256k1 public key (0x-prefixed hex). */
+  /**
+   * Compressed secp256k1 public key as BARE hex (no 0x) — the form the account
+   * record stores (`CompressedPublicKeySchema` is 66 hex chars, no prefix).
+   */
   publicKey: string
   /** The BIP-39 entropy behind the phrase — this is what gets encrypted. */
   entropy: Uint8Array
@@ -35,7 +38,9 @@ export function walletFromPhrase(phrase: string): DerivedWallet {
   const wallet = HDNodeWallet.fromMnemonic(mnemonic)
   return {
     address: wallet.address,
-    publicKey: wallet.publicKey,
+    // ethers returns the compressed key 0x-prefixed; strip it so the stored
+    // value satisfies the lib's bare-hex `CompressedPublicKeySchema`.
+    publicKey: wallet.publicKey.replace(/^0x/, ''),
     entropy: hexToBytes(mnemonic.entropy),
   }
 }
