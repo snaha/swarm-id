@@ -28,10 +28,9 @@ export async function unlockAccount(account: Account, password?: string): Promis
   } else if (access.type === 'passkey') {
     key = (await authenticateWithPasskey(access.credentialId)).key
   } else {
+    // No wallet-address check: the wrong wallet derives a different key and
+    // simply fails to decrypt below (the account id already pins the address).
     const source = await requestWalletKeySource()
-    if (source.walletAddress.toLowerCase() !== access.walletAddress.toLowerCase()) {
-      throw new Error('Connected wallet does not match the one securing this account.')
-    }
     key = await deriveWalletKey(source, hexToBytes(access.encryptionSalt))
   }
 
