@@ -232,7 +232,9 @@ export const AccountSchemaV1 = z.object({
   // Device-local: deliberately excluded from the sync snapshot.
   access: AccessMethodSchemaV1,
   // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
-  encryptedSeed: z.string(),
+  // Non-empty, even-length hex — never blank. Width varies with the seed size
+  // (12-word seed → 88 chars, 24-word → 120), so it is not a fixed length.
+  encryptedSeed: z.string().regex(/^([0-9a-f]{2})+$/),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
   // Account-owned nested collections (replace the old flat identities/apps/
