@@ -11,6 +11,7 @@
   import Copy from '@lucide/svelte/icons/copy'
   import Download from '@lucide/svelte/icons/download'
   import Eye from '@lucide/svelte/icons/eye'
+  import { Wallet } from 'ethers'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -21,7 +22,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
   import { Textarea } from '$lib/components/ui/textarea'
-  import { generatePhrase, isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
+  import { isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
   import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { copyToClipboard } from '$lib/utils'
@@ -33,7 +34,7 @@
   ]
 
   // Reuse the draft phrase so navigating back does not regenerate it.
-  const generated = sessionStore.draft?.phrase ?? generatePhrase()
+  const generated = sessionStore.draft?.phrase ?? Wallet.createRandom().mnemonic!.phrase
   const words = generated.split(' ')
 
   let mode = $state('generate')
