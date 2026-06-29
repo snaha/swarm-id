@@ -28,9 +28,9 @@ export function createDevice(overrides?: Partial<Device>): Device {
 }
 
 /**
- * The single account fixture. Every account is a BIP-39 seed account; pass an
- * `access` + `encryptedSeed` override to model an interactive UI account, or
- * leave them unset for a headless/programmatic account.
+ * The single account fixture. Every account is a BIP-39 seed account with a
+ * required `access` + `encryptedSeed` vault (defaulted here to a password vault);
+ * override them to model a different access method.
  */
 export function createAccount(overrides?: Partial<Account>): Account {
   return {
