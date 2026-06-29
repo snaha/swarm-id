@@ -10,11 +10,14 @@ default unit suite (`pnpm test`) and the local-cluster `pnpm test:integration`.
 
 ## What it covers
 
-| File                          | Scenario                                                                    |
-| ----------------------------- | --------------------------------------------------------------------------- |
-| `per-device-sync.test.ts`     | 2 devices: per-device feeds converge; stamp/device tombstones; §7 invariant |
-| `per-device-sync-3.test.ts`   | 3 devices: append-only roster (no clobber); fold-latency report             |
-| `partition-acquire-3.test.ts` | 3 devices race for 2 partitions; idle-then-reacquire → no dual-acquire      |
+| File                                   | Scenario                                                                                |
+| -------------------------------------- | --------------------------------------------------------------------------------------- |
+| `per-device-sync.test.ts`              | 2 devices: per-device feeds converge; stamp/device tombstones; §7 invariant             |
+| `per-device-sync-3.test.ts`            | 3 devices: append-only roster (no clobber); fold-latency report                         |
+| `partition-acquire-3.test.ts`          | 3 devices race for 2 partitions; idle-then-reacquire → no dual-acquire                  |
+| `single-device-acquire-upload.test.ts` | 1 device: clean acquire → SOC upload → publish wall times                               |
+| `multi-device-acquire-upload.test.ts`  | 2 devices: per-device acquire + SOC upload + publish wall times (timings)               |
+| `three-device-acquire-handoff.test.ts` | 3 devices, K=2: A→p0, B→p1 upload; B idles → C takes the freed slot + uploads (timings) |
 
 The deterministic, always-on guards for the same logic are the mocked tests in
 `lib/src/sync/*.test.ts` (run in CI). This suite is the live counterpart.
