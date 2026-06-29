@@ -103,7 +103,10 @@
   let toastMessage = $state<string | undefined>(undefined)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-  const isLocal = $derived(account.postageStamps.length === 0)
+  // "Local" = no usable drives. Use `drives` (tombstone-filtered), not the raw
+  // `postageStamps` array, so a removed drive's tombstone doesn't read as a live
+  // drive and wrongly hide the view-only banner.
+  const isLocal = $derived(account.drives.length === 0)
   const accessLabel = $derived(methodLabel(account.access.type))
   const AccessIcon: Component = $derived(
     account.access.type === 'passkey'
