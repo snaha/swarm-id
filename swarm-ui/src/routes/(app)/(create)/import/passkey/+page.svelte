@@ -21,9 +21,13 @@
   import { sessionStore } from '$lib/stores/session.svelte'
   import { navigateToConnectOrHome } from '$lib/utils/navigation'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { validateSeedPhrase, countSeedPhraseWords } from '$lib/seed-phrase'
   import { secureSeedWithPassword } from '$lib/utils/account-auth'
-  import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import {
+    walletFromPhrase,
+    privateKeyFromEntropy,
+    validateSeedPhrase,
+    countSeedPhraseWords,
+  } from '$lib/crypto/mnemonic'
   import {
     decryptEncryptedExport,
     deriveAccountDerivationKey,

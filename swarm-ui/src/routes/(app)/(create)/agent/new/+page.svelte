@@ -26,9 +26,13 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
-  import { validateSeedPhrase, countSeedPhraseWords } from '$lib/seed-phrase'
   import { secureSeedWithPassword } from '$lib/utils/account-auth'
-  import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import {
+    walletFromPhrase,
+    privateKeyFromEntropy,
+    validateSeedPhrase,
+    countSeedPhraseWords,
+  } from '$lib/crypto/mnemonic'
   import {
     deriveAccountDerivationKey,
     getOrCreateDeviceId,

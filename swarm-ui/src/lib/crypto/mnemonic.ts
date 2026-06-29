@@ -50,3 +50,47 @@ export function privateKeyFromEntropy(entropy: Uint8Array): string {
   const mnemonic = Mnemonic.fromEntropy(entropy)
   return HDNodeWallet.fromMnemonic(mnemonic).privateKey
 }
+
+export type SeedPhraseValidation = { valid: true; phrase: string } | { valid: false; error: string }
+
+/**
+ * Validates a BIP-39 mnemonic seed phrase (12 or 24 words). Returns the
+ * normalized (trimmed, lowercased) phrase when valid, or a user-facing error.
+ * Used by the phrase-entry create/import UIs.
+ */
+export function validateSeedPhrase(phrase: string): SeedPhraseValidation {
+  const trimmed = phrase.trim()
+
+  if (!trimmed) {
+    return { valid: false, error: 'Please enter your seed phrase' }
+  }
+
+  const normalized = trimmed.toLowerCase()
+  const words = normalized.split(/\s+/)
+
+  // Check word count
+  if (words.length !== 12 && words.length !== 24) {
+    return {
+      valid: false,
+      error: `Invalid word count: ${words.length}. Must be 12 or 24 words.`,
+    }
+  }
+
+  // Validate using ethers.js Mnemonic
+  try {
+    Mnemonic.fromPhrase(normalized)
+    return { valid: true, phrase: normalized }
+  } catch {
+    return {
+      valid: false,
+      error: 'Invalid mnemonic phrase. Please check that all words are from the BIP39 wordlist.',
+    }
+  }
+}
+
+/** Counts words in a seed phrase (for live UI feedback). */
+export function countSeedPhraseWords(phrase: string): number {
+  const trimmed = phrase.trim()
+  if (trimmed === '') return 0
+  return trimmed.split(/\s+/).length
+}
