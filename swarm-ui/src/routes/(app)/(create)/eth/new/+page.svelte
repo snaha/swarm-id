@@ -23,7 +23,8 @@
   import { requestWalletKeySource, deriveWalletKey } from '$lib/crypto/eth-wallet'
   import { encryptSeed, randomSalt } from '$lib/crypto/encryption'
   import { bytesToHex } from '$lib/crypto/hex'
-  import { generatePhrase, walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import { Wallet } from 'ethers'
   import { EthAddress } from '@ethersphere/bee-js'
   import { WarningAlt } from 'carbon-icons-svelte'
   import Confirmation from '$lib/components/confirmation.svelte'
@@ -72,7 +73,7 @@
       // Unified seed account: generate a BIP-39 phrase and encrypt its entropy
       // with a key derived from a wallet signature. Re-signing the same message
       // with the same wallet unlocks the seed on this device.
-      const phrase = generatePhrase()
+      const phrase = Wallet.createRandom().mnemonic!.phrase
       const wallet = walletFromPhrase(phrase)
 
       const source = await requestWalletKeySource()

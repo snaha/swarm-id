@@ -7,20 +7,20 @@
  * `AccountSchemaV1` accepts (and that the constraint rejects a blanked one).
  */
 import { describe, it, expect } from 'vitest'
-import { Mnemonic } from 'ethers'
+import { Mnemonic, Wallet } from 'ethers'
 import { AccountSchemaV1 } from '@snaha/swarm-id'
 import { encryptSeed, deriveKeyFromPassword, randomSalt } from './encryption'
 import { bytesToHex } from './hex'
-import { generatePhrase, walletFromPhrase } from './mnemonic'
+import { walletFromPhrase } from './mnemonic'
 
 const PASSWORD = 'correct horse battery staple'
 // PBKDF2 strength does not affect the encryptedSeed format (IV ‖ ciphertext),
 // so use a low iteration count to keep the test fast.
 const TEST_KDF_ITERATIONS = 1000
 
-/** A real BIP-39 phrase: generatePhrase() yields 12 words; 24 needs 32B entropy. */
+/** A real BIP-39 phrase: createRandom() yields 12 words; 24 needs 32B entropy. */
 function realPhrase(words: 12 | 24): string {
-  if (words === 12) return generatePhrase()
+  if (words === 12) return Wallet.createRandom().mnemonic!.phrase
   return Mnemonic.fromEntropy(crypto.getRandomValues(new Uint8Array(32))).phrase
 }
 
@@ -73,7 +73,7 @@ describe('encryptedSeed from a real seed phrase', () => {
   )
 
   it('rejects a real account whose encryptedSeed is blanked', async () => {
-    const phrase = generatePhrase()
+    const phrase = Wallet.createRandom().mnemonic!.phrase
     const account = serializedAccount(phrase, await encryptPhrase(phrase))
     expect(AccountSchemaV1.safeParse({ ...account, encryptedSeed: '' }).success).toBe(false)
   })

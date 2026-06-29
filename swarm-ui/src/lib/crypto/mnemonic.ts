@@ -8,9 +8,6 @@ import { HDNodeWallet, Mnemonic } from 'ethers'
 
 import { hexToBytes } from '$lib/crypto/hex'
 
-/** 16 bytes of entropy produce a 12-word BIP-39 phrase. */
-const ENTROPY_LENGTH = 16
-
 export interface DerivedWallet {
   /** 0x-prefixed Ethereum address — the account id. */
   address: string
@@ -21,12 +18,6 @@ export interface DerivedWallet {
   publicKey: string
   /** The BIP-39 entropy behind the phrase — this is what gets encrypted. */
   entropy: Uint8Array
-}
-
-export function generatePhrase(): string {
-  const entropy = new Uint8Array(ENTROPY_LENGTH)
-  crypto.getRandomValues(entropy)
-  return Mnemonic.fromEntropy(entropy).phrase
 }
 
 function normalizePhrase(phrase: string): string {

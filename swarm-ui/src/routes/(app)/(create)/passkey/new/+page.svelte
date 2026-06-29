@@ -7,7 +7,8 @@
   import { goto } from '$app/navigation'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import { encryptSeed } from '$lib/crypto/encryption'
-  import { generatePhrase, walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import { Wallet } from 'ethers'
   import { EthAddress } from '@ethersphere/bee-js'
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Button from '$lib/components/ui/button.svelte'
@@ -68,7 +69,7 @@
       // Unified seed account: generate a BIP-39 phrase, register a passkey, and
       // encrypt the seed entropy with the passkey PRF-derived key. The account
       // id and master key (private key) come from the phrase.
-      const phrase = generatePhrase()
+      const phrase = Wallet.createRandom().mnemonic!.phrase
       const wallet = walletFromPhrase(phrase)
       const passkey = await createPasskeyKey(accountName.trim())
       const encryptedSeed = await encryptSeed(wallet.entropy, passkey.key)
