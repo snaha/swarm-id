@@ -75,9 +75,9 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     settingsAt: account.settingsAt,
     lastModified: account.lastModified,
     partitionCount: account.partitionCount,
-    // Device-local seed vault (plain JSON, no byte classes). Present on every
-    // interactive UI account; `undefined` is dropped from the JSON for a
-    // headless/programmatic account.
+    // Device-local seed vault (plain JSON, no byte classes). Every account is a
+    // BIP-39 seed account, so both are always present: `access` records how the
+    // seed is protected/unlocked and `encryptedSeed` is the seed encrypted at rest.
     access: account.access,
     encryptedSeed: account.encryptedSeed,
   }
