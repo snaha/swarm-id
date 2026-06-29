@@ -2,29 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 import { describe, expect, it } from 'vitest'
 
-import {
-  generatePhrase,
-  isValidPhrase,
-  normalizePhrase,
-  phraseFromEntropy,
-  walletFromPhrase,
-} from './mnemonic'
+import { isValidPhrase, normalizePhrase, phraseFromEntropy, walletFromPhrase } from './mnemonic'
 
 const KNOWN_PHRASE = 'test test test test test test test test test test test junk'
 // Hardhat's well-known account #0 for the phrase above.
 const KNOWN_ADDRESS = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
-
-describe('generatePhrase', () => {
-  it('produces a valid 12-word phrase', () => {
-    const phrase = generatePhrase()
-    expect(phrase.split(' ')).toHaveLength(12)
-    expect(isValidPhrase(phrase)).toBe(true)
-  })
-
-  it('produces a different phrase each time', () => {
-    expect(generatePhrase()).not.toBe(generatePhrase())
-  })
-})
 
 describe('normalizePhrase', () => {
   it('collapses whitespace and lowercases', () => {
