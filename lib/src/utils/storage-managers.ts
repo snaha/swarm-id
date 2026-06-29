@@ -59,11 +59,10 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
  * postage stamps inline).
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
-  const common = {
+  return {
     id: account.id.toString(),
     name: account.name,
     createdAt: account.createdAt,
-    type: account.type,
     derivationKey: account.derivationKey,
     publicKey: account.publicKey,
     defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toString(),
@@ -76,22 +75,11 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     settingsAt: account.settingsAt,
     lastModified: account.lastModified,
     partitionCount: account.partitionCount,
-  }
-
-  if (account.type === "passkey") {
-    return { ...common, credentialId: account.credentialId }
-  } else if (account.type === "ethereum") {
-    return {
-      ...common,
-      ethereumAddress: account.ethereumAddress.toString(),
-      encryptedMasterKey: Array.from(account.encryptedMasterKey.toUint8Array()),
-      encryptionSalt: Array.from(account.encryptionSalt.toUint8Array()),
-      encryptedSecretSeed: Array.from(
-        account.encryptedSecretSeed.toUint8Array(),
-      ),
-    }
-  } else {
-    return common
+    // Device-local seed vault (plain JSON, no byte classes). Present on every
+    // interactive UI account; `undefined` is dropped from the JSON for a
+    // headless/programmatic account.
+    access: account.access,
+    encryptedSeed: account.encryptedSeed,
   }
 }
 

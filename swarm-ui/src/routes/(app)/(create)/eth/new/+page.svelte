@@ -9,7 +9,6 @@
   import Button from '$lib/components/ui/button.svelte'
   import Input from '$lib/components/ui/input/input.svelte'
   import Select from '$lib/components/ui/select/select.svelte'
-  import WorkflowAutomation from 'carbon-icons-svelte/lib/WorkflowAutomation.svelte'
   import ArrowRight from 'carbon-icons-svelte/lib/ArrowRight.svelte'
   import Information from 'carbon-icons-svelte/lib/Information.svelte'
   import routes from '$lib/routes'
@@ -19,19 +18,13 @@
   import Vertical from '$lib/components/ui/vertical.svelte'
   import Horizontal from '$lib/components/ui/horizontal.svelte'
   import Tooltip from '$lib/components/ui/tooltip.svelte'
-  import ErrorMessage from '$lib/components/ui/error-message.svelte'
-  import GenerateSeedModal from '$lib/components/generate-seed-modal.svelte'
-  import { connectAndSign, deriveMasterKey } from '$lib/ethereum'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import {
-    generateEncryptionSalt,
-    deriveEncryptionKey,
-    encryptMasterKey,
-    deriveSecretSeedEncryptionKey,
-    encryptSecretSeed,
-  } from '$lib/utils/encryption'
-  import { validateSecretSeed } from '$lib/utils/secret-seed'
+  import { requestWalletKeySource, deriveWalletKey } from '$lib/crypto/eth-wallet'
+  import { encryptSeed, randomSalt } from '$lib/crypto/encryption'
+  import { bytesToHex } from '$lib/crypto/hex'
+  import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
+  import { Wallet } from 'ethers'
   import { EthAddress } from '@ethersphere/bee-js'
   import { WarningAlt } from 'carbon-icons-svelte'
   import Confirmation from '$lib/components/confirmation.svelte'
@@ -46,11 +39,8 @@
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
-  let showSeedTooltip = $state(false)
-  let showSeedModal = $state(false)
   let accountName = $state('Ethereum')
   let accountType = $state<AccountSyncType>('local')
-  let secretSeed = $state('')
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
 
@@ -64,25 +54,15 @@
       (account) => account.name === accountName,
     )
     if (accountNameIsTaken) {
-      accountName = `${accountName} ${accountsStore.accounts.filter((account) => account.type === 'ethereum').length + 1}`
+      accountName = `${accountName} ${accountsStore.accounts.length + 1}`
     }
   })
 
-  let secretSeedError = $derived.by(() => {
-    if (!secretSeed) return undefined
-
-    if (!validateSecretSeed(secretSeed)) {
-      return 'Use 20 to 128 characters with a mix of uppercase letters, lowercase letters, numbers, and special characters.'
-    }
-
-    return undefined
-  })
-
-  let isFormDisabled = $derived(!accountName || !secretSeed || !!secretSeedError)
+  let isFormDisabled = $derived(!accountName)
 
   async function handleConfirm() {
-    if (!accountName.trim() || !secretSeed.trim()) {
-      error = 'Please fill in all fields'
+    if (!accountName.trim()) {
+      error = 'Please enter an account name'
       return
     }
 
@@ -90,40 +70,31 @@
       isProcessing = true
       error = undefined
 
-      // Connect wallet and sign SIWE message
-      const signed = await connectAndSign()
+      // Unified seed account: generate a BIP-39 phrase and encrypt its entropy
+      // with a key derived from a wallet signature. Re-signing the same message
+      // with the same wallet unlocks the seed on this device.
+      const phrase = Wallet.createRandom().mnemonic!.phrase
+      const wallet = walletFromPhrase(phrase)
 
-      const { masterKey, masterAddress } = deriveMasterKey(secretSeed, signed.publicKey)
+      const source = await requestWalletKeySource()
+      const salt = randomSalt()
+      const key = await deriveWalletKey(source, salt)
+      const encryptedSeed = await encryptSeed(wallet.entropy, key)
 
-      // Derive derivationKey from master key
-      const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
+      const masterKeyHex = privateKeyFromEntropy(wallet.entropy)
+      const derivationKey = await deriveAccountDerivationKey(masterKeyHex)
 
-      // Encrypt masterKey before storage
-
-      // Step 2: Generate encryption salt
-      const encryptionSalt = generateEncryptionSalt()
-
-      // Step 3: Derive encryption key from public key + salt
-      const encryptionKey = await deriveEncryptionKey(signed.publicKey, encryptionSalt)
-
-      // Step 4: Encrypt masterKey
-      const encryptedMasterKey = await encryptMasterKey(masterKey, encryptionKey)
-
-      // Step 5: Encrypt secretSeed with masterKey as encryption key
-      const secretSeedEncryptionKey = await deriveSecretSeedEncryptionKey(masterKey)
-      const encryptedSecretSeed = await encryptSecretSeed(secretSeed, secretSeedEncryptionKey)
-
-      // Store account with encrypted masterKey and encrypted secret seed
       const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
-        id: masterAddress,
+        id: new EthAddress(wallet.address),
         createdAt: Date.now(),
         name: accountName.trim(),
-        type: 'ethereum',
-        ethereumAddress: new EthAddress(signed.address),
-        encryptedMasterKey: encryptedMasterKey,
-        encryptionSalt: encryptionSalt,
-        encryptedSecretSeed: encryptedSecretSeed,
+        publicKey: wallet.publicKey,
+        access: {
+          type: 'eth-wallet',
+          encryptionSalt: bytesToHex(salt),
+        },
+        encryptedSeed,
         derivationKey,
         devices: mergeDevices([], deviceId, detectDeviceName()),
         connectedApps: [],
@@ -212,64 +183,10 @@
           </div>
         </div>
 
-        <Vertical --vertical-gap="var(--quarter-padding)">
-          <Typography>Secret seed</Typography>
-          <Horizontal --horizontal-gap="var(--half-padding)">
-            <div style="flex: 1" class="secret-seed-input">
-              <Input
-                variant="outline"
-                dimension="compact"
-                name="secret-seed"
-                bind:value={secretSeed}
-                error={secretSeedError}
-                disabled={isProcessing}
-              />
-            </div>
-            <Button
-              dimension="compact"
-              variant="ghost"
-              onclick={() => (showSeedModal = true)}
-              disabled={isProcessing}
-            >
-              <WorkflowAutomation size={20} />
-            </Button>
-          </Horizontal>
-          {#if secretSeedError}
-            <ErrorMessage>{secretSeedError}</ErrorMessage>
-          {:else}
-            <Typography variant="small" class="accent"
-              >Generate one with the button above on the right or use your own. <Tooltip
-                show={showSeedTooltip}
-                position="top"
-                variant="small"
-                color="dark"
-                maxWidth="287px"
-              >
-                <!-- svelte-ignore a11y_invalid_attribute -->
-                <a
-                  href="#"
-                  onmouseenter={() => (showSeedTooltip = true)}
-                  onmouseleave={() => (showSeedTooltip = false)}
-                  onclick={(e: MouseEvent) => {
-                    e.stopPropagation()
-                    showSeedTooltip = !showSeedTooltip
-                  }}>Learn more</a
-                >
-                {#snippet helperText()}
-                  The secret seed works with your ETH wallet to restore your Swarm ID account. <strong
-                    >Store it in a password manager or write it down and keep it in a secure
-                    location. Never share it with anyone.</strong
-                  >
-                {/snippet}
-              </Tooltip></Typography
-            >
-          {/if}
-          {#if secretSeed && !secretSeedError}
-            <Typography variant="small" style="color: var(--colors-red)"
-              ><strong>Warning:</strong> If you lose this seed, you won't be able to recover your account.</Typography
-            >
-          {/if}
-        </Vertical>
+        <Typography variant="small"
+          >A fresh recovery phrase is generated for you and encrypted on this device with your
+          Ethereum wallet. Sign the message in your wallet to continue.</Typography
+        >
 
         {#if error}
           <Horizontal
@@ -306,8 +223,6 @@
   </CreationLayout>
 {/if}
 
-<GenerateSeedModal bind:open={showSeedModal} onUseSeed={(seed) => (secretSeed = seed)} />
-
 <style>
   .form-row {
     display: flex;
@@ -322,10 +237,6 @@
 
   .info-button {
     flex-shrink: 0;
-  }
-
-  .secret-seed-input :global(.error-message) {
-    display: none;
   }
 
   .mobile-only {

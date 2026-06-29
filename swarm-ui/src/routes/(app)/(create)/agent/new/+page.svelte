@@ -26,7 +26,13 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
-  import { createAgentAccount, validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
+  import { secureSeedWithPassword } from '$lib/utils/account-auth'
+  import {
+    walletFromPhrase,
+    privateKeyFromEntropy,
+    validateSeedPhrase,
+    countSeedPhraseWords,
+  } from '$lib/crypto/mnemonic'
   import {
     deriveAccountDerivationKey,
     getOrCreateDeviceId,
@@ -36,13 +42,14 @@
     SnapshotDataUnavailableError,
     PARTITION_COUNT,
   } from '@snaha/swarm-id'
-  import { Bee, BatchId } from '@ethersphere/bee-js'
+  import { Bee, BatchId, EthAddress, Bytes } from '@ethersphere/bee-js'
   import type { AccountSyncType } from '$lib/types'
 
   let showTypeTooltip = $state(false)
   let accountName = $state('Agent')
   let accountType = $state<AccountSyncType>('local')
   let seedPhrase = $state('')
+  let password = $state('')
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
 
@@ -56,7 +63,7 @@
       (account) => account.name === accountName,
     )
     if (accountNameIsTaken) {
-      accountName = `${accountName} ${accountsStore.accounts.filter((account) => account.type === 'agent').length + 1}`
+      accountName = `${accountName} ${accountsStore.accounts.length + 1}`
     }
   })
 
@@ -74,7 +81,11 @@
   })
 
   const isFormDisabled = $derived(
-    !accountName.trim() || !seedPhrase.trim() || !!seedPhraseError || !seedPhraseValidation?.valid,
+    !accountName.trim() ||
+      !seedPhrase.trim() ||
+      !password ||
+      !!seedPhraseError ||
+      !seedPhraseValidation?.valid,
   )
 
   async function handleConfirm() {
@@ -94,14 +105,15 @@
       error = undefined
 
       // Derive the deterministic account from the seed phrase (same address on
-      // every device). The seed phrase is NOT stored — re-entered each time.
-      const { account, masterKey } = createAgentAccount({
-        name: accountName.trim(),
-        seedPhrase: validation.phrase,
-      })
+      // every device). The seed is secured at rest with the password (the
+      // `access`/`encryptedSeed` vault built below), so later unlocks use the
+      // password rather than re-entering the phrase.
+      const wallet = walletFromPhrase(validation.phrase)
+      const accountId = new EthAddress(wallet.address)
+      const masterKey = new Bytes(privateKeyFromEntropy(wallet.entropy))
 
       // Already on this device → just re-enter (don't blank or re-restore it).
-      const existing = accountsStore.getAccount(account.id)
+      const existing = accountsStore.getAccount(accountId)
       if (existing) {
         sessionStore.setAccount(existing)
         sessionStore.setTemporaryMasterKey(masterKey)
@@ -111,11 +123,13 @@
 
       // Not local: this seed may already own a synced account on Swarm (a 2nd
       // device). Restore its published apps/stamps/devices instead of starting
-      // blank. Agent accounts have no credentialId.
+      // blank. The trailing '' is the (unused) credentialId positional arg —
+      // this phrase-derived account is secured with a password below, not a
+      // passkey.
       const bee = new Bee(networkSettingsStore.beeNodeUrl)
       let restored: Awaited<ReturnType<typeof restoreAccountFromSwarm>>
       try {
-        restored = await restoreAccountFromSwarm(bee, masterKey, account.id, '')
+        restored = await restoreAccountFromSwarm(bee, masterKey, accountId, '')
       } catch (err) {
         console.error('Agent restore from Swarm failed:', err)
         error =
@@ -128,14 +142,18 @@
 
       if (restored) {
         // 2nd device: adopt the published account (its name/stamp/apps win).
+        // Secure the seed locally with the password so this device carries the
+        // required access vault.
+        const vault = await secureSeedWithPassword(wallet.entropy, password)
         const meta = restored.snapshot.metadata
         const restoredAccount = restoreAccountToStores({
-          id: account.id,
+          id: accountId,
           name: meta.accountName,
           createdAt: meta.createdAt,
-          type: 'agent',
           derivationKey: restored.derivationKey,
           publicKey: meta.publicKey,
+          access: vault.access,
+          encryptedSeed: vault.encryptedSeed,
           defaultPostageStampBatchID: meta.defaultPostageStampBatchID
             ? new BatchId(meta.defaultPostageStampBatchID)
             : undefined,
@@ -151,15 +169,19 @@
         return
       }
 
-      // No backup on Swarm → fresh account on this device.
+      // No backup on Swarm → fresh account on this device. Secure the seed with
+      // the password so the account carries the required access vault.
+      const vault = await secureSeedWithPassword(wallet.entropy, password)
       const derivationKey = await deriveAccountDerivationKey(masterKey.toHex())
       const deviceId = getOrCreateDeviceId()
       const newAccount = accountsStore.addAccount({
-        id: account.id,
-        name: account.name,
-        createdAt: account.createdAt,
-        type: 'agent',
+        id: accountId,
+        name: accountName.trim(),
+        createdAt: Date.now(),
+        publicKey: wallet.publicKey,
         derivationKey,
+        access: vault.access,
+        encryptedSeed: vault.encryptedSeed,
         devices: mergeDevices([], deviceId, detectDeviceName()),
         connectedApps: [],
         postageStamps: [],
@@ -269,16 +291,22 @@
         {/if}
       </Vertical>
 
-      <Horizontal
-        --horizontal-gap="var(--quarter-padding)"
-        style="background: var(--colors-yellow-light); padding: var(--half-padding)"
-      >
-        <WarningAlt size={20} />
+      <Vertical --vertical-gap="var(--quarter-padding)">
+        <Input
+          variant="outline"
+          dimension="compact"
+          type="password"
+          name="account-password"
+          bind:value={password}
+          placeholder="Enter a password"
+          disabled={isProcessing}
+          label="Password"
+        />
         <Typography variant="small"
-          ><strong>Security note:</strong> The seed phrase is never stored. You must re-enter it each
-          time you authenticate with this account.</Typography
+          >Your recovery phrase is encrypted on this device with this password. You'll re-enter the
+          password to unlock the account.</Typography
         >
-      </Horizontal>
+      </Vertical>
 
       {#if error}
         <Horizontal

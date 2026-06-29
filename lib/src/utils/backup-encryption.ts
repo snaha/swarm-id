@@ -34,53 +34,25 @@ const IV_LENGTH_BYTES = 12
 // Schemas
 // ============================================================================
 
-const BackupHeaderBaseSchemaV1 = z.object({
+/**
+ * Encrypted `.swarmid` export header: plaintext metadata + ciphertext.
+ *
+ * There is a single account model (a BIP-39 seed account), so the header carries
+ * no account-type discriminant and no key material. On import the user re-enters
+ * the recovery phrase, from which the master key — and everything derived from
+ * it — is recomputed; only the account name + timestamps travel in plaintext.
+ */
+export const EncryptedSwarmIdExportSchemaV1 = z.object({
   version: z.literal(BACKUP_VERSION),
   accountName: z.string(),
   exportedAt: z.number(),
   ciphertext: z.string(),
 })
 
-export const PasskeyBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
-  accountType: z.literal("passkey"),
-  credentialId: z.string(),
-})
-
-/**
- * Ethereum backup header fields (plaintext, not encrypted):
- *
- * - `ethereumAddress` — validates the user is connecting the correct wallet
- *   before attempting decryption.
- *
- * Key material is NOT stored in the export header. During import the user
- * must enter their secret seed, and the master key is re-derived from
- * `secretSeed + publicKey` via `deriveMasterKey()`.
- */
-export const EthereumBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
-  accountType: z.literal("ethereum"),
-  ethereumAddress: z.string(),
-})
-
-export const AgentBackupHeaderSchemaV1 = BackupHeaderBaseSchemaV1.extend({
-  accountType: z.literal("agent"),
-})
-
-export const EncryptedSwarmIdExportSchemaV1 = z.discriminatedUnion(
-  "accountType",
-  [
-    PasskeyBackupHeaderSchemaV1,
-    EthereumBackupHeaderSchemaV1,
-    AgentBackupHeaderSchemaV1,
-  ],
-)
-
 // ============================================================================
 // Types
 // ============================================================================
 
-export type PasskeyBackupHeader = z.infer<typeof PasskeyBackupHeaderSchemaV1>
-export type EthereumBackupHeader = z.infer<typeof EthereumBackupHeaderSchemaV1>
-export type AgentBackupHeader = z.infer<typeof AgentBackupHeaderSchemaV1>
 export type EncryptedSwarmIdExport = z.infer<
   typeof EncryptedSwarmIdExportSchemaV1
 >
@@ -167,45 +139,26 @@ export async function decryptBackupPayload(
 // ============================================================================
 
 /**
- * Build the plaintext header fields for an encrypted backup,
- * based on the account type.
+ * Build the plaintext header fields for an encrypted backup.
  *
- * `accountName` and `exportedAt` are deliberately kept in the plaintext
- * header: accountName helps the user identify which credential to use,
- * and exportedAt lets them assess backup recency.
+ * `accountName` and `exportedAt` are deliberately kept in the plaintext header:
+ * accountName helps the user identify the backup, and exportedAt lets them
+ * assess its recency. No key material or device-local seed-vault data
+ * (`access` / `encryptedSeed`) is ever exported.
  */
-export type BackupHeaderWithoutCiphertext =
-  | Omit<PasskeyBackupHeader, "ciphertext">
-  | Omit<EthereumBackupHeader, "ciphertext">
-  | Omit<AgentBackupHeader, "ciphertext">
+export type BackupHeaderWithoutCiphertext = Omit<
+  EncryptedSwarmIdExport,
+  "ciphertext"
+>
 
 export function buildBackupHeader(
   account: Account,
 ): BackupHeaderWithoutCiphertext {
-  const base = {
+  return {
     version: BACKUP_VERSION as typeof BACKUP_VERSION,
     accountName: account.name,
     exportedAt: Date.now(),
   }
-
-  if (account.type === "passkey") {
-    return {
-      ...base,
-      accountType: "passkey" as const,
-      credentialId: account.credentialId,
-    }
-  }
-
-  if (account.type === "ethereum") {
-    return {
-      ...base,
-      accountType: "ethereum" as const,
-      ethereumAddress: account.ethereumAddress.toHex(),
-    }
-  }
-
-  // agent — no extra fields
-  return { ...base, accountType: "agent" as const }
 }
 
 // ============================================================================

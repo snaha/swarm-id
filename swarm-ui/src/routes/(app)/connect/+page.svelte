@@ -23,21 +23,19 @@
   import Polycon from '$lib/components/polycon.svelte'
   import { ArrowRight } from 'carbon-icons-svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import {
-    getMasterKeyFromAccount,
-    SeedPhraseRequiredError,
-    getMasterKeyFromAgentAccount,
-  } from '$lib/utils/account-auth'
+  import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
   import Confirmation from '$lib/components/confirmation.svelte'
-  import EnterSeedModal from '$lib/components/enter-seed-modal.svelte'
+  import EnterPasswordModal from '$lib/components/enter-password-modal.svelte'
 
   // The account the user picked to connect this app to.
   let selected = $state<Account | undefined>(undefined)
   let error = $state<string | undefined>(undefined)
   let authenticated = $state(false)
   let isAuthenticating = $state(false)
-  let showSeedModal = $state(false)
-  let pendingAgentAccount = $state<Account | undefined>(undefined)
+  let showPasswordModal = $state(false)
+  let passwordError = $state<string | undefined>(undefined)
+  let passwordBusy = $state(false)
+  let pendingPasswordAccount = $state<Account | undefined>(undefined)
   let showAgentSignup = $state(false)
   let storagePartitioned = $state(false)
   let storageChallenge = $state<string | undefined>(undefined)
@@ -181,9 +179,9 @@
 
     await handleAuthenticate()
 
-    // Close automatically once authenticated, unless we're waiting for a seed
-    // phrase (agent accounts).
-    if (!error && !showSeedModal) {
+    // Close automatically once authenticated, unless we're waiting for a
+    // password (password-access accounts).
+    if (!error && !showPasswordModal) {
       closeWindowWithSessionCleanup()
     }
   }
@@ -249,48 +247,52 @@
       return masterKey
     }
 
+    // Password accounts have no interactive ceremony — collect the password in
+    // a modal, then re-run authentication.
+    if (account.access.type === 'password') {
+      pendingPasswordAccount = account
+      passwordError = undefined
+      showPasswordModal = true
+      return undefined
+    }
+
     try {
       isAuthenticating = true
       return await getMasterKeyFromAccount(account)
-    } catch (err) {
-      if (err instanceof SeedPhraseRequiredError) {
-        // Agent accounts need seed phrase - show modal
-        pendingAgentAccount = account
-        showSeedModal = true
-        isAuthenticating = false
-        return undefined
-      }
-      throw err
     } finally {
-      if (!showSeedModal) {
-        isAuthenticating = false
-      }
+      isAuthenticating = false
     }
   }
 
-  async function handleSeedPhraseProvided(seedPhrase: string) {
-    if (!pendingAgentAccount) return
+  async function handlePasswordProvided(password: string) {
+    if (!pendingPasswordAccount) return
 
+    passwordBusy = true
+    passwordError = undefined
     try {
-      const masterKey = getMasterKeyFromAgentAccount(pendingAgentAccount, seedPhrase)
+      const masterKey = await getMasterKeyFromAccount(pendingPasswordAccount, password)
       sessionStore.setTemporaryMasterKey(masterKey)
-      pendingAgentAccount = undefined
-
-      // Re-trigger the authentication flow
-      if (selected) {
-        await handleAuthenticate()
-        if (!error && !showSeedModal) {
-          closeWindowWithSessionCleanup()
-        }
-      }
     } catch (err) {
-      error = err instanceof Error ? err.message : 'Invalid seed phrase'
-      pendingAgentAccount = undefined
+      passwordError = err instanceof Error ? err.message : 'Authentication failed'
+      return
+    } finally {
+      passwordBusy = false
+    }
+
+    pendingPasswordAccount = undefined
+    showPasswordModal = false
+
+    // Re-trigger the authentication flow now that the master key is in session.
+    if (selected) {
+      await handleAuthenticate()
+      if (!error && !showPasswordModal) {
+        closeWindowWithSessionCleanup()
+      }
     }
   }
 
-  function handleSeedModalCancel() {
-    pendingAgentAccount = undefined
+  function handlePasswordModalCancel() {
+    pendingPasswordAccount = undefined
     isAuthenticating = false
   }
 
@@ -306,10 +308,10 @@
     }
 
     try {
-      // Retrieve masterKey based on account type
+      // Unlock the account's master key (interactively for passkey/eth-wallet).
       const masterKey = await tryGetMasterKeyFromAccount(selected)
 
-      // If masterKey is undefined, we're waiting for seed phrase input
+      // Undefined means we're waiting for the password modal to be submitted.
       if (!masterKey) {
         return
       }
@@ -343,7 +345,13 @@
     <Typography>{error}</Typography>
   </Vertical>
 {:else if isAuthenticating && selected}
-  <Confirmation authenticationType={selected.type} />
+  <Confirmation
+    authenticationType={selected.access.type === 'eth-wallet'
+      ? 'ethereum'
+      : selected.access.type === 'passkey'
+        ? 'passkey'
+        : 'agent'}
+  />
 {:else if selected && authenticated}
   <Vertical --vertical-gap="var(--double-padding)" --vertical-align-items="center">
     <Vertical --vertical-gap="var(--half-padding)">
@@ -399,8 +407,13 @@
   {/if}
 {/if}
 
-<EnterSeedModal
-  bind:open={showSeedModal}
-  onUnlock={handleSeedPhraseProvided}
-  onCancel={handleSeedModalCancel}
+<EnterPasswordModal
+  bind:open={showPasswordModal}
+  title="Enter password"
+  description="Enter your account password to connect this app."
+  confirmLabel="Connect"
+  onSubmit={handlePasswordProvided}
+  onCancel={handlePasswordModalCancel}
+  error={passwordError}
+  busy={passwordBusy}
 />

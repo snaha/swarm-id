@@ -14,9 +14,7 @@ import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
-  createPasskeyAccount,
-  createEthereumAccount,
-  createAgentAccount,
+  createAccount,
   createConnectedApp,
   createPostageStamp,
   createDevice,
@@ -50,7 +48,7 @@ function serializeFromAccount(account: Account) {
 
 describe("round-trip: serialize → JSON → deserialize", () => {
   it("should round-trip a passkey account with apps and stamps", () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       connectedApps: [createConnectedApp()],
       postageStamps: [createPostageStamp()],
     })
@@ -64,7 +62,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     if (!result.success) return
 
     expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
-    expect(result.data.metadata.accountName).toBe("Test Passkey Account")
+    expect(result.data.metadata.accountName).toBe("Test Account")
     expect(result.data.connectedApps).toHaveLength(1)
     expect(result.data.connectedApps[0].appName).toBe("Test App")
     expect(result.data.postageStamps).toHaveLength(1)
@@ -73,7 +71,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
   })
 
   it("should round-trip an ethereum account with metadata", () => {
-    const account = createEthereumAccount()
+    const account = createAccount()
 
     const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
@@ -84,12 +82,12 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     if (!result.success) return
 
     expect(result.data.accountId).toBe(TEST_ETH_ADDRESS_HEX)
-    expect(result.data.metadata.accountName).toBe("Test Ethereum Account")
+    expect(result.data.metadata.accountName).toBe("Test Account")
     expect(result.data.metadata.createdAt).toBe(1700000000000)
   })
 
   it("should round-trip an agent account", () => {
-    const account = createAgentAccount()
+    const account = createAccount()
 
     const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
@@ -99,11 +97,11 @@ describe("round-trip: serialize → JSON → deserialize", () => {
     expect(result.success).toBe(true)
     if (!result.success) return
 
-    expect(result.data.metadata.accountName).toBe("Test Agent Account")
+    expect(result.data.metadata.accountName).toBe("Test Account")
   })
 
   it("should produce valid JSON for actual file I/O simulation", () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
       settings: { appSessionDuration: 3600 },
       connectedApps: [
@@ -144,7 +142,7 @@ describe("round-trip: serialize → JSON → deserialize", () => {
 describe("device tracking in metadata", () => {
   it("should round-trip devices through metadata", () => {
     const device = createDevice()
-    const account = createPasskeyAccount({ devices: [device] })
+    const account = createAccount({ devices: [device] })
     const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -190,7 +188,7 @@ describe("device tracking in metadata", () => {
 
 describe("appSecret in snapshots", () => {
   it("should include appSecret in serialized export when present on input", () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       connectedApps: [createConnectedApp({ appSecret: "my-secret-value" })],
     })
 
@@ -201,7 +199,7 @@ describe("appSecret in snapshots", () => {
   })
 
   it("should preserve appSecret through round-trip", () => {
-    const account = createPasskeyAccount()
+    const account = createAccount()
     const serialized = serializeFromAccount(account)
 
     const raw = JSON.parse(JSON.stringify(serialized))
@@ -229,7 +227,7 @@ describe("appSecret in snapshots", () => {
 
 describe("edge cases", () => {
   it("should handle empty arrays for connectedApps and postageStamps", () => {
-    const account = createPasskeyAccount()
+    const account = createAccount()
     const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -243,7 +241,7 @@ describe("edge cases", () => {
   })
 
   it("should handle account settings absent", () => {
-    const account = createPasskeyAccount({ settings: undefined })
+    const account = createAccount({ settings: undefined })
     const serialized = serializeFromAccount(account)
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -263,7 +261,7 @@ describe("edge cases", () => {
       appSecret: undefined,
     })
     const serialized = serializeFromAccount(
-      createPasskeyAccount({ connectedApps: [app] }),
+      createAccount({ connectedApps: [app] }),
     )
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -280,7 +278,7 @@ describe("edge cases", () => {
   it("should handle optional fields absent on postage stamp", () => {
     const stamp = createPostageStamp({ batchTTL: undefined })
     const serialized = serializeFromAccount(
-      createPasskeyAccount({ postageStamps: [stamp] }),
+      createAccount({ postageStamps: [stamp] }),
     )
     const result = deserializeAccountStateSnapshot(
       JSON.parse(JSON.stringify(serialized)),
@@ -293,7 +291,7 @@ describe("edge cases", () => {
   })
 
   it("should handle optional defaultPostageStampBatchID absent on account metadata", () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       defaultPostageStampBatchID: undefined,
     })
     const serialized = serializeFromAccount(account)
@@ -308,7 +306,7 @@ describe("edge cases", () => {
   })
 
   it("should handle multiple entities of each type", () => {
-    const account = createPasskeyAccount({
+    const account = createAccount({
       connectedApps: [
         createConnectedApp({ appUrl: "https://app1.example.com" }),
         createConnectedApp({ appUrl: "https://app2.example.com" }),
@@ -338,7 +336,7 @@ describe("edge cases", () => {
 
 describe("invalid data rejection", () => {
   it("should reject wrong version number", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.version = 2
 
@@ -347,7 +345,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject missing version", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.version
 
@@ -356,7 +354,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject missing accountId", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.accountId
 
@@ -365,7 +363,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject missing metadata", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     delete raw.metadata
 
@@ -374,7 +372,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject invalid accountId hex length", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.accountId = "abc" // too short
 
@@ -447,7 +445,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject number where string is expected", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.metadata.accountName = 12345
 
@@ -456,7 +454,7 @@ describe("invalid data rejection", () => {
   })
 
   it("should reject string where array is expected", () => {
-    const serialized = serializeFromAccount(createPasskeyAccount())
+    const serialized = serializeFromAccount(createAccount())
     const raw = JSON.parse(JSON.stringify(serialized))
     raw.connectedApps = "not-an-array"
 
