@@ -67,5 +67,10 @@ export async function foldAccountFromSwarm(opts: {
     )
   ).filter((view): view is DeviceStateSnapshot => view !== undefined)
 
+  // No readable device feed → nothing to restore (the roster exists but every
+  // device's state was unreachable). Mirrors the `devices.length === 0` guard
+  // above, and guarantees `foldAccount` has a view carrying `accountPublicKey`.
+  if (views.length === 0) return undefined
+
   return { account: foldAccount(views, devices), devices }
 }

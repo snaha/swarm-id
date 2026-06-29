@@ -225,7 +225,7 @@ export const AccountSchemaV1 = z.object({
   derivationKey: z.string().length(64), // derived key for deterministic sub-key generation (64-char hex)
   // App-facing public key (compressed secp256k1). Surfaced to dApps as the
   // identity public key in ConnectionInfo. Was previously on the identity.
-  publicKey: CompressedPublicKeySchema.optional(),
+  publicKey: CompressedPublicKeySchema,
   // Device-local seed vault. Every account is a BIP-39 seed account: `access`
   // records how the seed is protected/unlocked on this device (passkey /
   // eth-wallet / password) and `encryptedSeed` is that seed encrypted at rest.
@@ -275,7 +275,7 @@ export const AccountMetadataSchemaV1 = z.object({
   accountName: z.string(),
   defaultPostageStampBatchID: z.string().length(64).optional(), // BatchId hex string
   // App-facing public key (compressed secp256k1 hex). Mirrors account.publicKey.
-  publicKey: CompressedPublicKeySchema.optional(),
+  publicKey: CompressedPublicKeySchema,
   // Per-account settings (was identity.settings).
   settings: z
     .object({

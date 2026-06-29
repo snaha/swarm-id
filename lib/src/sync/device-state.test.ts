@@ -16,6 +16,8 @@ import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
 import type { ConnectedApp, Device, PostageStamp } from "../schemas"
 
 const ACCOUNT_ID = "aa".repeat(20)
+// Compressed secp256k1 public key (prefix byte + 32 bytes = 66 bare hex chars).
+const TEST_ACCOUNT_PUBLIC_KEY = "02" + "ab".repeat(32)
 
 function makeStamp(
   batchHex: string,
@@ -60,6 +62,7 @@ function makeView(overrides: Partial<DeviceStateView> = {}): DeviceStateView {
     accountName: { value: "acct", at: 1 },
     defaultPostageStampBatchID: { value: undefined, at: 1 },
     settings: { value: undefined, at: 1 },
+    accountPublicKey: TEST_ACCOUNT_PUBLIC_KEY,
     accountCreatedAt: 1_000_000,
     partitionCount: 2,
     ...overrides,
@@ -74,6 +77,7 @@ function viewToSnapshot(v: DeviceStateView): AccountStateSnapshot {
     metadata: {
       accountName: v.accountName.value,
       defaultPostageStampBatchID: v.defaultPostageStampBatchID.value,
+      publicKey: v.accountPublicKey,
       createdAt: 1_000_000,
       lastModified: 1_000_000,
       devices: [],
@@ -119,6 +123,7 @@ describe("accountStateToDeviceView — never-edited scalar clocks", () => {
       metadata: {
         accountName: "Account-A",
         defaultPostageStampBatchID: undefined,
+        publicKey: TEST_ACCOUNT_PUBLIC_KEY,
         createdAt: CREATED_AT,
         // Always freshly stamped at publish time — the trap the old fallback
         // (`?? lastModified`) fell into, re-clocking unedited fields every sync.
@@ -233,20 +238,18 @@ describe("foldAccount — per-field scalar LWW", () => {
 })
 
 describe("foldAccount — account immutables from any defining view", () => {
-  it("takes partitionCount/publicKey from a later view when views[0] omits them", () => {
+  it("takes partitionCount from a later view when views[0] has the default", () => {
     // views[0] is an older/partial feed: partitionCount defaulted to 1 (which
-    // would disable partition locking) and no publicKey. A later view carries the
-    // real values — the fold must prefer those, not views[0].
-    const partial = makeView({ partitionCount: 1, accountPublicKey: undefined })
-    const full = makeView({
-      partitionCount: 4,
-      accountPublicKey: "ab".repeat(32),
-    })
+    // would disable partition locking). A later view carries the real value —
+    // the fold must prefer that, not views[0]. publicKey is an account immutable
+    // present on every view, so it always comes from views[0].
+    const partial = makeView({ partitionCount: 1 })
+    const full = makeView({ partitionCount: 4 })
     const folded = foldAccount(
       [partial, full] as unknown as DeviceStateSnapshot[],
       [makeDevice("dev-a")],
     )
     expect(folded.partitionCount).toBe(4)
-    expect(folded.publicKey).toBe("ab".repeat(32))
+    expect(folded.publicKey).toBe(TEST_ACCOUNT_PUBLIC_KEY)
   })
 })

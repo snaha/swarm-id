@@ -15,6 +15,8 @@ export const TEST_BATCH_ID_HEX = "c".repeat(64)
 export const TEST_BATCH_ID_2_HEX = "e".repeat(64)
 export const TEST_PRIVATE_KEY_HEX = "d".repeat(64)
 export const TEST_DERIVATION_KEY_HEX = "f".repeat(64)
+// Compressed secp256k1 public key: 0x02/0x03 prefix byte + 32 bytes = 66 bare hex chars.
+export const TEST_PUBLIC_KEY_HEX = "02" + "ab".repeat(32)
 export const DIFFERENT_DERIVATION_KEY_HEX = "1".repeat(64)
 export const TEST_DEVICE_ID = "550e8400-e29b-41d4-a716-446655440000"
 
@@ -37,6 +39,7 @@ export function createAccount(overrides?: Partial<Account>): Account {
     id: new EthAddress(TEST_ETH_ADDRESS_HEX),
     name: "Test Account",
     createdAt: 1700000000000,
+    publicKey: TEST_PUBLIC_KEY_HEX,
     access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
     encryptedSeed: "aabbccdd",
     derivationKey: TEST_DERIVATION_KEY_HEX,

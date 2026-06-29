@@ -8,6 +8,7 @@ import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
+  TEST_PUBLIC_KEY_HEX,
   createAccount,
   createPostageStamp,
 } from "./test-fixtures"
@@ -85,6 +86,7 @@ describe("AccountSchemaV1 encryptedSeed", () => {
       name: "Test Account",
       createdAt: 1700000000000,
       derivationKey: "f".repeat(64),
+      publicKey: TEST_PUBLIC_KEY_HEX,
       access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
       encryptedSeed,
     }
