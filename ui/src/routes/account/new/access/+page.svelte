@@ -86,7 +86,7 @@
     }
     const wallet = walletFromPhrase(draft.phrase)
     // Carry over data from a restore, or from an existing record for the same
-    // address — re-importing a phrase must not wipe drives or connected apps.
+    // address — re-importing a phrase must not wipe stamps or connected apps.
     const carried = draft.restored ?? accountsStore.get(wallet.address)
     // The derivation key is computed from the master key (the wallet private
     // key) while the entropy is in hand — the same chain the proxy/sync use.

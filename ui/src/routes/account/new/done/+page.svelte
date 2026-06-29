@@ -59,14 +59,16 @@
 
           <div class="bg-muted flex w-full flex-col items-center rounded-lg p-2 text-center">
             <p class="text-sm font-bold">Want the full experience?</p>
-            <p class="text-sm">Upload data and sync your Swarm ID across devices with a drive.</p>
+            <p class="text-sm">
+              Upload data and sync your Swarm ID across devices with a postage stamp.
+            </p>
           </div>
         </div>
 
         <div class="flex w-full flex-col items-center gap-4">
           <div class="flex w-full flex-col items-center gap-2">
-            <!-- Drive purchase flow is still TBD in the design. -->
-            <Button class="w-full" onclick={notImplemented}>Add a drive</Button>
+            <!-- Stamp purchase flow is still TBD in the design. -->
+            <Button class="w-full" onclick={notImplemented}>Add a postage stamp</Button>
             <Button variant="outline" class="w-full" href={resolve(routes.HOME)}>
               Stay local for now
             </Button>

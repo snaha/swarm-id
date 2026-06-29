@@ -21,11 +21,11 @@ type AccountSettings = { appSessionDuration?: number }
  * The account aggregate root. Fields are reactive (`$state`) so component reads
  * update on mutation, and every mutator is a method **on the object** that
  * persists the whole collection through the injected `onChange` — callers mutate
- * the account they already hold (`account.addDrive(…)`), never a store method
+ * the account they already hold (`account.addStamp(…)`), never a store method
  * that takes an id and looks the account up.
  *
  * The shape is the shared `@snaha/swarm-id` `Account` record (byte-class fields,
- * serialized to hex by the lib storage manager). A drive is an account's owned
+ * serialized to hex by the lib storage manager). A stamp is an account's owned
  * Swarm storage, persisted as the lib `postageStamps` field. The private
  * `#onChange` makes the class nominal, so a plain record can't be mistaken for
  * a live account.
@@ -91,8 +91,8 @@ export class Account {
     return this.connectedApps.filter((app) => !app.revokedAt)
   }
 
-  /** Live (non-tombstoned) drives — what the UI displays. */
-  get drives(): PostageStamp[] {
+  /** Live (non-tombstoned) stamps — what the UI displays. */
+  get stamps(): PostageStamp[] {
     return this.postageStamps.filter((stamp) => stamp.deletedAt === undefined)
   }
 
@@ -154,48 +154,48 @@ export class Account {
   }
 
   // --------------------------------------------------------------------------
-  // Drives — owned Swarm storage, each backed by a postage stamp batch (the lib
+  // Stamps — owned Swarm storage, each backed by a postage stamp batch (the lib
   // `postageStamps` field). The default is `defaultPostageStampBatchID`.
   // --------------------------------------------------------------------------
 
   /**
-   * Add or replace a drive (deduped by batch id). The first drive added becomes
+   * Add or replace a stamp (deduped by batch id). The first stamp added becomes
    * the account default so uploads have something to spend against. Re-adding a
    * previously removed batch revives it (a fresh `createdAt` beats the old
    * tombstone on merge).
    */
-  addDrive(drive: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
+  addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
     const now = Date.now()
-    const newDrive: PostageStamp = { ...drive, createdAt: now }
+    const newStamp: PostageStamp = { ...stamp, createdAt: now }
     this.postageStamps = [
-      ...this.postageStamps.filter((existing) => !existing.batchID.equals(drive.batchID)),
-      newDrive,
+      ...this.postageStamps.filter((existing) => !existing.batchID.equals(stamp.batchID)),
+      newStamp,
     ]
     if (this.defaultPostageStampBatchID === undefined) {
-      this.defaultPostageStampBatchID = newDrive.batchID
+      this.defaultPostageStampBatchID = newStamp.batchID
       this.defaultStampAt = now
     }
     this.lastModified = now
     this.#persist()
-    return newDrive
+    return newStamp
   }
 
   /**
-   * Tombstone a drive (set `deletedAt`, keep it in the array) so the removal
+   * Tombstone a stamp (set `deletedAt`, keep it in the array) so the removal
    * propagates across devices — `mergePostageStamps` keeps the tombstone and
    * lets it beat any peer's stale active copy. A hard delete would be silently
    * re-added on the next fold from a device feed that still has the batch.
    */
-  removeDrive(batchID: BatchId) {
+  removeStamp(batchID: BatchId) {
     const now = Date.now()
-    this.postageStamps = this.postageStamps.map((drive) =>
-      drive.batchID.equals(batchID) ? { ...drive, deletedAt: now } : drive,
+    this.postageStamps = this.postageStamps.map((stamp) =>
+      stamp.batchID.equals(batchID) ? { ...stamp, deletedAt: now } : stamp,
     )
-    // Never leave a default pointing at a drive we just removed; fall back to a
-    // remaining live drive so the account never references a deleted batch.
+    // Never leave a default pointing at a stamp we just removed; fall back to a
+    // remaining live stamp so the account never references a deleted batch.
     if (this.defaultPostageStampBatchID?.equals(batchID)) {
       this.defaultPostageStampBatchID = this.postageStamps.find(
-        (drive) => drive.deletedAt === undefined,
+        (stamp) => stamp.deletedAt === undefined,
       )?.batchID
       this.defaultStampAt = now
     }
@@ -203,15 +203,15 @@ export class Account {
     this.#persist()
   }
 
-  /** Update a drive's volatile utilization in place, WITHOUT firing sync. */
-  updateDriveUtilization(batchID: BatchId, utilization: number) {
-    this.postageStamps = this.postageStamps.map((drive) =>
-      drive.batchID.equals(batchID) ? { ...drive, utilization } : drive,
+  /** Update a stamp's volatile utilization in place, WITHOUT firing sync. */
+  updateStampUtilization(batchID: BatchId, utilization: number) {
+    this.postageStamps = this.postageStamps.map((stamp) =>
+      stamp.batchID.equals(batchID) ? { ...stamp, utilization } : stamp,
     )
     this.#persist({ skipSync: true })
   }
 
-  setDefaultDrive(batchID: BatchId | undefined) {
+  setDefaultStamp(batchID: BatchId | undefined) {
     const now = Date.now()
     this.defaultPostageStampBatchID = batchID
     this.defaultStampAt = now
@@ -327,7 +327,7 @@ accounts = load()
 
 if (browser) {
   // Cross-tab refresh: another tab mutating the account document (sign-in,
-  // app connect, drive purchase) updates this tab's reactive state too.
+  // app connect, stamp purchase) updates this tab's reactive state too.
   window.addEventListener('storage', (event) => {
     if (event.key === STORAGE_KEY_ACCOUNTS) accounts = load()
   })

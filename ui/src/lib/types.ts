@@ -5,7 +5,7 @@ import type { Account as AccountRecord } from '@snaha/swarm-id'
 /**
  * `Account` is the live, rich aggregate the app works with: a reactive class
  * (its fields are `$state`) whose mutators are methods on the object
- * (`account.addDrive(…)`, `account.rename(…)`). It wraps the shared
+ * (`account.addStamp(…)`, `account.rename(…)`). It wraps the shared
  * `@snaha/swarm-id` `Account` record (byte-class fields serialized to hex by
  * the lib storage manager) and is type-only re-exported here so `$lib/types`
  * stays the one type entry point with no runtime cycle.

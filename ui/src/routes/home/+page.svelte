@@ -20,14 +20,13 @@
 
   const TABS = [
     { value: 'apps', label: 'Apps' },
-    { value: 'drives', label: 'Drives' },
+    { value: 'stamps', label: 'Stamps' },
     { value: 'account', label: 'Account' },
   ]
 
-  const account = $derived.by(() => {
-    const id = sessionStore.currentAccountId
-    return id ? accountsStore.get(id) : undefined
-  })
+  const account = $derived(
+    sessionStore.currentAccountId ? accountsStore.get(sessionStore.currentAccountId) : undefined,
+  )
 
   let tab = $state('apps')
 
@@ -57,9 +56,9 @@
         {#key account.id}
           {#if tab === 'apps'}
             <HomeApps {account} />
-          {:else if tab === 'drives'}
+          {:else if tab === 'stamps'}
             <p class="text-muted-foreground py-8 text-center text-sm">
-              Drive management is coming soon.
+              Postage stamp management is coming soon.
             </p>
           {:else}
             <HomeAccount {account} />

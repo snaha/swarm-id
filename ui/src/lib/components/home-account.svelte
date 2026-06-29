@@ -103,10 +103,10 @@
   let toastMessage = $state<string | undefined>(undefined)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-  // "Local" = no usable drives. Use `drives` (tombstone-filtered), not the raw
-  // `postageStamps` array, so a removed drive's tombstone doesn't read as a live
-  // drive and wrongly hide the view-only banner.
-  const isLocal = $derived(account.drives.length === 0)
+  // "Local" = no usable stamps. Use `stamps` (tombstone-filtered), not the raw
+  // `postageStamps` array, so a removed stamp's tombstone doesn't read as a live
+  // stamp and wrongly hide the view-only banner.
+  const isLocal = $derived(account.stamps.length === 0)
   const accessLabel = $derived(methodLabel(account.access.type))
   const AccessIcon: Component = $derived(
     account.access.type === 'passkey'
@@ -322,7 +322,7 @@
   }
 
   function deleteAccount() {
-    // Removing the record drops its connected apps and drives with it, and the
+    // Removing the record drops its connected apps and stamps with it, and the
     // storage event de-authenticates any dApp proxy iframes.
     accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
@@ -375,12 +375,12 @@
 
 <div class="flex w-full flex-col gap-6">
   {#if isLocal}
-    <!-- Local account banner: no drives yet, so the account is view-only. -->
+    <!-- Local account banner: no stamps yet, so the account is view-only. -->
     <div class="bg-muted flex w-full flex-col gap-2 rounded-lg px-4 py-2">
       <div class="flex w-full items-center gap-2">
         <Info class="size-4 shrink-0" />
         <p class="flex-1 text-sm">Local account (view-only)</p>
-        <!-- Drive purchase flow is still TBD in the design. -->
+        <!-- Stamp purchase flow is still TBD in the design. -->
         <Button size="xs" onclick={notImplemented}>Upgrade</Button>
         <Button size="xs" variant="ghost" onclick={() => (bannerInfoShown = !bannerInfoShown)}>
           Info
@@ -388,8 +388,8 @@
       </div>
       {#if bannerInfoShown}
         <p class="text-muted-foreground pl-6 text-sm">
-          This is a local account, view-only and not synced. Upgrade by adding a drive to upload
-          data and use your Swarm ID across all your devices.
+          This is a local account, view-only and not synced. Upgrade by adding a postage stamp to
+          upload data and use your Swarm ID across all your devices.
         </p>
       {/if}
     </div>
