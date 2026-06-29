@@ -75,7 +75,7 @@ export const DeviceStateSnapshotSchemaV1 = z.object({
   // Account-level immutables — carried on the robust per-device feed (not the
   // roster), so the fold reconstructs them without a shared doc. Identical
   // across devices.
-  accountPublicKey: z.string().optional(),
+  accountPublicKey: z.string(),
   accountCreatedAt: z.number(),
   partitionCount: z.number().int().min(1).default(1),
 })
@@ -89,7 +89,7 @@ export interface DeviceStateView {
   accountName: { value: string; at: number }
   defaultPostageStampBatchID: { value: string | undefined; at: number }
   settings: { value: AccountSettings | undefined; at: number }
-  accountPublicKey?: string
+  accountPublicKey: string
   accountCreatedAt: number
   partitionCount: number
 }
@@ -108,7 +108,7 @@ export interface FoldedAccount {
   defaultStampAt: number
   settingsAt: number
   createdAt: number
-  publicKey?: string
+  publicKey: string
   partitionCount: number
 }
 
@@ -315,10 +315,11 @@ export function foldAccount(
   }
 
   // Account immutables from any view that defines them — NOT just views[0],
-  // whose feed could be older/partial and omit one (publicKey is optional;
-  // partitionCount defaults to 1, which would silently disable partition locking
-  // for a multi-partition account). Fall back to the roster (min createdAt) so a
-  // fold with reachable roster but no readable device feed still has createdAt.
+  // whose feed could be older/partial and omit one (partitionCount defaults to 1,
+  // which would silently disable partition locking for a multi-partition
+  // account). Fall back to the roster (min createdAt) so a fold with reachable
+  // roster but no readable device feed still has createdAt. publicKey is carried
+  // on every view (callers pass a non-empty `views`), so `views[0]` always has it.
   const meta = views[0]
   const createdAt =
     meta?.accountCreatedAt ??
@@ -326,7 +327,7 @@ export function foldAccount(
       (min, d) => Math.min(min, d.createdAt),
       Number.MAX_SAFE_INTEGER,
     )
-  const publicKey = views.find((v) => v.accountPublicKey)?.accountPublicKey
+  const publicKey = views[0].accountPublicKey
   const partitionCount =
     views.find((v) => v.partitionCount > 1)?.partitionCount ??
     meta?.partitionCount ??

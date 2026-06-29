@@ -14,6 +14,7 @@ import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
+  TEST_PUBLIC_KEY_HEX,
   createAccount,
   createConnectedApp,
   createPostageStamp,
@@ -166,6 +167,7 @@ describe("device tracking in metadata", () => {
       accountId: TEST_ETH_ADDRESS_HEX,
       metadata: {
         accountName: "Test",
+        publicKey: TEST_PUBLIC_KEY_HEX,
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
@@ -387,6 +389,7 @@ describe("invalid data rejection", () => {
       accountId: TEST_ETH_ADDRESS_HEX,
       metadata: {
         accountName: "Test",
+        publicKey: TEST_PUBLIC_KEY_HEX,
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
@@ -419,6 +422,7 @@ describe("invalid data rejection", () => {
       accountId: TEST_ETH_ADDRESS_HEX,
       metadata: {
         accountName: "Test",
+        publicKey: TEST_PUBLIC_KEY_HEX,
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
@@ -490,6 +494,7 @@ describe("bee-js type conversions", () => {
       accountId: TEST_ETH_ADDRESS_HEX,
       metadata: {
         accountName: "Test",
+        publicKey: TEST_PUBLIC_KEY_HEX,
         createdAt: 1700000000000,
         lastModified: Date.now(),
       },
