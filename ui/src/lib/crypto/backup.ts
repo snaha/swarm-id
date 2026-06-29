@@ -140,11 +140,14 @@ export async function restoreBackup(fileContents: string, phrase: string): Promi
     throw new Error('Not a valid backup file.')
   }
   // Rehydrate byte-class fields through the shared Zod schema. Access/seed are
-  // device-local and never in the file, so pass placeholders and drop them.
+  // device-local and never in the file, so pass placeholders and drop them. The
+  // seed placeholder must still be non-empty even-length hex to satisfy the
+  // schema's `encryptedSeed` regex — its value is irrelevant since it's stripped
+  // below.
   const result = AccountSchemaV1.safeParse({
     ...(raw as Record<string, unknown>),
     access: { type: 'password', kdfSalt: '', kdfIterations: 0 },
-    encryptedSeed: '',
+    encryptedSeed: '00',
   })
   if (!result.success) {
     throw new Error('Not a valid backup file.')
