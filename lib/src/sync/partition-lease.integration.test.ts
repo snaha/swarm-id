@@ -65,7 +65,6 @@ import {
   PARTITION_COUNT,
   NUM_BUCKETS,
   getChunkLayout,
-  toBucket,
 } from "../utils/batch-utilization"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import { uploadData, type UploadTarget } from "../proxy/upload"
@@ -119,21 +118,25 @@ async function uploadEncryptedBlob(
 }
 
 /**
- * Bucket of the partition-state feed's LATEST entry SOC — the bucket
- * `readPartitionState` compensates with +1 (the entry's own SOC consumed an
- * unrecorded data slot there; see partition-state.ts).
+ * Publish a state pointer at the current rotating bucket naming `referenceHex` —
+ * the test stand-in for "a holder published this resume pointer". Used to seed
+ * dangling / malformed pointers for the fail-safe read tests.
  */
-async function feedSocBucket(partition: number): Promise<number> {
-  const { makePartitionStateTopic } = await import("./partition-state")
-  const { AsyncEpochFinder, epochSocAddress } =
-    await import("../proxy/feeds/epochs")
-  const topic = makePartitionStateTopic(TEST_BATCH_ID, partition)
-  const finder = new AsyncEpochFinder(bee as unknown as Bee, topic, OWNER)
-  const entry = await finder.findAtWithMetadata(
-    BigInt(Math.floor(Date.now() / 1000)),
-  )
-  const addr = await epochSocAddress(topic, entry!.epoch, OWNER)
-  return toBucket(addr)
+async function seedStatePointer(
+  referenceHex: string,
+  partition = 0,
+): Promise<void> {
+  const { writeStatePointer } = await import("./partition-state")
+  await writeStatePointer({
+    bee: bee as unknown as Bee,
+    stamper: createMockStamper() as unknown as Stamper,
+    backupSigner: BACKUP_SIGNER,
+    swarmEncryptionKey: TEST_ENC_KEY,
+    batchId: TEST_BATCH_ID,
+    partition,
+    referenceHex,
+    nowMs: Date.now(),
+  })
 }
 
 function makeLease(opts: {
@@ -204,24 +207,23 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
     })
 
     const result = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
     })
 
     expect(result.unchanged).toBe(false)
-    // The read equals the published snapshot plus exactly one compensation:
-    // +1 in the bucket of the feed entry's own SOC, whose data slot the
-    // publish-then-update-feed ordering left unrecorded. Resuming there
-    // without the +1 would overstamp (and evict) the feed entry itself.
-    const expected = localCounter.slice()
-    expected[await feedSocBucket(0)] += 1
-    expect(result.localCounter).toEqual(expected)
+    // The reader reconstructs the exact published counter. No compensation: the
+    // state pointer is a reserved-slot SOC, so it consumes no data slot (unlike
+    // the old data-slot epoch feed entry).
+    expect(result.localCounter).toEqual(localCounter)
   })
 
   it("reports the published state-chunk buckets identically on write and read", async () => {
@@ -240,6 +242,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
     })
 
     // One bucket per counter chunk plus the reference chunk, all distinct,
@@ -255,6 +258,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const read = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -262,32 +266,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(new Set(read.stateBuckets)).toEqual(new Set(written.stateBuckets))
   })
 
-  it("derives the same feed-entry SOC address the updater actually wrote", async () => {
-    const { makePartitionStateTopic } = await import("./partition-state")
-    const { BasicEpochUpdater, EpochIndex, epochSocAddress } =
-      await import("../proxy/feeds/epochs")
-
-    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
-    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
-    const result = await updater.update(
-      BigInt(Math.floor(Date.now() / 1000)),
-      new Uint8Array(64).fill(0x11),
-      {
-        mode: "stamper",
-        bee: bee as unknown as Bee,
-        stamper: createMockStamper() as unknown as Stamper,
-      },
-    )
-
-    const derived = await epochSocAddress(
-      topic,
-      new EpochIndex(result.epoch.start, result.epoch.level),
-      OWNER,
-    )
-    expect(derived).toEqual(result.socAddress)
-  })
-
-  it("skips the reference + counter-chunk downloads when the feed reference is unchanged", async () => {
+  it("skips the reference + counter-chunk downloads when the pointer is unchanged", async () => {
     const { writePartitionState, readPartitionState } =
       await import("./partition-state")
 
@@ -302,6 +281,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
     })
 
     const getSpy = vi.spyOn(store, "get")
@@ -310,14 +290,13 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const full = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
     })
     expect(full.unchanged).toBe(false)
-    const expected = localCounter.slice()
-    expected[await feedSocBucket(0)] += 1
-    expect(full.localCounter).toEqual(expected)
+    expect(full.localCounter).toEqual(localCounter)
     expect(full.referenceHex).toBe(writtenRef)
     const callsForFullRead = getSpy.mock.calls.length
 
@@ -326,6 +305,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       {
         bee: bee as unknown as Bee,
         owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
         batchId: TEST_BATCH_ID,
         partition: 0,
         batchDepth: TEST_BATCH_DEPTH,
@@ -339,28 +319,30 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(callsForCachedRead).toBeLessThan(callsForFullRead)
   })
 
-  it("reports readFailed when the feed entry is unreadable (no zero-seed)", async () => {
-    const { readPartitionState, makePartitionStateTopic } =
+  it("reports readFailed when the pointer's reference chunk is unreadable (no zero-seed)", async () => {
+    const { writeStatePointer, readPartitionState } =
       await import("./partition-state")
-    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
 
-    // Point the partition-state feed at a reference that resolves to nothing
-    // (e.g. an evicted or corrupt chunk). The feed HAS an entry, so the
-    // partition has a real resume point we failed to learn — readPartitionState
-    // must NOT fall back to a zero counter (resuming at zero would re-issue
-    // every used slot and evict the partition's data); it reports readFailed.
-    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
-    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
-    const danglingRef = new Uint8Array(64).fill(0x99)
-    await updater.update(BigInt(Math.floor(Date.now() / 1000)), danglingRef, {
-      mode: "stamper",
+    // Publish a pointer at the current bucket that names a reference chunk which
+    // resolves to nothing (evicted/corrupt). A pointer EXISTS, so the partition
+    // has a real resume point we failed to learn — readPartitionState must NOT
+    // zero-seed (that would re-issue every used slot); it reports readFailed.
+    const danglingRef = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99))
+    await writeStatePointer({
       bee: bee as unknown as Bee,
       stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      referenceHex: danglingRef,
+      nowMs: Date.now(),
     })
 
     const result = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -385,15 +367,17 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       partition: 0,
       localCounter,
       backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
     })
 
     // Learn a counter-chunk address by spying on a successful read: the read
-    // path fetches feed chunks, then the reference chunk, then the counter
+    // path fetches the pointer SOC, then the reference chunk, then the counter
     // chunks in order — so the LAST fetched address is a counter chunk.
     const getSpy = vi.spyOn(store, "get")
     const ok = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -406,6 +390,7 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     const result = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -414,12 +399,13 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(result.localCounter).toBeUndefined()
   })
 
-  it("still zero-seeds when the feed has no entry at all", async () => {
+  it("zero-seeds when no pointer exists and no prior holder is known", async () => {
     const { readPartitionState } = await import("./partition-state")
 
     const result = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -429,24 +415,64 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(result.unchanged).toBe(false)
     expect(result.localCounter![0]).toBe(0)
   })
+
+  it("finds a pointer published in the holder's leasedUntil bucket even after it ages out of `now`", async () => {
+    const { writePartitionState, readPartitionState, statePointerEpochBucket } =
+      await import("./partition-state")
+
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[7] = 4
+    // A holder published (and heartbeated) ~5 minutes ago, then stopped; its
+    // lease expired shortly after. The pointer is NOT in the `now` bucket.
+    const STATE_EPOCH_MS = 30_000
+    const longAgo = Date.now() - 5 * 60_000
+    vi.spyOn(Date, "now").mockReturnValue(longAgo)
+    await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+    vi.restoreAllMocks()
+
+    // Reading at `now` with no holder hint misses it (aged out of current/prev).
+    expect(statePointerEpochBucket(Date.now())).not.toBe(
+      statePointerEpochBucket(longAgo),
+    )
+    const missed = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+    expect(missed.localCounter![7]).toBe(0) // zero-seed (not found)
+
+    // With the gone holder's leasedUntil (≈ publish time + lease TTL), the
+    // reader computes the right bucket and resumes exactly.
+    const found = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+      holderLeasedUntilMs: longAgo + STATE_EPOCH_MS,
+    })
+    expect(found.localCounter).toEqual(localCounter)
+  })
 })
 
 describe("PartitionLease.acquire — unreadable partition state", () => {
   it("degrades to read-only without writing the lock SOC", async () => {
-    const { makePartitionStateTopic } = await import("./partition-state")
-    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
-
-    // Partition 0's state feed points at an unreadable reference.
-    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
-    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
-    await updater.update(
-      BigInt(Math.floor(Date.now() / 1000)),
-      new Uint8Array(64).fill(0x99),
-      {
-        mode: "stamper",
-        bee: bee as unknown as Bee,
-        stamper: createMockStamper() as unknown as Stamper,
-      },
+    // Partition 0's state pointer names an unreadable reference.
+    await seedStatePointer(
+      Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99)),
     )
 
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
@@ -468,9 +494,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
   })
 
   it("reports readFailed when the reference chunk has the wrong length", async () => {
-    const { readPartitionState, makePartitionStateTopic } =
-      await import("./partition-state")
-    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
+    const { readPartitionState } = await import("./partition-state")
 
     const target: UploadTarget = {
       mode: "stamper",
@@ -479,24 +503,19 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     }
 
     // A readable chunk that is NOT numUtilizationChunks × 64 bytes — e.g. an
-    // entry written by a buggy or older writer. Reads must fail safe: the
-    // feed HAS an entry, so the partition has a real resume point — a zero
-    // counter would re-issue every used slot.
+    // entry written by a buggy or older writer. Reads must fail safe: a pointer
+    // EXISTS, so the partition has a real resume point — a zero counter would
+    // re-issue every used slot.
     const malformedRef = await uploadEncryptedBlob(
       target,
       new Uint8Array(32).fill(7),
     )
-    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
-    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
-    await updater.update(
-      BigInt(Math.floor(Date.now() / 1000)),
-      malformedRef,
-      target,
-    )
+    await seedStatePointer(Binary.uint8ArrayToHex(malformedRef))
 
     const result = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -509,9 +528,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
   })
 
   it("reports readFailed when a counter chunk has the wrong length", async () => {
-    const { readPartitionState, makePartitionStateTopic } =
-      await import("./partition-state")
-    const { BasicEpochUpdater } = await import("../proxy/feeds/epochs")
+    const { readPartitionState } = await import("./partition-state")
 
     const target: UploadTarget = {
       mode: "stamper",
@@ -531,18 +548,12 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
       ...Array.from({ length: numUtilizationChunks }, () => shortCounterRef),
     )
     const referenceChunkRef = await uploadEncryptedBlob(target, referenceChunk)
-
-    const topic = makePartitionStateTopic(TEST_BATCH_ID, 0)
-    const updater = new BasicEpochUpdater(topic, BACKUP_SIGNER)
-    await updater.update(
-      BigInt(Math.floor(Date.now() / 1000)),
-      referenceChunkRef,
-      target,
-    )
+    await seedStatePointer(Binary.uint8ArrayToHex(referenceChunkRef))
 
     const result = await readPartitionState({
       bee: bee as unknown as Bee,
       owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
@@ -565,6 +576,7 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
         partition: 0,
         localCounter: new Uint32Array(5),
         backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
       }),
     ).rejects.toThrow(/65536/)
   })
@@ -988,6 +1000,145 @@ describe("PartitionLease.refresh", () => {
   it("returns 'lost' when no lease is held", async () => {
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
     expect(await lease.refresh()).toBe("lost")
+  })
+})
+
+describe("writePartitionState — incremental", () => {
+  it("re-uploads only changed chunks (unchanged refs retained) and reads back the full counter", async () => {
+    const { writePartitionState, readPartitionState } =
+      await import("./partition-state")
+    const stamper = createMockStamper() as unknown as Stamper
+    const { numUtilizationChunks, bucketsPerChunk } =
+      getChunkLayout(TEST_BATCH_DEPTH)
+
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[100] = 5
+    const first = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: counter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+    expect(first.references).toHaveLength(numUtilizationChunks)
+
+    // Change two buckets that fall in two distinct counter chunks.
+    const next = first.publishedCounter.slice()
+    next[100] = 9
+    next[5000] = 7
+    const changed = new Set([
+      Math.floor(100 / bucketsPerChunk),
+      Math.floor(5000 / bucketsPerChunk),
+    ])
+    expect(changed.size).toBe(2)
+
+    const second = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: next,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      previousReferences: first.references,
+      previousCounter: first.publishedCounter,
+    })
+
+    // A re-uploaded chunk is re-keyed (fresh random key → new ref); an untouched
+    // chunk keeps its prior ref, i.e. it was NOT re-uploaded. This is the
+    // incremental guarantee — only the changed chunks hit the network.
+    for (let i = 0; i < numUtilizationChunks; i++) {
+      const retained =
+        Binary.uint8ArrayToHex(second.references[i]) ===
+        Binary.uint8ArrayToHex(first.references[i])
+      expect(retained, `chunk ${i} retained?`).toBe(!changed.has(i))
+    }
+
+    // The taking-over device still reconstructs the FULL counter (changed +
+    // retained).
+    const read = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+    expect(read.localCounter).toEqual(next)
+  })
+
+  it("does a full publish when no previous refs are supplied", async () => {
+    const { writePartitionState } = await import("./partition-state")
+    const stamper = createMockStamper() as unknown as Stamper
+    const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[1] = 1
+    // previousCounter without previousReferences → NOT incremental.
+    const res = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: counter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      previousCounter: counter.slice(),
+    })
+    expect(res.references).toHaveLength(numUtilizationChunks)
+    expect(res.references.every((r) => r.length === 64)).toBe(true)
+  })
+})
+
+describe("PartitionLease.publishState — commit without release", () => {
+  it("publishes the counter as the resume point WITHOUT releasing the lock", async () => {
+    const NOW = 1_000_000
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+
+    // The slots reserved by an upload, committed mid-session (ack-after-publish).
+    const counter = new Uint32Array(NUM_BUCKETS)
+    counter[100] = 7
+    counter[200] = 3
+    await lease.publishState(counter)
+
+    // A taking-over device resumes at EXACTLY this counter.
+    const { readPartitionState } = await import("./partition-state")
+    const read = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+    expect(read.localCounter).toEqual(counter)
+
+    // Unlike release(), publishState keeps the lease: still held, no sentinel.
+    expect(lease.currentPartition).toBe(0)
+    const observed = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(observed?.holderDeviceId).toBe(DEVICE_A)
+  })
+
+  it("is a no-op when no lease is held", async () => {
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    await expect(
+      lease.publishState(new Uint32Array(NUM_BUCKETS)),
+    ).resolves.toBeUndefined()
   })
 })
 

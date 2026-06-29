@@ -25,11 +25,40 @@ export interface FoldAccountResult {
 }
 
 /**
+ * Folds in flight, keyed on `accountId:derivationKey`. A full fold is many slow
+ * Swarm reads (roster + every device-state feed); the UI triggers it from
+ * several uncoordinated places (account layout mount, dev page, restore) that
+ * commonly fire together. Coalescing concurrent calls to a single promise
+ * collapses that burst into one read set — especially on a slow gateway where a
+ * fold takes seconds, so overlapping triggers are the norm. The entry is cleared
+ * when the fold settles, so a later fold always re-reads (no stale cache).
+ */
+const inFlightFolds = new Map<string, Promise<FoldAccountResult | undefined>>()
+
+/**
  * Derive the feed owner + encryption key from the account derivation key, read
  * the roster, fold all device-state feeds. Returns `undefined` when the roster
  * is empty (no device has published — equivalent to today's "no-backup").
+ *
+ * Concurrent calls for the same account share one in-flight read (see
+ * `inFlightFolds`); `bee` is keyed out because any client reads the same feeds.
  */
 export async function foldAccountFromSwarm(opts: {
+  bee: Bee
+  derivationKey: string
+  accountId: string
+}): Promise<FoldAccountResult | undefined> {
+  const key = `${opts.accountId}:${opts.derivationKey}`
+  const existing = inFlightFolds.get(key)
+  if (existing) return existing
+  const fold = doFoldAccountFromSwarm(opts).finally(() => {
+    inFlightFolds.delete(key)
+  })
+  inFlightFolds.set(key, fold)
+  return fold
+}
+
+async function doFoldAccountFromSwarm(opts: {
   bee: Bee
   derivationKey: string
   accountId: string

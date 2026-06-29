@@ -77,9 +77,12 @@ function makeLease(
     /** Make `acquire` reject — an operational failure, not contention. */
     acquireError?: Error
     refreshResult?: LeaseRefreshOutcome
+    /** Local lease expiry, drives `leaseNearExpiry` in the reverse-clobber guard. */
+    leasedUntil?: number
   } = {},
 ) {
   let partition = opts.partition
+  let leasedUntil = opts.leasedUntil
   return {
     hydrate: vi.fn(),
     adoptIfLive: vi.fn(() => undefined),
@@ -97,10 +100,19 @@ function makeLease(
     }),
     refresh: vi.fn(async () => opts.refreshResult ?? "held"),
     release: vi.fn(async () => {}),
+    publishState: vi.fn(async () => {}),
+    heartbeatStatePointer: vi.fn(async () => {}),
     bumpLocalLease: vi.fn(),
     serialize: vi.fn(() => ({ v: 1 })),
     get currentPartition() {
       return partition
+    },
+    get leasedUntil() {
+      return leasedUntil
+    },
+    /** Test helper: simulate the lease lapsing mid-upload. */
+    setLeasedUntil(v: number) {
+      leasedUntil = v
     },
   }
 }
@@ -294,6 +306,141 @@ describe("BatchWriteCoordinator.withWrite — wait fork", () => {
     )
     expect(op).toHaveBeenCalledTimes(1)
     expect(stamper.bindPartition).not.toHaveBeenCalled()
+  })
+})
+
+describe("BatchWriteCoordinator.withWrite — commit-ordered ack", () => {
+  function held(partition: number) {
+    return makeLease({
+      acquireResult: {
+        partition,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      // Comfortably valid so the post-op freshness check stays throttled.
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+  }
+
+  it("publishes partition state AFTER op resolves and BEFORE withWrite resolves", async () => {
+    const order: string[] = []
+    const lease = held(1)
+    lease.publishState = vi.fn(async (lc: Uint32Array) => {
+      order.push("publish")
+      // The publish carries the stamper's current counter (its resume point).
+      expect(lc).toBeInstanceOf(Uint32Array)
+    }) as typeof lease.publishState
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+
+    const op = vi.fn(async () => {
+      order.push("op")
+      return "ref"
+    })
+    const result = await coordinator.withWrite(op, { wait: "block" })
+
+    expect(result).toBe("ref")
+    // Ack-after-publish: op's chunks are written, THEN the slot-reserving state
+    // is published, THEN the upload resolves durable.
+    expect(order).toEqual(["op", "publish"])
+    expect(lease.publishState).toHaveBeenCalledTimes(1)
+  })
+
+  it("a publish failure rejects the upload (never reported durable)", async () => {
+    const lease = held(1)
+    lease.publishState = vi.fn(async () => {
+      throw new Error("partition-state publish failed")
+    }) as typeof lease.publishState
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+
+    const op = vi.fn(async () => "ref")
+    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
+      "partition-state publish failed",
+    )
+    expect(op).toHaveBeenCalledTimes(1)
+  })
+
+  it("reverse-clobber guard: a lease that lapsed mid-upload is re-read; the upload throws and does NOT publish", async () => {
+    const lease = held(0)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+    // No live foreign holder at the start-of-write check (it's throttled anyway).
+    lockController.payload = undefined
+
+    const op = vi.fn(async () => {
+      // The upload ran long enough that our lease lapsed AND a peer took the
+      // slot — the reverse hazard the commit rule cannot cover.
+      lease.setLeasedUntil(Date.now() - 1)
+      lockController.payload = {
+        holderDeviceId: PEER,
+        leasedUntil: Date.now() + 10_000,
+      }
+      return "ref"
+    })
+
+    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
+      /reclaimed/,
+    )
+    expect(op).toHaveBeenCalledTimes(1)
+    // Never ack slots a new holder now owns.
+    expect(lease.publishState).not.toHaveBeenCalled()
+    expect(coordinator.isReadOnly).toBe(true)
+  })
+})
+
+describe("BatchWriteCoordinator — acquire does not block on the device-registry refresh", () => {
+  it("completes acquire while refreshKnownDeviceIds is still pending (non-blocking)", async () => {
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+    })
+    const stamper = makeStamper([])
+    // A refresh that never settles — modelling the slow gateway roster fold.
+    // If `acquire` awaited it (the old bug), `withWrite` would hang to the 45s
+    // cap; non-blocking, the acquire binds the partition immediately.
+    let settleRefresh!: () => void
+    const refreshKnownDeviceIds = vi.fn(
+      () => new Promise<void>((resolve) => (settleRefresh = resolve)),
+    )
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+        refreshKnownDeviceIds,
+      }),
+    )
+
+    const op = vi.fn(async () => "ok")
+    await expect(coordinator.withWrite(op, { wait: "block" })).resolves.toBe(
+      "ok",
+    )
+    expect(refreshKnownDeviceIds).toHaveBeenCalledTimes(1)
+    expect(coordinator.currentPartition).toBe(1)
+    settleRefresh() // let the detached refresh resolve so no promise leaks
   })
 })
 

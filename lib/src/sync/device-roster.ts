@@ -53,6 +53,29 @@ const MAX_ROSTER_SCAN = 256
 // a single round-trip instead of K+1 serial ones.
 const ROSTER_SCAN_WINDOW = 16
 
+// Per-read cap so an empty/unreachable slot on a slow gateway fails fast instead
+// of hanging on peer-exhaustion. A present slot retrieves well under this; a
+// timed-out read is treated as an empty/transient slot (same as a 404). Matches
+// the epoch finder's bound.
+const ROSTER_READ_TIMEOUT_MS = 2500
+
+/**
+ * Reject `read` after {@link ROSTER_READ_TIMEOUT_MS} so a single hanging slot
+ * can't drag a scan window. `readRosterEntry` maps a rejection to `undefined`
+ * (empty/transient slot), so a timed-out read is just skipped. The timer is
+ * cleared when the read settles so no handle leaks past the scan.
+ */
+function withReadTimeout<T>(read: Promise<T>): Promise<T> {
+  let timer: ReturnType<typeof setTimeout>
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(new Error("roster read timed out")),
+      ROSTER_READ_TIMEOUT_MS,
+    )
+  })
+  return Promise.race([read, timeout]).finally(() => clearTimeout(timer))
+}
+
 export function rosterTopic(accountId: string): Topic {
   return Topic.fromString(`${ROSTER_TOPIC_PREFIX}:${accountId}`)
 }
@@ -77,15 +100,16 @@ async function readRosterEntry(opts: {
   const identifier = rosterIdentifier(opts.topic, opts.index)
   let refBytes: Uint8Array
   try {
-    const soc = await opts.bee.makeSOCReader(opts.owner).download(identifier)
+    const soc = await withReadTimeout(
+      opts.bee.makeSOCReader(opts.owner).download(identifier),
+    )
     refBytes = soc.payload.toUint8Array()
   } catch {
-    return undefined // empty slot → end of feed
+    return undefined // empty slot / timed out → end of feed
   }
   try {
-    const data = await downloadDataWithChunkAPI(
-      opts.bee,
-      new Reference(refBytes).toHex(),
+    const data = await withReadTimeout(
+      downloadDataWithChunkAPI(opts.bee, new Reference(refBytes).toHex()),
     )
     return DeviceSchemaV1.parse(JSON.parse(new TextDecoder().decode(data)))
   } catch {

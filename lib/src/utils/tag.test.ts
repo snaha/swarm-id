@@ -36,4 +36,34 @@ describe("tryCreateTag", () => {
     expect(warnSpy).toHaveBeenCalledOnce()
     warnSpy.mockRestore()
   })
+
+  it("caches the 404 verdict per Bee — does not re-POST /tags on the same node", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const bee = {
+      createTag: vi.fn().mockRejectedValue(new Error("404")),
+    } as unknown as Bee
+
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    // Only the first call hits the network; the rest short-circuit on the cache.
+    expect(
+      (bee as unknown as { createTag: ReturnType<typeof vi.fn> }).createTag,
+    ).toHaveBeenCalledTimes(1)
+  })
+
+  it("keeps the verdict per-Bee — a different node re-probes", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const gateway = {
+      createTag: vi.fn().mockRejectedValue(new Error("404")),
+    } as unknown as Bee
+    const realNode = {
+      createTag: vi.fn().mockResolvedValue({ uid: 7 }),
+    } as unknown as Bee
+
+    await tryCreateTag(gateway)
+    await tryCreateTag(gateway)
+    // A separate Bee instance is unaffected by the gateway's cached verdict.
+    expect(await tryCreateTag(realNode)).toBe(7)
+  })
 })

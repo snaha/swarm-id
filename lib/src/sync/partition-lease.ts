@@ -55,7 +55,11 @@ import {
   writePartitionIntent,
   writePartitionOccupancy,
 } from "./partition-intent"
-import { readPartitionState, writePartitionState } from "./partition-state"
+import {
+  readPartitionState,
+  writePartitionState,
+  writeStatePointer,
+} from "./partition-state"
 
 /** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
 export const PARTITION_LOCK_GUARD_MS = 2000
@@ -146,6 +150,18 @@ export class PartitionLease {
    * watermark) from a genuine post-release claimant (gen > watermark).
    */
   private releasedPartitions = new Map<number, PartitionLockGeneration>()
+  /**
+   * Cached state from this session's last partition-state publish, so the next
+   * publish re-uploads only the chunks that changed (incremental). Seeded on the
+   * first publish (full), refreshed on every publish, and cleared by `acquire()`
+   * (a new session resumes from a peer's counter, not our stale one).
+   */
+  private publishedReferences: Uint8Array[] | undefined
+  private publishedCounter: Uint32Array | undefined
+  /** Reference-chunk ref (hex) of this session's last publish — re-written to the
+   *  current rotating bucket on each refresh tick (heartbeat) so an idle holder
+   *  keeps a fresh state pointer the next reader can find. */
+  private lastReferenceHex: string | undefined
   /**
    * Set at the start of `release()` (the lease session is closing) and
    * cleared by the next `acquire()`. While set, an overlapping `refresh()`
@@ -492,8 +508,13 @@ export class PartitionLease {
   ): Promise<AcquireResult> {
     const { partitionCount } = snapshot
 
-    // A new acquisition opens a new lease session.
+    // A new acquisition opens a new lease session. Drop any cached publish
+    // state from a previous session — this session resumes from the partition's
+    // published counter, not our stale one (a peer may have held it meanwhile).
     this.closed = false
+    this.publishedReferences = undefined
+    this.publishedCounter = undefined
+    this.lastReferenceHex = undefined
 
     if (partitionCount <= 1) {
       return {
@@ -570,9 +591,14 @@ export class PartitionLease {
       {
         bee: this.opts.bee,
         owner: this.opts.backupSigner.publicKey().address(),
+        swarmEncryptionKey: this.opts.swarmEncryptionKey,
         batchId,
         partition,
         batchDepth,
+        // Locate the pointer of a partition that's been free for a while at the
+        // gone holder's last-heartbeat bucket (its `leasedUntil`), so a takeover
+        // resumes at the right counter however long ago the holder stopped.
+        holderLeasedUntilMs: this.holders.get(partition)?.leasedUntil,
       },
       knownReference,
     )
@@ -977,27 +1003,9 @@ export class PartitionLease {
     // refresh from minting a newer ghost claim mid-release.
     const { partition, generation, acquiredAt } = this.self
     this.closed = true
-    const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    const { stamper } = this.requireWriteContext()
 
-    const published = await writePartitionState({
-      bee: this.opts.bee,
-      stamper,
-      batchId,
-      batchDepth,
-      partition,
-      localCounter,
-      backupSigner: this.opts.backupSigner,
-    })
-
-    // Record the reference we just published as our synced reference: the next
-    // acquire (if no peer publishes meanwhile) skips re-downloading our own
-    // counter. Our local counter equals what we published, so reusing it is
-    // correct. Also protect the publish's buckets from future utilisation
-    // saves — overstamping one would evict the resume point from the reserve.
-    if (stamper instanceof UtilizationAwareStamper) {
-      await stamper.setSyncedReference(partition, published.referenceHex)
-      await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
-    }
+    await this.flushState(partition, localCounter)
 
     await releasePartitionLock({
       bee: this.opts.bee,
@@ -1017,9 +1025,85 @@ export class PartitionLease {
     this.holders.delete(partition)
   }
 
+  /**
+   * Publish the held partition's counter on the partition-state feed WITHOUT
+   * releasing the lock — the commit point that makes an upload's slots durable
+   * before its promise resolves (ack-after-publish). The new holder on takeover
+   * resumes at exactly this counter, so an un-published (un-acked) in-flight
+   * write is safe to overwrite while every acked write is preserved. No-op when
+   * no lease is held. Same reserved-slot publish as `release()`, so it is safe
+   * through a still-bound stamper.
+   */
+  async publishState(localCounter: Uint32Array): Promise<void> {
+    if (!this.self) return
+    await this.flushState(this.self.partition, localCounter)
+  }
+
+  /**
+   * Publish `localCounter` on the partition-state feed and record it as our
+   * synced reference + protected buckets. Shared by `release()` (final flush)
+   * and `publishState()` (per-upload commit). Protecting the publish's buckets
+   * stops a later utilisation save from overstamping (evicting) the resume
+   * point from the reserve.
+   */
+  private async flushState(
+    partition: number,
+    localCounter: Uint32Array,
+  ): Promise<void> {
+    const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    const published = await writePartitionState({
+      bee: this.opts.bee,
+      stamper,
+      batchId,
+      batchDepth,
+      partition,
+      localCounter,
+      backupSigner: this.opts.backupSigner,
+      swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      // Incremental inputs from this session's last publish (undefined on the
+      // first → full publish, which seeds them).
+      previousReferences: this.publishedReferences,
+      previousCounter: this.publishedCounter,
+    })
+    this.publishedReferences = published.references
+    this.publishedCounter = published.publishedCounter
+    this.lastReferenceHex = published.referenceHex
+    if (stamper instanceof UtilizationAwareStamper) {
+      await stamper.setSyncedReference(partition, published.referenceHex)
+      await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
+    }
+  }
+
+  /**
+   * Re-write the state pointer to the CURRENT rotating bucket without
+   * re-uploading the counter — the refresh-tick heartbeat. Keeps a fresh pointer
+   * in the current bucket so a taking-over device finds the resume point even
+   * after this holder has been idle (no uploads) for a while. No-op until the
+   * first publish of the session has produced a reference to point at.
+   */
+  async heartbeatStatePointer(): Promise<void> {
+    if (!this.self || this.lastReferenceHex === undefined) return
+    const { stamper, batchId } = this.requireWriteContext()
+    await writeStatePointer({
+      bee: this.opts.bee,
+      stamper,
+      backupSigner: this.opts.backupSigner,
+      swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      batchId,
+      partition: this.self.partition,
+      referenceHex: this.lastReferenceHex,
+      nowMs: this.now(),
+    })
+  }
+
   /** Current partition (undefined when not holding a lease). */
   get currentPartition(): number | undefined {
     return this.self?.partition
+  }
+
+  /** Wall-clock ms this device's lease is valid until (undefined when none). */
+  get leasedUntil(): number | undefined {
+    return this.self?.leasedUntil
   }
 
   /**

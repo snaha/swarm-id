@@ -2,18 +2,28 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Partition-state feed for multi-device postage-batch sharing.
+ * Partition-state pointer for multi-device postage-batch sharing.
  *
- * Each `(batchId, partition)` pair has its own epoch feed. The current holder
- * publishes its per-partition counter on release; the next holder reads it on
- * acquire and resumes from exactly that counter, so the two devices never race
- * for the same `(bucket, slot)` pair during an orderly hand-off.
+ * The current holder publishes its per-partition counter on each upload (and on
+ * release); the next holder reads it on acquire and resumes from exactly that
+ * counter, so the two devices never race for the same `(bucket, slot)` pair
+ * during an orderly hand-off.
  *
  * The counter is not a single blob: it is split into the same per-`chunkIndex`
  * chunks the utilisation store uses, each uploaded with a random key to the
  * partition's reserved slot (never a data slot), and a single "reference chunk"
- * lists their 64-byte encrypted references (address‖key). The feed points at
- * the reference chunk. See docs/Postage-Batch-Partitioning.md.
+ * lists their 64-byte encrypted references (address‖key).
+ *
+ * The address of the latest reference chunk is published as a **rotating
+ * per-epoch state-pointer SOC** (`writeStatePointer`/`readStatePointer`): the
+ * identifier is `keccak256(topic ‖ uint64(floor(now / STATE_POINTER_EPOCH_MS)))`,
+ * so a reader COMPUTES the address directly — no epoch-tree walk — and the
+ * rotating address bypasses a gateway's frozen static-cache. The holder
+ * heartbeats the pointer on every refresh, so a taking-over device finds it at
+ * the current/previous bucket around `now` or the gone holder's `leasedUntil`.
+ * Mirrors the occupancy beacon (`partition-intent.ts`). See
+ * docs/Postage-Batch-Partitioning.md and
+ * docs/Partition-Acquire-Optimistic-Lease.md.
  *
  * Topic = keccak256("swarm-id-partition-state-v1" ‖ batchId ‖ uint32(partition))
  * Owner = backup signer (`deriveSecret(swarmEncryptionKey, "backup-key")`)
@@ -23,6 +33,7 @@ import {
   Bee,
   BatchId,
   EthAddress,
+  Identifier,
   PrivateKey,
   Reference,
   Topic,
@@ -30,13 +41,11 @@ import {
 } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { z } from "zod"
-import { AsyncEpochFinder } from "../proxy/feeds/epochs/async-finder"
 import {
-  BasicEpochUpdater,
-  epochSocAddress,
-} from "../proxy/feeds/epochs/updater"
-import { downloadDataWithChunkAPI } from "../proxy/download-data"
-import { uploadData, type UploadTarget } from "../proxy/upload"
+  downloadDataWithChunkAPI,
+  downloadEncryptedSOC,
+} from "../proxy/download-data"
+import { uploadData, uploadSOC, type UploadTarget } from "../proxy/upload"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   NUM_BUCKETS,
@@ -101,6 +110,166 @@ export function makePartitionStateTopic(
 }
 
 /**
+ * Granularity of the rotating state-pointer address. Tracks `INTENT_EPOCH_MS`
+ * (kept a local constant to avoid a circular import through partition-intent);
+ * the two are intended to move together.
+ */
+const STATE_POINTER_EPOCH_MS = 30_000
+
+/** Bound a single pointer read so an absent SOC doesn't block on peer exhaustion. */
+const STATE_POINTER_READ_TIMEOUT_MS = 2500
+
+/** `floor(nowMs / STATE_POINTER_EPOCH_MS)` — the current state-pointer epoch bucket. */
+export function statePointerEpochBucket(nowMs: number): number {
+  return Math.floor(nowMs / STATE_POINTER_EPOCH_MS)
+}
+
+/**
+ * The state-pointer payload: the 64-byte reference of the latest published
+ * reference chunk (address‖key), plus the write time so a reader can prefer the
+ * freshest of two buckets.
+ */
+const StatePointerPayloadSchemaV1 = z.object({
+  referenceHex: z.string(),
+  timestampMs: z.number(),
+})
+
+/**
+ * SOC identifier for the partition's state pointer at `epochBucket`:
+ * `keccak256(topic ‖ uint64(bucket))`. The address rotates every
+ * `STATE_POINTER_EPOCH_MS`, so a reader computes it directly (no feed walk) and
+ * the fresh address forces a network read that bypasses a gateway's frozen
+ * static-cache — the same property the occupancy beacon relies on.
+ */
+function makeStatePointerIdentifier(
+  topic: Topic,
+  epochBucket: number,
+): Identifier {
+  const bucketBytes = new Uint8Array(8)
+  new DataView(bucketBytes.buffer).setBigUint64(0, BigInt(epochBucket), false)
+  return new Identifier(
+    Binary.keccak256(Binary.concatBytes(topic.toUint8Array(), bucketBytes)),
+  )
+}
+
+/**
+ * Publish the reference-chunk pointer at the current epoch bucket — a reserved-
+ * slot, encrypted SOC (mirrors the occupancy beacon's `writeReservedPartitionSoc`).
+ * Reserved-slot routed so it never consumes a data slot; overwrites within the
+ * same 30 s bucket. Called per publish AND on the refresh-tick heartbeat so a
+ * held partition always has a fresh pointer in the current bucket.
+ */
+export async function writeStatePointer(opts: {
+  bee: Bee
+  stamper: Stamper
+  backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  batchId: BatchId
+  partition: number
+  referenceHex: string
+  nowMs: number
+}): Promise<void> {
+  const topic = makePartitionStateTopic(opts.batchId, opts.partition)
+  const epochBucket = statePointerEpochBucket(opts.nowMs)
+  const identifier = makeStatePointerIdentifier(topic, epochBucket)
+  const owner = opts.backupSigner.publicKey().address()
+  const address = makeStatePointerAddress(identifier, owner)
+  const data = new TextEncoder().encode(
+    JSON.stringify({
+      referenceHex: opts.referenceHex,
+      timestampMs: opts.nowMs,
+    }),
+  )
+  const target: UploadTarget = {
+    mode: "stamper",
+    bee: opts.bee,
+    stamper: opts.stamper,
+  }
+  if (opts.stamper instanceof UtilizationAwareStamper) {
+    opts.stamper.reserveIntentSocSlot(address, opts.partition)
+    try {
+      await uploadSOC(target, opts.backupSigner, identifier, data, {
+        encryptionKey: opts.swarmEncryptionKey,
+      })
+    } finally {
+      opts.stamper.clearIntentSocSlot()
+    }
+    return
+  }
+  await uploadSOC(target, opts.backupSigner, identifier, data, {
+    encryptionKey: opts.swarmEncryptionKey,
+  })
+}
+
+/** 32-byte SOC address `keccak256(identifier ‖ owner)`. */
+function makeStatePointerAddress(
+  identifier: Identifier,
+  owner: EthAddress,
+): Uint8Array {
+  return Binary.keccak256(
+    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
+  )
+}
+
+/**
+ * Read the latest state pointer by computing bucket addresses directly — no
+ * feed walk. Checks (newest-first) the current/previous bucket around `now` and,
+ * when given, around the gone holder's `leasedUntil` (so a partition that's been
+ * free for a while is still found at the holder's last-heartbeat bucket). Returns
+ * the freshest pointer found, or `undefined` when none of the candidate buckets
+ * carry one.
+ */
+async function readStatePointer(opts: {
+  bee: Bee
+  owner: EthAddress
+  swarmEncryptionKey: Uint8Array
+  batchId: BatchId
+  partition: number
+  nowMs: number
+  holderLeasedUntilMs?: number
+}): Promise<{ referenceHex: string; timestampMs: number } | undefined> {
+  const topic = makePartitionStateTopic(opts.batchId, opts.partition)
+  const buckets = new Set<number>()
+  const cur = statePointerEpochBucket(opts.nowMs)
+  buckets.add(cur)
+  buckets.add(cur - 1)
+  if (opts.holderLeasedUntilMs !== undefined) {
+    const lb = statePointerEpochBucket(opts.holderLeasedUntilMs)
+    buckets.add(lb)
+    buckets.add(lb - 1)
+  }
+  // Newest bucket first: a holder writes contiguous buckets up to its last
+  // heartbeat, so the highest-numbered present bucket is the freshest pointer.
+  const ordered = Array.from(buckets).sort((a, b) => b - a)
+  for (const bucket of ordered) {
+    const identifier = makeStatePointerIdentifier(topic, bucket)
+    try {
+      const soc = await Promise.race([
+        downloadEncryptedSOC(
+          opts.bee,
+          opts.owner,
+          identifier,
+          opts.swarmEncryptionKey,
+        ),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new Error("state-pointer read timed out")),
+            STATE_POINTER_READ_TIMEOUT_MS,
+          ),
+        ),
+      ])
+      const parsed = StatePointerPayloadSchemaV1.safeParse(
+        JSON.parse(new TextDecoder().decode(soc.payload)),
+      )
+      if (parsed.success) return parsed.data
+    } catch {
+      // Missing / timed out / malformed at this bucket — try the next candidate.
+    }
+  }
+  return undefined
+}
+
+/**
  * Read the latest partition-state-feed entry and reconstruct the
  * `localCounter` array — the previous holder's per-bucket high-water.
  *
@@ -123,9 +292,16 @@ export async function readPartitionState(
   opts: {
     bee: Bee
     owner: EthAddress
+    swarmEncryptionKey: Uint8Array
     batchId: BatchId
     partition: number
     batchDepth: number
+    /** Gone holder's `leasedUntil` (from the lock SOC) — locates the pointer of
+     *  a partition that's been free for a while at its last-heartbeat bucket.
+     *  A holder heartbeats the pointer up to its `leasedUntil`, so reading that
+     *  bucket (and the one before) finds a published pointer durably, however
+     *  long ago: "no pointer found" then reliably means "no state was published". */
+    holderLeasedUntilMs?: number
   },
   knownReferenceHex?: string,
 ): Promise<{
@@ -149,24 +325,42 @@ export async function readPartitionState(
    */
   stateBuckets?: number[]
 }> {
-  const { bee, owner, batchId, partition, batchDepth } = opts
-  const topic = makePartitionStateTopic(batchId, partition)
-  const finder = new AsyncEpochFinder(bee, topic, owner)
-  const now = BigInt(Math.floor(Date.now() / 1000))
+  const {
+    bee,
+    owner,
+    swarmEncryptionKey,
+    batchId,
+    partition,
+    batchDepth,
+    holderLeasedUntilMs,
+  } = opts
 
-  const entry = await finder.findAtWithMetadata(now)
+  const pointer = await readStatePointer({
+    bee,
+    owner,
+    swarmEncryptionKey,
+    batchId,
+    partition,
+    nowMs: Date.now(),
+    holderLeasedUntilMs,
+  })
 
-  if (!entry) {
-    // No prior state — start fresh from zero.
+  if (!pointer) {
+    // No pointer in any candidate bucket (around `now` or the holder's
+    // `leasedUntil`). A holder heartbeats its pointer up to `leasedUntil`, so
+    // this reliably means no state was published — resume from zero. (If we hold
+    // a local synced reference, keep it: same-device reclaim within the trail.)
+    if (knownReferenceHex !== undefined) {
+      return { referenceHex: knownReferenceHex, unchanged: true }
+    }
     return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
   }
 
-  const refBytes = entry.reference
-  const referenceHex = Binary.uint8ArrayToHex(refBytes)
+  const referenceHex = pointer.referenceHex
+  const refBytes = new Reference(referenceHex).toUint8Array()
 
-  // Cache hit: the feed still points to the reference this device's local
-  // counter is already in sync with. Skip the reference-chunk + counter-chunk
-  // downloads; the caller reuses its local counter.
+  // Cache hit: the pointer still names the reference this device's local counter
+  // is already in sync with. Skip the reference-chunk + counter-chunk downloads.
   if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
     return { referenceHex, unchanged: true }
   }
@@ -226,21 +420,10 @@ export async function readPartitionState(
     return { unchanged: false, readFailed: true }
   }
 
-  // Compensate for the feed entry's own SOC: `writePartitionState` extracts
-  // and uploads the counter snapshot FIRST and writes the feed SOC LAST, so
-  // the feed SOC consumed one data slot — `slot(snapshot[bucket])` of its own
-  // address's bucket — that the snapshot does not record. Resuming without
-  // this +1 would place the next data chunk in that bucket onto the feed
-  // SOC's exact slot, evicting the feed entry from the reserve (Bee replaces
-  // the older chunk at a colliding stamp index) and breaking later feed
-  // walks. The bump is unconditional: if a future writer ever pre-accounted
-  // the slot, the +1 merely wastes one slot in one bucket. Only this (the
-  // latest) entry needs compensation — earlier entries were compensated by
-  // the readers that consumed them. NOTE: the `unchanged` short-circuit above
-  // must NOT bump — the caller's live counter already includes the increment
-  // made when the feed SOC was stamped.
-  const feedSocAddr = await epochSocAddress(topic, entry.epoch, owner)
-  localCounter[toBucket(feedSocAddr)] += 1
+  // No feed-SOC compensation needed: the state pointer is a reserved-slot SOC
+  // (it overstamps the partition's reserved slot, like the counter chunks), so
+  // — unlike the old data-slot epoch feed entry — it consumes no data slot that
+  // the snapshot would have to account for.
 
   return { localCounter, referenceHex, unchanged: false, stateBuckets }
 }
@@ -248,13 +431,25 @@ export async function readPartitionState(
 /**
  * Publish the current `localCounter` to the partition-state feed.
  *
- * Called from `PartitionLease.release()`. The counter is split into the same
- * per-`chunkIndex` chunks the utilisation store uses; each is uploaded with a
- * random encryption key to this partition's reserved slot (so it never
- * consumes a data slot), yielding a 64-byte encrypted reference (address‖key).
- * A single "reference chunk" lists those references and is itself uploaded the
- * same way; the feed points at it. A taking-over device follows the feed →
- * reference chunk → counter chunks, decrypting each from the embedded key.
+ * The counter is split into the same per-`chunkIndex` chunks the utilisation
+ * store uses; each is uploaded with a random encryption key to this partition's
+ * reserved slot (so it never consumes a data slot), yielding a 64-byte
+ * encrypted reference (address‖key). A single "reference chunk" lists those
+ * references and is itself uploaded the same way; the feed points at it. A
+ * taking-over device follows the feed → reference chunk → counter chunks,
+ * decrypting each from the embedded key.
+ *
+ * INCREMENTAL: pass `previousReferences` (the refs the last publish returned)
+ * and `previousCounter` (the counter it published) to re-upload ONLY the chunks
+ * that changed, reusing the retained refs for the rest. A typical upload changes
+ * the data SOC's bucket plus the previous publish's feed-SOC bucket, so the
+ * publish is ~3-4 chunks instead of the whole counter. Omit them (release, or
+ * the first publish of a session) for a full publish.
+ *
+ * PARALLEL: every chunk address is content-derived, so all PUTs (counter chunks
+ * + reference chunk + state-pointer SOC) are computed first and fired in a
+ * single `Promise.all`. The pointer is written at the current rotating epoch
+ * bucket — no feed walk to publish, and the reader computes its address directly.
  */
 export async function writePartitionState(opts: {
   bee: Bee
@@ -264,15 +459,25 @@ export async function writePartitionState(opts: {
   partition: number
   localCounter: Uint32Array
   backupSigner: PrivateKey
+  swarmEncryptionKey: Uint8Array
+  /** Refs from the previous publish; with `previousCounter`, enables incremental. */
+  previousReferences?: Uint8Array[]
+  /** The counter the previous publish wrote; diffed to find changed chunks. */
+  previousCounter?: Uint32Array
 }): Promise<{
-  /** Feed reference (hex) — the caller's "synced reference". */
+  /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
   /**
-   * Buckets occupied by the uploaded state chunks (counter chunks + the
-   * reference chunk). The caller hands these to the stamper so subsequent
-   * utilisation saves avoid overstamping (and evicting) this publish.
+   * Buckets occupied by the current state chunks (retained + re-uploaded
+   * counter chunks + the reference chunk). The caller hands these to the
+   * stamper so subsequent utilisation saves avoid overstamping (evicting) the
+   * publish.
    */
   stateBuckets: number[]
+  /** The full ref set after this publish, for the caller to cache. */
+  references: Uint8Array[]
+  /** Snapshot of the counter this publish wrote (pass as `previousCounter` next). */
+  publishedCounter: Uint32Array
 }> {
   const {
     bee,
@@ -282,6 +487,9 @@ export async function writePartitionState(opts: {
     partition,
     localCounter,
     backupSigner,
+    swarmEncryptionKey,
+    previousReferences,
+    previousCounter,
   } = opts
 
   PartitionStateSchemaV1.parse({ counters: localCounter })
@@ -291,89 +499,137 @@ export async function writePartitionState(opts: {
   const owner = backupSigner.publicKey().address()
   const reserve =
     stamper instanceof UtilizationAwareStamper ? stamper : undefined
-  // Every chunk below overstamps the partition's reserved slot, so they must
-  // land in distinct buckets, clear of the partition's lock-SOC bucket, and
-  // clear of the live utilisation chunks (whose buckets share the same
-  // reserved slot — landing there would evict them from the reserve).
+
+  // Snapshot what we are about to publish BEFORE the feed SOC (uploaded below)
+  // mutates the live counter — this is the exact resume point, cached by the
+  // caller and diffed on the next publish.
+  const publishedCounter = localCounter.slice()
+
+  // Incremental only when we have a full previous ref set AND the counter it
+  // published; otherwise re-upload every chunk (refs/diff unknown). Re-upload a
+  // chunk iff its serialized bytes changed since the last publish — this
+  // catches both the data write and the previous publish's feed-SOC bucket.
+  const incremental =
+    previousReferences !== undefined &&
+    previousReferences.length === numUtilizationChunks &&
+    previousCounter !== undefined
+  const allIndices = Array.from({ length: numUtilizationChunks }, (_, i) => i)
+  const uploadIndices = incremental
+    ? allIndices.filter(
+        (i) =>
+          !bytesEqual(
+            extractChunk(localCounter, i, batchDepth),
+            extractChunk(previousCounter, i, batchDepth),
+          ),
+      )
+    : allIndices
+  const uploadSet = new Set(uploadIndices)
+
+  // Start from the retained refs (incremental) or empty slots (full publish).
+  const references: Uint8Array[] = incremental
+    ? previousReferences.map((r) => r.slice())
+    : new Array<Uint8Array>(numUtilizationChunks)
+
+  // Every reserved chunk overstamps the partition's single reserved slot, so
+  // they must land in distinct buckets, clear of the lock-SOC bucket, the live
+  // utilisation chunks, and (incremental) the buckets of the chunks we retain.
   const claimedBuckets = new Set<number>([
     lockSocBucket(partition, owner),
     ...(reserve?.getCleanChunkBuckets() ?? []),
   ])
-
-  // 1. Upload each counter chunk → 64-byte encrypted reference.
-  const references: Uint8Array[] = []
-  const stateBuckets: number[] = []
-  for (let i = 0; i < numUtilizationChunks; i++) {
-    const plaintext = extractChunk(localCounter, i, batchDepth)
-    const ref = await uploadReservedChunk(
-      target,
-      plaintext,
-      claimedBuckets,
-      reserve,
-      partition,
-    )
-    references.push(ref)
-    stateBuckets.push(toBucket(ref.slice(0, 32)))
+  if (incremental) {
+    for (let i = 0; i < numUtilizationChunks; i++) {
+      if (!uploadSet.has(i))
+        claimedBuckets.add(toBucket(references[i].slice(0, 32)))
+    }
   }
 
-  // 2. Upload the reference chunk listing those references (N·64 bytes; ≤ 4096
-  //    even at N=64, so a single chunk).
+  // Precompute (CPU only) a distinct-bucket key/address for each chunk we will
+  // upload, marking it reserved so its `stamp()` routes to the reserved slot.
+  const prepared = uploadIndices.map((i) => {
+    const plaintext = extractChunk(localCounter, i, batchDepth)
+    const picked = pickReservedChunkKey(plaintext, claimedBuckets)
+    references[i] = picked.reference
+    reserve?.markReservedUtilizationChunk(picked.address, partition)
+    return { plaintext, key: picked.key }
+  })
+
+  // The reference chunk lists every ref (N·64 bytes; ≤ 4096 even at N=64).
   const referenceChunk = Binary.concatBytes(...references)
-  const referenceChunkRef = await uploadReservedChunk(
-    target,
-    referenceChunk,
-    claimedBuckets,
-    reserve,
-    partition,
-  )
-  stateBuckets.push(toBucket(referenceChunkRef.slice(0, 32)))
+  const refPicked = pickReservedChunkKey(referenceChunk, claimedBuckets)
+  reserve?.markReservedUtilizationChunk(refPicked.address, partition)
+
+  const referenceHex = Binary.uint8ArrayToHex(refPicked.reference)
+
+  // One batch: dirty counter chunks + the reference chunk + the state-pointer
+  // SOC (at the current rotating bucket, naming the COMPUTED reference-chunk
+  // ref). All addresses are known up front, so they land together; the caller
+  // awaits all before acking (ack-after-publish).
+  await Promise.all([
+    ...prepared.map((p) =>
+      uploadData(target, p.plaintext, {
+        encryptionKey: p.key,
+        deferred: false,
+      }),
+    ),
+    uploadData(target, referenceChunk, {
+      encryptionKey: refPicked.key,
+      deferred: false,
+    }),
+    writeStatePointer({
+      bee,
+      stamper,
+      backupSigner,
+      swarmEncryptionKey,
+      batchId,
+      partition,
+      referenceHex,
+      nowMs: Date.now(),
+    }),
+  ])
 
   reserve?.clearReservedUtilizationChunks()
 
-  // 3. Point the partition-state feed at the reference chunk.
-  const topic = makePartitionStateTopic(batchId, partition)
-  const updater = new BasicEpochUpdater(topic, backupSigner)
-  await updater.update(
-    BigInt(Math.floor(Date.now() / 1000)),
-    referenceChunkRef,
-    target,
-  )
+  const stateBuckets = references.map((r) => toBucket(r.slice(0, 32)))
+  stateBuckets.push(toBucket(refPicked.address))
 
-  // Return the feed reference so the caller can record it as this device's
-  // "synced reference" (skips re-downloading on the next acquire), plus the
-  // buckets the publish occupied so saves can avoid evicting it.
   return {
-    referenceHex: Binary.uint8ArrayToHex(referenceChunkRef),
+    referenceHex,
     stateBuckets,
+    references,
+    publishedCounter,
   }
 }
 
+/** Byte-wise equality for two equal-length chunk plaintexts. */
+function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) return false
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
 /**
- * Upload one chunk with a random encryption key to the partition's reserved
- * slot, returning its 64-byte encrypted reference (address‖key). Retries the
- * random key until the encrypted address lands in a bucket not yet claimed by
- * another reserved chunk (they all share the same reserved slot, so each must
- * occupy a distinct bucket). The slot is passed EXPLICITLY: the teardown
- * release publishes through an unbound stamper, whose `partition` fallback
- * (slot 0) would overstamp the other partition's reserved chunks.
+ * Pick a random encryption key whose encrypted address lands in a bucket not
+ * yet claimed (reserved chunks share one slot, so each must occupy a distinct
+ * bucket), claim that bucket, and return the address + key + 64-byte reference.
+ * CPU only — the upload happens later, batched. The bucket-distinctness retry
+ * is why addresses are chosen in one synchronous pass before any PUT.
  */
-async function uploadReservedChunk(
-  target: UploadTarget,
+function pickReservedChunkKey(
   plaintext: Uint8Array,
   claimedBuckets: Set<number>,
-  reserve: UtilizationAwareStamper | undefined,
-  partition: number,
-): Promise<Uint8Array> {
+): { address: Uint8Array; key: Uint8Array; reference: Uint8Array } {
   let encrypted = makeEncryptedContentAddressedChunk(plaintext)
   while (claimedBuckets.has(toBucket(encrypted.address.toUint8Array()))) {
     encrypted = makeEncryptedContentAddressedChunk(plaintext)
   }
   const address = encrypted.address.toUint8Array()
   claimedBuckets.add(toBucket(address))
-  reserve?.markReservedUtilizationChunk(address, partition)
-  await uploadData(target, plaintext, {
-    encryptionKey: encrypted.encryptionKey,
-    deferred: false,
-  })
-  return encrypted.reference.toUint8Array()
+  return {
+    address,
+    key: encrypted.encryptionKey,
+    reference: encrypted.reference.toUint8Array(),
+  }
 }
