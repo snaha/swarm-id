@@ -720,6 +720,16 @@ export class PartitionLease {
       }
     }
 
+    // Seed the publish baseline from the state we just resumed, so the FIRST
+    // publish of this session is incremental (only the bucket the upload touches
+    // + the reference chunk) instead of a full re-publish. `publishedCounter`
+    // must be a COPY: bindPartition aliases `localCounter` and the stamper
+    // mutates it on stamp(), which would otherwise empty the diff. When the read
+    // recovered no refs (fresh account / cache-miss), these stay undefined and
+    // the first publish falls back to the sparse-full path.
+    this.publishedReferences = stateResult.references
+    this.publishedCounter = localCounter.slice()
+
     const payload = lockResult.payload
     this.self = {
       partition,

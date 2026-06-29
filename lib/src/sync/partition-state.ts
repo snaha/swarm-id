@@ -60,6 +60,16 @@ import { lockSocBucket } from "../utils/lock-soc"
 /** Length of a Swarm encrypted reference: 32-byte address + 32-byte key. */
 const ENCRYPTED_REFERENCE_BYTES = 64
 
+/**
+ * All-zero reference sentinel for a counter chunk that is entirely zero (never
+ * written). It is NOT uploaded — the reference chunk just carries the sentinel
+ * at that index, and the reader defaults a sentinel to a zero chunk. Keeps the
+ * first publish sparse (only the touched chunks) instead of writing all
+ * `numUtilizationChunks`, most of which are zero. Safe sentinel: a real ref is
+ * `keccak256-address ‖ random-key`, never all-zero.
+ */
+const ZERO_CHUNK_REF = new Uint8Array(ENCRYPTED_REFERENCE_BYTES)
+
 /** Domain-separation tag for partition-state-feed topics. */
 const PARTITION_STATE_TOPIC_DOMAIN = "swarm-id-partition-state-v1"
 
@@ -324,6 +334,15 @@ export async function readPartitionState(
    * published resume point. Present only on a successful full read.
    */
   stateBuckets?: number[]
+  /**
+   * The N per-chunk refs (sentinels included) the resume state was assembled
+   * from — i.e. the reference chunk's contents. The caller seeds these as the
+   * lease's `publishedReferences` so its FIRST publish is incremental against
+   * the resumed state (only the changed chunk + reference chunk), not a full
+   * re-publish. Present on a full read and (best-effort) on a cache hit;
+   * undefined when no prior state exists.
+   */
+  references?: Uint8Array[]
 }> {
   const {
     bee,
@@ -360,9 +379,19 @@ export async function readPartitionState(
   const refBytes = new Reference(referenceHex).toUint8Array()
 
   // Cache hit: the pointer still names the reference this device's local counter
-  // is already in sync with. Skip the reference-chunk + counter-chunk downloads.
+  // is already in sync with. Skip the COUNTER-chunk downloads — but still fetch
+  // the single reference chunk so we can return its per-chunk refs, letting the
+  // caller's FIRST publish be incremental against the resumed state rather than a
+  // full re-publish. Best-effort: on failure omit `references` (the first publish
+  // then falls back to the sparse-full path).
   if (knownReferenceHex !== undefined && referenceHex === knownReferenceHex) {
-    return { referenceHex, unchanged: true }
+    const { numUtilizationChunks } = getChunkLayout(batchDepth)
+    const references = await downloadReferenceChunkRefs(
+      bee,
+      refBytes,
+      numUtilizationChunks,
+    ).catch(() => undefined)
+    return { referenceHex, unchanged: true, references }
   }
 
   const localCounter = new Uint32Array(NUM_BUCKETS)
@@ -385,23 +414,22 @@ export async function readPartitionState(
   // overstamp deterministically evicts the existing data chunk (Bee replaces
   // the older chunk at a colliding (bucket, slot) stamp index). Report
   // `readFailed` so the caller degrades to read-only and retries later.
+  // Collected here so it survives the try for the success return. The full set
+  // of per-chunk refs (sentinels included) lets the caller seed the lease's
+  // `publishedReferences` for an incremental first publish.
+  let references: Uint8Array[] = []
   try {
-    const referenceChunk = await downloadDataWithChunkAPI(
-      bee,
-      new Reference(refBytes).toHex(),
-    )
     const { numUtilizationChunks } = getChunkLayout(batchDepth)
-    const expectedLength = numUtilizationChunks * ENCRYPTED_REFERENCE_BYTES
-    if (referenceChunk.length !== expectedLength) {
-      throw new Error(
-        `reference chunk has ${referenceChunk.length} bytes, expected ${expectedLength} (${numUtilizationChunks} × ${ENCRYPTED_REFERENCE_BYTES})`,
-      )
-    }
+    references = await downloadReferenceChunkRefs(
+      bee,
+      refBytes,
+      numUtilizationChunks,
+    )
     for (let i = 0; i < numUtilizationChunks; i++) {
-      const ref = referenceChunk.slice(
-        i * ENCRYPTED_REFERENCE_BYTES,
-        (i + 1) * ENCRYPTED_REFERENCE_BYTES,
-      )
+      const ref = references[i]
+      // All-zero sentinel → this chunk was never written; leave it zero and
+      // skip the download (sparse publish — only non-zero chunks are uploaded).
+      if (bytesAllZero(ref)) continue
       const chunkData = await downloadDataWithChunkAPI(
         bee,
         Binary.uint8ArrayToHex(ref),
@@ -425,7 +453,42 @@ export async function readPartitionState(
   // — unlike the old data-slot epoch feed entry — it consumes no data slot that
   // the snapshot would have to account for.
 
-  return { localCounter, referenceHex, unchanged: false, stateBuckets }
+  return {
+    localCounter,
+    referenceHex,
+    unchanged: false,
+    stateBuckets,
+    references,
+  }
+}
+
+/**
+ * Download a partition's reference chunk and split it into its N per-chunk
+ * encrypted refs (address‖key), sentinels included. Throws on a missing chunk
+ * or a wrong-length reference chunk (callers map that to `readFailed` on the
+ * full-read path, or to `undefined` references on the best-effort cache-hit path).
+ */
+async function downloadReferenceChunkRefs(
+  bee: Bee,
+  refBytes: Uint8Array,
+  numUtilizationChunks: number,
+): Promise<Uint8Array[]> {
+  const referenceChunk = await downloadDataWithChunkAPI(
+    bee,
+    new Reference(refBytes).toHex(),
+  )
+  const expectedLength = numUtilizationChunks * ENCRYPTED_REFERENCE_BYTES
+  if (referenceChunk.length !== expectedLength) {
+    throw new Error(
+      `reference chunk has ${referenceChunk.length} bytes, expected ${expectedLength} (${numUtilizationChunks} × ${ENCRYPTED_REFERENCE_BYTES})`,
+    )
+  }
+  return Array.from({ length: numUtilizationChunks }, (_, i) =>
+    referenceChunk.slice(
+      i * ENCRYPTED_REFERENCE_BYTES,
+      (i + 1) * ENCRYPTED_REFERENCE_BYTES,
+    ),
+  )
 }
 
 /**
@@ -514,6 +577,14 @@ export async function writePartitionState(opts: {
     previousReferences.length === numUtilizationChunks &&
     previousCounter !== undefined
   const allIndices = Array.from({ length: numUtilizationChunks }, (_, i) => i)
+  // Which chunks to (re)upload:
+  //  - incremental: those whose serialized bytes changed since the last publish
+  //    (catches the data write + the previous publish's feed-SOC bucket).
+  //  - full (first publish of a session): only the NON-ZERO chunks; zero chunks
+  //    get the all-zero sentinel ref (not uploaded), so the first publish is
+  //    sparse instead of writing all `numUtilizationChunks` (mostly zero).
+  //    Counters are monotonic high-water — a chunk never returns to zero — so a
+  //    real-ref chunk stays real and only never-written chunks are sentinels.
   const uploadIndices = incremental
     ? allIndices.filter(
         (i) =>
@@ -522,24 +593,27 @@ export async function writePartitionState(opts: {
             extractChunk(previousCounter, i, batchDepth),
           ),
       )
-    : allIndices
+    : allIndices.filter(
+        (i) => !bytesAllZero(extractChunk(localCounter, i, batchDepth)),
+      )
   const uploadSet = new Set(uploadIndices)
 
-  // Start from the retained refs (incremental) or empty slots (full publish).
+  // Start from the retained refs (incremental) or all-zero sentinels (full).
   const references: Uint8Array[] = incremental
     ? previousReferences.map((r) => r.slice())
-    : new Array<Uint8Array>(numUtilizationChunks)
+    : allIndices.map(() => ZERO_CHUNK_REF)
 
   // Every reserved chunk overstamps the partition's single reserved slot, so
   // they must land in distinct buckets, clear of the lock-SOC bucket, the live
-  // utilisation chunks, and (incremental) the buckets of the chunks we retain.
+  // utilisation chunks, and (incremental) the buckets of the REAL chunks we
+  // retain (sentinel/zero chunks occupy no bucket).
   const claimedBuckets = new Set<number>([
     lockSocBucket(partition, owner),
     ...(reserve?.getCleanChunkBuckets() ?? []),
   ])
   if (incremental) {
     for (let i = 0; i < numUtilizationChunks; i++) {
-      if (!uploadSet.has(i))
+      if (!uploadSet.has(i) && !bytesAllZero(references[i]))
         claimedBuckets.add(toBucket(references[i].slice(0, 32)))
     }
   }
@@ -565,6 +639,7 @@ export async function writePartitionState(opts: {
   // SOC (at the current rotating bucket, naming the COMPUTED reference-chunk
   // ref). All addresses are known up front, so they land together; the caller
   // awaits all before acking (ack-after-publish).
+  const publishStart = Date.now()
   await Promise.all([
     ...prepared.map((p) =>
       uploadData(target, p.plaintext, {
@@ -588,9 +663,23 @@ export async function writePartitionState(opts: {
     }),
   ])
 
+  // Diagnostic (visible in the browser console): how many chunks this publish
+  // actually wrote — counter chunks + the reference chunk + the pointer SOC —
+  // and the batch latency. Shows whether a held-lease upload's publish is
+  // sparse/incremental (~a few writes) or a full publish, and its gateway cost.
+  console.log(
+    `[partition-state] publish p=${partition} incremental=${incremental} ` +
+      `counterChunks=${prepared.length}/${numUtilizationChunks} ` +
+      `writes=${prepared.length + 2} durationMs=${Date.now() - publishStart}`,
+  )
+
   reserve?.clearReservedUtilizationChunks()
 
-  const stateBuckets = references.map((r) => toBucket(r.slice(0, 32)))
+  // Only REAL (uploaded or retained) chunks occupy a reserved-slot bucket to
+  // protect; sentinel (zero) chunks were never uploaded.
+  const stateBuckets = references
+    .filter((r) => !bytesAllZero(r))
+    .map((r) => toBucket(r.slice(0, 32)))
   stateBuckets.push(toBucket(refPicked.address))
 
   return {
@@ -599,6 +688,14 @@ export async function writePartitionState(opts: {
     references,
     publishedCounter,
   }
+}
+
+/** True when every byte is zero (the zero-chunk / sentinel-ref test). */
+function bytesAllZero(b: Uint8Array): boolean {
+  for (let i = 0; i < b.length; i++) {
+    if (b[i] !== 0) return false
+  }
+  return true
 }
 
 /** Byte-wise equality for two equal-length chunk plaintexts. */
