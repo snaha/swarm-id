@@ -6,10 +6,18 @@
  * a key derived from the recovery-phrase entropy, so the file is useless
  * without the phrase and restoring needs exactly: file + phrase.
  */
+import {
+  type Account as AccountRecord,
+  AccountSchemaV1,
+  serializeConnectedApp,
+  serializePostageStamp,
+} from '@snaha/swarm-id'
+
 import { decryptSeed, deriveKeyFromSecret, encryptSeed } from '$lib/crypto/encryption'
 import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
 import { walletFromPhrase } from '$lib/crypto/mnemonic'
-import type { Account, AccountData } from '$lib/types'
+import type { AccountData } from '$lib/types'
+import { bareHex } from '$lib/utils'
 
 const BACKUP_VERSION = 1
 const BACKUP_KEY_INFO = 'swarm-id-backup-v1'
@@ -43,17 +51,25 @@ function parseEnvelope(fileContents: string): BackupEnvelope | undefined {
   return undefined
 }
 
-/** Serialize and encrypt an account into .swarmid file contents. */
-export async function createBackup(account: Account, entropy: Uint8Array): Promise<string> {
-  const data: AccountData = {
-    id: account.id,
+/**
+ * Serialize and encrypt an account into .swarmid file contents. Byte-class
+ * fields (id, batch ids, stamps) are projected to hex through the lib
+ * serializers so the payload is plain JSON — never the access method or
+ * encrypted seed.
+ */
+export async function createBackup(account: AccountRecord, entropy: Uint8Array): Promise<string> {
+  const data = {
+    id: account.id.toHex(),
     name: account.name,
     publicKey: account.publicKey,
     createdAt: account.createdAt,
-    appConnectionDays: account.appConnectionDays,
-    defaultStampBatchId: account.defaultStampBatchId,
-    stamps: account.stamps,
-    connectedApps: account.connectedApps,
+    derivationKey: account.derivationKey,
+    settings: account.settings,
+    defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
+    devices: account.devices,
+    connectedApps: account.connectedApps.map(serializeConnectedApp),
+    postageStamps: account.postageStamps.map(serializePostageStamp),
+    partitionCount: account.partitionCount,
   }
 
   const salt = new Uint8Array(SALT_LENGTH)
@@ -117,11 +133,28 @@ export async function restoreBackup(fileContents: string, phrase: string): Promi
     throw new Error('The recovery phrase does not match this backup.')
   }
 
-  const data = JSON.parse(new TextDecoder().decode(plaintext)) as AccountData
-  if (data.id.toLowerCase() !== wallet.address.toLowerCase()) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(new TextDecoder().decode(plaintext))
+  } catch {
+    throw new Error('Not a valid backup file.')
+  }
+  // Rehydrate byte-class fields through the shared Zod schema. Access/seed are
+  // device-local and never in the file, so pass placeholders and drop them.
+  const result = AccountSchemaV1.safeParse({
+    ...(raw as Record<string, unknown>),
+    access: { type: 'password', kdfSalt: '', kdfIterations: 0 },
+    encryptedSeed: '',
+  })
+  if (!result.success) {
+    throw new Error('Not a valid backup file.')
+  }
+  const parsed = result.data
+  if (parsed.id.toHex() !== bareHex(wallet.address)) {
     throw new Error('The recovery phrase does not match this backup.')
   }
-  return data
+  const { access: _access, encryptedSeed: _encryptedSeed, ...portable } = parsed
+  return portable
 }
 
 /** Backup filename like 20260610.swarmid */

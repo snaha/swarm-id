@@ -1,28 +1,33 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { EthAddress } from '@ethersphere/bee-js'
 import { describe, expect, it } from 'vitest'
 
-import type { Account } from '../types'
+import type { AccountRecord } from '../types'
+import { bareHex } from '../utils'
 import { backupFilename, createBackup, restoreBackup } from './backup'
 import { walletFromPhrase } from './mnemonic'
 
 const PHRASE = 'test test test test test test test test test test test junk'
 const OTHER_PHRASE = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
+const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-function accountFor(phrase: string): Account {
+function accountFor(phrase: string): AccountRecord {
   const wallet = walletFromPhrase(phrase)
   return {
-    id: wallet.address,
+    id: new EthAddress(bareHex(wallet.address)),
     name: 'Jovial Einstein',
-    publicKey: wallet.publicKey,
+    publicKey: bareHex(wallet.publicKey),
     createdAt: 1765000000000,
+    derivationKey: 'f'.repeat(64),
     access: { type: 'password', kdfSalt: '00', kdfIterations: 1 },
     encryptedSeed: '00',
-    appConnectionDays: 30,
-    stamps: [],
+    settings: { appSessionDuration: 30 * MS_PER_DAY },
+    devices: [],
     connectedApps: [
       { appUrl: 'https://coucou.mail', appName: 'Coucou', lastConnectedAt: 1765000000000 },
     ],
+    postageStamps: [],
   }
 }
 
@@ -33,10 +38,10 @@ describe('backup round-trip', () => {
     const file = await createBackup(account, wallet.entropy)
 
     const restored = await restoreBackup(file, PHRASE)
-    expect(restored.id).toBe(account.id)
+    expect(restored.id.toHex()).toBe(account.id.toHex())
     expect(restored.name).toBe('Jovial Einstein')
     expect(restored.connectedApps).toHaveLength(1)
-    expect(restored.appConnectionDays).toBe(30)
+    expect(restored.settings?.appSessionDuration).toBe(30 * MS_PER_DAY)
     // The secret material never leaves the device.
     expect(file).not.toContain('encryptedSeed')
     expect(file).not.toContain('kdfSalt')

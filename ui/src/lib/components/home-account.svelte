@@ -33,7 +33,6 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
-  import { removeSharedAccountRecords } from '$lib/connect-handshake'
   import { backupFilename, createBackup } from '$lib/crypto/backup'
   import {
     PASSWORD_KDF_ITERATIONS,
@@ -50,7 +49,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { AccessMethod, Account } from '$lib/types'
-  import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
+  import { copyToClipboard, display0x, notImplemented, truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const MIN_PASSWORD_LENGTH = 8
@@ -104,7 +103,7 @@
   let toastMessage = $state<string | undefined>(undefined)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-  const isLocal = $derived(account.stamps.length === 0)
+  const isLocal = $derived(account.postageStamps.length === 0)
   const accessLabel = $derived(methodLabel(account.access.type))
   const AccessIcon: Component = $derived(
     account.access.type === 'passkey'
@@ -113,6 +112,7 @@
         ? Wallet
         : KeyRound,
   )
+  const publicKeyDisplay = $derived(account.publicKey ? display0x(account.publicKey) : '')
   const privateKey = $derived(entropy ? privateKeyFromEntropy(entropy) : undefined)
   const phraseWords = $derived(entropy ? phraseFromEntropy(entropy).split(' ') : [])
   const newPasswordTooShort = $derived(
@@ -142,7 +142,7 @@
   function onNameChange() {
     const trimmed = name.trim()
     if (trimmed.length > 0 && trimmed !== account.name) {
-      accountsStore.rename(account.id, trimmed)
+      account.rename(trimmed)
     }
   }
 
@@ -253,7 +253,6 @@
         key = await deriveWalletKey(source, salt)
         access = {
           type: 'eth-wallet',
-          walletAddress: source.walletAddress,
           encryptionSalt: bytesToHex(salt),
         }
       } else {
@@ -268,7 +267,7 @@
       if (myAttempt !== attempt) {
         return
       }
-      accountsStore.setAccess(account.id, access, await encryptSeed(entropy, key))
+      account.setAccess(access, await encryptSeed(entropy, key))
       dialog = undefined
       newPassword = ''
       verifyNewPassword = ''
@@ -320,11 +319,12 @@
   }
 
   function deleteAccount() {
-    removeSharedAccountRecords(account)
+    // Removing the record drops its connected apps and drives with it, and the
+    // storage event de-authenticates any dApp proxy iframes.
     accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
     if (next) {
-      sessionStore.setCurrentAccount(next.id)
+      sessionStore.setCurrentAccount(next.id.toHex())
     } else {
       sessionStore.clearCurrentAccount()
       goto(resolve(routes.ROOT))
@@ -372,12 +372,12 @@
 
 <div class="flex w-full flex-col gap-6">
   {#if isLocal}
-    <!-- Local account banner: no stamps yet, so the account is view-only. -->
+    <!-- Local account banner: no drives yet, so the account is view-only. -->
     <div class="bg-muted flex w-full flex-col gap-2 rounded-lg px-4 py-2">
       <div class="flex w-full items-center gap-2">
         <Info class="size-4 shrink-0" />
         <p class="flex-1 text-sm">Local account (view-only)</p>
-        <!-- Stamp purchase flow is still TBD in the design. -->
+        <!-- Drive purchase flow is still TBD in the design. -->
         <Button size="xs" onclick={notImplemented}>Upgrade</Button>
         <Button size="xs" variant="ghost" onclick={() => (bannerInfoShown = !bannerInfoShown)}>
           Info
@@ -385,8 +385,8 @@
       </div>
       {#if bannerInfoShown}
         <p class="text-muted-foreground pl-6 text-sm">
-          This is a local account, view-only and not synced. Upgrade by adding a postage stamp to
-          upload data and use your Swarm ID across all your devices.
+          This is a local account, view-only and not synced. Upgrade by adding a drive to upload
+          data and use your Swarm ID across all your devices.
         </p>
       {/if}
     </div>
@@ -398,7 +398,7 @@
     {#if expanded.identity}
       <div class="flex w-full items-center gap-2 pl-5">
         <Input bind:value={name} onchange={onNameChange} />
-        <Polycon value={account.id} size={32} class="shrink-0 overflow-hidden rounded-lg" />
+        <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />
       </div>
     {/if}
   </div>
@@ -440,8 +440,12 @@
       <div class="pl-5">
         <div class="border-border flex w-full flex-col rounded-lg border">
           <div class="flex h-12 w-full items-center gap-2 px-4">
-            <p class="flex-1 truncate text-sm">{truncateAddress(account.id)}</p>
-            <Button variant="ghost" size="sm" onclick={() => copyText(account.id, 'Address')}>
+            <p class="flex-1 truncate text-sm">{truncateAddress(display0x(account.id))}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={() => copyText(display0x(account.id), 'Address')}
+            >
               <Copy />
               Copy
             </Button>
@@ -461,13 +465,13 @@
               <div class="flex flex-col gap-1">
                 {@render keyBlock('Address', 'The unique identifier for your Swarm ID.')}
                 <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{account.id}</p>
+                  <p class="min-w-0 flex-1 text-sm break-all">{display0x(account.id)}</p>
                   <Button
                     variant="ghost"
                     size="icon"
                     class="size-7 shrink-0"
                     aria-label="Copy address"
-                    onclick={() => copyText(account.id, 'Address')}
+                    onclick={() => copyText(display0x(account.id), 'Address')}
                   >
                     <Copy />
                   </Button>
@@ -480,13 +484,13 @@
                   'Can be used for establishing secure, private communication.',
                 )}
                 <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{account.publicKey}</p>
+                  <p class="min-w-0 flex-1 text-sm break-all">{publicKeyDisplay}</p>
                   <Button
                     variant="ghost"
                     size="icon"
                     class="size-7 shrink-0"
                     aria-label="Copy public key"
-                    onclick={() => copyText(account.publicKey, 'Public key')}
+                    onclick={() => copyText(publicKeyDisplay, 'Public key')}
                   >
                     <Copy />
                   </Button>

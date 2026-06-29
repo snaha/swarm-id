@@ -14,6 +14,10 @@ const config = {
     },
     prerender: {
       handleUnseenRoutes: 'warn',
+      // `*` keeps the default link-crawl; `/dev` is forced because the developer
+      // tools page is intentionally unlinked (no nav entry) and would otherwise
+      // not be emitted as a real file — a deep link to it 404s on GitHub Pages.
+      entries: ['*', '/dev'],
     },
   },
 }
