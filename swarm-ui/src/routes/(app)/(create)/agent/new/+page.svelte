@@ -26,7 +26,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { restoreAccountToStores } from '$lib/utils/restore-account'
-  import { validateSeedPhrase, countSeedPhraseWords } from '$lib/agent-account'
+  import { validateSeedPhrase, countSeedPhraseWords } from '$lib/seed-phrase'
   import { secureSeedWithPassword } from '$lib/utils/account-auth'
   import { walletFromPhrase, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import {
@@ -101,8 +101,9 @@
       error = undefined
 
       // Derive the deterministic account from the seed phrase (same address on
-      // every device). The seed phrase is NOT stored — re-entered each time
-      // (phrase-only account: no `access`/`encryptedSeed`).
+      // every device). The seed is secured at rest with the password (the
+      // `access`/`encryptedSeed` vault built below), so later unlocks use the
+      // password rather than re-entering the phrase.
       const wallet = walletFromPhrase(validation.phrase)
       const accountId = new EthAddress(wallet.address)
       const masterKey = new Bytes(privateKeyFromEntropy(wallet.entropy))
@@ -118,7 +119,9 @@
 
       // Not local: this seed may already own a synced account on Swarm (a 2nd
       // device). Restore its published apps/stamps/devices instead of starting
-      // blank. Agent accounts have no credentialId.
+      // blank. The trailing '' is the (unused) credentialId positional arg —
+      // this phrase-derived account is secured with a password below, not a
+      // passkey.
       const bee = new Bee(networkSettingsStore.beeNodeUrl)
       let restored: Awaited<ReturnType<typeof restoreAccountFromSwarm>>
       try {

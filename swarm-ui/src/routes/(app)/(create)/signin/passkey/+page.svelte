@@ -29,8 +29,9 @@
       // Unified model: a passkey account stores its seed encrypted on THIS
       // device (the passkey only gates the decryption key). Cross-device
       // restore from a passkey alone is therefore not possible — the account
-      // must already exist locally. Unlock the most recent passkey account.
-      const account = accountsStore.accounts.find((a) => a.access?.type === 'passkey')
+      // must already exist locally. Unlock the first passkey account found on
+      // this device.
+      const account = accountsStore.accounts.find((a) => a.access.type === 'passkey')
 
       if (!account) {
         error =

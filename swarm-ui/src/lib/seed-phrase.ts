@@ -4,10 +4,11 @@
 /**
  * BIP39 seed-phrase validation helpers.
  *
- * In the unified account model there is no distinct "agent" account type — a
- * phrase-only account is simply a seed account with no stored `access`/
- * `encryptedSeed`. These helpers validate and count words for the phrase-entry
- * UIs (create, import, and the re-enter-seed modal).
+ * Generic word-count + mnemonic validation shared by every phrase-entry UI
+ * (create, import, and the re-enter-seed modal). These helpers concern the seed
+ * phrase itself and are independent of how the resulting seed is then secured —
+ * in the unified account model every account stores its seed under an `access`
+ * method + `encryptedSeed` vault (e.g. a password-secured account).
  */
 
 import { Mnemonic } from 'ethers'

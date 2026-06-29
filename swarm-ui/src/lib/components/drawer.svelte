@@ -36,11 +36,7 @@
     SWARM_SECRET_PREFIX,
   } from '@snaha/swarm-id'
   import type { Account } from '$lib/types'
-  import {
-    getMasterKeyFromAccount,
-    SeedPhraseRequiredError,
-    getMasterKeyFromAgentAccount,
-  } from '$lib/utils/account-auth'
+  import { getMasterKeyFromAccount } from '$lib/utils/account-auth'
   import EthereumLogo from './ethereum-logo.svelte'
   import PasskeyLogo from './passkey-logo.svelte'
   import Input from './ui/input/input.svelte'
@@ -48,7 +44,7 @@
   import CopyButton from './copy-button.svelte'
   import Tooltip from './ui/tooltip.svelte'
   import DeleteModal from './delete-modal.svelte'
-  import EnterSeedModal from './enter-seed-modal.svelte'
+  import EnterPasswordModal from './enter-password-modal.svelte'
   import Bot from 'carbon-icons-svelte/lib/Bot.svelte'
 
   type Props = {
@@ -66,7 +62,9 @@
   let showExportTooltip = $state(false)
   let networkSettingsModalOpen = $state(false)
   let showDeleteModal = $state(false)
-  let showDeleteSeedModal = $state(false)
+  let showDeletePasswordModal = $state(false)
+  let deletePasswordError = $state<string | undefined>(undefined)
+  let deletePasswordBusy = $state(false)
   let deleteError = $state<string | undefined>(undefined)
   let isDeleteAuthInProgress = $state(false)
   // Non-reactive flag set when the user cancels mid-auth. Checked before
@@ -109,16 +107,22 @@
   async function handleDeleteAccount() {
     deleteError = undefined
     deleteCancelled = false
+
+    // Re-authenticate as a confirmation gate before the destructive delete (the
+    // derived key itself is discarded). Password accounts have no interactive
+    // ceremony, so collect the password in a modal and verify it there.
+    if (account.access.type === 'password') {
+      showDeleteModal = false
+      deletePasswordError = undefined
+      showDeletePasswordModal = true
+      return
+    }
+
     isDeleteAuthInProgress = true
     try {
       try {
         await getMasterKeyFromAccount(account)
       } catch (err) {
-        if (err instanceof SeedPhraseRequiredError) {
-          showDeleteModal = false
-          showDeleteSeedModal = true
-          return
-        }
         deleteError = err instanceof Error ? err.message : 'Authentication failed'
         console.error('Authentication failed:', err)
         return
@@ -133,20 +137,24 @@
     }
   }
 
-  async function handleDeleteSeedPhraseProvided(seedPhrase: string) {
+  async function handleDeletePasswordProvided(password: string) {
+    deletePasswordBusy = true
+    deletePasswordError = undefined
     try {
-      getMasterKeyFromAgentAccount(account, seedPhrase)
+      await getMasterKeyFromAccount(account, password)
     } catch (err) {
-      deleteError = err instanceof Error ? err.message : 'Invalid seed phrase'
-      showDeleteModal = true
-      console.error('Invalid seed phrase:', err)
+      deletePasswordError = err instanceof Error ? err.message : 'Authentication failed'
+      console.error('Authentication failed:', err)
       return
+    } finally {
+      deletePasswordBusy = false
     }
+    showDeletePasswordModal = false
     await performAccountDeletion()
   }
 
-  function handleDeleteSeedModalCancel() {
-    showDeleteSeedModal = false
+  function handleDeletePasswordCancel() {
+    showDeletePasswordModal = false
   }
 
   let showPasskeyExportWarning = $state(false)
@@ -179,7 +187,7 @@
       a.click()
       document.body.removeChild(a)
 
-      if (account.access?.type === 'passkey') {
+      if (account.access.type === 'passkey') {
         showPasskeyExportWarning = true
       }
     } catch (err) {
@@ -219,9 +227,9 @@
           style="padding: var(--padding)"
         >
           <Horizontal --horizontal-gap="var(--half-padding)">
-            {account.access?.type === 'eth-wallet'
+            {account.access.type === 'eth-wallet'
               ? 'Ethereum'
-              : account.access?.type === 'passkey'
+              : account.access.type === 'passkey'
                 ? 'Passkey'
                 : 'Agent'}
             <Badge>{account.defaultPostageStampBatchID ? 'Synced' : 'Local'}</Badge>
@@ -333,9 +341,9 @@
                 --horizontal-justify-content="stretch"
                 style="flex: 1"
               >
-                {#if acc.access?.type === 'eth-wallet'}
+                {#if acc.access.type === 'eth-wallet'}
                   <EthereumLogo size={20} />
-                {:else if acc.access?.type === 'passkey'}
+                {:else if acc.access.type === 'passkey'}
                   <PasskeyLogo size={20} />
                 {:else}
                   <Bot size={20} />
@@ -403,9 +411,9 @@
               oninput={onAccountNameChange}
             />
             <Horizontal --horizontal-gap="var(--quarter-padding)">
-              {#if account.access?.type === 'eth-wallet'}
+              {#if account.access.type === 'eth-wallet'}
                 <EthereumLogo size={20} />Ethereum
-              {:else if account.access?.type === 'passkey'}
+              {:else if account.access.type === 'passkey'}
                 <PasskeyLogo size={20} />Passkey
               {:else}
                 <Bot size={20} />Agent
@@ -583,10 +591,15 @@
   }}
 />
 
-<EnterSeedModal
-  bind:open={showDeleteSeedModal}
-  onUnlock={handleDeleteSeedPhraseProvided}
-  onCancel={handleDeleteSeedModalCancel}
+<EnterPasswordModal
+  bind:open={showDeletePasswordModal}
+  title="Delete account?"
+  description="Enter your account password to confirm deletion. This action cannot be undone."
+  confirmLabel="Delete account"
+  onSubmit={handleDeletePasswordProvided}
+  onCancel={handleDeletePasswordCancel}
+  error={deletePasswordError}
+  busy={deletePasswordBusy}
 />
 
 <style>

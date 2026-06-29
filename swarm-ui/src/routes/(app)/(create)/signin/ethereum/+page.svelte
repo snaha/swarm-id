@@ -21,7 +21,6 @@
 
   let error = $state<string | undefined>(undefined)
   let isProcessing = $state(false)
-  let isConfirmDisabled = $derived(false)
 
   async function handleConfirm() {
     try {
@@ -80,20 +79,13 @@
 
     {#snippet buttonContent()}
       <Vertical --vertical-gap="var(--half-padding)">
-        <Button
-          dimension="compact"
-          onclick={handleConfirm}
-          disabled={isConfirmDisabled}
-          class="mobile-full-width"
-        >
+        <Button dimension="compact" onclick={handleConfirm} class="mobile-full-width">
           Confirm with wallet
           <ArrowRight size={20} />
         </Button>
-        {#if !isConfirmDisabled}
-          <Typography variant="small">
-            Make sure to use the same Ethereum wallet you used to create your Swarm ID account.
-          </Typography>
-        {/if}
+        <Typography variant="small">
+          Make sure to use the same Ethereum wallet you used to create your Swarm ID account.
+        </Typography>
       </Vertical>
     {/snippet}
   </CreationLayout>
