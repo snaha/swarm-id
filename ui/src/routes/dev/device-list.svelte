@@ -142,7 +142,7 @@
 
   // Refresh exactly once when the component mounts. No $effect — that
   // re-fires whenever any tracked dependency changes (which happens every
-  // time `applyRefreshedSnapshot` mutates the account), producing a loop.
+  // time `applyRefreshed` mutates the account), producing a loop.
   // onMount runs after initial render with no reactive subscriptions, so
   // it fires once per fresh mount and never again. Re-mounting the panel
   // (e.g. switching the selected account via {#key}) re-fires onMount —

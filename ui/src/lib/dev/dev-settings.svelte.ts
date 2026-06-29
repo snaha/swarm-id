@@ -25,7 +25,7 @@ const MOCK_RESULT_KEY = 'dev-mock-stamp-result'
 function loadMockEnabled(): boolean {
   if (!browser) return import.meta.env.DEV
   const stored = localStorage.getItem(MOCK_ENABLED_KEY)
-  return stored === undefined || stored === null ? import.meta.env.DEV : stored === 'true'
+  return stored === null ? import.meta.env.DEV : stored === 'true'
 }
 
 function loadMockResult(): MockStampResult {
