@@ -906,6 +906,40 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
 
     expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
   })
+
+  it("does NOT heartbeat when an upload slips in while the tick queues on the lock", async () => {
+    // The outer `activeUploadCount === 0` gate is a TOCTOU: an upload can start
+    // AFTER the gate passes and run its publish concurrently with an off-lock
+    // heartbeat, clobbering the shared `intentSoc` slot. The heartbeat must run
+    // UNDER the write lock and re-check the count once granted, so an upload that
+    // slipped in aborts it (the concurrent publish already refreshes the pointer).
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0 })
+    internals.partitionLease = lease
+    internals.activeUploadCount = 0 // passes the outer gate
+    internals.lastLeaseActivityAt = Date.now() // recent → reach the heartbeat tail
+
+    // An upload enters `withWrite` (bumping the count) in the window between the
+    // tick's outer gate and the heartbeat winning the lock. Only an under-lock
+    // re-check catches it.
+    writeLockController.onGrant = () => {
+      internals.activeUploadCount = 1
+    }
+    try {
+      await internals.refreshTick(lease)
+    } finally {
+      writeLockController.onGrant = undefined
+    }
+
+    expect(lease.heartbeatStatePointer).not.toHaveBeenCalled()
+  })
 })
 
 describe("BatchWriteCoordinator — self-demote on un-renewed lease expiry", () => {

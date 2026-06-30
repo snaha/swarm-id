@@ -667,6 +667,36 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       .filter((i: number) => !bytesEqual(after[i], seed[i]))
     expect(changed).toEqual([0])
   })
+
+  it("a resumed holder heartbeats the inherited pointer (acquire seeds lastReferenceHex)", async () => {
+    // A prior holder published state on partition 0.
+    const partitionState = await import("./partition-state")
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await partitionState.writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: published,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+
+    // Resume the partition without ever uploading.
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+
+    // The heartbeat must re-publish the inherited resume pointer to the current
+    // bucket so a later takeover finds it even if this holder never uploads.
+    // Without the lastReferenceHex seed it no-ops (the resume point silently ages
+    // out of the takeover lookup span → resume-from-zero).
+    const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
+    await lease.heartbeatStatePointer()
+    expect(pointerSpy).toHaveBeenCalledTimes(1)
+  })
 })
 
 /** Local byte-equality (the module's `bytesEqual` is not exported). */

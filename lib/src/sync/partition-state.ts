@@ -124,6 +124,12 @@ export function makePartitionStateTopic(
  * Granularity of the rotating state-pointer address. Tracks `INTENT_EPOCH_MS`
  * (kept a local constant to avoid a circular import through partition-intent);
  * the two are intended to move together.
+ *
+ * COUPLING: the takeover lookup (`readStatePointer`) scans the whole
+ * `LEASE_TTL_MS`-wide bucket span SEQUENTIALLY (newest-first, short-circuiting on
+ * the first hit — so the hot path is one read). Keep `STATE_POINTER_EPOCH_MS`
+ * within a small ratio of `LEASE_TTL_MS`: raising the TTL far above the epoch
+ * widens the span into many serial gateway reads, each up to the timeout below.
  */
 const STATE_POINTER_EPOCH_MS = 30_000
 
@@ -146,12 +152,12 @@ export function statePointerEpochBucket(nowMs: number): number {
 
 /**
  * The state-pointer payload: the 64-byte reference of the latest published
- * reference chunk (address‖key), plus the write time so a reader can prefer the
- * freshest of two buckets.
+ * reference chunk (address‖key). The reader picks the highest-numbered present
+ * bucket (a holder writes contiguous buckets up to its last heartbeat), so the
+ * bucket index already orders writes — no in-payload timestamp is needed.
  */
 const StatePointerPayloadSchemaV1 = z.object({
   referenceHex: z.string(),
-  timestampMs: z.number(),
 })
 
 /**
@@ -197,7 +203,6 @@ export async function writeStatePointer(opts: {
   const data = new TextEncoder().encode(
     JSON.stringify({
       referenceHex: opts.referenceHex,
-      timestampMs: opts.nowMs,
     }),
   )
   const target: UploadTarget = {
@@ -255,7 +260,7 @@ async function readStatePointer(opts: {
   partition: number
   nowMs: number
   holderLeasedUntilMs?: number
-}): Promise<{ referenceHex: string; timestampMs: number } | undefined> {
+}): Promise<{ referenceHex: string } | undefined> {
   const topic = makePartitionStateTopic(opts.batchId, opts.partition)
   const buckets = new Set<number>()
   const cur = statePointerEpochBucket(opts.nowMs)

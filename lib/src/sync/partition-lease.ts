@@ -788,6 +788,13 @@ export class PartitionLease {
     // the first publish falls back to the sparse-full path.
     this.publishedReferences = stateResult.references
     this.publishedCounter = localCounter.slice()
+    // Seed the heartbeat's pointer target from the state we resumed, so a holder
+    // that never uploads still re-publishes the inherited resume pointer to the
+    // current bucket each refresh tick (otherwise `heartbeatStatePointer` no-ops
+    // until the first upload and the resume point ages out of the takeover lookup
+    // span → resume-from-zero). Undefined on a genuinely fresh account (no prior
+    // pointer to keep alive — the heartbeat correctly stays a no-op).
+    this.lastReferenceHex = stateResult.referenceHex
 
     const payload = lockResult.payload
     this.self = {

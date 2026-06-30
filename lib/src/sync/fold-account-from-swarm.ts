@@ -32,6 +32,9 @@ export interface FoldAccountResult {
  * collapses that burst into one read set — especially on a slow gateway where a
  * fold takes seconds, so overlapping triggers are the norm. The entry is cleared
  * when the fold settles, so a later fold always re-reads (no stale cache).
+ *
+ * Coalesced callers share ONE `FoldAccountResult` instance — treat it as
+ * read-only; a caller that mutates the result corrupts the others.
  */
 const inFlightFolds = new Map<string, Promise<FoldAccountResult | undefined>>()
 

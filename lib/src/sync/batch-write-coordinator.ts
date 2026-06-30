@@ -921,21 +921,26 @@ export class BatchWriteCoordinator {
     this.deps.writeLeaseCache?.(lease.serialize())
     // Heartbeat the state pointer to the current rotating bucket (best-effort,
     // off the critical path) so an idle-but-alive holder keeps a fresh resume
-    // pointer the next reader can find without a feed walk. SKIP while an upload
-    // is in flight: this tick runs off the write lock, but `withWrite`'s publish
-    // (which holds it) also calls `writeStatePointer`, and both route through the
-    // stamper's single `intentSoc` slot — overlapping them clobbers that
-    // reservation and mis-stamps a pointer SOC into a data slot. The concurrent
-    // publish already refreshes the pointer, so the heartbeat is redundant here.
+    // pointer the next reader can find without a feed walk. `withWrite`'s publish
+    // also calls `writeStatePointer`, and both route through the stamper's single
+    // `intentSoc` slot — overlapping them clobbers that reservation and mis-stamps
+    // a pointer SOC into a data slot. So serialize the heartbeat with the publish:
+    // run it UNDER the write lock (the publish holds the same lock). The outer
+    // `activeUploadCount === 0` gate is a cheap skip when an upload is already in
+    // flight; the under-lock re-check closes the TOCTOU where an upload starts
+    // AFTER the gate but before the heartbeat wins the lock (the concurrent
+    // publish then already refreshes the pointer, so the heartbeat is redundant).
     if (this.activeUploadCount === 0) {
-      void lease
-        .heartbeatStatePointer()
-        .catch((err) =>
-          console.warn(
-            "[BatchWriteCoordinator] State-pointer heartbeat failed:",
-            err,
-          ),
-        )
+      await this.lock(async () => {
+        if (this.disposed || this.partitionLease !== lease) return
+        if (this.activeUploadCount !== 0) return // an upload slipped in while queued
+        await lease.heartbeatStatePointer()
+      }).catch((err) =>
+        console.warn(
+          "[BatchWriteCoordinator] State-pointer heartbeat failed:",
+          err,
+        ),
+      )
     }
   }
 
