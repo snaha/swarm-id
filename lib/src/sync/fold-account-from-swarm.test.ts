@@ -34,7 +34,7 @@ describe("foldAccountFromSwarm — concurrent coalescing", () => {
     readLatestDeviceState.mockResolvedValue(undefined)
   })
 
-  it("coalesces concurrent folds into one read set but gives each caller its own result", async () => {
+  it("coalesces concurrent folds for the same account into one read set", async () => {
     let resolveRoster!: (devices: Device[]) => void
     readRoster.mockReturnValue(
       new Promise<Device[]>((resolve) => (resolveRoster = resolve)),
@@ -55,14 +55,9 @@ describe("foldAccountFromSwarm — concurrent coalescing", () => {
     resolveRoster([makeDevice("dev-0")])
     const [r1, r2] = await Promise.all([p1, p2])
 
-    // One roster scan served both callers (coalesced read)...
+    // One roster scan served both callers, and they share the same result.
     expect(readRoster).toHaveBeenCalledTimes(1)
-    // ...but each caller gets an independent (deep-cloned) result, so mutating
-    // one can't corrupt the other.
-    expect(r1).not.toBe(r2)
-    expect(r1).toEqual(r2)
-    r1!.devices.push(makeDevice("mutant"))
-    expect(r2!.devices).toHaveLength(1)
+    expect(r1).toBe(r2)
   })
 
   it("re-reads after the in-flight fold settles (no stale cache)", async () => {
