@@ -518,6 +518,55 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     })
     expect(found.localCounter).toEqual(localCounter)
   })
+
+  it("finds the pointer when leasedUntil is more than one epoch past the last heartbeat (dropped final heartbeats / TTL > epoch)", async () => {
+    const { writePartitionState, readPartitionState, statePointerEpochBucket } =
+      await import("./partition-state")
+
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[7] = 4
+    const STATE_EPOCH_MS = 30_000
+    // The holder's last DURABLE pointer was written at T0, but its lock SOC's
+    // `leasedUntil` then advanced ~2 epochs further — the last couple of
+    // best-effort heartbeats were dropped (flaky gateway), or the lease TTL is
+    // wider than one pointer epoch. The pointer is NOT in the {leasedUntil,
+    // leasedUntil-1} window the old reader probed.
+    const T0 = Date.now() - 5 * 60_000
+    vi.spyOn(Date, "now").mockReturnValue(T0)
+    await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+    vi.restoreAllMocks()
+
+    const leasedUntil = T0 + 2 * STATE_EPOCH_MS + 1_000
+    // The pointer's bucket is ≥2 below the leasedUntil bucket — outside the old
+    // ±1 window, inside the full-TTL span the reader must scan.
+    expect(
+      statePointerEpochBucket(leasedUntil) - statePointerEpochBucket(T0),
+    ).toBeGreaterThanOrEqual(2)
+    // `now` is ~5 min away, so the current/previous buckets can't mask the miss.
+    expect(statePointerEpochBucket(Date.now())).not.toBe(
+      statePointerEpochBucket(T0),
+    )
+
+    const found = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+      holderLeasedUntilMs: leasedUntil,
+    })
+    expect(found.localCounter).toEqual(localCounter)
+  })
 })
 
 describe("PartitionLease.acquire — seeds the incremental first publish", () => {
@@ -794,6 +843,63 @@ describe("PartitionLease.acquire — fresh scan", () => {
       partition: 0,
     })
     expect(observed?.holderDeviceId).toBe(DEVICE_A)
+  })
+
+  it("resumes the expired holder's published counter on takeover (not a zero counter)", async () => {
+    const PAST = 1_000_000
+    const NOW = PAST + LEASE_TTL_MS + 10_000
+    const { writePartitionState } = await import("./partition-state")
+
+    // DEVICE_B published a non-zero counter while holding p0, ~at PAST. The state
+    // pointer is a rotating per-epoch SOC keyed off `Date.now()` (NOT the lease's
+    // injected `now`), so mock Date.now to PAST while seeding → the pointer lands
+    // in PAST's epoch bucket. The lease later reads at the real wall clock, whose
+    // bucket is far past PAST: the pointer is aged out of `now`/`now-1` and is
+    // reachable ONLY via the gone holder's `leasedUntil` bucket.
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    const nowSpy = vi.spyOn(Date, "now").mockReturnValue(PAST)
+    await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: published,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+    nowSpy.mockRestore()
+
+    // DEVICE_B's lock is expired at NOW (it departed without releasing).
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      payload: {
+        holderDeviceId: DEVICE_B,
+        generation: {
+          timestampMs: PAST,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+        },
+        acquiredAt: PAST,
+        leasedUntil: PAST + LEASE_TTL_MS, // < NOW → expired
+      },
+    })
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    expect(result.partition).toBe(0)
+    // Regression guard: the takeover must resume B's exact published counter, NOT
+    // a zero seed that would re-issue every used slot and evict B's data chunks.
+    expect(result.localCounter).toEqual(published)
   })
 
   it("returns read-only when every partition has a live foreign holder", async () => {

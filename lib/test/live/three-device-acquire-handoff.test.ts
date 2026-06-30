@@ -91,8 +91,23 @@ function deviceIdForHome(prefix: string, target: number): string {
 interface DeviceHarness {
   id: string
   coordinator: BatchWriteCoordinator
-  /** Set by `onLeaseAcquired` so a fresh acquire can be timed off the call. */
-  state: { acquiredAt: number }
+  /**
+   * `acquiredAt` — wall time `onLeaseAcquired` fired (times a fresh acquire).
+   * `resumedCounterSum` — Σ of the counter the lease resumed from, snapshotted
+   * at acquire BEFORE this session's first upload bumps it. A takeover of a
+   * partition a peer already published on MUST be > 0; a zero resume means the
+   * rotating state-pointer was missed and the new holder would re-issue used
+   * slots (the #382 regression).
+   */
+  state: { acquiredAt: number; resumedCounterSum: number }
+}
+
+/** Σ of a per-bucket counter (0 when the stamper isn't partition-bound). */
+function counterSum(counter: Uint32Array | undefined): number {
+  if (!counter) return 0
+  let total = 0
+  for (const c of counter) total += c
+  return total
 }
 
 interface UploadTiming {
@@ -133,7 +148,7 @@ describe.skipIf(!liveEnv.configured)(
         keys.owner,
         encryptionKey,
       )
-      const state = { acquiredAt: 0 }
+      const state = { acquiredAt: 0, resumedCounterSum: 0 }
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
         batchId: ctx.batchID.toHex(),
@@ -155,6 +170,10 @@ describe.skipIf(!liveEnv.configured)(
         flushStamperState: () => stamper.flush(),
         onLeaseAcquired: () => {
           state.acquiredAt = Date.now()
+          // Snapshot the resume point: `bindPartition` ran just before this
+          // callback, so the bound counter is exactly what the lease resumed from
+          // (this session's first upload hasn't bumped it yet).
+          state.resumedCounterSum = counterSum(stamper.getLocalCounter())
         },
       })
       return { id, coordinator, state }
@@ -272,6 +291,13 @@ describe.skipIf(!liveEnv.configured)(
         cTakeover.partition,
         "C did not dual-grab A's still-held partition",
       ).not.toBe(A.coordinator.currentPartition)
+      // Resume-correctness guard (#382): C must resume B's published counter via
+      // the gone holder's leasedUntil bucket, NOT a zero seed — a zero resume
+      // re-issues the slots B already used and evicts B's data chunks.
+      expect(
+        C.state.resumedCounterSum,
+        "C resumed B's published partition-state (non-zero), not a zero counter",
+      ).toBeGreaterThan(0)
     })
 
     it("B: reclaims its original partition (cold) after C idles out + SOC upload", async () => {
@@ -319,6 +345,12 @@ describe.skipIf(!liveEnv.configured)(
         bReclaim.partition,
         "B did not dual-grab A's still-held partition",
       ).not.toBe(A.coordinator.currentPartition)
+      // Resume-correctness guard (#382): B's cold reclaim must resume C's
+      // published counter (non-zero) via C's leasedUntil bucket, not a zero seed.
+      expect(
+        B.state.resumedCounterSum,
+        "B reclaim resumed C's published partition-state (non-zero), not a zero counter",
+      ).toBeGreaterThan(0)
     })
   },
 )

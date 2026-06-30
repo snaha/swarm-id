@@ -48,6 +48,7 @@ import {
 import { uploadData, uploadSOC, type UploadTarget } from "../proxy/upload"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
+  LEASE_TTL_MS,
   NUM_BUCKETS,
   UtilizationAwareStamper,
   extractChunk,
@@ -125,6 +126,15 @@ export function makePartitionStateTopic(
  * the two are intended to move together.
  */
 const STATE_POINTER_EPOCH_MS = 30_000
+
+/**
+ * Extra epoch buckets the takeover lookup scans BELOW the lease-TTL span, to
+ * tolerate a holder whose last few best-effort pointer heartbeats were dropped
+ * (flaky gateway) while its lock SOC kept advancing `leasedUntil`. The lookup is
+ * TTL-independent (see `readStatePointer`); this only sets how many dropped
+ * final heartbeats it survives.
+ */
+const POINTER_LOOKUP_SLACK_BUCKETS = 2
 
 /** Bound a single pointer read so an absent SOC doesn't block on peer exhaustion. */
 const STATE_POINTER_READ_TIMEOUT_MS = 2500
@@ -224,10 +234,18 @@ function makeStatePointerAddress(
 /**
  * Read the latest state pointer by computing bucket addresses directly — no
  * feed walk. Checks (newest-first) the current/previous bucket around `now` and,
- * when given, around the gone holder's `leasedUntil` (so a partition that's been
- * free for a while is still found at the holder's last-heartbeat bucket). Returns
- * the freshest pointer found, or `undefined` when none of the candidate buckets
- * carry one.
+ * when given, the gone holder's lease span: every bucket from its last lock
+ * refresh (`leasedUntil`) back through `leasedUntil - LEASE_TTL_MS` plus
+ * {@link POINTER_LOOKUP_SLACK_BUCKETS} of slack. The holder heartbeats the
+ * pointer at `floor(now / EPOCH)` on every refresh, so its last DURABLE pointer
+ * lands somewhere in that span; scanning the whole span (rather than just the
+ * `leasedUntil` bucket) makes the lookup independent of the
+ * `STATE_POINTER_EPOCH_MS` vs `LEASE_TTL_MS` ratio AND tolerant of a couple of
+ * dropped final heartbeats. Returns the freshest pointer found, or `undefined`
+ * when none of the candidate buckets carry one (then the partition really has no
+ * published state — resume from zero). Ceiling: a holder dark for longer than
+ * `LEASE_TTL_MS + POINTER_LOOKUP_SLACK_BUCKETS·EPOCH` past its last heartbeat
+ * resumes from zero.
  */
 async function readStatePointer(opts: {
   bee: Bee
@@ -244,9 +262,14 @@ async function readStatePointer(opts: {
   buckets.add(cur)
   buckets.add(cur - 1)
   if (opts.holderLeasedUntilMs !== undefined) {
-    const lb = statePointerEpochBucket(opts.holderLeasedUntilMs)
-    buckets.add(lb)
-    buckets.add(lb - 1)
+    // Scan the whole lease span: from the final lock refresh (`leasedUntil`)
+    // back through the earliest this lease could have heartbeated
+    // (`leasedUntil - LEASE_TTL_MS`), minus slack for dropped final heartbeats.
+    const hi = statePointerEpochBucket(opts.holderLeasedUntilMs)
+    const lo =
+      statePointerEpochBucket(opts.holderLeasedUntilMs - LEASE_TTL_MS) -
+      POINTER_LOOKUP_SLACK_BUCKETS
+    for (let b = lo; b <= hi; b++) buckets.add(b)
   }
   // Newest bucket first: a holder writes contiguous buckets up to its last
   // heartbeat, so the highest-numbered present bucket is the freshest pointer.

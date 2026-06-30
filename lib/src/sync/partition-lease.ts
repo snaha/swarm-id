@@ -151,6 +151,16 @@ export class PartitionLease {
    */
   private releasedPartitions = new Map<number, PartitionLockGeneration>()
   /**
+   * Last `leasedUntil` observed on a partition's lock SOC that is NOT a live
+   * holder — an EXPIRED holder, or a release sentinel (whose `leasedUntil` is the
+   * release time). The gone holder heartbeats its rotating state-pointer SOC up to
+   * its `leasedUntil`, so this bounds the pointer's last bucket and lets a DELAYED
+   * takeover compute the right address (the pointer ages out of the `now` buckets
+   * otherwise — `holders` only carries LIVE holders' `leasedUntil`). Keyed by
+   * partition; rebuilt each `refreshFromSwarm`.
+   */
+  private lastSeenLeasedUntil = new Map<number, number>()
+  /**
    * Cached state from this session's last partition-state publish, so the next
    * publish re-uploads only the chunks that changed (incremental). Seeded on the
    * first publish (full), refreshed on every publish, and cleared by `acquire()`
@@ -252,6 +262,7 @@ export class PartitionLease {
     const now = this.now()
     this.holders.clear()
     this.releasedPartitions.clear()
+    this.lastSeenLeasedUntil.clear()
     // Read every partition's lock SOC in parallel — each is an independent
     // multi-round-trip retrieval, so overlapping them collapses N×latency into
     // ≈1×. Classification below is order-independent (holders/releasedPartitions
@@ -279,6 +290,9 @@ export class PartitionLease {
       if (lock.holderDeviceId === NO_HOLDER_DEVICE_ID) {
         console.debug(`[PartitionLease] refresh p=${p}: released sentinel`)
         this.releasedPartitions.set(p, lock.generation)
+        // The sentinel's `leasedUntil` is the release time; the releaser's final
+        // state-pointer write sits in that bucket, so a delayed takeover can find it.
+        this.lastSeenLeasedUntil.set(p, lock.leasedUntil)
         continue
       }
       const self = lock.holderDeviceId === this.opts.deviceId ? " (self)" : ""
@@ -286,6 +300,9 @@ export class PartitionLease {
         console.debug(
           `[PartitionLease] refresh p=${p}: EXPIRED holder ${lock.holderDeviceId}${self} (until ${lock.leasedUntil} <= now ${now})`,
         )
+        // The expired holder heartbeated its state pointer up to `leasedUntil`;
+        // retain it so a takeover computes the pointer bucket even long after.
+        this.lastSeenLeasedUntil.set(p, lock.leasedUntil)
         continue
       }
       console.debug(
@@ -597,8 +614,14 @@ export class PartitionLease {
         batchDepth,
         // Locate the pointer of a partition that's been free for a while at the
         // gone holder's last-heartbeat bucket (its `leasedUntil`), so a takeover
-        // resumes at the right counter however long ago the holder stopped.
-        holderLeasedUntilMs: this.holders.get(partition)?.leasedUntil,
+        // resumes at the right counter however long ago the holder stopped. A live
+        // self/foreign holder's `leasedUntil` comes from `holders`; an EXPIRED or
+        // RELEASED holder's (the actual takeover case — `pickFreeOrExpired` only
+        // picks partitions with no live holder) comes from `lastSeenLeasedUntil`,
+        // which `refreshFromSwarm` retains from the lock SOC.
+        holderLeasedUntilMs:
+          this.holders.get(partition)?.leasedUntil ??
+          this.lastSeenLeasedUntil.get(partition),
       },
       knownReference,
     )
