@@ -374,6 +374,30 @@ describe("BatchWriteCoordinator.withWrite — commit-ordered ack", () => {
     expect(op).toHaveBeenCalledTimes(1)
   })
 
+  it("a held partition with no local counter rejects (never acks without publishing the slot reservation)", async () => {
+    const lease = held(1)
+    leaseController.lease = lease
+    const stamper = makeStamper([])
+    // Held a partition lease, but the stamper exposes no local counter — the
+    // commit publish would be silently skipped, acking an upload whose slots
+    // were never reserved on Swarm. The coordinator must fail loudly instead.
+    stamper.getLocalCounter = (() =>
+      undefined) as typeof stamper.getLocalCounter
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+      }),
+    )
+
+    const op = vi.fn(async () => "ref")
+    await expect(coordinator.withWrite(op, { wait: "block" })).rejects.toThrow(
+      /local counter/,
+    )
+    expect(op).toHaveBeenCalledTimes(1)
+    expect(lease.publishState).not.toHaveBeenCalled()
+  })
+
   it("reverse-clobber guard: a lease that lapsed mid-upload is re-read; the upload throws and does NOT publish", async () => {
     const lease = held(0)
     leaseController.lease = lease

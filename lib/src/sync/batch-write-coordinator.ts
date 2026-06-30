@@ -268,6 +268,18 @@ export class BatchWriteCoordinator {
         const localCounter = this.deps.stamper.getLocalCounter()
         if (localCounter !== undefined) {
           await this.partitionLease?.publishState(localCounter)
+        } else if (this.currentPartition !== undefined) {
+          // Held a partition lease but the stamper has no local counter: the
+          // commit publish (ack-after-publish) would be silently skipped,
+          // acking an upload whose slot reservation never reached Swarm. Fail
+          // loudly instead — the chunks are content-addressed, so a retry is
+          // safe. (Legacy single-partition mode has no counter to publish and
+          // correctly falls through.)
+          throw new Error(
+            `[BatchWriteCoordinator] Held partition ${this.currentPartition} ` +
+              "but the stamper exposed no local counter — cannot publish the " +
+              "slot reservation (ack-after-publish); failing the upload.",
+          )
         }
         return result
       } finally {
