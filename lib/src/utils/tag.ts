@@ -16,8 +16,9 @@ const tagsUnsupported = new WeakMap<Bee, boolean>()
  * Returns the tag UID on success, or undefined if the node
  * does not support tags (e.g., gateway nodes return 404).
  *
- * The "unsupported" verdict is cached per `Bee`, so once a node has 404'd we
- * skip the `POST /tags` attempt on every subsequent upload.
+ * Only a definitive 404 (the endpoint is unsupported) is cached per `Bee`; a
+ * transient failure (5xx / network / timeout) is NOT cached, so a later upload
+ * re-probes the node instead of being permanently tag-less after one blip.
  */
 export async function tryCreateTag(bee: Bee): Promise<number | undefined> {
   if (tagsUnsupported.get(bee)) {
@@ -26,10 +27,20 @@ export async function tryCreateTag(bee: Bee): Promise<number | undefined> {
   try {
     const tagResponse = await bee.createTag()
     return tagResponse.uid
-  } catch {
-    tagsUnsupported.set(bee, true)
+  } catch (error) {
+    // A 404 means the node doesn't implement `POST /tags` — cache it so every
+    // subsequent upload skips the round-trip. Anything else is transient: skip
+    // the tag this once, but leave the cache clear so we re-probe next time.
+    const unsupported = error instanceof Error && /\b404\b/.test(error.message)
+    if (unsupported) {
+      tagsUnsupported.set(bee, true)
+    }
     console.warn(
-      "[tryCreateTag] Tag creation failed — node may not support tags, proceeding without tag (cached; will not retry on this node)",
+      `[tryCreateTag] Tag creation failed — proceeding without tag${
+        unsupported
+          ? " (node does not support tags; cached, will not retry on this node)"
+          : " (transient; will re-probe on the next upload)"
+      }`,
     )
     return undefined
   }

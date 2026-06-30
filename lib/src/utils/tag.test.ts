@@ -52,6 +52,21 @@ describe("tryCreateTag", () => {
     ).toHaveBeenCalledTimes(1)
   })
 
+  it("does NOT cache a transient (non-404) failure — re-probes on the next upload", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const createTag = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Request failed with status code 500"))
+      .mockResolvedValueOnce({ uid: 9 })
+    const bee = { createTag } as unknown as Bee
+
+    // A transient 5xx yields undefined this time, but must NOT poison the cache.
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    // So the next upload re-probes the node and succeeds.
+    expect(await tryCreateTag(bee)).toBe(9)
+    expect(createTag).toHaveBeenCalledTimes(2)
+  })
+
   it("keeps the verdict per-Bee — a different node re-probes", async () => {
     vi.spyOn(console, "warn").mockImplementation(() => {})
     const gateway = {
