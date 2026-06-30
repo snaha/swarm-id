@@ -11,6 +11,19 @@ import type { Bee } from "@ethersphere/bee-js"
  */
 const tagsUnsupported = new WeakMap<Bee, boolean>()
 
+/** HTTP status for an unimplemented endpoint. */
+const NOT_FOUND = 404
+
+/** True when `error` carries a numeric HTTP `status` equal to `status`
+ *  (`BeeResponseError.status`); false for any error without that field. */
+function isStatus(error: unknown, status: number): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    (error as { status?: unknown }).status === status
+  )
+}
+
 /**
  * Attempt to create a tag for upload progress tracking.
  * Returns the tag UID on success, or undefined if the node
@@ -31,7 +44,10 @@ export async function tryCreateTag(bee: Bee): Promise<number | undefined> {
     // A 404 means the node doesn't implement `POST /tags` — cache it so every
     // subsequent upload skips the round-trip. Anything else is transient: skip
     // the tag this once, but leave the cache clear so we re-probe next time.
-    const unsupported = error instanceof Error && /\b404\b/.test(error.message)
+    // Decide on the response STATUS (`BeeResponseError.status`), never the
+    // message text — a 5xx whose body merely mentions "404" must not poison the
+    // cache.
+    const unsupported = isStatus(error, NOT_FOUND)
     if (unsupported) {
       tagsUnsupported.set(bee, true)
     }

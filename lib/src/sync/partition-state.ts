@@ -760,6 +760,15 @@ export async function writePartitionState(opts: {
   // SOC (at the current rotating bucket, naming the COMPUTED reference-chunk
   // ref). All addresses are known up front, so they land together; the caller
   // awaits all before acking (ack-after-publish).
+  //
+  // CONCURRENCY: these PUTs share one `stamper`. They are safe to fire in
+  // parallel ONLY because (a) every chunk here lands in a DISTINCT bucket
+  // (`claimedBuckets` above guarantees it) and (b) the reserved-slot `stamp()`
+  // branches set `stamper.buckets[bucket]` and call `stamp()` with NO await
+  // between them, so each critical section runs to completion on the event loop
+  // before another starts. If a future change introduces an await inside those
+  // branches, concurrent stamps would race on the shared `buckets` array —
+  // serialize the PUTs (or guard the slot) before doing so.
   const publishStart = Date.now()
   await Promise.all([
     ...prepared.map((p) =>

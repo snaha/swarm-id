@@ -34,7 +34,9 @@ export interface FoldAccountResult {
  * when the fold settles, so a later fold always re-reads (no stale cache).
  *
  * Coalesced callers share ONE `FoldAccountResult` instance — treat it as
- * read-only; a caller that mutates the result corrupts the others.
+ * read-only; a caller that mutates the result corrupts the others. The result's
+ * arrays are frozen before return so such a mutation fails loud rather than
+ * silently (see `doFoldAccountFromSwarm`).
  */
 const inFlightFolds = new Map<string, Promise<FoldAccountResult | undefined>>()
 
@@ -104,5 +106,20 @@ async function doFoldAccountFromSwarm(opts: {
   // above, and guarantees `foldAccount` has a view carrying `accountPublicKey`.
   if (views.length === 0) return undefined
 
-  return { account: foldAccount(views, devices), devices }
+  const account = foldAccount(views, devices)
+  // Coalesced callers share this ONE result (see `inFlightFolds`). Freeze the
+  // arrays they iterate so a stray mutation throws loudly instead of silently
+  // corrupting a concurrent caller's view. Shallow (the arrays, not each
+  // element) — enough to catch the realistic push/splice/sort corruption; the
+  // production callers only ever read or pass these into the pure `merge*`
+  // helpers, which never mutate their inputs.
+  for (const arr of [
+    devices,
+    account.devices,
+    account.connectedApps,
+    account.postageStamps,
+  ]) {
+    if (Array.isArray(arr)) Object.freeze(arr)
+  }
+  return { account, devices }
 }

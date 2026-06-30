@@ -14,7 +14,12 @@ vi.mock("./device-roster", () => ({
 }))
 vi.mock("./device-state", () => ({
   readLatestDeviceState: (...args: unknown[]) => readLatestDeviceState(...args),
-  foldAccount: (_views: unknown, _devices: unknown) => ({ folded: true }),
+  foldAccount: (_views: unknown, _devices: unknown) => ({
+    folded: true,
+    devices: [],
+    connectedApps: [],
+    postageStamps: [],
+  }),
 }))
 
 import { foldAccountFromSwarm } from "./fold-account-from-swarm"
@@ -78,5 +83,23 @@ describe("foldAccountFromSwarm — concurrent coalescing", () => {
     // Sequential (non-overlapping) folds each read fresh — coalescing only
     // dedupes truly concurrent calls, it does not cache across time.
     expect(readRoster).toHaveBeenCalledTimes(2)
+  })
+
+  it("freezes the result arrays so coalesced callers can't corrupt each other", async () => {
+    readRoster.mockResolvedValue([makeDevice("dev-0")])
+    const bee = {} as Bee
+
+    const result = await foldAccountFromSwarm({
+      bee,
+      derivationKey: DERIVATION_KEY,
+      accountId: ACCOUNT_ID,
+    })
+
+    // Coalesced callers share one result; a mutation must fail loud, not
+    // silently corrupt a concurrent caller's view.
+    expect(Object.isFrozen(result!.devices)).toBe(true)
+    expect(Object.isFrozen(result!.account.connectedApps)).toBe(true)
+    expect(Object.isFrozen(result!.account.postageStamps)).toBe(true)
+    expect(() => result!.devices.push(makeDevice("dev-1"))).toThrow()
   })
 })
