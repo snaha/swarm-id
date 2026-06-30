@@ -1137,6 +1137,9 @@ export class PartitionLease {
       // first → full publish, which seeds them).
       previousReferences: this.publishedReferences,
       previousCounter: this.publishedCounter,
+      // Lets the publish also avoid this device's intent-beacon buckets (the
+      // refresh tick re-writes them off-lock at the same reserved slot).
+      deviceId: this.opts.deviceId,
     })
     this.publishedReferences = published.references
     this.publishedCounter = published.publishedCounter

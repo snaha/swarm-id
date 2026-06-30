@@ -1444,18 +1444,19 @@ export class UtilizationAwareStamper implements Stamper {
    * stamper so concurrent intent/occupancy/state-pointer writes can't clobber
    * one another's reservation (see {@link intentSocLock}). Production callers
    * (`writeReservedPartitionSoc`, `writeStatePointer`) MUST use this instead of
-   * the bare `reserveIntentSocSlot`/`clearIntentSocSlot` pair.
+   * the bare `reserveIntentSocSlot`/`clearIntentSocSlot` pair. `partition` is the
+   * reserved slot index the SOC routes to (the contended partition's index).
    */
   async withIntentSocSlot<T>(
     address: Uint8Array,
-    slot: number,
+    partition: number,
     fn: () => Promise<T>,
   ): Promise<T> {
     const previous = this.intentSocLock
     let release!: () => void
     this.intentSocLock = new Promise<void>((resolve) => (release = resolve))
     await previous
-    this.reserveIntentSocSlot(address, slot)
+    this.reserveIntentSocSlot(address, partition)
     try {
       return await fn()
     } finally {

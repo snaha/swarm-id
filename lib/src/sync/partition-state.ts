@@ -58,6 +58,11 @@ import {
   toBucket,
 } from "../utils/batch-utilization"
 import { lockSocBucket } from "../utils/lock-soc"
+import {
+  intentEpochBucket,
+  intentSocAddress,
+  partitionOccupancyAddress,
+} from "./partition-intent"
 
 /** Length of a Swarm encrypted reference: 32-byte address + 32-byte key. */
 const ENCRYPTED_REFERENCE_BYTES = 64
@@ -235,6 +240,27 @@ function makeStatePointerAddress(
   return Binary.keccak256(
     Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
   )
+}
+
+/**
+ * The 32-byte state-pointer SOC address for `partition` at the epoch bucket
+ * covering `nowMs`. Exposed so `writePartitionState` can exclude the pointer's
+ * bucket from the reserved-slot buckets its counter/reference chunks may use
+ * (both land at slot = partition; a collision would evict one). Same derivation
+ * `writeStatePointer` writes at.
+ */
+export function statePointerAddress(
+  batchId: BatchId,
+  partition: number,
+  owner: EthAddress,
+  nowMs: number,
+): Uint8Array {
+  const topic = makePartitionStateTopic(batchId, partition)
+  const identifier = makeStatePointerIdentifier(
+    topic,
+    statePointerEpochBucket(nowMs),
+  )
+  return makeStatePointerAddress(identifier, owner)
 }
 
 /**
@@ -581,6 +607,14 @@ export async function writePartitionState(opts: {
   previousReferences?: Uint8Array[]
   /** The counter the previous publish wrote; diffed to find changed chunks. */
   previousCounter?: Uint32Array
+  /**
+   * This device's id. When provided, the publish also avoids the buckets of
+   * this device's current/previous-epoch intent beacons (the refresh tick
+   * writes them off-lock at the same reserved slot). Omit for read-only / the
+   * deviceId-independent paths — the pointer and occupancy buckets are avoided
+   * regardless.
+   */
+  deviceId?: string
 }): Promise<{
   /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
@@ -607,6 +641,7 @@ export async function writePartitionState(opts: {
     swarmEncryptionKey,
     previousReferences,
     previousCounter,
+    deviceId,
   } = opts
 
   PartitionStateSchemaV1.parse({ counters: localCounter })
@@ -672,6 +707,34 @@ export async function writePartitionState(opts: {
     }
   }
 
+  // Other reserved-slot writers for this partition also stamp slot = partition,
+  // so a counter/reference chunk sharing one of their buckets would evict — or
+  // be evicted by — them under Bee's newer-stamp-wins replacement. Exclude their
+  // buckets (current + previous epoch, covering the rotation boundary):
+  //  - the state-pointer SOC this publish writes in the same Promise.all below
+  //    (an intra-publish self-collision otherwise);
+  //  - the deviceId-independent occupancy beacon, and (when known) this device's
+  //    intent beacon, both re-written off-lock by the refresh tick concurrently.
+  // A peer's intent beacon uses its own deviceId and can't be computed here; that
+  // residual stays fail-safe (an evicted beacon self-heals next tick).
+  const now = Date.now()
+  for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
+    claimedBuckets.add(
+      toBucket(statePointerAddress(batchId, partition, owner, ptrMs)),
+    )
+  }
+  const epoch = intentEpochBucket(now)
+  for (const beaconBucket of [epoch, epoch - 1]) {
+    claimedBuckets.add(
+      toBucket(partitionOccupancyAddress(partition, beaconBucket, owner)),
+    )
+    if (deviceId !== undefined) {
+      claimedBuckets.add(
+        toBucket(intentSocAddress(partition, deviceId, beaconBucket, owner)),
+      )
+    }
+  }
+
   // Precompute (CPU only) a distinct-bucket key/address for each chunk we will
   // upload, marking it reserved so its `stamp()` routes to the reserved slot.
   const prepared = uploadIndices.map((i) => {
@@ -713,7 +776,7 @@ export async function writePartitionState(opts: {
       batchId,
       partition,
       referenceHex,
-      nowMs: Date.now(),
+      nowMs: now,
     }),
   ])
 
