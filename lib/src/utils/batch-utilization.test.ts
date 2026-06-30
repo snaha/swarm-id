@@ -385,9 +385,9 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
 
-    // 20 × 2 = 40 stamps; ECDSA signing dominates wall time in this test
-    // (the bee-js Stamper signs every envelope), so we keep the count low
-    // enough for the default vitest 5 s timeout.
+    // 20 × 2 = 40 stamps; ECDSA signing dominates wall time in this test (the
+    // bee-js Stamper signs every envelope). The global testTimeout (vitest
+    // config) absorbs the parallel-suite CPU contention that used to flake it.
     const STAMPS_PER_DEVICE = 20
     const BUCKET = 0x1234
     const seen = new Set<string>()
