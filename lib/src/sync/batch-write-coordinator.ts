@@ -254,6 +254,13 @@ export class BatchWriteCoordinator {
       this.lastLeaseActivityAt = Date.now()
       this.activeUploadCount++
       try {
+        // NOTE: `op` performs the chunk write(s) BEFORE the post-op guard
+        // below. The cold-re-entry case (a woken/throttled holder) is fenced by
+        // the pre-op `ensureLease` check (`leaseNearExpiry` forces a lock read).
+        // A lease that lapses MID-`op` (a long multi-chunk upload while the
+        // refresh tick can't renew for a full TTL) is NOT fenced for the data
+        // write — stamps only re-check the local `leaseStale` flag — only the
+        // ack is. Bounded by skew + TTL (see Partition-Acquire-Optimistic-Lease.md).
         const result = await op(target)
         // Commit-ordered ack: only report the upload durable after the
         // partition-state that reserves its slots is published.
@@ -873,15 +880,22 @@ export class BatchWriteCoordinator {
     this.deps.writeLeaseCache?.(lease.serialize())
     // Heartbeat the state pointer to the current rotating bucket (best-effort,
     // off the critical path) so an idle-but-alive holder keeps a fresh resume
-    // pointer the next reader can find without a feed walk.
-    void lease
-      .heartbeatStatePointer()
-      .catch((err) =>
-        console.warn(
-          "[BatchWriteCoordinator] State-pointer heartbeat failed:",
-          err,
-        ),
-      )
+    // pointer the next reader can find without a feed walk. SKIP while an upload
+    // is in flight: this tick runs off the write lock, but `withWrite`'s publish
+    // (which holds it) also calls `writeStatePointer`, and both route through the
+    // stamper's single `intentSoc` slot — overlapping them clobbers that
+    // reservation and mis-stamps a pointer SOC into a data slot. The concurrent
+    // publish already refreshes the pointer, so the heartbeat is redundant here.
+    if (this.activeUploadCount === 0) {
+      void lease
+        .heartbeatStatePointer()
+        .catch((err) =>
+          console.warn(
+            "[BatchWriteCoordinator] State-pointer heartbeat failed:",
+            err,
+          ),
+        )
+    }
   }
 
   /**

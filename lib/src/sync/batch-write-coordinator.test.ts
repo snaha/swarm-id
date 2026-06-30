@@ -862,6 +862,52 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   })
 })
 
+describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload", () => {
+  // The refresh tick runs OFF the write lock; `withWrite`'s publish (which also
+  // calls `writeStatePointer`) holds it. Both go through the stamper's single
+  // `intentSoc` slot, so an off-lock heartbeat firing while an upload's publish
+  // is in flight clobbers that reservation and mis-stamps a pointer SOC into a
+  // data slot. The tick must skip the heartbeat while an upload is in flight —
+  // the concurrent publish already refreshes the pointer to the current bucket.
+  it("does NOT heartbeat the state pointer while an upload is in flight", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0 })
+    internals.partitionLease = lease
+    internals.activeUploadCount = 1 // an upload is in flight (publish may run)
+    internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield
+
+    await internals.refreshTick(lease)
+
+    expect(lease.heartbeatStatePointer).not.toHaveBeenCalled()
+  })
+
+  it("heartbeats the state pointer when alive and no upload is in flight", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0 })
+    internals.partitionLease = lease
+    internals.activeUploadCount = 0
+    internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield, reach tail
+
+    await internals.refreshTick(lease)
+
+    expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe("BatchWriteCoordinator — acquire-epoch guard", () => {
   it("a late-completing acquire does not resurrect a cleared lease", async () => {
     const calls: string[] = []
