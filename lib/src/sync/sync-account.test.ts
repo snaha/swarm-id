@@ -39,7 +39,7 @@ function createMockStores(
   })
 
   const accountsStore: AccountsStoreInterface = {
-    getAccount: vi.fn((id: EthAddress) =>
+    get: vi.fn((id: EthAddress) =>
       id.toHex() === TEST_ETH_ADDRESS_HEX ? account : undefined,
     ),
   }
@@ -344,9 +344,9 @@ describe("createSyncAccount", () => {
 
   it("should return undefined when account not found", async () => {
     const stores = createMockStores()
-    ;(
-      stores.accountsStore.getAccount as ReturnType<typeof vi.fn>
-    ).mockReturnValue(undefined)
+    ;(stores.accountsStore.get as ReturnType<typeof vi.fn>).mockReturnValue(
+      undefined,
+    )
 
     const syncAccount = createSyncAccount({
       bee: createMockBee(),
@@ -367,9 +367,7 @@ describe("createSyncAccount", () => {
     const account = createAccount({
       defaultPostageStampBatchID: new BatchId(TEST_BATCH_ID_HEX),
     })
-    ;(
-      stores.accountsStore.getAccount as ReturnType<typeof vi.fn>
-    ).mockReturnValue({
+    ;(stores.accountsStore.get as ReturnType<typeof vi.fn>).mockReturnValue({
       ...account,
       defaultPostageStampBatchID: undefined,
     })
@@ -433,10 +431,10 @@ describe("createSyncAccount", () => {
 
   it("publishes for a multi-device account when the coordinator holds a partition", async () => {
     const stores = createMockStores()
-    const baseAccount = stores.accountsStore.getAccount(
+    const baseAccount = stores.accountsStore.get(
       new EthAddress(TEST_ETH_ADDRESS_HEX),
     )!
-    stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
+    stores.accountsStore.get = vi.fn((id: EthAddress) =>
       id.toHex() === TEST_ETH_ADDRESS_HEX
         ? { ...baseAccount, partitionCount: 2 }
         : undefined,
@@ -463,10 +461,10 @@ describe("createSyncAccount", () => {
 
   it("skips sync (returns undefined, no upload) when the coordinator reports contention", async () => {
     const stores = createMockStores()
-    const baseAccount = stores.accountsStore.getAccount(
+    const baseAccount = stores.accountsStore.get(
       new EthAddress(TEST_ETH_ADDRESS_HEX),
     )!
-    stores.accountsStore.getAccount = vi.fn((id: EthAddress) =>
+    stores.accountsStore.get = vi.fn((id: EthAddress) =>
       id.toHex() === TEST_ETH_ADDRESS_HEX
         ? { ...baseAccount, partitionCount: 2 }
         : undefined,

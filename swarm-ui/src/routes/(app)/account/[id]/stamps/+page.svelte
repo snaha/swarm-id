@@ -49,7 +49,7 @@
 
   const accountId = $derived(page.params.id)
   const account = $derived(
-    accountId ? accountsStore.getAccount(new EthAddress(accountId)) : undefined,
+    accountId ? accountsStore.get(new EthAddress(accountId)) : undefined,
   )
   const accountStamp = $derived(
     account?.defaultPostageStampBatchID

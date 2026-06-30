@@ -80,7 +80,7 @@ export const accountsStore = {
     saveAccounts(accounts)
   },
 
-  getAccount(id: EthAddress): Account | undefined {
+  get(id: EthAddress): Account | undefined {
     return accounts.find((a) => a.id.equals(id))
   },
 
@@ -136,7 +136,7 @@ export const accountsStore = {
 
   /** All apps for an account, INCLUDING revoked tombstones (for the synced snapshot). */
   getApps(id: EthAddress): ConnectedApp[] {
-    return this.getAccount(id)?.connectedApps ?? []
+    return this.get(id)?.connectedApps ?? []
   },
 
   /** Displayable (non-revoked) apps for an account. */
@@ -256,7 +256,7 @@ export const accountsStore = {
 
   /** Displayable (non-deleted) stamps for an account. */
   getStamps(id: EthAddress): PostageStamp[] {
-    return (this.getAccount(id)?.postageStamps ?? []).filter((s) => !s.deletedAt)
+    return (this.get(id)?.postageStamps ?? []).filter((s) => !s.deletedAt)
   },
 
   addStamp(id: EthAddress, stamp: Omit<PostageStamp, 'createdAt'>): PostageStamp {

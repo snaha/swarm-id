@@ -13,9 +13,11 @@ import {
 
 import { browser } from '$app/environment'
 
+import { with0x } from '$lib/utils'
+
 const MS_PER_DAY = 24 * 60 * 60 * 1000
 
-type AccountSettings = { appSessionDuration?: number }
+type AccountSettings = NonNullable<AccountRecord['settings']>
 
 /**
  * The account aggregate root. Fields are reactive (`$state`) so component reads
@@ -84,6 +86,11 @@ export class Account {
 
   #persist(options?: { skipSync?: boolean }) {
     this.#onChange(this, options)
+  }
+
+  /** The account id as 0x-prefixed hex — the form the UI shows and copies. */
+  get displayId(): string {
+    return with0x(this.id.toHex())
   }
 
   /** Active (non-revoked) connected apps — what the UI displays. */
@@ -333,10 +340,10 @@ if (browser) {
   })
 }
 
+// EthAddress already accepts both bare and `0x`-prefixed hex, so this is just a
+// convenience for the string-keyed call sites (session id, wallet address).
 function toEthAddress(id: string | EthAddress): EthAddress {
-  if (typeof id !== 'string') return id
-  // Tolerate a `0x`-prefixed id persisted by older UI code; records store bare hex.
-  return new EthAddress(id.startsWith('0x') ? id.slice(2) : id)
+  return id instanceof EthAddress ? id : new EthAddress(id)
 }
 
 export const accountsStore = {
@@ -352,11 +359,6 @@ export const accountsStore = {
   get(id: string | EthAddress): Account | undefined {
     const ethId = toEthAddress(id)
     return accounts.find((account) => account.id.equals(ethId))
-  },
-
-  /** Alias used by the sync engine / dev tooling (keyed by EthAddress). */
-  getAccount(id: EthAddress): Account | undefined {
-    return accountsStore.get(id)
   },
 
   /** Create — or replace, for sign-in / restore — an account; returns the live object. */

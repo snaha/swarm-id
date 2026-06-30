@@ -44,7 +44,7 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
     return { ok: false, kind: 'error', error: 'Invalid account id' }
   }
 
-  const account = accountsStore.getAccount(ethAddress)
+  const account = accountsStore.get(ethAddress)
   if (!account) {
     return { ok: false, kind: 'error', error: 'No local account for this id' }
   }

@@ -119,7 +119,7 @@
 
   $effect(() => {
     const acct = selectedAccountId
-      ? accountsStore.getAccount(new EthAddress(selectedAccountId))
+      ? accountsStore.get(new EthAddress(selectedAccountId))
       : undefined
     if (!acct) {
       accountSigner = undefined
@@ -427,7 +427,7 @@
     })),
   )
   const selectedAccount = $derived(
-    selectedAccountId ? accountsStore.getAccount(new EthAddress(selectedAccountId)) : undefined,
+    selectedAccountId ? accountsStore.get(new EthAddress(selectedAccountId)) : undefined,
   )
   const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
   const stampAssignments = $derived(

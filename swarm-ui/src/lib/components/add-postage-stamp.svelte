@@ -117,7 +117,7 @@
 
   export async function handlePurchase() {
     // Derive signer key from account's derivation key
-    const account = accountsStore.getAccount(new EthAddress(accountId))
+    const account = accountsStore.get(new EthAddress(accountId))
     if (!account) {
       console.error('[AddPostageStamp] Account not found', accountId)
       return

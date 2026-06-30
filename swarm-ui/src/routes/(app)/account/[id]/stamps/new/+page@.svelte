@@ -23,7 +23,7 @@
 
   const accountId = $derived($page.params.id)
   const account = $derived(
-    accountId ? accountsStore.getAccount(new EthAddress(accountId)) : undefined,
+    accountId ? accountsStore.get(new EthAddress(accountId)) : undefined,
   )
 
   // Determine variant based on whether user came from external app

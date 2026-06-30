@@ -26,7 +26,7 @@
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { display0x, notImplemented, truncateAddress } from '$lib/utils'
+  import { notImplemented, truncateAddress } from '$lib/utils'
 
   let missingRequest = $state(false)
   let unlocking = $state<Account | undefined>(undefined)
@@ -184,7 +184,7 @@
                   <span class="flex min-w-0 flex-col">
                     <span class="truncate font-medium">{account.name}</span>
                     <span class="text-muted-foreground text-xs">
-                      {truncateAddress(display0x(account.id))}
+                      {truncateAddress(account.displayId)}
                     </span>
                   </span>
                 </button>

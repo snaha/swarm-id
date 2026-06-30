@@ -87,7 +87,7 @@
   // deletion sync: `mergePostageStamps` keeps the tombstone (#337), so a peer's
   // fold no longer resurrects it.
   function deleteStoredStamp(accountId: EthAddress, batchID: BatchId) {
-    sharedAccountsStore.getAccount(accountId)?.removeDrive(batchID)
+    sharedAccountsStore.get(accountId)?.removeDrive(batchID)
     storedStampMessage = `🗑️ Removed ${batchID.toHex().slice(0, 12)}…`
   }
 
@@ -132,7 +132,7 @@
 
   $effect(() => {
     const acct = selectedAccountId
-      ? sharedAccountsStore.getAccount(new EthAddress(selectedAccountId))
+      ? sharedAccountsStore.get(new EthAddress(selectedAccountId))
       : undefined
     if (!acct) {
       accountSigner = undefined
@@ -440,9 +440,7 @@
     })),
   )
   const selectedAccount = $derived(
-    selectedAccountId
-      ? sharedAccountsStore.getAccount(new EthAddress(selectedAccountId))
-      : undefined,
+    selectedAccountId ? sharedAccountsStore.get(new EthAddress(selectedAccountId)) : undefined,
   )
   const accountHasDefaultDrive = $derived(!!selectedAccount?.defaultPostageStampBatchID)
   const driveAssignments = $derived(
@@ -654,7 +652,7 @@ Check console logs for details:
     try {
       const batchId = new BatchId(selectedStampId)
       const accountId = new EthAddress(selectedAccountId)
-      const account = sharedAccountsStore.getAccount(accountId)
+      const account = sharedAccountsStore.get(accountId)
       if (!account) {
         assignError = 'Account not found.'
         return
@@ -720,7 +718,7 @@ Check console logs for details:
       return
     }
     const accountId = new EthAddress(selectedAccountId)
-    sharedAccountsStore.getAccount(accountId)?.setDefaultDrive(undefined)
+    sharedAccountsStore.get(accountId)?.setDefaultDrive(undefined)
     assignMessage = `✅ Cleared default drive for ${selectedAccountId.slice(0, 8)}…`
   }
 

@@ -16,9 +16,12 @@ import { sharedAccountsStore } from '$lib/dev/accounts.svelte'
 // lib `PostageStampsStoreInterface` consumed by `createSyncAccount`.
 // ============================================================================
 
+// The single IndexedDB-backed utilization store, shared with the sync engine
+// (sync.svelte.ts imports this) so both sides read/write one in-memory cache
+// instead of two that could diverge.
 let utilizationStore: UtilizationStoreDB | undefined
 
-const getUtilizationStore = () => {
+export const getUtilizationStore = (): UtilizationStoreDB => {
   if (!browser) {
     throw new Error('Utilization store not available (browser only)')
   }
@@ -72,6 +75,6 @@ export const postageStampsStore = {
       console.warn('[PostageStamps] Cannot update utilization: stamp not found')
       return
     }
-    sharedAccountsStore.getAccount(found.accountId)?.updateDriveUtilization(batchID, newUtilization)
+    sharedAccountsStore.get(found.accountId)?.updateDriveUtilization(batchID, newUtilization)
   },
 }

@@ -12,7 +12,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { display0x, truncateAddress } from '$lib/utils'
+  import { truncateAddress } from '$lib/utils'
 
   const ITEM_CLASS =
     'flex h-9 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
@@ -62,7 +62,7 @@
     <span class="flex flex-col items-end">
       <span class="text-sm font-medium">{account.name}</span>
       <span class="text-muted-foreground text-xs font-normal">
-        {truncateAddress(display0x(account.id))}
+        {truncateAddress(account.displayId)}
       </span>
     </span>
     <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />

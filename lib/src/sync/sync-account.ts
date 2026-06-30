@@ -131,7 +131,7 @@ export function createSyncAccount(
     chunkAddresses: Uint8Array[],
   ): Promise<void> {
     // Get account
-    const account = accountsStore.getAccount(new EthAddress(accountId))
+    const account = accountsStore.get(new EthAddress(accountId))
     if (!account) {
       console.warn("[SyncCoordinator] Account not found for utilization update")
       return
@@ -243,7 +243,7 @@ export function createSyncAccount(
     | undefined
   > {
     // Get account
-    const account = accountsStore.getAccount(new EthAddress(accountId))
+    const account = accountsStore.get(new EthAddress(accountId))
     if (!account) {
       console.warn("[SyncCoordinator] Account not found", accountId)
       return undefined
@@ -354,7 +354,7 @@ export function createSyncAccount(
       // check and can collide with a live holder on another device.
       knownDeviceIds: () =>
         accountsStore
-          .getAccount(new EthAddress(accountId))
+          .get(new EthAddress(accountId))
           ?.devices.map((d) => d.deviceId) ?? [],
       backupSigner: accountKey,
       swarmEncryptionKey: hexToUint8Array(encryptionKey),

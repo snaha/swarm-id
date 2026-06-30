@@ -75,7 +75,7 @@
       const accountId = new EthAddress(wallet.address)
       const masterKey = new Bytes(privateKeyFromEntropy(wallet.entropy))
 
-      const existingAccount = accountsStore.getAccount(accountId)
+      const existingAccount = accountsStore.get(accountId)
       if (existingAccount) {
         error = 'Account already exists on this device. Go back to the home screen to select it.'
         isProcessing = false

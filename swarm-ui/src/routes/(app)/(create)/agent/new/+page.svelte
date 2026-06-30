@@ -108,7 +108,7 @@
       const masterKey = new Bytes(privateKeyFromEntropy(wallet.entropy))
 
       // Already on this device → just re-enter (don't blank or re-restore it).
-      const existing = accountsStore.getAccount(accountId)
+      const existing = accountsStore.get(accountId)
       if (existing) {
         sessionStore.setAccount(existing)
         sessionStore.setTemporaryMasterKey(masterKey)

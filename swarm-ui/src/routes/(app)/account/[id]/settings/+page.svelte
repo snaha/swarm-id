@@ -17,7 +17,7 @@
   import CopyButton from '$lib/components/copy-button.svelte'
 
   const account = $derived(
-    page.params.id ? accountsStore.getAccount(new EthAddress(page.params.id)) : undefined,
+    page.params.id ? accountsStore.get(new EthAddress(page.params.id)) : undefined,
   )
 
   // eslint-disable-next-line svelte/prefer-writable-derived

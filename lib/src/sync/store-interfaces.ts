@@ -41,7 +41,7 @@ export interface FlushableStamper extends Stamper {
  * owns its connected apps and postage stamps inline.
  */
 export interface AccountsStoreInterface {
-  getAccount(id: EthAddress): Account | undefined
+  get(id: EthAddress): Account | undefined
 }
 
 /**

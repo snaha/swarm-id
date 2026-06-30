@@ -15,7 +15,7 @@
   import Select from '$lib/components/ui/select/select.svelte'
 
   const account = $derived(
-    page.params.id ? accountsStore.getAccount(new EthAddress(page.params.id)) : undefined,
+    page.params.id ? accountsStore.get(new EthAddress(page.params.id)) : undefined,
   )
   const apps = $derived(account ? accountsStore.getActiveApps(account.id) : [])
 

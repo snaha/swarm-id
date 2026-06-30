@@ -48,12 +48,10 @@ export function truncateAddress(address: string): string {
 }
 
 /**
- * Render a bee-js byte class (or bare hex string) as 0x-prefixed hex for
- * display/copy. bee-js `.toHex()` returns bare lowercase hex; the UI shows the
- * 0x-prefixed form everywhere.
+ * Prefix bare hex with `0x` for display/copy (idempotent). bee-js `.toHex()`
+ * returns bare lowercase hex; the UI shows the 0x-prefixed form everywhere.
  */
-export function display0x(value: string | { toHex(): string }): string {
-  const hex = typeof value === 'string' ? value : value.toHex()
+export function with0x(hex: string): string {
   return hex.startsWith('0x') ? hex : `0x${hex}`
 }
 
