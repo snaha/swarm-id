@@ -1151,6 +1151,22 @@ export class PartitionLease {
   }
 
   /**
+   * Seed the heartbeat's pointer target (`lastReferenceHex`) without reading
+   * partition-state. Used by the coordinator's cached-lease re-adopt fast path
+   * (`adoptIfLive`), which binds from local state and never runs
+   * `claimPartition` — where the cold acquire path seeds this. Without it a
+   * reloaded holder that re-adopts its lease and then stays idle never
+   * heartbeats the inherited resume pointer forward, so it ages out of the
+   * takeover lookup span (resume-from-zero → re-issue acked slots). The caller
+   * passes the partition's persisted synced reference
+   * (`UtilizationAwareStamper.getSyncedReference`); `undefined` (fresh partition)
+   * keeps the heartbeat a no-op.
+   */
+  seedReferenceHex(referenceHex: string | undefined): void {
+    this.lastReferenceHex = referenceHex
+  }
+
+  /**
    * Re-write the state pointer to the CURRENT rotating bucket without
    * re-uploading the counter — the refresh-tick heartbeat. Keeps a fresh pointer
    * in the current bucket so a taking-over device finds the resume point even

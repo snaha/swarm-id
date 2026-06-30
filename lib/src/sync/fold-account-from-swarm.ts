@@ -33,10 +33,18 @@ export interface FoldAccountResult {
  * fold takes seconds, so overlapping triggers are the norm. The entry is cleared
  * when the fold settles, so a later fold always re-reads (no stale cache).
  *
- * Coalesced callers share ONE `FoldAccountResult` instance — treat it as
- * read-only; a caller that mutates the result corrupts the others.
+ * Coalesced callers share the one in-flight READ but each receives its own
+ * deep-cloned `FoldAccountResult` (see `cloneFoldResult`), so a caller that
+ * mutates its result can't corrupt the others.
  */
 const inFlightFolds = new Map<string, Promise<FoldAccountResult | undefined>>()
+
+/** Per-caller deep copy so coalesced callers can't corrupt each other's result. */
+function cloneFoldResult(
+  result: FoldAccountResult | undefined,
+): FoldAccountResult | undefined {
+  return result === undefined ? undefined : structuredClone(result)
+}
 
 /**
  * Derive the feed owner + encryption key from the account derivation key, read
@@ -53,12 +61,14 @@ export async function foldAccountFromSwarm(opts: {
 }): Promise<FoldAccountResult | undefined> {
   const key = `${opts.accountId}:${opts.derivationKey}`
   const existing = inFlightFolds.get(key)
-  if (existing) return existing
+  // Clone on the way out (both the coalesced and the originating caller) so the
+  // shared in-flight read is reused but no two callers alias the same object.
+  if (existing) return existing.then(cloneFoldResult)
   const fold = doFoldAccountFromSwarm(opts).finally(() => {
     inFlightFolds.delete(key)
   })
   inFlightFolds.set(key, fold)
-  return fold
+  return fold.then(cloneFoldResult)
 }
 
 async function doFoldAccountFromSwarm(opts: {

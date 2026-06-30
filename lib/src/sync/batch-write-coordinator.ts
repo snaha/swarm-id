@@ -505,6 +505,19 @@ export class BatchWriteCoordinator {
       // reconciles with Swarm and demotes only on a confirmed foreign holder.
       const adopted = lease.adoptIfLive()
       if (adopted !== undefined) {
+        // Seed the heartbeat's resume-pointer target from the persisted synced
+        // reference. The cold `claimPartition` path seeds this from the state it
+        // reads on acquire; the adopt fast path skips `claimPartition`, so
+        // without this an adopted-but-idle holder never heartbeats the inherited
+        // pointer forward and it ages out of the takeover lookup span
+        // (resume-from-zero → re-issues a gone holder's acked slots). Read it
+        // BEFORE the synchronous commit below so no await splits the bind, then
+        // re-check the epoch the same way the cold path does. Best-effort
+        // (undefined on a genuinely fresh partition → heartbeat stays a no-op).
+        const seededReferenceHex = await stamper
+          .getSyncedReference(adopted)
+          .catch(() => undefined)
+        if (this.leaseEpoch !== epoch || this.disposed) return
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
         // caches, that's a dual-hold the intent round never gets to arbitrate.
@@ -518,6 +531,9 @@ export class BatchWriteCoordinator {
           partitionCount,
           localCounter: stamper.buildLeaseLocalCounter(),
         })
+        // Seed before `onLeaseAcquired` (which may publish): a publish's
+        // `flushState` then overwrites this with the fresh reference.
+        lease.seedReferenceHex(seededReferenceHex)
         this.deps.writeLeaseCache?.(lease.serialize())
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()

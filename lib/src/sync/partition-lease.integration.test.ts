@@ -782,6 +782,44 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     await lease.heartbeatStatePointer()
     expect(pointerSpy).toHaveBeenCalledTimes(1)
   })
+
+  it("seedReferenceHex revives the heartbeat for a re-adopted idle holder", async () => {
+    const partitionState = await import("./partition-state")
+    // The coordinator's cached-lease re-adopt path (hydrate + adoptIfLive) binds
+    // from local state and never reads partition-state, so lastReferenceHex is
+    // unset and the heartbeat no-ops — until the coordinator seeds it from the
+    // persisted synced reference. Simulate that path here.
+    const now = 1_000_000
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => now,
+    })
+    lease.hydrate({
+      deviceId: DEVICE_A,
+      batchId: TEST_BATCH_ID.toHex(),
+      self: {
+        partition: 0,
+        generation: {
+          timestampMs: now - 1,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_A),
+        },
+        acquiredAt: now - 1,
+        leasedUntil: now + 60_000, // within TTL → adoptIfLive succeeds
+      },
+    })
+    expect(lease.adoptIfLive()).toBe(0)
+
+    const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
+    // No pointer to heartbeat yet (adopt didn't read state).
+    await lease.heartbeatStatePointer()
+    expect(pointerSpy).not.toHaveBeenCalled()
+
+    // Coordinator seeds the inherited synced reference → heartbeat re-publishes.
+    lease.seedReferenceHex("ab".repeat(32))
+    await lease.heartbeatStatePointer()
+    expect(pointerSpy).toHaveBeenCalledTimes(1)
+  })
 })
 
 /** Local byte-equality (the module's `bytesEqual` is not exported). */

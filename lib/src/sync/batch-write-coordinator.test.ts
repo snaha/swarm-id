@@ -61,6 +61,9 @@ function makeStamper(calls: string[]) {
     bindPartition: vi.fn(() => calls.push("bind")),
     buildLeaseLocalCounter: () => new Uint32Array(8),
     getLocalCounter: () => new Uint32Array(8),
+    // Persisted per-partition synced reference; the adopt fast path reads it to
+    // seed the lease's heartbeat pointer. Default: none (fresh partition).
+    getSyncedReference: vi.fn(async (_partition: number) => undefined),
   }
 }
 
@@ -102,6 +105,7 @@ function makeLease(
     release: vi.fn(async () => {}),
     publishState: vi.fn(async () => {}),
     heartbeatStatePointer: vi.fn(async () => {}),
+    seedReferenceHex: vi.fn(),
     bumpLocalLease: vi.fn(),
     serialize: vi.fn(() => ({ v: 1 })),
     get currentPartition() {
@@ -859,6 +863,33 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
 
     expect(lease.release).not.toHaveBeenCalled()
     expect(stamper.unbindPartition).not.toHaveBeenCalled()
+  })
+})
+
+describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer", () => {
+  it("seeds lastReferenceHex from the persisted synced reference on re-adopt", async () => {
+    // The cached-lease re-adopt path binds from local state and skips
+    // `claimPartition`, so without this seed an adopted-but-idle holder never
+    // heartbeats the inherited pointer forward (it ages out of the takeover
+    // lookup span → resume-from-zero). The coordinator must read the partition's
+    // persisted synced reference and seed it into the lease.
+    const lease = makeLease({ partition: 2 })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    stamper.getSyncedReference = vi.fn(async () => "deadbeef")
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot", // no refresh timer to leak in the test
+      }),
+    )
+
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(stamper.getSyncedReference).toHaveBeenCalledWith(2)
+    expect(lease.seedReferenceHex).toHaveBeenCalledWith("deadbeef")
   })
 })
 
