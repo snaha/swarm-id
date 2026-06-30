@@ -64,6 +64,14 @@ import {
 /** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
 export const PARTITION_LOCK_GUARD_MS = 2000
 
+/**
+ * Bound each lock-SOC read in `refreshFromSwarm` so a hanging read on a slow
+ * gateway is classified as "unreadable" (a takeover then fails safe) rather than
+ * silently treated as an absent lock. Matches the roster / state-pointer read
+ * timeouts.
+ */
+const LOCK_READ_TIMEOUT_MS = 2500
+
 /** This device's own lease over a partition. */
 export interface SelfLease {
   partition: number
@@ -160,6 +168,16 @@ export class PartitionLease {
    * partition; rebuilt each `refreshFromSwarm`.
    */
   private lastSeenLeasedUntil = new Map<number, number>()
+  /**
+   * Partitions whose lock SOC could not be read conclusively this refresh — the
+   * read timed out / hung (a transient failure), NOT a clean "absent" 404. For
+   * such a partition, `holderLeasedUntilMs` is unknown, so a takeover that finds
+   * no pointer must fail safe (read-only) instead of resuming from zero and
+   * re-issuing a gone holder's acked slots. Rebuilt each `refreshFromSwarm`.
+   * A clean 404 (genuinely free partition) is NOT recorded here, so first-claim
+   * from zero still works.
+   */
+  private unreadableLocks = new Set<number>()
   /**
    * Cached state from this session's last partition-state publish, so the next
    * publish re-uploads only the chunks that changed (incremental). Seeded on the
@@ -263,17 +281,32 @@ export class PartitionLease {
     this.holders.clear()
     this.releasedPartitions.clear()
     this.lastSeenLeasedUntil.clear()
+    this.unreadableLocks.clear()
     // Read every partition's lock SOC in parallel — each is an independent
     // multi-round-trip retrieval, so overlapping them collapses N×latency into
     // ≈1×. Classification below is order-independent (holders/releasedPartitions
-    // are partition-keyed).
+    // are partition-keyed). Each read is bounded by a timeout we generate, so a
+    // HANGING read (slow gateway) is an unambiguous "unreadable" signal — recorded
+    // so a takeover of this partition fails safe rather than zero-seeding. A fast
+    // `undefined` (clean 404) is genuinely absent and stays claimable.
     const locks = await Promise.all(
       Array.from({ length: partitionCount }, (_unused, p) =>
-        readPartitionLock({
-          bee: this.opts.bee,
-          backupSigner: this.opts.backupSigner,
-          swarmEncryptionKey: this.opts.swarmEncryptionKey,
-          partition: p,
+        Promise.race([
+          readPartitionLock({
+            bee: this.opts.bee,
+            backupSigner: this.opts.backupSigner,
+            swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            partition: p,
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new Error("lock read timed out")),
+              LOCK_READ_TIMEOUT_MS,
+            ),
+          ),
+        ]).catch(() => {
+          this.unreadableLocks.add(p)
+          return undefined
         }),
       ),
     )
@@ -622,6 +655,9 @@ export class PartitionLease {
         holderLeasedUntilMs:
           this.holders.get(partition)?.leasedUntil ??
           this.lastSeenLeasedUntil.get(partition),
+        // If this partition's lock read was inconclusive (timed out), a
+        // "no pointer found" result must fail safe rather than zero-seed.
+        lockUnreadable: this.unreadableLocks.has(partition),
       },
       knownReference,
     )

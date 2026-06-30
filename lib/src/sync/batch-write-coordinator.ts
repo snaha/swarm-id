@@ -814,8 +814,17 @@ export class BatchWriteCoordinator {
     }
 
     let confirmedDisplaced = false
+    // Did this tick confirm we STILL hold the slot? Either write-verified
+    // (`refresh()` returns "held") or read-verified (a "lost" whose lock-SOC
+    // read shows us as the live holder). A transient throw or an unconfirmable
+    // "lost" (lock read undefined / expired) leaves this false — we must NOT
+    // extend the local lease on a hold we couldn't confirm, else a holder whose
+    // writes keep failing extends itself forever and keeps writing (the
+    // reverse-clobber the post-op ack guard can't cover for a long upload).
+    let confirmedHeld = false
     try {
       const outcome = await lease.refresh()
+      if (outcome === "held") confirmedHeld = true
       if (outcome === "displaced") {
         // The lease read a foreign presence beacon (earlier generation) at a
         // fresh per-epoch address and confirmed a peer holds this partition.
@@ -839,6 +848,17 @@ export class BatchWriteCoordinator {
           Date.now(),
           this.deps.deviceId,
         )
+        // Not displaced AND the lock SOC still names US as the live holder →
+        // read-verified hold (the lock protocol's authority), so it's safe to
+        // extend the lease even though the write+verify didn't land this tick.
+        if (
+          !confirmedDisplaced &&
+          payload !== undefined &&
+          payload.holderDeviceId === this.deps.deviceId &&
+          payload.leasedUntil > Date.now()
+        ) {
+          confirmedHeld = true
+        }
       }
     } catch (err) {
       console.warn(
@@ -869,12 +889,33 @@ export class BatchWriteCoordinator {
       return
     }
 
-    // Alive + not displaced → bump the local heartbeat and persist it so the
-    // UI stays Active even when the Swarm write is transiently failing.
     // Guard the tail too: after teardown/demote cleared the cache, a stale
     // tick must not re-write a live-looking snapshot that a future acquire
     // would hydrate + adoptIfLive without any Swarm round-trip.
     if (this.disposed || this.partitionLease !== lease) return
+
+    if (!confirmedHeld) {
+      // Couldn't confirm we still hold (transient failure, not a confirmed
+      // peer). Tolerate a short blip — but once the local lease lapses past skew
+      // we can no longer assert we hold the slot (rule 2: never write without a
+      // valid lease). Stop writing and demote; the next upload re-acquires and
+      // re-reads the lock. Until then, keep the lease as-is WITHOUT bumping, so
+      // `leasedUntil` tracks the last successful renewal and genuinely counts
+      // down. The UI stays Active through the blip (lease not yet lapsed).
+      if (this.leaseNearExpiry()) {
+        console.warn(
+          `[BatchWriteCoordinator] Refresh: partition ${partition} lease lapsed without a successful renewal; demoting.`,
+        )
+        this.signalLeaseLost()
+        await this.lock(async () => {
+          if (this.disposed || this.partitionLease !== lease) return
+          this.finalizeDemote()
+        })
+      }
+      return
+    }
+
+    // Renewed on Swarm → bump the local heartbeat and persist it.
     lease.bumpLocalLease(LEASE_TTL_MS)
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(lease.serialize())

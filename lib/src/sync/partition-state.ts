@@ -335,6 +335,15 @@ export async function readPartitionState(
      *  bucket (and the one before) finds a published pointer durably, however
      *  long ago: "no pointer found" then reliably means "no state was published". */
     holderLeasedUntilMs?: number
+    /**
+     * True when this partition's lock SOC could not be read conclusively (a
+     * transient/hanging read, NOT a clean 404). If we then find no published
+     * pointer we must NOT assume "no state" and resume from zero — the lock may
+     * be hiding an expired holder whose acked slots we'd re-issue. Treat that as
+     * `readFailed` (degrade to read-only + retry) instead. A genuinely fresh
+     * partition has a cleanly-absent lock (`false`) and still zero-seeds.
+     */
+    lockUnreadable?: boolean
   },
   knownReferenceHex?: string,
 ): Promise<{
@@ -375,6 +384,7 @@ export async function readPartitionState(
     partition,
     batchDepth,
     holderLeasedUntilMs,
+    lockUnreadable,
   } = opts
 
   const pointer = await readStatePointer({
@@ -394,6 +404,16 @@ export async function readPartitionState(
     // a local synced reference, keep it: same-device reclaim within the trail.)
     if (knownReferenceHex !== undefined) {
       return { referenceHex: knownReferenceHex, unchanged: true }
+    }
+    // No local synced reference to fall back on. If the lock read was
+    // inconclusive, "no pointer" is NOT proof of "no state" — fail safe rather
+    // than zero-seed (which could re-issue a gone holder's acked slots). A
+    // genuinely fresh partition (cleanly-absent lock) still zero-seeds below.
+    if (lockUnreadable) {
+      console.warn(
+        `[partition-state] partition ${partition}: no pointer found and the lock was unreadable; degrading to read-only instead of resuming from zero.`,
+      )
+      return { unchanged: false, readFailed: true }
     }
     return { localCounter: new Uint32Array(NUM_BUCKETS), unchanged: false }
   }

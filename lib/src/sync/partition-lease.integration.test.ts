@@ -468,6 +468,46 @@ describe("readPartitionState / writePartitionState round-trip", () => {
     expect(result.localCounter![0]).toBe(0)
   })
 
+  it("fails safe (NOT zero) when no pointer is found but the lock was unreadable", async () => {
+    const { readPartitionState } = await import("./partition-state")
+
+    // No pointer published AND the lock SOC read was inconclusive (a transient
+    // failure, not a clean 404). Resuming from zero here could re-issue a gone
+    // holder's acked slots, so the read must degrade to `readFailed` instead —
+    // the caller retries read-only rather than claiming-from-zero.
+    const result = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+      lockUnreadable: true,
+    })
+
+    expect(result.readFailed).toBe(true)
+    expect(result.localCounter).toBeUndefined()
+  })
+
+  it("still zero-seeds a fresh partition (clean absent lock) even with lockUnreadable false", async () => {
+    const { readPartitionState } = await import("./partition-state")
+
+    // A genuinely fresh partition: the lock read returned cleanly absent
+    // (lockUnreadable === false), so first-claim from zero must still proceed.
+    const result = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+      lockUnreadable: false,
+    })
+
+    expect(result.readFailed).toBeUndefined()
+    expect(result.localCounter![0]).toBe(0)
+  })
+
   it("finds a pointer published in the holder's leasedUntil bucket even after it ages out of `now`", async () => {
     const { writePartitionState, readPartitionState, statePointerEpochBucket } =
       await import("./partition-state")

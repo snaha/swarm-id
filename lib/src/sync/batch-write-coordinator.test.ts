@@ -908,6 +908,68 @@ describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload"
   })
 })
 
+describe("BatchWriteCoordinator — self-demote on un-renewed lease expiry", () => {
+  // A refresh tick that could NOT renew on Swarm (transient throw, or a "lost"
+  // with no confirmable peer) must not extend the local lease forever. Once the
+  // lease lapses past skew the holder can no longer assert it holds the slot —
+  // it must fence in-flight writes (invalidate) and demote, or a stale holder's
+  // long upload keeps clobbering a new holder's acked slots (only the ack is
+  // guarded post-op, not the writes already made).
+  it("a lapsed lease whose renewal keeps failing fences writes and demotes", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0, leasedUntil: Date.now() - 1 })
+    lease.refresh = vi.fn(async () => {
+      throw new Error("gateway 500")
+    }) as typeof lease.refresh
+    internals.partitionLease = lease
+    internals.activeUploadCount = 1 // an upload is in flight; skip idle-yield
+    internals.lastLeaseActivityAt = Date.now()
+    lockController.payload = undefined // no confirmable foreign holder
+
+    await internals.refreshTick(lease)
+
+    expect(stamper.invalidateLease).toHaveBeenCalled() // in-flight stamp aborts
+    expect(coordinator.isReadOnly).toBe(true) // demoted
+    expect(lease.bumpLocalLease).not.toHaveBeenCalled() // never extended
+  })
+
+  it("a within-TTL transient blip keeps the lease but does NOT extend it", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    // Lease still comfortably within TTL — a single failed renewal is tolerated.
+    const lease = makeLease({ partition: 0, leasedUntil: Date.now() + 10_000 })
+    lease.refresh = vi.fn(async () => {
+      throw new Error("gateway 500")
+    }) as typeof lease.refresh
+    internals.partitionLease = lease
+    internals.activeUploadCount = 1
+    internals.lastLeaseActivityAt = Date.now()
+    lockController.payload = undefined
+
+    await internals.refreshTick(lease)
+
+    expect(stamper.invalidateLease).not.toHaveBeenCalled()
+    expect(coordinator.isReadOnly).toBe(false)
+    expect(coordinator.currentPartition).toBe(0)
+    // Not renewed on Swarm → the local lease must NOT be bumped (it counts down
+    // from the last successful renewal until it genuinely lapses).
+    expect(lease.bumpLocalLease).not.toHaveBeenCalled()
+  })
+})
+
 describe("BatchWriteCoordinator — acquire-epoch guard", () => {
   it("a late-completing acquire does not resurrect a cleared lease", async () => {
     const calls: string[] = []
