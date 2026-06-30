@@ -2,9 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Vitest setupFile for the multi-device suite. Runs in each worker BEFORE the
+ * Vitest setupFile for the live suite. Runs in each worker BEFORE the
  * test files are imported, so the env it loads is visible to `env.ts`'s
- * top-level `multiDeviceEnv` (and thus to `describe.skipIf`).
+ * top-level `liveEnv` (and thus to `describe.skipIf`).
  *
  * Loads the gitignored `.env` next to this file (Node 22 `process.loadEnvFile`,
  * no dependency) when present; absent → the suites self-skip. Also quiets the

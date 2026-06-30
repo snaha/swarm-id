@@ -24,12 +24,12 @@ import { PartitionLease } from "../../src/sync/partition-lease"
 import { PARTITION_COUNT } from "../../src/utils/batch-utilization"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
   delay,
-  type MultiDeviceContext,
+  type LiveContext,
 } from "./env"
 
 interface AcquireResult {
@@ -38,10 +38,10 @@ interface AcquireResult {
   ms: number
 }
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — 3 devices race for 2 partitions",
+describe.skipIf(!liveEnv.configured)(
+  "live — 3 devices race for 2 partitions",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let A: string
     let B: string
@@ -63,8 +63,8 @@ describe.skipIf(!multiDeviceEnv.configured)(
         // All three are known rivals → fresh claims run the intent round
         // (rotating addresses), the gateway-safe path for deconfliction.
         knownDeviceIds: () => allDevices,
-        guardMs: multiDeviceEnv.guardMs,
-        intentGuardWindowMs: multiDeviceEnv.intentWindowMs,
+        guardMs: liveEnv.guardMs,
+        intentGuardWindowMs: liveEnv.intentWindowMs,
       })
 
     const acquireOn = async (
@@ -97,7 +97,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       a = await acquireOn(leaseA, "A")
       expect(a.partition).not.toBeUndefined()
       expect(a.isReadOnly).toBe(false)
-      await delay(multiDeviceEnv.acquireGapMs)
+      await delay(liveEnv.acquireGapMs)
     })
 
     it("B acquires the OTHER partition (no double-grab)", async () => {
@@ -105,7 +105,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       expect(b.partition).not.toBeUndefined()
       expect(b.isReadOnly).toBe(false)
       expect(b.partition).not.toBe(a.partition)
-      await delay(multiDeviceEnv.acquireGapMs)
+      await delay(liveEnv.acquireGapMs)
     })
 
     it("C is read-only while both partitions are held", async () => {
@@ -117,9 +117,9 @@ describe.skipIf(!multiDeviceEnv.configured)(
     it("idle-then-reacquire: B lapses, a peer takes its slot, no dual-acquire", async () => {
       // Keep A alive (refresh) while B idles past its 30s lease TTL.
       let aOutcome = "held"
-      const end = Date.now() + multiDeviceEnv.idleMs
+      const end = Date.now() + liveEnv.idleMs
       while (Date.now() < end) {
-        await delay(Math.min(multiDeviceEnv.keepAliveEveryMs, end - Date.now()))
+        await delay(Math.min(liveEnv.keepAliveEveryMs, end - Date.now()))
         aOutcome = String(
           await leaseA.refresh().catch((e) => `error: ${e?.message ?? e}`),
         )
@@ -128,7 +128,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       const aHolds = aOutcome === "held" ? a.partition : undefined
 
       const cReacq = await acquireOn(leaseC, "C")
-      await delay(multiDeviceEnv.acquireGapMs)
+      await delay(liveEnv.acquireGapMs)
       const bReacq = await acquireOn(leaseB, "B")
 
       const beliefs = [

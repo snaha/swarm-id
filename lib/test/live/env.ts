@@ -2,14 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Shared setup for the multi-device integration suite.
+ * Shared setup for the live test suite.
  *
- * These tests drive several simulated devices of one throwaway account through
- * the REAL library publish → fold → restore path against a live Bee node,
- * stamping uploads with a real postage batch. They are opt-in (see README):
+ * These tests drive one or more simulated devices of a throwaway account through
+ * the REAL library publish → fold → restore path against a live remote Bee
+ * backend (default = the public gateway), stamping uploads with a real postage
+ * batch. They are opt-in (see README):
  * every config value comes from a gitignored `.env` (loaded by `setup.ts`), and
- * each suite `describe.skipIf(!multiDeviceEnv.configured)`s itself when no
- * `BATCH_ID`/`SIGNER_KEY` is present — so a bare `pnpm test:multi-device` skips
+ * each suite `describe.skipIf(!liveEnv.configured)`s itself when no
+ * `BATCH_ID`/`SIGNER_KEY` is present — so a bare `pnpm test:live` skips
  * cleanly and CI (which never invokes it) is unaffected.
  *
  * Mirrors `test/integration/cluster.ts`, but the backend + stamp come from env
@@ -40,7 +41,7 @@ const num = (name: string, fallback: number): number =>
   Number(str(name) ?? fallback)
 
 /** Parsed env + the timing knobs the scenarios honour. Gateway-sized defaults. */
-export const multiDeviceEnv = {
+export const liveEnv = {
   beeUrl: str("BEE_URL") ?? DEFAULT_BEE_URL,
   batchIdHex: str("BATCH_ID"),
   signerKeyHex: str("SIGNER_KEY"),
@@ -74,7 +75,7 @@ export function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
 }
 
-export interface MultiDeviceContext {
+export interface LiveContext {
   bee: Bee
   batchID: BatchId
   signerKey: PrivateKey
@@ -83,16 +84,16 @@ export interface MultiDeviceContext {
 }
 
 /** Bee client + stamper-mode upload target for the configured batch. */
-export function createContext(): MultiDeviceContext {
-  const bee = new Bee(multiDeviceEnv.beeUrl)
-  const batchID = new BatchId(multiDeviceEnv.batchIdHex!)
-  const signerKey = new PrivateKey(multiDeviceEnv.signerKeyHex!)
+export function createContext(): LiveContext {
+  const bee = new Bee(liveEnv.beeUrl)
+  const batchID = new BatchId(liveEnv.batchIdHex!)
+  const signerKey = new PrivateKey(liveEnv.signerKeyHex!)
   const target: UploadTarget = {
     mode: "stamper",
     bee,
-    stamper: Stamper.fromBlank(signerKey, batchID, multiDeviceEnv.depth),
+    stamper: Stamper.fromBlank(signerKey, batchID, liveEnv.depth),
   }
-  return { bee, batchID, signerKey, depth: multiDeviceEnv.depth, target }
+  return { bee, batchID, signerKey, depth: liveEnv.depth, target }
 }
 
 /**
@@ -141,7 +142,7 @@ export function makeStamp(
     utilization: 0,
     usable: true,
     depth,
-    amount: BigInt(multiDeviceEnv.amount),
+    amount: BigInt(liveEnv.amount),
     bucketDepth: 16,
     blockNumber: 0,
     immutableFlag: false,
@@ -155,7 +156,7 @@ export function makeView(over: Partial<DeviceStateView> = {}): DeviceStateView {
   return {
     connectedApps: [],
     postageStamps: [],
-    accountName: { value: "multi-device-test", at: 1 },
+    accountName: { value: "live-test", at: 1 },
     defaultPostageStampBatchID: { value: undefined, at: 1 },
     settings: { value: undefined, at: 1 },
     accountCreatedAt: 1_000,
@@ -187,7 +188,7 @@ export async function foldUntil(
   what: string,
 ): Promise<FoldedAccount | undefined> {
   const t0 = Date.now()
-  for (let i = 0; i < multiDeviceEnv.restorePollTries; i++) {
+  for (let i = 0; i < liveEnv.restorePollTries; i++) {
     const folded = await foldAccountFromSwarm({
       bee,
       derivationKey,
@@ -199,7 +200,7 @@ export async function foldUntil(
       )
       return folded.account
     }
-    await delay(multiDeviceEnv.restorePollDelayMs)
+    await delay(liveEnv.restorePollDelayMs)
   }
   console.log(`  ⚠️  fold never converged on: ${what} (${Date.now() - t0}ms)`)
   return undefined

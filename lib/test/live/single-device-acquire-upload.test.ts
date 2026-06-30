@@ -40,11 +40,11 @@ import { readRoster } from "../../src/sync/device-roster"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
-  type MultiDeviceContext,
+  type LiveContext,
 } from "./env"
 
 /** Minimal in-memory `UtilizationStoreDB` (no IndexedDB), per the unit suite. */
@@ -68,10 +68,10 @@ function makeInMemoryCache(): UtilizationStoreDB {
   } as unknown as UtilizationStoreDB
 }
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — single device: clean acquire + random SOC upload (timings)",
+describe.skipIf(!liveEnv.configured)(
+  "live — single device: clean acquire + random SOC upload (timings)",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let D: string
 

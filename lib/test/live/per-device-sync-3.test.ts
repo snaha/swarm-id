@@ -20,7 +20,7 @@ import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
 import { ACCOUNT_SYNC_TOPIC_PREFIX } from "../../src/sync/publish-account-state"
 import { AsyncEpochFinder } from "../../src/proxy/feeds/epochs"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
@@ -31,7 +31,7 @@ import {
   foldUntil,
   delay,
   type FoldedAccount,
-  type MultiDeviceContext,
+  type LiveContext,
 } from "./env"
 
 const APP_B = "https://app-b.example"
@@ -41,10 +41,10 @@ const TIMING_RUNS = 5
 const activeDevices = (a: FoldedAccount) =>
   a.devices.filter((d) => !d.removedAt)
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — per-device feeds converge (3 devices)",
+describe.skipIf(!liveEnv.configured)(
+  "live — per-device feeds converge (3 devices)",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let A: string
     let B: string
@@ -87,13 +87,13 @@ describe.skipIf(!multiDeviceEnv.configured)(
         }),
       )
       expect(sA.status).not.toBe("error")
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
       const sB = await pub(
         makeDevice(B, "Device B"),
         makeView({ connectedApps: [makeApp(APP_B)] }),
       )
       expect(sB.status).not.toBe("error")
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
       const sC = await pub(
         makeDevice(C, "Device C"),
         makeView({ connectedApps: [makeApp(APP_C)] }),
@@ -174,7 +174,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       expect(activeDevices(removed!)).toHaveLength(2)
       expect(activeDevices(removed!).some((d) => d.deviceId === C)).toBe(false)
 
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
       await pub(
         makeDevice(C, "Device C"),
         makeView({ connectedApps: [makeApp(APP_C)] }),

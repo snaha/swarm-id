@@ -41,12 +41,12 @@ import type {
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
   delay,
-  type MultiDeviceContext,
+  type LiveContext,
 } from "./env"
 
 /** Minimal in-memory `UtilizationStoreDB` (no IndexedDB), per the unit suite. */
@@ -86,10 +86,10 @@ interface UploadTiming {
   socAddress?: Uint8Array
 }
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — acquire + SOC upload timings (2 devices, 2 partitions)",
+describe.skipIf(!liveEnv.configured)(
+  "live — acquire + SOC upload timings (2 devices, 2 partitions)",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let A: DeviceHarness
     let B: DeviceHarness
@@ -123,7 +123,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
         swarmEncryptionKey: encryptionKey,
         partitionCount: PARTITION_COUNT,
         mode: "oneshot", // lazy acquire inside withWrite → clean per-call timing
-        intentGuardWindowMs: multiDeviceEnv.intentWindowMs,
+        intentGuardWindowMs: liveEnv.intentWindowMs,
         flushStamperState: () => stamper.flush(),
         onLeaseAcquired: () => {
           state.acquiredAt = Date.now()
@@ -193,7 +193,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       aFirst = await uploadOn(A, "A first")
       expect(aFirst.socAddress?.length, "A's SOC uploaded").toBe(32)
       expect(aFirst.partition, "A acquired a partition").not.toBeUndefined()
-      await delay(multiDeviceEnv.acquireGapMs) // let A's lock be readable to B
+      await delay(liveEnv.acquireGapMs) // let A's lock be readable to B
     })
 
     it("B: cold acquire of the OTHER partition + SOC upload (no double-grab)", async () => {
@@ -212,9 +212,9 @@ describe.skipIf(!multiDeviceEnv.configured)(
       // its still-readable lock (acquire=0) rather than paying a fresh acquire; a
       // genuine cold re-acquire needs idle > the cache window (raise IDLE_MS). The
       // no-dual-grab guard below holds either way.
-      const end = Date.now() + multiDeviceEnv.idleMs
+      const end = Date.now() + liveEnv.idleMs
       while (Date.now() < end) {
-        await delay(Math.min(multiDeviceEnv.keepAliveEveryMs, end - Date.now()))
+        await delay(Math.min(liveEnv.keepAliveEveryMs, end - Date.now()))
         await uploadOn(A, "A keep-alive")
       }
 

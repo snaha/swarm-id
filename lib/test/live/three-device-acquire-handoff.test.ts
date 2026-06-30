@@ -45,12 +45,12 @@ import type {
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
   delay,
-  type MultiDeviceContext,
+  type LiveContext,
 } from "./env"
 
 // B must be gone long enough that C sees p1 free on EVERY channel: the lock SOC
@@ -104,10 +104,10 @@ interface UploadTiming {
   socAddress?: Uint8Array
 }
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — 3 devices: A→p0, B→p1, handoff to C (acquire + upload timings)",
+describe.skipIf(!liveEnv.configured)(
+  "live — 3 devices: A→p0, B→p1, handoff to C (acquire + upload timings)",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let aId: string
     let bId: string
@@ -151,7 +151,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
         // that rewrites the lock SOC on Swarm every ~10s — without it a held
         // device's on-gateway lease still expires after 30s and a peer takes over.
         mode,
-        intentGuardWindowMs: multiDeviceEnv.intentWindowMs,
+        intentGuardWindowMs: liveEnv.intentWindowMs,
         flushStamperState: () => stamper.flush(),
         onLeaseAcquired: () => {
           state.acquiredAt = Date.now()
@@ -233,7 +233,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       aFirst = await uploadOn(A, "A p0")
       expect(aFirst.socAddress?.length, "A's SOC uploaded").toBe(32)
       expect(aFirst.partition, "A acquired its home partition p0").toBe(0)
-      await delay(multiDeviceEnv.acquireGapMs) // let A's lock be readable to B
+      await delay(liveEnv.acquireGapMs) // let A's lock be readable to B
     })
 
     it("B: acquires p1 + SOC upload (no double-grab)", async () => {
@@ -243,7 +243,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       expect(bFirst.partition, "B took the OTHER partition").not.toBe(
         aFirst.partition,
       )
-      await delay(multiDeviceEnv.acquireGapMs)
+      await delay(liveEnv.acquireGapMs)
     })
 
     it("C: takes over the freed partition + SOC upload after B idles past its TTL", async () => {
@@ -252,7 +252,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       // occupancy beacon to age out, so p1 frees for C to take over.
       const end = Date.now() + HANDOFF_IDLE_MS
       while (Date.now() < end) {
-        await delay(Math.min(multiDeviceEnv.keepAliveEveryMs, end - Date.now()))
+        await delay(Math.min(liveEnv.keepAliveEveryMs, end - Date.now()))
         await uploadOn(A, "A keep-alive")
       }
 
@@ -285,7 +285,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       // lease instead of re-acquiring; a fresh session is the honest reclaim.)
       const end = Date.now() + HANDOFF_IDLE_MS
       while (Date.now() < end) {
-        await delay(Math.min(multiDeviceEnv.keepAliveEveryMs, end - Date.now()))
+        await delay(Math.min(liveEnv.keepAliveEveryMs, end - Date.now()))
         await uploadOn(A, "A keep-alive")
       }
 

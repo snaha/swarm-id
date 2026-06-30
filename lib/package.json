@@ -22,7 +22,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:integration": "vitest run --config vitest.integration.config.ts",
-    "test:multi-device": "vitest run --config vitest.multi-device.config.ts",
+    "test:live": "vitest run --config vitest.live.config.ts",
     "test:ui": "vitest --ui",
     "test:coverage": "vitest run --coverage",
     "lint": "eslint src/**/*.ts",
