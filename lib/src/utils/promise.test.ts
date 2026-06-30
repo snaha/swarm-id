@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { rejectAfter } from "./promise"
+import { rejectAfter, withTimeout } from "./promise"
 
 describe("rejectAfter", () => {
   beforeEach(() => {
@@ -48,5 +48,45 @@ describe("rejectAfter", () => {
     racing.catch(() => {})
     vi.advanceTimersByTime(50)
     await expect(racing).rejects.toThrow("init timed out")
+  })
+})
+
+describe("withTimeout", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("resolves with the work's value when it settles first", async () => {
+    await expect(
+      withTimeout(Promise.resolve("ok"), 10_000, "should not fire"),
+    ).resolves.toBe("ok")
+  })
+
+  it("propagates the work's rejection when it settles first", async () => {
+    await expect(
+      withTimeout(Promise.reject(new Error("work failed")), 10_000, "timeout"),
+    ).rejects.toThrow("work failed")
+  })
+
+  it("rejects with the timeout message when the work hangs past the limit", async () => {
+    const hung = new Promise<string>(() => {}) // never resolves
+    const racing = withTimeout(hung, 50, "read timed out")
+    racing.catch(() => {})
+    vi.advanceTimersByTime(50)
+    await expect(racing).rejects.toThrow("read timed out")
+  })
+
+  it("clears the timer on the fast path (no pending timer left to fire)", async () => {
+    await expect(
+      withTimeout(Promise.resolve("ok"), 1000, "boom"),
+    ).resolves.toBe("ok")
+    // If the timer had not been cleared, advancing past it would leave an
+    // unhandled rejection; `clearTimeout` removes it entirely.
+    expect(vi.getTimerCount()).toBe(0)
+    vi.advanceTimersByTime(5000)
   })
 })

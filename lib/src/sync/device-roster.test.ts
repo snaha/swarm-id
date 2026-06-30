@@ -123,3 +123,125 @@ describe("readRoster — windowed-parallel scan", () => {
     expect(devices).toEqual([])
   })
 })
+
+// The per-read timeout (ROSTER_READ_TIMEOUT_MS) is module-private; the SOC read
+// is bounded by it. Driven here with fake timers + a hanging download.
+const ROSTER_READ_TIMEOUT_MS = 2500
+
+/**
+ * Fake Bee where index `slowOnce` HANGS on its first SOC read (→ a timeout, not
+ * a clean miss) then resolves present on retry, and index `alwaysSlow` hangs on
+ * every read. A hanging read is what the slow gateway does; a clean miss throws
+ * synchronously (as `fakeBee` does), which `readRoster` treats as end-of-feed.
+ */
+function fakeBeeWithSlow(opts: {
+  present: Set<number>
+  slowOnce?: number
+  alwaysSlow?: number
+}): { readCount: number; bee: unknown } {
+  const topic = rosterTopic(ACCOUNT_ID)
+  const identToIndex = new Map<string, number>()
+  for (let i = 0; i < 64; i++) {
+    identToIndex.set(rosterIdentifier(topic, BigInt(i)).toHex(), i)
+  }
+  const calls = new Map<number, number>()
+  const state = { readCount: 0 }
+  const bee = {
+    makeSOCReader: () => ({
+      download: (identifier: { toHex(): string }) => {
+        const index = identToIndex.get(identifier.toHex())
+        if (index === undefined) throw new Error("empty slot")
+        state.readCount++
+        const n = (calls.get(index) ?? 0) + 1
+        calls.set(index, n)
+        if (index === opts.alwaysSlow) return new Promise(() => {}) // never settles
+        if (index === opts.slowOnce && n === 1) return new Promise(() => {})
+        const present = opts.present.has(index) || index === opts.slowOnce
+        if (!present) throw new Error("empty slot") // clean miss → end of feed
+        return Promise.resolve({
+          payload: { toUint8Array: () => refForIndex(index) },
+        })
+      },
+    }),
+  }
+  return {
+    get readCount() {
+      return state.readCount
+    },
+    bee,
+  }
+}
+
+describe("readRoster — a timed-out read is not end-of-feed", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+    mockDownloadData.mockReset()
+    mockDownloadData.mockImplementation((_bee: unknown, refHex: string) => {
+      const index = parseInt(refHex.slice(0, 2), 16)
+      return new TextEncoder().encode(JSON.stringify(makeDevice(index)))
+    })
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("retries a timed-out slot once and does NOT report the roster empty", async () => {
+    // The roster's only device (index 0) hangs on its first read — without the
+    // retry, the empty-looking window 0 would be read as end-of-feed and the
+    // roster would come back []. The retry resolves it.
+    const { bee } = fakeBeeWithSlow({ present: new Set([0]), slowOnce: 0 })
+    const promise = readRoster({
+      bee: bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS) // fire the hang
+    expect((await promise).map((d) => d.deviceId)).toEqual(["dev-0"])
+  })
+
+  it("does not truncate the tail when a later window's only device times out once", async () => {
+    // Window 0 (0..15) full + index 16 present-but-slow in window 1. The old
+    // behaviour read window 1 as all-empty and dropped dev-16.
+    const present = new Set<number>()
+    for (let i = 0; i <= 15; i++) present.add(i)
+    const { bee } = fakeBeeWithSlow({ present, slowOnce: 16 })
+    const promise = readRoster({
+      bee: bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS)
+    const devices = await promise
+    expect(devices).toHaveLength(17)
+    expect(devices.some((d) => d.deviceId === "dev-16")).toBe(true)
+  })
+
+  it("stops (bounded, one retry) when a slot times out on both the read and the retry", async () => {
+    const { bee } = fakeBeeWithSlow({ present: new Set(), alwaysSlow: 0 })
+    const promise = readRoster({
+      bee: bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS) // first read
+    await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS) // the one retry
+    expect(await promise).toEqual([])
+  })
+
+  it("does not retry a cleanly-empty window (clean 404s stop the scan immediately)", async () => {
+    // Window 0 present, window 1 all clean misses: end-of-feed with no retry, so
+    // each scanned index is read exactly once.
+    const present = new Set<number>()
+    for (let i = 0; i <= 15; i++) present.add(i)
+    const fake = fakeBeeWithSlow({ present })
+    const devices = await readRoster({
+      bee: fake.bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    expect(devices).toHaveLength(16)
+    // 16 (window 0) + 16 (window 1, all clean miss → stop). No retry round.
+    expect(fake.readCount).toBe(32)
+  })
+})

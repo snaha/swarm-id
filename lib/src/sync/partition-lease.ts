@@ -27,6 +27,7 @@
 
 import { Bee, BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "../utils/hex"
+import { withTimeout } from "../utils/promise"
 import { deriveSecret } from "../utils/key-derivation"
 import {
   LEASE_TTL_MS,
@@ -291,20 +292,16 @@ export class PartitionLease {
     // `undefined` (clean 404) is genuinely absent and stays claimable.
     const locks = await Promise.all(
       Array.from({ length: partitionCount }, (_unused, p) =>
-        Promise.race([
+        withTimeout(
           readPartitionLock({
             bee: this.opts.bee,
             backupSigner: this.opts.backupSigner,
             swarmEncryptionKey: this.opts.swarmEncryptionKey,
             partition: p,
           }),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new Error("lock read timed out")),
-              LOCK_READ_TIMEOUT_MS,
-            ),
-          ),
-        ]).catch(() => {
+          LOCK_READ_TIMEOUT_MS,
+          "lock read timed out",
+        ).catch(() => {
           this.unreadableLocks.add(p)
           return undefined
         }),

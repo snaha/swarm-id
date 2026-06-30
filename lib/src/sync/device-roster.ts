@@ -40,6 +40,7 @@ import {
 } from "../proxy/feeds/sequence"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
+import { withTimeout } from "../utils/promise"
 import { mergeDevicesList } from "./merge-snapshot"
 
 export const ROSTER_TOPIC_PREFIX = "swarm-id-roster-v1"
@@ -54,27 +55,24 @@ const MAX_ROSTER_SCAN = 256
 const ROSTER_SCAN_WINDOW = 16
 
 // Per-read cap so an empty/unreachable slot on a slow gateway fails fast instead
-// of hanging on peer-exhaustion. A present slot retrieves well under this; a
-// timed-out read is treated as an empty/transient slot (same as a 404). Matches
-// the epoch finder's bound.
+// of hanging on peer-exhaustion. A present slot retrieves well under this.
+// Matches the epoch finder's bound. A timed-out read is INCONCLUSIVE (not a
+// confirmed empty slot): `readRosterEntry` surfaces it as `ROSTER_READ_TIMED_OUT`
+// so `readRoster` retries it once at the stop boundary rather than mistaking it
+// for end-of-feed and truncating the roster.
 const ROSTER_READ_TIMEOUT_MS = 2500
 
+/** Stable message so `readRosterEntry` can tell a timeout from a 404/garbage. */
+const ROSTER_READ_TIMEOUT_MESSAGE = "roster read timed out"
+
 /**
- * Reject `read` after {@link ROSTER_READ_TIMEOUT_MS} so a single hanging slot
- * can't drag a scan window. `readRosterEntry` maps a rejection to `undefined`
- * (empty/transient slot), so a timed-out read is just skipped. The timer is
- * cleared when the read settles so no handle leaks past the scan.
+ * Sentinel for a roster slot whose read TIMED OUT — distinct from `undefined`
+ * (a clean miss / garbage blob). A timeout is inconclusive: the slot may well
+ * hold a live device the slow gateway just couldn't return in time, so the scan
+ * must not treat it as end-of-feed.
  */
-function withReadTimeout<T>(read: Promise<T>): Promise<T> {
-  let timer: ReturnType<typeof setTimeout>
-  const timeout = new Promise<never>((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error("roster read timed out")),
-      ROSTER_READ_TIMEOUT_MS,
-    )
-  })
-  return Promise.race([read, timeout]).finally(() => clearTimeout(timer))
-}
+const ROSTER_READ_TIMED_OUT = Symbol("roster-read-timed-out")
+type RosterReadResult = Device | undefined | typeof ROSTER_READ_TIMED_OUT
 
 export function rosterTopic(accountId: string): Topic {
   return Topic.fromString(`${ROSTER_TOPIC_PREFIX}:${accountId}`)
@@ -88,37 +86,51 @@ export function rosterIdentifier(topic: Topic, index: bigint): Identifier {
 }
 
 /**
- * Read one roster entry (the device record) at `index`, or `undefined` when the
- * slot is empty/unreachable (the scan's stop signal).
+ * Read one roster entry (the device record) at `index`. Returns the `Device`
+ * when present, `undefined` for a clean miss / garbage blob (a confirmed-empty
+ * slot — the scan's stop signal), or {@link ROSTER_READ_TIMED_OUT} when the
+ * read timed out (INCONCLUSIVE — the slot may hold a live device the slow
+ * gateway couldn't return, so the scan must not stop on it).
  */
 async function readRosterEntry(opts: {
   bee: Bee
   topic: Topic
   owner: EthAddress
   index: bigint
-}): Promise<Device | undefined> {
+}): Promise<RosterReadResult> {
   const identifier = rosterIdentifier(opts.topic, opts.index)
   let refBytes: Uint8Array
   try {
-    const soc = await withReadTimeout(
+    const soc = await withTimeout(
       opts.bee.makeSOCReader(opts.owner).download(identifier),
+      ROSTER_READ_TIMEOUT_MS,
+      ROSTER_READ_TIMEOUT_MESSAGE,
     )
     refBytes = soc.payload.toUint8Array()
-  } catch {
-    return undefined // empty slot / timed out → end of feed
+  } catch (error) {
+    return isRosterTimeout(error) ? ROSTER_READ_TIMED_OUT : undefined
   }
   try {
-    const data = await withReadTimeout(
+    const data = await withTimeout(
       downloadDataWithChunkAPI(opts.bee, new Reference(refBytes).toHex()),
+      ROSTER_READ_TIMEOUT_MS,
+      ROSTER_READ_TIMEOUT_MESSAGE,
     )
     return DeviceSchemaV1.parse(JSON.parse(new TextDecoder().decode(data)))
-  } catch {
-    // Reachable SOC but unretrievable/garbage blob. Returns `undefined` like an
-    // empty slot; `readRoster` treats a hole inside an otherwise-present window
-    // as a transient (skippable) read failure — exactly the caching-gateway case
-    // this roster exists to survive — and only stops on a fully-empty window.
-    return undefined
+  } catch (error) {
+    // A timeout here is inconclusive (retried at the stop boundary). Otherwise
+    // the SOC was reachable but the blob is unretrievable/garbage: return
+    // `undefined` like an empty slot — `readRoster` treats a hole inside an
+    // otherwise-present window as a transient (skippable) read failure (the
+    // caching-gateway case this roster exists to survive) and only stops on a
+    // fully-empty window.
+    return isRosterTimeout(error) ? ROSTER_READ_TIMED_OUT : undefined
   }
+}
+
+/** True when `error` is the timeout `withTimeout` raised (vs a 404/garbage). */
+function isRosterTimeout(error: unknown): boolean {
+  return error instanceof Error && error.message === ROSTER_READ_TIMEOUT_MESSAGE
 }
 
 /**
@@ -138,24 +150,53 @@ export async function readRoster(opts: {
   // lives past the true end. A hole *inside* an otherwise-present window is
   // therefore a transient read failure — the exact caching-gateway failure this
   // roster exists to survive — so we skip it and keep folding later entries
-  // rather than truncating every device after it. Only a FULLY empty window
-  // means we have scanned past the end of the feed.
+  // rather than truncating every device after it. Only a window with no present
+  // entry means we may have scanned past the end of the feed.
   for (let base = 0; base < MAX_ROSTER_SCAN; base += ROSTER_SCAN_WINDOW) {
     const indices = Array.from(
       { length: Math.min(ROSTER_SCAN_WINDOW, MAX_ROSTER_SCAN - base) },
       (_, i) => BigInt(base + i),
     )
-    const entries = await Promise.all(
+    let entries = await Promise.all(
       indices.map((index) =>
         readRosterEntry({ bee: opts.bee, topic, owner: opts.owner, index }),
       ),
     )
-    for (const entry of entries) {
-      if (entry) devices = mergeDevicesList(devices, [entry])
+    // A window with no present entry is a stop candidate — but a timed-out read
+    // is inconclusive (a slow gateway may have hidden a live device). Retry just
+    // the timed-out slots ONCE before concluding end-of-feed, so a transiently
+    // slow tail window doesn't truncate the roster. Bounded to one extra partial
+    // read; a still-timed-out slot reconciles on the next sync.
+    if (
+      !entries.some(isDevice) &&
+      entries.some((entry) => entry === ROSTER_READ_TIMED_OUT)
+    ) {
+      entries = await Promise.all(
+        indices.map((index, i) =>
+          entries[i] === ROSTER_READ_TIMED_OUT
+            ? readRosterEntry({
+                bee: opts.bee,
+                topic,
+                owner: opts.owner,
+                index,
+              })
+            : entries[i],
+        ),
+      )
     }
-    if (entries.every((entry) => !entry)) break
+    for (const entry of entries) {
+      if (isDevice(entry)) devices = mergeDevicesList(devices, [entry])
+    }
+    // Stop on a window with no present entry (clean end-of-feed, or one whose
+    // timeouts survived the retry — bounded, the slow slot reconciles later).
+    if (!entries.some(isDevice)) break
   }
   return devices
+}
+
+/** Narrow a roster read to a present device (not a miss or a timeout). */
+function isDevice(entry: RosterReadResult): entry is Device {
+  return entry !== undefined && entry !== ROSTER_READ_TIMED_OUT
 }
 
 /** Append one device record at the next free index. Each device writes only its own. */
