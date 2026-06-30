@@ -43,7 +43,7 @@ export class Account {
   // Initialized here so the runes compiler tracks them; real values are set
   // from the record in the constructor.
   name = $state('')
-  publicKey = $state<string | undefined>(undefined)
+  publicKey = $state('')
   access = $state<AccessMethod>({ type: 'password', kdfSalt: '', kdfIterations: 0 })
   encryptedSeed = $state('')
   settings = $state<AccountSettings | undefined>(undefined)
