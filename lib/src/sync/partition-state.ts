@@ -658,8 +658,10 @@ export async function writePartitionState(opts: {
 
   // Incremental only when we have a full previous ref set AND the counter it
   // published; otherwise re-upload every chunk (refs/diff unknown). Re-upload a
-  // chunk iff its serialized bytes changed since the last publish — this
-  // catches both the data write and the previous publish's feed-SOC bucket.
+  // chunk iff its serialized bytes changed since the last publish — i.e. the
+  // chunk(s) covering the bucket(s) this session's data upload(s) touched.
+  // Reserved-slot writes (the prior publish's reference/pointer SOCs) never bump
+  // the counter, so the data write is the only inter-publish counter delta.
   const incremental =
     previousReferences !== undefined &&
     previousReferences.length === numUtilizationChunks &&
@@ -667,7 +669,8 @@ export async function writePartitionState(opts: {
   const allIndices = Array.from({ length: numUtilizationChunks }, (_, i) => i)
   // Which chunks to (re)upload:
   //  - incremental: those whose serialized bytes changed since the last publish
-  //    (catches the data write + the previous publish's feed-SOC bucket).
+  //    (the chunk[s] covering the data write's bucket[s]; reserved-slot writes
+  //    don't bump the counter, so the data write is the only delta).
   //  - full (first publish of a session): only the NON-ZERO chunks; zero chunks
   //    get the all-zero sentinel ref (not uploaded), so the first publish is
   //    sparse instead of writing all `numUtilizationChunks` (mostly zero).

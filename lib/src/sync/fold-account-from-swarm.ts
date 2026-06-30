@@ -109,10 +109,12 @@ async function doFoldAccountFromSwarm(opts: {
   const account = foldAccount(views, devices)
   // Coalesced callers share this ONE result (see `inFlightFolds`). Freeze the
   // arrays they iterate so a stray mutation throws loudly instead of silently
-  // corrupting a concurrent caller's view. Shallow (the arrays, not each
-  // element) — enough to catch the realistic push/splice/sort corruption; the
-  // production callers only ever read or pass these into the pure `merge*`
-  // helpers, which never mutate their inputs.
+  // corrupting a concurrent caller's view.
+  // ponytail: shallow freeze (arrays only, not each element) — catches the
+  // realistic push/splice/sort corruption since today's callers only read or
+  // pass these into the pure `merge*` helpers, which never mutate their inputs.
+  // If a caller ever mutates an element in place, deep-freeze the elements too
+  // (or clone the result per caller).
   for (const arr of [
     devices,
     account.devices,
