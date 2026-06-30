@@ -260,7 +260,7 @@ export class BatchWriteCoordinator {
         // A lease that lapses MID-`op` (a long multi-chunk upload while the
         // refresh tick can't renew for a full TTL) is NOT fenced for the data
         // write — stamps only re-check the local `leaseStale` flag — only the
-        // ack is. Bounded by skew + TTL (see Partition-Acquire-Optimistic-Lease.md).
+        // ack is. Bounded by skew + TTL (see Postage-Batch-Partitioning.md §12).
         const result = await op(target)
         // Commit-ordered ack: only report the upload durable after the
         // partition-state that reserves its slots is published.

@@ -22,8 +22,7 @@
  * heartbeats the pointer on every refresh, so a taking-over device finds it at
  * the current/previous bucket around `now` or the gone holder's `leasedUntil`.
  * Mirrors the occupancy beacon (`partition-intent.ts`). See
- * docs/Postage-Batch-Partitioning.md and
- * docs/Partition-Acquire-Optimistic-Lease.md.
+ * docs/Postage-Batch-Partitioning.md (§8 cross-device handoff).
  *
  * Topic = keccak256("swarm-id-partition-state-v1" ‖ batchId ‖ uint32(partition))
  * Owner = backup signer (`deriveSecret(swarmEncryptionKey, "backup-key")`)
