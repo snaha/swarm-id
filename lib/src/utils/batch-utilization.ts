@@ -1226,6 +1226,20 @@ export class UtilizationAwareStamper implements Stamper {
     undefined
 
   /**
+   * Promise-chain mutex serializing {@link withIntentSocSlot} critical sections.
+   * The intent / occupancy / state-pointer SOC writes all share the single
+   * {@link intentSoc} reservation, but their callers run concurrently (the
+   * off-lock refresh-tick presence/occupancy beacon vs. an under-lock upload's
+   * state-pointer publish). Without this, the two reserve→stamp windows overlap:
+   * the second `reserveIntentSocSlot` clobbers the first's address, so the
+   * first `stamp()` no longer matches `intentSoc` and falls through to a DATA
+   * slot — consuming data budget and bumping the counter under the very publish
+   * that is diffing it. The mutex makes each writer wait for the previous to
+   * clear its reservation.
+   */
+  private intentSocLock: Promise<void> = Promise.resolve()
+
+  /**
    * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
    * detects displacement on a refresh tick (or upload-start lease check);
    * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
@@ -1422,6 +1436,32 @@ export class UtilizationAwareStamper implements Stamper {
   /** Clear the registered intent SOC after its upload. */
   clearIntentSocSlot(): void {
     this.intentSoc = undefined
+  }
+
+  /**
+   * Reserve the intent-SOC slot for `address`, run `fn` (the upload), then
+   * clear it — serialized against every other `withIntentSocSlot` call on this
+   * stamper so concurrent intent/occupancy/state-pointer writes can't clobber
+   * one another's reservation (see {@link intentSocLock}). Production callers
+   * (`writeReservedPartitionSoc`, `writeStatePointer`) MUST use this instead of
+   * the bare `reserveIntentSocSlot`/`clearIntentSocSlot` pair.
+   */
+  async withIntentSocSlot<T>(
+    address: Uint8Array,
+    slot: number,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.intentSocLock
+    let release!: () => void
+    this.intentSocLock = new Promise<void>((resolve) => (release = resolve))
+    await previous
+    this.reserveIntentSocSlot(address, slot)
+    try {
+      return await fn()
+    } finally {
+      this.clearIntentSocSlot()
+      release()
+    }
   }
 
   /**

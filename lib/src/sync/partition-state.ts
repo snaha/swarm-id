@@ -46,6 +46,7 @@ import {
   downloadEncryptedSOC,
 } from "../proxy/download-data"
 import { uploadData, uploadSOC, type UploadTarget } from "../proxy/upload"
+import { withTimeout } from "../utils/promise"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
   LEASE_TTL_MS,
@@ -126,10 +127,10 @@ export function makePartitionStateTopic(
  * the two are intended to move together.
  *
  * COUPLING: the takeover lookup (`readStatePointer`) scans the whole
- * `LEASE_TTL_MS`-wide bucket span SEQUENTIALLY (newest-first, short-circuiting on
- * the first hit — so the hot path is one read). Keep `STATE_POINTER_EPOCH_MS`
- * within a small ratio of `LEASE_TTL_MS`: raising the TTL far above the epoch
- * widens the span into many serial gateway reads, each up to the timeout below.
+ * `LEASE_TTL_MS`-wide bucket span. The reads run CONCURRENTLY (each
+ * timeout-bounded), so widening the span costs more parallel reads but not more
+ * wall-clock — the lookup latency stays ~one read timeout regardless of the
+ * `STATE_POINTER_EPOCH_MS` vs `LEASE_TTL_MS` ratio.
  */
 const STATE_POINTER_EPOCH_MS = 30_000
 
@@ -211,14 +212,14 @@ export async function writeStatePointer(opts: {
     stamper: opts.stamper,
   }
   if (opts.stamper instanceof UtilizationAwareStamper) {
-    opts.stamper.reserveIntentSocSlot(address, opts.partition)
-    try {
-      await uploadSOC(target, opts.backupSigner, identifier, data, {
+    // Serialized against concurrent intent/occupancy/pointer SOC writes (the
+    // off-lock refresh-tick beacon vs. this under-lock publish) so neither
+    // clobbers the shared intent-SOC reservation and mis-stamps into a data slot.
+    await opts.stamper.withIntentSocSlot(address, opts.partition, () =>
+      uploadSOC(target, opts.backupSigner, identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
-      })
-    } finally {
-      opts.stamper.clearIntentSocSlot()
-    }
+      }),
+    )
     return
   }
   await uploadSOC(target, opts.backupSigner, identifier, data, {
@@ -276,34 +277,39 @@ async function readStatePointer(opts: {
       POINTER_LOOKUP_SLACK_BUCKETS
     for (let b = lo; b <= hi; b++) buckets.add(b)
   }
-  // Newest bucket first: a holder writes contiguous buckets up to its last
-  // heartbeat, so the highest-numbered present bucket is the freshest pointer.
+  // Read every candidate bucket CONCURRENTLY (each timeout-bounded), then pick
+  // the freshest present pointer. Parallel rather than a serial newest-first
+  // short-circuit: a cold takeover scanning the whole lease span pays ~one read
+  // timeout instead of N of them. A holder writes contiguous buckets up to its
+  // last heartbeat, so the highest-numbered present bucket is the freshest — and
+  // `ordered`/`Promise.all` preserve that newest-first order, so returning the
+  // first present entry yields the same pointer the serial scan would have.
   const ordered = Array.from(buckets).sort((a, b) => b - a)
-  for (const bucket of ordered) {
-    const identifier = makeStatePointerIdentifier(topic, bucket)
-    try {
-      const soc = await Promise.race([
-        downloadEncryptedSOC(
-          opts.bee,
-          opts.owner,
-          identifier,
-          opts.swarmEncryptionKey,
-        ),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error("state-pointer read timed out")),
-            STATE_POINTER_READ_TIMEOUT_MS,
+  const found = await Promise.all(
+    ordered.map(async (bucket) => {
+      const identifier = makeStatePointerIdentifier(topic, bucket)
+      try {
+        const soc = await withTimeout(
+          downloadEncryptedSOC(
+            opts.bee,
+            opts.owner,
+            identifier,
+            opts.swarmEncryptionKey,
           ),
-        ),
-      ])
-      const parsed = StatePointerPayloadSchemaV1.safeParse(
-        JSON.parse(new TextDecoder().decode(soc.payload)),
-      )
-      if (parsed.success) return parsed.data
-    } catch {
-      // Missing / timed out / malformed at this bucket — try the next candidate.
-    }
-  }
+          STATE_POINTER_READ_TIMEOUT_MS,
+          "state-pointer read timed out",
+        )
+        const parsed = StatePointerPayloadSchemaV1.safeParse(
+          JSON.parse(new TextDecoder().decode(soc.payload)),
+        )
+        return parsed.success ? parsed.data : undefined
+      } catch {
+        // Missing / timed out / malformed at this bucket.
+        return undefined
+      }
+    }),
+  )
+  for (const pointer of found) if (pointer) return pointer
   return undefined
 }
 

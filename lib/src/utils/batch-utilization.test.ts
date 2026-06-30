@@ -798,6 +798,54 @@ describe("UtilizationAwareStamper partition awareness", () => {
     }
   })
 
+  it("withIntentSocSlot serializes concurrent intent-SOC writes so neither clobbers the other's reserved slot", async () => {
+    // The intent / occupancy / state-pointer SOC writes all share the single
+    // `intentSoc` reservation. The off-lock refresh-tick presence beacon and an
+    // under-lock upload's state-pointer publish run concurrently, so their
+    // reserve→stamp windows can overlap: the second reserve clobbers the first's
+    // address, and the first `stamp()` then no longer matches `intentSoc` and
+    // falls through to a DATA slot (consuming budget + bumping the counter).
+    // `withIntentSocSlot` serializes the critical sections so each writer's
+    // reservation is intact at stamp time.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const SLOT = 0
+    const slots: Record<string, number> = {}
+    async function write(name: string, bucket: number): Promise<void> {
+      const chunk = makeChunkInBucket(bucket, bucket)
+      await stamper.withIntentSocSlot(chunk.hash(), SLOT, async () => {
+        // Yield microtasks so an unserialized concurrent writer would clobber
+        // the shared reservation before this flow stamps.
+        await Promise.resolve()
+        await Promise.resolve()
+        slots[name] = decodeIndex(stamper.stamp(chunk).index).slot
+      })
+    }
+
+    const counterBefore = stamper.getLocalCounter()!.slice()
+    await Promise.all([write("A", 0x4444), write("B", 0x5555)])
+
+    // Each SOC routed to the reserved slot (below the data lanes) — proof its
+    // reservation survived the other concurrent flow.
+    expect(slots.A).toBe(SLOT)
+    expect(slots.B).toBe(SLOT)
+    expect(slots.A).toBeLessThan(DATA_COUNTER_START)
+    // No fall-through to a data slot: the counter is untouched.
+    expect(stamper.getLocalCounter()).toEqual(counterBefore)
+  })
+
   it("auto-bind uses the BACKUP-signer address (derived from encryptionKey), not the `owner` arg", async () => {
     // Regression: `writePartitionLock` writes the lock SOC to
     // `keccak256(identifier || backupSigner.publicKey().address())`, where

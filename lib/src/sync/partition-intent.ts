@@ -332,14 +332,13 @@ async function writeReservedPartitionSoc(opts: {
   }
   const stamper = opts.stamper
   if (stamper instanceof UtilizationAwareStamper) {
-    stamper.reserveIntentSocSlot(opts.address, opts.partition)
-    try {
-      await uploadSOC(target, opts.backupSigner, opts.identifier, data, {
+    // Serialized against concurrent intent/occupancy/pointer SOC writes so a
+    // peer reservation can't clobber this one and mis-stamp it into a data slot.
+    await stamper.withIntentSocSlot(opts.address, opts.partition, () =>
+      uploadSOC(target, opts.backupSigner, opts.identifier, data, {
         encryptionKey: opts.swarmEncryptionKey,
-      })
-    } finally {
-      stamper.clearIntentSocSlot()
-    }
+      }),
+    )
     return
   }
   await uploadSOC(target, opts.backupSigner, opts.identifier, data, {

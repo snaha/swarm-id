@@ -65,6 +65,7 @@ import {
   PARTITION_COUNT,
   NUM_BUCKETS,
   getChunkLayout,
+  UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import { uploadData, type UploadTarget } from "../proxy/upload"
@@ -606,6 +607,90 @@ describe("readPartitionState / writePartitionState round-trip", () => {
       holderLeasedUntilMs: leasedUntil,
     })
     expect(found.localCounter).toEqual(localCounter)
+  })
+})
+
+describe("intent / occupancy / state-pointer SOC slot race (regression)", () => {
+  // The intent, occupancy, and state-pointer SOC writes all route through the
+  // stamper's SINGLE reserved intent-SOC slot. In production the off-lock
+  // refresh-tick beacons (writePartitionIntent/Occupancy) run concurrently with
+  // an under-lock upload publish (writeStatePointer): their reserve→stamp
+  // windows overlap, so without serialization the second reserve clobbers the
+  // first's address and the first stamp() falls through to a DATA slot —
+  // consuming data budget and bumping the local counter under the publish that
+  // is diffing it. `UtilizationAwareStamper.withIntentSocSlot` serializes them.
+  it("concurrent SOC writers never mis-stamp into a data slot (counter untouched)", async () => {
+    const { writeStatePointer } = await import("./partition-state")
+
+    const PARTITION = 0
+    const SIGNER_KEY = "11".repeat(32)
+    const cache = {
+      getAllChunks: async () => [],
+      putChunk: async () => undefined,
+    } as unknown as Parameters<typeof UtilizationAwareStamper.create>[3]
+    const stamper = await UtilizationAwareStamper.create(
+      SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_BATCH_DEPTH,
+      cache,
+      OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: PARTITION,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const beforeCounter = stamper.getLocalCounter()!.slice()
+    const referenceHex = Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x11))
+    const now = Date.now()
+    const epochBucket = intentEpochBucket(now)
+    const generation = {
+      timestampMs: now,
+      tiebreaker: makeDeviceTiebreaker("device-A"),
+    }
+    const common = {
+      bee: bee as unknown as Bee,
+      stamper: stamper as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+    }
+
+    // Many interleaved intent-SOC writers contending on the one reservation;
+    // without serialization at least one falls through to a data lane.
+    const ROUNDS = 8
+    const flows: Promise<void>[] = []
+    for (let i = 0; i < ROUNDS; i++) {
+      flows.push(
+        writeStatePointer({
+          ...common,
+          batchId: TEST_BATCH_ID,
+          referenceHex,
+          nowMs: now,
+        }),
+        writePartitionIntent({
+          ...common,
+          deviceId: "device-A",
+          epochBucket,
+          generation,
+          leasedUntil: now + LEASE_TTL_MS,
+        }),
+        writePartitionOccupancy({
+          ...common,
+          deviceId: "device-A",
+          epochBucket,
+          generation,
+          leasedUntil: now + LEASE_TTL_MS,
+        }),
+      )
+    }
+    await Promise.all(flows)
+
+    // Every SOC routed to the partition's reserved slot — the local data counter
+    // is byte-for-byte unchanged (no fall-through consumed a data slot).
+    expect(stamper.getLocalCounter()).toEqual(beforeCounter)
   })
 })
 
