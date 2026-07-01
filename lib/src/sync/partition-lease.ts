@@ -192,6 +192,19 @@ export class PartitionLease {
    *  keeps a fresh state pointer the next reader can find. */
   private lastReferenceHex: string | undefined
   /**
+   * Epoch bucket of the last FULL (non-incremental) publish. An incremental
+   * publish leaves unchanged counter chunks in place across epochs, but the
+   * rotating pointer/occupancy/intent SOCs share this partition's reserved slot
+   * and a LATER epoch's (deterministic) bucket can collide with a long-retained
+   * chunk and evict it — only the current+previous epoch's beacon buckets are
+   * excluded at publish time (see `writePartitionState`). So we force one FULL
+   * re-pin per epoch: every non-zero chunk is re-uploaded at a fresh bucket clear
+   * of the current epoch's beacons, so any such eviction self-heals within ~1
+   * epoch while the holder lives (only a collision in the final pre-departure
+   * epoch is left for the takeover `readFailed` path). undefined after `acquire`.
+   */
+  private lastFullPublishEpoch: number | undefined
+  /**
    * Set at the start of `release()` (the lease session is closing) and
    * cleared by the next `acquire()`. While set, an overlapping `refresh()`
    * aborts before its claim write — otherwise it could mint a ghost claim
@@ -562,6 +575,7 @@ export class PartitionLease {
     this.publishedReferences = undefined
     this.publishedCounter = undefined
     this.lastReferenceHex = undefined
+    this.lastFullPublishEpoch = undefined
 
     if (partitionCount <= 1) {
       return {
@@ -785,6 +799,12 @@ export class PartitionLease {
     // the first publish falls back to the sparse-full path.
     this.publishedReferences = stateResult.references
     this.publishedCounter = localCounter.slice()
+    // Mark this epoch as already full-pinned so the FIRST publish of the session
+    // stays incremental against the resumed refs (the cheap-first-publish win) —
+    // those chunks were just verified to exist on the read. The once-per-epoch
+    // full re-pin (`flushState`) then kicks in only once the epoch rolls over,
+    // bounding any retained chunk's eviction exposure to ~1 epoch.
+    this.lastFullPublishEpoch = intentEpochBucket(this.now())
     // Seed the heartbeat's pointer target from the state we resumed, so a holder
     // that never uploads still re-publishes the inherited resume pointer to the
     // current bucket each refresh tick (otherwise `heartbeatStatePointer` no-ops
@@ -1124,6 +1144,14 @@ export class PartitionLease {
     localCounter: Uint32Array,
   ): Promise<void> {
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    // Force a FULL (non-incremental) publish once per epoch: incremental
+    // publishes leave unchanged chunks pinned across epochs, where a later
+    // epoch's rotating pointer/beacon SOC (same reserved slot) can evict one and
+    // the incremental path never re-uploads it. Re-pinning every epoch bounds a
+    // retained chunk's exposure to ~1 epoch and self-heals any eviction (the
+    // full publish re-uploads every non-zero chunk clear of the current beacons).
+    const currentEpoch = intentEpochBucket(this.now())
+    const forceFullRepin = currentEpoch !== this.lastFullPublishEpoch
     const published = await writePartitionState({
       bee: this.opts.bee,
       stamper,
@@ -1134,13 +1162,15 @@ export class PartitionLease {
       backupSigner: this.opts.backupSigner,
       swarmEncryptionKey: this.opts.swarmEncryptionKey,
       // Incremental inputs from this session's last publish (undefined on the
-      // first → full publish, which seeds them).
-      previousReferences: this.publishedReferences,
-      previousCounter: this.publishedCounter,
+      // first → full publish, which seeds them). Nulled once per epoch to force a
+      // full re-pin (see `lastFullPublishEpoch`).
+      previousReferences: forceFullRepin ? undefined : this.publishedReferences,
+      previousCounter: forceFullRepin ? undefined : this.publishedCounter,
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,
     })
+    if (forceFullRepin) this.lastFullPublishEpoch = currentEpoch
     this.publishedReferences = published.references
     this.publishedCounter = published.publishedCounter
     this.lastReferenceHex = published.referenceHex

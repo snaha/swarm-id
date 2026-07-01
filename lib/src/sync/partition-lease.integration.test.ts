@@ -753,6 +753,56 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     expect(changed).toEqual([0])
   })
 
+  it("forces a FULL re-pin on the first publish of a new epoch (same-epoch publishes stay incremental)", async () => {
+    const partitionState = await import("./partition-state")
+    // STATE_POINTER_EPOCH_MS / INTENT_EPOCH_MS — the re-pin granularity.
+    const EPOCH_MS = 30_000
+
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5 // chunk 0
+    published[3000] = 7 // chunk 1
+    await partitionState.writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: published,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+
+    // Drive a fake clock aligned to an epoch boundary.
+    let clock = EPOCH_MS * 1000 // start of epoch 1000
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => clock,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+
+    // First publish, SAME epoch as acquire → incremental (seeded refs reused).
+    const a = acquired.localCounter.slice()
+    a[101] += 1
+    await lease.publishState(a)
+    expect(writeSpy.mock.calls[0][0].previousReferences).toHaveLength(
+      getChunkLayout(TEST_BATCH_DEPTH).numUtilizationChunks,
+    )
+
+    // Roll the clock into the NEXT epoch → the first publish there forces a full
+    // re-pin (previousReferences nulled) so a chunk retained from the prior epoch
+    // can't sit unrefreshed where a later beacon/pointer bucket would evict it.
+    clock += EPOCH_MS
+    const b = a.slice()
+    b[102] += 1
+    await lease.publishState(b)
+    expect(writeSpy.mock.calls[1][0].previousReferences).toBeUndefined()
+    expect(writeSpy.mock.calls[1][0].previousCounter).toBeUndefined()
+  })
+
   it("a resumed holder heartbeats the inherited pointer (acquire seeds lastReferenceHex)", async () => {
     // A prior holder published state on partition 0.
     const partitionState = await import("./partition-state")

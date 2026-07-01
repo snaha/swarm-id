@@ -720,10 +720,15 @@ export async function writePartitionState(opts: {
   // A peer's intent beacon uses its own deviceId and can't be computed here; that
   // residual stays fail-safe (an evicted beacon self-heals next tick). The
   // converse — a beacon at a LATER epoch (beyond the two excluded here) evicting
-  // a counter/reference chunk — is also fail-safe, not silent corruption: the
-  // reference chunk then fails to download on the next takeover and
-  // `readPartitionState` reports `readFailed` (→ read-only + retry), never a
-  // zero-counter resume that would re-issue acked slots.
+  // a RETAINED (incremental) counter/reference chunk — is healed by the holder's
+  // once-per-epoch FULL re-pin (`PartitionLease.flushState`), which re-uploads
+  // every non-zero chunk clear of the current epoch's beacons; a long-retained
+  // chunk is therefore exposed for ~1 epoch, not the whole session. The only
+  // unhealed case is an eviction in the final epoch before the holder vanishes:
+  // that stays fail-safe, not silent corruption — the reference chunk then fails
+  // to download on the next takeover and `readPartitionState` reports
+  // `readFailed` (→ read-only + retry), never a zero-counter resume that would
+  // re-issue acked slots.
   const now = Date.now()
   for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
     claimedBuckets.add(
