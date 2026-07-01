@@ -41,9 +41,10 @@ type AccountSettings = { appSessionDuration?: number }
  * mutator that changes a scalar MUST stamp the matching clock; the /dev sync
  * subsystem folds them by LWW (`applyRefreshed`).
  *
- * Members split into two groups: the product mutators the shipping app calls,
- * and — below the `DEV-ONLY` banner — stamp/refresh mutators used **only** by
- * the local `/dev` tooling. See that banner for why they live here.
+ * Members split into two groups: the product mutators the shipping app calls
+ * (including the postage-stamp / "drive" mutators the storage UI drives), and —
+ * below the `DEV-ONLY` banner — the volatile-utilization updater and the Swarm
+ * refresh fold used **only** by the local `/dev` tooling and sync engine.
  */
 export class Account {
   readonly id: EthAddress
@@ -174,17 +175,15 @@ export class Account {
     this.#commit()
   }
 
-  // ==========================================================================
-  // DEV-ONLY MUTATORS
+  // --------------------------------------------------------------------------
+  // Postage stamps ("drives") — keyed by batch id
   //
-  // Consumed exclusively by the local-only /dev tooling (`routes/dev`,
-  // `lib/dev`): buying/assigning/removing stamps and folding a hand-triggered
-  // Swarm refresh. The shipping app NEVER calls these — a stamp only reaches the
-  // product UI once the storage/drives PR adds a purchase flow. They live on the
-  // class (not a `lib/dev` free function) because they need the private
-  // `#commit` seam; kept together here so what ships is easy to tell from what
-  // is dev scaffolding.
-  // ==========================================================================
+  // The account owns its stamps as a nested collection. Add / rename / update /
+  // remove / set-default are product mutators driven by the storage (drives) UI;
+  // the /dev tooling also assigns stamps through them. Only the volatile
+  // utilization updater and the sync fold below the DEV-ONLY banner are
+  // dev/sync-exclusive.
+  // --------------------------------------------------------------------------
 
   /**
    * Add or replace a stamp (deduped by batch id). The first stamp added becomes
@@ -213,6 +212,31 @@ export class Account {
     return newStamp
   }
 
+  /** Rename a stamp (matched by batch id); no-op if no such stamp. */
+  renameStamp(batchID: BatchId, name: string) {
+    this.postageStamps = this.postageStamps.map((stamp) =>
+      stamp.batchID.equals(batchID) ? { ...stamp, name } : stamp,
+    )
+    this.lastModified = Date.now()
+    this.#commit()
+  }
+
+  /**
+   * Patch a stamp's batch fields after a node-side dilute / top-up (matched by
+   * batch id); no-op if no such stamp. `createdAt` is left untouched so the
+   * "purchased on" date and the merge tombstone clock stay stable.
+   */
+  updateStamp(
+    batchID: BatchId,
+    patch: Partial<Pick<PostageStamp, 'depth' | 'amount' | 'batchTTL'>>,
+  ) {
+    this.postageStamps = this.postageStamps.map((stamp) =>
+      stamp.batchID.equals(batchID) ? { ...stamp, ...patch } : stamp,
+    )
+    this.lastModified = Date.now()
+    this.#commit()
+  }
+
   /**
    * Tombstone a stamp (set `deletedAt`, keep it in the array) so the removal
    * propagates across devices — `mergePostageStamps` keeps the tombstone and
@@ -236,20 +260,30 @@ export class Account {
     this.#commit()
   }
 
-  /** Update a stamp's volatile utilization in place, WITHOUT firing sync. */
-  updateStampUtilization(batchID: BatchId, utilization: number) {
-    this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, utilization } : stamp,
-    )
-    this.#commit({ skipSync: true })
-  }
-
   setDefaultStamp(batchID: BatchId | undefined) {
     const now = Date.now()
     this.defaultPostageStampBatchID = batchID
     this.defaultStampAt = now
     this.lastModified = now
     this.#commit()
+  }
+
+  // ==========================================================================
+  // DEV-ONLY MUTATORS
+  //
+  // Consumed exclusively by the local-only /dev tooling (`routes/dev`,
+  // `lib/dev`) and the sync engine: refreshing a stamp's volatile utilization
+  // and folding a hand-triggered Swarm refresh. The shipping app never calls
+  // these. They live on the class (not a `lib/dev` free function) because they
+  // need the private `#commit` seam.
+  // ==========================================================================
+
+  /** Update a stamp's volatile utilization in place, WITHOUT firing sync. */
+  updateStampUtilization(batchID: BatchId, utilization: number) {
+    this.postageStamps = this.postageStamps.map((stamp) =>
+      stamp.batchID.equals(batchID) ? { ...stamp, utilization } : stamp,
+    )
+    this.#commit({ skipSync: true })
   }
 
   /**

@@ -157,6 +157,7 @@ export function serializePostageStamp(
   return {
     batchID: stamp.batchID.toString(),
     signerKey: stamp.signerKey.toString(),
+    name: stamp.name,
     utilization: stamp.utilization,
     usable: stamp.usable,
     depth: stamp.depth,

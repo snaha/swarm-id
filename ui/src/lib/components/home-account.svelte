@@ -27,6 +27,7 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
+  import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Polycon from '$lib/components/polycon.svelte'
   import Toast from '$lib/components/toast.svelte'
@@ -50,7 +51,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
+  import { copyToClipboard, truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const MIN_PASSWORD_LENGTH = 8
@@ -84,6 +85,7 @@
     backup: false,
   })
   let bannerInfoShown = $state(false)
+  let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
   let entropy = $state<Uint8Array | undefined>(undefined)
   let privateKeyRevealed = $state(false)
@@ -379,8 +381,7 @@
       <div class="flex w-full items-center gap-2">
         <Info class="size-4 shrink-0" />
         <p class="flex-1 text-sm">Local account (view-only)</p>
-        <!-- Stamp purchase flow is still TBD in the design. -->
-        <Button size="xs" onclick={notImplemented}>Upgrade</Button>
+        <Button size="xs" onclick={() => (addDriveOpen = true)}>Upgrade</Button>
         <Button size="xs" variant="ghost" onclick={() => (bannerInfoShown = !bannerInfoShown)}>
           Info
         </Button>
@@ -775,6 +776,10 @@
       <Button variant="outline" class="w-full" onclick={closeDialog}>Cancel</Button>
     </div>
   </Dialog>
+{/if}
+
+{#if addDriveOpen}
+  <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={showToast} />
 {/if}
 
 <Toast message={toastMessage} />

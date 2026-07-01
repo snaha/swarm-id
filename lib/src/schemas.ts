@@ -152,6 +152,10 @@ export const ConnectedAppSchemaV1 = z.object({
 export const PostageStampSchemaV1 = z.object({
   batchID: StoredBatchId,
   signerKey: StoredPrivateKey,
+  // User-given label shown in the UI (a "drive"). Optional: stamps created before
+  // naming existed — and those bought outside the app — have none, and callers
+  // fall back to a positional `Drive N` label.
+  name: z.string().optional(),
   utilization: z.number(),
   usable: z.boolean(),
   depth: z.number(),

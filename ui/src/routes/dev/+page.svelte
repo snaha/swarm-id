@@ -25,6 +25,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
+  import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
   import { networkSettingsStore } from '$lib/dev/network-settings.svelte'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
@@ -32,6 +33,7 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import routes from '$lib/routes'
   import { accountsStore, setAccountsSyncHook } from '$lib/stores/accounts.svelte'
+  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
 
   import DeviceList from './device-list.svelte'
@@ -398,8 +400,21 @@
   let customSignerKey = $state('')
   let customSignerError = $state<string | undefined>(undefined)
 
-  // Mock stamp widget settings — the store is the single source of truth
-  // (durable + cross-tab); the controls below read/write it directly.
+  // Mock stamp widget settings — `devSettingsStore` is the single source of truth
+  // (durable + cross-tab). Local mirrors keep the controls two-way; the effects
+  // below persist any change back through the store's setters.
+  let mockStampEnabled = $state(devSettingsStore.data.mockStampEnabled)
+  let mockStampPopup = $state(devSettingsStore.data.mockStampPopup)
+  let mockStampResult = $state<string>(devSettingsStore.data.mockStampResult)
+  const MOCK_RESULT_OPTIONS = [
+    { value: 'success', label: 'Success (creates a drive)' },
+    { value: 'error', label: 'Error (purchase failed)' },
+  ]
+  $effect(() => devSettingsStore.setMockStampEnabled(mockStampEnabled))
+  $effect(() => devSettingsStore.setMockStampPopup(mockStampPopup))
+  $effect(() =>
+    devSettingsStore.setMockStampResult(mockStampResult === 'error' ? 'error' : 'success'),
+  )
 
   // Validate custom signer key when enabled
   $effect(() => {
@@ -841,6 +856,30 @@ Check console logs for details:
   <!-- Stamps Tab -->
   {#if activeTab === 'stamps'}
     <div class="flex flex-col gap-4">
+      <h3 class="text-lg font-semibold">Mock stamp purchase</h3>
+      <p class="text-muted-foreground text-sm">
+        Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real cross-chain
+        payment. When enabled, the purchase widget resolves locally after a short delay.
+      </p>
+      <label class="flex items-center gap-2">
+        <Switch bind:checked={mockStampEnabled} aria-label="Enable mock stamp purchase" />
+        <span class="text-sm">Enable mock purchases</span>
+      </label>
+      {#if mockStampEnabled}
+        <label class="flex items-center gap-2">
+          <Switch bind:checked={mockStampPopup} aria-label="Open widget popup while mocking" />
+          <span class="text-sm"
+            >Open widget popup (off = local, works where popups are blocked)</span
+          >
+        </label>
+        <label class={`${LABEL_CLASS} w-64`}>
+          <span class={LABEL_TEXT_CLASS}>Outcome</span>
+          <Select options={MOCK_RESULT_OPTIONS} bind:value={mockStampResult} />
+        </label>
+      {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
       <h3 class="text-lg font-semibold">Buy Postage Stamp</h3>
       <p class="text-sm">Buy a postage stamp on the local blockchain for testing uploads.</p>
 
