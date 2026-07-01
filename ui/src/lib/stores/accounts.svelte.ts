@@ -296,6 +296,11 @@ const storageManager = createAccountsStorageManager()
  */
 let syncHook: ((accountIdHex: string) => void) | undefined
 
+/**
+ * Inject the sync hook. Consumed by the local-only /dev sync subsystem (shipped
+ * in a separate PR); the product app leaves it unset for now.
+ * @public
+ */
 export function setAccountsSyncHook(hook: ((accountIdHex: string) => void) | undefined): void {
   syncHook = hook
 }
