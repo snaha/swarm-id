@@ -300,6 +300,12 @@ export function foldAccount(
   views: DeviceStateSnapshot[],
   rosterDevices: Device[],
 ): FoldedAccount {
+  // Non-empty `views` is a precondition: account immutables (publicKey below)
+  // are read from `views[0]`. The sole caller guards this, but assert it here so
+  // a future caller gets a clear error rather than a bare `views[0]` TypeError.
+  if (views.length === 0) {
+    throw new Error("foldAccount requires at least one device-state view")
+  }
   let connectedApps: ConnectedApp[] = []
   let postageStamps: PostageStamp[] = []
   let accountName = { value: "", at: 0 }
