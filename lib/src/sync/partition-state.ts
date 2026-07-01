@@ -150,6 +150,30 @@ const POINTER_LOOKUP_SLACK_BUCKETS = 2
 /** Bound a single pointer read so an absent SOC doesn't block on peer exhaustion. */
 const STATE_POINTER_READ_TIMEOUT_MS = 2500
 
+/** Stable message so a timed-out pointer read is told apart from a clean miss. */
+const STATE_POINTER_READ_TIMEOUT_MESSAGE = "state-pointer read timed out"
+
+/**
+ * Sentinel for a pointer-bucket read that TIMED OUT — distinct from `undefined`
+ * (a clean miss / malformed blob). A timeout is INCONCLUSIVE: the bucket may hold
+ * a pointer the slow gateway couldn't return, so "no pointer found" across the
+ * scan is only authoritative when no candidate bucket timed out. Mirrors the
+ * roster scan's `ROSTER_READ_TIMED_OUT`.
+ */
+const POINTER_READ_TIMED_OUT = Symbol("state-pointer-read-timed-out")
+type PointerBucketRead =
+  | { referenceHex: string }
+  | undefined
+  | typeof POINTER_READ_TIMED_OUT
+
+/** True when `error` is the timeout `withTimeout` raised (vs a 404/garbage). */
+function isStatePointerTimeout(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    error.message === STATE_POINTER_READ_TIMEOUT_MESSAGE
+  )
+}
+
 /** `floor(nowMs / STATE_POINTER_EPOCH_MS)` — the current state-pointer epoch bucket. */
 export function statePointerEpochBucket(nowMs: number): number {
   return Math.floor(nowMs / STATE_POINTER_EPOCH_MS)
@@ -272,9 +296,13 @@ export function statePointerAddress(
  * lands somewhere in that span; scanning the whole span (rather than just the
  * `leasedUntil` bucket) makes the lookup independent of the
  * `STATE_POINTER_EPOCH_MS` vs `LEASE_TTL_MS` ratio AND tolerant of a couple of
- * dropped final heartbeats. Returns the freshest pointer found, or `undefined`
- * when none of the candidate buckets carry one (then the partition really has no
- * published state — resume from zero). Ceiling: a holder dark for longer than
+ * dropped final heartbeats. Returns the freshest pointer found (`pointer`), or
+ * `pointer: undefined` when none of the candidate buckets carry one. In the
+ * latter case `inconclusive` distinguishes a CLEAN "no pointer" (every candidate
+ * bucket read resolved — the partition really has no published state, resume from
+ * zero is safe) from an AMBIGUOUS one (≥1 candidate bucket read timed out, so a
+ * pointer may exist we just couldn't fetch — the caller must fail safe rather
+ * than zero-resume). Ceiling: a holder dark for longer than
  * `LEASE_TTL_MS + POINTER_LOOKUP_SLACK_BUCKETS·EPOCH` past its last heartbeat
  * resumes from zero.
  */
@@ -286,7 +314,7 @@ async function readStatePointer(opts: {
   partition: number
   nowMs: number
   holderLeasedUntilMs?: number
-}): Promise<{ referenceHex: string } | undefined> {
+}): Promise<{ pointer?: { referenceHex: string }; inconclusive: boolean }> {
   const topic = makePartitionStateTopic(opts.batchId, opts.partition)
   const buckets = new Set<number>()
   const cur = statePointerEpochBucket(opts.nowMs)
@@ -310,7 +338,7 @@ async function readStatePointer(opts: {
   // `ordered`/`Promise.all` preserve that newest-first order, so returning the
   // first present entry yields the same pointer the serial scan would have.
   const ordered = Array.from(buckets).sort((a, b) => b - a)
-  const found = await Promise.all(
+  const found: PointerBucketRead[] = await Promise.all(
     ordered.map(async (bucket) => {
       const identifier = makeStatePointerIdentifier(topic, bucket)
       try {
@@ -322,20 +350,31 @@ async function readStatePointer(opts: {
             opts.swarmEncryptionKey,
           ),
           STATE_POINTER_READ_TIMEOUT_MS,
-          "state-pointer read timed out",
+          STATE_POINTER_READ_TIMEOUT_MESSAGE,
         )
         const parsed = StatePointerPayloadSchemaV1.safeParse(
           JSON.parse(new TextDecoder().decode(soc.payload)),
         )
         return parsed.success ? parsed.data : undefined
-      } catch {
-        // Missing / timed out / malformed at this bucket.
-        return undefined
+      } catch (error) {
+        // A timeout is INCONCLUSIVE (the slot may hold a pointer the slow gateway
+        // couldn't return); a clean miss / malformed blob is a conclusive absent.
+        return isStatePointerTimeout(error) ? POINTER_READ_TIMED_OUT : undefined
       }
     }),
   )
-  for (const pointer of found) if (pointer) return pointer
-  return undefined
+  // `ordered` is newest-first, so the first present entry is the freshest pointer.
+  for (const read of found) {
+    if (read !== undefined && read !== POINTER_READ_TIMED_OUT) {
+      return { pointer: read, inconclusive: false }
+    }
+  }
+  // No pointer anywhere. Only a CLEAN scan (no bucket timed out) authoritatively
+  // means "no state was published"; a timed-out candidate leaves it ambiguous.
+  return {
+    pointer: undefined,
+    inconclusive: found.some((read) => read === POINTER_READ_TIMED_OUT),
+  }
 }
 
 /**
@@ -432,15 +471,17 @@ export async function readPartitionState(
     nowMs = Date.now(),
   } = opts
 
-  const pointer = await readStatePointer({
-    bee,
-    owner,
-    swarmEncryptionKey,
-    batchId,
-    partition,
-    nowMs,
-    holderLeasedUntilMs,
-  })
+  const { pointer, inconclusive: pointerInconclusive } = await readStatePointer(
+    {
+      bee,
+      owner,
+      swarmEncryptionKey,
+      batchId,
+      partition,
+      nowMs,
+      holderLeasedUntilMs,
+    },
+  )
 
   if (!pointer) {
     // No pointer in any candidate bucket (around `now` or the holder's
@@ -450,13 +491,30 @@ export async function readPartitionState(
     if (knownReferenceHex !== undefined) {
       return { referenceHex: knownReferenceHex, unchanged: true }
     }
-    // No local synced reference to fall back on. If the lock read was
-    // inconclusive, "no pointer" is NOT proof of "no state" — fail safe rather
-    // than zero-seed (which could re-issue a gone holder's acked slots). A
-    // genuinely fresh partition (cleanly-absent lock) still zero-seeds below.
-    if (lockUnreadable) {
+    // No local synced reference to fall back on. "No pointer" is only proof of
+    // "no state" when the read was CONCLUSIVE. Fail safe (degrade to read-only +
+    // retry) rather than zero-seed — which would re-issue a gone holder's acked
+    // slots, each overstamp evicting its data chunk — whenever the verdict is
+    // not authoritative:
+    //  - `lockUnreadable`: the lock read itself hung, so the lock may hide an
+    //    expired holder whose state we'd zero over; OR
+    //  - a candidate pointer-bucket read TIMED OUT (`pointerInconclusive`) on a
+    //    partition that DID have a holder (`holderLeasedUntilMs` set — expired or
+    //    released), so a real pointer may exist we just couldn't fetch. This is
+    //    the read the rest of the handoff path guards everywhere else; without it
+    //    a fast-but-empty lock read + all-slow pointer reads would silently
+    //    zero-resume.
+    // A genuinely fresh partition (no holder ever → `holderLeasedUntilMs`
+    // undefined AND a cleanly-absent lock) still zero-seeds even if a pointer
+    // read was slow: there is no prior state to protect, so first-claim proceeds.
+    if (
+      lockUnreadable ||
+      (pointerInconclusive && holderLeasedUntilMs !== undefined)
+    ) {
       console.warn(
-        `[partition-state] partition ${partition}: no pointer found and the lock was unreadable; degrading to read-only instead of resuming from zero.`,
+        `[partition-state] partition ${partition}: no pointer found but the read was inconclusive ` +
+          `(lockUnreadable=${lockUnreadable === true} pointerTimedOut=${pointerInconclusive}); ` +
+          "degrading to read-only instead of resuming from zero.",
       )
       return { unchanged: false, readFailed: true }
     }

@@ -700,6 +700,16 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     const partitionState = await import("./partition-state")
     const { numUtilizationChunks } = getChunkLayout(TEST_BATCH_DEPTH)
 
+    // Pin a fixed clock (as the epoch-re-pin sibling below does): acquire seeds
+    // `lastFullPublishEpoch` from `now`, and `flushState` forces a FULL re-pin
+    // (previousReferences nulled) whenever the epoch has rolled since. On the
+    // real clock this test's own acquire→publish gap can straddle a 30s
+    // STATE_POINTER_EPOCH boundary under parallel-worker CPU contention, forcing
+    // the first publish full and flaking the incremental assertion. The setup
+    // write must anchor to the SAME clock so its rotating pointer lands in the
+    // bucket the lease reads (#385).
+    const clock = 30_000 * 1000
+
     // A prior holder published multi-chunk state (non-zero buckets across three
     // distinct counter chunks; bucketsPerChunk = 2048).
     const published = new Uint32Array(NUM_BUCKETS)
@@ -715,6 +725,7 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      nowMs: clock,
     })
 
     // Observe every writePartitionState from here: the setup write above is
@@ -723,7 +734,11 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
 
     // A fresh lease acquires partition 0 (no live lock) → full read → seeds
     // publishedReferences/publishedCounter from the resumed state.
-    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => clock,
+    })
     const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
     expect(acquired.partition).toBe(0)
     expect(acquired.localCounter).toEqual(published)
@@ -1091,6 +1106,63 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     expect(result.readFailed).toBe(true)
     expect(result.localCounter).toBeUndefined()
     expect(result.referenceHex).toBeUndefined()
+  })
+
+  it("fails safe (readFailed) when a pointer read TIMES OUT for a partition that had a holder", async () => {
+    const partitionState = await import("./partition-state")
+    const downloadData = await import("../proxy/download-data")
+
+    // Force every state-pointer SOC read to hang so `withTimeout` classifies it
+    // as an INCONCLUSIVE timeout (not a clean miss). A gone holder existed
+    // (`holderLeasedUntilMs` set), so a real pointer may exist we just couldn't
+    // fetch — "no pointer found" must NOT zero-resume (that would re-issue the
+    // gone holder's acked slots, evicting their data). Degrade to read-only.
+    const hang = vi
+      .spyOn(downloadData, "downloadEncryptedSOC")
+      .mockImplementation((() => new Promise(() => {})) as never)
+    try {
+      const result = await partitionState.readPartitionState({
+        bee: bee as unknown as Bee,
+        owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+        batchDepth: TEST_BATCH_DEPTH,
+        holderLeasedUntilMs: 1_000_000, // a gone holder → state may exist
+      })
+      expect(result.readFailed).toBe(true)
+      expect(result.localCounter).toBeUndefined()
+      expect(result.referenceHex).toBeUndefined()
+    } finally {
+      hang.mockRestore()
+    }
+  })
+
+  it("still zero-seeds a genuinely fresh partition when a pointer read times out (no prior holder)", async () => {
+    const partitionState = await import("./partition-state")
+    const downloadData = await import("../proxy/download-data")
+
+    // Same hanging pointer read, but NO prior holder (`holderLeasedUntilMs`
+    // undefined) and a cleanly-absent lock (`lockUnreadable` unset): the
+    // partition never had state, so a slow pointer read must not block
+    // first-claim — resume from zero as before.
+    const hang = vi
+      .spyOn(downloadData, "downloadEncryptedSOC")
+      .mockImplementation((() => new Promise(() => {})) as never)
+    try {
+      const result = await partitionState.readPartitionState({
+        bee: bee as unknown as Bee,
+        owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+        batchDepth: TEST_BATCH_DEPTH,
+      })
+      expect(result.readFailed).toBeFalsy()
+      expect(result.localCounter).toEqual(new Uint32Array(NUM_BUCKETS))
+    } finally {
+      hang.mockRestore()
+    }
   })
 
   it("rejects publishing a counter with the wrong length", async () => {
