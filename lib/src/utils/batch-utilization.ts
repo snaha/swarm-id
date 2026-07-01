@@ -1456,8 +1456,12 @@ export class UtilizationAwareStamper implements Stamper {
     let release!: () => void
     this.intentSocLock = new Promise<void>((resolve) => (release = resolve))
     await previous
-    this.reserveIntentSocSlot(address, partition)
+    // `reserveIntentSocSlot` inside the try so `release()` still runs if it (or
+    // `fn`) ever throws — otherwise `intentSocLock` would stay pending forever
+    // and every later intent/occupancy/state-pointer write on this stamper would
+    // deadlock on `await previous`.
     try {
+      this.reserveIntentSocSlot(address, partition)
       return await fn()
     } finally {
       this.clearIntentSocSlot()

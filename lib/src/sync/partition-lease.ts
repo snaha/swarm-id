@@ -1179,6 +1179,10 @@ export class PartitionLease {
     // the incremental path never re-uploads it. Re-pinning every epoch bounds a
     // retained chunk's exposure to ~1 epoch and self-heals any eviction (the
     // full publish re-uploads every non-zero chunk clear of the current beacons).
+    // NOTE: this re-pin only runs on the publish (upload) path — the idle
+    // refresh-tick `heartbeatStatePointer` does NOT re-pin (see its caveat), so
+    // an idle holder crossing an epoch relies on the fail-safe takeover
+    // (`readFailed`) rather than this self-heal.
     const currentEpoch = intentEpochBucket(this.now())
     const forceFullRepin = currentEpoch !== this.lastFullPublishEpoch
     const published = await writePartitionState({
@@ -1231,6 +1235,16 @@ export class PartitionLease {
    * in the current bucket so a taking-over device finds the resume point even
    * after this holder has been idle (no uploads) for a while. No-op until the
    * first publish of the session has produced a reference to point at.
+   *
+   * CAVEAT: this path does NOT re-pin the counter chunks — only `flushState`'s
+   * once-per-epoch `forceFullRepin` (the upload/publish path) does. So an
+   * idle-but-alive holder that crosses an epoch boundary WITHOUT uploading can
+   * have a retained counter chunk evicted by the rotating pointer/beacon at the
+   * new epoch's bucket with nothing to heal it until the next upload or the
+   * idle-yield. `IDLE_YIELD_MS === STATE_POINTER_EPOCH_MS`, so the window is
+   * narrow, and the outcome is fail-safe: a takeover reading the missing chunk
+   * gets `readFailed` (→ read-only + retry), never a zero-counter resume that
+   * would re-issue acked slots.
    */
   async heartbeatStatePointer(): Promise<void> {
     if (!this.self || this.lastReferenceHex === undefined) return
