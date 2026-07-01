@@ -75,9 +75,13 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     settingsAt: account.settingsAt,
     lastModified: account.lastModified,
     partitionCount: account.partitionCount,
-    // Device-local seed vault (plain JSON, no byte classes). Every account is a
-    // BIP-39 seed account, so both are always present: `access` records how the
-    // seed is protected/unlocked and `encryptedSeed` is the seed encrypted at rest.
+    // Device-local seed vault — the account's only secret material. `access` is
+    // how the seed is unlocked on THIS device (the method plus its params:
+    // password KDF, passkey credential, or eth-wallet salt); `encryptedSeed` is
+    // the BIP-39 seed encrypted at rest under the key that method derives. Plain
+    // JSON (no byte classes); both are always set, as every account is a seed
+    // account. This pair stays on the device: the portable copy that backups and
+    // the sync feed publish omits it (`AccountData` = the record without them).
     access: account.access,
     encryptedSeed: account.encryptedSeed,
   }
