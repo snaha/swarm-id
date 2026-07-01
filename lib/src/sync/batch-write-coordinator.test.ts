@@ -59,6 +59,7 @@ function makeStamper(calls: string[]) {
     invalidateLease: vi.fn(() => calls.push("invalidate")),
     unbindPartition: vi.fn(() => calls.push("unbind")),
     bindPartition: vi.fn(() => calls.push("bind")),
+    setLeaseValidUntil: vi.fn(),
     buildLeaseLocalCounter: () => new Uint32Array(8),
     getLocalCounter: () => new Uint32Array(8),
     // Persisted per-partition synced reference; the adopt fast path reads it to

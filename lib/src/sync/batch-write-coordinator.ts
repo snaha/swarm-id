@@ -41,6 +41,7 @@ import { Bee, BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,
+  LEASE_SKEW_MARGIN_MS,
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
@@ -58,14 +59,6 @@ import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
 const PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 45000
 /** Max time the acquire spends polling for a slot when all are held. */
 const SLOT_WAIT_TIMEOUT_MS = 30000
-/**
- * Local-clock margin for treating a lease as "could have lapsed". When
- * `now >= leasedUntil - LEASE_SKEW_MARGIN_MS` the freshness check stops
- * trusting the throttle and re-reads the lock SOC before a write/ack — the
- * reverse-clobber guard (a slept/throttled holder must not overwrite a new
- * holder's acked data). Bounded by NTP-level skew, like the lock protocol.
- */
-const LEASE_SKEW_MARGIN_MS = 2000
 
 /**
  * Thrown by `withWrite` in `wait: "skip"` mode when every partition is held by
@@ -531,6 +524,8 @@ export class BatchWriteCoordinator {
           partitionCount,
           localCounter: stamper.buildLeaseLocalCounter(),
         })
+        // Fence in-flight stamps to the lease's local expiry (bind clears it).
+        this.syncStamperLeaseDeadline()
         // Seed before `onLeaseAcquired` (which may publish): a publish's
         // `flushState` then overwrites this with the fresh reference.
         lease.seedReferenceHex(seededReferenceHex)
@@ -562,6 +557,8 @@ export class BatchWriteCoordinator {
         partitionCount: result.partitionCount,
         localCounter: result.localCounter,
       })
+      // Fence in-flight stamps to the lease's local expiry (bind clears it).
+      this.syncStamperLeaseDeadline()
       this.deps.writeLeaseCache?.(lease.serialize())
       this.startRefreshTimer(lease)
       this.lastLeaseValidatedAt = Date.now()
@@ -632,6 +629,17 @@ export class BatchWriteCoordinator {
       // call would capture the bumped epoch as its own baseline and commit.
       if (this.leaseEpoch !== epoch) return
     }
+  }
+
+  /**
+   * Push the held lease's local expiry to the stamper so an in-flight `stamp()`
+   * fences itself the moment the lease lapses locally — the write-side
+   * complement of the reverse-clobber ack guard (Postage-Batch-Partitioning.md
+   * §12, "ack-safe, not write-safe"). Call wherever `leasedUntil` moves while we
+   * hold: bind and every renewal. `undefined` (no lease) disables the fence.
+   */
+  private syncStamperLeaseDeadline(): void {
+    this.deps.stamper.setLeaseValidUntil(this.partitionLease?.leasedUntil)
   }
 
   /**
@@ -728,12 +736,14 @@ export class BatchWriteCoordinator {
         throw new Error("Partition lease was reclaimed by another device.")
       }
       // Re-asserted: refresh() rewrote the claim and bumped the lease.
+      this.syncStamperLeaseDeadline()
       this.lastLeaseValidatedAt = Date.now()
       this.deps.writeLeaseCache?.(this.partitionLease.serialize())
       return
     }
 
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
+    this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(this.partitionLease.serialize())
   }
@@ -933,6 +943,7 @@ export class BatchWriteCoordinator {
 
     // Renewed on Swarm → bump the local heartbeat and persist it.
     lease.bumpLocalLease(LEASE_TTL_MS)
+    this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(lease.serialize())
     // Heartbeat the state pointer to the current rotating bucket (best-effort,

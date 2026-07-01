@@ -101,6 +101,16 @@ export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
 export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
 
 /**
+ * Local-clock margin for treating a lease as "could have lapsed". A holder must
+ * stop writing (and re-validating before ack) once `now >= leasedUntil - margin`
+ * so it ceases before a peer — reading the same `leasedUntil` from the lock SOC
+ * — could validly take over. Bounds the write/ack exposure to NTP-level skew,
+ * the same assumption the lock protocol already makes. Consumed by the stamper's
+ * local-lapse fence and the coordinator's reverse-clobber guard.
+ */
+export const LEASE_SKEW_MARGIN_MS = 2000
+
+/**
  * How long a holder may go without an upload before it voluntarily yields
  * its partition (writes the release sentinel + publishes its final counter)
  * so a waiting device can take the slot without waiting out the full TTL.
@@ -1249,6 +1259,18 @@ export class UtilizationAwareStamper implements Stamper {
   private leaseStale: boolean = false
 
   /**
+   * Wall-clock ms this device's lease is valid until (from the lock SOC's
+   * `leasedUntil`, pushed by the coordinator on bind and every renewal). While a
+   * multi-chunk upload runs, each `stamp()` re-checks it locally (no network) and
+   * throws once `Date.now()` passes it (minus a skew margin), so an un-renewable
+   * holder stops writing mid-op the instant its own clock says the lease lapsed —
+   * closing the "ack-safe, not write-safe" residual to the irreducible skew bound
+   * (Postage-Batch-Partitioning.md §12). `undefined` = not fenced (legacy mode,
+   * or between bind and the coordinator's first push).
+   */
+  private leaseValidUntil: number | undefined = undefined
+
+  /**
    * Per-partition buckets of the latest published partition-state chunks.
    * Utilisation saves must not place chunks in these buckets (same reserved
    * slot → overstamp → the published resume point is evicted from the
@@ -1380,6 +1402,9 @@ export class UtilizationAwareStamper implements Stamper {
     // B/D) becomes the single counter of record for this held partition.
     this.utilizationState.dataCounters = opts.localCounter
     this.leaseStale = false
+    // Presumed valid until the coordinator pushes the real `leasedUntil` (it
+    // does so synchronously right after bind). Mirrors the `leaseStale` reset.
+    this.leaseValidUntil = undefined
   }
 
   /**
@@ -1478,6 +1503,7 @@ export class UtilizationAwareStamper implements Stamper {
     this.partition = undefined
     this.partitionCountValue = 1
     this.leaseStale = false
+    this.leaseValidUntil = undefined
   }
 
   /**
@@ -1487,6 +1513,27 @@ export class UtilizationAwareStamper implements Stamper {
    */
   invalidateLease(): void {
     this.leaseStale = true
+  }
+
+  /**
+   * Record the wall-clock ms this device's lease is valid until (the lock SOC's
+   * `leasedUntil`). The coordinator pushes it on bind and every successful
+   * renewal; `undefined` disables the local-lapse fence. See `leaseValidUntil`.
+   */
+  setLeaseValidUntil(ms: number | undefined): void {
+    this.leaseValidUntil = ms
+  }
+
+  /**
+   * True when this device's own clock says the lease has lapsed (or is within
+   * the skew margin of it). Pure/local — no network — so it can gate every
+   * `stamp()` on the hot path for free. `undefined` deadline → not fenced.
+   */
+  private leaseLocallyLapsed(): boolean {
+    return (
+      this.leaseValidUntil !== undefined &&
+      Date.now() >= this.leaseValidUntil - LEASE_SKEW_MARGIN_MS
+    )
   }
 
   private constructor(
@@ -1656,10 +1703,21 @@ export class UtilizationAwareStamper implements Stamper {
       return this.stamper.stamp(chunk)
     }
 
-    // Partition lease was reclaimed — abort cleanly before the stamp lands
-    // in slot space the peer now controls. Only meaningful when a partition
-    // is bound (single-device legacy mode has no lease to invalidate).
-    if (this.partition !== undefined && this.leaseStale) {
+    // Partition lease was reclaimed — abort cleanly before the stamp lands in
+    // slot space the peer now controls. Only meaningful when a partition is
+    // bound (single-device legacy mode has no lease to invalidate). Two
+    // conditions:
+    //  - `leaseStale`: the refresh tick CONFIRMED a peer took over (write-verify
+    //    failed / displacement beacon seen).
+    //  - `leaseLocallyLapsed()`: this device's own clock says the lease expired
+    //    (skew margin applied). Catches the un-renewable case a disjoint-gateway
+    //    refresh can't confirm by reading — stops a long op mid-stream the moment
+    //    the lease lapses locally, so the data write is fenced to the same skew
+    //    bound as the ack (Postage-Batch-Partitioning.md §12, "ack-safe").
+    if (
+      this.partition !== undefined &&
+      (this.leaseStale || this.leaseLocallyLapsed())
+    ) {
       throw new PartitionLeaseLostError()
     }
 

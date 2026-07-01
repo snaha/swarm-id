@@ -287,15 +287,24 @@ A peer's _intent_ beacon uses its own deviceId and can't be computed here — se
 
 ## 12. Remaining issues / accepted residuals
 
-- **Ack-safe, not write-safe.** A lease lapsing _mid-`op`_ is fenced for the **ack** (the
-  reverse-clobber guard refuses to publish) but **not** for the data chunk already written:
-  `stamp()` only re-checks the local `leaseStale` flag, so a chunk that landed before the
-  refresh tick flips the breaker can sit in a slot a new holder now owns. It is never
-  _acked_, so the app never recorded it; the exposure is a not-yet-durable chunk overwriting
-  a peer's slot, bounded by clock skew + TTL. (`batch-write-coordinator.ts:257-263`.)
+- **Write-fenced to clock skew (was: ack-safe, not write-safe).** A lease lapsing _mid-`op`_
+  is fenced both for the **ack** (the reverse-clobber guard refuses to publish) and for the
+  **data write**: `stamp()` throws `PartitionLeaseLostError` when either `leaseStale` is set
+  (a refresh tick _confirmed_ a peer took over) **or** the lease has lapsed by this device's
+  own clock — `Date.now() >= leaseValidUntil - LEASE_SKEW_MARGIN_MS`, a purely local check on
+  every chunk. So an un-renewable holder (e.g. a disjoint-gateway view its refresh can't
+  confirm by reading) stops writing the instant its own clock says the lease expired — before
+  a peer reading the same `leasedUntil` could validly take over. A long multi-chunk `op`
+  aborts mid-stream; the chunk is content-addressed, so the upload cleanly fails and retries.
+  The residual is now just the irreducible clock skew below, not a full refresh interval.
+  (Fence: `batch-utilization.ts` `leaseLocallyLapsed`; deadline pushed by
+  `batch-write-coordinator.ts` `syncStamperLeaseDeadline` on bind + every renewal.)
 - **Bounded clock skew.** A device with a slow clock can believe its lease is valid while
   peers correctly took over. Irreducible; bounded by NTP-level skew + the TTL margin, the
-  same assumption the lock protocol already makes.
+  same assumption the lock protocol already makes. The local-lapse fence above relies on
+  `leaseValidUntil` (from the lease's `leasedUntil`) and the stamper's `Date.now()` being the
+  same wall clock — true in production; a test that drives the coordinator with an injected
+  lease clock must inject the stamper's clock too (see #385).
 - **Peer intent-beacon reserved-slot collision.** §10 covers the pointer and the
   deviceId-independent occupancy beacon, but a **peer's** per-device intent beacon sits at an
   address keyed on the peer's deviceId, which we may not know (or can't enumerate). It can

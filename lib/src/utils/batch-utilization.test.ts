@@ -23,6 +23,7 @@ import {
   getChunkIndexForBucket,
   getChunkLayout,
   initializeBatchUtilization,
+  LEASE_TTL_MS,
   mergeChunk,
   serializeUint16Array,
   serializeUint32Array,
@@ -591,6 +592,88 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
     expect(() => stamper.stamp(makeChunkInBucket(0x99, 1))).not.toThrow()
+  })
+
+  it("a locally-lapsed lease fences the next partition-bound stamp (skew margin applied)", async () => {
+    // Race B (Postage-Batch-Partitioning.md §12): a holder whose refresh tick
+    // can't renew must stop writing when its OWN clock says the lease lapsed —
+    // otherwise a mid-op chunk lands in a slot a peer legitimately took over.
+    // Local, no-network fence: `stamp()` throws once `Date.now()` is within the
+    // skew margin of `leaseValidUntil`, matching the ack guard's bound.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    // Valid until only 500ms out — inside the (2s) skew margin, so the lease is
+    // treated as lapsed NOW even though raw expiry hasn't strictly passed.
+    stamper.setLeaseValidUntil(Date.now() + 500)
+
+    expect(() => stamper.stamp(makeChunkInBucket(0xa1, 0))).toThrow(
+      PartitionLeaseLostError,
+    )
+  })
+
+  it("a healthy (well-in-future) lease deadline does not fence stamping", async () => {
+    // No false positives on the hot path: a freshly-renewed lease (~TTL out)
+    // stamps normally. Only an un-renewable, locally-lapsed lease is fenced.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    stamper.setLeaseValidUntil(Date.now() + LEASE_TTL_MS)
+
+    expect(() => stamper.stamp(makeChunkInBucket(0xa2, 0))).not.toThrow()
+  })
+
+  it("bindPartition clears a stale lease deadline (re-acquire reuses stamper)", async () => {
+    // A reused stamper must not carry a previous session's lapsed deadline into
+    // a fresh bind — the coordinator pushes the new `leasedUntil` right after.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.setLeaseValidUntil(Date.now() - 1) // already lapsed
+    expect(() => stamper.stamp(makeChunkInBucket(0xa3, 0))).toThrow(
+      PartitionLeaseLostError,
+    )
+
+    // Re-bind → deadline cleared (undefined) → stamps work until the coordinator
+    // pushes a fresh one.
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    expect(() => stamper.stamp(makeChunkInBucket(0xa3, 1))).not.toThrow()
   })
 
   it("lock-SOC short-circuit routes overstamps to the reserved slot", async () => {
