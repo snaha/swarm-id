@@ -230,3 +230,45 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
     expect(new Set(stateBuckets).size).toBe(stateBuckets.length)
   })
 })
+
+describe("writePartitionState — counter monotonicity tripwire", () => {
+  it("refuses an incremental publish whose counter regressed below the previous", async () => {
+    const stamper = await makeBoundStamper()
+
+    // A first full publish establishes the incremental baseline (refs + counter).
+    const baseline = new Uint32Array(NUM_BUCKETS)
+    baseline[1000] = 5
+    const first = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: PARTITION,
+      localCounter: baseline,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      deviceId: DEVICE_ID,
+    })
+
+    // A regressed counter (bucket 1000 dropped 5 → 4) must fail loudly rather
+    // than retain a ref describing a value ABOVE the live counter — the "impossible"
+    // case the tripwire guards (a takeover would resume past an acked slot).
+    const regressed = new Uint32Array(NUM_BUCKETS)
+    regressed[1000] = 4
+    await expect(
+      writePartitionState({
+        bee: bee as unknown as Bee,
+        stamper,
+        batchId: TEST_BATCH_ID,
+        batchDepth: TEST_BATCH_DEPTH,
+        partition: PARTITION,
+        localCounter: regressed,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        deviceId: DEVICE_ID,
+        previousReferences: first.references,
+        previousCounter: first.publishedCounter,
+      }),
+    ).rejects.toThrow(/counter regressed/)
+  })
+})

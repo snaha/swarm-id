@@ -666,6 +666,31 @@ export async function writePartitionState(opts: {
     previousReferences !== undefined &&
     previousReferences.length === numUtilizationChunks &&
     previousCounter !== undefined
+
+  // KEYSTONE tripwire (fail loud, never silent slot reuse). The incremental diff
+  // RETAINS the previous ref for every unchanged chunk; that is only safe because
+  // the counter is a monotonic per-bucket high-water, so what we publish is always
+  // >= what those retained refs describe (see the SAFETY INVARIANT note in
+  // `PartitionLease.claimPartition`). If the counter ever regresses below the one
+  // the last publish recorded, an unchanged-looking chunk could retain a ref
+  // ABOVE the live counter and a takeover would resume PAST an acked slot into
+  // reuse. That "impossible" case means the stamper's counter/synced-ref
+  // persistence broke its invariant — refuse to publish rather than corrupt the
+  // resume point. Cheap: one pass over the 65536-entry counter, dwarfed by the
+  // ECDSA/upload work below. (It catches the regression SYMPTOM; it cannot decode
+  // the retained refs' own counters, so it is a tripwire, not a full proof.)
+  if (incremental && previousCounter !== undefined) {
+    for (let b = 0; b < NUM_BUCKETS; b++) {
+      if (localCounter[b] < previousCounter[b]) {
+        throw new Error(
+          `[partition-state] publish p=${partition}: counter regressed at bucket ${b} ` +
+            `(${localCounter[b]} < previous ${previousCounter[b]}) — monotonicity ` +
+            "violation; refusing to publish a state a takeover could resume past an acked slot.",
+        )
+      }
+    }
+  }
+
   const allIndices = Array.from({ length: numUtilizationChunks }, (_, i) => i)
   // Which chunks to (re)upload:
   //  - incremental: those whose serialized bytes changed since the last publish

@@ -812,13 +812,27 @@ export class PartitionLease {
     // direction — a ref reporting above the counter, which could resume PAST an
     // acked slot into reuse — cannot occur. See the "divergent seed" regression
     // test in partition-lease.integration.test.ts.
+    //
+    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its local
+    // per-partition counter monotonic and >= its synced-reference counter. Every
+    // guarantee above collapses if a future change to stamper-state persistence
+    // lets the local counter fall BELOW the synced ref. `writePartitionState`'s
+    // incremental path carries a cheap monotonicity tripwire that fails the
+    // publish loudly (rather than silently retaining a ref above the counter) if
+    // that invariant is ever broken — see the assert there.
     this.publishedReferences = stateResult.references
     this.publishedCounter = localCounter.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session
-    // stays incremental against the resumed refs (the cheap-first-publish win) —
-    // those chunks were just verified to exist on the read. The once-per-epoch
-    // full re-pin (`flushState`) then kicks in only once the epoch rolls over,
-    // bounding any retained chunk's eviction exposure to ~1 epoch.
+    // stays incremental against the resumed refs (the cheap-first-publish win).
+    // On the FULL-read branch every non-zero counter chunk was just downloaded,
+    // so the retained refs are verified-present. On the CACHE-HIT branch only the
+    // reference chunk was read (the counter chunks were not re-fetched), so a
+    // retained chunk that was meanwhile evicted from the reserve is NOT detected
+    // here — but that stays fail-safe: a takeover reading the missing chunk gets
+    // `readFailed` (→ read-only + retry), never a zero-counter resume, and this
+    // holder's own once-per-epoch full re-pin (`flushState`, below) re-uploads it
+    // from local state once the epoch rolls over. Either way the re-pin bounds a
+    // retained chunk's eviction exposure to ~1 epoch.
     this.lastFullPublishEpoch = intentEpochBucket(this.now())
     // Seed the heartbeat's pointer target from the state we resumed, so a holder
     // that never uploads still re-publishes the inherited resume pointer to the
