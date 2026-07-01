@@ -82,6 +82,12 @@ export async function restoreAccountFromSwarm(
 /**
  * Project a folded account onto the legacy `AccountStateSnapshot` shape so
  * callers (the swarm-ui sign-in / import flows) consume it unchanged.
+ *
+ * `foldAccountFromSwarm` shallow-FREEZES its result arrays (so coalesced
+ * concurrent callers can't corrupt each other's shared view). The snapshot
+ * outlives that coalescing window and its arrays are commonly mutated in place
+ * downstream, so we COPY them here — otherwise a frozen array would escape and a
+ * later `push`/`splice` would throw far from the freeze site.
  */
 function foldedToSnapshot(
   accountId: string,
@@ -101,10 +107,10 @@ function foldedToSnapshot(
       settingsAt: a.settingsAt,
       createdAt: a.createdAt,
       lastModified: Date.now(),
-      devices: a.devices,
+      devices: [...a.devices],
       partitionCount: a.partitionCount,
     },
-    connectedApps: a.connectedApps,
-    postageStamps: a.postageStamps,
+    connectedApps: [...a.connectedApps],
+    postageStamps: [...a.postageStamps],
   }
 }

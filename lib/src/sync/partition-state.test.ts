@@ -176,3 +176,57 @@ describe("writePartitionState — reserved-slot bucket-collision avoidance", () 
     expect(stateBuckets).not.toContain(occupancyBucket)
   })
 })
+
+describe("writePartitionState — sparse sentinel refs are independent", () => {
+  it("returns a distinct zero-ref instance per never-written chunk", async () => {
+    const stamper = await makeBoundStamper()
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[1000] = 1 // exactly one non-zero chunk → the rest are sentinels
+
+    const { references } = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: PARTITION,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      deviceId: DEVICE_ID,
+    })
+
+    const zeroRefs = references.filter((r) => r.every((b) => b === 0))
+    expect(zeroRefs.length).toBeGreaterThan(1)
+    // A shared sentinel instance would collapse to size 1 — an in-place byte
+    // write to one zero slot would then corrupt every other zero slot.
+    expect(new Set(zeroRefs).size).toBe(zeroRefs.length)
+  })
+})
+
+describe("writePartitionState — distinct-bucket invariant guard", () => {
+  it("publishes many chunks into all-distinct reserved buckets", async () => {
+    const stamper = await makeBoundStamper()
+    // Non-zero buckets across several distinct counter chunks (bucketsPerChunk =
+    // 2048 at depth 24), so the publish uploads multiple counter chunks + the
+    // reference chunk in one parallel batch — the case the distinct-bucket
+    // assertion protects (parallel stamps must not share a bucket).
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    for (const b of [100, 3000, 5000, 7000]) localCounter[b] = 1
+
+    const { stateBuckets } = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: PARTITION,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      deviceId: DEVICE_ID,
+    })
+
+    // Every reserved-slot write lands at (bucket, slot=PARTITION); the parallel
+    // publish is only race-free because those buckets are all distinct.
+    expect(new Set(stateBuckets).size).toBe(stateBuckets.length)
+  })
+})

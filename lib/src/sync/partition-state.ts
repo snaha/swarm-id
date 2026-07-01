@@ -690,9 +690,12 @@ export async function writePartitionState(opts: {
   const uploadSet = new Set(uploadIndices)
 
   // Start from the retained refs (incremental) or all-zero sentinels (full).
+  // Each sentinel is a fresh copy (not the shared `ZERO_CHUNK_REF` instance) so
+  // the returned refs are mutually independent — an in-place byte write to one
+  // zero slot can never bleed into another.
   const references: Uint8Array[] = incremental
     ? previousReferences.map((r) => r.slice())
-    : allIndices.map(() => ZERO_CHUNK_REF)
+    : allIndices.map(() => ZERO_CHUNK_REF.slice())
 
   // Every reserved chunk overstamps the partition's single reserved slot, so
   // they must land in distinct buckets, clear of the lock-SOC bucket, the live
@@ -729,6 +732,10 @@ export async function writePartitionState(opts: {
   // to download on the next takeover and `readPartitionState` reports
   // `readFailed` (→ read-only + retry), never a zero-counter resume that would
   // re-issue acked slots.
+  // Wall-clock, deliberately NOT the lease's injectable clock: the rotating
+  // pointer / beacon addresses are a cross-device rendezvous, and a taking-over
+  // device computes the same buckets from its OWN `Date.now()`. Anchoring the
+  // write to wall-clock is what keeps writer and reader on the same address.
   const now = Date.now()
   for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
     claimedBuckets.add(
@@ -763,6 +770,28 @@ export async function writePartitionState(opts: {
   reserve?.markReservedUtilizationChunk(refPicked.address, partition)
 
   const referenceHex = Binary.uint8ArrayToHex(refPicked.reference)
+
+  // Invariant the parallel PUTs below rely on: every reserved-slot chunk this
+  // publish uploads must occupy a DISTINCT bucket. They all land at
+  // slot=partition, so a shared bucket both evicts one under Bee's newer-stamp-
+  // wins replacement AND races the shared `buckets[bucket]` counter across the
+  // concurrent stamps. `claimedBuckets` + `pickReservedChunkKey` already
+  // guarantee distinctness by construction; assert it here so a future change to
+  // that bucket-selection can't silently reintroduce a collision. (This covers
+  // the distinct-bucket half of the parallel-safety invariant; the "no `await`
+  // between the reserved-slot bucket-set and `stamp()`" half stays enforced by
+  // the UtilizationAwareStamper stamp path and the comment on the Promise.all.)
+  const writtenBuckets = [
+    ...uploadIndices.map((i) => toBucket(references[i].slice(0, 32))),
+    toBucket(refPicked.address),
+  ]
+  if (new Set(writtenBuckets).size !== writtenBuckets.length) {
+    throw new Error(
+      `[partition-state] publish p=${partition}: reserved-slot chunks collided ` +
+        "on a bucket — parallel PUTs would race/evict. This is a bucket-" +
+        "selection regression (pickReservedChunkKey / claimedBuckets).",
+    )
+  }
 
   // One batch: dirty counter chunks + the reference chunk + the state-pointer
   // SOC (at the current rotating bucket, naming the COMPUTED reference-chunk
