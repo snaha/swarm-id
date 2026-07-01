@@ -103,6 +103,7 @@ export class Account {
   setAccess(access: AccessMethod, encryptedSeed: string) {
     this.access = access
     this.encryptedSeed = encryptedSeed
+    this.lastModified = Date.now()
     this.#persist()
   }
 
@@ -154,9 +155,11 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
   const now = Date.now()
   return {
     ...app,
+    // Clear only the auth material; keep `lastConnectedAt` so the connect flow
+    // can still order this account by when it was last used (a revoked app must
+    // not read as "never used").
     appSecret: undefined,
     connectedUntil: undefined,
-    lastConnectedAt: 0,
     updatedAt: now,
     revokedAt: tombstone ? now : app.revokedAt,
   }
