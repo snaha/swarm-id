@@ -23,6 +23,10 @@ function accountFor(phrase: string): AccountRecord {
     access: { type: 'password', kdfSalt: '00', kdfIterations: 1 },
     encryptedSeed: '00',
     settings: { appSessionDuration: daysToMs(30) },
+    // Per-field LWW clocks — must survive the round-trip so merge doesn't fall back.
+    accountNameAt: 1765000001000,
+    settingsAt: 1765000002000,
+    lastModified: 1765000003000,
     devices: [],
     connectedApps: [
       {
@@ -50,6 +54,10 @@ describe('backup round-trip', () => {
     // The per-app session secret is stripped — restore re-derives it on reconnect.
     expect(restored.connectedApps[0].appSecret).toBeUndefined()
     expect(restored.settings?.appSessionDuration).toBe(daysToMs(30))
+    // Convergence clocks survive so merge doesn't treat restored scalars as stale.
+    expect(restored.accountNameAt).toBe(1765000001000)
+    expect(restored.settingsAt).toBe(1765000002000)
+    expect(restored.lastModified).toBe(1765000003000)
     // The secret material never leaves the device.
     expect(file).not.toContain('encryptedSeed')
     expect(file).not.toContain('kdfSalt')

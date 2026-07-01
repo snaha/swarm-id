@@ -66,6 +66,13 @@ export async function createBackup(account: AccountRecord, entropy: Uint8Array):
     derivationKey: account.derivationKey,
     settings: account.settings,
     defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
+    // Carry the per-field LWW clocks so a restored account keeps its convergence
+    // metadata — without them, merge logic falls back to older timestamps (or
+    // `createdAt`) and can clobber newer scalar edits.
+    accountNameAt: account.accountNameAt,
+    defaultStampAt: account.defaultStampAt,
+    settingsAt: account.settingsAt,
+    lastModified: account.lastModified,
     devices: account.devices,
     // Strip `appSecret` from every connected app: it is the live session secret
     // the dApp's proxy authenticates from, re-derivable from the master key on

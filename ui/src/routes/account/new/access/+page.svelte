@@ -104,6 +104,13 @@
       encryptedSeed: await encryptSeed(wallet.entropy, key),
       settings: carried?.settings,
       defaultPostageStampBatchID: carried?.defaultPostageStampBatchID,
+      // Preserve the carried record's per-field LWW clocks so re-importing a
+      // phrase doesn't reset convergence metadata and make local scalar edits
+      // look stale to sync/merge.
+      accountNameAt: carried?.accountNameAt,
+      defaultStampAt: carried?.defaultStampAt,
+      settingsAt: carried?.settingsAt,
+      lastModified: carried?.lastModified,
       devices: carried?.devices ?? [],
       connectedApps: carried?.connectedApps ?? [],
       postageStamps: carried?.postageStamps ?? [],
