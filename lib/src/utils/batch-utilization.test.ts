@@ -846,6 +846,46 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(stamper.getLocalCounter()).toEqual(counterBefore)
   })
 
+  it("withIntentSocSlot releases the mutex when fn throws, so later writes don't deadlock", async () => {
+    // Regression (the reserve/fn-throw guard): if `fn` — the upload — throws,
+    // the `finally` must still `clearIntentSocSlot()` and resolve the lock.
+    // Otherwise `intentSocLock` stays pending forever and EVERY later intent /
+    // occupancy / state-pointer write on this stamper deadlocks on
+    // `await previous`.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const SLOT = 0
+    const boom = new Error("upload failed")
+    await expect(
+      stamper.withIntentSocSlot(new Uint8Array(32), SLOT, async () => {
+        throw boom
+      }),
+    ).rejects.toBe(boom)
+
+    // The mutex must have been released by the failed call: the next write
+    // completes and routes to the reserved slot. Without the finally-release it
+    // would hang forever on `await previous` (the test would time out).
+    const chunk = makeChunkInBucket(0x4444, 0x4444)
+    const slot = await stamper.withIntentSocSlot(
+      chunk.hash(),
+      SLOT,
+      async () => decodeIndex(stamper.stamp(chunk).index).slot,
+    )
+    expect(slot).toBe(SLOT)
+  })
+
   it("auto-bind uses the BACKUP-signer address (derived from encryptionKey), not the `owner` arg", async () => {
     // Regression: `writePartitionLock` writes the lock SOC to
     // `keccak256(identifier || backupSigner.publicKey().address())`, where
