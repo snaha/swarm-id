@@ -65,6 +65,7 @@ import {
   PARTITION_COUNT,
   NUM_BUCKETS,
   getChunkLayout,
+  toBucket,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
@@ -868,6 +869,119 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // Coordinator seeds the inherited synced reference → heartbeat re-publishes.
     lease.seedReferenceHex("ab".repeat(32))
     await lease.heartbeatStatePointer()
+    expect(pointerSpy).toHaveBeenCalledTimes(1)
+  })
+
+  // Both retained-chunk kinds sit at `slot = partition` and are pinned across
+  // epochs by an incremental publish, so a later epoch's rotating pointer can
+  // evict EITHER: a non-zero COUNTER chunk (in `publishedReferences`) or the
+  // REFERENCE chunk itself (the pointer's target, NOT in `publishedReferences`).
+  // Cover both explicitly — the reference-chunk case is the subtler one the
+  // detection must not forget.
+  it.each([
+    { kind: "counter chunk", pick: (sb: number[]) => sb[0] },
+    { kind: "reference chunk", pick: (sb: number[]) => sb[sb.length - 1] },
+  ])(
+    "heartbeat RELOCATES a retained $kind the new epoch's pointer would evict (not a bare pointer write)",
+    async ({ pick }) => {
+      const partitionState = await import("./partition-state")
+      const EPOCH_MS = 30_000
+      const acquireEpoch = 1000
+
+      // A prior holder publishes state at the acquire epoch. Nothing is forced, so
+      // the chunks land at real readable buckets and the resume read succeeds.
+      // Sparse (one non-zero chunk) → `stateBuckets` = [counter chunk, ref chunk].
+      vi.spyOn(Date, "now").mockReturnValue(acquireEpoch * EPOCH_MS)
+      const published = new Uint32Array(NUM_BUCKETS)
+      published[1000] = 3
+      const setup = await partitionState.writePartitionState({
+        bee: bee as unknown as Bee,
+        stamper: createMockStamper() as unknown as Stamper,
+        batchId: TEST_BATCH_ID,
+        batchDepth: TEST_BATCH_DEPTH,
+        partition: 0,
+        localCounter: published,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+      })
+      const targetBucket = pick(setup.stateBuckets)
+
+      // Find a FUTURE epoch whose rotating state-pointer bucket lands exactly on
+      // that retained chunk — the ~1/65536 collision, made deterministic by search
+      // (not by forcing an unreadable address, which would break the resume read).
+      // The idle-holder-crosses-an-epoch case: the heartbeat's own pointer write
+      // would overstamp (evict) the retained chunk at their shared reserved slot.
+      let collidingEpoch: number | undefined
+      for (let e = acquireEpoch + 1; e < acquireEpoch + 400_000; e++) {
+        const bucket = toBucket(
+          partitionState.statePointerAddress(
+            TEST_BATCH_ID,
+            0,
+            OWNER,
+            e * EPOCH_MS,
+          ),
+        )
+        if (bucket === targetBucket) {
+          collidingEpoch = e
+          break
+        }
+      }
+      expect(collidingEpoch).toBeDefined()
+
+      // Resume the partition (full read seeds publishedReferences +
+      // lastReferenceHex) without ever uploading.
+      const lease = makeLease({
+        deviceId: DEVICE_A,
+        bee: bee as unknown as Bee,
+      })
+      const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+      expect(acquired.partition).toBe(0)
+      expect(acquired.localCounter).toEqual(published)
+
+      // Cross into the colliding epoch: the heartbeat's own pointer now maps to
+      // the retained chunk's bucket.
+      vi.spyOn(Date, "now").mockReturnValue(collidingEpoch! * EPOCH_MS)
+      const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+
+      await lease.heartbeatStatePointer(acquired.localCounter)
+
+      // The heartbeat must RELOCATE via a full re-pin (writePartitionState), not
+      // overwrite the pointer on top of the retained chunk — a bare
+      // writeStatePointer would evict it (same reserved slot) and a later takeover
+      // would hit readFailed.
+      expect(writeSpy).toHaveBeenCalledTimes(1)
+      const repin = await writeSpy.mock.results[0].value
+      expect(repin.stateBuckets).not.toContain(targetBucket)
+    },
+  )
+
+  it("heartbeat stays a bare pointer write when no retained chunk collides", async () => {
+    const partitionState = await import("./partition-state")
+    // A prior holder published state at random (uncollided) buckets.
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await partitionState.writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: published,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+    const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
+    await lease.heartbeatStatePointer(acquired.localCounter)
+
+    // No collision (≈1/65536 avoided): the common heartbeat must NOT re-pin —
+    // one cheap pointer write, no counter re-upload.
+    expect(writeSpy).not.toHaveBeenCalled()
     expect(pointerSpy).toHaveBeenCalledTimes(1)
   })
 })

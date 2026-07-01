@@ -950,7 +950,11 @@ export class BatchWriteCoordinator {
       await this.lock(async () => {
         if (this.disposed || this.partitionLease !== lease) return
         if (this.activeUploadCount !== 0) return // an upload slipped in while queued
-        await lease.heartbeatStatePointer()
+        // Pass the live counter so the heartbeat can RELOCATE a retained state
+        // chunk that this epoch's rotating pointer/beacon bucket would otherwise
+        // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
+        // partition mode → the heartbeat stays a bare pointer write.
+        await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
       }).catch((err) =>
         console.warn(
           "[BatchWriteCoordinator] State-pointer heartbeat failed:",
