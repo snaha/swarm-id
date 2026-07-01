@@ -21,20 +21,18 @@ type AccountSettings = { appSessionDuration?: number }
  * The account aggregate root. Fields are reactive (`$state`) so component reads
  * update on mutation, and every mutator is a method **on the object** that
  * persists the whole collection through the injected `onChange` — callers mutate
- * the account they already hold (`account.addStamp(…)`), never a store method
- * that takes an id and looks the account up.
+ * the account they already hold (`account.rename(…)`), never a store method that
+ * takes an id and looks the account up.
  *
  * The shape is the shared `@snaha/swarm-id` `Account` record (byte-class fields,
- * serialized to hex by the lib storage manager). A stamp is an account's owned
- * Swarm storage, persisted as the lib `postageStamps` field. The private
- * `#onChange` makes the class nominal, so a plain record can't be mistaken for
- * a live account.
+ * serialized to hex by the lib storage manager). The private `#onChange` makes
+ * the class nominal, so a plain record can't be mistaken for a live account.
  *
  * Scalar fields each carry a per-field last-writer-wins clock
  * (`accountNameAt` / `defaultStampAt` / `settingsAt`) so concurrent edits to
- * different scalars on different devices converge instead of clobbering. The
- * sync engine reads those clocks (`createSyncAccount`), so a mutator that
- * changes a scalar MUST stamp the matching clock.
+ * different scalars on different devices converge instead of clobbering. A
+ * mutator that changes a scalar MUST stamp the matching clock; the sync engine
+ * (a follow-up PR) folds them by LWW.
  */
 export class Account {
   readonly id: EthAddress
@@ -56,12 +54,9 @@ export class Account {
   settingsAt = $state<number | undefined>(undefined)
   lastModified = $state<number | undefined>(undefined)
   partitionCount = $state<number | undefined>(undefined)
-  readonly #onChange: (account: Account, options?: { skipSync?: boolean }) => void
+  readonly #onChange: () => void
 
-  constructor(
-    record: AccountRecord,
-    onChange: (account: Account, options?: { skipSync?: boolean }) => void,
-  ) {
+  constructor(record: AccountRecord, onChange: () => void) {
     this.id = record.id
     this.createdAt = record.createdAt
     this.derivationKey = record.derivationKey
@@ -82,8 +77,8 @@ export class Account {
     this.#onChange = onChange
   }
 
-  #persist(options?: { skipSync?: boolean }) {
-    this.#onChange(this, options)
+  #persist() {
+    this.#onChange()
   }
 
   /** Active (non-revoked) connected apps — what the UI displays. */
@@ -152,117 +147,6 @@ export class Account {
     this.lastModified = Date.now()
     this.#persist()
   }
-
-  // --------------------------------------------------------------------------
-  // Stamps — owned Swarm storage, each backed by a postage stamp batch (the lib
-  // `postageStamps` field). The default is `defaultPostageStampBatchID`.
-  // --------------------------------------------------------------------------
-
-  /**
-   * Add or replace a stamp (deduped by batch id). The first stamp added becomes
-   * the account default so uploads have something to spend against. Re-adding a
-   * previously removed batch revives it (a fresh `createdAt` beats the old
-   * tombstone on merge).
-   */
-  addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
-    const now = Date.now()
-    const newStamp: PostageStamp = { ...stamp, createdAt: now }
-    this.postageStamps = [
-      ...this.postageStamps.filter((existing) => !existing.batchID.equals(stamp.batchID)),
-      newStamp,
-    ]
-    if (this.defaultPostageStampBatchID === undefined) {
-      this.defaultPostageStampBatchID = newStamp.batchID
-      this.defaultStampAt = now
-    }
-    this.lastModified = now
-    this.#persist()
-    return newStamp
-  }
-
-  /**
-   * Tombstone a stamp (set `deletedAt`, keep it in the array) so the removal
-   * propagates across devices — `mergePostageStamps` keeps the tombstone and
-   * lets it beat any peer's stale active copy. A hard delete would be silently
-   * re-added on the next fold from a device feed that still has the batch.
-   */
-  removeStamp(batchID: BatchId) {
-    const now = Date.now()
-    this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, deletedAt: now } : stamp,
-    )
-    // Never leave a default pointing at a stamp we just removed; fall back to a
-    // remaining live stamp so the account never references a deleted batch.
-    if (this.defaultPostageStampBatchID?.equals(batchID)) {
-      this.defaultPostageStampBatchID = this.postageStamps.find(
-        (stamp) => stamp.deletedAt === undefined,
-      )?.batchID
-      this.defaultStampAt = now
-    }
-    this.lastModified = now
-    this.#persist()
-  }
-
-  /** Update a stamp's volatile utilization in place, WITHOUT firing sync. */
-  updateStampUtilization(batchID: BatchId, utilization: number) {
-    this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, utilization } : stamp,
-    )
-    this.#persist({ skipSync: true })
-  }
-
-  setDefaultStamp(batchID: BatchId | undefined) {
-    const now = Date.now()
-    this.defaultPostageStampBatchID = batchID
-    this.defaultStampAt = now
-    this.lastModified = now
-    this.#persist()
-  }
-
-  /**
-   * Apply state merged from a Swarm refresh, WITHOUT re-publishing (the data
-   * came from Swarm). Collections replace wholesale (already merged upstream).
-   * Scalars are folded by per-field LWW: a remote value wins only if its clock
-   * is newer than ours, so a stale device can't clobber a local edit.
-   */
-  applyRefreshed(fields: {
-    devices?: Device[]
-    connectedApps?: ConnectedApp[]
-    postageStamps?: PostageStamp[]
-    accountName?: string
-    accountNameAt?: number
-    defaultPostageStampBatchID?: BatchId | undefined
-    defaultStampAt?: number
-    settings?: AccountSettings | undefined
-    settingsAt?: number
-  }) {
-    if (fields.devices) this.devices = fields.devices
-    if (fields.connectedApps) this.connectedApps = fields.connectedApps
-    if (fields.postageStamps) this.postageStamps = fields.postageStamps
-    if (
-      fields.accountName !== undefined &&
-      fields.accountNameAt !== undefined &&
-      fields.accountNameAt > (this.accountNameAt ?? this.createdAt)
-    ) {
-      this.name = fields.accountName
-      this.accountNameAt = fields.accountNameAt
-    }
-    if (
-      fields.defaultStampAt !== undefined &&
-      fields.defaultStampAt > (this.defaultStampAt ?? this.createdAt)
-    ) {
-      this.defaultPostageStampBatchID = fields.defaultPostageStampBatchID
-      this.defaultStampAt = fields.defaultStampAt
-    }
-    if (
-      fields.settingsAt !== undefined &&
-      fields.settingsAt > (this.settingsAt ?? this.createdAt)
-    ) {
-      this.settings = fields.settings
-      this.settingsAt = fields.settingsAt
-    }
-    this.#persist({ skipSync: true })
-  }
 }
 
 /** Revoke an app connection: drop the secret so the dApp proxy de-authenticates. */
@@ -283,27 +167,11 @@ function revoked(app: ConnectedApp, tombstone: boolean): ConnectedApp {
 // state changes live on the Account object itself.
 //
 // Backed by the `@snaha/swarm-id` Zod storage manager (key STORAGE_KEY_ACCOUNTS)
-// — the SAME nested-account document the proxy iframe and sync engine read. The
-// product UI, the /dev tooling and sync all drive off this one reactive store.
+// — the SAME nested-account document the proxy iframe reads. The product UI
+// drives off this one reactive store.
 // ============================================================================
 
 const storageManager = createAccountsStorageManager()
-
-/**
- * Optional sync hook. The /dev sync subsystem injects `triggerSync` so its
- * mutations publish to Swarm; the plain product app leaves it unset, so a
- * rename or app-connect never attempts a network publish.
- */
-let syncHook: ((accountIdHex: string) => void) | undefined
-
-/**
- * Inject the sync hook. Consumed by the local-only /dev sync subsystem (shipped
- * in a separate PR); the product app leaves it unset for now.
- * @public
- */
-export function setAccountsSyncHook(hook: ((accountIdHex: string) => void) | undefined): void {
-  syncHook = hook
-}
 
 let accounts = $state<Account[]>([])
 
@@ -313,14 +181,8 @@ function persist(): void {
   storageManager.save(accounts)
 }
 
-/** Persist the collection and (unless skipped) publish the changed account. */
-function onChange(account: Account, options?: { skipSync?: boolean }): void {
-  persist()
-  if (!options?.skipSync) syncHook?.(account.id.toHex())
-}
-
 function hydrate(record: AccountRecord): Account {
-  return new Account(record, onChange)
+  return new Account(record, persist)
 }
 
 function load(): Account[] {
@@ -349,19 +211,9 @@ export const accountsStore = {
     return accounts
   },
 
-  /** Re-read from shared storage (e.g. after a direct storage manager write). */
-  reload(): void {
-    accounts = load()
-  },
-
   get(id: string | EthAddress): Account | undefined {
     const ethId = toEthAddress(id)
     return accounts.find((account) => account.id.equals(ethId))
-  },
-
-  /** Alias used by the sync engine / dev tooling (keyed by EthAddress). */
-  getAccount(id: EthAddress): Account | undefined {
-    return accountsStore.get(id)
   },
 
   /** Create — or replace, for sign-in / restore — an account; returns the live object. */
@@ -376,11 +228,5 @@ export const accountsStore = {
     const ethId = toEthAddress(id)
     accounts = accounts.filter((account) => !account.id.equals(ethId))
     persist()
-  },
-
-  /** Wipe every account from this device (developer reset). */
-  clear(): void {
-    accounts = []
-    storageManager.clear()
   },
 }
