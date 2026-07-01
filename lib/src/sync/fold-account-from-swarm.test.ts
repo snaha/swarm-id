@@ -87,6 +87,10 @@ describe("foldAccountFromSwarm — concurrent coalescing", () => {
 
   it("freezes the result arrays so coalesced callers can't corrupt each other", async () => {
     readRoster.mockResolvedValue([makeDevice("dev-0")])
+    // A readable device feed so `views` is non-empty — otherwise the
+    // `views.length === 0` short-circuit returns undefined before the fold.
+    // `foldAccount` is mocked here, so the view's contents don't matter.
+    readLatestDeviceState.mockResolvedValue({ deviceId: "dev-0" })
     const bee = {} as Bee
 
     const result = await foldAccountFromSwarm({

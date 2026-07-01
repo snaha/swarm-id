@@ -33,6 +33,18 @@ import type { ConnectedApp, Device, PostageStamp } from "../../src/schemas"
 const DEFAULT_BEE_URL = "https://api.gateway.ethswarm.org/"
 const KEY_BYTES = 32
 
+/**
+ * Stand-in account public key for the now-REQUIRED `DeviceStateView`/
+ * `DeviceStateSnapshotSchemaV1.accountPublicKey` field (#377/#381 made it
+ * mandatory). The read schema only requires a string, and the fold just needs it
+ * present + consistent across an account's device feeds — these throwaway test
+ * accounts never validate its curve identity — so one shared compressed-pubkey-
+ * shaped constant suffices. Without it, every published snapshot fails read
+ * validation → `readLatestDeviceState` returns undefined → the fold sees no views
+ * and returns undefined (the `views.length === 0` guard).
+ */
+export const TEST_ACCOUNT_PUBLIC_KEY = `02${"11".repeat(KEY_BYTES)}`
+
 const str = (name: string): string | undefined => {
   const v = process.env[name]
   return v && v.length > 0 ? v : undefined
@@ -159,6 +171,7 @@ export function makeView(over: Partial<DeviceStateView> = {}): DeviceStateView {
     accountName: { value: "live-test", at: 1 },
     defaultPostageStampBatchID: { value: undefined, at: 1 },
     settings: { value: undefined, at: 1 },
+    accountPublicKey: TEST_ACCOUNT_PUBLIC_KEY,
     accountCreatedAt: 1_000,
     partitionCount: 2,
     ...over,

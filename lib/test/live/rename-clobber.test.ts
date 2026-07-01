@@ -29,6 +29,7 @@ import {
   makeDevice,
   foldUntil,
   delay,
+  TEST_ACCOUNT_PUBLIC_KEY,
   type LiveContext,
 } from "./env"
 
@@ -61,6 +62,10 @@ describe.skipIf(!liveEnv.configured)(
         accountName,
         defaultPostageStampBatchID: undefined,
         accountNameAt,
+        // #377/#381 made accountPublicKey required on the device-state feed;
+        // without it the published snapshot fails read validation and the fold
+        // reads no views. `accountStateToDeviceView` sources it from here.
+        publicKey: TEST_ACCOUNT_PUBLIC_KEY,
         createdAt: CREATED_AT,
         lastModified: Date.now(),
         devices: [],

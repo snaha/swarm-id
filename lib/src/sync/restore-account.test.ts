@@ -40,6 +40,7 @@ function frozenFoldedAccount(): FoldedAccount {
     defaultStampAt: 0,
     settingsAt: 0,
     createdAt: 0,
+    publicKey: "02".repeat(33),
     partitionCount: 1,
   }
 }
