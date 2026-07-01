@@ -41,7 +41,7 @@
     randomSalt,
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-  import { bytesToHex } from '$lib/crypto/hex'
+  import { bytesToHex, prefix0x } from '$lib/crypto/hex'
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import { unlockAccount } from '$lib/crypto/unlock'
@@ -115,7 +115,7 @@
         ? Wallet
         : KeyRound,
   )
-  const publicKeyDisplay = $derived(account.publicKey ? `0x${account.publicKey}` : '')
+  const publicKeyDisplay = $derived(account.publicKey ? prefix0x(account.publicKey) : '')
   const privateKey = $derived(entropy ? privateKeyFromEntropy(entropy) : undefined)
   const phraseWords = $derived(entropy ? phraseFromEntropy(entropy).split(' ') : [])
   const newPasswordTooShort = $derived(

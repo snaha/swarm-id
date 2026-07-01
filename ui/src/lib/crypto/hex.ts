@@ -23,6 +23,20 @@ export function strip0x(value: string): string {
   return value.startsWith('0x') ? value.slice(2) : value
 }
 
+/**
+ * Add a `0x` prefix to a bare hex string (idempotent: a value that already has
+ * one is returned unchanged). Throws on a non-hex string so a malformed value
+ * can't be handed off as hex. The inverse of `strip0x`, for presenting bare
+ * stored hex to UI or code that expects the `0x` form.
+ */
+export function prefix0x(value: string): string {
+  if (value.startsWith('0x')) return value
+  if (!HEX_PATTERN.test(value)) {
+    throw new Error('Invalid hex string.')
+  }
+  return `0x${value}`
+}
+
 /** Decode a hex string (optional 0x prefix); throws on malformed input. */
 export function hexToBytes(hex: string): Uint8Array {
   const stripped = hex.startsWith('0x') ? hex.slice(2) : hex
