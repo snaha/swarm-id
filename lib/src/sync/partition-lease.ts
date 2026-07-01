@@ -797,6 +797,21 @@ export class PartitionLease {
     // mutates it on stamp(), which would otherwise empty the diff. When the read
     // recovered no refs (fresh account / cache-miss), these stay undefined and
     // the first publish falls back to the sparse-full path.
+    //
+    // SAFETY INVARIANT (why a divergent seed is safe). On the cache-hit
+    // (`unchanged`) branch `publishedReferences` describes the last *acked*
+    // counter (the synced reference, advanced only on a successful publish/read)
+    // while `publishedCounter` = `buildLeaseLocalCounter()`, which can be AHEAD
+    // if a prior publish FAILED after the local counter advanced (withWrite's
+    // `finally` still flushes the bumped counter). Counters are monotonic, so
+    // `publishedCounter >= synced-ref counter` always — the refs never describe a
+    // value ABOVE the counter. On the first incremental publish an unchanged
+    // (ahead) chunk therefore RETAINS a ref describing the acked floor, and a
+    // takeover resumes at ≤ the acked high-water: it only ever reissues *unacked*
+    // (content-addressed → safe) slots, never an acked one. The dangerous
+    // direction — a ref reporting above the counter, which could resume PAST an
+    // acked slot into reuse — cannot occur. See the "divergent seed" regression
+    // test in partition-lease.integration.test.ts.
     this.publishedReferences = stateResult.references
     this.publishedCounter = localCounter.slice()
     // Mark this epoch as already full-pinned so the FIRST publish of the session

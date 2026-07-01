@@ -1560,6 +1560,88 @@ describe("writePartitionState — incremental", () => {
     expect(res.references).toHaveLength(numUtilizationChunks)
     expect(res.references.every((r) => r.length === 64)).toBe(true)
   })
+
+  // Regression: the "divergent seed" the cache-hit branch of `claimPartition`
+  // produces after a FAILED publish — `previousReferences` describe the last
+  // ACKED counter, but `previousCounter` (= the stamper's local counter) is
+  // AHEAD by an unacked write. The incremental diff must retain the acked ref
+  // for the ahead-but-unchanged chunk, so a takeover resumes at the acked FLOOR
+  // (never past it into an acked slot). See the SAFETY INVARIANT note in
+  // partition-lease.ts (`claimPartition`).
+  it("retains the acked ref when the seed counter is ahead (unacked write); reader resumes at the acked floor", async () => {
+    const { writePartitionState, readPartitionState } =
+      await import("./partition-state")
+    const stamper = createMockStamper() as unknown as Stamper
+    const { bucketsPerChunk } = getChunkLayout(TEST_BATCH_DEPTH)
+
+    // 1. The last ACKED publish: bucket 100 at counter 5.
+    const AHEAD_BUCKET = 100
+    const NEW_BUCKET = 5000
+    const ACKED_VALUE = 5
+    const acked = new Uint32Array(NUM_BUCKETS)
+    acked[AHEAD_BUCKET] = ACKED_VALUE
+    const ackedPublish = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: acked,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+    })
+
+    // 2. Seed as claimPartition's cache-hit branch would AFTER a failed publish:
+    //    refs describe the acked counter (100 -> 5) but the baseline counter is
+    //    AHEAD (100 -> 6), the unacked write that never reached Swarm.
+    const seededCounter = ackedPublish.publishedCounter.slice()
+    seededCounter[AHEAD_BUCKET] = ACKED_VALUE + 1 // 6, unacked
+
+    // 3. First incremental publish: a NEW upload touches a DIFFERENT bucket, so
+    //    the chunk holding AHEAD_BUCKET is unchanged vs the ahead baseline and
+    //    its ref is retained (the acked-floor ref, describing 5 — not 6).
+    const current = seededCounter.slice()
+    current[NEW_BUCKET] = 1
+    const aheadChunk = Math.floor(AHEAD_BUCKET / bucketsPerChunk)
+    const newChunk = Math.floor(NEW_BUCKET / bucketsPerChunk)
+    expect(aheadChunk).not.toBe(newChunk)
+
+    const incremental = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter: current,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      previousReferences: ackedPublish.references,
+      previousCounter: seededCounter,
+    })
+
+    // The ahead chunk kept the ACKED ref (not re-uploaded); the new chunk changed.
+    expect(
+      Binary.uint8ArrayToHex(incremental.references[aheadChunk]),
+      "ahead chunk ref retained (acked floor)",
+    ).toBe(Binary.uint8ArrayToHex(ackedPublish.references[aheadChunk]))
+    expect(
+      Binary.uint8ArrayToHex(incremental.references[newChunk]),
+      "new chunk re-uploaded",
+    ).not.toBe(Binary.uint8ArrayToHex(ackedPublish.references[newChunk]))
+
+    // A takeover reconstructs the ACKED floor for the ahead bucket (5), never the
+    // unacked 6 — so it reissues only the unacked slot, never an acked one.
+    const read = await readPartitionState({
+      bee: bee as unknown as Bee,
+      owner: OWNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: TEST_BATCH_ID,
+      partition: 0,
+      batchDepth: TEST_BATCH_DEPTH,
+    })
+    expect(read.localCounter?.[AHEAD_BUCKET]).toBe(ACKED_VALUE)
+    expect(read.localCounter?.[NEW_BUCKET]).toBe(1)
+  })
 })
 
 describe("PartitionLease.publishState — commit without release", () => {
