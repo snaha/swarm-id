@@ -15,7 +15,7 @@ const MS_PER_DAY = 24 * 60 * 60 * 1000
 function accountFor(phrase: string): AccountRecord {
   const wallet = walletFromPhrase(phrase)
   return {
-    id: new EthAddress(bareHex(wallet.address)),
+    id: new EthAddress(wallet.address),
     name: 'Jovial Einstein',
     publicKey: bareHex(wallet.publicKey),
     createdAt: 1765000000000,

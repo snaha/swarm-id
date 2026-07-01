@@ -92,7 +92,7 @@
     // key) while the entropy is in hand — the same chain the proxy/sync use.
     const masterKey = bareHex(privateKeyFromEntropy(wallet.entropy))
     const account: AccountRecord = {
-      id: new EthAddress(bareHex(wallet.address)),
+      id: new EthAddress(wallet.address),
       name: draft.name,
       publicKey: bareHex(wallet.publicKey),
       createdAt: carried?.createdAt ?? Date.now(),

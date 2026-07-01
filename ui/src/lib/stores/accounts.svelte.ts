@@ -204,9 +204,9 @@ if (browser) {
 }
 
 function toEthAddress(id: string | EthAddress): EthAddress {
-  if (typeof id !== 'string') return id
-  // Tolerate a `0x`-prefixed id persisted by older UI code; records store bare hex.
-  return new EthAddress(id.startsWith('0x') ? id.slice(2) : id)
+  // `EthAddress` parses a bare or `0x`-prefixed hex string, so a raw stored id
+  // and a caller's `.toHex()` both work.
+  return typeof id === 'string' ? new EthAddress(id) : id
 }
 
 export const accountsStore = {
