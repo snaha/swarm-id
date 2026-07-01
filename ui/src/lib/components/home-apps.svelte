@@ -11,10 +11,10 @@
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select } from '$lib/components/ui/select'
+  import { msToDays } from '$lib/duration'
   import type { Account } from '$lib/types'
 
   const DEFAULT_CONNECTION_DAYS = 30
-  const MS_PER_DAY = 24 * 60 * 60 * 1000
   const DURATION_OPTIONS = [
     { value: '1', label: '1 day' },
     { value: '7', label: '7 days' },
@@ -30,12 +30,10 @@
 
   let { account }: Props = $props()
 
-  // Connection lifetime is stored in ms (`settings.appSessionDuration`); the UI
-  // works in days.
   let connectionDays = $derived(
     String(
       account.settings?.appSessionDuration !== undefined
-        ? Math.round(account.settings.appSessionDuration / MS_PER_DAY)
+        ? msToDays(account.settings.appSessionDuration)
         : DEFAULT_CONNECTION_DAYS,
     ),
   )

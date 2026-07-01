@@ -3,6 +3,7 @@
 import { EthAddress } from '@ethersphere/bee-js'
 import { describe, expect, it } from 'vitest'
 
+import { daysToMs } from '../duration'
 import type { AccountRecord } from '../types'
 import { backupFilename, createBackup, restoreBackup } from './backup'
 import { strip0x } from './hex'
@@ -10,7 +11,6 @@ import { walletFromPhrase } from './mnemonic'
 
 const PHRASE = 'test test test test test test test test test test test junk'
 const OTHER_PHRASE = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
-const MS_PER_DAY = 24 * 60 * 60 * 1000
 
 function accountFor(phrase: string): AccountRecord {
   const wallet = walletFromPhrase(phrase)
@@ -22,7 +22,7 @@ function accountFor(phrase: string): AccountRecord {
     derivationKey: 'f'.repeat(64),
     access: { type: 'password', kdfSalt: '00', kdfIterations: 1 },
     encryptedSeed: '00',
-    settings: { appSessionDuration: 30 * MS_PER_DAY },
+    settings: { appSessionDuration: daysToMs(30) },
     devices: [],
     connectedApps: [
       {
@@ -49,7 +49,7 @@ describe('backup round-trip', () => {
     expect(restored.connectedApps).toHaveLength(1)
     // The per-app session secret is stripped — restore re-derives it on reconnect.
     expect(restored.connectedApps[0].appSecret).toBeUndefined()
-    expect(restored.settings?.appSessionDuration).toBe(30 * MS_PER_DAY)
+    expect(restored.settings?.appSessionDuration).toBe(daysToMs(30))
     // The secret material never leaves the device.
     expect(file).not.toContain('encryptedSeed')
     expect(file).not.toContain('kdfSalt')

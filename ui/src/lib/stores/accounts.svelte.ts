@@ -13,7 +13,7 @@ import {
 
 import { browser } from '$app/environment'
 
-const MS_PER_DAY = 24 * 60 * 60 * 1000
+import { daysToMs } from '$lib/duration'
 
 type AccountSettings = { appSessionDuration?: number }
 
@@ -110,7 +110,7 @@ export class Account {
   /** How long app connections stay valid, set in days (stored as ms). */
   setAppConnectionDays(days: number) {
     const now = Date.now()
-    this.settings = { ...this.settings, appSessionDuration: days * MS_PER_DAY }
+    this.settings = { ...this.settings, appSessionDuration: daysToMs(days) }
     this.settingsAt = now
     this.lastModified = now
     this.#persist()
