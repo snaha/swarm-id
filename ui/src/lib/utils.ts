@@ -47,16 +47,6 @@ export function truncateAddress(address: string): string {
   return `${address.slice(0, ADDRESS_PREFIX_LENGTH)}...${address.slice(-ADDRESS_SUFFIX_LENGTH)}`
 }
 
-/**
- * Render a bee-js byte class (or bare hex string) as 0x-prefixed hex for
- * display/copy. bee-js `.toHex()` returns bare lowercase hex; the UI shows the
- * 0x-prefixed form everywhere.
- */
-export function display0x(value: string | { toHex(): string }): string {
-  const hex = typeof value === 'string' ? value : value.toHex()
-  return hex.startsWith('0x') ? hex : `0x${hex}`
-}
-
 /** Bare lowercase hex (no 0x prefix) — the form persisted in shared records. */
 export function bareHex(value: string): string {
   return (value.startsWith('0x') ? value.slice(2) : value).toLowerCase()

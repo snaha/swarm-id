@@ -39,7 +39,7 @@
       // Already set up on this device — just switch to it.
       const existing = accountsStore.get(wallet.address)
       if (existing) {
-        sessionStore.setCurrentAccount(existing.id.toHex())
+        sessionStore.setCurrentAccount(existing.id)
 
         // Came from a dApp connect popup — the phrase already unlocked the
         // account, so finish the handshake right away.

@@ -108,7 +108,7 @@
     }
     // `add` returns the live reactive account; the handshake mutates it.
     const liveAccount = accountsStore.add(account)
-    sessionStore.setCurrentAccount(liveAccount.id.toHex())
+    sessionStore.setCurrentAccount(liveAccount.id)
     const flow = draft.flow
 
     // Came from a dApp connect popup — finish the handshake and hand back.

@@ -49,7 +49,7 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { AccessMethod, Account } from '$lib/types'
-  import { copyToClipboard, display0x, notImplemented, truncateAddress } from '$lib/utils'
+  import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const MIN_PASSWORD_LENGTH = 8
@@ -115,7 +115,7 @@
         ? Wallet
         : KeyRound,
   )
-  const publicKeyDisplay = $derived(account.publicKey ? display0x(account.publicKey) : '')
+  const publicKeyDisplay = $derived(account.publicKey ? `0x${account.publicKey}` : '')
   const privateKey = $derived(entropy ? privateKeyFromEntropy(entropy) : undefined)
   const phraseWords = $derived(entropy ? phraseFromEntropy(entropy).split(' ') : [])
   const newPasswordTooShort = $derived(
@@ -327,7 +327,7 @@
     accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
     if (next) {
-      sessionStore.setCurrentAccount(next.id.toHex())
+      sessionStore.setCurrentAccount(next.id)
     } else {
       sessionStore.clearCurrentAccount()
       goto(resolve(routes.ROOT))
@@ -443,11 +443,11 @@
       <div class="pl-5">
         <div class="border-border flex w-full flex-col rounded-lg border">
           <div class="flex h-12 w-full items-center gap-2 px-4">
-            <p class="flex-1 truncate text-sm">{truncateAddress(display0x(account.id))}</p>
+            <p class="flex-1 truncate text-sm">{truncateAddress(account.id.toChecksum())}</p>
             <Button
               variant="ghost"
               size="sm"
-              onclick={() => copyText(display0x(account.id), 'Address')}
+              onclick={() => copyText(account.id.toChecksum(), 'Address')}
             >
               <Copy />
               Copy
@@ -468,13 +468,13 @@
               <div class="flex flex-col gap-1">
                 {@render keyBlock('Address', 'The unique identifier for your Swarm ID.')}
                 <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{display0x(account.id)}</p>
+                  <p class="min-w-0 flex-1 text-sm break-all">{account.id.toChecksum()}</p>
                   <Button
                     variant="ghost"
                     size="icon"
                     class="size-7 shrink-0"
                     aria-label="Copy address"
-                    onclick={() => copyText(display0x(account.id), 'Address')}
+                    onclick={() => copyText(account.id.toChecksum(), 'Address')}
                   >
                     <Copy />
                   </Button>

@@ -26,7 +26,7 @@
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { display0x, notImplemented, truncateAddress } from '$lib/utils'
+  import { notImplemented, truncateAddress } from '$lib/utils'
 
   let missingRequest = $state(false)
   let unlocking = $state<Account | undefined>(undefined)
@@ -81,7 +81,7 @@
     }
     // A still-valid prior connection carries the secret — no unlock needed.
     if (reuseConnection(account, request)) {
-      sessionStore.setCurrentAccount(account.id.toHex())
+      sessionStore.setCurrentAccount(account.id)
       await goto(resolve(routes.CONNECT_DONE))
       return
     }
@@ -111,7 +111,7 @@
         return
       }
       await completeConnect(account, entropy, request)
-      sessionStore.setCurrentAccount(account.id.toHex())
+      sessionStore.setCurrentAccount(account.id)
       unlocking = undefined
       password = ''
       await goto(resolve(routes.CONNECT_DONE))
@@ -184,7 +184,7 @@
                   <span class="flex min-w-0 flex-col">
                     <span class="truncate font-medium">{account.name}</span>
                     <span class="text-muted-foreground text-xs">
-                      {truncateAddress(display0x(account.id))}
+                      {truncateAddress(account.id.toChecksum())}
                     </span>
                   </span>
                 </button>
