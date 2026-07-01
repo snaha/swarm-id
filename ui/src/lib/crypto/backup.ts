@@ -6,6 +6,7 @@
  * a key derived from the recovery-phrase entropy, so the file is useless
  * without the phrase and restoring needs exactly: file + phrase.
  */
+import { EthAddress } from '@ethersphere/bee-js'
 import {
   type Account as AccountRecord,
   AccountSchemaV1,
@@ -17,7 +18,6 @@ import { decryptSeed, deriveKeyFromSecret, encryptSeed } from '$lib/crypto/encry
 import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
 import { walletFromPhrase } from '$lib/crypto/mnemonic'
 import type { AccountData } from '$lib/types'
-import { bareHex } from '$lib/utils'
 
 const BACKUP_VERSION = 1
 const BACKUP_KEY_INFO = 'swarm-id-backup-v1'
@@ -160,7 +160,7 @@ export async function restoreBackup(fileContents: string, phrase: string): Promi
     throw new Error('Not a valid backup file.')
   }
   const parsed = result.data
-  if (parsed.id.toHex() !== bareHex(wallet.address)) {
+  if (!parsed.id.equals(new EthAddress(wallet.address))) {
     throw new Error('The recovery phrase does not match this backup.')
   }
   const { access: _access, encryptedSeed: _encryptedSeed, ...portable } = parsed

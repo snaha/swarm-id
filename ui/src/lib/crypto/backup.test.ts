@@ -4,8 +4,8 @@ import { EthAddress } from '@ethersphere/bee-js'
 import { describe, expect, it } from 'vitest'
 
 import type { AccountRecord } from '../types'
-import { bareHex } from '../utils'
 import { backupFilename, createBackup, restoreBackup } from './backup'
+import { strip0x } from './hex'
 import { walletFromPhrase } from './mnemonic'
 
 const PHRASE = 'test test test test test test test test test test test junk'
@@ -17,7 +17,7 @@ function accountFor(phrase: string): AccountRecord {
   return {
     id: new EthAddress(wallet.address),
     name: 'Jovial Einstein',
-    publicKey: bareHex(wallet.publicKey),
+    publicKey: strip0x(wallet.publicKey),
     createdAt: 1765000000000,
     derivationKey: 'f'.repeat(64),
     access: { type: 'password', kdfSalt: '00', kdfIterations: 1 },

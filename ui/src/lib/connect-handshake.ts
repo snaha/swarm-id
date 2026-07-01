@@ -15,10 +15,10 @@
  */
 import { type ConnectedApp, DEFAULT_SESSION_DURATION, deriveSecret } from '@snaha/swarm-id'
 
+import { strip0x } from '$lib/crypto/hex'
 import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
 import type { ConnectRequest } from '$lib/stores/connect.svelte'
 import type { Account } from '$lib/types'
-import { bareHex } from '$lib/utils'
 
 function connectionDuration(account: Account): number {
   return account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION
@@ -82,7 +82,7 @@ export async function completeConnect(
   entropy: Uint8Array,
   request: ConnectRequest,
 ): Promise<void> {
-  const masterKey = bareHex(privateKeyFromEntropy(entropy))
+  const masterKey = strip0x(privateKeyFromEntropy(entropy))
   const appSecret = await deriveSecret(masterKey, request.appOrigin)
   saveConnection(account, request, appSecret)
   sendSecretToOpener(account, request, appSecret)

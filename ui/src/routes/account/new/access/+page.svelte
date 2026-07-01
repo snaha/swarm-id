@@ -28,7 +28,7 @@
     randomSalt,
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-  import { bytesToHex } from '$lib/crypto/hex'
+  import { bytesToHex, strip0x } from '$lib/crypto/hex'
   import { privateKeyFromEntropy, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import routes from '$lib/routes'
@@ -36,7 +36,6 @@
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { AccessMethod, AccountRecord } from '$lib/types'
-  import { bareHex } from '$lib/utils'
 
   const MIN_PASSWORD_LENGTH = 8
   const TABS = [
@@ -90,11 +89,11 @@
     const carried = draft.restored ?? accountsStore.get(wallet.address)
     // The derivation key is computed from the master key (the wallet private
     // key) while the entropy is in hand — the same chain the proxy/sync use.
-    const masterKey = bareHex(privateKeyFromEntropy(wallet.entropy))
+    const masterKey = strip0x(privateKeyFromEntropy(wallet.entropy))
     const account: AccountRecord = {
       id: new EthAddress(wallet.address),
       name: draft.name,
-      publicKey: bareHex(wallet.publicKey),
+      publicKey: strip0x(wallet.publicKey),
       createdAt: carried?.createdAt ?? Date.now(),
       derivationKey: await deriveAccountDerivationKey(masterKey),
       access,

@@ -11,6 +11,18 @@ export function bytesToHex(bytes: Uint8Array): string {
     .join('')
 }
 
+/**
+ * Strip a leading `0x` from a hex string (returns it unchanged if there is
+ * none): ethers returns keys `0x`-prefixed, but the lib and the shared records
+ * store bare hex. Use this for the public/private-key strings that aren't
+ * wrapped in a bee-js type. For addresses prefer `new EthAddress(value)`, which
+ * strips the prefix AND normalizes EIP-55 mixed-case to lowercase — a plain
+ * prefix strip does not lowercase.
+ */
+export function strip0x(value: string): string {
+  return value.startsWith('0x') ? value.slice(2) : value
+}
+
 /** Decode a hex string (optional 0x prefix); throws on malformed input. */
 export function hexToBytes(hex: string): Uint8Array {
   const stripped = hex.startsWith('0x') ? hex.slice(2) : hex
