@@ -103,9 +103,6 @@
   let toastMessage = $state<string | undefined>(undefined)
   let toastTimer: ReturnType<typeof setTimeout> | undefined
 
-  // "Local" = no usable stamps. Use `stamps` (tombstone-filtered), not the raw
-  // `postageStamps` array, so a removed stamp's tombstone doesn't read as a live
-  // stamp and wrongly hide the view-only banner.
   const isLocal = $derived(account.stamps.length === 0)
   const accessLabel = $derived(methodLabel(account.access.type))
   const AccessIcon: Component = $derived(
