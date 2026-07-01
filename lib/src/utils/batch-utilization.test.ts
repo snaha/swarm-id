@@ -23,6 +23,7 @@ import {
   getChunkIndexForBucket,
   getChunkLayout,
   initializeBatchUtilization,
+  LEASE_SKEW_MARGIN_MS,
   LEASE_TTL_MS,
   mergeChunk,
   serializeUint16Array,
@@ -674,6 +675,37 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
     expect(() => stamper.stamp(makeChunkInBucket(0xa3, 1))).not.toThrow()
+  })
+
+  it("the lease fence reads the injected clock (deterministic, no Date.now)", async () => {
+    // #385: the fence uses the stamper's injected clock — the SAME clock a test
+    // gives the lease (whose `leasedUntil` feeds `leaseValidUntil`). Drive it by
+    // hand: no real time, no `Date.now` mock; advancing the clock across the
+    // deadline flips the fence deterministically.
+    let clock = 1_000_000
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+      () => clock,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    // Lease valid until clock + 10s. Well clear of the skew margin → no fence.
+    stamper.setLeaseValidUntil(clock + 10_000)
+    expect(() => stamper.stamp(makeChunkInBucket(0xa4, 0))).not.toThrow()
+
+    // Advance to exactly the skew margin before expiry → now fenced.
+    clock = clock + 10_000 - LEASE_SKEW_MARGIN_MS
+    expect(() => stamper.stamp(makeChunkInBucket(0xa4, 1))).toThrow(
+      PartitionLeaseLostError,
+    )
   })
 
   it("lock-SOC short-circuit routes overstamps to the reserved slot", async () => {

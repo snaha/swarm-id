@@ -380,6 +380,14 @@ export async function readPartitionState(
      * partition has a cleanly-absent lock (`false`) and still zero-seeds.
      */
     lockUnreadable?: boolean
+    /**
+     * Wall-clock ms to anchor the state-pointer lookup to — the reader half of
+     * the rendezvous. The lease passes its own clock (`this.now()`, = `Date.now()`
+     * in production) so the reader computes the same buckets the writer wrote at.
+     * Defaults to `Date.now()` for bare callers. Injectable for deterministic /
+     * per-device-skew tests (#385).
+     */
+    nowMs?: number
   },
   knownReferenceHex?: string,
 ): Promise<{
@@ -421,6 +429,7 @@ export async function readPartitionState(
     batchDepth,
     holderLeasedUntilMs,
     lockUnreadable,
+    nowMs = Date.now(),
   } = opts
 
   const pointer = await readStatePointer({
@@ -429,7 +438,7 @@ export async function readPartitionState(
     swarmEncryptionKey,
     batchId,
     partition,
-    nowMs: Date.now(),
+    nowMs,
     holderLeasedUntilMs,
   })
 
@@ -614,6 +623,15 @@ export async function writePartitionState(opts: {
    * regardless.
    */
   deviceId?: string
+  /**
+   * Wall-clock ms the rotating pointer/beacon rendezvous addresses are anchored
+   * to. The lease passes its own clock (`this.now()`, = `Date.now()` in
+   * production) so writer, reader, and the collision detector all agree (#385);
+   * the reader anchors to the same clock. Defaults to `Date.now()` for bare
+   * callers (direct unit tests). Injectable so a test can drive rendezvous
+   * deterministically / model per-device skew.
+   */
+  nowMs?: number
 }): Promise<{
   /** Reference-chunk reference (hex) — the caller's "synced reference". */
   referenceHex: string
@@ -641,6 +659,7 @@ export async function writePartitionState(opts: {
     previousReferences,
     previousCounter,
     deviceId,
+    nowMs = Date.now(),
   } = opts
 
   PartitionStateSchemaV1.parse({ counters: localCounter })
@@ -757,11 +776,14 @@ export async function writePartitionState(opts: {
   // to download on the next takeover and `readPartitionState` reports
   // `readFailed` (→ read-only + retry), never a zero-counter resume that would
   // re-issue acked slots.
-  // Wall-clock, deliberately NOT the lease's injectable clock: the rotating
-  // pointer / beacon addresses are a cross-device rendezvous, and a taking-over
-  // device computes the same buckets from its OWN `Date.now()`. Anchoring the
-  // write to wall-clock is what keeps writer and reader on the same address.
-  const now = Date.now()
+  // The lease's clock (`nowMs`), NOT a fresh `Date.now()`: the rotating pointer /
+  // beacon addresses are a cross-device rendezvous, and a taking-over device
+  // computes the same buckets from its OWN clock. In production the lease clock
+  // IS `Date.now()`, so writer and reader still agree on wall-clock; threading it
+  // (rather than reading `Date.now()` here) lets a test drive the rendezvous
+  // deterministically and keeps this on the same clock as the caller's lease-
+  // validity + collision-detection logic (#385).
+  const now = nowMs
   for (const ptrMs of [now, now - STATE_POINTER_EPOCH_MS]) {
     claimedBuckets.add(
       toBucket(statePointerAddress(batchId, partition, owner, ptrMs)),

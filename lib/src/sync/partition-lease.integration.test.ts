@@ -759,6 +759,11 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
     // STATE_POINTER_EPOCH_MS / INTENT_EPOCH_MS — the re-pin granularity.
     const EPOCH_MS = 30_000
 
+    // Drive a fake clock aligned to an epoch boundary. The prior-holder setup
+    // write must anchor to the SAME clock the lease reads with (#385), else its
+    // rotating pointer lands in a different bucket and acquire can't resume it.
+    let clock = EPOCH_MS * 1000 // start of epoch 1000
+
     const published = new Uint32Array(NUM_BUCKETS)
     published[100] = 5 // chunk 0
     published[3000] = 7 // chunk 1
@@ -771,12 +776,11 @@ describe("PartitionLease.acquire — seeds the incremental first publish", () =>
       localCounter: published,
       backupSigner: BACKUP_SIGNER,
       swarmEncryptionKey: TEST_ENC_KEY,
+      nowMs: clock,
     })
 
     const writeSpy = vi.spyOn(partitionState, "writePartitionState")
 
-    // Drive a fake clock aligned to an epoch boundary.
-    let clock = EPOCH_MS * 1000 // start of epoch 1000
     const lease = makeLease({
       deviceId: DEVICE_A,
       bee: bee as unknown as Bee,
@@ -1775,7 +1779,8 @@ describe("PartitionLease.publishState — commit without release", () => {
     counter[200] = 3
     await lease.publishState(counter)
 
-    // A taking-over device resumes at EXACTLY this counter.
+    // A taking-over device resumes at EXACTLY this counter. It reads at the same
+    // clock the lease published at (#385) — the rendezvous is clock-anchored.
     const { readPartitionState } = await import("./partition-state")
     const read = await readPartitionState({
       bee: bee as unknown as Bee,
@@ -1784,6 +1789,7 @@ describe("PartitionLease.publishState — commit without release", () => {
       batchId: TEST_BATCH_ID,
       partition: 0,
       batchDepth: TEST_BATCH_DEPTH,
+      nowMs: NOW,
     })
     expect(read.localCounter).toEqual(counter)
 

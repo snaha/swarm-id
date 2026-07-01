@@ -687,6 +687,8 @@ export class PartitionLease {
         // If this partition's lock read was inconclusive (timed out), a
         // "no pointer found" result must fail safe rather than zero-seed.
         lockUnreadable: this.unreadableLocks.has(partition),
+        // Reader half of the rendezvous — this device's clock (#385).
+        nowMs: this.now(),
       },
       knownReference,
     )
@@ -1222,6 +1224,9 @@ export class PartitionLease {
       // Lets the publish also avoid this device's intent-beacon buckets (the
       // refresh tick re-writes them off-lock at the same reserved slot).
       deviceId: this.opts.deviceId,
+      // Anchor the rendezvous addresses to this device's clock (#385): same
+      // clock as the collision detector and lease validity; `Date.now()` in prod.
+      nowMs: this.now(),
     })
     if (forceFullRepin) this.lastFullPublishEpoch = currentEpoch
     this.publishedReferences = published.references
@@ -1304,9 +1309,10 @@ export class PartitionLease {
    * state-pointer, the deviceId-independent occupancy beacon, this device's
    * intent beacon, or the constant lock SOC. All land at `slot = partition`, so a
    * shared bucket means one overstamps (evicts) the other. Computed from
-   * `Date.now()`-derived addresses (the cross-device rendezvous clock, matching
-   * `writePartitionState` and the reader), so a heartbeat detects exactly the
-   * collision its own write would cause.
+   * `this.now()`-derived addresses — the one rendezvous clock shared by
+   * `writePartitionState` (via `nowMs`) and the reader (#385), = `Date.now()` in
+   * production — so a heartbeat detects exactly the collision its own write would
+   * cause.
    *
    * The retained set is EVERY non-zero counter chunk (`publishedReferences`) AND
    * the reference chunk itself (`lastReferenceHex`) — the latter isn't in
@@ -1320,12 +1326,9 @@ export class PartitionLease {
     if (this.publishedReferences === undefined) return false
     const owner = this.opts.backupSigner.publicKey().address()
     const { batchId } = this.requireWriteContext()
-    // Uses `this.now()`, like the beacon/heartbeat writes it guards. The publish
-    // it triggers (`writePartitionState`) anchors the same rendezvous buckets to
-    // `Date.now()` instead — harmless in production (`this.now() === Date.now()`)
-    // but a known clock-accessor inconsistency across the rendezvous-address code.
-    // Tracked for a deliberate cleanup (inject one clock through both) in #385 —
-    // not a correctness bug, so intentionally left as-is here.
+    // `this.now()` — one clock for the whole rendezvous path (#385): the beacon/
+    // heartbeat writes this guards, the publish it triggers (`writePartitionState`
+    // via `nowMs`), and the reader all derive their buckets from this same clock.
     const nowMs = this.now()
     const epoch = intentEpochBucket(nowMs)
     // This device's own reserved-slot writers for the current epoch.

@@ -301,10 +301,11 @@ A peer's _intent_ beacon uses its own deviceId and can't be computed here — se
   `batch-write-coordinator.ts` `syncStamperLeaseDeadline` on bind + every renewal.)
 - **Bounded clock skew.** A device with a slow clock can believe its lease is valid while
   peers correctly took over. Irreducible; bounded by NTP-level skew + the TTL margin, the
-  same assumption the lock protocol already makes. The local-lapse fence above relies on
-  `leaseValidUntil` (from the lease's `leasedUntil`) and the stamper's `Date.now()` being the
-  same wall clock — true in production; a test that drives the coordinator with an injected
-  lease clock must inject the stamper's clock too (see #385).
+  same assumption the lock protocol already makes. The local-lapse fence relies on
+  `leaseValidUntil` (from the lease's `leasedUntil`) and the stamper's clock being the same —
+  which they are by construction: both the lease and the stamper take one injectable clock
+  (defaulting to `Date.now()`), so a test drives all of lease validity, rendezvous addresses,
+  and the fence from a single clock (#385).
 - **Peer intent-beacon reserved-slot collision.** §10 covers the pointer and the
   deviceId-independent occupancy beacon, but a **peer's** per-device intent beacon sits at an
   address keyed on the peer's deviceId, which we may not know (or can't enumerate). It can

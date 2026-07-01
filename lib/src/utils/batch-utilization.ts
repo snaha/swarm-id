@@ -1271,6 +1271,15 @@ export class UtilizationAwareStamper implements Stamper {
   private leaseValidUntil: number | undefined = undefined
 
   /**
+   * This device's clock, injectable for tests (#385). The local-lapse fence
+   * compares it against `leaseValidUntil`, so a test MUST drive the stamper with
+   * the SAME clock it gives the `PartitionLease` (whose `leasedUntil` feeds
+   * `leaseValidUntil`) — otherwise the two disagree and the fence mis-fires.
+   * Defaults to `Date.now()` (production: one wall clock everywhere).
+   */
+  private readonly now: () => number
+
+  /**
    * Per-partition buckets of the latest published partition-state chunks.
    * Utilisation saves must not place chunks in these buckets (same reserved
    * slot → overstamp → the published resume point is evicted from the
@@ -1532,7 +1541,7 @@ export class UtilizationAwareStamper implements Stamper {
   private leaseLocallyLapsed(): boolean {
     return (
       this.leaseValidUntil !== undefined &&
-      Date.now() >= this.leaseValidUntil - LEASE_SKEW_MARGIN_MS
+      this.now() >= this.leaseValidUntil - LEASE_SKEW_MARGIN_MS
     )
   }
 
@@ -1543,6 +1552,7 @@ export class UtilizationAwareStamper implements Stamper {
     cache: UtilizationStoreDB,
     encryptionKey: Uint8Array,
     utilizationState: BatchUtilizationState,
+    now: () => number,
   ) {
     this.stamper = stamper
     this.batchId = batchId
@@ -1550,6 +1560,7 @@ export class UtilizationAwareStamper implements Stamper {
     this.cache = cache
     this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
+    this.now = now
   }
 
   /**
@@ -1570,6 +1581,7 @@ export class UtilizationAwareStamper implements Stamper {
     cache: UtilizationStoreDB,
     owner: EthAddress,
     encryptionKey: Uint8Array,
+    now: () => number = () => Date.now(),
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
@@ -1610,6 +1622,7 @@ export class UtilizationAwareStamper implements Stamper {
       cache,
       encryptionKey,
       utilizationState,
+      now,
     )
 
     // Restore the protected partition-state buckets so saves keep avoiding
