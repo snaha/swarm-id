@@ -1320,6 +1320,12 @@ export class PartitionLease {
     if (this.publishedReferences === undefined) return false
     const owner = this.opts.backupSigner.publicKey().address()
     const { batchId } = this.requireWriteContext()
+    // Uses `this.now()`, like the beacon/heartbeat writes it guards. The publish
+    // it triggers (`writePartitionState`) anchors the same rendezvous buckets to
+    // `Date.now()` instead — harmless in production (`this.now() === Date.now()`)
+    // but a known clock-accessor inconsistency across the rendezvous-address code.
+    // Tracked for a deliberate cleanup (inject one clock through both) in #385 —
+    // not a correctness bug, so intentionally left as-is here.
     const nowMs = this.now()
     const epoch = intentEpochBucket(nowMs)
     // This device's own reserved-slot writers for the current epoch.

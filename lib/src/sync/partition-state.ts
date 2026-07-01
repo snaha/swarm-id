@@ -859,7 +859,7 @@ export async function writePartitionState(opts: {
   // actually wrote — counter chunks + the reference chunk + the pointer SOC —
   // and the batch latency. Shows whether a held-lease upload's publish is
   // sparse/incremental (~a few writes) or a full publish, and its gateway cost.
-  console.log(
+  console.debug(
     `[partition-state] publish p=${partition} incremental=${incremental} ` +
       `counterChunks=${prepared.length}/${numUtilizationChunks} ` +
       `writes=${prepared.length + 2} durationMs=${Date.now() - publishStart}`,

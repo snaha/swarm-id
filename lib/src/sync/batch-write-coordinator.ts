@@ -521,7 +521,7 @@ export class BatchWriteCoordinator {
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
         // caches, that's a dual-hold the intent round never gets to arbitrate.
-        console.log(
+        console.debug(
           `[BatchWriteCoordinator] Adopted cached lease p=${adopted} (no acquire/intent round) for device=${this.deps.deviceId}`,
         )
         this.partitionLease = lease
