@@ -322,8 +322,9 @@
   }
 
   function deleteAccount() {
-    // Removing the record drops its connected apps and stamps with it, and the
-    // storage event de-authenticates any dApp proxy iframes.
+    // The account's connected apps and stamps are nested in the record, so they
+    // are removed with it; the resulting storage event de-authenticates any
+    // connected dApp proxy iframes.
     accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
     if (next) {
