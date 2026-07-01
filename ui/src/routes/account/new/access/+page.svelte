@@ -11,7 +11,12 @@
   import Eye from '@lucide/svelte/icons/eye'
   import EyeOff from '@lucide/svelte/icons/eye-off'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
-  import { PARTITION_COUNT, deriveAccountDerivationKey } from '@snaha/swarm-id'
+  import {
+    type AccessMethod,
+    type Account as AccountRecord,
+    PARTITION_COUNT,
+    deriveAccountDerivationKey,
+  } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -35,7 +40,6 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { AccessMethod, AccountRecord } from '$lib/types'
 
   const MIN_PASSWORD_LENGTH = 8
   const TABS = [

@@ -22,6 +22,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Wallet from '@lucide/svelte/icons/wallet'
+  import type { AccessMethod } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -48,7 +49,7 @@
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { AccessMethod, Account } from '$lib/types'
+  import type { Account } from '$lib/types'
   import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000

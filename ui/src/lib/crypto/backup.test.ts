@@ -1,10 +1,10 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { EthAddress } from '@ethersphere/bee-js'
+import type { Account as AccountRecord } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
 import { daysToMs } from '../duration'
-import type { AccountRecord } from '../types'
 import { backupFilename, createBackup, restoreBackup } from './backup'
 import { strip0x } from './hex'
 import { walletFromPhrase } from './mnemonic'
