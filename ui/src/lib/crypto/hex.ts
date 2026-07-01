@@ -14,20 +14,18 @@ export function bytesToHex(bytes: Uint8Array): string {
 /**
  * Strip a leading `0x` from a hex string (returns it unchanged if there is
  * none): ethers returns keys `0x`-prefixed, but the lib and the shared records
- * store bare hex. Use this for the public/private-key strings that aren't
- * wrapped in a bee-js type. For addresses prefer `new EthAddress(value)`, which
- * strips the prefix AND normalizes EIP-55 mixed-case to lowercase — a plain
- * prefix strip does not lowercase.
+ * store bare hex. Use this for the public/private-key strings. For addresses
+ * prefer `new EthAddress(value)`, which also normalizes EIP-55 case.
  */
 export function strip0x(value: string): string {
   return value.startsWith('0x') ? value.slice(2) : value
 }
 
 /**
- * Add a `0x` prefix to a bare hex string (idempotent: a value that already has
- * one is returned unchanged). Throws on a non-hex string so a malformed value
- * can't be handed off as hex. The inverse of `strip0x`, for presenting bare
- * stored hex to UI or code that expects the `0x` form.
+ * Add a `0x` prefix to a bare hex string (idempotent: an already-prefixed value
+ * is returned unchanged). Throws on a non-hex string so a malformed value can't
+ * be handed off as hex. The inverse of `strip0x`, for presenting bare stored hex
+ * to UI or code that expects the `0x` form.
  */
 export function prefix0x(value: string): string {
   if (value.startsWith('0x')) return value
