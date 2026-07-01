@@ -46,7 +46,17 @@ const inFlightFolds = new Map<string, Promise<FoldAccountResult | undefined>>()
  * is empty (no device has published — equivalent to today's "no-backup").
  *
  * Concurrent calls for the same account share one in-flight read (see
- * `inFlightFolds`); `bee` is keyed out because any client reads the same feeds.
+ * `inFlightFolds`); `bee` is intentionally keyed OUT — every client reads the
+ * same feeds. Coalescing across two DIFFERENT `bee` endpoints (e.g. a local
+ * cluster and a public gateway mid-transition) is safe, not a bug: a fold is a
+ * point-in-time, eventually-consistent LWW/CRDT snapshot (roster + device-state
+ * both fold last-writer-wins by their per-field `at` clocks — see
+ * `merge-snapshot.ts` / `device-state.ts`). No caller assumes a fold reflects a
+ * specific endpoint's live view, so a coalesced caller receiving the other
+ * endpoint's equally-valid snapshot is indistinguishable from ordinary gateway
+ * staleness — which the LWW fold already tolerates everywhere, and the next
+ * (uncoalesced, entry-cleared) fold re-reads and re-converges. Do NOT add `bee`
+ * to the key to "fix" this; it would only defeat the coalescing.
  */
 export async function foldAccountFromSwarm(opts: {
   bee: Bee

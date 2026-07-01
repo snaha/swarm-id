@@ -742,6 +742,18 @@ export class BatchWriteCoordinator {
       return
     }
 
+    // Optimistic resume: the lock read showed no live foreign holder and no
+    // release sentinel, so extend the local lease and keep writing — even when
+    // our OWN lock claim has lapsed on Swarm (idle past TTL, or renewals failing)
+    // but no peer has taken the slot on this gateway. This is the held-lease fast
+    // path (an idle-past-TTL upload re-validates its still-readable lock instead
+    // of paying a fresh acquire). A same-gateway takeover IS caught above by
+    // `isDisplaced`; the only unhandled case is a peer on a disjoint gateway whose
+    // lock write we can't see — the documented §12 optimistic-lease residual,
+    // bounded by skew and backstopped by the presence/occupancy beacons on
+    // `refresh()`. (The refresh tick takes a more conservative stance and
+    // self-demotes an un-renewable lease; this on-demand path favors upload
+    // latency, relying on the per-upload `isDisplaced` re-read as its net.)
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
     this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
