@@ -25,7 +25,13 @@ function accountFor(phrase: string): AccountRecord {
     settings: { appSessionDuration: 30 * MS_PER_DAY },
     devices: [],
     connectedApps: [
-      { appUrl: 'https://coucou.mail', appName: 'Coucou', lastConnectedAt: 1765000000000 },
+      {
+        appUrl: 'https://coucou.mail',
+        appName: 'Coucou',
+        lastConnectedAt: 1765000000000,
+        // Live session secret — must NOT survive a backup round-trip.
+        appSecret: 'deadbeefdeadbeef',
+      },
     ],
     postageStamps: [],
   }
@@ -41,6 +47,8 @@ describe('backup round-trip', () => {
     expect(restored.id.toHex()).toBe(account.id.toHex())
     expect(restored.name).toBe('Jovial Einstein')
     expect(restored.connectedApps).toHaveLength(1)
+    // The per-app session secret is stripped — restore re-derives it on reconnect.
+    expect(restored.connectedApps[0].appSecret).toBeUndefined()
     expect(restored.settings?.appSessionDuration).toBe(30 * MS_PER_DAY)
     // The secret material never leaves the device.
     expect(file).not.toContain('encryptedSeed')

@@ -67,7 +67,14 @@ export async function createBackup(account: AccountRecord, entropy: Uint8Array):
     settings: account.settings,
     defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toHex(),
     devices: account.devices,
-    connectedApps: account.connectedApps.map(serializeConnectedApp),
+    // Strip `appSecret` from every connected app: it is the live session secret
+    // the dApp's proxy authenticates from, re-derivable from the master key on
+    // the next connect. Backing it up would let a restore silently re-authenticate
+    // apps without an explicit reconnect (and needlessly ships a secret).
+    connectedApps: account.connectedApps.map((app) => {
+      const { appSecret: _appSecret, ...withoutSecret } = serializeConnectedApp(app)
+      return withoutSecret
+    }),
     postageStamps: account.postageStamps.map(serializePostageStamp),
     partitionCount: account.partitionCount,
   }
