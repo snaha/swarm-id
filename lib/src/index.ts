@@ -138,6 +138,7 @@ export {
   createAccountsStorageManager,
   createNetworkSettingsStorageManager,
   serializeAccount,
+  serializeAccountData,
   serializeConnectedApp,
   serializePostageStamp,
   serializeNetworkSettings,
@@ -337,6 +338,7 @@ export type {
 export type {
   Device,
   Account,
+  AccountData,
   AccessMethod,
   ConnectedApp,
   PostageStamp,
@@ -351,6 +353,7 @@ export {
   DEFAULT_GNOSIS_RPC_URL,
   NetworkSettingsSchemaV1,
   AccountSchemaV1,
+  AccountDataSchemaV1,
   AccessMethodSchemaV1,
   isLocalAccount,
 } from "./schemas"

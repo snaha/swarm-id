@@ -15,7 +15,7 @@ import {
   createLocalStorageManager,
   type VersionParser,
 } from "./versioned-storage"
-import type { Account, ConnectedApp, PostageStamp } from "../types"
+import type { Account, AccountData, ConnectedApp, PostageStamp } from "../types"
 import { STORAGE_KEY_ACCOUNTS, STORAGE_KEY_NETWORK_SETTINGS } from "../types"
 import {
   AccountSchemaV1,
@@ -55,26 +55,52 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
 // ============================================================================
 
 /**
+ * Serialize the portable projection of an account (`AccountData`) — what backup
+ * files and the sync feed carry off the device. Beyond the schema-level omission
+ * of the seed vault, it strips the live per-app session material: `appSecret`
+ * (the secret the dApp proxy authenticates from, re-derivable from the master
+ * key on the next connect) and `connectedUntil` (meaningless without the secret
+ * — keeping it would show a "Connected" app that can no longer authenticate).
+ */
+export function serializeAccountData(
+  data: AccountData,
+): Record<string, unknown> {
+  return {
+    id: data.id.toString(),
+    name: data.name,
+    createdAt: data.createdAt,
+    derivationKey: data.derivationKey,
+    publicKey: data.publicKey,
+    defaultPostageStampBatchID: data.defaultPostageStampBatchID?.toString(),
+    devices: data.devices,
+    connectedApps: data.connectedApps.map((app) => {
+      const {
+        appSecret: _appSecret,
+        connectedUntil: _connectedUntil,
+        ...portable
+      } = serializeConnectedApp(app)
+      return portable
+    }),
+    postageStamps: data.postageStamps.map(serializePostageStamp),
+    settings: data.settings,
+    accountNameAt: data.accountNameAt,
+    defaultStampAt: data.defaultStampAt,
+    settingsAt: data.settingsAt,
+    lastModified: data.lastModified,
+    partitionCount: data.partitionCount,
+  }
+}
+
+/**
  * Serialize Account for storage (nested: includes its connected apps and
  * postage stamps inline).
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
   return {
-    id: account.id.toString(),
-    name: account.name,
-    createdAt: account.createdAt,
-    derivationKey: account.derivationKey,
-    publicKey: account.publicKey,
-    defaultPostageStampBatchID: account.defaultPostageStampBatchID?.toString(),
-    devices: account.devices,
+    ...serializeAccountData(account),
+    // Local storage keeps the live per-app session secrets the portable
+    // projection strips.
     connectedApps: account.connectedApps.map(serializeConnectedApp),
-    postageStamps: account.postageStamps.map(serializePostageStamp),
-    settings: account.settings,
-    accountNameAt: account.accountNameAt,
-    defaultStampAt: account.defaultStampAt,
-    settingsAt: account.settingsAt,
-    lastModified: account.lastModified,
-    partitionCount: account.partitionCount,
     // Device-local seed vault — the account's only secret material. `access` is
     // how the seed is unlocked on THIS device (the method plus its params:
     // password KDF, passkey credential, or eth-wallet salt); `encryptedSeed` is

@@ -264,6 +264,18 @@ export const AccountSchemaV1 = z.object({
   partitionCount: z.number().int().min(1).optional(),
 })
 
+/**
+ * The portable projection of the account — everything except the device-local
+ * seed vault (`access` + `encryptedSeed`). This is the single definition of
+ * what travels off the device: backup files serialize/parse it directly, and
+ * the sync feed carries the same shape. Serialize with `serializeAccountData`,
+ * which additionally strips the live per-app session material.
+ */
+export const AccountDataSchemaV1 = AccountSchemaV1.omit({
+  access: true,
+  encryptedSeed: true,
+})
+
 // ============================================================================
 // Sync State Snapshot Schemas
 // ============================================================================
@@ -324,6 +336,7 @@ export const AccountStateSnapshotSchemaV1 = z.object({
 export type Device = z.infer<typeof DeviceSchemaV1>
 export type AccessMethod = z.infer<typeof AccessMethodSchemaV1>
 export type Account = z.infer<typeof AccountSchemaV1>
+export type AccountData = z.infer<typeof AccountDataSchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
