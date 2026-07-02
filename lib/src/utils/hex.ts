@@ -10,16 +10,17 @@
 import type { Address } from "../schemas"
 
 /**
- * Convert a hex string to Uint8Array
+ * Convert a hex string (optional 0x prefix) to Uint8Array
  *
- * @param hexString - Hex string (e.g., "deadbeef")
+ * @param hexString - Hex string (e.g., "deadbeef" or "0xdeadbeef")
  * @returns Uint8Array
+ * @throws {Error} If the input has odd length or non-hex characters — a
+ *   malformed value must fail loudly, not silently decode to zero bytes
  */
 export function hexToUint8Array(hexString: string): Uint8Array {
-  // Remove any whitespace and ensure even length
-  const hex = hexString.replace(/\s/g, "")
-  if (hex.length % 2 !== 0) {
-    throw new Error("Invalid hex string: length must be even")
+  const hex = hexString.replace(/^0x/i, "")
+  if (hex.length % 2 !== 0 || !/^[0-9a-fA-F]*$/.test(hex)) {
+    throw new Error("Invalid hex string.")
   }
 
   const bytes = new Uint8Array(hex.length / 2)
