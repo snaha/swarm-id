@@ -1,12 +1,17 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "vitest"
-import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import { serializeAccount } from "./storage-managers"
+import { describe, it, expect, afterEach, vi } from "vitest"
+import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
+import {
+  createAccountsStorageManager,
+  serializeAccount,
+} from "./storage-managers"
 import { AccountSchemaV1 } from "../schemas"
+import { STORAGE_KEY_ACCOUNTS } from "../types"
 import {
   TEST_BATCH_ID_HEX,
+  TEST_ETH_ADDRESS_2_HEX,
   TEST_PRIVATE_KEY_HEX,
   createAccount,
   createPostageStamp,
@@ -57,5 +62,55 @@ describe("serializeAccount — device-local seed vault", () => {
       )
       expect(reparsed.access).toEqual(access)
     }
+  })
+})
+
+describe("createAccountsStorageManager().load() — invalid records", () => {
+  afterEach(() => {
+    vi.unstubAllGlobals()
+    vi.restoreAllMocks()
+  })
+
+  function stubLocalStorage(document: unknown) {
+    const store = new Map<string, string>([
+      [STORAGE_KEY_ACCOUNTS, JSON.stringify(document)],
+    ])
+    vi.stubGlobal("window", {
+      localStorage: {
+        getItem: (key: string) => store.get(key) ?? null,
+        setItem: (key: string, value: string) => void store.set(key, value),
+        removeItem: (key: string) => void store.delete(key),
+      },
+    })
+  }
+
+  it("skips an invalid record instead of dropping every account", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const good = createAccount()
+    const other = createAccount({
+      id: new EthAddress(TEST_ETH_ADDRESS_2_HEX),
+      name: "Other Account",
+    })
+    const corrupt = {
+      ...serializeAccount(other),
+      // Fails the schema's hex regex — e.g. a malformed write from a dev tool.
+      encryptedSeed: "not-hex",
+    }
+    stubLocalStorage({
+      version: 1,
+      data: [serializeAccount(good), corrupt],
+    })
+
+    const loaded = createAccountsStorageManager().load()
+
+    expect(loaded).toHaveLength(1)
+    expect(loaded[0].id.equals(good.id)).toBe(true)
+  })
+
+  it("returns [] when the document is not an array", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    stubLocalStorage({ version: 1, data: { not: "an array" } })
+
+    expect(createAccountsStorageManager().load()).toEqual([])
   })
 })
