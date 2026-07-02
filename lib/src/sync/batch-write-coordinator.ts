@@ -277,6 +277,12 @@ export class BatchWriteCoordinator {
         const localCounter = this.deps.stamper.getLocalCounter()
         if (localCounter !== undefined) {
           await this.partitionLease?.publishState(localCounter)
+          // The publish durably re-wrote the state pointer to the current
+          // bucket (same effect as a successful heartbeat), so an idle-blip
+          // failure streak is stale — clear it. Otherwise the refresh tick keeps
+          // measuring drift from the old timestamp across this fresh publish and
+          // could demote a healthy holder prematurely.
+          this.pointerHeartbeatFailingSince = undefined
         } else if (this.currentPartition !== undefined) {
           // Held a partition lease but the stamper has no local counter: the
           // commit publish (ack-after-publish) would be silently skipped,

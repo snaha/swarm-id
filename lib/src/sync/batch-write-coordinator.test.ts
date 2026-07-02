@@ -1110,6 +1110,45 @@ describe("BatchWriteCoordinator — self-demote on persistently failing pointer 
   })
 })
 
+describe("BatchWriteCoordinator — upload publish resets the heartbeat streak", () => {
+  // An upload's commit publish (`publishState`) durably re-writes the state
+  // pointer to the current bucket — exactly what a successful heartbeat does. A
+  // failure streak armed during an idle blip must therefore be cleared by a
+  // successful upload publish; otherwise the streak keeps counting from the old
+  // (now-stale) timestamp across the fresh publish and can demote a healthy
+  // holder prematurely (measuring drift the upload already repaired).
+  it("clears pointerHeartbeatFailingSince after a successful publish", async () => {
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS, // stays throttled post-op
+    })
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot", // no refresh timer to leak
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    // First write establishes the held lease (acquire resets the streak).
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+    // An idle heartbeat blip armed the streak more than one epoch ago.
+    internals.pointerHeartbeatFailingSince =
+      Date.now() - (STATE_POINTER_EPOCH_MS + 1)
+
+    // A second write publishes the pointer afresh — this must clear the streak.
+    await coordinator.withWrite(async () => "ok", { wait: "block" })
+
+    expect(internals.pointerHeartbeatFailingSince).toBeUndefined()
+  })
+})
+
 describe("BatchWriteCoordinator — acquire-epoch guard", () => {
   it("a late-completing acquire does not resurrect a cleared lease", async () => {
     const calls: string[] = []
