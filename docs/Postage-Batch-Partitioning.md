@@ -319,6 +319,15 @@ A peer's _intent_ beacon uses its own deviceId and can't be computed here — se
 - **`readFailed` degradation.** When the resume point exists but can't be read (transient
   network error, or a published chunk evicted from the reserve), acquire degrades to
   read-only and retries rather than resuming from zero — never re-issuing used slots.
+- **No cross-version transport migration (stale-tab window).** The rotating state-pointer
+  SOC replaced the walked epoch feed under the **same** topic domain
+  (`swarm-id-partition-state-v1`): pre-pointer code neither writes nor reads the pointer
+  buckets, and current code never touches the feed, so a device running pre-pointer code
+  against an account written by current code (or vice versa) resumes from stale/absent
+  state. Accepted because the lib is bundled into the centrally-deployed UI apps — every
+  device loads the current build fresh, so the exposure is one already-open tab spanning a
+  deploy, and the data at risk overlaps the unclean-crash slots already accepted above. A
+  future wire-format change must bump the topic domain (`…-v2`) instead of reusing v1.
 
 ## Key constants (in `lib/src/utils/batch-utilization.ts`)
 
