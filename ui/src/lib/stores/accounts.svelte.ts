@@ -28,6 +28,11 @@ type AccountSettings = { appSessionDuration?: number }
  * serialized to hex by the lib storage manager). The private `#onChange` makes
  * the class nominal, so a plain record can't be mistaken for a live account.
  *
+ * Instances are stable per account id: a cross-tab storage refresh updates the
+ * existing instance's fields via `applyRecord` rather than replacing it, so an
+ * account held across an await (connect handshake, access change) stays part of
+ * the persisted collection and its mutations are never dropped.
+ *
  * Scalar fields each carry a per-field last-writer-wins clock
  * (`accountNameAt` / `defaultStampAt` / `settingsAt`) so concurrent edits to
  * different scalars on different devices converge instead of clobbering. A
@@ -36,10 +41,10 @@ type AccountSettings = { appSessionDuration?: number }
  */
 export class Account {
   readonly id: EthAddress
-  readonly createdAt: number
-  readonly derivationKey: string
   // Initialized here so the runes compiler tracks them; real values are set
   // from the record in the constructor.
+  createdAt = $state(0)
+  derivationKey = $state('')
   name = $state('')
   publicKey = $state('')
   access = $state<AccessMethod>({ type: 'password', kdfSalt: '', kdfIterations: 0 })
@@ -58,6 +63,18 @@ export class Account {
 
   constructor(record: AccountRecord, onChange: () => void) {
     this.id = record.id
+    this.#onChange = onChange
+    this.applyRecord(record)
+  }
+
+  /**
+   * Overwrite this instance's state from a record with the same id. Cross-tab
+   * refreshes and same-address re-creation go through this instead of building
+   * a new instance, so references held across an await stay live — a mutation
+   * on a detached instance would persist a collection that no longer contains
+   * it, silently dropping the write.
+   */
+  applyRecord(record: AccountRecord) {
     this.createdAt = record.createdAt
     this.derivationKey = record.derivationKey
     this.name = record.name
@@ -74,7 +91,6 @@ export class Account {
     this.settingsAt = record.settingsAt
     this.lastModified = record.lastModified
     this.partitionCount = record.partitionCount
-    this.#onChange = onChange
   }
 
   #persist() {
@@ -195,11 +211,24 @@ function load(): Account[] {
 
 accounts = load()
 
+/**
+ * Re-read the collection from storage, updating existing instances in place
+ * (see `applyRecord`) so held references survive the refresh.
+ */
+function refresh(): void {
+  accounts = storageManager.load().map((record) => {
+    const existing = accounts.find((account) => account.id.equals(record.id))
+    if (!existing) return hydrate(record)
+    existing.applyRecord(record)
+    return existing
+  })
+}
+
 if (browser) {
   // Cross-tab refresh: another tab mutating the account document (sign-in,
   // app connect, stamp purchase) updates this tab's reactive state too.
   window.addEventListener('storage', (event) => {
-    if (event.key === STORAGE_KEY_ACCOUNTS) accounts = load()
+    if (event.key === STORAGE_KEY_ACCOUNTS) refresh()
   })
 }
 
@@ -221,8 +250,15 @@ export const accountsStore = {
 
   /** Create — or replace, for sign-in / restore — an account; returns the live object. */
   add(record: AccountRecord): Account {
+    const existing = accounts.find((account) => account.id.equals(record.id))
+    if (existing) {
+      // Reuse the instance so references held elsewhere keep working.
+      existing.applyRecord(record)
+      persist()
+      return existing
+    }
     const account = hydrate(record)
-    accounts = [...accounts.filter((existing) => !existing.id.equals(account.id)), account]
+    accounts = [...accounts, account]
     persist()
     return account
   },
