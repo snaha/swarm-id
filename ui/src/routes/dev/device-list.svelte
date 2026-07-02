@@ -24,9 +24,9 @@
 
   import CopyButton from '$lib/components/copy-button.svelte'
   import { Button } from '$lib/components/ui/button'
-  import { networkSettingsStore } from '$lib/dev/network-settings.svelte'
   import { refreshAccountFromSwarm } from '$lib/dev/refresh-account-from-swarm'
   import { syncStore } from '$lib/dev/sync.svelte'
+  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   const { account }: { account: Account } = $props()
 

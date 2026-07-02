@@ -4,19 +4,12 @@
 -->
 
 <script lang="ts">
-  import { Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Minus from '@lucide/svelte/icons/minus'
   import Plus from '@lucide/svelte/icons/plus'
-  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
-  import {
-    DEFAULT_BEE_NODE_URL,
-    type PostageStamp,
-    calculateStampAmountForDays,
-    fetchChainState,
-  } from '@snaha/swarm-id'
+  import type { PostageStamp } from '@snaha/swarm-id'
 
+  import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -24,15 +17,16 @@
   import {
     LIFESPAN_UNIT_OPTIONS,
     type LifespanUnit,
-    SECONDS_PER_DAY,
     formatYmd,
     lifespanToSeconds,
+    remainingLifespanSeconds,
   } from '$lib/drives'
   import { topUpStamp } from '$lib/payment/bee'
-  import { extendedStamp } from '$lib/payment/purchase'
+  import { currentChainPrice } from '$lib/payment/chain-price'
+  import { extendedStamp, stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
-  const COST_SIGNIFICANT_DIGITS = 4
+  const MS_PER_SECOND = 1000
 
   interface Props {
     account: Account
@@ -56,36 +50,24 @@
 
   const changed = $derived(addedSeconds > 0)
   const estimatedUntil = $derived(
-    formatYmd(Date.now() + ((drive.batchTTL ?? 0) + addedSeconds) * 1000),
+    formatYmd(
+      Date.now() +
+        (Math.max(0, remainingLifespanSeconds(drive) ?? 0) + addedSeconds) * MS_PER_SECOND,
+    ),
   )
 
   const estimateBzz = $derived.by(() => {
     if (!changed || currentPrice === undefined) {
       return undefined
     }
-    const days = Math.max(1, Math.ceil(addedSeconds / SECONDS_PER_DAY))
-    const amount = calculateStampAmountForDays(currentPrice, days)
-    if (amount <= 0n) {
-      return undefined
-    }
-    try {
-      return Utils.getStampCost(drive.depth, amount).toSignificantDigits(COST_SIGNIFICANT_DIGITS)
-    } catch {
-      return undefined
-    }
+    return stampCostBzz(drive.depth, stampAmountForSeconds(currentPrice, addedSeconds))
   })
 
-  const infoText = $derived(
-    !changed
-      ? 'No changes made yet.'
-      : estimateBzz
-        ? `Estimated cost ≈ ${estimateBzz} BZZ`
-        : 'Final cost is shown at payment.',
-  )
-
+  // Best-effort prefetch for the live estimate; proceed() fetches for real (and
+  // therefore retries after a failure), so a miss here only hides the estimate.
   $effect(() => {
-    fetchChainState(DEFAULT_BEE_NODE_URL)
-      .then((state) => (currentPrice = state.currentPrice))
+    currentChainPrice()
+      .then((price) => (currentPrice = price))
       .catch(() => undefined)
   })
 
@@ -102,22 +84,25 @@
     if (!changed) {
       return
     }
-    if (currentPrice === undefined) {
-      errorMessage = 'Couldn’t fetch the current price. Check your connection and try again.'
-      phase = 'error'
-      return
-    }
     const myAttempt = ++attempt
     phase = 'pending'
     errorMessage = ''
     try {
-      const days = Math.max(1, Math.ceil(addedSeconds / SECONDS_PER_DAY))
-      const topUpAmount = calculateStampAmountForDays(currentPrice, days)
+      const price = (currentPrice ??= await currentChainPrice())
+      const topUpAmount = stampAmountForSeconds(price, addedSeconds)
+      // The drive may have been removed meanwhile (another tab, a sync fold) —
+      // check before spending on the node against a record we'd never show.
+      if (!account.hasLiveStamp(drive.batchID)) {
+        throw new Error('This drive was removed in the meantime.')
+      }
       await topUpStamp(drive.batchID.toHex(), topUpAmount)
       if (myAttempt !== attempt) {
         return
       }
-      account.updateStamp(drive.batchID, extendedStamp(drive, addedSeconds, topUpAmount))
+      account.updateStamp(
+        drive.batchID,
+        extendedStamp(drive, addedSeconds, topUpAmount, remainingLifespanSeconds(drive)),
+      )
       onUpdated?.('Lifespan extended')
       close()
     } catch (caught) {
@@ -130,24 +115,15 @@
   }
 </script>
 
-{#if phase === 'pending'}
-  <Dialog onclose={close} dismissable={false} title={drive.name || 'Drive'}>
-    <div class="flex flex-col items-center gap-2 py-2 text-center">
-      <LoaderCircle class="size-5 animate-spin" />
-      <p class="text-sm">Extending the lifespan…</p>
-    </div>
-  </Dialog>
-{:else if phase === 'error'}
-  <Dialog onclose={close} title={drive.name || 'Drive'}>
-    <div class="flex items-start gap-2">
-      <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-      <p class="text-sm">{errorMessage}</p>
-    </div>
-    <div class="flex w-full flex-col gap-2">
-      <Button class="w-full" onclick={() => (phase = 'form')}>Try again</Button>
-      <Button variant="outline" class="w-full" onclick={close}>Close</Button>
-    </div>
-  </Dialog>
+{#if phase !== 'form'}
+  <DriveDialogStatus
+    title={drive.name || 'Drive'}
+    {phase}
+    pendingLabel="Extending the lifespan…"
+    {errorMessage}
+    onRetry={() => (phase = 'form')}
+    onClose={close}
+  />
 {:else}
   <Dialog onclose={close} title={drive.name || 'Drive'}>
     <div class="flex w-full flex-col gap-2">
@@ -171,7 +147,13 @@
       <p class="text-muted-foreground text-sm">Estimated until {estimatedUntil}</p>
     </div>
 
-    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">{infoText}</p>
+    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">
+      {!changed
+        ? 'No changes made yet.'
+        : estimateBzz
+          ? `Estimated cost ≈ ${estimateBzz} BZZ`
+          : 'Final cost is shown at payment.'}
+    </p>
 
     <Button class="w-full" disabled={!changed} onclick={proceed}>
       Proceed

@@ -109,22 +109,38 @@ export function mergePostageStamps(
   remote: PostageStamp[],
 ): PostageStamp[] {
   const keyOf = (s: PostageStamp) => s.batchID.toHex()
-  // Last-writer-wins per batch so deletions AND edits propagate: a delete is a
-  // tombstone (`deletedAt`), an in-place edit (rename / dilute / top-up) stamps
-  // `updatedAt`, and the recency clock is the max of the three — mirroring
-  // `mergeConnectedApps`. A delete beats an older add/edit, a fresh edit beats
-  // a stale copy (so renames propagate instead of tying on `createdAt`), and a
-  // fresh re-add (new `createdAt`) re-activates the stamp, matching device
-  // resurrection. Deleted stamps are kept (the tombstone keeps propagating
-  // until a re-add or newer edit supersedes it).
+  // Last-writer-wins per batch so deletions AND edits propagate, on TWO clocks:
+  //
+  // - Node state (the whole record) merges on `max(deletedAt, updatedAt,
+  //   createdAt)` — a delete beats an older add/edit, a dilute/top-up
+  //   (`updatedAt`) beats a stale copy, and a fresh re-add (new `createdAt`)
+  //   re-activates the stamp, matching device resurrection. Deleted stamps are
+  //   kept (the tombstone keeps propagating until a re-add or newer node edit
+  //   supersedes it).
+  // - The name overlays on its own `nameUpdatedAt` clock. A rename made over a
+  //   stale copy carries no node-state recency, so it can neither drag old
+  //   depth/amount/batchTTL past a concurrent dilute/top-up nor resurrect a
+  //   tombstone — but the newest name still wins.
   const recency = (s: PostageStamp) =>
     Math.max(s.deletedAt ?? 0, s.updatedAt ?? 0, s.createdAt)
+  const nameRecency = (s: PostageStamp) => s.nameUpdatedAt ?? 0
   const merged = new Map<string, PostageStamp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.
   for (const s of [...remote, ...local]) {
     const existing = merged.get(keyOf(s))
-    if (!existing || recency(s) >= recency(existing)) merged.set(keyOf(s), s)
+    if (!existing) {
+      merged.set(keyOf(s), s)
+      continue
+    }
+    const winner = recency(s) >= recency(existing) ? s : existing
+    const loser = winner === s ? existing : s
+    merged.set(
+      keyOf(s),
+      nameRecency(loser) > nameRecency(winner)
+        ? { ...winner, name: loser.name, nameUpdatedAt: loser.nameUpdatedAt }
+        : winner,
+    )
   }
   return Array.from(merged.values())
 }

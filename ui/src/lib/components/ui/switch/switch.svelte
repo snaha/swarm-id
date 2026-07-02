@@ -9,10 +9,11 @@
   interface Props {
     checked: boolean
     class?: string
+    disabled?: boolean
     'aria-label'?: string
   }
 
-  let { checked = $bindable(), class: className, ...restProps }: Props = $props()
+  let { checked = $bindable(), class: className, disabled = false, ...restProps }: Props = $props()
 </script>
 
 <button
@@ -20,9 +21,10 @@
   role="switch"
   aria-checked={checked}
   data-slot="switch"
+  {disabled}
   onclick={() => (checked = !checked)}
   class={cn(
-    'focus-visible:ring-ring/50 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:ring-3',
+    'focus-visible:ring-ring/50 inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border border-transparent transition-colors outline-none focus-visible:ring-3 disabled:cursor-not-allowed disabled:opacity-50',
     checked ? 'bg-primary' : 'bg-input',
     className,
   )}

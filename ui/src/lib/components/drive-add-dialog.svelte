@@ -4,16 +4,13 @@
 -->
 
 <script lang="ts">
+  import { onDestroy } from 'svelte'
+
   import { Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
-  import {
-    DEFAULT_BEE_NODE_URL,
-    calculateStampAmountForDays,
-    fetchChainState,
-  } from '@snaha/swarm-id'
 
+  import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -22,17 +19,22 @@
   import {
     LIFESPAN_UNIT_OPTIONS,
     type LifespanUnit,
-    SECONDS_PER_DAY,
     formatBytes,
     lifespanToSeconds,
   } from '$lib/drives'
   import { fetchExistingStamp } from '$lib/payment/bee'
+  import { currentChainPrice } from '$lib/payment/chain-price'
   import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
-  import { derivePostageSigner, stampFromBatch } from '$lib/payment/purchase'
+  import {
+    derivePostageSigner,
+    stampAmountForSeconds,
+    stampCostBzz,
+    stampFromBatch,
+    stampTtlSeconds,
+  } from '$lib/payment/purchase'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import type { Account } from '$lib/types'
 
-  const COST_SIGNIFICANT_DIGITS = 4
   const BATCH_ID_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/
 
   const STORAGE_OPTIONS = [
@@ -94,20 +96,7 @@
     ) {
       return undefined
     }
-    // Round up: Bee enforces a 24h floor, and rounding a fractional day down
-    // would under-estimate the cost (matches drive-extend-dialog).
-    const days = Math.max(1, Math.ceil(lifespanSeconds / SECONDS_PER_DAY))
-    const amount = calculateStampAmountForDays(currentPrice, days)
-    if (amount <= 0n) {
-      return undefined
-    }
-    try {
-      return Utils.getStampCost(Number(depthValue), amount).toSignificantDigits(
-        COST_SIGNIFICANT_DIGITS,
-      )
-    } catch {
-      return undefined
-    }
+    return stampCostBzz(Number(depthValue), stampAmountForSeconds(currentPrice, lifespanSeconds))
   })
 
   const batchIdValid = $derived(BATCH_ID_PATTERN.test(batchIdInput.trim()))
@@ -135,9 +124,11 @@
     return 'Confirm with passkey'
   }
 
+  // Best-effort: the price only feeds the cost estimate here (and the TTL guess
+  // for a settled purchase); the purchase itself never gates on it.
   $effect(() => {
-    fetchChainState(DEFAULT_BEE_NODE_URL)
-      .then((state) => (currentPrice = state.currentPrice))
+    currentChainPrice()
+      .then((price) => (currentPrice = price))
       .catch(() => undefined)
   })
 
@@ -147,6 +138,10 @@
     purchase = undefined
     onClose()
   }
+
+  // The dialog can unmount without close() (tab switch, navigation) — treat
+  // that as a cancel so the popup poll and message listener don't outlive us.
+  onDestroy(() => purchase?.cancel())
 
   function proceed() {
     errorMessage = ''
@@ -207,6 +202,11 @@
     const driveName = name.trim() || suggestedName()
     try {
       const { signerKey, destination } = await derivePostageSigner(seed)
+      // The user may have cancelled during the derivation — bail before the
+      // popup opens, or a payment window would appear after they backed out.
+      if (myAttempt !== attempt) {
+        return
+      }
       purchase = openStampPurchaseWidget({
         destination,
         // /dev mock (see dev-settings): simulate the purchase without a real
@@ -218,7 +218,14 @@
           if (myAttempt !== attempt) {
             return
           }
-          const ttl = lifespanSeconds > 0 ? lifespanSeconds : undefined
+          // The size/lifespan actually bought are chosen INSIDE the widget —
+          // the form's selection is only a pre-payment estimate. Derive the
+          // lifespan from what settled (funded blocks × block time); when the
+          // chain price never loaded it stays unknown rather than wrong.
+          const ttl =
+            currentPrice === undefined
+              ? undefined
+              : stampTtlSeconds(BigInt(batch.amount), currentPrice)
           account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
           succeed()
         },
@@ -282,27 +289,16 @@
   }
 </script>
 
-{#if phase === 'pending'}
-  <Dialog onclose={close} dismissable={false} title="Add drive">
-    <div class="flex flex-col items-center gap-2 py-2 text-center">
-      <LoaderCircle class="size-5 animate-spin" />
-      <p class="text-sm">{pendingLabel}</p>
-    </div>
-    <Button variant="outline" class="w-full" onclick={close}>Cancel</Button>
-  </Dialog>
-{:else if phase === 'error'}
-  <Dialog onclose={close} title="Add drive">
-    <div class="flex items-start gap-2">
-      <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-      <p class="text-sm">{errorMessage}</p>
-    </div>
-    <div class="flex w-full flex-col gap-2">
-      <Button class="w-full" onclick={() => ((phase = 'form'), (errorMessage = ''))}
-        >Try again</Button
-      >
-      <Button variant="outline" class="w-full" onclick={close}>Close</Button>
-    </div>
-  </Dialog>
+{#if phase === 'pending' || phase === 'error'}
+  <DriveDialogStatus
+    title="Add drive"
+    {phase}
+    {pendingLabel}
+    {errorMessage}
+    cancellable
+    onRetry={() => ((phase = 'form'), (errorMessage = ''))}
+    onClose={close}
+  />
 {:else if phase === 'unconfirmed'}
   <Dialog onclose={close} title="Purchase not confirmed">
     <div class="flex items-start gap-2">

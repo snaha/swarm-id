@@ -212,11 +212,19 @@ export class Account {
     return newStamp
   }
 
-  /** Rename a stamp (matched by batch id); no-op if no such stamp. */
+  /**
+   * Rename a stamp (matched by batch id); no-op if no such LIVE stamp — a
+   * tombstoned entry stays untouched so a rename can't mutate (or appear to
+   * act on) a drive that was removed meanwhile. `nameUpdatedAt` is the name's
+   * own merge clock: it propagates the rename without giving this record any
+   * node-state recency (see `mergePostageStamps`).
+   */
   renameStamp(batchID: BatchId, name: string) {
     const now = Date.now()
     this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, name, updatedAt: now } : stamp,
+      stamp.batchID.equals(batchID) && stamp.deletedAt === undefined
+        ? { ...stamp, name, nameUpdatedAt: now }
+        : stamp,
     )
     this.lastModified = now
     this.#commit()
@@ -224,9 +232,12 @@ export class Account {
 
   /**
    * Patch a stamp's batch fields after a node-side dilute / top-up (matched by
-   * batch id); no-op if no such stamp. `createdAt` is left untouched (the
-   * "purchased on" date stays stable); `updatedAt` carries the edit through the
-   * merge so it propagates to other devices instead of tying with stale copies.
+   * batch id); no-op if no such LIVE stamp (callers verify existence BEFORE
+   * spending on the node — see `drive-resize-dialog` / `drive-extend-dialog`).
+   * `createdAt` is left untouched (the "purchased on" date stays stable);
+   * `updatedAt` carries the edit through the merge so it propagates to other
+   * devices instead of tying with stale copies, and doubles as the instant the
+   * patched `batchTTL` was measured.
    */
   updateStamp(
     batchID: BatchId,
@@ -234,10 +245,19 @@ export class Account {
   ) {
     const now = Date.now()
     this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, ...patch, updatedAt: now } : stamp,
+      stamp.batchID.equals(batchID) && stamp.deletedAt === undefined
+        ? { ...stamp, ...patch, updatedAt: now }
+        : stamp,
     )
     this.lastModified = now
     this.#commit()
+  }
+
+  /** True when the account still has a live (non-tombstoned) stamp for `batchID`. */
+  hasLiveStamp(batchID: BatchId): boolean {
+    return this.postageStamps.some(
+      (stamp) => stamp.batchID.equals(batchID) && stamp.deletedAt === undefined,
+    )
   }
 
   /**

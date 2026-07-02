@@ -1,15 +1,17 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { Bee, PrivateKey } from '@ethersphere/bee-js'
-import { DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
 import type { NewStamp } from '$lib/payment/purchase'
+import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 /**
  * The product UI's postage ("drive") operations against a Bee node, as a thin
  * adapter over the bee-js client. All node interaction goes through bee-js —
- * don't hand-roll fetch calls against the node API here.
+ * don't hand-roll fetch calls against the node API here. The node URL defaults
+ * to the shared network setting (the same one the lib proxy and /dev honour),
+ * so pointing the app at a different Bee node redirects these calls too.
  */
 
 /**
@@ -21,7 +23,7 @@ export async function fetchExistingStamp(
   batchId: string,
   signerKey: PrivateKey,
   name: string,
-  beeUrl: string = DEFAULT_BEE_NODE_URL,
+  beeUrl: string = networkSettingsStore.beeNodeUrl,
 ): Promise<NewStamp | undefined> {
   try {
     const batch = await new Bee(beeUrl).getPostageBatch(strip0x(batchId))
@@ -55,7 +57,7 @@ export async function fetchExistingStamp(
 export async function topUpStamp(
   batchId: string,
   amount: bigint,
-  beeUrl: string = DEFAULT_BEE_NODE_URL,
+  beeUrl: string = networkSettingsStore.beeNodeUrl,
 ): Promise<void> {
   await new Bee(beeUrl).topUpBatch(strip0x(batchId), amount)
 }
@@ -69,7 +71,7 @@ export async function topUpStamp(
 export async function diluteStamp(
   batchId: string,
   depth: number,
-  beeUrl: string = DEFAULT_BEE_NODE_URL,
+  beeUrl: string = networkSettingsStore.beeNodeUrl,
 ): Promise<void> {
   await new Bee(beeUrl).diluteBatch(strip0x(batchId), depth)
 }

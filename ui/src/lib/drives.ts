@@ -7,9 +7,13 @@ import type { PostageStamp } from '@snaha/swarm-id'
  * Pure presentation helpers that turn a {@link PostageStamp} (a "drive") into
  * the labels the Storage UI renders: human size, used %, status, friendly
  * remaining-lifespan text, and dates. No network calls — everything derives
- * from fields already on the stamp (`batchTTL` is Bee's remaining-seconds view).
+ * from fields already on the stamp. `batchTTL` is a remaining-seconds SNAPSHOT
+ * measured when the stamp was last written (`updatedAt`, else `createdAt`), so
+ * {@link remainingLifespanSeconds} ages it by the elapsed time — without that,
+ * the countdown would freeze at the purchase-day value forever.
  */
 
+const MS_PER_SECOND = 1000
 const SECONDS_PER_HOUR = 60 * 60
 export const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 const DAYS_PER_MONTH = 30
@@ -18,7 +22,7 @@ const SECONDS_PER_MONTH = DAYS_PER_MONTH * SECONDS_PER_DAY
 const SECONDS_PER_YEAR = DAYS_PER_YEAR * SECONDS_PER_DAY
 
 /** Below this much remaining lifespan a drive is flagged "Expires soon". */
-export const EXPIRES_SOON_THRESHOLD_SECONDS = 7 * SECONDS_PER_DAY
+const EXPIRES_SOON_THRESHOLD_SECONDS = 7 * SECONDS_PER_DAY
 /** At/above this utilization fraction a drive is flagged "Storage full". */
 const STORAGE_FULL_FRACTION = 1
 
@@ -62,7 +66,12 @@ export interface DriveDisplay {
   purchasedOn: string
 }
 
-/** Binary (1024-based) byte formatting, e.g. `512 MB`, `64 GB`, `1.5 GB`. */
+/**
+ * Binary (1024-based) byte formatting, e.g. `512 MB`, `64 GB`, `1.5 GB`.
+ * Deliberately diverges from bee-js's decimal `Size.toFormattedString()`
+ * (base-1000, "536.871 MB"): the capacity breakpoints are powers of two, so
+ * binary units render them as the clean sizes the design shows.
+ */
 export function formatBytes(bytes: number): string {
   if (!Number.isFinite(bytes) || bytes <= 0) {
     return '0 B'
@@ -102,19 +111,39 @@ function plural(count: number, unit: string): string {
   return `${count} ${unit}${count === 1 ? '' : 's'} left`
 }
 
+const PERCENT_MAX = 100
+
 /** Effective storage capacity of the batch (`Up to X`), formatted. */
-export function driveSizeLabel(drive: PostageStamp): string {
+function driveSizeLabel(drive: PostageStamp): string {
   return formatBytes(Utils.getStampEffectiveBytes(drive.depth))
 }
 
 /** Used capacity as a 0–100 integer (`drive.utilization` is the 0–1 fraction). */
-export function driveUsedPercent(drive: PostageStamp): number {
-  return Math.min(100, Math.max(0, Math.round(drive.utilization * 100)))
+function driveUsedPercent(drive: PostageStamp): number {
+  return Math.min(PERCENT_MAX, Math.max(0, Math.round(drive.utilization * PERCENT_MAX)))
 }
 
 /** The drive's label, falling back to a positional `Drive N` when unnamed. */
-export function driveDisplayName(drive: PostageStamp, index: number): string {
+function driveDisplayName(drive: PostageStamp, index: number): string {
   return drive.name?.trim() || `Drive ${index + 1}`
+}
+
+/**
+ * The drive's remaining lifespan (seconds) at `now`: the stored `batchTTL`
+ * snapshot aged by the time elapsed since it was measured — `updatedAt` (set
+ * whenever a node operation rewrites `batchTTL`), else `createdAt` (purchase /
+ * attach measures it too). Negative once the drive has expired; `undefined`
+ * when the TTL was never known.
+ */
+export function remainingLifespanSeconds(
+  drive: PostageStamp,
+  now = Date.now(),
+): number | undefined {
+  if (drive.batchTTL === undefined) {
+    return undefined
+  }
+  const measuredAt = drive.updatedAt ?? drive.createdAt
+  return drive.batchTTL - Math.max(0, Math.floor((now - measuredAt) / MS_PER_SECOND))
 }
 
 /** Format an epoch-ms instant as `YYYY-MM-DD` (the design's date style). Formats
@@ -129,7 +158,7 @@ export function formatYmd(epochMs: number): string {
 
 /** One-pass derivation of every display value for a drive row + detail. */
 export function describeDrive(drive: PostageStamp, index: number, now = Date.now()): DriveDisplay {
-  const ttl = drive.batchTTL
+  const ttl = remainingLifespanSeconds(drive, now)
   const known = ttl !== undefined
   const expired = known && ttl <= 0
   const expiresSoon = known && ttl > 0 && ttl <= EXPIRES_SOON_THRESHOLD_SECONDS
@@ -142,7 +171,7 @@ export function describeDrive(drive: PostageStamp, index: number, now = Date.now
     storageFull: drive.utilization >= STORAGE_FULL_FRACTION,
     status: expired ? 'expired' : expiresSoon ? 'expires-soon' : 'active',
     timeLeftLabel: hasLifespan ? formatRemaining(ttl) : '',
-    expiryDate: hasLifespan ? formatYmd(now + ttl * 1000) : undefined,
+    expiryDate: hasLifespan ? formatYmd(now + ttl * MS_PER_SECOND) : undefined,
     purchasedOn: formatYmd(drive.createdAt),
   }
 }

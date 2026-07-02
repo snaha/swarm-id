@@ -11,13 +11,12 @@
 
   import AppHeader from '$lib/components/app-header.svelte'
   import Polycon from '$lib/components/polycon.svelte'
-  import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
 
-  const TOAST_DURATION_MS = 4000
   const IDENTICON_SIZE = 80
 
   const account = $derived(
@@ -25,16 +24,12 @@
   )
   const restored = sessionStore.completedFlow === 'restore'
 
-  let toastMessage = $state<string | undefined>(undefined)
-
   onMount(() => {
     if (!account) {
       goto(resolve(routes.ROOT))
       return
     }
-    toastMessage = restored ? 'Account restored successfully!' : 'Sign in successful'
-    const timer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
-    return () => clearTimeout(timer)
+    toastStore.show(restored ? 'Account restored successfully!' : 'Sign in successful')
   })
 </script>
 
@@ -68,6 +63,4 @@
       </div>
     </main>
   {/if}
-
-  <Toast message={toastMessage} />
 </div>

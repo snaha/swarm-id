@@ -6,6 +6,8 @@
 <script lang="ts">
   import { cn } from '$lib/utils'
 
+  const PERCENT_MAX = 100
+
   interface Props {
     /** Filled portion, 0–100. */
     percent: number
@@ -19,7 +21,7 @@
 
   let { percent, destructive = false, class: className, label = 'Storage used' }: Props = $props()
 
-  const clamped = $derived(Math.min(100, Math.max(0, percent)))
+  const clamped = $derived(Math.min(PERCENT_MAX, Math.max(0, percent)))
 </script>
 
 <div
@@ -28,7 +30,7 @@
   aria-label={label}
   aria-valuenow={clamped}
   aria-valuemin={0}
-  aria-valuemax={100}
+  aria-valuemax={PERCENT_MAX}
 >
   <div
     class={cn('h-full rounded-full', destructive ? 'bg-destructive' : 'bg-foreground')}

@@ -30,7 +30,6 @@
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Polycon from '$lib/components/polycon.svelte'
-  import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -50,10 +49,10 @@
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
   import { copyToClipboard, truncateAddress } from '$lib/utils'
 
-  const TOAST_DURATION_MS = 4000
   const MIN_PASSWORD_LENGTH = 8
   const MASKED_KEY = '•'.repeat(66)
   const METHOD_TABS = [
@@ -103,9 +102,6 @@
   let newPassword = $state('')
   let verifyNewPassword = $state('')
 
-  let toastMessage = $state<string | undefined>(undefined)
-  let toastTimer: ReturnType<typeof setTimeout> | undefined
-
   const isLocal = $derived(account.stamps.length === 0)
   const accessLabel = $derived(methodLabel(account.access.type))
   const AccessIcon: Component = $derived(
@@ -136,12 +132,6 @@
     expanded[section] = !expanded[section]
   }
 
-  function showToast(message: string) {
-    toastMessage = message
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
-  }
-
   function onNameChange() {
     const trimmed = name.trim()
     if (trimmed.length > 0 && trimmed !== account.name) {
@@ -151,9 +141,9 @@
 
   async function copyText(text: string, what: string) {
     if (await copyToClipboard(text)) {
-      showToast(`${what} copied to clipboard`)
+      toastStore.show(`${what} copied to clipboard`)
     } else {
-      showToast('Could not copy to clipboard')
+      toastStore.show('Could not copy to clipboard')
     }
   }
 
@@ -274,7 +264,7 @@
       dialog = undefined
       newPassword = ''
       verifyNewPassword = ''
-      showToast('Unlock method updated')
+      toastStore.show('Unlock method updated')
     } catch (caught) {
       if (myAttempt === attempt) {
         dialogError = caught instanceof Error ? caught.message : 'Could not set the new method.'
@@ -779,7 +769,5 @@
 {/if}
 
 {#if addDriveOpen}
-  <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={showToast} />
+  <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={toastStore.show} />
 {/if}
-
-<Toast message={toastMessage} />

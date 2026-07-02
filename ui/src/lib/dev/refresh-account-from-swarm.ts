@@ -25,8 +25,8 @@ import {
   mergePostageStamps,
 } from '@snaha/swarm-id'
 
-import { networkSettingsStore } from '$lib/dev/network-settings.svelte'
 import { accountsStore } from '$lib/stores/accounts.svelte'
+import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 export type RefreshResult =
   | { ok: true; refreshedAt: number }

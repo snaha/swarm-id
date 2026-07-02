@@ -16,16 +16,15 @@
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import DriveExtendDialog from '$lib/components/drive-extend-dialog.svelte'
   import DriveResizeDialog from '$lib/components/drive-resize-dialog.svelte'
-  import Toast from '$lib/components/toast.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import UtilizationBar from '$lib/components/utilization-bar.svelte'
   import { describeDrive } from '$lib/drives'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
   import { cn } from '$lib/utils'
 
-  const TOAST_DURATION_MS = 4000
   const MENU_ITEM_CLASS =
     'flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
 
@@ -42,15 +41,6 @@
   let resizeDrive = $state<PostageStamp | undefined>(undefined)
   let extendDrive = $state<PostageStamp | undefined>(undefined)
 
-  let toastMessage = $state<string | undefined>(undefined)
-  let toastTimer: ReturnType<typeof setTimeout> | undefined
-
-  function showToast(message: string) {
-    toastMessage = message
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
-  }
-
   function toggle(batchId: string, currentName: string) {
     if (expandedId === batchId) {
       expandedId = undefined
@@ -65,14 +55,14 @@
     const trimmed = nameDraft.trim()
     if (trimmed.length > 0 && trimmed !== drive.name) {
       account.renameStamp(drive.batchID, trimmed)
-      showToast('Drive renamed')
+      toastStore.show('Drive renamed')
     }
   }
 
   function setDefault(drive: PostageStamp) {
     account.setDefaultStamp(drive.batchID)
     openMenuId = undefined
-    showToast('Default drive updated')
+    toastStore.show('Default drive updated')
   }
 
   function remove(drive: PostageStamp) {
@@ -81,7 +71,7 @@
     if (expandedId === drive.batchID.toHex()) {
       expandedId = undefined
     }
-    showToast('Drive removed')
+    toastStore.show('Drive removed')
   }
 
   function onWindowPointerDown(event: PointerEvent) {
@@ -320,7 +310,7 @@
 </div>
 
 {#if addOpen}
-  <DriveAddDialog {account} onClose={() => (addOpen = false)} onAdded={showToast} />
+  <DriveAddDialog {account} onClose={() => (addOpen = false)} onAdded={toastStore.show} />
 {/if}
 
 {#if resizeDrive}
@@ -328,7 +318,7 @@
     {account}
     drive={resizeDrive}
     onClose={() => (resizeDrive = undefined)}
-    onUpdated={showToast}
+    onUpdated={toastStore.show}
   />
 {/if}
 
@@ -337,8 +327,6 @@
     {account}
     drive={extendDrive}
     onClose={() => (extendDrive = undefined)}
-    onUpdated={showToast}
+    onUpdated={toastStore.show}
   />
 {/if}
-
-<Toast message={toastMessage} />

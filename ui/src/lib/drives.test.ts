@@ -4,14 +4,7 @@ import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
-import {
-  EXPIRES_SOON_THRESHOLD_SECONDS,
-  describeDrive,
-  driveDisplayName,
-  driveUsedPercent,
-  formatBytes,
-  formatRemaining,
-} from './drives'
+import { describeDrive, formatBytes, formatRemaining, remainingLifespanSeconds } from './drives'
 
 const DAY = 24 * 60 * 60
 
@@ -68,61 +61,85 @@ describe('formatRemaining', () => {
   })
 })
 
-describe('driveUsedPercent', () => {
-  it('rounds the 0–1 fraction to a clamped percentage', () => {
-    expect(driveUsedPercent(makeDrive({ utilization: 0.25 }))).toBe(25)
-    expect(driveUsedPercent(makeDrive({ utilization: 1.2 }))).toBe(100)
-    expect(driveUsedPercent(makeDrive({ utilization: -0.1 }))).toBe(0)
-  })
-})
+describe('remainingLifespanSeconds', () => {
+  const measuredAt = Date.UTC(2026, 0, 1)
 
-describe('driveDisplayName', () => {
-  it('uses the name when present', () => {
-    expect(driveDisplayName(makeDrive({ name: 'Photos' }), 3)).toBe('Photos')
+  it('ages the stored snapshot by the time elapsed since it was measured', () => {
+    const drive = makeDrive({ batchTTL: 90 * DAY, createdAt: measuredAt })
+    expect(remainingLifespanSeconds(drive, measuredAt)).toBe(90 * DAY)
+    expect(remainingLifespanSeconds(drive, measuredAt + 30 * DAY * 1000)).toBe(60 * DAY)
+    expect(remainingLifespanSeconds(drive, measuredAt + 91 * DAY * 1000)).toBe(-1 * DAY)
   })
 
-  it('falls back to a positional label', () => {
-    expect(driveDisplayName(makeDrive({ name: undefined }), 0)).toBe('Drive 1')
-    expect(driveDisplayName(makeDrive({ name: '   ' }), 2)).toBe('Drive 3')
+  it('prefers updatedAt (a node edit re-measures the TTL) over createdAt', () => {
+    const drive = makeDrive({
+      batchTTL: 90 * DAY,
+      createdAt: measuredAt,
+      updatedAt: measuredAt + 30 * DAY * 1000,
+    })
+    expect(remainingLifespanSeconds(drive, measuredAt + 30 * DAY * 1000)).toBe(90 * DAY)
+  })
+
+  it('passes an unknown TTL through', () => {
+    expect(remainingLifespanSeconds(makeDrive({ batchTTL: undefined }))).toBeUndefined()
   })
 })
 
 describe('describeDrive', () => {
-  const now = Date.UTC(2026, 5, 24) // 2026-06-24
+  // The drive's TTL snapshot was measured at createdAt (2026-09-21); render at
+  // the same instant so the un-aged values are exercised first.
+  const measuredAt = Date.UTC(2026, 8, 21)
 
   it('describes an active drive', () => {
-    const display = describeDrive(makeDrive({ batchTTL: 90 * DAY }), 0, now)
+    const display = describeDrive(makeDrive({ batchTTL: 90 * DAY }), 0, measuredAt)
     expect(display.status).toBe('active')
     expect(display.timeLeftLabel).toBe('3 months left')
-    expect(display.expiryDate).toBe('2026-09-22')
+    expect(display.expiryDate).toBe('2026-12-20')
     expect(display.usedPercent).toBe(25)
     expect(display.storageFull).toBe(false)
     expect(display.purchasedOn).toBe('2026-09-21')
   })
 
+  it('ages the countdown as time passes without any node refresh', () => {
+    const drive = makeDrive({ batchTTL: 90 * DAY })
+    const later = describeDrive(drive, 0, measuredAt + 89 * DAY * 1000)
+    expect(later.status).toBe('expires-soon')
+    expect(later.timeLeftLabel).toBe('1 day left')
+    // The expiry date stays anchored instead of sliding forward every render.
+    expect(later.expiryDate).toBe('2026-12-20')
+    expect(describeDrive(drive, 0, measuredAt + 91 * DAY * 1000).status).toBe('expired')
+  })
+
   it('flags drives close to expiry', () => {
-    const display = describeDrive(
-      makeDrive({ batchTTL: EXPIRES_SOON_THRESHOLD_SECONDS - DAY }),
-      0,
-      now,
-    )
+    const display = describeDrive(makeDrive({ batchTTL: 6 * DAY }), 0, measuredAt)
     expect(display.status).toBe('expires-soon')
     expect(display.timeLeftLabel).not.toBe('')
   })
 
   it('flags expired drives and hides the lifespan', () => {
-    const display = describeDrive(makeDrive({ batchTTL: 0 }), 0, now)
+    const display = describeDrive(makeDrive({ batchTTL: 0 }), 0, measuredAt)
     expect(display.status).toBe('expired')
     expect(display.timeLeftLabel).toBe('')
     expect(display.expiryDate).toBeUndefined()
   })
 
   it('flags a full drive', () => {
-    expect(describeDrive(makeDrive({ utilization: 1 }), 0, now).storageFull).toBe(true)
+    expect(describeDrive(makeDrive({ utilization: 1 }), 0, measuredAt).storageFull).toBe(true)
+  })
+
+  it('clamps utilization to the 0–100 range', () => {
+    expect(describeDrive(makeDrive({ utilization: 1.2 }), 0, measuredAt).usedPercent).toBe(100)
+    expect(describeDrive(makeDrive({ utilization: -0.1 }), 0, measuredAt).usedPercent).toBe(0)
+  })
+
+  it('names drives, falling back to a positional label', () => {
+    expect(describeDrive(makeDrive({ name: 'Photos' }), 3, measuredAt).name).toBe('Photos')
+    expect(describeDrive(makeDrive({ name: undefined }), 0, measuredAt).name).toBe('Drive 1')
+    expect(describeDrive(makeDrive({ name: '   ' }), 2, measuredAt).name).toBe('Drive 3')
   })
 
   it('treats unknown TTL as active with no lifespan labels', () => {
-    const display = describeDrive(makeDrive({ batchTTL: undefined }), 0, now)
+    const display = describeDrive(makeDrive({ batchTTL: undefined }), 0, measuredAt)
     expect(display.status).toBe('active')
     expect(display.timeLeftLabel).toBe('')
     expect(display.expiryDate).toBeUndefined()

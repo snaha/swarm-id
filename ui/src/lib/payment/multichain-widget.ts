@@ -49,6 +49,12 @@ const CLOSE_GRACE_MS = 1_500
 // the simulated settlement resolves.
 const MOCK_DELAY_MS = 1_500
 const CLOSE_POLL_MS = 500
+// Shape of the mock settlement's fabricated batch event.
+const BATCH_ID_HEX_LENGTH = 64
+const MOCK_BATCH_DEPTH = 20
+const MOCK_BATCH_AMOUNT = '10000000000'
+const MS_PER_SECOND = 1_000
+const HEX_RADIX = 16
 
 /** Build the widget URL with parameters. */
 function buildWidgetUrl(destination: string, mocked?: boolean): string {
@@ -69,6 +75,24 @@ function buildWidgetUrl(destination: string, mocked?: boolean): string {
 /** Check if the message origin is from an allowed widget domain. */
 function isAllowedOrigin(origin: string): boolean {
   return ALLOWED_ORIGINS.includes(origin)
+}
+
+/**
+ * Deliver a settled batch to `onSuccess`, routing a callback throw (e.g. the
+ * stamp record failing schema validation) to `onError`. Settlement callbacks
+ * fire from a message handler / timer where an uncaught throw would vanish and
+ * leave the caller's pending UI up forever with the paid batch unrecorded.
+ */
+function settle(
+  onSuccess: (batch: BatchEvent) => void,
+  onError: (error: Error) => void,
+  batch: BatchEvent,
+): void {
+  try {
+    onSuccess(batch)
+  } catch (caught) {
+    onError(caught instanceof Error ? caught : new Error('Could not record the purchased batch.'))
+  }
 }
 
 /**
@@ -209,14 +233,15 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
         return
       }
       // A 64-character hex batch ID, as the real widget would return.
-      const batchId =
-        crypto.randomUUID().replace(/-/g, '') + crypto.randomUUID().replace(/-/g, '').slice(0, 32)
-      onSuccess({
+      const batchId = (crypto.randomUUID() + crypto.randomUUID())
+        .replace(/-/g, '')
+        .slice(0, BATCH_ID_HEX_LENGTH)
+      settle(onSuccess, onError, {
         event: 'batch',
         batchId,
-        depth: 20,
-        amount: '10000000000',
-        blockNumber: '0x' + Math.floor(Date.now() / 1000).toString(16),
+        depth: MOCK_BATCH_DEPTH,
+        amount: MOCK_BATCH_AMOUNT,
+        blockNumber: '0x' + Math.floor(Date.now() / MS_PER_SECOND).toString(HEX_RADIX),
       })
     }, MOCK_DELAY_MS)
     return {
@@ -253,7 +278,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       completed = true
       cleanup()
       popup.close()
-      onSuccess(batchEvent)
+      settle(onSuccess, onError, batchEvent)
       return
     }
 

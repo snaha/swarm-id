@@ -7,20 +7,17 @@
   import { Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Info from '@lucide/svelte/icons/info'
-  import LoaderCircle from '@lucide/svelte/icons/loader-circle'
-  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import type { PostageStamp } from '@snaha/swarm-id'
 
+  import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
-  import { formatBytes, formatRemaining } from '$lib/drives'
+  import { formatBytes, formatRemaining, remainingLifespanSeconds } from '$lib/drives'
   import { diluteStamp, topUpStamp } from '$lib/payment/bee'
-  import { dilutedStamp } from '$lib/payment/purchase'
+  import { type DilutionPlan, dilutedStamp, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
-
-  const COST_SIGNIFICANT_DIGITS = 4
 
   interface Props {
     account: Account
@@ -40,6 +37,11 @@
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
   let attempt = 0
+  // Set once the dilute has landed on-chain: dilute and top-up are two separate
+  // node transactions, so a failed top-up must NOT re-run the dilute on retry
+  // (the node rejects a dilution to the batch's now-current depth). While set,
+  // the retry completes THIS plan — the form's inputs are locked.
+  let committedPlan = $state<DilutionPlan | undefined>(undefined)
 
   // The current size is the default (empty-valued) option; only larger sizes are
   // offered — Bee can grow a batch (dilute) but not shrink it.
@@ -53,31 +55,26 @@
 
   const changed = $derived(newDepth !== '' && Number(newDepth) > drive.depth)
 
-  // The dilution plan for the current selection: the patched batch fields and, when
-  // keeping the lifespan, the compensating per-chunk top-up the user pays for.
-  const plan = $derived(changed ? dilutedStamp(drive, Number(newDepth), keepLifespan) : undefined)
+  // The dilution plan for the current selection: the node operations' outcomes
+  // as local-record patches, plus the compensating top-up when keeping lifespan.
+  const plan = $derived(
+    changed
+      ? dilutedStamp(drive, Number(newDepth), keepLifespan, remainingLifespanSeconds(drive))
+      : undefined,
+  )
 
   // Keep-lifespan cost: the top-up spread across the larger (diluted) batch, in BZZ.
-  const estimateBzz = $derived.by(() => {
-    if (!plan || !keepLifespan || plan.topUpAmount <= 0n) {
-      return undefined
-    }
-    try {
-      return Utils.getStampCost(Number(newDepth), plan.topUpAmount).toSignificantDigits(
-        COST_SIGNIFICANT_DIGITS,
-      )
-    } catch {
-      return undefined
-    }
-  })
+  const estimateBzz = $derived(
+    plan && keepLifespan ? stampCostBzz(Number(newDepth), plan.topUpAmount) : undefined,
+  )
 
   // Not-keeping cost is free, but the lifespan shrinks — project the reduced span
-  // (e.g. "2 months") from the diluted batchTTL; empty when the TTL is unknown.
+  // (e.g. "2 months") from the diluted TTL; empty when the TTL is unknown.
   const reducedLifespan = $derived.by(() => {
-    if (!plan || keepLifespan || plan.update.batchTTL === undefined) {
+    if (!plan || keepLifespan || plan.afterDilute.batchTTL === undefined) {
       return ''
     }
-    return formatRemaining(plan.update.batchTTL).replace(/ left$/, '')
+    return formatRemaining(plan.afterDilute.batchTTL).replace(/ left$/, '')
   })
 
   const infoText = $derived.by(() => {
@@ -100,25 +97,37 @@
   }
 
   async function proceed() {
-    if (!plan) {
+    // Resume a partially-applied plan first; otherwise snapshot the derived one
+    // so the amounts applied are exactly the ones the estimate showed.
+    const active = committedPlan ?? plan
+    if (!active) {
       return
     }
-    // Snapshot the derived plan so the amounts applied are exactly the ones the
-    // estimate showed, even if the selection somehow changes mid-flight.
-    const { update, topUpAmount } = plan
     const myAttempt = ++attempt
     phase = 'pending'
     errorMessage = ''
     try {
       const batchId = drive.batchID.toHex()
-      await diluteStamp(batchId, Number(newDepth))
-      if (topUpAmount > 0n) {
-        await topUpStamp(batchId, topUpAmount)
+      if (!committedPlan) {
+        // The drive may have been removed meanwhile (another tab, a sync fold) —
+        // check before spending on the node against a record we'd never show.
+        if (!account.hasLiveStamp(drive.batchID)) {
+          throw new Error('This drive was removed in the meantime.')
+        }
+        await diluteStamp(batchId, Number(newDepth))
+        // The dilute is on-chain: record it immediately (a failed top-up must
+        // not leave the UI showing the old, un-diluted size/lifespan) and pin
+        // the plan so a retry resumes at the top-up.
+        committedPlan = active
+        account.updateStamp(drive.batchID, active.afterDilute)
+      }
+      if (active.topUpAmount > 0n) {
+        await topUpStamp(batchId, active.topUpAmount)
+        account.updateStamp(drive.batchID, active.afterTopUp)
       }
       if (myAttempt !== attempt) {
         return
       }
-      account.updateStamp(drive.batchID, update)
       onUpdated?.('Drive size increased')
       close()
     } catch (caught) {
@@ -131,33 +140,28 @@
   }
 </script>
 
-{#if phase === 'pending'}
-  <Dialog onclose={close} dismissable={false} title={drive.name || 'Drive'}>
-    <div class="flex flex-col items-center gap-2 py-2 text-center">
-      <LoaderCircle class="size-5 animate-spin" />
-      <p class="text-sm">Increasing the drive size…</p>
-    </div>
-  </Dialog>
-{:else if phase === 'error'}
-  <Dialog onclose={close} title={drive.name || 'Drive'}>
-    <div class="flex items-start gap-2">
-      <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-      <p class="text-sm">{errorMessage}</p>
-    </div>
-    <div class="flex w-full flex-col gap-2">
-      <Button class="w-full" onclick={() => (phase = 'form')}>Try again</Button>
-      <Button variant="outline" class="w-full" onclick={close}>Close</Button>
-    </div>
-  </Dialog>
+{#if phase !== 'form'}
+  <DriveDialogStatus
+    title={drive.name || 'Drive'}
+    {phase}
+    pendingLabel={committedPlan ? 'Completing the top-up…' : 'Increasing the drive size…'}
+    {errorMessage}
+    onRetry={() => (phase = 'form')}
+    onClose={close}
+  />
 {:else}
   <Dialog onclose={close} title={drive.name || 'Drive'}>
     <div class="flex w-full flex-col gap-2">
       <span class="text-sm font-medium">Size up to</span>
-      <Select options={sizeOptions} bind:value={newDepth} />
+      <Select options={sizeOptions} bind:value={newDepth} disabled={committedPlan !== undefined} />
     </div>
 
     <div class="flex w-full items-center gap-2">
-      <Switch bind:checked={keepLifespan} aria-label="Keep current lifespan" />
+      <Switch
+        bind:checked={keepLifespan}
+        disabled={committedPlan !== undefined}
+        aria-label="Keep current lifespan"
+      />
       <p class="flex-1 text-sm">Keep current lifespan</p>
       <span
         title="Spreading the deposit over more storage shortens the lifespan unless you top up."
@@ -166,9 +170,13 @@
       </span>
     </div>
 
-    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">{infoText}</p>
+    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">
+      {committedPlan
+        ? 'The size increase is done; the lifespan top-up is still pending. Proceed to retry it.'
+        : infoText}
+    </p>
 
-    <Button class="w-full" disabled={!changed} onclick={proceed}>
+    <Button class="w-full" disabled={!changed && !committedPlan} onclick={proceed}>
       Proceed
       <ArrowRight />
     </Button>
