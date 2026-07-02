@@ -355,6 +355,7 @@ export {
   AccountSchemaV1,
   AccountDataSchemaV1,
   AccessMethodSchemaV1,
+  PostageStampSchemaV1,
   isLocalAccount,
 } from "./schemas"
 

@@ -29,17 +29,32 @@ import { PARTITION_COUNT } from "./batch-utilization"
 // ============================================================================
 
 /**
- * Parse accounts - Zod transforms handle type conversion
+ * Parse accounts - Zod transforms handle type conversion.
+ *
+ * Records are validated one by one: an invalid record is skipped (logged), not
+ * allowed to fail the whole document. Dropping every account for one bad record
+ * would present an empty list, and the next save would erase the document for
+ * real.
  */
 const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
-  const result = z.array(AccountSchemaV1).safeParse(data)
+  const records = z.array(z.unknown()).safeParse(data)
 
-  if (!result.success) {
-    console.error("Parse failed:", result.error.format())
+  if (!records.success) {
+    console.error("Parse failed:", records.error.format())
     return []
   }
 
-  return result.data.map((account) => {
+  const accounts: Account[] = []
+  for (const record of records.data) {
+    const result = AccountSchemaV1.safeParse(record)
+    if (!result.success) {
+      console.error("Skipping invalid account record:", result.error.format())
+      continue
+    }
+    accounts.push(result.data)
+  }
+
+  return accounts.map((account) => {
     if (account.partitionCount === undefined && account.devices.length > 0) {
       return {
         ...account,
