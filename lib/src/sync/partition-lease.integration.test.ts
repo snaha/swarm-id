@@ -1165,6 +1165,111 @@ describe("PartitionLease.acquire — unreadable partition state", () => {
     }
   })
 
+  it("fails safe when a pointer bucket NEWER than the found pointer timed out (stale-pointer mask)", async () => {
+    const partitionState = await import("./partition-state")
+    const downloadData = await import("../proxy/download-data")
+
+    // Publish full state one pointer-epoch ago: the pointer lands in the
+    // PREVIOUS bucket relative to `now`.
+    const nowMs = Date.now()
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[42] = 7
+    await partitionState.writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: 0,
+      localCounter,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      nowMs: nowMs - partitionState.STATE_POINTER_EPOCH_MS,
+    })
+
+    // The scan reads newest-first; hang ONLY the newest (current-bucket) read.
+    // A later acked upload could have published a fresher pointer there —
+    // returning the previous bucket's pointer as authoritative would resume
+    // BELOW the acked high-water and re-issue acked slots (evicting data).
+    // The read must fail safe (readFailed) instead of trusting the stale one.
+    const hang = vi
+      .spyOn(downloadData, "downloadEncryptedSOC")
+      .mockImplementationOnce((() => new Promise(() => {})) as never)
+    try {
+      const result = await partitionState.readPartitionState({
+        bee: bee as unknown as Bee,
+        owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+        batchDepth: TEST_BATCH_DEPTH,
+        nowMs,
+      })
+      expect(result.readFailed).toBe(true)
+      expect(result.localCounter).toBeUndefined()
+      expect(result.referenceHex).toBeUndefined()
+    } finally {
+      hang.mockRestore()
+    }
+  })
+
+  it("fails safe on an inconclusive pointer read even when a local synced reference exists", async () => {
+    const partitionState = await import("./partition-state")
+    const downloadData = await import("../proxy/download-data")
+
+    // This device holds a synced reference from an EARLIER session; a foreign
+    // holder may have advanced the partition since (a peer's publish never
+    // clears our local ref). With a gone holder present and ALL pointer reads
+    // timing out, "no pointer" is not authoritative — resuming `unchanged`
+    // from the stale local ref would re-issue the peer's acked slots. The
+    // fail-safe must win over the same-device-reclaim shortcut.
+    const hang = vi
+      .spyOn(downloadData, "downloadEncryptedSOC")
+      .mockImplementation((() => new Promise(() => {})) as never)
+    try {
+      const result = await partitionState.readPartitionState(
+        {
+          bee: bee as unknown as Bee,
+          owner: OWNER,
+          swarmEncryptionKey: TEST_ENC_KEY,
+          batchId: TEST_BATCH_ID,
+          partition: 0,
+          batchDepth: TEST_BATCH_DEPTH,
+          holderLeasedUntilMs: 1_000_000, // a gone holder → state may exist
+        },
+        "aa".repeat(64), // stale local synced reference
+      )
+      expect(result.readFailed).toBe(true)
+      expect(result.unchanged).toBe(false)
+      expect(result.referenceHex).toBeUndefined()
+    } finally {
+      hang.mockRestore()
+    }
+  })
+
+  it("still resumes `unchanged` from the local synced reference on a CLEAN no-pointer scan", async () => {
+    const { readPartitionState } = await import("./partition-state")
+
+    // Same-device reclaim: every candidate bucket read resolved cleanly absent
+    // (no timeouts, no unreadable lock), so "no pointer" is authoritative and
+    // the local synced reference stays trustworthy.
+    const knownRef = "aa".repeat(64)
+    const result = await readPartitionState(
+      {
+        bee: bee as unknown as Bee,
+        owner: OWNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        batchId: TEST_BATCH_ID,
+        partition: 0,
+        batchDepth: TEST_BATCH_DEPTH,
+        holderLeasedUntilMs: 1_000_000,
+      },
+      knownRef,
+    )
+    expect(result.readFailed).toBeUndefined()
+    expect(result.unchanged).toBe(true)
+    expect(result.referenceHex).toBe(knownRef)
+  })
+
   it("rejects publishing a counter with the wrong length", async () => {
     const { writePartitionState } = await import("./partition-state")
 

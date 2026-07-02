@@ -65,7 +65,7 @@ import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { UtilizationAwareStamper } from "../utils/batch-utilization"
-import { rejectAfter } from "../utils/promise"
+import { TimeoutError, withTimeout } from "../utils/promise"
 import {
   PartitionIntentPayloadSchemaV1,
   type PartitionIntentPayload,
@@ -133,9 +133,6 @@ export const INTENT_GUARD_POLL_MS = 2500
  * bucket-bounded read window means this can never resurrect an aged-out beacon.
  */
 export const INTENT_LIVENESS_GRACE_MS = INTENT_EPOCH_MS
-
-/** Internal marker so a timed-out read is distinguishable from a real error. */
-const INTENT_TIMEOUT_MESSAGE = "intent read timed out"
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
@@ -377,18 +374,16 @@ async function readPartitionSoc(opts: {
   retryOn5xx?: boolean
 }): Promise<PartitionIntentPayload | undefined> {
   const download = () =>
-    Promise.race([
+    withTimeout(
       downloadEncryptedSOC(
         opts.bee,
         opts.owner,
         opts.identifier,
         opts.swarmEncryptionKey,
       ),
-      rejectAfter(
-        opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS,
-        INTENT_TIMEOUT_MESSAGE,
-      ),
-    ])
+      opts.timeoutMs ?? INTENT_READ_TIMEOUT_MS,
+      "intent read timed out",
+    )
 
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
@@ -409,8 +404,7 @@ async function readPartitionSoc(opts: {
       // treated as absence so a single flaky device can't deadlock the round.
       if (isServerError(error) && attempt === 0 && opts.retryOn5xx !== false)
         continue
-      const timedOut =
-        error instanceof Error && error.message === INTENT_TIMEOUT_MESSAGE
+      const timedOut = error instanceof TimeoutError
       console.debug(
         `[partition-intent] ${opts.logLabel}: ${
           timedOut

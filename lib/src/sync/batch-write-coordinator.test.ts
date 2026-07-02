@@ -43,6 +43,7 @@ import {
 } from "./batch-write-coordinator"
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { LeaseRefreshOutcome } from "./partition-lease"
+import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import { LEASE_REFRESH_MS, LEASE_TTL_MS } from "../utils/batch-utilization"
 
 const SELF = "self-device"
@@ -226,6 +227,7 @@ type Internals = {
   lastLeaseValidatedAt: number
   activeUploadCount: number
   pendingAcquire: boolean
+  pointerHeartbeatFailingSince: number | undefined
   readOnly: boolean
   refreshTick: (lease: unknown) => Promise<void>
   ensureLeaseStillValid: () => Promise<void>
@@ -1033,6 +1035,78 @@ describe("BatchWriteCoordinator — self-demote on un-renewed lease expiry", () 
     // Not renewed on Swarm → the local lease must NOT be bumped (it counts down
     // from the last successful renewal until it genuinely lapses).
     expect(lease.bumpLocalLease).not.toHaveBeenCalled()
+  })
+})
+
+describe("BatchWriteCoordinator — self-demote on persistently failing pointer heartbeats", () => {
+  // The state-pointer heartbeat is what keeps a takeover able to FIND the
+  // resume point: the pointer lookup scans only ~(LEASE_TTL + slack) of buckets
+  // below the lock's `leasedUntil`, while lock renewals extend `leasedUntil`
+  // indefinitely and are independent of the (best-effort) heartbeat. A holder
+  // whose heartbeats keep failing while its lock keeps renewing walks its last
+  // durable pointer out of the lookup span — a takeover then finds NO pointer
+  // on a clean scan and zero-seeds, re-issuing every acked slot. Once the
+  // failure streak exceeds one pointer epoch the holder must stop holding
+  // (demote; the next upload re-acquires and re-publishes) instead of letting
+  // the gap grow toward the scan floor.
+  function setupFailingHeartbeat() {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0, leasedUntil: Date.now() + 30_000 })
+    lease.heartbeatStatePointer = vi.fn(async () => {
+      throw new Error("gateway 500")
+    }) as typeof lease.heartbeatStatePointer
+    internals.partitionLease = lease
+    internals.activeUploadCount = 0 // idle → the tick attempts the heartbeat
+    internals.lastLeaseActivityAt = Date.now() // recent → no idle-yield
+    return { coordinator, internals, lease, stamper }
+  }
+
+  it("keeps the lease on a fresh heartbeat-failure streak", async () => {
+    const { coordinator, internals, lease, stamper } = setupFailingHeartbeat()
+
+    await internals.refreshTick(lease)
+
+    expect(stamper.invalidateLease).not.toHaveBeenCalled()
+    expect(coordinator.isReadOnly).toBe(false)
+    expect(coordinator.currentPartition).toBe(0)
+    // The streak is armed so a persisting failure can demote later.
+    expect(internals.pointerHeartbeatFailingSince).toBeDefined()
+  })
+
+  it("demotes once the heartbeat-failure streak exceeds one pointer epoch", async () => {
+    const { coordinator, internals, lease, stamper } = setupFailingHeartbeat()
+
+    // The streak started more than one pointer epoch ago and the heartbeat is
+    // still failing on this tick.
+    internals.pointerHeartbeatFailingSince =
+      Date.now() - (STATE_POINTER_EPOCH_MS + 1)
+    await internals.refreshTick(lease)
+
+    expect(stamper.invalidateLease).toHaveBeenCalled() // in-flight stamp fence
+    expect(coordinator.isReadOnly).toBe(true) // demoted
+    expect(coordinator.currentPartition).toBeUndefined()
+  })
+
+  it("a successful heartbeat resets the failure streak", async () => {
+    const { coordinator, internals, lease } = setupFailingHeartbeat()
+    lease.heartbeatStatePointer = vi.fn(
+      async () => {},
+    ) as typeof lease.heartbeatStatePointer
+    // A previous tick's failure armed the streak; this tick's success must
+    // clear it so an unrelated later failure starts a fresh streak.
+    internals.pointerHeartbeatFailingSince = Date.now() - 10_000
+
+    await internals.refreshTick(lease)
+
+    expect(internals.pointerHeartbeatFailingSince).toBeUndefined()
+    expect(coordinator.isReadOnly).toBe(false)
   })
 })
 

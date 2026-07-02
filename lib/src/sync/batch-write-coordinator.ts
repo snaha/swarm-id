@@ -52,6 +52,7 @@ import type {
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
+import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
 
@@ -183,6 +184,14 @@ export class BatchWriteCoordinator {
   /** Uploads currently executing under the write lock; the refresh tick only
    *  yields an idle lease when this is 0. */
   private activeUploadCount: number = 0
+  /** Wall-clock ms the state-pointer heartbeat has been failing since
+   *  (undefined = healthy). The heartbeat is best-effort per tick, but a
+   *  PERSISTENT failure streak walks the last durable pointer out of the
+   *  takeover lookup span while lock renewals keep extending `leasedUntil` —
+   *  a takeover would then zero-seed over acked slots. Once the streak
+   *  exceeds one pointer epoch, `refreshTick` demotes. Reset on a successful
+   *  heartbeat and whenever the lease binding changes. */
+  private pointerHeartbeatFailingSince: number | undefined = undefined
   /** Set by `teardown()`. Once disposed the coordinator must never re-acquire a
    *  partition or arm a refresh timer: an in-flight `withWrite` (e.g. a deferred
    *  publish, or a normal upload) can outlive a disconnect/sign-out, and without
@@ -533,6 +542,7 @@ export class BatchWriteCoordinator {
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()
         this.lastLeaseActivityAt = Date.now()
+        this.pointerHeartbeatFailingSince = undefined // fresh lease session
         this.deps.onLeaseAcquired?.(adopted)
         return
       }
@@ -563,6 +573,7 @@ export class BatchWriteCoordinator {
       this.startRefreshTimer(lease)
       this.lastLeaseValidatedAt = Date.now()
       this.lastLeaseActivityAt = Date.now()
+      this.pointerHeartbeatFailingSince = undefined // fresh lease session
       this.deps.onLeaseAcquired?.(result.partition)
     } catch (error) {
       console.error(
@@ -785,6 +796,7 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = true
     this.lastLeaseValidatedAt = 0
+    this.pointerHeartbeatFailingSince = undefined
     this.deps.writeLeaseCache?.(undefined)
     // Re-arm so the next write re-acquires.
     this.pendingAcquire = true
@@ -970,20 +982,46 @@ export class BatchWriteCoordinator {
     // AFTER the gate but before the heartbeat wins the lock (the concurrent
     // publish then already refreshes the pointer, so the heartbeat is redundant).
     if (this.activeUploadCount === 0) {
-      await this.lock(async () => {
-        if (this.disposed || this.partitionLease !== lease) return
-        if (this.activeUploadCount !== 0) return // an upload slipped in while queued
-        // Pass the live counter so the heartbeat can RELOCATE a retained state
-        // chunk that this epoch's rotating pointer/beacon bucket would otherwise
-        // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
-        // partition mode → the heartbeat stays a bare pointer write.
-        await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
-      }).catch((err) =>
+      try {
+        await this.lock(async () => {
+          if (this.disposed || this.partitionLease !== lease) return
+          if (this.activeUploadCount !== 0) return // an upload slipped in while queued
+          // Pass the live counter so the heartbeat can RELOCATE a retained state
+          // chunk that this epoch's rotating pointer/beacon bucket would otherwise
+          // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
+          // partition mode → the heartbeat stays a bare pointer write.
+          await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
+        })
+        this.pointerHeartbeatFailingSince = undefined
+      } catch (err) {
         console.warn(
           "[BatchWriteCoordinator] State-pointer heartbeat failed:",
           err,
-        ),
-      )
+        )
+        // One failed heartbeat is a blip (the takeover lookup tolerates a few
+        // dropped buckets of slack). A PERSISTENT streak is not: the lock
+        // renewal above keeps extending `leasedUntil` independently, so the
+        // last durable pointer drifts toward the lookup span's floor — past it,
+        // a takeover finds no pointer on a CLEAN scan and zero-seeds,
+        // re-issuing every acked slot. Demote before the drift can reach the
+        // floor (one pointer epoch of failures, well inside the
+        // TTL + slack·epoch tolerance): the next upload re-acquires and its
+        // publish re-pins the pointer.
+        this.pointerHeartbeatFailingSince ??= Date.now()
+        if (
+          Date.now() - this.pointerHeartbeatFailingSince >
+          STATE_POINTER_EPOCH_MS
+        ) {
+          console.warn(
+            `[BatchWriteCoordinator] Refresh: partition ${partition} state-pointer heartbeat failing persistently; demoting before the resume pointer ages out of the takeover lookup.`,
+          )
+          this.signalLeaseLost()
+          await this.lock(async () => {
+            if (this.disposed || this.partitionLease !== lease) return
+            this.finalizeDemote()
+          })
+        }
+      }
     }
   }
 

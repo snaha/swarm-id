@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { rejectAfter, withTimeout } from "./promise"
+import { TimeoutError, rejectAfter, withTimeout } from "./promise"
 
 describe("rejectAfter", () => {
   beforeEach(() => {
@@ -88,5 +88,29 @@ describe("withTimeout", () => {
     // unhandled rejection; `clearTimeout` removes it entirely.
     expect(vi.getTimerCount()).toBe(0)
     vi.advanceTimersByTime(5000)
+  })
+
+  it("rejects with a TimeoutError so callers can classify without message matching", async () => {
+    // The timeout-vs-other-failure distinction is load-bearing control flow
+    // (inconclusive → fail safe vs clean miss → resume); an `instanceof` check
+    // can't silently break the way a copied message string can.
+    const hung = new Promise<string>(() => {})
+    const racing = withTimeout(hung, 50, "read timed out")
+    racing.catch(() => {})
+    vi.advanceTimersByTime(50)
+    await expect(racing).rejects.toBeInstanceOf(TimeoutError)
+  })
+
+  it("a work rejection is NOT a TimeoutError", async () => {
+    let caught: unknown
+    await withTimeout(
+      Promise.reject(new Error("boom")),
+      10_000,
+      "timeout",
+    ).catch((e: unknown) => {
+      caught = e
+    })
+    expect(caught).toBeInstanceOf(Error)
+    expect(caught).not.toBeInstanceOf(TimeoutError)
   })
 })

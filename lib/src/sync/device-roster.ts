@@ -40,7 +40,7 @@ import {
 } from "../proxy/feeds/sequence"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
-import { withTimeout } from "../utils/promise"
+import { TimeoutError, withTimeout } from "../utils/promise"
 import { mergeDevicesList } from "./merge-snapshot"
 
 export const ROSTER_TOPIC_PREFIX = "swarm-id-roster-v1"
@@ -61,9 +61,6 @@ const ROSTER_SCAN_WINDOW = 16
 // so `readRoster` retries it once at the stop boundary rather than mistaking it
 // for end-of-feed and truncating the roster.
 const ROSTER_READ_TIMEOUT_MS = 2500
-
-/** Stable message so `readRosterEntry` can tell a timeout from a 404/garbage. */
-const ROSTER_READ_TIMEOUT_MESSAGE = "roster read timed out"
 
 /**
  * Sentinel for a roster slot whose read TIMED OUT — distinct from `undefined`
@@ -104,17 +101,17 @@ async function readRosterEntry(opts: {
     const soc = await withTimeout(
       opts.bee.makeSOCReader(opts.owner).download(identifier),
       ROSTER_READ_TIMEOUT_MS,
-      ROSTER_READ_TIMEOUT_MESSAGE,
+      "roster read timed out",
     )
     refBytes = soc.payload.toUint8Array()
   } catch (error) {
-    return isRosterTimeout(error) ? ROSTER_READ_TIMED_OUT : undefined
+    return error instanceof TimeoutError ? ROSTER_READ_TIMED_OUT : undefined
   }
   try {
     const data = await withTimeout(
       downloadDataWithChunkAPI(opts.bee, new Reference(refBytes).toHex()),
       ROSTER_READ_TIMEOUT_MS,
-      ROSTER_READ_TIMEOUT_MESSAGE,
+      "roster read timed out",
     )
     return DeviceSchemaV1.parse(JSON.parse(new TextDecoder().decode(data)))
   } catch (error) {
@@ -124,13 +121,8 @@ async function readRosterEntry(opts: {
     // otherwise-present window as a transient (skippable) read failure (the
     // caching-gateway case this roster exists to survive) and only stops on a
     // fully-empty window.
-    return isRosterTimeout(error) ? ROSTER_READ_TIMED_OUT : undefined
+    return error instanceof TimeoutError ? ROSTER_READ_TIMED_OUT : undefined
   }
-}
-
-/** True when `error` is the timeout `withTimeout` raised (vs a 404/garbage). */
-function isRosterTimeout(error: unknown): boolean {
-  return error instanceof Error && error.message === ROSTER_READ_TIMEOUT_MESSAGE
 }
 
 /**
