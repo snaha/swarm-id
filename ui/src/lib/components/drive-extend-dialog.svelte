@@ -21,21 +21,18 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
-  import { formatYmd } from '$lib/drives'
+  import {
+    LIFESPAN_UNIT_OPTIONS,
+    type LifespanUnit,
+    SECONDS_PER_DAY,
+    formatYmd,
+    lifespanToSeconds,
+  } from '$lib/drives'
   import { topUpStamp } from '$lib/payment/bee'
   import { extendedStamp } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
-  const SECONDS_PER_DAY = 24 * 60 * 60
-  const SECONDS_PER_MONTH = 30 * SECONDS_PER_DAY
-  const SECONDS_PER_YEAR = 365 * SECONDS_PER_DAY
   const COST_SIGNIFICANT_DIGITS = 4
-
-  const UNIT_OPTIONS = [
-    { value: 'days', label: 'days' },
-    { value: 'months', label: 'months' },
-    { value: 'years', label: 'years' },
-  ]
 
   interface Props {
     account: Account
@@ -46,25 +43,16 @@
 
   let { account, drive, onClose, onUpdated }: Props = $props()
 
-  type Unit = 'days' | 'months' | 'years'
   type Phase = 'form' | 'pending' | 'error'
 
   let count = $state('0')
-  let unit = $state<Unit>('months')
+  let unit = $state<LifespanUnit>('months')
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
   let currentPrice = $state<bigint | undefined>(undefined)
   let attempt = 0
 
-  const addedSeconds = $derived.by(() => {
-    const value = Number(count)
-    if (!Number.isFinite(value) || value <= 0) {
-      return 0
-    }
-    const unitSeconds =
-      unit === 'years' ? SECONDS_PER_YEAR : unit === 'months' ? SECONDS_PER_MONTH : SECONDS_PER_DAY
-    return Math.round(value * unitSeconds)
-  })
+  const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
 
   const changed = $derived(addedSeconds > 0)
   const estimatedUntil = $derived(
@@ -178,7 +166,7 @@
         <Button variant="outline" size="icon" aria-label="Increase" onclick={() => step(1)}>
           <Plus />
         </Button>
-        <Select options={UNIT_OPTIONS} bind:value={unit} class="w-32" />
+        <Select options={LIFESPAN_UNIT_OPTIONS} bind:value={unit} class="w-32" />
       </div>
       <p class="text-muted-foreground text-sm">Estimated until {estimatedUntil}</p>
     </div>

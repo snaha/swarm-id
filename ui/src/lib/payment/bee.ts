@@ -3,6 +3,7 @@
 import { BatchId, PrivateKey, Utils } from '@ethersphere/bee-js'
 import { DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
 
+import { strip0x } from '$lib/crypto/hex'
 import type { NewStamp } from '$lib/payment/purchase'
 
 /** A postage batch as returned by Bee's `GET /stamps/{id}`. */
@@ -17,11 +18,6 @@ interface NodeStamp {
   usable: boolean
   exists: boolean
   batchTTL?: number
-}
-
-/** Strip a 0x prefix from a batch id for use in Bee URL paths. */
-function bareBatchId(batchId: string): string {
-  return batchId.startsWith('0x') ? batchId.slice(2) : batchId
 }
 
 async function readError(response: Response): Promise<string> {
@@ -43,7 +39,7 @@ export async function fetchExistingStamp(
   const base = beeUrl.replace(/\/$/, '')
   let stamp: NodeStamp
   try {
-    const response = await fetch(`${base}/stamps/${bareBatchId(batchId)}`)
+    const response = await fetch(`${base}/stamps/${strip0x(batchId)}`)
     if (!response.ok) {
       return undefined
     }
@@ -53,7 +49,7 @@ export async function fetchExistingStamp(
   }
 
   return {
-    batchID: new BatchId(bareBatchId(batchId)),
+    batchID: new BatchId(strip0x(batchId)),
     name,
     signerKey,
     depth: stamp.depth,
@@ -80,7 +76,7 @@ export async function topUpStamp(
   beeUrl: string = DEFAULT_BEE_NODE_URL,
 ): Promise<void> {
   const base = beeUrl.replace(/\/$/, '')
-  const response = await fetch(`${base}/stamps/topup/${bareBatchId(batchId)}/${amount}`, {
+  const response = await fetch(`${base}/stamps/topup/${strip0x(batchId)}/${amount}`, {
     method: 'PATCH',
   })
   if (!response.ok) {
@@ -100,7 +96,7 @@ export async function diluteStamp(
   beeUrl: string = DEFAULT_BEE_NODE_URL,
 ): Promise<void> {
   const base = beeUrl.replace(/\/$/, '')
-  const response = await fetch(`${base}/stamps/dilute/${bareBatchId(batchId)}/${depth}`, {
+  const response = await fetch(`${base}/stamps/dilute/${strip0x(batchId)}/${depth}`, {
     method: 'PATCH',
   })
   if (!response.ok) {

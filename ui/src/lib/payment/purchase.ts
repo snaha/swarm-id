@@ -3,6 +3,7 @@
 import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 import { type PostageStamp, derivePostageSignerKey } from '@snaha/swarm-id'
 
+import { strip0x } from '$lib/crypto/hex'
 import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
 import type { BatchEvent } from '$lib/payment/multichain-widget'
 
@@ -32,7 +33,7 @@ export interface PostageSigner {
 export async function derivePostageSigner(entropy: Uint8Array): Promise<PostageSigner> {
   // `derivePostageSignerKey` HMACs the master key as raw hex bytes, so strip the
   // 0x the ethers private key carries.
-  const masterKey = privateKeyFromEntropy(entropy).replace(/^0x/, '')
+  const masterKey = strip0x(privateKeyFromEntropy(entropy))
   const signerKey = new PrivateKey(await derivePostageSignerKey(masterKey))
   const destination = `0x${signerKey.publicKey().address().toHex()}`
   return { signerKey, destination }

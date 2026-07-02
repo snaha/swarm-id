@@ -400,21 +400,13 @@
   let customSignerKey = $state('')
   let customSignerError = $state<string | undefined>(undefined)
 
-  // Mock stamp widget settings — `devSettingsStore` is the single source of truth
-  // (durable + cross-tab). Local mirrors keep the controls two-way; the effects
-  // below persist any change back through the store's setters.
-  let mockStampEnabled = $state(devSettingsStore.data.mockStampEnabled)
-  let mockStampPopup = $state(devSettingsStore.data.mockStampPopup)
-  let mockStampResult = $state<string>(devSettingsStore.data.mockStampResult)
+  // Mock stamp widget settings — `devSettingsStore` is the single source of
+  // truth (durable + cross-tab); the controls bind straight to its setters via
+  // function bindings, so there is no local mirror to drift.
   const MOCK_RESULT_OPTIONS = [
     { value: 'success', label: 'Success (creates a drive)' },
     { value: 'error', label: 'Error (purchase failed)' },
   ]
-  $effect(() => devSettingsStore.setMockStampEnabled(mockStampEnabled))
-  $effect(() => devSettingsStore.setMockStampPopup(mockStampPopup))
-  $effect(() =>
-    devSettingsStore.setMockStampResult(mockStampResult === 'error' ? 'error' : 'success'),
-  )
 
   // Validate custom signer key when enabled
   $effect(() => {
@@ -862,19 +854,38 @@ Check console logs for details:
         payment. When enabled, the purchase widget resolves locally after a short delay.
       </p>
       <label class="flex items-center gap-2">
-        <Switch bind:checked={mockStampEnabled} aria-label="Enable mock stamp purchase" />
+        <Switch
+          bind:checked={
+            () => devSettingsStore.data.mockStampEnabled,
+            (enabled) => devSettingsStore.setMockStampEnabled(enabled)
+          }
+          aria-label="Enable mock stamp purchase"
+        />
         <span class="text-sm">Enable mock purchases</span>
       </label>
-      {#if mockStampEnabled}
+      {#if devSettingsStore.data.mockStampEnabled}
         <label class="flex items-center gap-2">
-          <Switch bind:checked={mockStampPopup} aria-label="Open widget popup while mocking" />
+          <Switch
+            bind:checked={
+              () => devSettingsStore.data.mockStampPopup,
+              (popup) => devSettingsStore.setMockStampPopup(popup)
+            }
+            aria-label="Open widget popup while mocking"
+          />
           <span class="text-sm"
             >Open widget popup (off = local, works where popups are blocked)</span
           >
         </label>
         <label class={`${LABEL_CLASS} w-64`}>
           <span class={LABEL_TEXT_CLASS}>Outcome</span>
-          <Select options={MOCK_RESULT_OPTIONS} bind:value={mockStampResult} />
+          <Select
+            options={MOCK_RESULT_OPTIONS}
+            bind:value={
+              () => devSettingsStore.data.mockStampResult,
+              (result) =>
+                devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
+            }
+          />
         </label>
       {/if}
 

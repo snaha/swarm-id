@@ -11,9 +11,11 @@ import type { PostageStamp } from '@snaha/swarm-id'
  */
 
 const SECONDS_PER_HOUR = 60 * 60
-const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
+export const SECONDS_PER_DAY = 24 * SECONDS_PER_HOUR
 const DAYS_PER_MONTH = 30
 const DAYS_PER_YEAR = 365
+const SECONDS_PER_MONTH = DAYS_PER_MONTH * SECONDS_PER_DAY
+const SECONDS_PER_YEAR = DAYS_PER_YEAR * SECONDS_PER_DAY
 
 /** Below this much remaining lifespan a drive is flagged "Expires soon". */
 export const EXPIRES_SOON_THRESHOLD_SECONDS = 7 * SECONDS_PER_DAY
@@ -26,6 +28,25 @@ const DECIMAL_UNIT_CEILING = 100
 
 /** A drive's lifespan state, driving badge/colour choices in the UI. */
 export type DriveStatus = 'active' | 'expires-soon' | 'expired'
+
+/** Units offered by the drive dialogs' lifespan selects. */
+export type LifespanUnit = 'days' | 'months' | 'years'
+
+export const LIFESPAN_UNIT_OPTIONS = [
+  { value: 'days', label: 'days' },
+  { value: 'months', label: 'months' },
+  { value: 'years', label: 'years' },
+]
+
+/** A lifespan given as `value` × `unit`, as whole seconds; 0 for empty/invalid input. */
+export function lifespanToSeconds(value: number, unit: LifespanUnit): number {
+  if (!Number.isFinite(value) || value <= 0) {
+    return 0
+  }
+  const unitSeconds =
+    unit === 'years' ? SECONDS_PER_YEAR : unit === 'months' ? SECONDS_PER_MONTH : SECONDS_PER_DAY
+  return Math.round(value * unitSeconds)
+}
 
 /** Everything the Storage UI needs to render one drive, derived in one pass. */
 export interface DriveDisplay {

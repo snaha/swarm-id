@@ -100,17 +100,18 @@
   }
 
   async function proceed() {
-    if (!changed) {
+    if (!plan) {
       return
     }
+    // Snapshot the derived plan so the amounts applied are exactly the ones the
+    // estimate showed, even if the selection somehow changes mid-flight.
+    const { update, topUpAmount } = plan
     const myAttempt = ++attempt
     phase = 'pending'
     errorMessage = ''
     try {
-      const depth = Number(newDepth)
       const batchId = drive.batchID.toHex()
-      await diluteStamp(batchId, depth)
-      const { update, topUpAmount } = dilutedStamp(drive, depth, keepLifespan)
+      await diluteStamp(batchId, Number(newDepth))
       if (topUpAmount > 0n) {
         await topUpStamp(batchId, topUpAmount)
       }
