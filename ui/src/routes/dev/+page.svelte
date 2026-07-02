@@ -139,9 +139,13 @@
       accountSigner = undefined
       return
     }
-    // Fire-and-forget derive; effect re-runs when the selection changes.
+    // Fire-and-forget derive with a staleness guard: two quick account
+    // switches can resolve out of order, and this card renders key material —
+    // never label one account's private key with another account selected.
+    const requestedId = selectedAccountId
     void (async () => {
       const k = await derivePostageSignerKey(acct.derivationKey)
+      if (selectedAccountId !== requestedId) return
       accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
     })()
   })
