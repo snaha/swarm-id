@@ -47,6 +47,11 @@ function withNetworkSettingsStore(): NetworkSettingsStore {
     get beeNodeUrl() {
       return settings.beeNodeUrl
     },
+    // Settable so the /dev page can bind its URL input straight to the shared
+    // setting; persists like updateSettings.
+    set beeNodeUrl(url: string) {
+      updateSettings({ ...settings, beeNodeUrl: url })
+    },
     get gnosisRpcUrl() {
       return settings.gnosisRpcUrl
     },

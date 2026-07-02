@@ -105,8 +105,11 @@
   // Sync state
   let syncMessage = $state('')
 
-  // Stamp buying state
-  let beeUrl = $state('http://localhost:1633')
+  // Stamp buying state. The Bee node URL is NOT page-local: every dev
+  // subsystem (stamp buying/listing here, sync, account refresh, the
+  // retrievability checks) reads the one persisted network setting, so a URL
+  // change applies everywhere at once — buying a stamp against one node while
+  // sync silently targets another was a debugging trap.
   // Amount starts empty — autofilled from chain price on first chainstate
   // load (see loadChainState). Hardcoding a default is fragile across chain
   // configs: bee-compose's PriceOracle floor (24_000 PLUR/chunk/block) needs
@@ -136,7 +139,7 @@
       accountSigner = undefined
       return
     }
-    // ponytail: fire-and-forget derive; effect re-runs when the selection changes
+    // Fire-and-forget derive; effect re-runs when the selection changes.
     void (async () => {
       const k = await derivePostageSignerKey(acct.derivationKey)
       accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
@@ -247,8 +250,6 @@
         push('❌ Select a stored stamp to pay for the test chunk.')
         return
       }
-      // Test the node the proxy/app actually uses (network settings), not the
-      // dev-page stamp-buying URL which defaults to localhost.
       const nodeUrl = networkSettingsStore.beeNodeUrl
       const bee = new Bee(nodeUrl)
       // Throwaway, fresh-per-run SOC: random owner key + identifier + encryption
@@ -552,10 +553,13 @@ Check console logs for details:
       // multi-device partition scheme rewrites the partition-lock SOC on every
       // lease refresh, which an immutable batch forbids. Request mutable
       // explicitly so /dev-bought stamps work with partitioning.
-      const response = await fetch(`${beeUrl}/stamps/${stampAmount}/${stampDepth}`, {
-        method: 'POST',
-        headers: { immutable: 'false' },
-      })
+      const response = await fetch(
+        `${networkSettingsStore.beeNodeUrl}/stamps/${stampAmount}/${stampDepth}`,
+        {
+          method: 'POST',
+          headers: { immutable: 'false' },
+        },
+      )
       if (!response.ok) {
         const errorText = await response.text()
         throw new Error(errorText || `HTTP ${response.status}`)
@@ -590,17 +594,18 @@ Check console logs for details:
   }
 
   async function loadBeeStamps() {
+    const url = networkSettingsStore.beeNodeUrl
     beeStampsLoading = true
     beeStampsError = ''
     try {
-      const response = await fetch(`${beeUrl}/stamps`)
+      const response = await fetch(`${url}/stamps`)
       if (!response.ok) {
         const errorText = await response.text()
         throw new Error(errorText || `HTTP ${response.status}`)
       }
       const data = await response.json()
       beeStamps = data.stamps ?? []
-      lastBeeUrl = beeUrl
+      lastBeeUrl = url
     } catch (error) {
       beeStampsError = error instanceof Error ? error.message : String(error)
       beeStamps = []
@@ -612,7 +617,7 @@ Check console logs for details:
   async function loadChainState() {
     chainStateError = ''
     try {
-      const state = await fetchChainState(beeUrl)
+      const state = await fetchChainState(networkSettingsStore.beeNodeUrl)
       currentPrice = state.currentPrice
       // Only autofill if the user hasn't typed (or pre-typed) a value yet.
       // After the first fill, the user owns this field — switching bee URLs
@@ -627,7 +632,8 @@ Check console logs for details:
   }
 
   $effect(() => {
-    if (activeTab === 'stamps' && beeUrl && beeUrl !== lastBeeUrl && !beeStampsLoading) {
+    const url = networkSettingsStore.beeNodeUrl
+    if (activeTab === 'stamps' && url && url !== lastBeeUrl && !beeStampsLoading) {
       loadBeeStamps()
       loadChainState()
     }
@@ -832,9 +838,17 @@ Check console logs for details:
 
       <div class="flex flex-col gap-2">
         <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Bee Node URL</span>
-          <Input bind:value={beeUrl} />
+          <span class={LABEL_TEXT_CLASS}>Bee Node URL (network settings)</span>
+          <div class="flex gap-2">
+            <Input bind:value={networkSettingsStore.beeNodeUrl} />
+            <Button variant="secondary" onclick={networkSettingsStore.reset}>Reset</Button>
+          </div>
         </label>
+        <p class="text-muted-foreground text-sm">
+          One URL for all dev tooling — stamp buying/listing here, plus sync, account refresh and
+          the retrievability checks below. Persisted across reloads; point it at
+          http://localhost:1633 for the local cluster.
+        </p>
         <div class="flex gap-4">
           <label class={`${LABEL_CLASS} flex-1`}>
             <span class={LABEL_TEXT_CLASS}>Amount</span>
@@ -931,7 +945,7 @@ Check console logs for details:
 
       <h3 class="text-lg font-semibold">Retrievability self-check</h3>
       <p class="text-muted-foreground text-sm">
-        Writes a throwaway single-owner chunk to the Bee node from network settings ({networkSettingsStore.beeNodeUrl})
+        Writes a throwaway single-owner chunk to the configured Bee node ({networkSettingsStore.beeNodeUrl})
         and reads it back, to confirm the node actually serves back what you write. Multi-device
         coordination (and reliable sync/download) only works when this succeeds.
       </p>
