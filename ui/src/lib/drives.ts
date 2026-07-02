@@ -118,9 +118,16 @@ function driveSizeLabel(drive: PostageStamp): string {
   return formatBytes(Utils.getStampEffectiveBytes(drive.depth))
 }
 
-/** Used capacity as a 0–100 integer (`drive.utilization` is the 0–1 fraction). */
+/**
+ * Used capacity as a 0–100 integer (`drive.utilization` is the 0–1 fraction).
+ * 100 is reserved for an actually-full drive: 0.996 would otherwise round up
+ * to "100% used" while the storage-full state (utilization >= 1) stays off.
+ */
 function driveUsedPercent(drive: PostageStamp): number {
-  return Math.min(PERCENT_MAX, Math.max(0, Math.round(drive.utilization * PERCENT_MAX)))
+  const percent = Math.min(PERCENT_MAX, Math.max(0, Math.round(drive.utilization * PERCENT_MAX)))
+  return percent === PERCENT_MAX && drive.utilization < STORAGE_FULL_FRACTION
+    ? PERCENT_MAX - 1
+    : percent
 }
 
 /** The drive's label, falling back to a positional `Drive N` when unnamed. */

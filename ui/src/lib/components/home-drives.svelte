@@ -82,6 +82,12 @@
     }
   }
 
+  function onWindowKeydown(event: KeyboardEvent) {
+    if (event.key === 'Escape') {
+      openMenuId = undefined
+    }
+  }
+
   function addDrive() {
     addOpen = true
   }
@@ -94,7 +100,7 @@
   }
 </script>
 
-<svelte:window onpointerdown={onWindowPointerDown} />
+<svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeydown} />
 
 <div class="flex w-full flex-col gap-4">
   <div class="flex flex-col gap-1">

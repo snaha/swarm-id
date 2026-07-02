@@ -90,10 +90,11 @@ export function stampTtlSeconds(amount: bigint, pricePerBlock: bigint): number |
   return Number(amount / pricePerBlock) * GNOSIS_BLOCK_TIME
 }
 
-/** Parse the widget's block number (hex `0x…` or decimal) into a finite integer. */
+/** Parse the widget's block number (hex `0x…` or decimal) into an integer; `0`
+ * for garbage or non-integer input (downstream stores it as a block height). */
 export function parseBlockNumber(value: string): number {
   const parsed = value.startsWith('0x') ? Number.parseInt(value.slice(2), 16) : Number(value)
-  return Number.isFinite(parsed) ? parsed : 0
+  return Number.isInteger(parsed) ? parsed : 0
 }
 
 /** Build a stamp record from a completed widget purchase. */

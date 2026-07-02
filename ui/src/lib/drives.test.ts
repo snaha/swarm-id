@@ -132,6 +132,15 @@ describe('describeDrive', () => {
     expect(describeDrive(makeDrive({ utilization: -0.1 }), 0, measuredAt).usedPercent).toBe(0)
   })
 
+  it('reserves 100% for an actually-full drive', () => {
+    const almostFull = describeDrive(makeDrive({ utilization: 0.996 }), 0, measuredAt)
+    expect(almostFull.usedPercent).toBe(99)
+    expect(almostFull.storageFull).toBe(false)
+    const full = describeDrive(makeDrive({ utilization: 1 }), 0, measuredAt)
+    expect(full.usedPercent).toBe(100)
+    expect(full.storageFull).toBe(true)
+  })
+
   it('names drives, falling back to a positional label', () => {
     expect(describeDrive(makeDrive({ name: 'Photos' }), 3, measuredAt).name).toBe('Photos')
     expect(describeDrive(makeDrive({ name: undefined }), 0, measuredAt).name).toBe('Drive 1')

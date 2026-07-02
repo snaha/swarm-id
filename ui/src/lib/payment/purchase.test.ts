@@ -39,8 +39,9 @@ describe('parseBlockNumber', () => {
     expect(parseBlockNumber('42')).toBe(42)
   })
 
-  it('falls back to 0 for garbage', () => {
+  it('falls back to 0 for garbage and non-integer input', () => {
     expect(parseBlockNumber('nope')).toBe(0)
+    expect(parseBlockNumber('42.5')).toBe(0)
   })
 })
 
