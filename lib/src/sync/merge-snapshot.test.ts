@@ -218,6 +218,44 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     expect(result.postageStamps[0].createdAt).toBe(9_000_000)
   })
 
+  it("a newer updatedAt edit supersedes a stale copy (renames propagate)", () => {
+    // device 1 renamed the stamp (updatedAt 5M); device 2 still has the old
+    // copy with the same createdAt. Without the edit clock the two would tie
+    // and each device would keep its own copy — the rename must win.
+    const batchHex = "ab".repeat(32)
+    const stale = makeStamp(batchHex, 1_000_000)
+    const renamed = {
+      ...makeStamp(batchHex, 1_000_000),
+      name: "Photos",
+      updatedAt: 5_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [stale] }), // local (device 2): old copy
+      makeSnapshot({ postageStamps: [renamed] }), // remote (device 1): renamed
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].name).toBe("Photos")
+  })
+
+  it("a newer tombstone still beats an older edit (deletion wins over stale rename)", () => {
+    const batchHex = "ba".repeat(32)
+    const renamed = {
+      ...makeStamp(batchHex, 1_000_000),
+      name: "Photos",
+      updatedAt: 5_000_000,
+    }
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 9_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [renamed] }),
+      makeSnapshot({ postageStamps: [tombstone] }),
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].deletedAt).toBe(9_000_000)
+  })
+
   it("unions connectedApps by appUrl", () => {
     const a = makeConnectedApp("https://app-a.example")
     const b = makeConnectedApp("https://app-b.example")

@@ -168,6 +168,7 @@ export function serializePostageStamp(
     exists: stamp.exists,
     batchTTL: stamp.batchTTL,
     createdAt: stamp.createdAt,
+    updatedAt: stamp.updatedAt,
     deletedAt: stamp.deletedAt,
   }
 }

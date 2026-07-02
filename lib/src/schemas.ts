@@ -166,10 +166,15 @@ export const PostageStampSchemaV1 = z.object({
   exists: z.boolean(),
   batchTTL: z.number().optional(),
   createdAt: z.number(),
+  // In-place edit clock (rename / dilute / top-up). Optional: stamps written
+  // before the field existed have none and fall back to `createdAt` in the
+  // merge. Without it, an edited copy would tie with a stale remote copy and
+  // the edit would never propagate across devices.
+  updatedAt: z.number().optional(),
   // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and unusable for
-  // uploads. A `batchID` is immutable and stamps are never edited in place, so
-  // `deletedAt` always supersedes the original `createdAt` in the merge.
+  // uploads. `deletedAt`/`updatedAt`/`createdAt` compete as one last-writer-wins
+  // clock in the merge, so the newest action on the batch wins.
   deletedAt: z.number().optional(),
 })
 

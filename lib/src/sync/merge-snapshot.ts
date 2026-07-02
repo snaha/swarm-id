@@ -109,14 +109,16 @@ export function mergePostageStamps(
   remote: PostageStamp[],
 ): PostageStamp[] {
   const keyOf = (s: PostageStamp) => s.batchID.toHex()
-  // Last-writer-wins per batch so deletions propagate: a delete is a tombstone
-  // (`deletedAt`), and the recency clock is `max(deletedAt, createdAt)` —
-  // mirroring `mergeDevicesList`. A delete beats an older add, while a fresh
-  // re-add (a new `createdAt` later than the tombstone) re-activates the stamp,
-  // matching device resurrection. A stale active copy (older `createdAt`) still
-  // loses to the tombstone, so deletions keep propagating. Deleted stamps are
-  // kept (the tombstone keeps propagating until a re-add supersedes it).
-  const recency = (s: PostageStamp) => Math.max(s.deletedAt ?? 0, s.createdAt)
+  // Last-writer-wins per batch so deletions AND edits propagate: a delete is a
+  // tombstone (`deletedAt`), an in-place edit (rename / dilute / top-up) stamps
+  // `updatedAt`, and the recency clock is the max of the three — mirroring
+  // `mergeConnectedApps`. A delete beats an older add/edit, a fresh edit beats
+  // a stale copy (so renames propagate instead of tying on `createdAt`), and a
+  // fresh re-add (new `createdAt`) re-activates the stamp, matching device
+  // resurrection. Deleted stamps are kept (the tombstone keeps propagating
+  // until a re-add or newer edit supersedes it).
+  const recency = (s: PostageStamp) =>
+    Math.max(s.deletedAt ?? 0, s.updatedAt ?? 0, s.createdAt)
   const merged = new Map<string, PostageStamp>()
   // Process remote first, then local, so a tie favours local (most recent
   // observation here); a strictly-newer entry on either side wins.

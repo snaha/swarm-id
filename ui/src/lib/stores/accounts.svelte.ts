@@ -214,26 +214,29 @@ export class Account {
 
   /** Rename a stamp (matched by batch id); no-op if no such stamp. */
   renameStamp(batchID: BatchId, name: string) {
+    const now = Date.now()
     this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, name } : stamp,
+      stamp.batchID.equals(batchID) ? { ...stamp, name, updatedAt: now } : stamp,
     )
-    this.lastModified = Date.now()
+    this.lastModified = now
     this.#commit()
   }
 
   /**
    * Patch a stamp's batch fields after a node-side dilute / top-up (matched by
-   * batch id); no-op if no such stamp. `createdAt` is left untouched so the
-   * "purchased on" date and the merge tombstone clock stay stable.
+   * batch id); no-op if no such stamp. `createdAt` is left untouched (the
+   * "purchased on" date stays stable); `updatedAt` carries the edit through the
+   * merge so it propagates to other devices instead of tying with stale copies.
    */
   updateStamp(
     batchID: BatchId,
     patch: Partial<Pick<PostageStamp, 'depth' | 'amount' | 'batchTTL'>>,
   ) {
+    const now = Date.now()
     this.postageStamps = this.postageStamps.map((stamp) =>
-      stamp.batchID.equals(batchID) ? { ...stamp, ...patch } : stamp,
+      stamp.batchID.equals(batchID) ? { ...stamp, ...patch, updatedAt: now } : stamp,
     )
-    this.lastModified = Date.now()
+    this.lastModified = now
     this.#commit()
   }
 
