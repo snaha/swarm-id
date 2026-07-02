@@ -37,11 +37,6 @@ import {
 } from "../../src/utils/batch-utilization"
 import { deviceHomePartition } from "../../src/sync/partition-lock"
 import { INTENT_LIVENESS_GRACE_MS } from "../../src/sync/partition-intent"
-import type {
-  BatchMetadata,
-  ChunkCacheEntry,
-  UtilizationStoreDB,
-} from "../../src/storage/utilization-store"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
@@ -51,6 +46,7 @@ import {
   deviceId,
   delay,
   type LiveContext,
+  makeInMemoryCache,
 } from "./env"
 
 // B must be gone long enough that C sees p1 free on EVERY channel: the lock SOC
@@ -58,27 +54,6 @@ import {
 // INTENT_LIVENESS_GRACE_MS after B's last heartbeat). B never refreshes, so its
 // last heartbeat is its acquire ≈ the idle start; wait TTL + grace + margin.
 const HANDOFF_IDLE_MS = LEASE_TTL_MS + INTENT_LIVENESS_GRACE_MS + 12_000
-
-/** Minimal in-memory `UtilizationStoreDB` (no IndexedDB), per the unit suite. */
-function makeInMemoryCache(): UtilizationStoreDB {
-  const chunks = new Map<string, ChunkCacheEntry>()
-  const meta = new Map<string, BatchMetadata>()
-  return {
-    getAllChunks: async (batchId: string) =>
-      Array.from(chunks.values())
-        .filter((c) => c.batchId === batchId)
-        .sort((a, b) => a.chunkIndex - b.chunkIndex),
-    putChunk: async (entry: ChunkCacheEntry) => {
-      chunks.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
-    },
-    getChunk: async (batchId: string, chunkIndex: number) =>
-      chunks.get(`${batchId}:${chunkIndex}`),
-    getMetadata: async (batchId: string) => meta.get(batchId),
-    putMetadata: async (metadata: BatchMetadata) => {
-      meta.set(metadata.batchId, { ...metadata })
-    },
-  } as unknown as UtilizationStoreDB
-}
 
 /** A device id whose deterministic home partition is `target` (so A→p0, B→p1). */
 function deviceIdForHome(prefix: string, target: number): string {

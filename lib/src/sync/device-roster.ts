@@ -41,6 +41,7 @@ import {
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { TimeoutError, withTimeout } from "../utils/promise"
+import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { mergeDevicesList } from "./merge-snapshot"
 
 export const ROSTER_TOPIC_PREFIX = "swarm-id-roster-v1"
@@ -60,7 +61,7 @@ const ROSTER_SCAN_WINDOW = 16
 // confirmed empty slot): `readRosterEntry` surfaces it as `ROSTER_READ_TIMED_OUT`
 // so `readRoster` retries it once at the stop boundary rather than mistaking it
 // for end-of-feed and truncating the roster.
-const ROSTER_READ_TIMEOUT_MS = 2500
+const ROSTER_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
 /**
  * Sentinel for a roster slot whose read TIMED OUT — distinct from `undefined`

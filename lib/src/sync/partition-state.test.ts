@@ -271,4 +271,44 @@ describe("writePartitionState — counter monotonicity tripwire", () => {
       }),
     ).rejects.toThrow(/counter regressed/)
   })
+
+  it("refuses a full (sparse) publish whose counter regressed — no previousReferences", async () => {
+    const stamper = await makeBoundStamper()
+
+    const baseline = new Uint32Array(NUM_BUCKETS)
+    baseline[1000] = 5
+    const first = await writePartitionState({
+      bee: bee as unknown as Bee,
+      stamper,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      partition: PARTITION,
+      localCounter: baseline,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      deviceId: DEVICE_ID,
+    })
+
+    // A previous counter is known but the ref set is NOT (the reachable
+    // cache-hit-read case where the best-effort reference-chunk download failed),
+    // so this is a FULL publish. The monotonicity tripwire must still fire — a
+    // regressed counter is a broken-persistence symptom regardless of path.
+    const regressed = new Uint32Array(NUM_BUCKETS)
+    regressed[1000] = 4
+    await expect(
+      writePartitionState({
+        bee: bee as unknown as Bee,
+        stamper,
+        batchId: TEST_BATCH_ID,
+        batchDepth: TEST_BATCH_DEPTH,
+        partition: PARTITION,
+        localCounter: regressed,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        deviceId: DEVICE_ID,
+        // previousReferences intentionally omitted → full path.
+        previousCounter: first.publishedCounter,
+      }),
+    ).rejects.toThrow(/counter regressed/)
+  })
 })

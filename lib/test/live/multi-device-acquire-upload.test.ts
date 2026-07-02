@@ -33,11 +33,6 @@ import {
   UtilizationAwareStamper,
   PARTITION_COUNT,
 } from "../../src/utils/batch-utilization"
-import type {
-  BatchMetadata,
-  ChunkCacheEntry,
-  UtilizationStoreDB,
-} from "../../src/storage/utilization-store"
 import { uploadSOC, type UploadTarget } from "../../src/proxy/upload"
 import { hexToUint8Array } from "../../src/utils/hex"
 import {
@@ -47,28 +42,8 @@ import {
   deviceId,
   delay,
   type LiveContext,
+  makeInMemoryCache,
 } from "./env"
-
-/** Minimal in-memory `UtilizationStoreDB` (no IndexedDB), per the unit suite. */
-function makeInMemoryCache(): UtilizationStoreDB {
-  const chunks = new Map<string, ChunkCacheEntry>()
-  const meta = new Map<string, BatchMetadata>()
-  return {
-    getAllChunks: async (batchId: string) =>
-      Array.from(chunks.values())
-        .filter((c) => c.batchId === batchId)
-        .sort((a, b) => a.chunkIndex - b.chunkIndex),
-    putChunk: async (entry: ChunkCacheEntry) => {
-      chunks.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
-    },
-    getChunk: async (batchId: string, chunkIndex: number) =>
-      chunks.get(`${batchId}:${chunkIndex}`),
-    getMetadata: async (batchId: string) => meta.get(batchId),
-    putMetadata: async (metadata: BatchMetadata) => {
-      meta.set(metadata.batchId, { ...metadata })
-    },
-  } as unknown as UtilizationStoreDB
-}
 
 interface DeviceHarness {
   id: string

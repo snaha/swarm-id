@@ -63,6 +63,7 @@ import {
   intentSocAddress,
   partitionOccupancyAddress,
 } from "./partition-intent"
+import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 
 /** Length of a Swarm encrypted reference: 32-byte address + 32-byte key. */
 const ENCRYPTED_REFERENCE_BYTES = 64
@@ -150,7 +151,7 @@ export const STATE_POINTER_EPOCH_MS = INTENT_EPOCH_MS
 const POINTER_LOOKUP_SLACK_BUCKETS = 2
 
 /** Bound a single pointer read so an absent SOC doesn't block on peer exhaustion. */
-const STATE_POINTER_READ_TIMEOUT_MS = 2500
+const STATE_POINTER_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
 /**
  * Sentinel for a pointer-bucket read that TIMED OUT — distinct from `undefined`
@@ -775,19 +776,21 @@ export async function writePartitionState(opts: {
     previousReferences.length === numUtilizationChunks &&
     previousCounter !== undefined
 
-  // KEYSTONE tripwire (fail loud, never silent slot reuse). The incremental diff
-  // RETAINS the previous ref for every unchanged chunk; that is only safe because
-  // the counter is a monotonic per-bucket high-water, so what we publish is always
-  // >= what those retained refs describe (see the SAFETY INVARIANT note in
-  // `PartitionLease.claimPartition`). If the counter ever regresses below the one
-  // the last publish recorded, an unchanged-looking chunk could retain a ref
-  // ABOVE the live counter and a takeover would resume PAST an acked slot into
-  // reuse. That "impossible" case means the stamper's counter/synced-ref
-  // persistence broke its invariant — refuse to publish rather than corrupt the
-  // resume point. Cheap: one pass over the 65536-entry counter, dwarfed by the
-  // ECDSA/upload work below. (It catches the regression SYMPTOM; it cannot decode
-  // the retained refs' own counters, so it is a tripwire, not a full proof.)
-  if (incremental && previousCounter !== undefined) {
+  // KEYSTONE tripwire (fail loud, never silent slot reuse). The counter is a
+  // monotonic per-bucket high-water, so any publish is always >= the one the last
+  // publish recorded (see the SAFETY INVARIANT note in `PartitionLease.claimPartition`).
+  // A regression means the stamper's counter/synced-ref persistence broke its
+  // invariant. On the INCREMENTAL path it is actively dangerous — an unchanged-
+  // looking chunk retains a ref ABOVE the live counter and a takeover resumes PAST
+  // an acked slot into reuse. But it is a broken-persistence symptom on ANY path,
+  // so guard on a known `previousCounter` ALONE, not `incremental`: the sparse-full
+  // path is reachable with a previous counter but no refs (a cache-hit read whose
+  // best-effort reference-chunk download failed seeds the lease that way), and a
+  // regressed resume point must fail loud there too rather than ship silently.
+  // Cheap: one pass over the 65536-entry counter, dwarfed by the ECDSA/upload work
+  // below. (It catches the regression SYMPTOM; it cannot decode the retained refs'
+  // own counters, so it is a tripwire, not a full proof.)
+  if (previousCounter !== undefined) {
     for (let b = 0; b < NUM_BUCKETS; b++) {
       if (localCounter[b] < previousCounter[b]) {
         throw new Error(

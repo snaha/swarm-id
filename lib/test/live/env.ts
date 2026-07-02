@@ -29,6 +29,11 @@ import {
 import { foldAccountFromSwarm } from "../../src/sync/fold-account-from-swarm"
 import type { DeviceStateView } from "../../src/sync/device-state"
 import type { ConnectedApp, Device, PostageStamp } from "../../src/schemas"
+import type {
+  BatchMetadata,
+  ChunkCacheEntry,
+  UtilizationStoreDB,
+} from "../../src/storage/utilization-store"
 
 const DEFAULT_BEE_URL = "https://api.gateway.ethswarm.org/"
 const KEY_BYTES = 32
@@ -44,6 +49,32 @@ const KEY_BYTES = 32
  * and returns undefined (the `views.length === 0` guard).
  */
 export const TEST_ACCOUNT_PUBLIC_KEY = `02${"11".repeat(KEY_BYTES)}`
+
+/**
+ * Minimal in-memory `UtilizationStoreDB` (no IndexedDB) for the live scenarios,
+ * matching the unit suite's stamper cache. Shared here so the five scenario
+ * files don't each carry a byte-identical copy that would drift when the
+ * interface changes.
+ */
+export function makeInMemoryCache(): UtilizationStoreDB {
+  const chunks = new Map<string, ChunkCacheEntry>()
+  const meta = new Map<string, BatchMetadata>()
+  return {
+    getAllChunks: async (batchId: string) =>
+      Array.from(chunks.values())
+        .filter((c) => c.batchId === batchId)
+        .sort((a, b) => a.chunkIndex - b.chunkIndex),
+    putChunk: async (entry: ChunkCacheEntry) => {
+      chunks.set(`${entry.batchId}:${entry.chunkIndex}`, { ...entry })
+    },
+    getChunk: async (batchId: string, chunkIndex: number) =>
+      chunks.get(`${batchId}:${chunkIndex}`),
+    getMetadata: async (batchId: string) => meta.get(batchId),
+    putMetadata: async (metadata: BatchMetadata) => {
+      meta.set(metadata.batchId, { ...metadata })
+    },
+  } as unknown as UtilizationStoreDB
+}
 
 const str = (name: string): string | undefined => {
   const v = process.env[name]

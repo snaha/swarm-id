@@ -66,6 +66,7 @@ import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { UtilizationAwareStamper } from "../utils/batch-utilization"
 import { TimeoutError, withTimeout } from "../utils/promise"
+import { INTENT_EPOCH_MS, SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import {
   PartitionIntentPayloadSchemaV1,
   type PartitionIntentPayload,
@@ -91,23 +92,17 @@ const PARTITION_INTENT_DOMAIN = "swarm-id-partition-intent-v1"
  */
 const PARTITION_OCCUPANCY_DOMAIN = "swarm-id-partition-occupancy-v1"
 
-/**
- * Epoch length for the rotating intent address. TTL-sized so a contention
- * round and its immediate retries share a bucket (and the previous bucket
- * covers the boundary), while every fresh round rotates to an address no node
- * has cached. Kept independent of the lock TTL constant to avoid a circular
- * import through batch-utilization; the two are intended to track each other.
- */
-export const INTENT_EPOCH_MS = 30_000
+// Epoch length for the rotating intent address (TTL-sized so a round + its
+// retries share a bucket; every fresh round rotates to an uncached address).
+// Single source in `sync/timing-constants` (= `LEASE_TTL_MS`), which the
+// dependency-free module lets us share without a circular import.
+export { INTENT_EPOCH_MS }
 
-/**
- * Client-side timeout for a single rival-intent read. Bee has no fast
- * authoritative "not found" — a retrieval of an absent chunk fails only after
- * exhausting peers — so an absent rival would otherwise block for tens of
- * seconds. A present chunk in its neighborhood retrieves well under this; a
- * timed-out read is treated as "no intent from that device".
- */
-export const INTENT_READ_TIMEOUT_MS = 2500
+// Client-side timeout for a single rival-intent read — the shared cross-device
+// read timeout (Bee has no fast authoritative "not found", so an absent rival
+// would otherwise block for tens of seconds; a timed-out read is treated as
+// "no intent from that device").
+export const INTENT_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
 /**
  * Total window an intent round polls rivals before binding a fresh claim.

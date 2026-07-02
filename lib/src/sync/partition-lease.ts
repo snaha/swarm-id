@@ -34,6 +34,7 @@ import {
 } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "../utils/hex"
 import { withTimeout } from "../utils/promise"
+import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { deriveSecret } from "../utils/key-derivation"
 import {
   LEASE_TTL_MS,
@@ -89,7 +90,7 @@ function isZeroRef(ref: Uint8Array): boolean {
  * silently treated as an absent lock. Matches the roster / state-pointer read
  * timeouts.
  */
-const LOCK_READ_TIMEOUT_MS = 2500
+const LOCK_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
 /** This device's own lease over a partition. */
 export interface SelfLease {

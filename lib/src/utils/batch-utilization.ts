@@ -86,12 +86,11 @@ export const UTILIZATION_SLOTS_PER_BUCKET = PARTITION_COUNT
 /** First data slot index; reserved slots `[0, PARTITION_COUNT)` precede it. */
 export const DATA_COUNTER_START = PARTITION_COUNT
 
-/**
- * Partition-lease lifetime. A device holds its partition for this long
- * before the lease must be refreshed; if it crashes without refreshing,
- * peers can reclaim the partition via Case D.
- */
-export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
+// Partition-lease lifetime — single source in `sync/timing-constants` (shared
+// with `partition-intent`'s epoch, which tracks it). Re-exported here so the
+// many `import { LEASE_TTL_MS } from "../utils/batch-utilization"` callers are
+// unchanged.
+export { LEASE_TTL_MS } from "../sync/timing-constants"
 
 /**
  * How often the holder re-writes its partition lock SOC to bump
