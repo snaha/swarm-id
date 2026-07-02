@@ -63,9 +63,7 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
         identityId: idHex,
         identityName: account.name,
         identityAddress: idHex,
-        // Omit when falsy — the schema validates a compressed public key hex,
-        // so an empty string would fail parsing and drop the whole setSecret.
-        ...(account.publicKey ? { identityPublicKey: account.publicKey } : {}),
+        identityPublicKey: account.publicKey,
       },
     },
     window.location.origin,

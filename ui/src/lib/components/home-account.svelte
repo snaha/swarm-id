@@ -22,7 +22,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import type { AccessMethod } from '@snaha/swarm-id'
+  import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -42,7 +42,7 @@
     randomSalt,
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-  import { bytesToHex, prefix0x } from '$lib/crypto/hex'
+  import { prefix0x } from '$lib/crypto/hex'
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import { unlockAccount } from '$lib/crypto/unlock'
@@ -113,7 +113,7 @@
         ? Wallet
         : KeyRound,
   )
-  const publicKeyDisplay = $derived(account.publicKey ? prefix0x(account.publicKey) : '')
+  const publicKeyDisplay = $derived(prefix0x(account.publicKey))
   const privateKey = $derived(entropy ? privateKeyFromEntropy(entropy) : undefined)
   const phraseWords = $derived(entropy ? phraseFromEntropy(entropy).split(' ') : [])
   const newPasswordTooShort = $derived(
@@ -254,14 +254,14 @@
         key = await deriveWalletKey(source, salt)
         access = {
           type: 'eth-wallet',
-          encryptionSalt: bytesToHex(salt),
+          encryptionSalt: uint8ArrayToHex(salt),
         }
       } else {
         const salt = randomSalt()
         key = await deriveKeyFromPassword(newPassword, salt)
         access = {
           type: 'password',
-          kdfSalt: bytesToHex(salt),
+          kdfSalt: uint8ArrayToHex(salt),
           kdfIterations: PASSWORD_KDF_ITERATIONS,
         }
       }
