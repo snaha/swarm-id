@@ -6,10 +6,18 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
+  import { EthAddress } from '@ethersphere/bee-js'
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import Eye from '@lucide/svelte/icons/eye'
   import EyeOff from '@lucide/svelte/icons/eye-off'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
+  import {
+    type AccessMethod,
+    type Account as AccountRecord,
+    PARTITION_COUNT,
+    deriveAccountDerivationKey,
+    uint8ArrayToHex,
+  } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -26,14 +34,13 @@
     randomSalt,
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-  import { bytesToHex } from '$lib/crypto/hex'
+  import { strip0x } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { AccessMethod } from '$lib/types'
 
   const MIN_PASSWORD_LENGTH = 8
   const TABS = [
@@ -85,20 +92,38 @@
     // Carry over data from a restore, or from an existing record for the same
     // address — re-importing a phrase must not wipe stamps or connected apps.
     const carried = draft.restored ?? accountsStore.get(wallet.address)
-    const account = {
-      id: wallet.address,
+    // The derivation key is computed from the master key (the wallet private
+    // key) while the entropy is in hand — the same chain the proxy/sync use.
+    const masterKey = strip0x(wallet.privateKey)
+    const [derivationKey, encryptedSeed] = await Promise.all([
+      deriveAccountDerivationKey(masterKey),
+      encryptSeed(wallet.entropy, key),
+    ])
+    const account: AccountRecord = {
+      id: new EthAddress(wallet.address),
       name: draft.name,
-      publicKey: wallet.publicKey,
+      publicKey: strip0x(wallet.publicKey),
       createdAt: carried?.createdAt ?? Date.now(),
+      derivationKey,
       access,
-      encryptedSeed: await encryptSeed(wallet.entropy, key),
-      appConnectionDays: carried?.appConnectionDays,
-      defaultStampBatchId: carried?.defaultStampBatchId,
-      stamps: carried?.stamps ?? [],
+      encryptedSeed,
+      settings: carried?.settings,
+      defaultPostageStampBatchID: carried?.defaultPostageStampBatchID,
+      // Preserve the carried record's per-field LWW clocks so re-importing a
+      // phrase doesn't reset convergence metadata and make local scalar edits
+      // look stale to sync/merge.
+      accountNameAt: carried?.accountNameAt,
+      defaultStampAt: carried?.defaultStampAt,
+      settingsAt: carried?.settingsAt,
+      lastModified: carried?.lastModified,
+      devices: carried?.devices ?? [],
       connectedApps: carried?.connectedApps ?? [],
+      postageStamps: carried?.postageStamps ?? [],
+      partitionCount: carried?.partitionCount ?? PARTITION_COUNT,
     }
-    accountsStore.add(account)
-    sessionStore.setCurrentAccount(wallet.address)
+    // `add` returns the live reactive account; the handshake mutates it.
+    const liveAccount = accountsStore.add(account)
+    sessionStore.setCurrentAccount(liveAccount.id)
     const flow = draft.flow
 
     // Came from a dApp connect popup — finish the handshake and hand back.
@@ -106,7 +131,7 @@
     // leaves the Confirm buttons functional for a retry.
     const request = connectStore.request
     if (request) {
-      await completeConnect(account, wallet.entropy, request)
+      await completeConnect(liveAccount, wallet.entropy, request)
       sessionStore.setCompletedFlow(flow)
       sessionStore.clearDraft()
       goto(resolve(routes.CONNECT_DONE))
@@ -158,8 +183,7 @@
       await finalize(
         {
           type: 'eth-wallet',
-          walletAddress: source.walletAddress,
-          encryptionSalt: bytesToHex(salt),
+          encryptionSalt: uint8ArrayToHex(salt),
         },
         key,
       )
@@ -184,7 +208,11 @@
       const salt = randomSalt()
       const key = await deriveKeyFromPassword(password, salt)
       await finalize(
-        { type: 'password', kdfSalt: bytesToHex(salt), kdfIterations: PASSWORD_KDF_ITERATIONS },
+        {
+          type: 'password',
+          kdfSalt: uint8ArrayToHex(salt),
+          kdfIterations: PASSWORD_KDF_ITERATIONS,
+        },
         key,
       )
     } catch (caught) {

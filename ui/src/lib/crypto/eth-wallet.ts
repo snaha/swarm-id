@@ -12,10 +12,10 @@
  * wallets (ERC-1271) don't return a recoverable ECDSA signature and are
  * rejected up front.
  */
+import { hexToUint8Array } from '@snaha/swarm-id'
 import { Signature, getAddress, verifyMessage } from 'ethers'
 
 import { deriveKeyFromSignature } from '$lib/crypto/encryption'
-import { hexToBytes } from '$lib/crypto/hex'
 
 interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>
@@ -67,5 +67,5 @@ export async function requestWalletKeySource(): Promise<WalletKeySource> {
 
 /** Derive the seed-encryption key for a wallet key source. */
 export function deriveWalletKey(source: WalletKeySource, salt: Uint8Array): Promise<CryptoKey> {
-  return deriveKeyFromSignature(hexToBytes(source.signature), salt)
+  return deriveKeyFromSignature(hexToUint8Array(source.signature), salt)
 }

@@ -45,7 +45,7 @@
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         <div class="flex flex-col items-center gap-4">
           <Polycon
-            value={account.id}
+            value={account.id.toHex()}
             size={IDENTICON_SIZE}
             class="shrink-0 overflow-hidden rounded-lg"
           />

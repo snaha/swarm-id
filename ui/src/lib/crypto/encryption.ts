@@ -6,7 +6,7 @@
  * password); the access method can always re-derive the key, so only the
  * ciphertext is persisted.
  */
-import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
+import { hexToUint8Array, uint8ArrayToHex } from '@snaha/swarm-id'
 
 const AES_GCM = 'AES-GCM'
 const AES_KEY_BITS = 256
@@ -33,11 +33,11 @@ export async function encryptSeed(data: Uint8Array, key: CryptoKey): Promise<str
   const payload = new Uint8Array(IV_LENGTH + ciphertext.byteLength)
   payload.set(iv)
   payload.set(new Uint8Array(ciphertext), IV_LENGTH)
-  return bytesToHex(payload)
+  return uint8ArrayToHex(payload)
 }
 
 export async function decryptSeed(payloadHex: string, key: CryptoKey): Promise<Uint8Array> {
-  const payload = hexToBytes(payloadHex)
+  const payload = hexToUint8Array(payloadHex)
   const iv = payload.slice(0, IV_LENGTH)
   const ciphertext = payload.slice(IV_LENGTH)
   const data = await crypto.subtle.decrypt(

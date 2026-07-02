@@ -79,6 +79,11 @@ The new identity UI is a fresh SvelteKit product replacing `swarm-ui/` screen by
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
+- **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
+  from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
+  only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)
+  and the `0x`-prefixed form (ethers keys, display). For an address use `new EthAddress(value)`
+  (parse) and `.toChecksum()` (EIP-55 display) rather than raw string juggling.
 
 ## Library Core (`lib/`)
 

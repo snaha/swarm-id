@@ -1,6 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import type { AccountData } from '$lib/types'
+import type { EthAddress } from '@ethersphere/bee-js'
+import type { AccountData } from '@snaha/swarm-id'
 
 const CURRENT_ACCOUNT_KEY = 'swarm-id-current-account-v2'
 
@@ -29,9 +30,10 @@ function createSessionStore() {
     get currentAccountId() {
       return currentAccountId
     },
-    setCurrentAccount(id: string) {
-      currentAccountId = id
-      localStorage.setItem(CURRENT_ACCOUNT_KEY, id)
+    setCurrentAccount(id: EthAddress) {
+      const hex = id.toHex()
+      currentAccountId = hex
+      localStorage.setItem(CURRENT_ACCOUNT_KEY, hex)
     },
     clearCurrentAccount() {
       currentAccountId = undefined

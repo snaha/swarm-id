@@ -4,6 +4,7 @@
 -->
 
 <script lang="ts">
+  import { EthAddress } from '@ethersphere/bee-js'
   import Check from '@lucide/svelte/icons/check'
 
   import Polycon from '$lib/components/polycon.svelte'
@@ -41,7 +42,7 @@
     }
   }
 
-  function switchTo(id: string) {
+  function switchTo(id: EthAddress) {
     sessionStore.setCurrentAccount(id)
     close()
   }
@@ -60,9 +61,11 @@
   >
     <span class="flex flex-col items-end">
       <span class="text-sm font-medium">{account.name}</span>
-      <span class="text-muted-foreground text-xs font-normal">{truncateAddress(account.id)}</span>
+      <span class="text-muted-foreground text-xs font-normal">
+        {truncateAddress(account.id.toChecksum())}
+      </span>
     </span>
-    <Polycon value={account.id} size={32} class="shrink-0 overflow-hidden rounded-lg" />
+    <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />
   </Button>
 
   {#if open}
@@ -72,17 +75,21 @@
       class="bg-popover text-popover-foreground absolute top-full right-0 z-50 mt-2 min-w-56 rounded-lg border p-1 shadow-md"
     >
       <div class="text-muted-foreground px-1.5 py-1 text-xs">Account</div>
-      {#each accountsStore.accounts as candidate (candidate.id)}
+      {#each accountsStore.accounts as candidate (candidate.id.toHex())}
         <button
           type="button"
           role="menuitemradio"
-          aria-checked={candidate.id === account.id}
+          aria-checked={candidate.id.equals(account.id)}
           class={ITEM_CLASS}
           onclick={() => switchTo(candidate.id)}
         >
-          <Polycon value={candidate.id} size={24} class="shrink-0 overflow-hidden rounded-md" />
+          <Polycon
+            value={candidate.id.toHex()}
+            size={24}
+            class="shrink-0 overflow-hidden rounded-md"
+          />
           <span class="flex-1 truncate whitespace-nowrap">{candidate.name}</span>
-          {#if candidate.id === account.id}
+          {#if candidate.id.equals(account.id)}
             <Check class="size-4 shrink-0" />
           {/if}
         </button>

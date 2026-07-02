@@ -22,6 +22,7 @@
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Wallet from '@lucide/svelte/icons/wallet'
+  import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -33,7 +34,6 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
-  import { removeSharedAccountRecords } from '$lib/connect-handshake'
   import { backupFilename, createBackup } from '$lib/crypto/backup'
   import {
     PASSWORD_KDF_ITERATIONS,
@@ -42,14 +42,14 @@
     randomSalt,
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-  import { bytesToHex } from '$lib/crypto/hex'
+  import { prefix0x } from '$lib/crypto/hex'
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import { unlockAccount } from '$lib/crypto/unlock'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import type { AccessMethod, Account } from '$lib/types'
+  import type { Account } from '$lib/types'
   import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
@@ -113,6 +113,7 @@
         ? Wallet
         : KeyRound,
   )
+  const publicKeyDisplay = $derived(prefix0x(account.publicKey))
   const privateKey = $derived(entropy ? privateKeyFromEntropy(entropy) : undefined)
   const phraseWords = $derived(entropy ? phraseFromEntropy(entropy).split(' ') : [])
   const newPasswordTooShort = $derived(
@@ -142,7 +143,7 @@
   function onNameChange() {
     const trimmed = name.trim()
     if (trimmed.length > 0 && trimmed !== account.name) {
-      accountsStore.rename(account.id, trimmed)
+      account.rename(trimmed)
     }
   }
 
@@ -253,22 +254,21 @@
         key = await deriveWalletKey(source, salt)
         access = {
           type: 'eth-wallet',
-          walletAddress: source.walletAddress,
-          encryptionSalt: bytesToHex(salt),
+          encryptionSalt: uint8ArrayToHex(salt),
         }
       } else {
         const salt = randomSalt()
         key = await deriveKeyFromPassword(newPassword, salt)
         access = {
           type: 'password',
-          kdfSalt: bytesToHex(salt),
+          kdfSalt: uint8ArrayToHex(salt),
           kdfIterations: PASSWORD_KDF_ITERATIONS,
         }
       }
       if (myAttempt !== attempt) {
         return
       }
-      accountsStore.setAccess(account.id, access, await encryptSeed(entropy, key))
+      account.setAccess(access, await encryptSeed(entropy, key))
       dialog = undefined
       newPassword = ''
       verifyNewPassword = ''
@@ -320,7 +320,9 @@
   }
 
   function deleteAccount() {
-    removeSharedAccountRecords(account)
+    // The account's connected apps and stamps are nested in the record, so they
+    // are removed with it; the resulting storage event de-authenticates any
+    // connected dApp proxy iframes.
     accountsStore.remove(account.id)
     const next = accountsStore.accounts[0]
     if (next) {
@@ -398,7 +400,7 @@
     {#if expanded.identity}
       <div class="flex w-full items-center gap-2 pl-5">
         <Input bind:value={name} onchange={onNameChange} />
-        <Polycon value={account.id} size={32} class="shrink-0 overflow-hidden rounded-lg" />
+        <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />
       </div>
     {/if}
   </div>
@@ -440,8 +442,12 @@
       <div class="pl-5">
         <div class="border-border flex w-full flex-col rounded-lg border">
           <div class="flex h-12 w-full items-center gap-2 px-4">
-            <p class="flex-1 truncate text-sm">{truncateAddress(account.id)}</p>
-            <Button variant="ghost" size="sm" onclick={() => copyText(account.id, 'Address')}>
+            <p class="flex-1 truncate text-sm">{truncateAddress(account.id.toChecksum())}</p>
+            <Button
+              variant="ghost"
+              size="sm"
+              onclick={() => copyText(account.id.toChecksum(), 'Address')}
+            >
               <Copy />
               Copy
             </Button>
@@ -461,13 +467,13 @@
               <div class="flex flex-col gap-1">
                 {@render keyBlock('Address', 'The unique identifier for your Swarm ID.')}
                 <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{account.id}</p>
+                  <p class="min-w-0 flex-1 text-sm break-all">{account.id.toChecksum()}</p>
                   <Button
                     variant="ghost"
                     size="icon"
                     class="size-7 shrink-0"
                     aria-label="Copy address"
-                    onclick={() => copyText(account.id, 'Address')}
+                    onclick={() => copyText(account.id.toChecksum(), 'Address')}
                   >
                     <Copy />
                   </Button>
@@ -480,13 +486,13 @@
                   'Can be used for establishing secure, private communication.',
                 )}
                 <div class="flex items-center gap-2">
-                  <p class="min-w-0 flex-1 text-sm break-all">{account.publicKey}</p>
+                  <p class="min-w-0 flex-1 text-sm break-all">{publicKeyDisplay}</p>
                   <Button
                     variant="ghost"
                     size="icon"
                     class="size-7 shrink-0"
                     aria-label="Copy public key"
-                    onclick={() => copyText(account.publicKey, 'Public key')}
+                    onclick={() => copyText(publicKeyDisplay, 'Public key')}
                   >
                     <Copy />
                   </Button>

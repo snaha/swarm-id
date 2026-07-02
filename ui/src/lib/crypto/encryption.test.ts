@@ -1,5 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
+import { hexToUint8Array } from '@snaha/swarm-id'
 import { Signature, Wallet } from 'ethers'
 import { describe, expect, it } from 'vitest'
 
@@ -11,7 +12,6 @@ import {
   encryptSeed,
   randomSalt,
 } from './encryption'
-import { hexToBytes } from './hex'
 
 // Fast KDF settings for tests only.
 const TEST_ITERATIONS = 10
@@ -58,10 +58,10 @@ describe('seed encryption round-trips', () => {
     const reSignature = Signature.from(await wallet.signMessage(message)).serialized
     expect(reSignature).toBe(signature)
 
-    const key = await deriveKeyFromSignature(hexToBytes(signature), salt)
+    const key = await deriveKeyFromSignature(hexToUint8Array(signature), salt)
     const payload = await encryptSeed(ENTROPY, key)
     expect(
-      await decryptSeed(payload, await deriveKeyFromSignature(hexToBytes(reSignature), salt)),
+      await decryptSeed(payload, await deriveKeyFromSignature(hexToUint8Array(reSignature), salt)),
     ).toEqual(ENTROPY)
   })
 

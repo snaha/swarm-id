@@ -1701,4 +1701,9 @@ export interface ConnectOptions {
 // Entity Types (derived from Zod schemas for type safety)
 // ============================================================================
 
-export type { Account, ConnectedApp, PostageStamp } from "./schemas"
+export type {
+  Account,
+  AccountData,
+  ConnectedApp,
+  PostageStamp,
+} from "./schemas"

@@ -6,10 +6,18 @@
  * a key derived from the recovery-phrase entropy, so the file is useless
  * without the phrase and restoring needs exactly: file + phrase.
  */
+import { EthAddress } from '@ethersphere/bee-js'
+import {
+  type AccountData,
+  AccountDataSchemaV1,
+  type Account as AccountRecord,
+  hexToUint8Array,
+  serializeAccountData,
+  uint8ArrayToHex,
+} from '@snaha/swarm-id'
+
 import { decryptSeed, deriveKeyFromSecret, encryptSeed } from '$lib/crypto/encryption'
-import { bytesToHex, hexToBytes } from '$lib/crypto/hex'
 import { walletFromPhrase } from '$lib/crypto/mnemonic'
-import type { Account, AccountData } from '$lib/types'
 
 const BACKUP_VERSION = 1
 const BACKUP_KEY_INFO = 'swarm-id-backup-v1'
@@ -43,18 +51,15 @@ function parseEnvelope(fileContents: string): BackupEnvelope | undefined {
   return undefined
 }
 
-/** Serialize and encrypt an account into .swarmid file contents. */
-export async function createBackup(account: Account, entropy: Uint8Array): Promise<string> {
-  const data: AccountData = {
-    id: account.id,
-    name: account.name,
-    publicKey: account.publicKey,
-    createdAt: account.createdAt,
-    appConnectionDays: account.appConnectionDays,
-    defaultStampBatchId: account.defaultStampBatchId,
-    stamps: account.stamps,
-    connectedApps: account.connectedApps,
-  }
+/**
+ * Serialize and encrypt an account into .swarmid file contents. The payload is
+ * the lib's portable projection (`serializeAccountData`): plain JSON with
+ * byte-class fields as hex, never the seed vault or live per-app session
+ * material (`appSecret`/`connectedUntil` — the secret is re-derived from the
+ * master key on the next connect).
+ */
+export async function createBackup(account: AccountRecord, entropy: Uint8Array): Promise<string> {
+  const data = serializeAccountData(account)
 
   const salt = new Uint8Array(SALT_LENGTH)
   crypto.getRandomValues(salt)
@@ -63,7 +68,7 @@ export async function createBackup(account: Account, entropy: Uint8Array): Promi
   const envelope: BackupEnvelope = {
     format: 'swarm-id-backup',
     version: BACKUP_VERSION,
-    salt: bytesToHex(salt),
+    salt: uint8ArrayToHex(salt),
     payload: await encryptSeed(new TextEncoder().encode(JSON.stringify(data)), key),
   }
   return JSON.stringify(envelope)
@@ -101,8 +106,8 @@ export async function restoreBackup(fileContents: string, phrase: string): Promi
 
   let salt: Uint8Array
   try {
-    salt = hexToBytes(envelope.salt)
-    hexToBytes(envelope.payload) // corrupt hex is a file problem, not a phrase mismatch
+    salt = hexToUint8Array(envelope.salt)
+    hexToUint8Array(envelope.payload) // corrupt hex is a file problem, not a phrase mismatch
   } catch {
     throw new Error('Not a valid backup file.')
   }
@@ -117,11 +122,23 @@ export async function restoreBackup(fileContents: string, phrase: string): Promi
     throw new Error('The recovery phrase does not match this backup.')
   }
 
-  const data = JSON.parse(new TextDecoder().decode(plaintext)) as AccountData
-  if (data.id.toLowerCase() !== wallet.address.toLowerCase()) {
+  let raw: unknown
+  try {
+    raw = JSON.parse(new TextDecoder().decode(plaintext))
+  } catch {
+    throw new Error('Not a valid backup file.')
+  }
+  // Rehydrate byte-class fields through the shared portable schema — the exact
+  // shape `createBackup` wrote (no device-local seed vault to fake or strip).
+  const result = AccountDataSchemaV1.safeParse(raw)
+  if (!result.success) {
+    throw new Error('Not a valid backup file.')
+  }
+  const parsed = result.data
+  if (!parsed.id.equals(new EthAddress(wallet.address))) {
     throw new Error('The recovery phrase does not match this backup.')
   }
-  return data
+  return parsed
 }
 
 /** Backup filename like 20260610.swarmid */

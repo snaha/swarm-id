@@ -170,21 +170,21 @@
               <Tabs tabs={TABS} bind:value={() => activeTab, (value) => (selectedTab = value)} />
             {/if}
             <div class="flex w-full flex-col rounded-lg border p-1">
-              {#each shownAccounts as account (account.id)}
+              {#each shownAccounts as account (account.id.toHex())}
                 <button
                   type="button"
                   class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm outline-none"
                   onclick={() => select(account)}
                 >
                   <Polycon
-                    value={account.id}
+                    value={account.id.toHex()}
                     size={32}
                     class="shrink-0 overflow-hidden rounded-md"
                   />
                   <span class="flex min-w-0 flex-col">
                     <span class="truncate font-medium">{account.name}</span>
                     <span class="text-muted-foreground text-xs">
-                      {truncateAddress(account.id)}
+                      {truncateAddress(account.id.toChecksum())}
                     </span>
                   </span>
                 </button>
