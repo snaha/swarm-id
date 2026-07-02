@@ -7,8 +7,10 @@ import {
   type ConnectedApp,
   type Device,
   type PostageStamp,
+  PostageStampSchemaV1,
   STORAGE_KEY_ACCOUNTS,
   createAccountsStorageManager,
+  serializePostageStamp,
 } from '@snaha/swarm-id'
 
 import { browser } from '$app/environment'
@@ -193,6 +195,11 @@ export class Account {
   addStamp(stamp: Omit<PostageStamp, 'createdAt' | 'deletedAt'>): PostageStamp {
     const now = Date.now()
     const newStamp: PostageStamp = { ...stamp, createdAt: now }
+    // Callers build stamps from raw Bee-node JSON. Validate the constructed
+    // record BEFORE it enters the collection: one malformed field would make
+    // this account's stored record unparseable, so the loader would skip the
+    // whole account on the next load. Throws to the caller's error display.
+    PostageStampSchemaV1.parse(serializePostageStamp(newStamp))
     this.postageStamps = [
       ...this.postageStamps.filter((existing) => !existing.batchID.equals(stamp.batchID)),
       newStamp,
