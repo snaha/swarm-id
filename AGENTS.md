@@ -112,6 +112,9 @@ Authentication uses storage events: popup writes to localStorage → storage eve
 - Unit tests (`*.test.ts`): Vitest
 - Component tests (`*.ct.spec.ts`): Playwright
 - E2E tests (`tests/*.test.ts`): Playwright
+- **TDD for `lib/` fixes**: when fixing a bug in `lib/`, always work TDD-style if
+  applicable — write a failing test that reproduces the bug first, then fix, then
+  confirm the test passes (pure refactors/docs are exempt)
 
 ## Version control conventions
 
@@ -119,6 +122,7 @@ Authentication uses storage events: popup writes to localStorage → storage eve
 - Keep PR titles and descriptions concise
 - Omit the issue number from branch names and titles
 - When a PR resolves an issue, reference it with a closing keyword (e.g. `Closes #53`) so GitHub closes the issue automatically on merge
+- Keep a **linear history**: rebase onto `main` to update a branch or resolve a conflict — never merge `main` into the branch. Rebasing a branch that is already pushed ends in `git push --force-with-lease`.
 
 ## Deployment
 
