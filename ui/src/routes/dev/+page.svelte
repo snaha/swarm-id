@@ -595,6 +595,10 @@ Check console logs for details:
 
   async function loadBeeStamps() {
     const url = networkSettingsStore.beeNodeUrl
+    // Record the attempt BEFORE fetching — success or failure. The auto-load
+    // effect is guarded by `url !== lastBeeUrl`; recording only on success made
+    // every failure re-arm the effect, hammering an unreachable node in a loop.
+    lastBeeUrl = url
     beeStampsLoading = true
     beeStampsError = ''
     try {
@@ -605,7 +609,6 @@ Check console logs for details:
       }
       const data = await response.json()
       beeStamps = data.stamps ?? []
-      lastBeeUrl = url
     } catch (error) {
       beeStampsError = error instanceof Error ? error.message : String(error)
       beeStamps = []
