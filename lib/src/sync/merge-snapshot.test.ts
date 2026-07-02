@@ -218,6 +218,99 @@ describe("mergeSnapshotWithRemote — apps / stamps", () => {
     expect(result.postageStamps[0].createdAt).toBe(9_000_000)
   })
 
+  it("a newer nameUpdatedAt rename supersedes a stale copy (renames propagate)", () => {
+    // device 1 renamed the stamp (nameUpdatedAt 5M); device 2 still has the old
+    // copy with the same createdAt. Without the name clock the two would tie
+    // and each device would keep its own copy — the rename must win.
+    const batchHex = "ab".repeat(32)
+    const stale = makeStamp(batchHex, 1_000_000)
+    const renamed = {
+      ...makeStamp(batchHex, 1_000_000),
+      name: "Photos",
+      nameUpdatedAt: 5_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [stale] }), // local (device 2): old copy
+      makeSnapshot({ postageStamps: [renamed] }), // remote (device 1): renamed
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].name).toBe("Photos")
+    expect(result.postageStamps[0].nameUpdatedAt).toBe(5_000_000)
+  })
+
+  it("a newer tombstone still beats an older edit (deletion wins over stale dilute)", () => {
+    const batchHex = "ba".repeat(32)
+    const diluted = {
+      ...makeStamp(batchHex, 1_000_000),
+      depth: 26,
+      updatedAt: 5_000_000,
+    }
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 9_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [diluted] }),
+      makeSnapshot({ postageStamps: [tombstone] }),
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].deletedAt).toBe(9_000_000)
+  })
+
+  it("a concurrent rename and dilute both survive the merge", () => {
+    // device 1 diluted/topped-up (updatedAt 5M: new depth/amount/batchTTL);
+    // device 2, not yet synced, renamed the SAME drive later (nameUpdatedAt 6M)
+    // over its stale copy. Whole-record LWW would install device 2's record and
+    // erase the paid dilution — the name must ride its own clock instead.
+    const batchHex = "cd".repeat(32)
+    const diluted = {
+      ...makeStamp(batchHex, 1_000_000),
+      depth: 26,
+      amount: BigInt(400),
+      batchTTL: 7_200,
+      updatedAt: 5_000_000,
+    }
+    const renamedStale = {
+      ...makeStamp(batchHex, 1_000_000),
+      name: "Holiday photos",
+      nameUpdatedAt: 6_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [renamedStale] }), // local (device 2)
+      makeSnapshot({ postageStamps: [diluted] }), // remote (device 1)
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].depth).toBe(26)
+    expect(result.postageStamps[0].amount).toBe(BigInt(400))
+    expect(result.postageStamps[0].batchTTL).toBe(7_200)
+    expect(result.postageStamps[0].name).toBe("Holiday photos")
+    expect(result.postageStamps[0].nameUpdatedAt).toBe(6_000_000)
+  })
+
+  it("a rename does not resurrect a deleted stamp (name-only overlay)", () => {
+    // device 1 deleted the drive (deletedAt 5M); device 2 renamed it later
+    // (nameUpdatedAt 6M) without having seen the deletion. Renames carry no
+    // node-state recency, so the tombstone must survive — with the newer name
+    // folded in for whenever the batch is re-added.
+    const batchHex = "dc".repeat(32)
+    const tombstone = {
+      ...makeStamp(batchHex, 1_000_000),
+      deletedAt: 5_000_000,
+    }
+    const renamedStale = {
+      ...makeStamp(batchHex, 1_000_000),
+      name: "Holiday photos",
+      nameUpdatedAt: 6_000_000,
+    }
+    const result = mergeSnapshotWithRemote(
+      makeSnapshot({ postageStamps: [renamedStale] }),
+      makeSnapshot({ postageStamps: [tombstone] }),
+    )
+    expect(result.postageStamps).toHaveLength(1)
+    expect(result.postageStamps[0].deletedAt).toBe(5_000_000)
+    expect(result.postageStamps[0].name).toBe("Holiday photos")
+  })
+
   it("unions connectedApps by appUrl", () => {
     const a = makeConnectedApp("https://app-a.example")
     const b = makeConnectedApp("https://app-b.example")

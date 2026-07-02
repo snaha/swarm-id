@@ -152,6 +152,15 @@ export const ConnectedAppSchemaV1 = z.object({
 export const PostageStampSchemaV1 = z.object({
   batchID: StoredBatchId,
   signerKey: StoredPrivateKey,
+  // User-given label shown in the UI (a "drive"). Optional: stamps created before
+  // naming existed — and those bought outside the app — have none, and callers
+  // fall back to a positional `Drive N` label.
+  name: z.string().optional(),
+  // Rename clock. The name merges on its own last-writer-wins clock, separate
+  // from the node-state clock below: a rename made over a stale copy must not
+  // carry old batch fields past a concurrent dilute/top-up, nor resurrect a
+  // tombstone. Optional: unnamed/never-renamed stamps have none.
+  nameUpdatedAt: z.number().optional(),
   utilization: z.number(),
   usable: z.boolean(),
   depth: z.number(),
@@ -162,10 +171,17 @@ export const PostageStampSchemaV1 = z.object({
   exists: z.boolean(),
   batchTTL: z.number().optional(),
   createdAt: z.number(),
+  // Node-state edit clock (dilute / top-up: depth, amount, batchTTL). Doubles
+  // as the instant `batchTTL` was measured, so the UI can age the countdown.
+  // Optional: stamps written before the field existed have none and fall back
+  // to `createdAt` in the merge. Without it, an edited copy would tie with a
+  // stale remote copy and the edit would never propagate across devices.
+  updatedAt: z.number().optional(),
   // Tombstone marker. A deleted stamp is kept in the snapshot (so the removal
   // propagates to other devices) but hidden from the UI and unusable for
-  // uploads. A `batchID` is immutable and stamps are never edited in place, so
-  // `deletedAt` always supersedes the original `createdAt` in the merge.
+  // uploads. `deletedAt`/`updatedAt`/`createdAt` compete as one last-writer-wins
+  // clock in the merge, so the newest NODE action on the batch wins (renames
+  // ride `nameUpdatedAt` instead).
   deletedAt: z.number().optional(),
 })
 

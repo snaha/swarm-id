@@ -6,7 +6,9 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
+  import Toast from '$lib/components/toast.svelte'
   import { themeStore } from '$lib/stores/theme.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
 
   import '../app.css'
 
@@ -18,3 +20,5 @@
 </script>
 
 {@render children()}
+
+<Toast message={toastStore.message} />

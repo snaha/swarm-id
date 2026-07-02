@@ -12,6 +12,7 @@
   import AccountSwitcher from '$lib/components/account-switcher.svelte'
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
+  import HomeDrives from '$lib/components/home-drives.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Tabs } from '$lib/components/ui/tabs'
   import routes from '$lib/routes'
@@ -20,7 +21,7 @@
 
   const TABS = [
     { value: 'apps', label: 'Apps' },
-    { value: 'stamps', label: 'Stamps' },
+    { value: 'drives', label: 'Storage' },
     { value: 'account', label: 'Account' },
   ]
 
@@ -56,10 +57,8 @@
         {#key account.id}
           {#if tab === 'apps'}
             <HomeApps {account} />
-          {:else if tab === 'stamps'}
-            <p class="text-muted-foreground py-8 text-center text-sm">
-              Postage stamp management is coming soon.
-            </p>
+          {:else if tab === 'drives'}
+            <HomeDrives {account} />
           {:else}
             <HomeAccount {account} />
           {/if}

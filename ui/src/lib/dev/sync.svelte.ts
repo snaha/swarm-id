@@ -11,9 +11,9 @@ import {
 
 import { browser } from '$app/environment'
 
-import { networkSettingsStore } from '$lib/dev/network-settings.svelte'
 import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
 import { accountsStore } from '$lib/stores/accounts.svelte'
+import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 // ============================================================================
 // Lazy Initialization (Browser Only)

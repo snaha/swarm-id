@@ -17,16 +17,15 @@
 
   import AppHeader from '$lib/components/app-header.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
-  import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
   import { Textarea } from '$lib/components/ui/textarea'
   import { generatePhrase, isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
   import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import { copyToClipboard } from '$lib/utils'
 
-  const TOAST_DURATION_MS = 4000
   const TABS = [
     { value: 'generate', label: 'Generate' },
     { value: 'import', label: 'Import' },
@@ -41,8 +40,6 @@
   // The user had a chance to save the phrase (revealed, copied, or downloaded).
   let phraseAccessed = $state(false)
   let imported = $state('')
-  let toastMessage = $state<string | undefined>(undefined)
-  let toastTimer: ReturnType<typeof setTimeout> | undefined
 
   const importedValid = $derived(isValidPhrase(imported))
   const canContinue = $derived(mode === 'generate' ? phraseAccessed : importedValid)
@@ -56,12 +53,6 @@
     }
   })
 
-  function showToast(message: string) {
-    toastMessage = message
-    clearTimeout(toastTimer)
-    toastTimer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
-  }
-
   function reveal() {
     revealed = true
     phraseAccessed = true
@@ -70,9 +61,9 @@
   async function copyPhrase() {
     phraseAccessed = true
     if (await copyToClipboard(generated)) {
-      showToast('Seed phrase copied to clipboard')
+      toastStore.show('Seed phrase copied to clipboard')
     } else {
-      showToast('Could not copy to clipboard')
+      toastStore.show('Could not copy to clipboard')
     }
   }
 
@@ -175,6 +166,4 @@
       <Button class="w-full" disabled={!canContinue} onclick={onContinue}>Continue</Button>
     </div>
   </main>
-
-  <Toast message={toastMessage} />
 </div>

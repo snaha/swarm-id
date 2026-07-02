@@ -10,13 +10,13 @@
   import { resolve } from '$app/paths'
 
   import AppHeader from '$lib/components/app-header.svelte'
+  import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import Polycon from '$lib/components/polycon.svelte'
   import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
-  import { notImplemented } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
   const IDENTICON_SIZE = 80
@@ -26,6 +26,11 @@
   )
 
   let toastMessage = $state<string | undefined>('Account created successfully!')
+  let addDriveOpen = $state(false)
+
+  function onDriveAdded() {
+    goto(resolve(routes.HOME))
+  }
 
   onMount(() => {
     if (!account) {
@@ -67,8 +72,7 @@
 
         <div class="flex w-full flex-col items-center gap-4">
           <div class="flex w-full flex-col items-center gap-2">
-            <!-- Stamp purchase flow is still TBD in the design. -->
-            <Button class="w-full" onclick={notImplemented}>Add a postage stamp</Button>
+            <Button class="w-full" onclick={() => (addDriveOpen = true)}>Add a drive</Button>
             <Button variant="outline" class="w-full" href={resolve(routes.HOME)}>
               Stay local for now
             </Button>
@@ -80,6 +84,10 @@
         </div>
       </div>
     </main>
+
+    {#if addDriveOpen}
+      <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={onDriveAdded} />
+    {/if}
   {/if}
 
   <Toast message={toastMessage} />
