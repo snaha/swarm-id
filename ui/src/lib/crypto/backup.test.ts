@@ -26,6 +26,7 @@ function accountFor(phrase: string): AccountRecord {
     // Per-field LWW clocks — must survive the round-trip so merge doesn't fall back.
     accountNameAt: 1765000001000,
     settingsAt: 1765000002000,
+    defaultStampAt: 1765000002500,
     lastModified: 1765000003000,
     devices: [],
     connectedApps: [
@@ -33,8 +34,11 @@ function accountFor(phrase: string): AccountRecord {
         appUrl: 'https://coucou.mail',
         appName: 'Coucou',
         lastConnectedAt: 1765000000000,
-        // Live session secret — must NOT survive a backup round-trip.
+        // Live session material — must NOT survive a backup round-trip: the
+        // secret is what the proxy authenticates from, and `connectedUntil`
+        // without it would render a "Connected" app that can't authenticate.
         appSecret: 'deadbeefdeadbeef',
+        connectedUntil: 4102444800000,
       },
     ],
     postageStamps: [],
@@ -51,12 +55,15 @@ describe('backup round-trip', () => {
     expect(restored.id.toHex()).toBe(account.id.toHex())
     expect(restored.name).toBe('Jovial Einstein')
     expect(restored.connectedApps).toHaveLength(1)
-    // The per-app session secret is stripped — restore re-derives it on reconnect.
+    // The live session material is stripped — restore re-derives the secret on
+    // reconnect, and a leftover `connectedUntil` would show a false "Connected".
     expect(restored.connectedApps[0].appSecret).toBeUndefined()
+    expect(restored.connectedApps[0].connectedUntil).toBeUndefined()
     expect(restored.settings?.appSessionDuration).toBe(daysToMs(30))
     // Convergence clocks survive so merge doesn't treat restored scalars as stale.
     expect(restored.accountNameAt).toBe(1765000001000)
     expect(restored.settingsAt).toBe(1765000002000)
+    expect(restored.defaultStampAt).toBe(1765000002500)
     expect(restored.lastModified).toBe(1765000003000)
     // The secret material never leaves the device.
     expect(file).not.toContain('encryptedSeed')
