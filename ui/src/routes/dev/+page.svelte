@@ -557,13 +557,12 @@ Check console logs for details:
       // multi-device partition scheme rewrites the partition-lock SOC on every
       // lease refresh, which an immutable batch forbids. Request mutable
       // explicitly so /dev-bought stamps work with partitioning.
-      const response = await fetch(
-        `${networkSettingsStore.beeNodeUrl}/stamps/${stampAmount}/${stampDepth}`,
-        {
-          method: 'POST',
-          headers: { immutable: 'false' },
-        },
-      )
+      // Tolerate a trailing slash (the default gateway URL has one).
+      const base = networkSettingsStore.beeNodeUrl.replace(/\/$/, '')
+      const response = await fetch(`${base}/stamps/${stampAmount}/${stampDepth}`, {
+        method: 'POST',
+        headers: { immutable: 'false' },
+      })
       if (!response.ok) {
         const errorText = await response.text()
         throw new Error(errorText || `HTTP ${response.status}`)
@@ -606,7 +605,9 @@ Check console logs for details:
     beeStampsLoading = true
     beeStampsError = ''
     try {
-      const response = await fetch(`${url}/stamps`)
+      // Tolerate a trailing slash (the default gateway URL has one);
+      // `lastBeeUrl` keeps the raw value so the effect's guard compares equal.
+      const response = await fetch(`${url.replace(/\/$/, '')}/stamps`)
       if (!response.ok) {
         const errorText = await response.text()
         throw new Error(errorText || `HTTP ${response.status}`)
