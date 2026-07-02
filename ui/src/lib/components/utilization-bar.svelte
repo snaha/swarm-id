@@ -13,9 +13,11 @@
     destructive?: boolean
     /** Sizing utilities for the track (width/height); defaults to a mini bar. */
     class?: string
+    /** Accessible name for the progressbar. */
+    label?: string
   }
 
-  let { percent, destructive = false, class: className }: Props = $props()
+  let { percent, destructive = false, class: className, label = 'Storage used' }: Props = $props()
 
   const clamped = $derived(Math.min(100, Math.max(0, percent)))
 </script>
@@ -23,6 +25,7 @@
 <div
   class={cn('bg-muted h-1.5 w-16 overflow-hidden rounded-full', className)}
   role="progressbar"
+  aria-label={label}
   aria-valuenow={clamped}
   aria-valuemin={0}
   aria-valuemax={100}

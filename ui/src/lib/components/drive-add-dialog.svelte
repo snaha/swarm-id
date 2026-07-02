@@ -126,7 +126,13 @@
   })
 
   function unlockLabel() {
-    return account.access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'
+    if (account.access.type === 'eth-wallet') {
+      return 'Confirm with wallet'
+    }
+    if (account.access.type === 'password') {
+      return 'Verifying password…'
+    }
+    return 'Confirm with passkey'
   }
 
   $effect(() => {
@@ -190,7 +196,12 @@
   async function purchaseNew(seed: Uint8Array) {
     const myAttempt = ++attempt
     phase = 'pending'
-    pendingLabel = 'Complete the purchase in the popup window.'
+    // The popup-less /dev mock settles locally — telling the user to look for a
+    // popup window there is wrong.
+    pendingLabel =
+      devSettingsStore.data.mockStampEnabled && !devSettingsStore.data.mockStampPopup
+        ? 'Simulating the purchase…'
+        : 'Complete the purchase in the popup window.'
     // Capture the fallback now: computed at settlement it could differ from the
     // placeholder the user saw (a sync pull / another tab adding a stamp meanwhile).
     const driveName = name.trim() || suggestedName()

@@ -85,7 +85,9 @@
   }
 
   function onWindowPointerDown(event: PointerEvent) {
-    if (openMenuId && !(event.target as HTMLElement).closest('[data-drive-menu]')) {
+    // `target` can be a Text node (Firefox), which has no `.closest`.
+    const target = event.target instanceof Element ? event.target : undefined
+    if (openMenuId && !target?.closest('[data-drive-menu]')) {
       openMenuId = undefined
     }
   }
@@ -245,7 +247,9 @@
                 <p class="text-sm font-medium">Connected apps</p>
                 <Badge>{account.connectedApps.length}</Badge>
               </div>
-              <p class="text-muted-foreground text-sm">Apps using storage on this drive.</p>
+              <!-- Honest copy until per-drive usage attribution exists: the list
+                   is account-wide, so don't claim these apps use THIS drive. -->
+              <p class="text-muted-foreground text-sm">Apps connected to this account.</p>
               {#if account.connectedApps.length === 0}
                 <p class="text-muted-foreground text-sm">No connected apps yet.</p>
               {:else}
