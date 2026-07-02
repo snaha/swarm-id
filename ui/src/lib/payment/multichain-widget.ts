@@ -1,6 +1,5 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-
 /**
  * Multichain Widget Service
  *
@@ -10,6 +9,7 @@
  * the same proven settlement path the legacy UI uses — the URL only carries the
  * batch-owner `destination`; chain / token / amount are chosen inside the popup.
  */
+import { strip0x } from '$lib/crypto/hex'
 
 const WIDGET_BASE_URL = 'https://fund.bzz.limo/'
 const ALLOWED_ORIGINS = ['https://fund.bzz.limo', 'https://fund.ethswarm.org']
@@ -147,7 +147,7 @@ export function parseBatchEvent(data: unknown): BatchEvent | undefined {
   }
 
   // Validate batchId format (64 hex chars, optionally prefixed with 0x)
-  const batchIdHex = obj.batchId.startsWith('0x') ? obj.batchId.slice(2) : obj.batchId
+  const batchIdHex = strip0x(obj.batchId)
   if (!/^[0-9a-fA-F]{64}$/.test(batchIdHex)) {
     return undefined
   }
@@ -161,12 +161,26 @@ export function parseBatchEvent(data: unknown): BatchEvent | undefined {
   }
 }
 
+/** Handle over an in-flight widget purchase. */
+export interface StampPurchaseHandle {
+  /**
+   * Abort the purchase from OUR UI (e.g. the pending dialog's Cancel): closes
+   * the popup and detaches the listeners, so a payment can no longer complete
+   * invisibly after the user backed out. Fires no callback — the caller
+   * initiated it. No-op once the purchase has already settled.
+   */
+  cancel: () => void
+}
+
 /**
  * Open the stamp purchase widget in a popup window.
  *
  * @param options - Purchase options including destination address and callbacks
+ * @returns a handle whose `cancel()` the caller MUST invoke when the user
+ *   abandons the flow, otherwise the popup stays open and its message listener
+ *   keeps running until the popup is closed by hand.
  */
-export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
+export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPurchaseHandle {
   const {
     destination,
     onSuccess,
@@ -188,7 +202,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
     const popup = mockPopup
       ? window.open(buildWidgetUrl(destination, true), 'stamp-purchase', POPUP_FEATURES)
       : undefined
-    setTimeout(() => {
+    const mockTimer = setTimeout(() => {
       popup?.close()
       if (mockError) {
         onError(new Error('Mock error: Purchase failed'))
@@ -205,7 +219,12 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
         blockNumber: '0x' + Math.floor(Date.now() / 1000).toString(16),
       })
     }, MOCK_DELAY_MS)
-    return
+    return {
+      cancel: () => {
+        clearTimeout(mockTimer)
+        popup?.close()
+      },
+    }
   }
 
   const url = buildWidgetUrl(destination)
@@ -213,7 +232,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
 
   if (!popup) {
     onError(new Error('Failed to open widget popup. Please allow popups for this site.'))
-    return
+    return { cancel: () => undefined }
   }
 
   let completed = false
@@ -299,4 +318,17 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): void {
   }
 
   window.addEventListener('message', handleMessage)
+
+  return {
+    cancel: () => {
+      if (completed) {
+        return
+      }
+      // Close the popup BEFORE detaching so the user can't keep paying in a
+      // window whose result we would silently drop.
+      completed = true
+      cleanup()
+      popup.close()
+    },
+  }
 }

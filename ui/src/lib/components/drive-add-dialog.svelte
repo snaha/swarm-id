@@ -19,27 +19,25 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { unlockAccount } from '$lib/crypto/unlock'
-  import { formatBytes } from '$lib/drives'
+  import {
+    LIFESPAN_UNIT_OPTIONS,
+    type LifespanUnit,
+    SECONDS_PER_DAY,
+    formatBytes,
+    lifespanToSeconds,
+  } from '$lib/drives'
   import { fetchExistingStamp } from '$lib/payment/bee'
-  import { openStampPurchaseWidget } from '$lib/payment/multichain-widget'
+  import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
   import { derivePostageSigner, stampFromBatch } from '$lib/payment/purchase'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import type { Account } from '$lib/types'
 
-  const SECONDS_PER_DAY = 24 * 60 * 60
-  const SECONDS_PER_MONTH = 30 * SECONDS_PER_DAY
-  const SECONDS_PER_YEAR = 365 * SECONDS_PER_DAY
   const COST_SIGNIFICANT_DIGITS = 4
   const BATCH_ID_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/
 
   const STORAGE_OPTIONS = [
     { value: 'new', label: 'Purchase new batch' },
     { value: 'existing', label: 'Use existing batch' },
-  ]
-  const UNIT_OPTIONS = [
-    { value: 'days', label: 'days' },
-    { value: 'months', label: 'months' },
-    { value: 'years', label: 'years' },
   ]
 
   interface Props {
@@ -51,7 +49,6 @@
   let { account, onClose, onAdded }: Props = $props()
 
   type Storage = 'new' | 'existing'
-  type Unit = 'days' | 'months' | 'years'
   type Phase = 'form' | 'unlock' | 'pending' | 'error' | 'unconfirmed'
 
   /** Positional default shown as the name placeholder and used when left blank. */
@@ -63,7 +60,7 @@
   let name = $state('')
   let depthValue = $state('')
   let lifespanValue = $state('1')
-  let lifespanUnit = $state<Unit>('years')
+  let lifespanUnit = $state<LifespanUnit>('years')
   let batchIdInput = $state('')
 
   let phase = $state<Phase>('form')
@@ -75,6 +72,9 @@
   let entropy: Uint8Array | undefined
   // Bumped on cancel/close so a late ceremony or widget callback can't complete.
   let attempt = 0
+  // In-flight widget purchase; cancelled on close so the popup can't settle a
+  // payment we would silently drop.
+  let purchase: StampPurchaseHandle | undefined
 
   const sizeOptions = [
     { value: '', label: 'Please select' },
@@ -83,19 +83,7 @@
       .map(([depth, bytes]) => ({ value: String(depth), label: formatBytes(bytes) })),
   ]
 
-  const lifespanSeconds = $derived.by(() => {
-    const value = Number(lifespanValue)
-    if (!Number.isFinite(value) || value <= 0) {
-      return 0
-    }
-    const unit =
-      lifespanUnit === 'years'
-        ? SECONDS_PER_YEAR
-        : lifespanUnit === 'months'
-          ? SECONDS_PER_MONTH
-          : SECONDS_PER_DAY
-    return Math.round(value * unit)
-  })
+  const lifespanSeconds = $derived(lifespanToSeconds(Number(lifespanValue), lifespanUnit))
 
   const estimateBzz = $derived.by(() => {
     if (
@@ -149,6 +137,8 @@
 
   function close() {
     attempt++
+    purchase?.cancel()
+    purchase = undefined
     onClose()
   }
 
@@ -201,9 +191,12 @@
     const myAttempt = ++attempt
     phase = 'pending'
     pendingLabel = 'Complete the purchase in the popup window.'
+    // Capture the fallback now: computed at settlement it could differ from the
+    // placeholder the user saw (a sync pull / another tab adding a stamp meanwhile).
+    const driveName = name.trim() || suggestedName()
     try {
       const { signerKey, destination } = await derivePostageSigner(seed)
-      openStampPurchaseWidget({
+      purchase = openStampPurchaseWidget({
         destination,
         // /dev mock (see dev-settings): simulate the purchase without a real
         // cross-chain payment. No-op in production, where the toggle is off.
@@ -215,7 +208,7 @@
             return
           }
           const ttl = lifespanSeconds > 0 ? lifespanSeconds : undefined
-          account.addStamp(stampFromBatch(batch, signerKey, name.trim() || suggestedName(), ttl))
+          account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
           succeed()
         },
         onError: (error) => {
@@ -249,13 +242,10 @@
     const myAttempt = ++attempt
     phase = 'pending'
     pendingLabel = 'Looking up the batch…'
+    const driveName = name.trim() || suggestedName()
     try {
       const { signerKey } = await derivePostageSigner(seed)
-      const stamp = await fetchExistingStamp(
-        batchIdInput.trim(),
-        signerKey,
-        name.trim() || suggestedName(),
-      )
+      const stamp = await fetchExistingStamp(batchIdInput.trim(), signerKey, driveName)
       if (myAttempt !== attempt) {
         return
       }
@@ -349,7 +339,7 @@
         <span class="text-sm font-medium">Lifespan up to</span>
         <div class="flex w-full items-center gap-2">
           <Input type="number" min="1" bind:value={lifespanValue} class="flex-1" />
-          <Select options={UNIT_OPTIONS} bind:value={lifespanUnit} class="w-32" />
+          <Select options={LIFESPAN_UNIT_OPTIONS} bind:value={lifespanUnit} class="w-32" />
         </div>
       </div>
     {:else}
