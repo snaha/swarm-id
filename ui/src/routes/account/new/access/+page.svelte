@@ -16,6 +16,7 @@
     type Account as AccountRecord,
     PARTITION_COUNT,
     deriveAccountDerivationKey,
+    uint8ArrayToHex,
   } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
@@ -33,8 +34,8 @@
     randomSalt,
   } from '$lib/crypto/encryption'
   import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
-  import { bytesToHex, strip0x } from '$lib/crypto/hex'
-  import { privateKeyFromEntropy, walletFromPhrase } from '$lib/crypto/mnemonic'
+  import { strip0x } from '$lib/crypto/hex'
+  import { walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -93,15 +94,19 @@
     const carried = draft.restored ?? accountsStore.get(wallet.address)
     // The derivation key is computed from the master key (the wallet private
     // key) while the entropy is in hand — the same chain the proxy/sync use.
-    const masterKey = strip0x(privateKeyFromEntropy(wallet.entropy))
+    const masterKey = strip0x(wallet.privateKey)
+    const [derivationKey, encryptedSeed] = await Promise.all([
+      deriveAccountDerivationKey(masterKey),
+      encryptSeed(wallet.entropy, key),
+    ])
     const account: AccountRecord = {
       id: new EthAddress(wallet.address),
       name: draft.name,
       publicKey: strip0x(wallet.publicKey),
       createdAt: carried?.createdAt ?? Date.now(),
-      derivationKey: await deriveAccountDerivationKey(masterKey),
+      derivationKey,
       access,
-      encryptedSeed: await encryptSeed(wallet.entropy, key),
+      encryptedSeed,
       settings: carried?.settings,
       defaultPostageStampBatchID: carried?.defaultPostageStampBatchID,
       // Preserve the carried record's per-field LWW clocks so re-importing a
@@ -178,7 +183,7 @@
       await finalize(
         {
           type: 'eth-wallet',
-          encryptionSalt: bytesToHex(salt),
+          encryptionSalt: uint8ArrayToHex(salt),
         },
         key,
       )
@@ -203,7 +208,11 @@
       const salt = randomSalt()
       const key = await deriveKeyFromPassword(password, salt)
       await finalize(
-        { type: 'password', kdfSalt: bytesToHex(salt), kdfIterations: PASSWORD_KDF_ITERATIONS },
+        {
+          type: 'password',
+          kdfSalt: uint8ArrayToHex(salt),
+          kdfIterations: PASSWORD_KDF_ITERATIONS,
+        },
         key,
       )
     } catch (caught) {
