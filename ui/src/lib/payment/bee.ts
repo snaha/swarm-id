@@ -1,29 +1,16 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { BatchId, PrivateKey, Utils } from '@ethersphere/bee-js'
+import { Bee, PrivateKey } from '@ethersphere/bee-js'
 import { DEFAULT_BEE_NODE_URL } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
 import type { NewStamp } from '$lib/payment/purchase'
 
-/** A postage batch as returned by Bee's `GET /stamps/{id}`. */
-interface NodeStamp {
-  batchID: string
-  depth: number
-  amount: string
-  bucketDepth: number
-  blockNumber: number
-  immutableFlag: boolean
-  utilization: number
-  usable: boolean
-  exists: boolean
-  batchTTL?: number
-}
-
-async function readError(response: Response): Promise<string> {
-  const text = await response.text().catch(() => '')
-  return text || `HTTP ${response.status}`
-}
+/**
+ * The product UI's postage ("drive") operations against a Bee node, as a thin
+ * adapter over the bee-js client. All node interaction goes through bee-js —
+ * don't hand-roll fetch calls against the node API here.
+ */
 
 /**
  * Look up an existing batch on a Bee node and shape it into a stamp record.
@@ -36,70 +23,53 @@ export async function fetchExistingStamp(
   name: string,
   beeUrl: string = DEFAULT_BEE_NODE_URL,
 ): Promise<NewStamp | undefined> {
-  const base = beeUrl.replace(/\/$/, '')
-  let stamp: NodeStamp
   try {
-    const response = await fetch(`${base}/stamps/${strip0x(batchId)}`)
-    if (!response.ok) {
-      return undefined
+    const batch = await new Bee(beeUrl).getPostageBatch(strip0x(batchId))
+    return {
+      batchID: batch.batchID,
+      name,
+      signerKey,
+      depth: batch.depth,
+      amount: BigInt(batch.amount),
+      bucketDepth: batch.bucketDepth,
+      blockNumber: batch.blockNumber,
+      immutableFlag: batch.immutableFlag,
+      // bee-js precomputes `usage` as the 0–1 fraction the UI reads.
+      utilization: batch.usage,
+      usable: batch.usable,
+      // getPostageBatch throws when the node doesn't track the batch, so a
+      // batch that made it here exists by construction.
+      exists: true,
+      batchTTL: batch.duration.toSeconds(),
     }
-    stamp = (await response.json()) as NodeStamp
   } catch {
     return undefined
-  }
-
-  return {
-    batchID: new BatchId(strip0x(batchId)),
-    name,
-    signerKey,
-    depth: stamp.depth,
-    amount: BigInt(stamp.amount),
-    bucketDepth: stamp.bucketDepth,
-    blockNumber: stamp.blockNumber,
-    immutableFlag: stamp.immutableFlag,
-    // Node reports raw bucket utilization; store the 0–1 fraction the UI reads.
-    utilization: Utils.getStampUsage(stamp.utilization, stamp.depth, stamp.bucketDepth),
-    usable: stamp.usable,
-    exists: stamp.exists,
-    batchTTL: stamp.batchTTL,
   }
 }
 
 /**
- * Add funds to an existing batch (`PATCH /stamps/topup`), extending its
- * lifespan. The node must own the batch; rejects with the node's error
- * otherwise. `amount` is the additional per-chunk balance in PLUR.
+ * Add funds to an existing batch, extending its lifespan. The node must own
+ * the batch; rejects with the node's error otherwise. `amount` is the
+ * additional per-chunk balance in PLUR.
  */
 export async function topUpStamp(
   batchId: string,
   amount: bigint,
   beeUrl: string = DEFAULT_BEE_NODE_URL,
 ): Promise<void> {
-  const base = beeUrl.replace(/\/$/, '')
-  const response = await fetch(`${base}/stamps/topup/${strip0x(batchId)}/${amount}`, {
-    method: 'PATCH',
-  })
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
+  await new Bee(beeUrl).topUpBatch(strip0x(batchId), amount)
 }
 
 /**
- * Increase an existing batch's depth (`PATCH /stamps/dilute`), growing its
- * capacity. The node must own the batch; rejects with the node's error
- * otherwise. Dilution alone divides the remaining lifespan across the larger
- * capacity — callers top up too when preserving the lifespan.
+ * Increase an existing batch's depth, growing its capacity. The node must own
+ * the batch; rejects with the node's error otherwise. Dilution alone divides
+ * the remaining lifespan across the larger capacity — callers top up too when
+ * preserving the lifespan.
  */
 export async function diluteStamp(
   batchId: string,
   depth: number,
   beeUrl: string = DEFAULT_BEE_NODE_URL,
 ): Promise<void> {
-  const base = beeUrl.replace(/\/$/, '')
-  const response = await fetch(`${base}/stamps/dilute/${strip0x(batchId)}/${depth}`, {
-    method: 'PATCH',
-  })
-  if (!response.ok) {
-    throw new Error(await readError(response))
-  }
+  await new Bee(beeUrl).diluteBatch(strip0x(batchId), depth)
 }
