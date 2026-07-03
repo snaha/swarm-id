@@ -85,7 +85,7 @@ import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
-import { rejectAfter } from "./utils/promise"
+import { withTimeout } from "./utils/promise"
 
 const DEFAULT_TIMEOUT_MS = 30000
 const DEFAULT_INITIALIZATION_TIMEOUT_MS = 30000
@@ -280,15 +280,14 @@ export class SwarmIdClient {
     // `handleIframeMessage` when the `connectionInfoChanged` arrives — not
     // from this executor. ES2024's `Promise.withResolvers()` would express
     // the same shape more directly.
-    this.firstConnectionInfoPromise = Promise.race([
-      new Promise<void>((resolve) => {
-        this.firstConnectionInfoResolve = resolve
-      }),
-      rejectAfter(
+    this.firstConnectionInfoPromise = withTimeout(
+        new Promise<void>((resolve)=>{
+            this.firstConnectionInfoResolve = resolve
+        }),
         this.initializationTimeout,
         `Proxy initialization timeout - proxy did not send initial connectionInfoChanged within ${this.initializationTimeout}ms`,
-      ),
-    ])
+    )
+
     // Attach a no-op handler so the rejection isn't surfaced as
     // "unhandled" if the timeout fires before we reach the awaiting line
     // below (e.g. because an earlier `await` in this method hung first).

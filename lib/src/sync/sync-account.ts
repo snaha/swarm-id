@@ -35,7 +35,7 @@ import type {
 } from "./store-interfaces"
 import type { SyncResult } from "./types"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
-import { rejectAfter } from "../utils/promise"
+import { withTimeout } from "../utils/promise"
 import type { PostageStamp } from "../schemas"
 import {
   BatchWriteCoordinator,
@@ -217,13 +217,12 @@ export function createSyncAccount(
         },
       )
 
-      return Promise.race([
-        uploadPromise,
-        rejectAfter(
-          UTILIZATION_UPLOAD_TIMEOUT_MS,
-          `Utilization upload timeout (${UTILIZATION_UPLOAD_TIMEOUT_MS}ms)`,
-        ),
-      ])
+
+      return withTimeout(
+          uploadPromise,
+          UTILIZATION_UPLOAD_TIMEOUT_MS, 
+          `Utilization upload timeout (${UTILIZATION_UPLOAD_TIMEOUT_MS}ms)`
+      )
     }
   }
 

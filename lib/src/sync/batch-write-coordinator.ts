@@ -55,6 +55,7 @@ import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
+import { withTimeout } from "../utils/promise"
 
 /** Hard cap on the acquire path (including any wait-for-slot retry). */
 const PARTITION_LEASE_ACQUIRE_TIMEOUT_MS = 45000
@@ -417,19 +418,14 @@ export class BatchWriteCoordinator {
           }
           return
         }
-        const timeout = new Promise<void>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Partition lease timed out after ${PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
-                ),
-              ),
-            PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
-          ),
-        )
+
         try {
-          await Promise.race([this.acquireWithSlotWait(), timeout])
+            await withTimeout(
+                this.acquireWithSlotWait(),
+                PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
+                `Partition lease timed out after ${PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
+            )
+            
         } catch (error) {
           console.warn(
             "[BatchWriteCoordinator] Partition lease acquisition failed, pausing background work:",
