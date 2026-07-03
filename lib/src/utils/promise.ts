@@ -9,6 +9,10 @@
  * ```ts
  * await Promise.race([work, rejectAfter(5000, "work timed out")])
  * ```
+ *
+ * @deprecated Use {@link withTimeout} instead. `rejectAfter` never clears its
+ * `setTimeout`, so when the raced work wins the timer stays alive until it
+ * fires, holding its closure and an event-loop reference.
  */
 export function rejectAfter(ms: number, message: string): Promise<never> {
   return new Promise((_, reject) => {
