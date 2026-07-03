@@ -25,14 +25,24 @@
  * `getHolders` to inspect the live holders.
  */
 
-import { Bee, BatchId, PrivateKey, type Stamper } from "@ethersphere/bee-js"
+import {
+  Bee,
+  BatchId,
+  PrivateKey,
+  Reference,
+  type Stamper,
+} from "@ethersphere/bee-js"
 import { uint8ArrayToHex } from "../utils/hex"
+import { withTimeout } from "../utils/promise"
+import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { deriveSecret } from "../utils/key-derivation"
 import {
   LEASE_TTL_MS,
   NUM_BUCKETS,
   UtilizationAwareStamper,
+  toBucket,
 } from "../utils/batch-utilization"
+import { lockSocBucket } from "../utils/lock-soc"
 import {
   acquirePartitionLock,
   compareGenerations,
@@ -49,16 +59,38 @@ import {
   INTENT_GUARD_WINDOW_MS,
   INTENT_LIVENESS_GRACE_MS,
   intentEpochBucket,
+  intentSocAddress,
+  partitionOccupancyAddress,
   readPartitionIntent,
   readPartitionOccupancy,
   resolveIntentRound,
   writePartitionIntent,
   writePartitionOccupancy,
 } from "./partition-intent"
-import { readPartitionState, writePartitionState } from "./partition-state"
+import {
+  readPartitionState,
+  statePointerAddress,
+  writePartitionState,
+  writeStatePointer,
+} from "./partition-state"
 
 /** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
 export const PARTITION_LOCK_GUARD_MS = 2000
+
+/** True when a 64-byte reference is the all-zero sentinel (a never-written
+ *  counter chunk — see `ZERO_CHUNK_REF` in partition-state.ts). */
+function isZeroRef(ref: Uint8Array): boolean {
+  for (let i = 0; i < ref.length; i++) if (ref[i] !== 0) return false
+  return true
+}
+
+/**
+ * Bound each lock-SOC read in `refreshFromSwarm` so a hanging read on a slow
+ * gateway is classified as "unreadable" (a takeover then fails safe) rather than
+ * silently treated as an absent lock. Matches the roster / state-pointer read
+ * timeouts.
+ */
+const LOCK_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
 /** This device's own lease over a partition. */
 export interface SelfLease {
@@ -146,6 +178,51 @@ export class PartitionLease {
    * watermark) from a genuine post-release claimant (gen > watermark).
    */
   private releasedPartitions = new Map<number, PartitionLockGeneration>()
+  /**
+   * Last `leasedUntil` observed on a partition's lock SOC that is NOT a live
+   * holder — an EXPIRED holder, or a release sentinel (whose `leasedUntil` is the
+   * release time). The gone holder heartbeats its rotating state-pointer SOC up to
+   * its `leasedUntil`, so this bounds the pointer's last bucket and lets a DELAYED
+   * takeover compute the right address (the pointer ages out of the `now` buckets
+   * otherwise — `holders` only carries LIVE holders' `leasedUntil`). Keyed by
+   * partition; rebuilt each `refreshFromSwarm`.
+   */
+  private lastSeenLeasedUntil = new Map<number, number>()
+  /**
+   * Partitions whose lock SOC could not be read conclusively this refresh — the
+   * read timed out / hung (a transient failure), NOT a clean "absent" 404. For
+   * such a partition, `holderLeasedUntilMs` is unknown, so a takeover that finds
+   * no pointer must fail safe (read-only) instead of resuming from zero and
+   * re-issuing a gone holder's acked slots. Rebuilt each `refreshFromSwarm`.
+   * A clean 404 (genuinely free partition) is NOT recorded here, so first-claim
+   * from zero still works.
+   */
+  private unreadableLocks = new Set<number>()
+  /**
+   * Cached state from this session's last partition-state publish, so the next
+   * publish re-uploads only the chunks that changed (incremental). Seeded on the
+   * first publish (full), refreshed on every publish, and cleared by `acquire()`
+   * (a new session resumes from a peer's counter, not our stale one).
+   */
+  private publishedReferences: Uint8Array[] | undefined
+  private publishedCounter: Uint32Array | undefined
+  /** Reference-chunk ref (hex) of this session's last publish — re-written to the
+   *  current rotating bucket on each refresh tick (heartbeat) so an idle holder
+   *  keeps a fresh state pointer the next reader can find. */
+  private lastReferenceHex: string | undefined
+  /**
+   * Epoch bucket of the last FULL (non-incremental) publish. An incremental
+   * publish leaves unchanged counter chunks in place across epochs, but the
+   * rotating pointer/occupancy/intent SOCs share this partition's reserved slot
+   * and a LATER epoch's (deterministic) bucket can collide with a long-retained
+   * chunk and evict it — only the current+previous epoch's beacon buckets are
+   * excluded at publish time (see `writePartitionState`). So we force one FULL
+   * re-pin per epoch: every non-zero chunk is re-uploaded at a fresh bucket clear
+   * of the current epoch's beacons, so any such eviction self-heals within ~1
+   * epoch while the holder lives (only a collision in the final pre-departure
+   * epoch is left for the takeover `readFailed` path). undefined after `acquire`.
+   */
+  private lastFullPublishEpoch: number | undefined
   /**
    * Set at the start of `release()` (the lease session is closing) and
    * cleared by the next `acquire()`. While set, an overlapping `refresh()`
@@ -236,17 +313,29 @@ export class PartitionLease {
     const now = this.now()
     this.holders.clear()
     this.releasedPartitions.clear()
+    this.lastSeenLeasedUntil.clear()
+    this.unreadableLocks.clear()
     // Read every partition's lock SOC in parallel — each is an independent
     // multi-round-trip retrieval, so overlapping them collapses N×latency into
     // ≈1×. Classification below is order-independent (holders/releasedPartitions
-    // are partition-keyed).
+    // are partition-keyed). Each read is bounded by a timeout we generate, so a
+    // HANGING read (slow gateway) is an unambiguous "unreadable" signal — recorded
+    // so a takeover of this partition fails safe rather than zero-seeding. A fast
+    // `undefined` (clean 404) is genuinely absent and stays claimable.
     const locks = await Promise.all(
       Array.from({ length: partitionCount }, (_unused, p) =>
-        readPartitionLock({
-          bee: this.opts.bee,
-          backupSigner: this.opts.backupSigner,
-          swarmEncryptionKey: this.opts.swarmEncryptionKey,
-          partition: p,
+        withTimeout(
+          readPartitionLock({
+            bee: this.opts.bee,
+            backupSigner: this.opts.backupSigner,
+            swarmEncryptionKey: this.opts.swarmEncryptionKey,
+            partition: p,
+          }),
+          LOCK_READ_TIMEOUT_MS,
+          "lock read timed out",
+        ).catch(() => {
+          this.unreadableLocks.add(p)
+          return undefined
         }),
       ),
     )
@@ -263,6 +352,9 @@ export class PartitionLease {
       if (lock.holderDeviceId === NO_HOLDER_DEVICE_ID) {
         console.debug(`[PartitionLease] refresh p=${p}: released sentinel`)
         this.releasedPartitions.set(p, lock.generation)
+        // The sentinel's `leasedUntil` is the release time; the releaser's final
+        // state-pointer write sits in that bucket, so a delayed takeover can find it.
+        this.lastSeenLeasedUntil.set(p, lock.leasedUntil)
         continue
       }
       const self = lock.holderDeviceId === this.opts.deviceId ? " (self)" : ""
@@ -270,6 +362,9 @@ export class PartitionLease {
         console.debug(
           `[PartitionLease] refresh p=${p}: EXPIRED holder ${lock.holderDeviceId}${self} (until ${lock.leasedUntil} <= now ${now})`,
         )
+        // The expired holder heartbeated its state pointer up to `leasedUntil`;
+        // retain it so a takeover computes the pointer bucket even long after.
+        this.lastSeenLeasedUntil.set(p, lock.leasedUntil)
         continue
       }
       console.debug(
@@ -492,8 +587,14 @@ export class PartitionLease {
   ): Promise<AcquireResult> {
     const { partitionCount } = snapshot
 
-    // A new acquisition opens a new lease session.
+    // A new acquisition opens a new lease session. Drop any cached publish
+    // state from a previous session — this session resumes from the partition's
+    // published counter, not our stale one (a peer may have held it meanwhile).
     this.closed = false
+    this.publishedReferences = undefined
+    this.publishedCounter = undefined
+    this.lastReferenceHex = undefined
+    this.lastFullPublishEpoch = undefined
 
     if (partitionCount <= 1) {
       return {
@@ -570,9 +671,25 @@ export class PartitionLease {
       {
         bee: this.opts.bee,
         owner: this.opts.backupSigner.publicKey().address(),
+        swarmEncryptionKey: this.opts.swarmEncryptionKey,
         batchId,
         partition,
         batchDepth,
+        // Locate the pointer of a partition that's been free for a while at the
+        // gone holder's last-heartbeat bucket (its `leasedUntil`), so a takeover
+        // resumes at the right counter however long ago the holder stopped. A live
+        // self/foreign holder's `leasedUntil` comes from `holders`; an EXPIRED or
+        // RELEASED holder's (the actual takeover case — `pickFreeOrExpired` only
+        // picks partitions with no live holder) comes from `lastSeenLeasedUntil`,
+        // which `refreshFromSwarm` retains from the lock SOC.
+        holderLeasedUntilMs:
+          this.holders.get(partition)?.leasedUntil ??
+          this.lastSeenLeasedUntil.get(partition),
+        // If this partition's lock read was inconclusive (timed out), a
+        // "no pointer found" result must fail safe rather than zero-seed.
+        lockUnreadable: this.unreadableLocks.has(partition),
+        // Reader half of the rendezvous — this device's clock (#385).
+        nowMs: this.now(),
       },
       knownReference,
     )
@@ -693,6 +810,58 @@ export class PartitionLease {
         )
       }
     }
+
+    // Seed the publish baseline from the state we just resumed, so the FIRST
+    // publish of this session is incremental (only the bucket the upload touches
+    // + the reference chunk) instead of a full re-publish. `publishedCounter`
+    // must be a COPY: bindPartition aliases `localCounter` and the stamper
+    // mutates it on stamp(), which would otherwise empty the diff. When the read
+    // recovered no refs (fresh account / cache-miss), these stay undefined and
+    // the first publish falls back to the sparse-full path.
+    //
+    // SAFETY INVARIANT (why a divergent seed is safe). On the cache-hit
+    // (`unchanged`) branch `publishedReferences` describes the last *acked*
+    // counter (the synced reference, advanced only on a successful publish/read)
+    // while `publishedCounter` = `buildLeaseLocalCounter()`, which can be AHEAD
+    // if a prior publish FAILED after the local counter advanced (withWrite's
+    // `finally` still flushes the bumped counter). Counters are monotonic, so
+    // `publishedCounter >= synced-ref counter` always — the refs never describe a
+    // value ABOVE the counter. On the first incremental publish an unchanged
+    // (ahead) chunk therefore RETAINS a ref describing the acked floor, and a
+    // takeover resumes at ≤ the acked high-water: it only ever reissues *unacked*
+    // (content-addressed → safe) slots, never an acked one. The dangerous
+    // direction — a ref reporting above the counter, which could resume PAST an
+    // acked slot into reuse — cannot occur. See the "divergent seed" regression
+    // test in partition-lease.integration.test.ts.
+    //
+    // KEYSTONE (the one upstream fact this rests on): the stamper keeps its local
+    // per-partition counter monotonic and >= its synced-reference counter. Every
+    // guarantee above collapses if a future change to stamper-state persistence
+    // lets the local counter fall BELOW the synced ref. `writePartitionState`'s
+    // incremental path carries a cheap monotonicity tripwire that fails the
+    // publish loudly (rather than silently retaining a ref above the counter) if
+    // that invariant is ever broken — see the assert there.
+    this.publishedReferences = stateResult.references
+    this.publishedCounter = localCounter.slice()
+    // Mark this epoch as already full-pinned so the FIRST publish of the session
+    // stays incremental against the resumed refs (the cheap-first-publish win).
+    // On the FULL-read branch every non-zero counter chunk was just downloaded,
+    // so the retained refs are verified-present. On the CACHE-HIT branch only the
+    // reference chunk was read (the counter chunks were not re-fetched), so a
+    // retained chunk that was meanwhile evicted from the reserve is NOT detected
+    // here — but that stays fail-safe: a takeover reading the missing chunk gets
+    // `readFailed` (→ read-only + retry), never a zero-counter resume, and this
+    // holder's own once-per-epoch full re-pin (`flushState`, below) re-uploads it
+    // from local state once the epoch rolls over. Either way the re-pin bounds a
+    // retained chunk's eviction exposure to ~1 epoch.
+    this.lastFullPublishEpoch = intentEpochBucket(this.now())
+    // Seed the heartbeat's pointer target from the state we resumed, so a holder
+    // that never uploads still re-publishes the inherited resume pointer to the
+    // current bucket each refresh tick (otherwise `heartbeatStatePointer` no-ops
+    // until the first upload and the resume point ages out of the takeover lookup
+    // span → resume-from-zero). Undefined on a genuinely fresh account (no prior
+    // pointer to keep alive — the heartbeat correctly stays a no-op).
+    this.lastReferenceHex = stateResult.referenceHex
 
     const payload = lockResult.payload
     this.self = {
@@ -977,27 +1146,9 @@ export class PartitionLease {
     // refresh from minting a newer ghost claim mid-release.
     const { partition, generation, acquiredAt } = this.self
     this.closed = true
-    const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    const { stamper } = this.requireWriteContext()
 
-    const published = await writePartitionState({
-      bee: this.opts.bee,
-      stamper,
-      batchId,
-      batchDepth,
-      partition,
-      localCounter,
-      backupSigner: this.opts.backupSigner,
-    })
-
-    // Record the reference we just published as our synced reference: the next
-    // acquire (if no peer publishes meanwhile) skips re-downloading our own
-    // counter. Our local counter equals what we published, so reusing it is
-    // correct. Also protect the publish's buckets from future utilisation
-    // saves — overstamping one would evict the resume point from the reserve.
-    if (stamper instanceof UtilizationAwareStamper) {
-      await stamper.setSyncedReference(partition, published.referenceHex)
-      await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
-    }
+    await this.flushState(partition, localCounter)
 
     await releasePartitionLock({
       bee: this.opts.bee,
@@ -1017,9 +1168,199 @@ export class PartitionLease {
     this.holders.delete(partition)
   }
 
+  /**
+   * Publish the held partition's counter on the partition-state feed WITHOUT
+   * releasing the lock — the commit point that makes an upload's slots durable
+   * before its promise resolves (ack-after-publish). The new holder on takeover
+   * resumes at exactly this counter, so an un-published (un-acked) in-flight
+   * write is safe to overwrite while every acked write is preserved. No-op when
+   * no lease is held. Same reserved-slot publish as `release()`, so it is safe
+   * through a still-bound stamper.
+   */
+  async publishState(localCounter: Uint32Array): Promise<void> {
+    if (!this.self) return
+    await this.flushState(this.self.partition, localCounter)
+  }
+
+  /**
+   * Publish `localCounter` on the partition-state feed and record it as our
+   * synced reference + protected buckets. Shared by `release()` (final flush)
+   * and `publishState()` (per-upload commit). Protecting the publish's buckets
+   * stops a later utilisation save from overstamping (evicting) the resume
+   * point from the reserve.
+   */
+  private async flushState(
+    partition: number,
+    localCounter: Uint32Array,
+    opts?: { forceFull?: boolean },
+  ): Promise<void> {
+    const { stamper, batchId, batchDepth } = this.requireWriteContext()
+    // Force a FULL (non-incremental) publish once per epoch: incremental
+    // publishes leave unchanged chunks pinned across epochs, where a later
+    // epoch's rotating pointer/beacon SOC (same reserved slot) can evict one and
+    // the incremental path never re-uploads it. Re-pinning every epoch bounds a
+    // retained chunk's exposure to ~1 epoch and self-heals any eviction (the
+    // full publish re-uploads every non-zero chunk clear of the current beacons).
+    // `opts.forceFull` additionally forces it off-epoch: the idle refresh-tick
+    // `heartbeatStatePointer` asks for it the moment it DETECTS a retained-chunk
+    // collision with this epoch's own pointer/beacon bucket, so the eviction is
+    // repaired the same tick rather than waiting for the next upload/epoch.
+    const currentEpoch = intentEpochBucket(this.now())
+    const forceFullRepin =
+      opts?.forceFull === true || currentEpoch !== this.lastFullPublishEpoch
+    const published = await writePartitionState({
+      bee: this.opts.bee,
+      stamper,
+      batchId,
+      batchDepth,
+      partition,
+      localCounter,
+      backupSigner: this.opts.backupSigner,
+      swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      // Incremental inputs from this session's last publish (undefined on the
+      // first → full publish, which seeds them). Nulled once per epoch to force a
+      // full re-pin (see `lastFullPublishEpoch`).
+      previousReferences: forceFullRepin ? undefined : this.publishedReferences,
+      previousCounter: forceFullRepin ? undefined : this.publishedCounter,
+      // Lets the publish also avoid this device's intent-beacon buckets (the
+      // refresh tick re-writes them off-lock at the same reserved slot).
+      deviceId: this.opts.deviceId,
+      // Anchor the rendezvous addresses to this device's clock (#385): same
+      // clock as the collision detector and lease validity; `Date.now()` in prod.
+      nowMs: this.now(),
+    })
+    if (forceFullRepin) this.lastFullPublishEpoch = currentEpoch
+    this.publishedReferences = published.references
+    this.publishedCounter = published.publishedCounter
+    this.lastReferenceHex = published.referenceHex
+    if (stamper instanceof UtilizationAwareStamper) {
+      await stamper.setSyncedReference(partition, published.referenceHex)
+      await stamper.setProtectedStateBuckets(partition, published.stateBuckets)
+    }
+  }
+
+  /**
+   * Seed the heartbeat's pointer target (`lastReferenceHex`) without reading
+   * partition-state. Used by the coordinator's cached-lease re-adopt fast path
+   * (`adoptIfLive`), which binds from local state and never runs
+   * `claimPartition` — where the cold acquire path seeds this. Without it a
+   * reloaded holder that re-adopts its lease and then stays idle never
+   * heartbeats the inherited resume pointer forward, so it ages out of the
+   * takeover lookup span (resume-from-zero → re-issue acked slots). The caller
+   * passes the partition's persisted synced reference
+   * (`UtilizationAwareStamper.getSyncedReference`); `undefined` (fresh partition)
+   * keeps the heartbeat a no-op.
+   */
+  seedReferenceHex(referenceHex: string | undefined): void {
+    this.lastReferenceHex = referenceHex
+  }
+
+  /**
+   * Re-write the state pointer to the CURRENT rotating bucket without
+   * re-uploading the counter — the refresh-tick heartbeat. Keeps a fresh pointer
+   * in the current bucket so a taking-over device finds the resume point even
+   * after this holder has been idle (no uploads) for a while. No-op until the
+   * first publish of the session has produced a reference to point at.
+   *
+   * COLLISION SELF-HEAL: when this epoch's own rotating pointer/beacon buckets
+   * (or the constant lock-SOC bucket) now coincide with a RETAINED counter/
+   * reference chunk — the ~1/65536-per-epoch case an incremental publish left
+   * unrefreshed — a bare pointer write here would OVERSTAMP (evict) that chunk at
+   * their shared reserved slot. `retainedChunksCollideThisEpoch` detects it (CPU
+   * only, no network on the ~99.998% clear path) and, given the live counter,
+   * relocates via a forced full re-pin (`flushState`) so the eviction is repaired
+   * the same tick instead of waiting for the next upload. Without a counter to
+   * re-pin (or on a SOC-vs-SOC collision, where neither party is movable) it
+   * falls through to the plain pointer write — still fail-safe: the collision is
+   * bounded to one epoch (the rotating addresses separate next epoch) and a
+   * takeover reading a missing chunk gets `readFailed` (→ read-only + retry),
+   * never a zero-counter resume that would re-issue acked slots.
+   */
+  async heartbeatStatePointer(localCounter?: Uint32Array): Promise<void> {
+    if (!this.self || this.lastReferenceHex === undefined) return
+    const { stamper, batchId } = this.requireWriteContext()
+    if (
+      localCounter !== undefined &&
+      this.retainedChunksCollideThisEpoch(this.self.partition)
+    ) {
+      // Relocate the retained chunks clear of this epoch's reserved-slot writers.
+      // `flushState({ forceFull: true })` re-pins every non-zero chunk (avoiding
+      // the current epoch's pointer/beacon buckets) AND republishes the pointer,
+      // so it subsumes the heartbeat's pointer write.
+      await this.flushState(this.self.partition, localCounter, {
+        forceFull: true,
+      })
+      return
+    }
+    await writeStatePointer({
+      bee: this.opts.bee,
+      stamper,
+      backupSigner: this.opts.backupSigner,
+      swarmEncryptionKey: this.opts.swarmEncryptionKey,
+      batchId,
+      partition: this.self.partition,
+      referenceHex: this.lastReferenceHex,
+      nowMs: this.now(),
+    })
+  }
+
+  /**
+   * True when a RETAINED published state chunk now shares a bucket with one of
+   * THIS device's own reserved-slot writers for the current epoch — the rotating
+   * state-pointer, the deviceId-independent occupancy beacon, this device's
+   * intent beacon, or the constant lock SOC. All land at `slot = partition`, so a
+   * shared bucket means one overstamps (evicts) the other. Computed from
+   * `this.now()`-derived addresses — the one rendezvous clock shared by
+   * `writePartitionState` (via `nowMs`) and the reader (#385), = `Date.now()` in
+   * production — so a heartbeat detects exactly the collision its own write would
+   * cause.
+   *
+   * The retained set is EVERY non-zero counter chunk (`publishedReferences`) AND
+   * the reference chunk itself (`lastReferenceHex`) — the latter isn't in
+   * `publishedReferences` but sits at the same reserved slot and is the very
+   * chunk the pointer points at, so evicting it dangles the pointer just as
+   * badly. (This is the full `stateBuckets` set the publish protects.) A peer's
+   * intent beacon can't be computed here (its deviceId / address is unknown) —
+   * that residual stays fail-safe (§12).
+   */
+  private retainedChunksCollideThisEpoch(partition: number): boolean {
+    if (this.publishedReferences === undefined) return false
+    const owner = this.opts.backupSigner.publicKey().address()
+    const { batchId } = this.requireWriteContext()
+    // `this.now()` — one clock for the whole rendezvous path (#385): the beacon/
+    // heartbeat writes this guards, the publish it triggers (`writePartitionState`
+    // via `nowMs`), and the reader all derive their buckets from this same clock.
+    const nowMs = this.now()
+    const epoch = intentEpochBucket(nowMs)
+    // This device's own reserved-slot writers for the current epoch.
+    const fixed = new Set<number>([
+      lockSocBucket(partition, owner),
+      toBucket(statePointerAddress(batchId, partition, owner, nowMs)),
+      toBucket(partitionOccupancyAddress(partition, epoch, owner)),
+      toBucket(intentSocAddress(partition, this.opts.deviceId, epoch, owner)),
+    ])
+    // Retained chunks a rotating writer above could evict: the non-zero counter
+    // chunks + the reference chunk (its bucket isn't in `publishedReferences`).
+    for (const ref of this.publishedReferences) {
+      if (!isZeroRef(ref) && fixed.has(toBucket(ref.slice(0, 32)))) return true
+    }
+    if (this.lastReferenceHex !== undefined) {
+      const refChunkAddr = new Reference(this.lastReferenceHex)
+        .toUint8Array()
+        .slice(0, 32)
+      if (fixed.has(toBucket(refChunkAddr))) return true
+    }
+    return false
+  }
+
   /** Current partition (undefined when not holding a lease). */
   get currentPartition(): number | undefined {
     return this.self?.partition
+  }
+
+  /** Wall-clock ms this device's lease is valid until (undefined when none). */
+  get leasedUntil(): number | undefined {
+    return this.self?.leasedUntil
   }
 
   /**

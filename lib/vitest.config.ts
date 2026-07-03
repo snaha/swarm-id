@@ -8,6 +8,17 @@ export default defineConfig({
     globals: true,
     environment: "node",
     include: ["src/**/*.test.ts"],
+    // The suite has several ECDSA-signing / encryption-heavy tests (partition
+    // SOC writes, Merkle-tree upload round-trips). They run in 1–3s standalone,
+    // but vitest runs all files in parallel worker processes and CPU
+    // oversubscription has been observed to inflate them ~5×, blowing the 5s
+    // default and flaking the suite. A generous global timeout absorbs the
+    // contention while still catching a genuinely hung test.
+    // TRADEOFF: 6× the default also raises the ceiling under which a genuine
+    // per-test perf regression could hide. If a test starts routinely taking
+    // seconds in ISOLATION (not just under parallel contention), fix the test —
+    // don't lean on this headroom. Revisit lowering it if CI CPU improves.
+    testTimeout: 30000,
     coverage: {
       provider: "v8",
       reporter: ["text", "json", "html"],

@@ -23,6 +23,8 @@ import {
   getChunkIndexForBucket,
   getChunkLayout,
   initializeBatchUtilization,
+  LEASE_SKEW_MARGIN_MS,
+  LEASE_TTL_MS,
   mergeChunk,
   serializeUint16Array,
   serializeUint32Array,
@@ -385,9 +387,9 @@ describe("UtilizationAwareStamper partition awareness", () => {
       localCounter: new Uint32Array(NUM_BUCKETS),
     })
 
-    // 20 × 2 = 40 stamps; ECDSA signing dominates wall time in this test
-    // (the bee-js Stamper signs every envelope), so we keep the count low
-    // enough for the default vitest 5 s timeout.
+    // 20 × 2 = 40 stamps; ECDSA signing dominates wall time in this test (the
+    // bee-js Stamper signs every envelope). The global testTimeout (vitest
+    // config) absorbs the parallel-suite CPU contention that used to flake it.
     const STAMPS_PER_DEVICE = 20
     const BUCKET = 0x1234
     const seen = new Set<string>()
@@ -593,6 +595,119 @@ describe("UtilizationAwareStamper partition awareness", () => {
     expect(() => stamper.stamp(makeChunkInBucket(0x99, 1))).not.toThrow()
   })
 
+  it("a locally-lapsed lease fences the next partition-bound stamp (skew margin applied)", async () => {
+    // Race B (Postage-Batch-Partitioning.md §12): a holder whose refresh tick
+    // can't renew must stop writing when its OWN clock says the lease lapsed —
+    // otherwise a mid-op chunk lands in a slot a peer legitimately took over.
+    // Local, no-network fence: `stamp()` throws once `Date.now()` is within the
+    // skew margin of `leaseValidUntil`, matching the ack guard's bound.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    // Valid until only 500ms out — inside the (2s) skew margin, so the lease is
+    // treated as lapsed NOW even though raw expiry hasn't strictly passed.
+    stamper.setLeaseValidUntil(Date.now() + 500)
+
+    expect(() => stamper.stamp(makeChunkInBucket(0xa1, 0))).toThrow(
+      PartitionLeaseLostError,
+    )
+  })
+
+  it("a healthy (well-in-future) lease deadline does not fence stamping", async () => {
+    // No false positives on the hot path: a freshly-renewed lease (~TTL out)
+    // stamps normally. Only an un-renewable, locally-lapsed lease is fenced.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    stamper.setLeaseValidUntil(Date.now() + LEASE_TTL_MS)
+
+    expect(() => stamper.stamp(makeChunkInBucket(0xa2, 0))).not.toThrow()
+  })
+
+  it("bindPartition clears a stale lease deadline (re-acquire reuses stamper)", async () => {
+    // A reused stamper must not carry a previous session's lapsed deadline into
+    // a fresh bind — the coordinator pushes the new `leasedUntil` right after.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    stamper.setLeaseValidUntil(Date.now() - 1) // already lapsed
+    expect(() => stamper.stamp(makeChunkInBucket(0xa3, 0))).toThrow(
+      PartitionLeaseLostError,
+    )
+
+    // Re-bind → deadline cleared (undefined) → stamps work until the coordinator
+    // pushes a fresh one.
+    stamper.bindPartition({
+      partition: 1,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    expect(() => stamper.stamp(makeChunkInBucket(0xa3, 1))).not.toThrow()
+  })
+
+  it("the lease fence reads the injected clock (deterministic, no Date.now)", async () => {
+    // #385: the fence uses the stamper's injected clock — the SAME clock a test
+    // gives the lease (whose `leasedUntil` feeds `leaseValidUntil`). Drive it by
+    // hand: no real time, no `Date.now` mock; advancing the clock across the
+    // deadline flips the fence deterministically.
+    let clock = 1_000_000
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+      () => clock,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+    // Lease valid until clock + 10s. Well clear of the skew margin → no fence.
+    stamper.setLeaseValidUntil(clock + 10_000)
+    expect(() => stamper.stamp(makeChunkInBucket(0xa4, 0))).not.toThrow()
+
+    // Advance to exactly the skew margin before expiry → now fenced.
+    clock = clock + 10_000 - LEASE_SKEW_MARGIN_MS
+    expect(() => stamper.stamp(makeChunkInBucket(0xa4, 1))).toThrow(
+      PartitionLeaseLostError,
+    )
+  })
+
   it("lock-SOC short-circuit routes overstamps to the reserved slot", async () => {
     const stamper = await UtilizationAwareStamper.create(
       TEST_SIGNER_KEY,
@@ -796,6 +911,94 @@ describe("UtilizationAwareStamper partition awareness", () => {
       expect(intentEnv.slot).toBeLessThan(DATA_COUNTER_START)
       expect(dataSlots.has(intentEnv.slot)).toBe(false)
     }
+  })
+
+  it("withIntentSocSlot serializes concurrent intent-SOC writes so neither clobbers the other's reserved slot", async () => {
+    // The intent / occupancy / state-pointer SOC writes all share the single
+    // `intentSoc` reservation. The off-lock refresh-tick presence beacon and an
+    // under-lock upload's state-pointer publish run concurrently, so their
+    // reserve→stamp windows can overlap: the second reserve clobbers the first's
+    // address, and the first `stamp()` then no longer matches `intentSoc` and
+    // falls through to a DATA slot (consuming budget + bumping the counter).
+    // `withIntentSocSlot` serializes the critical sections so each writer's
+    // reservation is intact at stamp time.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const SLOT = 0
+    const slots: Record<string, number> = {}
+    async function write(name: string, bucket: number): Promise<void> {
+      const chunk = makeChunkInBucket(bucket, bucket)
+      await stamper.withIntentSocSlot(chunk.hash(), SLOT, async () => {
+        // Yield microtasks so an unserialized concurrent writer would clobber
+        // the shared reservation before this flow stamps.
+        await Promise.resolve()
+        await Promise.resolve()
+        slots[name] = decodeIndex(stamper.stamp(chunk).index).slot
+      })
+    }
+
+    const counterBefore = stamper.getLocalCounter()!.slice()
+    await Promise.all([write("A", 0x4444), write("B", 0x5555)])
+
+    // Each SOC routed to the reserved slot (below the data lanes) — proof its
+    // reservation survived the other concurrent flow.
+    expect(slots.A).toBe(SLOT)
+    expect(slots.B).toBe(SLOT)
+    expect(slots.A).toBeLessThan(DATA_COUNTER_START)
+    // No fall-through to a data slot: the counter is untouched.
+    expect(stamper.getLocalCounter()).toEqual(counterBefore)
+  })
+
+  it("withIntentSocSlot releases the mutex when fn throws, so later writes don't deadlock", async () => {
+    // Regression (the reserve/fn-throw guard): if `fn` — the upload — throws,
+    // the `finally` must still `clearIntentSocSlot()` and resolve the lock.
+    // Otherwise `intentSocLock` stays pending forever and EVERY later intent /
+    // occupancy / state-pointer write on this stamper deadlocks on
+    // `await previous`.
+    const stamper = await UtilizationAwareStamper.create(
+      TEST_SIGNER_KEY,
+      TEST_BATCH_ID,
+      TEST_DEPTH,
+      makeEmptyCache(),
+      TEST_OWNER,
+      TEST_ENC_KEY,
+    )
+    stamper.bindPartition({
+      partition: 0,
+      partitionCount: PARTITION_COUNT,
+      localCounter: new Uint32Array(NUM_BUCKETS),
+    })
+
+    const SLOT = 0
+    const boom = new Error("upload failed")
+    await expect(
+      stamper.withIntentSocSlot(new Uint8Array(32), SLOT, async () => {
+        throw boom
+      }),
+    ).rejects.toBe(boom)
+
+    // The mutex must have been released by the failed call: the next write
+    // completes and routes to the reserved slot. Without the finally-release it
+    // would hang forever on `await previous` (the test would time out).
+    const chunk = makeChunkInBucket(0x4444, 0x4444)
+    const slot = await stamper.withIntentSocSlot(
+      chunk.hash(),
+      SLOT,
+      async () => decodeIndex(stamper.stamp(chunk).index).slot,
+    )
+    expect(slot).toBe(SLOT)
   })
 
   it("auto-bind uses the BACKUP-signer address (derived from encryptionKey), not the `owner` arg", async () => {

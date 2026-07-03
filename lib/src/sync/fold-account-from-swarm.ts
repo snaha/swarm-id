@@ -25,11 +25,55 @@ export interface FoldAccountResult {
 }
 
 /**
+ * Folds in flight, keyed on `accountId:derivationKey`. A full fold is many slow
+ * Swarm reads (roster + every device-state feed); the UI triggers it from
+ * several uncoordinated places (account layout mount, dev page, restore) that
+ * commonly fire together. Coalescing concurrent calls to a single promise
+ * collapses that burst into one read set — especially on a slow gateway where a
+ * fold takes seconds, so overlapping triggers are the norm. The entry is cleared
+ * when the fold settles, so a later fold always re-reads (no stale cache).
+ *
+ * Coalesced callers share ONE `FoldAccountResult` instance — treat it as
+ * read-only; a caller that mutates the result corrupts the others. The result's
+ * arrays are frozen before return so such a mutation fails loud rather than
+ * silently (see `doFoldAccountFromSwarm`).
+ */
+const inFlightFolds = new Map<string, Promise<FoldAccountResult | undefined>>()
+
+/**
  * Derive the feed owner + encryption key from the account derivation key, read
  * the roster, fold all device-state feeds. Returns `undefined` when the roster
  * is empty (no device has published — equivalent to today's "no-backup").
+ *
+ * Concurrent calls for the same account share one in-flight read (see
+ * `inFlightFolds`); `bee` is intentionally keyed OUT — every client reads the
+ * same feeds. Coalescing across two DIFFERENT `bee` endpoints (e.g. a local
+ * cluster and a public gateway mid-transition) is safe, not a bug: a fold is a
+ * point-in-time, eventually-consistent LWW/CRDT snapshot (roster + device-state
+ * both fold last-writer-wins by their per-field `at` clocks — see
+ * `merge-snapshot.ts` / `device-state.ts`). No caller assumes a fold reflects a
+ * specific endpoint's live view, so a coalesced caller receiving the other
+ * endpoint's equally-valid snapshot is indistinguishable from ordinary gateway
+ * staleness — which the LWW fold already tolerates everywhere, and the next
+ * (uncoalesced, entry-cleared) fold re-reads and re-converges. Do NOT add `bee`
+ * to the key to "fix" this; it would only defeat the coalescing.
  */
 export async function foldAccountFromSwarm(opts: {
+  bee: Bee
+  derivationKey: string
+  accountId: string
+}): Promise<FoldAccountResult | undefined> {
+  const key = `${opts.accountId}:${opts.derivationKey}`
+  const existing = inFlightFolds.get(key)
+  if (existing) return existing
+  const fold = doFoldAccountFromSwarm(opts).finally(() => {
+    inFlightFolds.delete(key)
+  })
+  inFlightFolds.set(key, fold)
+  return fold
+}
+
+async function doFoldAccountFromSwarm(opts: {
   bee: Bee
   derivationKey: string
   accountId: string
@@ -72,5 +116,22 @@ export async function foldAccountFromSwarm(opts: {
   // above, and guarantees `foldAccount` has a view carrying `accountPublicKey`.
   if (views.length === 0) return undefined
 
-  return { account: foldAccount(views, devices), devices }
+  const account = foldAccount(views, devices)
+  // Coalesced callers share this ONE result (see `inFlightFolds`). Freeze the
+  // arrays they iterate so a stray mutation throws loudly instead of silently
+  // corrupting a concurrent caller's view.
+  // ponytail: shallow freeze (arrays only, not each element) — catches the
+  // realistic push/splice/sort corruption since today's callers only read or
+  // pass these into the pure `merge*` helpers, which never mutate their inputs.
+  // If a caller ever mutates an element in place, deep-freeze the elements too
+  // (or clone the result per caller).
+  for (const arr of [
+    devices,
+    account.devices,
+    account.connectedApps,
+    account.postageStamps,
+  ]) {
+    if (Array.isArray(arr)) Object.freeze(arr)
+  }
+  return { account, devices }
 }

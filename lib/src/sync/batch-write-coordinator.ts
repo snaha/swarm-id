@@ -41,6 +41,7 @@ import { Bee, BatchId, PrivateKey } from "@ethersphere/bee-js"
 import {
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,
+  LEASE_SKEW_MARGIN_MS,
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
@@ -51,6 +52,7 @@ import type {
   PartitionLeaseStateSnapshot,
 } from "./partition-lease"
 import { readPartitionLock, NO_HOLDER_DEVICE_ID } from "./partition-lock"
+import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import type { UploadTarget } from "../proxy/upload"
 import type { StampWorkerPool } from "../proxy/stamp-worker-pool"
 
@@ -182,6 +184,14 @@ export class BatchWriteCoordinator {
   /** Uploads currently executing under the write lock; the refresh tick only
    *  yields an idle lease when this is 0. */
   private activeUploadCount: number = 0
+  /** Wall-clock ms the state-pointer heartbeat has been failing since
+   *  (undefined = healthy). The heartbeat is best-effort per tick, but a
+   *  PERSISTENT failure streak walks the last durable pointer out of the
+   *  takeover lookup span while lock renewals keep extending `leasedUntil` —
+   *  a takeover would then zero-seed over acked slots. Once the streak
+   *  exceeds one pointer epoch, `refreshTick` demotes. Reset on a successful
+   *  heartbeat and whenever the lease binding changes. */
+  private pointerHeartbeatFailingSince: number | undefined = undefined
   /** Set by `teardown()`. Once disposed the coordinator must never re-acquire a
    *  partition or arm a refresh timer: an in-flight `withWrite` (e.g. a deferred
    *  publish, or a normal upload) can outlive a disconnect/sign-out, and without
@@ -246,7 +256,47 @@ export class BatchWriteCoordinator {
       this.lastLeaseActivityAt = Date.now()
       this.activeUploadCount++
       try {
-        return await op(target)
+        // NOTE: `op` performs the chunk write(s) BEFORE the post-op guard
+        // below. The cold-re-entry case (a woken/throttled holder) is fenced by
+        // the pre-op `ensureLease` check (`leaseNearExpiry` forces a lock read).
+        // A lease that lapses MID-`op` (a long multi-chunk upload while the
+        // refresh tick can't renew for a full TTL) is NOT fenced for the data
+        // write — stamps only re-check the local `leaseStale` flag — only the
+        // ack is. Bounded by skew + TTL (see Postage-Batch-Partitioning.md §12).
+        const result = await op(target)
+        // Commit-ordered ack: only report the upload durable after the
+        // partition-state that reserves its slots is published.
+        //  1. Reverse-clobber guard (#rule 2): re-validate the lease before
+        //     acking. For a fast upload this is throttled (no read); a long
+        //     upload that outran the refresh tick / TTL re-reads the lock SOC
+        //     and demotes+throws here, so we never publish slots a peer owns.
+        //  2. Ack-after-publish (#rule 1): publish the partition counter, then
+        //     resolve. A guard/publish throw propagates → upload reported
+        //     failed, never acked (chunks are content-addressed → safe retry).
+        await this.ensureLeaseStillValid()
+        const localCounter = this.deps.stamper.getLocalCounter()
+        if (localCounter !== undefined) {
+          await this.partitionLease?.publishState(localCounter)
+          // The publish durably re-wrote the state pointer to the current
+          // bucket (same effect as a successful heartbeat), so an idle-blip
+          // failure streak is stale — clear it. Otherwise the refresh tick keeps
+          // measuring drift from the old timestamp across this fresh publish and
+          // could demote a healthy holder prematurely.
+          this.pointerHeartbeatFailingSince = undefined
+        } else if (this.currentPartition !== undefined) {
+          // Held a partition lease but the stamper has no local counter: the
+          // commit publish (ack-after-publish) would be silently skipped,
+          // acking an upload whose slot reservation never reached Swarm. Fail
+          // loudly instead — the chunks are content-addressed, so a retry is
+          // safe. (Legacy single-partition mode has no counter to publish and
+          // correctly falls through.)
+          throw new Error(
+            `[BatchWriteCoordinator] Held partition ${this.currentPartition} ` +
+              "but the stamper exposed no local counter — cannot publish the " +
+              "slot reservation (ack-after-publish); failing the upload.",
+          )
+        }
+        return result
       } finally {
         this.activeUploadCount--
         this.lastLeaseActivityAt = Date.now()
@@ -421,18 +471,24 @@ export class BatchWriteCoordinator {
     // then abort instead of re-binding a partition and arming a refresh timer
     // the coordinator no longer tracks.
     const epoch = this.leaseEpoch
-    // Pull the latest device registry first so `knownDeviceIds` includes a peer
-    // that signed in after we created the account — otherwise we never read its
-    // beacon and dual-acquire. Best-effort + provider-throttled; a stale epoch
-    // after the await aborts below.
-    try {
-      await this.deps.refreshKnownDeviceIds?.()
-    } catch (error) {
-      console.warn(
-        "[BatchWriteCoordinator] Device-registry refresh before acquire failed (using current registry):",
-        error,
+    // Refresh the device registry in the BACKGROUND — do NOT await it here.
+    // `refreshKnownDeviceIds` folds the roster from Swarm, which on a slow/flaky
+    // gateway can take tens of seconds; awaiting it under the cross-tab write
+    // lock made `startLease`'s warm-up hold that lock for the whole scan (up to
+    // the 45s acquire cap), stalling the user's first upload behind it. `acquire`
+    // reads the rival set from local storage (`knownDeviceIds`), so a refresh
+    // that lands after this acquire simply benefits the NEXT one. The only cost
+    // of a momentarily-stale set is skipping the per-device intent read for a
+    // brand-new peer — still caught by the deviceId-independent occupancy beacon
+    // and reconciled on the next acquire.
+    void this.deps
+      .refreshKnownDeviceIds?.()
+      .catch((error) =>
+        console.warn(
+          "[BatchWriteCoordinator] Background device-registry refresh failed (using current registry):",
+          error,
+        ),
       )
-    }
     if (this.leaseEpoch !== epoch || this.disposed) return
     try {
       const lease = await PartitionLease.fromSwarmEncryptionKey({
@@ -457,10 +513,23 @@ export class BatchWriteCoordinator {
       // reconciles with Swarm and demotes only on a confirmed foreign holder.
       const adopted = lease.adoptIfLive()
       if (adopted !== undefined) {
+        // Seed the heartbeat's resume-pointer target from the persisted synced
+        // reference. The cold `claimPartition` path seeds this from the state it
+        // reads on acquire; the adopt fast path skips `claimPartition`, so
+        // without this an adopted-but-idle holder never heartbeats the inherited
+        // pointer forward and it ages out of the takeover lookup span
+        // (resume-from-zero → re-issues a gone holder's acked slots). Read it
+        // BEFORE the synchronous commit below so no await splits the bind, then
+        // re-check the epoch the same way the cold path does. Best-effort
+        // (undefined on a genuinely fresh partition → heartbeat stays a no-op).
+        const seededReferenceHex = await stamper
+          .getSyncedReference(adopted)
+          .catch(() => undefined)
+        if (this.leaseEpoch !== epoch || this.disposed) return
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
         // caches, that's a dual-hold the intent round never gets to arbitrate.
-        console.log(
+        console.debug(
           `[BatchWriteCoordinator] Adopted cached lease p=${adopted} (no acquire/intent round) for device=${this.deps.deviceId}`,
         )
         this.partitionLease = lease
@@ -470,10 +539,16 @@ export class BatchWriteCoordinator {
           partitionCount,
           localCounter: stamper.buildLeaseLocalCounter(),
         })
+        // Fence in-flight stamps to the lease's local expiry (bind clears it).
+        this.syncStamperLeaseDeadline()
+        // Seed before `onLeaseAcquired` (which may publish): a publish's
+        // `flushState` then overwrites this with the fresh reference.
+        lease.seedReferenceHex(seededReferenceHex)
         this.deps.writeLeaseCache?.(lease.serialize())
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()
         this.lastLeaseActivityAt = Date.now()
+        this.pointerHeartbeatFailingSince = undefined // fresh lease session
         this.deps.onLeaseAcquired?.(adopted)
         return
       }
@@ -498,10 +573,13 @@ export class BatchWriteCoordinator {
         partitionCount: result.partitionCount,
         localCounter: result.localCounter,
       })
+      // Fence in-flight stamps to the lease's local expiry (bind clears it).
+      this.syncStamperLeaseDeadline()
       this.deps.writeLeaseCache?.(lease.serialize())
       this.startRefreshTimer(lease)
       this.lastLeaseValidatedAt = Date.now()
       this.lastLeaseActivityAt = Date.now()
+      this.pointerHeartbeatFailingSince = undefined // fresh lease session
       this.deps.onLeaseAcquired?.(result.partition)
     } catch (error) {
       console.error(
@@ -571,6 +649,28 @@ export class BatchWriteCoordinator {
   }
 
   /**
+   * Push the held lease's local expiry to the stamper so an in-flight `stamp()`
+   * fences itself the moment the lease lapses locally — the write-side
+   * complement of the reverse-clobber ack guard (Postage-Batch-Partitioning.md
+   * §12, "ack-safe, not write-safe"). Call wherever `leasedUntil` moves while we
+   * hold: bind and every renewal. `undefined` (no lease) disables the fence.
+   */
+  private syncStamperLeaseDeadline(): void {
+    this.deps.stamper.setLeaseValidUntil(this.partitionLease?.leasedUntil)
+  }
+
+  /**
+   * Whether the held lease is within {@link LEASE_SKEW_MARGIN_MS} of its local
+   * expiry (or already lapsed). When true the freshness check must re-read the
+   * lock SOC even inside the throttle window — the reverse-clobber guard.
+   */
+  private leaseNearExpiry(): boolean {
+    const leasedUntil = this.partitionLease?.leasedUntil
+    if (leasedUntil === undefined) return false
+    return Date.now() >= leasedUntil - LEASE_SKEW_MARGIN_MS
+  }
+
+  /**
    * Throttled lock-SOC freshness check on the held lease. Runs under the write
    * lock (via `ensureLease`). Demotes (and throws) when a different live device
    * now holds our partition.
@@ -579,7 +679,14 @@ export class BatchWriteCoordinator {
     if (!this.partitionLease || this.readOnly) return
     const partition = this.partitionLease.currentPartition
     if (partition === undefined) return
-    if (Date.now() - this.lastLeaseValidatedAt < LEASE_REFRESH_MS) return
+    // Throttle gateway reads to once per refresh window — UNLESS the local
+    // lease is within skew of expiry, in which case we must re-read now (the
+    // refresh tick fell behind: suspended tab / clock jump / long upload).
+    if (
+      !this.leaseNearExpiry() &&
+      Date.now() - this.lastLeaseValidatedAt < LEASE_REFRESH_MS
+    )
+      return
 
     let payload
     try {
@@ -646,12 +753,26 @@ export class BatchWriteCoordinator {
         throw new Error("Partition lease was reclaimed by another device.")
       }
       // Re-asserted: refresh() rewrote the claim and bumped the lease.
+      this.syncStamperLeaseDeadline()
       this.lastLeaseValidatedAt = Date.now()
       this.deps.writeLeaseCache?.(this.partitionLease.serialize())
       return
     }
 
+    // Optimistic resume: the lock read showed no live foreign holder and no
+    // release sentinel, so extend the local lease and keep writing — even when
+    // our OWN lock claim has lapsed on Swarm (idle past TTL, or renewals failing)
+    // but no peer has taken the slot on this gateway. This is the held-lease fast
+    // path (an idle-past-TTL upload re-validates its still-readable lock instead
+    // of paying a fresh acquire). A same-gateway takeover IS caught above by
+    // `isDisplaced`; the only unhandled case is a peer on a disjoint gateway whose
+    // lock write we can't see — the documented §12 optimistic-lease residual,
+    // bounded by skew and backstopped by the presence/occupancy beacons on
+    // `refresh()`. (The refresh tick takes a more conservative stance and
+    // self-demotes an un-renewable lease; this on-demand path favors upload
+    // latency, relying on the per-upload `isDisplaced` re-read as its net.)
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
+    this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(this.partitionLease.serialize())
   }
@@ -681,6 +802,7 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = true
     this.lastLeaseValidatedAt = 0
+    this.pointerHeartbeatFailingSince = undefined
     this.deps.writeLeaseCache?.(undefined)
     // Re-arm so the next write re-acquires.
     this.pendingAcquire = true
@@ -748,8 +870,17 @@ export class BatchWriteCoordinator {
     }
 
     let confirmedDisplaced = false
+    // Did this tick confirm we STILL hold the slot? Either write-verified
+    // (`refresh()` returns "held") or read-verified (a "lost" whose lock-SOC
+    // read shows us as the live holder). A transient throw or an unconfirmable
+    // "lost" (lock read undefined / expired) leaves this false — we must NOT
+    // extend the local lease on a hold we couldn't confirm, else a holder whose
+    // writes keep failing extends itself forever and keeps writing (the
+    // reverse-clobber the post-op ack guard can't cover for a long upload).
+    let confirmedHeld = false
     try {
       const outcome = await lease.refresh()
+      if (outcome === "held") confirmedHeld = true
       if (outcome === "displaced") {
         // The lease read a foreign presence beacon (earlier generation) at a
         // fresh per-epoch address and confirmed a peer holds this partition.
@@ -773,6 +904,17 @@ export class BatchWriteCoordinator {
           Date.now(),
           this.deps.deviceId,
         )
+        // Not displaced AND the lock SOC still names US as the live holder →
+        // read-verified hold (the lock protocol's authority), so it's safe to
+        // extend the lease even though the write+verify didn't land this tick.
+        if (
+          !confirmedDisplaced &&
+          payload !== undefined &&
+          payload.holderDeviceId === this.deps.deviceId &&
+          payload.leasedUntil > Date.now()
+        ) {
+          confirmedHeld = true
+        }
       }
     } catch (err) {
       console.warn(
@@ -803,15 +945,90 @@ export class BatchWriteCoordinator {
       return
     }
 
-    // Alive + not displaced → bump the local heartbeat and persist it so the
-    // UI stays Active even when the Swarm write is transiently failing.
     // Guard the tail too: after teardown/demote cleared the cache, a stale
     // tick must not re-write a live-looking snapshot that a future acquire
     // would hydrate + adoptIfLive without any Swarm round-trip.
     if (this.disposed || this.partitionLease !== lease) return
+
+    if (!confirmedHeld) {
+      // Couldn't confirm we still hold (transient failure, not a confirmed
+      // peer). Tolerate a short blip — but once the local lease lapses past skew
+      // we can no longer assert we hold the slot (rule 2: never write without a
+      // valid lease). Stop writing and demote; the next upload re-acquires and
+      // re-reads the lock. Until then, keep the lease as-is WITHOUT bumping, so
+      // `leasedUntil` tracks the last successful renewal and genuinely counts
+      // down. The UI stays Active through the blip (lease not yet lapsed).
+      if (this.leaseNearExpiry()) {
+        console.warn(
+          `[BatchWriteCoordinator] Refresh: partition ${partition} lease lapsed without a successful renewal; demoting.`,
+        )
+        this.signalLeaseLost()
+        await this.lock(async () => {
+          if (this.disposed || this.partitionLease !== lease) return
+          this.finalizeDemote()
+        })
+      }
+      return
+    }
+
+    // Renewed on Swarm → bump the local heartbeat and persist it.
     lease.bumpLocalLease(LEASE_TTL_MS)
+    this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
     this.deps.writeLeaseCache?.(lease.serialize())
+    // Heartbeat the state pointer to the current rotating bucket (best-effort,
+    // off the critical path) so an idle-but-alive holder keeps a fresh resume
+    // pointer the next reader can find without a feed walk. `withWrite`'s publish
+    // also calls `writeStatePointer`, and both route through the stamper's single
+    // `intentSoc` slot — overlapping them clobbers that reservation and mis-stamps
+    // a pointer SOC into a data slot. So serialize the heartbeat with the publish:
+    // run it UNDER the write lock (the publish holds the same lock). The outer
+    // `activeUploadCount === 0` gate is a cheap skip when an upload is already in
+    // flight; the under-lock re-check closes the TOCTOU where an upload starts
+    // AFTER the gate but before the heartbeat wins the lock (the concurrent
+    // publish then already refreshes the pointer, so the heartbeat is redundant).
+    if (this.activeUploadCount === 0) {
+      try {
+        await this.lock(async () => {
+          if (this.disposed || this.partitionLease !== lease) return
+          if (this.activeUploadCount !== 0) return // an upload slipped in while queued
+          // Pass the live counter so the heartbeat can RELOCATE a retained state
+          // chunk that this epoch's rotating pointer/beacon bucket would otherwise
+          // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
+          // partition mode → the heartbeat stays a bare pointer write.
+          await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
+        })
+        this.pointerHeartbeatFailingSince = undefined
+      } catch (err) {
+        console.warn(
+          "[BatchWriteCoordinator] State-pointer heartbeat failed:",
+          err,
+        )
+        // One failed heartbeat is a blip (the takeover lookup tolerates a few
+        // dropped buckets of slack). A PERSISTENT streak is not: the lock
+        // renewal above keeps extending `leasedUntil` independently, so the
+        // last durable pointer drifts toward the lookup span's floor — past it,
+        // a takeover finds no pointer on a CLEAN scan and zero-seeds,
+        // re-issuing every acked slot. Demote before the drift can reach the
+        // floor (one pointer epoch of failures, well inside the
+        // TTL + slack·epoch tolerance): the next upload re-acquires and its
+        // publish re-pins the pointer.
+        this.pointerHeartbeatFailingSince ??= Date.now()
+        if (
+          Date.now() - this.pointerHeartbeatFailingSince >
+          STATE_POINTER_EPOCH_MS
+        ) {
+          console.warn(
+            `[BatchWriteCoordinator] Refresh: partition ${partition} state-pointer heartbeat failing persistently; demoting before the resume pointer ages out of the takeover lookup.`,
+          )
+          this.signalLeaseLost()
+          await this.lock(async () => {
+            if (this.disposed || this.partitionLease !== lease) return
+            this.finalizeDemote()
+          })
+        }
+      }
+    }
   }
 
   /**

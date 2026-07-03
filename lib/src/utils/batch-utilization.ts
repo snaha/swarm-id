@@ -86,12 +86,11 @@ export const UTILIZATION_SLOTS_PER_BUCKET = PARTITION_COUNT
 /** First data slot index; reserved slots `[0, PARTITION_COUNT)` precede it. */
 export const DATA_COUNTER_START = PARTITION_COUNT
 
-/**
- * Partition-lease lifetime. A device holds its partition for this long
- * before the lease must be refreshed; if it crashes without refreshing,
- * peers can reclaim the partition via Case D.
- */
-export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
+// Partition-lease lifetime — single source in `sync/timing-constants` (shared
+// with `partition-intent`'s epoch, which tracks it). Re-exported here so the
+// many `import { LEASE_TTL_MS } from "../utils/batch-utilization"` callers are
+// unchanged.
+export { LEASE_TTL_MS } from "../sync/timing-constants"
 
 /**
  * How often the holder re-writes its partition lock SOC to bump
@@ -99,6 +98,16 @@ export const LEASE_TTL_MS = 30 * 1000 // 30 seconds
  * attempts before a peer would consider the lease expired.
  */
 export const LEASE_REFRESH_MS = 10 * 1000 // 10 seconds
+
+/**
+ * Local-clock margin for treating a lease as "could have lapsed". A holder must
+ * stop writing (and re-validating before ack) once `now >= leasedUntil - margin`
+ * so it ceases before a peer — reading the same `leasedUntil` from the lock SOC
+ * — could validly take over. Bounds the write/ack exposure to NTP-level skew,
+ * the same assumption the lock protocol already makes. Consumed by the stamper's
+ * local-lapse fence and the coordinator's reverse-clobber guard.
+ */
+export const LEASE_SKEW_MARGIN_MS = 2000
 
 /**
  * How long a holder may go without an upload before it voluntarily yields
@@ -1226,6 +1235,20 @@ export class UtilizationAwareStamper implements Stamper {
     undefined
 
   /**
+   * Promise-chain mutex serializing {@link withIntentSocSlot} critical sections.
+   * The intent / occupancy / state-pointer SOC writes all share the single
+   * {@link intentSoc} reservation, but their callers run concurrently (the
+   * off-lock refresh-tick presence/occupancy beacon vs. an under-lock upload's
+   * state-pointer publish). Without this, the two reserve→stamp windows overlap:
+   * the second `reserveIntentSocSlot` clobbers the first's address, so the
+   * first `stamp()` no longer matches `intentSoc` and falls through to a DATA
+   * slot — consuming data budget and bumping the counter under the very publish
+   * that is diffing it. The mutex makes each writer wait for the previous to
+   * clear its reservation.
+   */
+  private intentSocLock: Promise<void> = Promise.resolve()
+
+  /**
    * Circuit breaker for in-flight uploads. Flipped to `true` when the proxy
    * detects displacement on a refresh tick (or upload-start lease check);
    * subsequent partition-bound `stamp()` calls throw `PartitionLeaseLostError`
@@ -1233,6 +1256,27 @@ export class UtilizationAwareStamper implements Stamper {
    * slot space.
    */
   private leaseStale: boolean = false
+
+  /**
+   * Wall-clock ms this device's lease is valid until (from the lock SOC's
+   * `leasedUntil`, pushed by the coordinator on bind and every renewal). While a
+   * multi-chunk upload runs, each `stamp()` re-checks it locally (no network) and
+   * throws once `Date.now()` passes it (minus a skew margin), so an un-renewable
+   * holder stops writing mid-op the instant its own clock says the lease lapsed —
+   * closing the "ack-safe, not write-safe" residual to the irreducible skew bound
+   * (Postage-Batch-Partitioning.md §12). `undefined` = not fenced (legacy mode,
+   * or between bind and the coordinator's first push).
+   */
+  private leaseValidUntil: number | undefined = undefined
+
+  /**
+   * This device's clock, injectable for tests (#385). The local-lapse fence
+   * compares it against `leaseValidUntil`, so a test MUST drive the stamper with
+   * the SAME clock it gives the `PartitionLease` (whose `leasedUntil` feeds
+   * `leaseValidUntil`) — otherwise the two disagree and the fence mis-fires.
+   * Defaults to `Date.now()` (production: one wall clock everywhere).
+   */
+  private readonly now: () => number
 
   /**
    * Per-partition buckets of the latest published partition-state chunks.
@@ -1366,6 +1410,9 @@ export class UtilizationAwareStamper implements Stamper {
     // B/D) becomes the single counter of record for this held partition.
     this.utilizationState.dataCounters = opts.localCounter
     this.leaseStale = false
+    // Presumed valid until the coordinator pushes the real `leasedUntil` (it
+    // does so synchronously right after bind). Mirrors the `leaseStale` reset.
+    this.leaseValidUntil = undefined
   }
 
   /**
@@ -1425,6 +1472,37 @@ export class UtilizationAwareStamper implements Stamper {
   }
 
   /**
+   * Reserve the intent-SOC slot for `address`, run `fn` (the upload), then
+   * clear it — serialized against every other `withIntentSocSlot` call on this
+   * stamper so concurrent intent/occupancy/state-pointer writes can't clobber
+   * one another's reservation (see {@link intentSocLock}). Production callers
+   * (`writeReservedPartitionSoc`, `writeStatePointer`) MUST use this instead of
+   * the bare `reserveIntentSocSlot`/`clearIntentSocSlot` pair. `partition` is the
+   * reserved slot index the SOC routes to (the contended partition's index).
+   */
+  async withIntentSocSlot<T>(
+    address: Uint8Array,
+    partition: number,
+    fn: () => Promise<T>,
+  ): Promise<T> {
+    const previous = this.intentSocLock
+    let release!: () => void
+    this.intentSocLock = new Promise<void>((resolve) => (release = resolve))
+    await previous
+    // `reserveIntentSocSlot` inside the try so `release()` still runs if it (or
+    // `fn`) ever throws — otherwise `intentSocLock` would stay pending forever
+    // and every later intent/occupancy/state-pointer write on this stamper would
+    // deadlock on `await previous`.
+    try {
+      this.reserveIntentSocSlot(address, partition)
+      return await fn()
+    } finally {
+      this.clearIntentSocSlot()
+      release()
+    }
+  }
+
+  /**
    * Inverse of `bindPartition` — clears partition slot state on demote.
    * Leaves `lockSocs` intact (still valid for the account; refresh/yield
    * writes may need them) and clears the lease-stale flag.
@@ -1433,6 +1511,7 @@ export class UtilizationAwareStamper implements Stamper {
     this.partition = undefined
     this.partitionCountValue = 1
     this.leaseStale = false
+    this.leaseValidUntil = undefined
   }
 
   /**
@@ -1444,6 +1523,27 @@ export class UtilizationAwareStamper implements Stamper {
     this.leaseStale = true
   }
 
+  /**
+   * Record the wall-clock ms this device's lease is valid until (the lock SOC's
+   * `leasedUntil`). The coordinator pushes it on bind and every successful
+   * renewal; `undefined` disables the local-lapse fence. See `leaseValidUntil`.
+   */
+  setLeaseValidUntil(ms: number | undefined): void {
+    this.leaseValidUntil = ms
+  }
+
+  /**
+   * True when this device's own clock says the lease has lapsed (or is within
+   * the skew margin of it). Pure/local — no network — so it can gate every
+   * `stamp()` on the hot path for free. `undefined` deadline → not fenced.
+   */
+  private leaseLocallyLapsed(): boolean {
+    return (
+      this.leaseValidUntil !== undefined &&
+      this.now() >= this.leaseValidUntil - LEASE_SKEW_MARGIN_MS
+    )
+  }
+
   private constructor(
     stamper: Stamper,
     batchId: BatchId,
@@ -1451,6 +1551,7 @@ export class UtilizationAwareStamper implements Stamper {
     cache: UtilizationStoreDB,
     encryptionKey: Uint8Array,
     utilizationState: BatchUtilizationState,
+    now: () => number,
   ) {
     this.stamper = stamper
     this.batchId = batchId
@@ -1458,6 +1559,7 @@ export class UtilizationAwareStamper implements Stamper {
     this.cache = cache
     this.encryptionKey = encryptionKey
     this.utilizationState = utilizationState
+    this.now = now
   }
 
   /**
@@ -1478,6 +1580,7 @@ export class UtilizationAwareStamper implements Stamper {
     cache: UtilizationStoreDB,
     owner: EthAddress,
     encryptionKey: Uint8Array,
+    now: () => number = () => Date.now(),
   ): Promise<UtilizationAwareStamper> {
     // Initialize utilization state (always, since owner is now required)
     const utilizationState = initializeBatchUtilization(batchId, depth)
@@ -1518,6 +1621,7 @@ export class UtilizationAwareStamper implements Stamper {
       cache,
       encryptionKey,
       utilizationState,
+      now,
     )
 
     // Restore the protected partition-state buckets so saves keep avoiding
@@ -1611,10 +1715,21 @@ export class UtilizationAwareStamper implements Stamper {
       return this.stamper.stamp(chunk)
     }
 
-    // Partition lease was reclaimed — abort cleanly before the stamp lands
-    // in slot space the peer now controls. Only meaningful when a partition
-    // is bound (single-device legacy mode has no lease to invalidate).
-    if (this.partition !== undefined && this.leaseStale) {
+    // Partition lease was reclaimed — abort cleanly before the stamp lands in
+    // slot space the peer now controls. Only meaningful when a partition is
+    // bound (single-device legacy mode has no lease to invalidate). Two
+    // conditions:
+    //  - `leaseStale`: the refresh tick CONFIRMED a peer took over (write-verify
+    //    failed / displacement beacon seen).
+    //  - `leaseLocallyLapsed()`: this device's own clock says the lease expired
+    //    (skew margin applied). Catches the un-renewable case a disjoint-gateway
+    //    refresh can't confirm by reading — stops a long op mid-stream the moment
+    //    the lease lapses locally, so the data write is fenced to the same skew
+    //    bound as the ack (Postage-Batch-Partitioning.md §12, "ack-safe").
+    if (
+      this.partition !== undefined &&
+      (this.leaseStale || this.leaseLocallyLapsed())
+    ) {
       throw new PartitionLeaseLostError()
     }
 

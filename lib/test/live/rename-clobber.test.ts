@@ -22,14 +22,15 @@ import {
 } from "../../src/sync/device-state"
 import type { AccountStateSnapshot } from "../../src/schemas"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
   makeDevice,
   foldUntil,
   delay,
-  type MultiDeviceContext,
+  TEST_ACCOUNT_PUBLIC_KEY,
+  type LiveContext,
 } from "./env"
 
 // A fixed account birth date and a genuine rename clock 5s after it. Both are
@@ -38,10 +39,10 @@ import {
 const CREATED_AT = 1_700_000_000_000
 const RENAME_AT = CREATED_AT + 5_000
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — a never-renamed device does not clobber a peer's rename",
+describe.skipIf(!liveEnv.configured)(
+  "live — a never-renamed device does not clobber a peer's rename",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let DEVICE_A: string
     let DEVICE_B: string
@@ -61,6 +62,10 @@ describe.skipIf(!multiDeviceEnv.configured)(
         accountName,
         defaultPostageStampBatchID: undefined,
         accountNameAt,
+        // #377/#381 made accountPublicKey required on the device-state feed;
+        // without it the published snapshot fails read validation and the fold
+        // reads no views. `accountStateToDeviceView` sources it from here.
+        publicKey: TEST_ACCOUNT_PUBLIC_KEY,
         createdAt: CREATED_AT,
         lastModified: Date.now(),
         devices: [],
@@ -98,13 +103,13 @@ describe.skipIf(!multiDeviceEnv.configured)(
       expect((await pub(DEVICE_A, "Account-A", undefined)).status).not.toBe(
         "error",
       )
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
 
       // B genuinely renames the account (a real per-field edit clock).
       expect((await pub(DEVICE_B, "Renamed-by-B", RENAME_AT)).status).not.toBe(
         "error",
       )
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
 
       // A publishes AGAIN with its unchanged default name. With the regression
       // this re-stamped a fresh `Date.now()` (≫ RENAME_AT) and clobbered B; with
@@ -115,7 +120,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
       // Wait out propagation so A's clobbering re-publish is readable BEFORE we
       // fold — otherwise an early poll could see B's rename before the clobber
       // lands and pass spuriously under the bug.
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
 
       const folded = await fold(
         (a) =>

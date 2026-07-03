@@ -18,7 +18,7 @@ import { ensureInRoster } from "../../src/sync/device-roster"
 import { ACCOUNT_SYNC_TOPIC_PREFIX } from "../../src/sync/publish-account-state"
 import { AsyncEpochFinder } from "../../src/proxy/feeds/epochs"
 import {
-  multiDeviceEnv,
+  liveEnv,
   createContext,
   deriveAgentKeys,
   deviceId,
@@ -28,15 +28,15 @@ import {
   makeApp,
   foldUntil,
   delay,
-  type MultiDeviceContext,
+  type LiveContext,
 } from "./env"
 
 const APP_URL = "https://app-b.example"
 
-describe.skipIf(!multiDeviceEnv.configured)(
-  "multi-device — per-device feeds converge (2 devices)",
+describe.skipIf(!liveEnv.configured)(
+  "live — per-device feeds converge (2 devices)",
   () => {
-    let ctx: MultiDeviceContext
+    let ctx: LiveContext
     let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
     let DEVICE_A: string
     let DEVICE_B: string
@@ -75,7 +75,7 @@ describe.skipIf(!multiDeviceEnv.configured)(
         }),
       )
       expect(sA.status).not.toBe("error")
-      await delay(multiDeviceEnv.propDelayMs)
+      await delay(liveEnv.propDelayMs)
       const sB = await pub(
         makeDevice(DEVICE_B, "Device B"),
         makeView({ connectedApps: [makeApp(APP_URL)] }),

@@ -36,4 +36,78 @@ describe("tryCreateTag", () => {
     expect(warnSpy).toHaveBeenCalledOnce()
     warnSpy.mockRestore()
   })
+
+  it("caches the 404 verdict per Bee — does not re-POST /tags on the same node", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const bee = {
+      createTag: vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error("Not Found"), { status: 404 }),
+        ),
+    } as unknown as Bee
+
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    // Only the first call hits the network; the rest short-circuit on the cache.
+    expect(
+      (bee as unknown as { createTag: ReturnType<typeof vi.fn> }).createTag,
+    ).toHaveBeenCalledTimes(1)
+  })
+
+  it("does NOT cache a transient failure whose message merely contains '404'", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    // A real 5xx whose body/message happens to mention 404 must NOT be read as
+    // "tags unsupported" — only the response STATUS (BeeResponseError.status)
+    // decides. A message-substring heuristic would poison the cache here.
+    const createTag = vi
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(new Error("Bee returned 500; upstream said 404"), {
+          status: 500,
+        }),
+      )
+      .mockResolvedValueOnce({ uid: 11 })
+    const bee = { createTag } as unknown as Bee
+
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    // Not cached → the next upload re-probes and succeeds.
+    expect(await tryCreateTag(bee)).toBe(11)
+    expect(createTag).toHaveBeenCalledTimes(2)
+  })
+
+  it("does NOT cache a transient (non-404) failure — re-probes on the next upload", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const createTag = vi
+      .fn()
+      .mockRejectedValueOnce(new Error("Request failed with status code 500"))
+      .mockResolvedValueOnce({ uid: 9 })
+    const bee = { createTag } as unknown as Bee
+
+    // A transient 5xx yields undefined this time, but must NOT poison the cache.
+    expect(await tryCreateTag(bee)).toBeUndefined()
+    // So the next upload re-probes the node and succeeds.
+    expect(await tryCreateTag(bee)).toBe(9)
+    expect(createTag).toHaveBeenCalledTimes(2)
+  })
+
+  it("keeps the verdict per-Bee — a different node re-probes", async () => {
+    vi.spyOn(console, "warn").mockImplementation(() => {})
+    const gateway = {
+      createTag: vi
+        .fn()
+        .mockRejectedValue(
+          Object.assign(new Error("Not Found"), { status: 404 }),
+        ),
+    } as unknown as Bee
+    const realNode = {
+      createTag: vi.fn().mockResolvedValue({ uid: 7 }),
+    } as unknown as Bee
+
+    await tryCreateTag(gateway)
+    await tryCreateTag(gateway)
+    // A separate Bee instance is unaffected by the gateway's cached verdict.
+    expect(await tryCreateTag(realNode)).toBe(7)
+  })
 })

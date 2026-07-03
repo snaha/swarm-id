@@ -15,8 +15,8 @@ popup/pnpm-lock.yaml
 # Local settings
 settings.local.json
 
-# Multi-device integration test env (holds a real signer key — never commit)
-lib/test/multi-device/.env
+# Live test suite env (holds a real signer key — never commit)
+lib/test/live/.env
 
 # Claude Code
 .claude/worktrees/
