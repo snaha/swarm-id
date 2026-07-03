@@ -1,0 +1,1 @@
+import{Q as c,Y as n,J as r}from"./GdBi-S25.js";import{a as d}from"./lUfpoZZl.js";function a(o){const e=c(o.devices??[],r(),n()),t=o.connectedApps.map(s=>({...s,connectedUntil:void 0}));return d.addAccount({...o,devices:e,connectedApps:t})}export{a as r};
