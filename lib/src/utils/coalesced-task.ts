@@ -8,7 +8,9 @@
  * concurrent callers so two tabs can't run `task` at the same instant; a shared
  * `localStorage` timestamp (`cooldownKey`) then lets the second caller skip when
  * another tab already ran within the window. `force` bypasses the cooldown (e.g.
- * a page load / manual refresh).
+ * a page load / manual refresh) but still honours the optional short `graceMs`
+ * window, so a burst of forced runs (N tabs on load, or two back-to-back forced
+ * triggers) still collapses to one.
  *
  * Effect: with several tabs each scheduling the same task, only ONE actually runs
  * per window — the rest observe the fresh timestamp and return. Whatever the task
@@ -23,9 +25,18 @@ export async function runCoalescedAcrossTabs(opts: {
   cooldownKey: string
   cooldownMs: number
   force?: boolean
+  /** Short window honoured even under `force` — collapses back-to-back forced runs. */
+  graceMs?: number
   task: () => Promise<void>
 }): Promise<void> {
   const run = async () => {
+    // The grace window applies even under force; the long cooldown only when not forced.
+    if (
+      opts.graceMs !== undefined &&
+      ranWithin(opts.cooldownKey, opts.graceMs)
+    ) {
+      return
+    }
     if (!opts.force && ranWithin(opts.cooldownKey, opts.cooldownMs)) {
       return
     }

@@ -100,10 +100,12 @@
   // `0x` prefix by stripping first.
   const batchIdValid = $derived(BatchIdSchema.safeParse(strip0x(batchIdInput.trim())).success)
   // Optional: blank keeps the derive-from-account behaviour; a pasted key lets
-  // the user attach a batch owned by an external signer.
+  // the user attach a batch owned by an external signer. `pastedSignerKey` is the
+  // trimmed non-empty key (undefined when blank) — the single source both the
+  // attach guard and the derive/paste branch read, so no `seed as` cast is needed.
+  const pastedSignerKey = $derived(signerKeyInput.trim() === '' ? undefined : signerKeyInput.trim())
   const signerKeyValid = $derived(
-    signerKeyInput.trim() === '' ||
-      PrivateKeySchema.safeParse(strip0x(signerKeyInput.trim())).success,
+    pastedSignerKey === undefined || PrivateKeySchema.safeParse(strip0x(pastedSignerKey)).success,
   )
   const canProceed = $derived(
     storage === 'new' ? depthValue !== '' && lifespanSeconds > 0 : batchIdValid && signerKeyValid,
@@ -111,7 +113,13 @@
 
   const infoText = $derived.by(() => {
     if (storage === 'existing') {
-      return batchIdValid ? "Don't reuse batches across accounts." : 'Enter a batch ID to proceed.'
+      if (!batchIdValid) {
+        return 'Enter a batch ID to proceed.'
+      }
+      if (!signerKeyValid) {
+        return "Enter a valid signer key, or leave it blank to use this account's key."
+      }
+      return "Don't reuse batches across accounts."
     }
     if (!canProceed) {
       return 'Set storage options to proceed.'
@@ -152,7 +160,7 @@
     errorMessage = ''
     // A user-supplied signer needs no account secret — attach the external
     // batch directly, skipping the unlock ceremony.
-    if (storage === 'existing' && signerKeyInput.trim() !== '') {
+    if (storage === 'existing' && pastedSignerKey) {
       void attachExisting()
       return
     }
@@ -274,25 +282,32 @@
     const driveName = name.trim() || undefined
     try {
       // A pasted signer key attaches an externally-owned batch; otherwise derive
-      // this account's signer (the `seed` path is only reached via unlock).
-      const pasted = signerKeyInput.trim()
-      const signerKey = pasted
-        ? new PrivateKey(strip0x(pasted))
-        : (await derivePostageSigner(seed as Uint8Array)).signerKey
+      // this account's signer. Without a pasted key the `seed` (from unlock) is
+      // required — guard it so no `as` cast is needed.
+      let signerKey: PrivateKey
+      if (pastedSignerKey) {
+        signerKey = new PrivateKey(strip0x(pastedSignerKey))
+      } else {
+        if (!seed) {
+          errorMessage = 'Unlock is required to derive the signer key.'
+          phase = 'error'
+          return
+        }
+        signerKey = (await derivePostageSigner(seed)).signerKey
+      }
       // Read the batch straight from the PostageStamp contract on-chain, not the
       // Bee node — a public gateway has no /stamps and won't know a batch bought
       // independently of it.
-      const lookup = await fetchExistingBatchFromChain(batchIdInput.trim(), signerKey, driveName)
+      const stamp = await fetchExistingBatchFromChain(batchIdInput.trim(), signerKey, driveName)
       if (myAttempt !== attempt) {
         return
       }
-      if (lookup.status !== 'found') {
+      if (!stamp) {
         errorMessage =
           'Couldn’t find that batch on chain. Check the Batch ID, or the Gnosis RPC endpoint in Network settings.'
         phase = 'error'
         return
       }
-      const stamp = lookup.stamp
       // Existence isn't enough — upload one stamped test chunk to prove the
       // signer key can actually stamp uploads for this batch before attaching.
       pendingLabel = 'Verifying the batch…'

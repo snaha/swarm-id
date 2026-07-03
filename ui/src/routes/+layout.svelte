@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onMount, untrack } from 'svelte'
 
   import Toast from '$lib/components/toast.svelte'
   // ponytail: the sync engine lives under `$lib/dev` but operates on real account
@@ -31,14 +31,13 @@
 
   // Force a fold whenever the active account is set or switched — the page-load
   // ("reload to force") and account-switch triggers. Reads ONLY the id (which
-  // applyRefreshed never changes) and defers the call so the fold's accountsStore
-  // reads aren't tracked, avoiding an $effect re-fire loop.
+  // applyRefreshed never changes); `untrack` keeps the fold's accountsStore reads
+  // out of this effect's dependencies, avoiding an $effect re-fire loop.
   $effect(() => {
     if (!sessionStore.currentAccountId) {
       return
     }
-    const timer = setTimeout(() => void foldCurrentAccount(true), 0)
-    return () => clearTimeout(timer)
+    untrack(() => void foldCurrentAccount(true))
   })
 </script>
 

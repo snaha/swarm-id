@@ -99,6 +99,40 @@ describe("runCoalescedAcrossTabs", () => {
     expect(task).toHaveBeenCalledTimes(1)
   })
 
+  it("skips despite force when the last run is within the grace window", async () => {
+    stubLocalStorage({ [KEY]: String(Date.now()) })
+    stubWebLocks()
+    const task = vi.fn(async () => undefined)
+
+    await runCoalescedAcrossTabs({
+      lockName: LOCK,
+      cooldownKey: KEY,
+      cooldownMs: COOLDOWN_MS,
+      force: true,
+      graceMs: 5_000,
+      task,
+    })
+
+    expect(task).not.toHaveBeenCalled()
+  })
+
+  it("runs under force when the last run is older than the grace window", async () => {
+    stubLocalStorage({ [KEY]: String(Date.now() - 10_000) })
+    stubWebLocks()
+    const task = vi.fn(async () => undefined)
+
+    await runCoalescedAcrossTabs({
+      lockName: LOCK,
+      cooldownKey: KEY,
+      cooldownMs: COOLDOWN_MS,
+      force: true,
+      graceMs: 5_000,
+      task,
+    })
+
+    expect(task).toHaveBeenCalledTimes(1)
+  })
+
   it("stamps the timestamp even if the task throws", async () => {
     const store = stubLocalStorage()
     stubWebLocks()

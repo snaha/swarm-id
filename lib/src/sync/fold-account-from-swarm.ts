@@ -8,7 +8,7 @@
  * / refresh / the proxy.
  */
 
-import { Bee, PrivateKey } from "@ethersphere/bee-js"
+import { Bee, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import { deriveSwarmEncryptionKey, deriveSecret } from "../utils/key-derivation"
 import { readRoster } from "./device-roster"
 import {
@@ -17,11 +17,48 @@ import {
   type DeviceStateSnapshot,
   type FoldedAccount,
 } from "./device-state"
-import type { Device } from "../schemas"
+import type { AccountData, Device } from "../schemas"
 
 export interface FoldAccountResult {
   account: FoldedAccount
   devices: Device[]
+}
+
+/**
+ * Project a folded account onto the local `AccountData` record — the single
+ * place the field list lives so a new `AccountData`/`FoldedAccount` field can't
+ * be silently dropped by a hand-written copy on the sign-in path. `id` and
+ * `derivationKey` aren't in the fold (they come from the recovering wallet), so
+ * the caller supplies them.
+ *
+ * `foldAccountFromSwarm` shallow-FREEZES its result arrays so coalesced callers
+ * can't corrupt each other's shared view; a persisted `AccountData` outlives that
+ * window and is mutated in place downstream, so the arrays are COPIED here.
+ */
+export function foldedToAccountData(opts: {
+  id: EthAddress
+  derivationKey: string
+  account: FoldedAccount
+  lastModified?: number
+}): AccountData {
+  const { id, derivationKey, account } = opts
+  return {
+    id,
+    name: account.accountName,
+    publicKey: account.publicKey,
+    createdAt: account.createdAt,
+    derivationKey,
+    defaultPostageStampBatchID: account.defaultPostageStampBatchID,
+    settings: account.settings,
+    accountNameAt: account.accountNameAt,
+    defaultStampAt: account.defaultStampAt,
+    settingsAt: account.settingsAt,
+    lastModified: opts.lastModified ?? Date.now(),
+    devices: [...account.devices],
+    connectedApps: [...account.connectedApps],
+    postageStamps: [...account.postageStamps],
+    partitionCount: account.partitionCount,
+  }
 }
 
 /**

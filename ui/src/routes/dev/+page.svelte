@@ -29,7 +29,10 @@
   import { Tabs } from '$lib/components/ui/tabs'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
-  import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import {
+    LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS,
+    fetchExistingBatchFromChain,
+  } from '$lib/payment/contract'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
@@ -581,13 +584,8 @@ Check console logs for details:
   // Import a batch by ID, reading its parameters from the PostageStamp contract
   // ON-CHAIN (not from a Bee node) — works for any batch id even when the
   // configured node never saw it. The signer key is NOT on-chain, so the user
-  // supplies it (required to sign uploads with the batch).
-  //
-  // ponytail: the local bee-compose (anvil) PostageStamp deployment address —
-  // deterministic, matches the `dev:ui:legacy` VITE_POSTAGE_STAMP_CONTRACT_ADDRESS
-  // injection. Only used when the RPC points at a local chain (see
-  // resolvePostageStampContractAddress); a remote RPC resolves to Gnosis mainnet.
-  const LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
+  // supplies it (required to sign uploads with the batch). The local anvil
+  // deployment address is shared from `$lib/payment/contract`.
 
   let importBatchId = $state('')
   let importSignerKey = $state('')
@@ -624,21 +622,21 @@ Check console logs for details:
         return
       }
 
-      const res = await fetchExistingBatchFromChain(batchId.toHex(), signerKey, '', {
+      const stamp = await fetchExistingBatchFromChain(batchId.toHex(), signerKey, '', {
         rpcUrl: importRpcUrl.trim(),
         contractAddress: effectiveContract,
       })
-      if (res.status !== 'found') {
+      if (!stamp) {
         importError =
           'Could not read the batch from the chain — no such batch here, or the RPC URL / contract address is wrong.'
         return
       }
 
-      account.addStamp(res.stamp)
-      if (importSetDefault) account.setDefaultStamp(res.stamp.batchID)
+      account.addStamp(stamp)
+      if (importSetDefault) account.setDefaultStamp(stamp.batchID)
       importMessage =
-        `✅ Imported ${batchId.toHex().slice(0, 12)}… (depth ${res.stamp.depth}` +
-        `${res.stamp.immutableFlag ? ', immutable — partition sharing needs a mutable batch' : ''}) ` +
+        `✅ Imported ${batchId.toHex().slice(0, 12)}… (depth ${stamp.depth}` +
+        `${stamp.immutableFlag ? ', immutable — partition sharing needs a mutable batch' : ''}) ` +
         `into ${account.name}`
     } catch (error) {
       importError = error instanceof Error ? error.message : String(error)

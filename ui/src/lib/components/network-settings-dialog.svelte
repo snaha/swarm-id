@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import { DEFAULT_BEE_NODE_URL, DEFAULT_GNOSIS_RPC_URL } from '@snaha/swarm-id'
+  import { DEFAULT_BEE_NODE_URL, DEFAULT_GNOSIS_RPC_URL, isHttpUrl } from '@snaha/swarm-id'
 
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -20,25 +20,18 @@
   let beeNodeUrl = $state(networkSettingsStore.beeNodeUrl)
   let gnosisRpcUrl = $state(networkSettingsStore.gnosisRpcUrl)
 
-  function isUrl(value: string): boolean {
-    try {
-      new URL(value)
-      return true
-    } catch {
-      return false
-    }
-  }
-
-  const beeNodeUrlValid = $derived(isUrl(beeNodeUrl.trim()))
-  const gnosisRpcUrlValid = $derived(isUrl(gnosisRpcUrl.trim()))
+  // Same http(s)-only validator the store's schema uses, so a value that saves
+  // here also survives the next load (a scheme-less `localhost:1633` fails both).
+  const beeNodeUrlValid = $derived(isHttpUrl(beeNodeUrl.trim()))
+  const gnosisRpcUrlValid = $derived(isHttpUrl(gnosisRpcUrl.trim()))
   const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid)
+  const beeNodeUrlError = $derived(beeNodeUrl.trim().length > 0 && !beeNodeUrlValid)
+  const gnosisRpcUrlError = $derived(gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid)
 
   function save() {
     if (!canSave) {
       return
     }
-    // Persist trimmed values; the store's schema (z.string().url()) would reject
-    // a malformed value on the next load and silently revert to defaults.
     networkSettingsStore.updateSettings({
       beeNodeUrl: beeNodeUrl.trim(),
       gnosisRpcUrl: gnosisRpcUrl.trim(),
@@ -61,9 +54,9 @@
       bind:value={beeNodeUrl}
       placeholder={DEFAULT_BEE_NODE_URL}
       class="font-mono"
-      aria-invalid={beeNodeUrl.trim().length > 0 && !beeNodeUrlValid}
+      aria-invalid={beeNodeUrlError}
     />
-    {#if beeNodeUrl.trim().length > 0 && !beeNodeUrlValid}
+    {#if beeNodeUrlError}
       <p class="text-destructive text-xs">Please enter a valid URL</p>
     {/if}
   </div>
@@ -75,9 +68,9 @@
       bind:value={gnosisRpcUrl}
       placeholder={DEFAULT_GNOSIS_RPC_URL}
       class="font-mono"
-      aria-invalid={gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid}
+      aria-invalid={gnosisRpcUrlError}
     />
-    {#if gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid}
+    {#if gnosisRpcUrlError}
       <p class="text-destructive text-xs">Please enter a valid URL</p>
     {/if}
   </div>

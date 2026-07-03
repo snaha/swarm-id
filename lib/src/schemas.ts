@@ -15,6 +15,7 @@ import {
   BatchId as BeeBatchId,
   PrivateKey as BeePrivateKey,
 } from "@ethersphere/bee-js"
+import { isHttpUrl } from "./utils/url"
 
 // ============================================================================
 // Network Settings Constants
@@ -448,8 +449,11 @@ export type PartitionIntentPayload = z.infer<
  * Stores user-configurable network endpoints (Bee node and Gnosis RPC)
  */
 export const NetworkSettingsSchemaV1 = z.object({
-  beeNodeUrl: z.string().url(),
-  gnosisRpcUrl: z.string().url(),
+  // `.refine(isHttpUrl)` (not `.url()`) so a scheme-less paste like `localhost:1633`
+  // — which `new URL`/zod `.url()` accept as protocol `localhost:` — can't persist
+  // as a broken endpoint. Same validator the settings dialog uses.
+  beeNodeUrl: z.string().refine(isHttpUrl, "Must be an http(s) URL"),
+  gnosisRpcUrl: z.string().refine(isHttpUrl, "Must be an http(s) URL"),
 })
 
 export type NetworkSettings = z.infer<typeof NetworkSettingsSchemaV1>

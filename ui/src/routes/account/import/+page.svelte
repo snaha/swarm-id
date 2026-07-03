@@ -9,9 +9,9 @@
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import {
-    type AccountData,
     deriveAccountDerivationKey,
     foldAccountFromSwarm,
+    foldedToAccountData,
   } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
@@ -23,6 +23,8 @@
   import { completeConnect } from '$lib/connect-handshake'
   import { strip0x } from '$lib/crypto/hex'
   import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
+  import { noteAccountFolded } from '$lib/dev/account-refresh'
+  import { generateName } from '$lib/name-generator'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -33,6 +35,9 @@
   let signingIn = $state(false)
   let failed = $state(false)
   let failureMessage = $state<string | undefined>(undefined)
+  // Distinct from `failed`: the phrase is valid but no account is published on
+  // the network (never synced). Shown with an escape hatch, not phrase-blame.
+  let notFound = $state(false)
 
   const phraseValid = $derived(isValidPhrase(phrase))
   const showInvalid = $derived(phrase.trim().length > 0 && !phraseValid)
@@ -68,50 +73,43 @@
       // instead of a silent empty account.
       const derivationKey = await deriveAccountDerivationKey(strip0x(wallet.privateKey))
       const bee = new Bee(networkSettingsStore.beeNodeUrl)
+      const accountId = new EthAddress(wallet.address).toHex()
 
       // The fold's roster reader swallows read failures into an empty roster, so
-      // it can't by itself tell "no account" from "network down". Probe
-      // reachability first so an offline node surfaces as an error to retry, not
-      // a false "account not found".
-      if (!(await bee.isConnected())) {
-        failed = true
-        failureMessage = "Couldn't reach the Swarm network. Check your connection and try again."
-        return
-      }
-
-      const accountId = new EthAddress(wallet.address).toHex()
+      // it can't by itself tell "no account" from "network down". The reachability
+      // probe disambiguates, but its answer only matters when the fold finds
+      // nothing — so run it alongside the fold instead of serially in front.
+      // `.catch(false)` both prevents a floating rejection and treats a probe
+      // error as "unreachable".
+      const connectedPromise = bee.isConnected().catch(() => false)
       const folded = await foldAccountFromSwarm({ bee, derivationKey, accountId })
+
       if (!folded) {
-        // No account has been published under this phrase — the default copy
-        // renders the "double-check your phrase" screen.
-        failed = true
-        failureMessage = undefined
+        if (!(await connectedPromise)) {
+          failed = true
+          failureMessage = "Couldn't reach the Swarm network. Check your connection and try again."
+          return
+        }
+        // Reachable, but nothing is published under this phrase — it may never
+        // have synced (no drive was ever added). Offer to set it up fresh rather
+        // than accuse the phrase.
+        notFound = true
         return
       }
 
       // Recover the synced state so `finalize` rebuilds the real account rather
-      // than a fresh empty one. The fold freezes its arrays — copy them since
-      // downstream mutates in place.
-      const { account: state } = folded
-      const restored: AccountData = {
+      // than a fresh empty one. `foldedToAccountData` owns the projection + the
+      // frozen-array copy.
+      const restored = foldedToAccountData({
         id: new EthAddress(wallet.address),
-        name: state.accountName,
-        publicKey: state.publicKey,
-        createdAt: state.createdAt,
         derivationKey,
-        defaultPostageStampBatchID: state.defaultPostageStampBatchID,
-        settings: state.settings,
-        accountNameAt: state.accountNameAt,
-        defaultStampAt: state.defaultStampAt,
-        settingsAt: state.settingsAt,
-        lastModified: Date.now(),
-        devices: [...state.devices],
-        connectedApps: [...state.connectedApps],
-        postageStamps: [...state.postageStamps],
-        partitionCount: state.partitionCount,
-      }
+        account: folded.account,
+      })
+      // We just folded directly; stamp the cooldown so the forced fold triggered
+      // right after finalize skips within the grace window instead of re-folding.
+      noteAccountFolded(accountId)
 
-      sessionStore.startSignIn(state.accountName, normalized, restored)
+      sessionStore.startSignIn(restored.name, normalized, restored)
       await goto(resolve(routes.ACCOUNT_NEW_ACCESS))
     } catch (caught) {
       // The phrase was checksum-validated before the button enabled, so a
@@ -126,8 +124,17 @@
 
   function tryAgain() {
     failed = false
+    notFound = false
     failureMessage = undefined
     phrase = ''
+  }
+
+  // Escape hatch for a never-synced account: set it up fresh on this device.
+  // `finalize`'s `accountsStore.get` returns undefined, so it builds a new
+  // account under the same phrase; a drive added later publishes it.
+  function setupFresh() {
+    sessionStore.startSignIn(generateName(), normalizePhrase(phrase))
+    goto(resolve(routes.ACCOUNT_NEW_ACCESS))
   }
 </script>
 
@@ -147,6 +154,26 @@
           </div>
         </div>
         <Button variant="outline" class="w-full" onclick={tryAgain}>Try again</Button>
+      </div>
+    </main>
+  {:else if notFound}
+    <main class="flex w-full flex-1 flex-col items-center justify-center px-8 pb-24">
+      <div class="flex w-full max-w-96 flex-col items-center gap-8">
+        <div class="flex flex-col items-center gap-2">
+          <CircleAlert class="text-muted-foreground size-5" />
+          <div class="flex flex-col items-center text-center">
+            <p class="text-sm font-bold">No account found</p>
+            <p class="text-sm">
+              We couldn't find an account for this phrase on the Swarm network. If you never added a
+              drive, it may never have synced — you can set it up fresh on this device.
+            </p>
+          </div>
+        </div>
+        <div class="flex w-full flex-col gap-2">
+          <Button class="w-full" onclick={setupFresh}>Set up on this device</Button>
+          <Button variant="outline" class="w-full" onclick={tryAgain}>Try a different phrase</Button
+          >
+        </div>
       </div>
     </main>
   {:else}

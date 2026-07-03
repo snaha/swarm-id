@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { type BatchId, Bee, Identifier, PrivateKey, Stamper } from '@ethersphere/bee-js'
-import { type UploadTarget, rejectAfter, uploadSOC } from '@snaha/swarm-id'
+import { SocUploadError, type UploadTarget, rejectAfter, uploadSOC } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
@@ -30,20 +30,20 @@ function randomIdentifier(): Identifier {
  */
 
 // The node validates a postage stamp synchronously at ingestion (signature vs
-// batch owner, funds, depth) BEFORE the chunk enters pushsync, so a bad signer
-// is refused with a fast 4xx. A valid stamp is accepted and only then pushsynced
-// — which can be slow or (on a misconfigured node) never receipt. So a definitive
-// 4xx is the only reliable "can't stamp" signal; a timeout / 5xx / network error
-// means "accepted, receipt pending" and must NOT reject a valid batch.
-const NODE_REJECTED = /SOC upload failed: 4\d\d/
+// batch owner, funds, depth) BEFORE the chunk enters pushsync, and refuses a bad
+// stamp with 400. A 404 ("batch not found") or 422 ("batch not usable yet"),
+// though, just means the node hasn't synced/warmed this batch yet — the exact
+// case attach exists for — so it must NOT count as a rejection. Only a 400 is
+// definitive; every other status (404/422/timeout/5xx/network) is inconclusive
+// ("accepted or unknown, receipt pending") and must let a valid batch through.
+const STAMP_REJECTED_STATUS = 400
 
 /**
  * Prove a (batchID, signerKey) pair can actually stamp uploads by writing one
  * tiny stamped SOC. `getPostageBatch` only proves the batch exists; this proves
- * the signer owns/can-stamp it. Returns false ONLY when the node definitively
- * rejects the stamp (4xx); a timeout or other error is inconclusive (the caller
- * already reached the node for the metadata lookup) and returns true so a slow
- * pushsync can't turn a valid batch away.
+ * the signer owns/can-stamp it. Returns false ONLY on a definitive stamp
+ * rejection (HTTP 400); a 404/422/timeout/other error is inconclusive and
+ * returns true so a freshly-bought or not-yet-synced batch isn't turned away.
  */
 export async function verifyBatchStampable(
   batchId: BatchId,
@@ -61,7 +61,7 @@ export async function verifyBatchStampable(
     await Promise.race([upload, rejectAfter(VALIDATION_TIMEOUT_MS, 'batch validation timed out')])
     return true
   } catch (error) {
-    return !NODE_REJECTED.test(error instanceof Error ? error.message : '')
+    return !(error instanceof SocUploadError && error.status === STAMP_REJECTED_STATUS)
   } finally {
     // If the timeout won the race, the upload promise is still pending; swallow
     // its eventual (unhandled) rejection.

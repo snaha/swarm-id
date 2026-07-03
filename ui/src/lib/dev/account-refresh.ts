@@ -22,11 +22,18 @@ import { sessionStore } from '$lib/stores/session.svelte'
 // "Every few minutes" — the cross-tab window doubles as the interval, so with N
 // tabs open only ~one fold runs per window.
 const FOLD_INTERVAL_MS = 3 * 60 * 1000
+// Short window honoured even under `force`, so a burst of forced folds collapses:
+// N restored tabs each forcing on load, and the post-sign-in fold immediately
+// after the import page's own fold (which stamps via `noteAccountFolded`).
+const FOLD_GRACE_MS = 5 * 1000
 const FOLD_LOCK_NAME = 'swarm-id-account-fold'
 const FOLD_COOLDOWN_KEY_PREFIX = 'swarm-id-account-folded-at-'
 
-// Per-tab guard so overlapping triggers (interval + account switch) don't stack.
-let inFlight = false
+const foldCooldownKey = (accountId: string) => `${FOLD_COOLDOWN_KEY_PREFIX}${accountId}`
+
+// Per-tab, per-account guard so overlapping triggers (interval + account switch)
+// don't stack — keyed so an A→B switch while A's fold runs still folds B.
+const inFlight = new Set<string>()
 
 /**
  * Fold the currently-active account. `force` bypasses the cross-tab cooldown
@@ -34,15 +41,16 @@ let inFlight = false
  */
 export async function foldCurrentAccount(force: boolean): Promise<void> {
   const accountId = sessionStore.currentAccountId
-  if (!accountId || inFlight) {
+  if (!accountId || inFlight.has(accountId)) {
     return
   }
-  inFlight = true
+  inFlight.add(accountId)
   try {
     await runCoalescedAcrossTabs({
       lockName: FOLD_LOCK_NAME,
-      cooldownKey: `${FOLD_COOLDOWN_KEY_PREFIX}${accountId}`,
+      cooldownKey: foldCooldownKey(accountId),
       cooldownMs: FOLD_INTERVAL_MS,
+      graceMs: FOLD_GRACE_MS,
       force,
       task: async () => {
         const result = await refreshAccountFromSwarm(accountId)
@@ -52,8 +60,21 @@ export async function foldCurrentAccount(force: boolean): Promise<void> {
       },
     })
   } finally {
-    inFlight = false
+    inFlight.delete(accountId)
   }
+}
+
+/**
+ * Stamp the fold cooldown for `accountId` as "just folded". The import/sign-in
+ * flow folds directly (not via `foldCurrentAccount`); calling this after it lets
+ * the forced fold triggered right after finalize skip within the grace window
+ * instead of re-folding back-to-back.
+ */
+export function noteAccountFolded(accountId: string): void {
+  if (typeof localStorage === 'undefined') {
+    return
+  }
+  localStorage.setItem(foldCooldownKey(accountId), String(Date.now()))
 }
 
 /** Start the periodic (coalesced) fold. Returns a teardown. */
