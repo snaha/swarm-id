@@ -30,7 +30,7 @@
 <Dialog onclose={onClose} title={drive.name || 'Drive'}>
   <p class="text-sm">
     This removes the drive from your account on all your devices. The storage itself stays on the
-    Swarm network — you can re-attach it later with its Batch ID.
+    Swarm network — this account can re-attach it later with its Batch ID.
   </p>
   <div class="flex w-full flex-col gap-2">
     <Button variant="destructive" class="w-full" onclick={remove}>
