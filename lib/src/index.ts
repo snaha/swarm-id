@@ -28,6 +28,9 @@ export {
 // Hex address utility
 export { hexAddress } from "./utils/hex"
 
+// Cross-tab coalescing: run a task at most once per window across same-origin tabs
+export { runCoalescedAcrossTabs } from "./utils/coalesced-task"
+
 // Stamp worker pool for parallel ECDSA signing
 export { StampWorkerPool } from "./proxy/stamp-worker-pool"
 
