@@ -15,6 +15,7 @@
   import AppIcon from '$lib/components/app-icon.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import DriveExtendDialog from '$lib/components/drive-extend-dialog.svelte'
+  import DriveRemoveDialog from '$lib/components/drive-remove-dialog.svelte'
   import DriveResizeDialog from '$lib/components/drive-resize-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
@@ -40,6 +41,7 @@
   let addOpen = $state(false)
   let resizeDrive = $state<PostageStamp | undefined>(undefined)
   let extendDrive = $state<PostageStamp | undefined>(undefined)
+  let removeDrive = $state<PostageStamp | undefined>(undefined)
 
   function toggle(batchId: string, currentName: string) {
     if (expandedId === batchId) {
@@ -66,12 +68,15 @@
   }
 
   function remove(drive: PostageStamp) {
-    account.removeStamp(drive.batchID)
+    removeDrive = drive
     openMenuId = undefined
-    if (expandedId === drive.batchID.toHex()) {
+  }
+
+  function onDriveRemoved(message: string) {
+    if (expandedId === removeDrive?.batchID.toHex()) {
       expandedId = undefined
     }
-    toastStore.show('Drive removed')
+    toastStore.show(message)
   }
 
   function onWindowPointerDown(event: PointerEvent) {
@@ -334,5 +339,14 @@
     drive={extendDrive}
     onClose={() => (extendDrive = undefined)}
     onUpdated={toastStore.show}
+  />
+{/if}
+
+{#if removeDrive}
+  <DriveRemoveDialog
+    {account}
+    drive={removeDrive}
+    onClose={() => (removeDrive = undefined)}
+    onRemoved={onDriveRemoved}
   />
 {/if}
