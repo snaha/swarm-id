@@ -13,6 +13,7 @@
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
   import HomeDrives from '$lib/components/home-drives.svelte'
+  import SettingsMenu from '$lib/components/settings-menu.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Tabs } from '$lib/components/ui/tabs'
   import routes from '$lib/routes'
@@ -41,11 +42,12 @@
 <div class="flex min-h-svh flex-col">
   <header class="flex w-full items-center gap-2 p-8">
     <SwarmWordmark height={30} />
-    {#if account}
-      <div class="flex flex-1 items-center justify-end">
+    <div class="flex flex-1 items-center justify-end gap-2">
+      {#if account}
         <AccountSwitcher {account} />
-      </div>
-    {/if}
+      {/if}
+      <SettingsMenu />
+    </div>
   </header>
 
   <main class="flex w-full flex-1 flex-col items-center px-8 pb-8">

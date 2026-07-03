@@ -6,15 +6,17 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
 
-  import { Utils } from '@ethersphere/bee-js'
+  import { PrivateKey, Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
+  import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
 
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
+  import { strip0x } from '$lib/crypto/hex'
   import { unlockAccount } from '$lib/crypto/unlock'
   import {
     LIFESPAN_UNIT_OPTIONS,
@@ -22,8 +24,9 @@
     formatBytes,
     lifespanToSeconds,
   } from '$lib/drives'
-  import { fetchExistingStamp } from '$lib/payment/bee'
+  import { verifyBatchStampable } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
+  import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
   import {
     derivePostageSigner,
@@ -34,8 +37,6 @@
   } from '$lib/payment/purchase'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import type { Account } from '$lib/types'
-
-  const BATCH_ID_PATTERN = /^(0x)?[0-9a-fA-F]{64}$/
 
   const STORAGE_OPTIONS = [
     { value: 'new', label: 'Purchase new batch' },
@@ -59,6 +60,7 @@
   let lifespanValue = $state('1')
   let lifespanUnit = $state<LifespanUnit>('years')
   let batchIdInput = $state('')
+  let signerKeyInput = $state('')
 
   let phase = $state<Phase>('form')
   let pendingLabel = $state('')
@@ -94,9 +96,17 @@
     return stampCostBzz(Number(depthValue), stampAmountForSeconds(currentPrice, lifespanSeconds))
   })
 
-  const batchIdValid = $derived(BATCH_ID_PATTERN.test(batchIdInput.trim()))
+  // Validate through the lib's canonical schemas (bare 64-hex), tolerating a
+  // `0x` prefix by stripping first.
+  const batchIdValid = $derived(BatchIdSchema.safeParse(strip0x(batchIdInput.trim())).success)
+  // Optional: blank keeps the derive-from-account behaviour; a pasted key lets
+  // the user attach a batch owned by an external signer.
+  const signerKeyValid = $derived(
+    signerKeyInput.trim() === '' ||
+      PrivateKeySchema.safeParse(strip0x(signerKeyInput.trim())).success,
+  )
   const canProceed = $derived(
-    storage === 'new' ? depthValue !== '' && lifespanSeconds > 0 : batchIdValid,
+    storage === 'new' ? depthValue !== '' && lifespanSeconds > 0 : batchIdValid && signerKeyValid,
   )
 
   const infoText = $derived.by(() => {
@@ -140,6 +150,12 @@
 
   function proceed() {
     errorMessage = ''
+    // A user-supplied signer needs no account secret — attach the external
+    // batch directly, skipping the unlock ceremony.
+    if (storage === 'existing' && signerKeyInput.trim() !== '') {
+      void attachExisting()
+      return
+    }
     if (entropy) {
       void runWithEntropy(entropy)
       return
@@ -251,19 +267,42 @@
     }
   }
 
-  async function attachExisting(seed: Uint8Array) {
+  async function attachExisting(seed?: Uint8Array) {
     const myAttempt = ++attempt
     phase = 'pending'
     pendingLabel = 'Looking up the batch…'
     const driveName = name.trim() || undefined
     try {
-      const { signerKey } = await derivePostageSigner(seed)
-      const stamp = await fetchExistingStamp(batchIdInput.trim(), signerKey, driveName)
+      // A pasted signer key attaches an externally-owned batch; otherwise derive
+      // this account's signer (the `seed` path is only reached via unlock).
+      const pasted = signerKeyInput.trim()
+      const signerKey = pasted
+        ? new PrivateKey(strip0x(pasted))
+        : (await derivePostageSigner(seed as Uint8Array)).signerKey
+      // Read the batch straight from the PostageStamp contract on-chain, not the
+      // Bee node — a public gateway has no /stamps and won't know a batch bought
+      // independently of it.
+      const lookup = await fetchExistingBatchFromChain(batchIdInput.trim(), signerKey, driveName)
       if (myAttempt !== attempt) {
         return
       }
-      if (!stamp) {
-        errorMessage = 'Couldn’t load that batch from the node. Check the Batch ID and try again.'
+      if (lookup.status !== 'found') {
+        errorMessage =
+          'Couldn’t find that batch on chain. Check the Batch ID, or the Gnosis RPC endpoint in Network settings.'
+        phase = 'error'
+        return
+      }
+      const stamp = lookup.stamp
+      // Existence isn't enough — upload one stamped test chunk to prove the
+      // signer key can actually stamp uploads for this batch before attaching.
+      pendingLabel = 'Verifying the batch…'
+      const stampable = await verifyBatchStampable(stamp.batchID, signerKey, stamp.depth)
+      if (myAttempt !== attempt) {
+        return
+      }
+      if (!stampable) {
+        errorMessage =
+          'That batch exists, but this signer key can’t stamp uploads for it. Check the signer key.'
         phase = 'error'
         return
       }
@@ -347,8 +386,27 @@
     {:else}
       <div class="flex w-full flex-col gap-2">
         <label for="drive-batch" class="text-sm font-medium">Batch ID</label>
-        <Input id="drive-batch" bind:value={batchIdInput} placeholder="0x…" class="font-mono" />
+        <Input
+          id="drive-batch"
+          bind:value={batchIdInput}
+          placeholder="64-character hex"
+          class="font-mono"
+        />
         <p class="text-muted-foreground text-xs">Don't reuse batches across accounts.</p>
+      </div>
+
+      <div class="flex w-full flex-col gap-2">
+        <label for="drive-signer" class="text-sm font-medium">Signer key (optional)</label>
+        <Input
+          id="drive-signer"
+          bind:value={signerKeyInput}
+          placeholder="64-character hex"
+          class="font-mono"
+        />
+        <p class="text-muted-foreground text-xs">
+          Leave blank to use this account's key. Paste the batch's private signer key to attach a
+          batch owned by another key.
+        </p>
       </div>
     {/if}
 

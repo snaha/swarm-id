@@ -1,10 +1,25 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { Bee, PrivateKey } from '@ethersphere/bee-js'
+import { type BatchId, Bee, Identifier, PrivateKey, Stamper } from '@ethersphere/bee-js'
+import { type UploadTarget, rejectAfter, uploadSOC } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
-import type { NewStamp } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
+
+const VALIDATION_PAYLOAD = new TextEncoder().encode('swarm-id batch validation')
+// A real gateway stamps + pushsyncs a valid chunk in a second or two; give it
+// headroom. A slower response is treated as "accepted, receipt pending" (see
+// verifyBatchStampable), so this bound only affects how long we wait before
+// letting a valid-looking batch through — it never turns a valid batch away.
+const VALIDATION_TIMEOUT_MS = 10000
+const IDENTIFIER_BYTES = 32
+
+// A random identifier each call → a fresh SOC address → a fresh postage bucket
+// slot, so re-validating the same batch doesn't reuse a stamp index (which the
+// node rejects as a double-spend). Costs one tiny chunk per validation.
+function randomIdentifier(): Identifier {
+  return new Identifier(crypto.getRandomValues(new Uint8Array(IDENTIFIER_BYTES)))
+}
 
 /**
  * The product UI's postage ("drive") operations against a Bee node, as a thin
@@ -14,38 +29,43 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
  * so pointing the app at a different Bee node redirects these calls too.
  */
 
+// The node validates a postage stamp synchronously at ingestion (signature vs
+// batch owner, funds, depth) BEFORE the chunk enters pushsync, so a bad signer
+// is refused with a fast 4xx. A valid stamp is accepted and only then pushsynced
+// — which can be slow or (on a misconfigured node) never receipt. So a definitive
+// 4xx is the only reliable "can't stamp" signal; a timeout / 5xx / network error
+// means "accepted, receipt pending" and must NOT reject a valid batch.
+const NODE_REJECTED = /SOC upload failed: 4\d\d/
+
 /**
- * Look up an existing batch on a Bee node and shape it into a stamp record.
- * Returns `undefined` when the node doesn't track the batch or is unreachable —
- * the caller surfaces that to the user rather than attaching a half-known drive.
+ * Prove a (batchID, signerKey) pair can actually stamp uploads by writing one
+ * tiny stamped SOC. `getPostageBatch` only proves the batch exists; this proves
+ * the signer owns/can-stamp it. Returns false ONLY when the node definitively
+ * rejects the stamp (4xx); a timeout or other error is inconclusive (the caller
+ * already reached the node for the metadata lookup) and returns true so a slow
+ * pushsync can't turn a valid batch away.
  */
-export async function fetchExistingStamp(
-  batchId: string,
+export async function verifyBatchStampable(
+  batchId: BatchId,
   signerKey: PrivateKey,
-  name: string | undefined,
+  depth: number,
   beeUrl: string = networkSettingsStore.beeNodeUrl,
-): Promise<NewStamp | undefined> {
+): Promise<boolean> {
+  const bee = new Bee(beeUrl)
+  const stamper = Stamper.fromBlank(signerKey, batchId, depth)
+  const target: UploadTarget = { mode: 'stamper', bee, stamper }
+  const upload = uploadSOC(target, signerKey, randomIdentifier(), VALIDATION_PAYLOAD, {
+    deferred: true,
+  })
   try {
-    const batch = await new Bee(beeUrl).getPostageBatch(strip0x(batchId))
-    return {
-      batchID: batch.batchID,
-      name,
-      signerKey,
-      depth: batch.depth,
-      amount: BigInt(batch.amount),
-      bucketDepth: batch.bucketDepth,
-      blockNumber: batch.blockNumber,
-      immutableFlag: batch.immutableFlag,
-      // bee-js precomputes `usage` as the 0–1 fraction the UI reads.
-      utilization: batch.usage,
-      usable: batch.usable,
-      // getPostageBatch throws when the node doesn't track the batch, so a
-      // batch that made it here exists by construction.
-      exists: true,
-      batchTTL: batch.duration.toSeconds(),
-    }
-  } catch {
-    return undefined
+    await Promise.race([upload, rejectAfter(VALIDATION_TIMEOUT_MS, 'batch validation timed out')])
+    return true
+  } catch (error) {
+    return !NODE_REJECTED.test(error instanceof Error ? error.message : '')
+  } finally {
+    // If the timeout won the race, the upload promise is still pending; swallow
+    // its eventual (unhandled) rejection.
+    upload.catch(() => undefined)
   }
 }
 

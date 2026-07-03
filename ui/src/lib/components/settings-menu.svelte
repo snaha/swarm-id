@@ -15,10 +15,10 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
+  import NetworkSettingsDialog from '$lib/components/network-settings-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import routes from '$lib/routes'
   import { type ThemePreference, themeStore } from '$lib/stores/theme.svelte'
-  import { notImplemented } from '$lib/utils'
 
   const APPEARANCE_OPTIONS = [
     { value: 'auto', label: 'Automatic', icon: Contrast },
@@ -30,6 +30,7 @@
     'flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
 
   let open = $state(false)
+  let dialogOpen = $state(false)
   let container = $state<HTMLDivElement>()
 
   function close() {
@@ -55,7 +56,7 @@
 
   function networkSettings() {
     close()
-    notImplemented()
+    dialogOpen = true
   }
 
   function selectAppearance(value: ThemePreference) {
@@ -115,3 +116,7 @@
     </div>
   {/if}
 </div>
+
+{#if dialogOpen}
+  <NetworkSettingsDialog onclose={() => (dialogOpen = false)} />
+{/if}
