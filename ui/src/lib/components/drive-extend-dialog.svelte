@@ -96,13 +96,13 @@
         throw new Error('This drive was removed in the meantime.')
       }
       await topUpStamp(drive.batchID.toHex(), topUpAmount)
-      if (myAttempt !== attempt) {
-        return
-      }
       account.updateStamp(
         drive.batchID,
         extendedStamp(drive, addedSeconds, topUpAmount, remainingLifespanSeconds(drive)),
       )
+      if (myAttempt !== attempt) {
+        return
+      }
       onUpdated?.('Lifespan extended')
       close()
     } catch (caught) {
