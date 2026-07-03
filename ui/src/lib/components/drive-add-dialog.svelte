@@ -53,11 +53,6 @@
   type Storage = 'new' | 'existing'
   type Phase = 'form' | 'unlock' | 'pending' | 'error' | 'unconfirmed'
 
-  /** Positional default shown as the name placeholder and used when left blank. */
-  function suggestedName() {
-    return `Drive ${account.stamps.length + 1}`
-  }
-
   let storage = $state<Storage>('new')
   let name = $state('')
   let depthValue = $state('')
@@ -197,9 +192,9 @@
       devSettingsStore.data.mockStampEnabled && !devSettingsStore.data.mockStampPopup
         ? 'Simulating the purchase…'
         : 'Complete the purchase in the popup window.'
-    // Capture the fallback now: computed at settlement it could differ from the
-    // placeholder the user saw (a sync pull / another tab adding a stamp meanwhile).
-    const driveName = name.trim() || suggestedName()
+    // Left blank, the drive stays unnamed and the UI falls back to its stable
+    // batch-ID-derived label.
+    const driveName = name.trim() || undefined
     try {
       const { signerKey, destination } = await derivePostageSigner(seed)
       // The user may have cancelled during the derivation — bail before the
@@ -260,7 +255,7 @@
     const myAttempt = ++attempt
     phase = 'pending'
     pendingLabel = 'Looking up the batch…'
-    const driveName = name.trim() || suggestedName()
+    const driveName = name.trim() || undefined
     try {
       const { signerKey } = await derivePostageSigner(seed)
       const stamp = await fetchExistingStamp(batchIdInput.trim(), signerKey, driveName)
@@ -328,7 +323,7 @@
   <Dialog onclose={close} title="Add drive">
     <div class="flex w-full flex-col gap-2">
       <label for="drive-name" class="text-sm font-medium">Name</label>
-      <Input id="drive-name" bind:value={name} placeholder={suggestedName()} />
+      <Input id="drive-name" bind:value={name} placeholder="Optional" />
     </div>
 
     <div class="flex w-full flex-col gap-2">

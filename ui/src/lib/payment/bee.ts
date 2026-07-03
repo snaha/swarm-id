@@ -22,7 +22,7 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 export async function fetchExistingStamp(
   batchId: string,
   signerKey: PrivateKey,
-  name: string,
+  name: string | undefined,
   beeUrl: string = networkSettingsStore.beeNodeUrl,
 ): Promise<NewStamp | undefined> {
   try {

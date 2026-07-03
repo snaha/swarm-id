@@ -154,7 +154,7 @@ export const PostageStampSchemaV1 = z.object({
   signerKey: StoredPrivateKey,
   // User-given label shown in the UI (a "drive"). Optional: stamps created before
   // naming existed — and those bought outside the app — have none, and callers
-  // fall back to a positional `Drive N` label.
+  // fall back to a batch-ID-derived label.
   name: z.string().optional(),
   // Rename clock. The name merges on its own last-writer-wins clock, separate
   // from the node-state clock below: a rename made over a stale copy must not

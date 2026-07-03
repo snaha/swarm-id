@@ -130,9 +130,16 @@ function driveUsedPercent(drive: PostageStamp): number {
     : percent
 }
 
-/** The drive's label, falling back to a positional `Drive N` when unnamed. */
-function driveDisplayName(drive: PostageStamp, index: number): string {
-  return drive.name?.trim() || `Drive ${index + 1}`
+/** Hex chars of the batch ID used in an unnamed drive's fallback label. */
+const FALLBACK_NAME_HEX_CHARS = 4
+
+/**
+ * The drive's label, falling back to `Drive <batch-ID prefix>` when unnamed.
+ * Deriving the fallback from the batch ID (not the list position) keeps it
+ * stable when drives are added/removed and identical on every device.
+ */
+function driveDisplayName(drive: PostageStamp): string {
+  return drive.name?.trim() || `Drive ${drive.batchID.toHex().slice(0, FALLBACK_NAME_HEX_CHARS)}`
 }
 
 /**
@@ -164,7 +171,7 @@ export function formatYmd(epochMs: number): string {
 }
 
 /** One-pass derivation of every display value for a drive row + detail. */
-export function describeDrive(drive: PostageStamp, index: number, now = Date.now()): DriveDisplay {
+export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDisplay {
   const ttl = remainingLifespanSeconds(drive, now)
   const known = ttl !== undefined
   const expired = known && ttl <= 0
@@ -172,7 +179,7 @@ export function describeDrive(drive: PostageStamp, index: number, now = Date.now
   const hasLifespan = known && ttl > 0
 
   return {
-    name: driveDisplayName(drive, index),
+    name: driveDisplayName(drive),
     sizeLabel: driveSizeLabel(drive),
     usedPercent: driveUsedPercent(drive),
     storageFull: drive.utilization >= STORAGE_FULL_FRACTION,
