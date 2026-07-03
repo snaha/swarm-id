@@ -1,1 +1,0 @@
-import{z as c,q as n,M as r}from"./BUmogIl2.js";import{a as d}from"./C9g_d7y2.js";function a(o){const e=c(o.devices??[],r(),n()),t=o.connectedApps.map(s=>({...s,connectedUntil:void 0}));return d.addAccount({...o,devices:e,connectedApps:t})}export{a as r};

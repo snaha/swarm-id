@@ -1,1 +1,0 @@
-import{Z as c,J as n,H as r}from"./CeZ9nKpE.js";import{a as d}from"./Cpa2LgiS.js";function a(o){const e=c(o.devices??[],r(),n()),t=o.connectedApps.map(s=>({...s,connectedUntil:void 0}));return d.addAccount({...o,devices:e,connectedApps:t})}export{a as r};
