@@ -46,6 +46,7 @@ import {
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
+import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
 import type {
   LeaseRefreshOutcome,
@@ -417,19 +418,12 @@ export class BatchWriteCoordinator {
           }
           return
         }
-        const timeout = new Promise<void>((_, reject) =>
-          setTimeout(
-            () =>
-              reject(
-                new Error(
-                  `Partition lease timed out after ${PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
-                ),
-              ),
-            PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
-          ),
-        )
         try {
-          await Promise.race([this.acquireWithSlotWait(), timeout])
+          await withTimeout(
+            this.acquireWithSlotWait(),
+            PARTITION_LEASE_ACQUIRE_TIMEOUT_MS,
+            `Partition lease timed out after ${PARTITION_LEASE_ACQUIRE_TIMEOUT_MS}ms`,
+          )
         } catch (error) {
           console.warn(
             "[BatchWriteCoordinator] Partition lease acquisition failed, pausing background work:",
@@ -621,8 +615,8 @@ export class BatchWriteCoordinator {
    */
   private async acquireWithSlotWait(): Promise<void> {
     const deadline = Date.now() + SLOT_WAIT_TIMEOUT_MS
-    // Epoch capture: when the Promise.race timeout in `ensureLease` fires,
-    // this loop keeps running detached (race can't cancel it) and would
+    // Epoch capture: when the `withTimeout` in `ensureLease` fires, this
+    // loop keeps running detached (the race can't cancel it) and would
     // otherwise wake from its poll sleep and claim the lock SOC one more
     // time, only for `acquire()` to discard the claim — a pointless ghost
     // claim peers must wait out via the TTL.
