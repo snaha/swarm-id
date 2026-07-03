@@ -118,6 +118,11 @@ Authentication uses storage events: popup writes to localStorage → storage eve
 - **kebab-case** for all file and directory names
 - **Conventional commits**: `feat:`, `fix:`, `docs:`, etc.
 - **TypeScript execution**: Use `pnpx tsx` (not `npx ts-node`)
+- **Timeouts: use `withTimeout`** (`lib/src/utils/promise.ts`) — never `Promise.race` work against
+  `rejectAfter` or an inline `setTimeout` rejection: when the work wins, the losing timer stays
+  armed and leaks its handle. `withTimeout(work, ms, message)` clears the timer and rejects with
+  `TimeoutError`, so discriminate timeouts with `instanceof TimeoutError`, not by message.
+  `rejectAfter` is deprecated and kept only for the public API.
 
 ## Testing
 
