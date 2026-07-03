@@ -37,6 +37,7 @@
   import { strip0x } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
+  import { triggerSync } from '$lib/dev/sync-hooks'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -124,6 +125,10 @@
     // `add` returns the live reactive account; the handshake mutates it.
     const liveAccount = accountsStore.add(account)
     sessionStore.setCurrentAccount(liveAccount.id)
+    // `add` persists but doesn't fire the sync hook (only field mutations do),
+    // so publish once here to register this device in the Swarm roster. No-ops
+    // harmlessly until the account has a stamp to sign the upload.
+    triggerSync(liveAccount.id.toHex())
     const flow = draft.flow
 
     // Came from a dApp connect popup — finish the handshake and hand back.

@@ -47,8 +47,8 @@ function createSessionStore() {
       // back to rename does not silently swap in a new recovery phrase.
       draft = draft?.flow === 'create' ? { ...draft, name } : { flow: 'create', name }
     },
-    startSignIn(name: string, phrase: string) {
-      draft = { flow: 'sign-in', name, phrase }
+    startSignIn(name: string, phrase: string, restored?: AccountData) {
+      draft = { flow: 'sign-in', name, phrase, restored }
     },
     startRestore(restored: AccountData, phrase: string) {
       draft = { flow: 'restore', name: restored.name, phrase, restored }
