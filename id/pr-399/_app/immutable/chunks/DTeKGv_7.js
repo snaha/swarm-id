@@ -1,0 +1,1 @@
+const r=["Jovial","Curious","Brave","Gentle","Witty","Cosmic","Radiant","Nimble","Lucid","Serene","Bold","Clever"],o=["Einstein","Curie","Newton","Tesla","Lovelace","Darwin","Bohr","Turing","Hopper","Franklin","Noether","Feynman"];function n(e){return e[Math.floor(Math.random()*e.length)]}function t(){return`${n(r)} ${n(o)}`}export{t as g};
