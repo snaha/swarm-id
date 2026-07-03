@@ -101,7 +101,7 @@ export function parseBlockNumber(value: string): number {
 export function stampFromBatch(
   batch: BatchEvent,
   signerKey: PrivateKey,
-  name: string,
+  name: string | undefined,
   batchTTL?: number,
 ): NewStamp {
   return {

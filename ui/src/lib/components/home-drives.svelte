@@ -124,9 +124,9 @@
     <p class="text-muted-foreground py-8 text-center text-sm">No drives yet.</p>
   {:else}
     <div class="flex w-full flex-col gap-2">
-      {#each account.stamps as drive, index (drive.batchID.toHex())}
+      {#each account.stamps as drive (drive.batchID.toHex())}
         {@const batchKey = drive.batchID.toHex()}
-        {@const d = describeDrive(drive, index)}
+        {@const d = describeDrive(drive)}
         {@const isDefault = account.defaultPostageStampBatchID?.equals(drive.batchID) ?? false}
         {@const isOpen = expandedId === batchKey}
         {@const lifespanAlarm = d.status === 'expires-soon' || d.status === 'expired'}
