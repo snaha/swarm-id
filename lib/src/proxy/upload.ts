@@ -43,6 +43,26 @@ import { uint8ArrayToHex } from "../utils/hex"
 import { normalizeUrl } from "../utils/url"
 
 // ============================================================================
+// Errors
+// ============================================================================
+
+/**
+ * Thrown when a SOC upload gets a non-OK HTTP response. Carries the numeric
+ * `status` so callers can distinguish a definitive stamp rejection (400) from a
+ * transient / not-yet-synced condition (404 "batch not found", 422 "not usable
+ * yet") without regex-matching the message — see `verifyBatchStampable`.
+ */
+export class SocUploadError extends Error {
+  readonly status: number
+
+  constructor(status: number, statusText: string, body: string) {
+    super(`SOC upload failed: ${status} ${statusText} - ${body}`)
+    this.name = "SocUploadError"
+    this.status = status
+  }
+}
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -910,8 +930,10 @@ export async function uploadSOC(
 
     if (!response.ok) {
       const errorText = await response.text()
-      throw new Error(
-        `Subsidised SOC upload failed: ${response.status} ${response.statusText} - ${errorText}`,
+      throw new SocUploadError(
+        response.status,
+        `${response.statusText} (subsidised)`,
+        errorText,
       )
     }
 
@@ -955,9 +977,7 @@ export async function uploadSOC(
 
     if (!response.ok) {
       const errorText = await response.text()
-      throw new Error(
-        `SOC upload failed: ${response.status} ${response.statusText} - ${errorText}`,
-      )
+      throw new SocUploadError(response.status, response.statusText, errorText)
     }
 
     return {

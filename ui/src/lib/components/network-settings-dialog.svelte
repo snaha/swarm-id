@@ -1,0 +1,82 @@
+<!--
+  Copyright 2026 The Swarm Authors. All rights reserved.
+  SPDX-License-Identifier: Apache-2.0
+-->
+
+<script lang="ts">
+  import { DEFAULT_BEE_NODE_URL, DEFAULT_GNOSIS_RPC_URL, isHttpUrl } from '@snaha/swarm-id'
+
+  import { Button } from '$lib/components/ui/button'
+  import { Dialog } from '$lib/components/ui/dialog'
+  import { Input } from '$lib/components/ui/input'
+  import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
+
+  interface Props {
+    onclose: () => void
+  }
+
+  let { onclose }: Props = $props()
+
+  let beeNodeUrl = $state(networkSettingsStore.beeNodeUrl)
+  let gnosisRpcUrl = $state(networkSettingsStore.gnosisRpcUrl)
+
+  // Same http(s)-only validator the store's schema uses, so a value that saves
+  // here also survives the next load (a scheme-less `localhost:1633` fails both).
+  const beeNodeUrlValid = $derived(isHttpUrl(beeNodeUrl.trim()))
+  const gnosisRpcUrlValid = $derived(isHttpUrl(gnosisRpcUrl.trim()))
+  const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid)
+  const beeNodeUrlError = $derived(beeNodeUrl.trim().length > 0 && !beeNodeUrlValid)
+  const gnosisRpcUrlError = $derived(gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid)
+
+  function save() {
+    if (!canSave) {
+      return
+    }
+    networkSettingsStore.updateSettings({
+      beeNodeUrl: beeNodeUrl.trim(),
+      gnosisRpcUrl: gnosisRpcUrl.trim(),
+    })
+    onclose()
+  }
+
+  // Fill the fields with the defaults; only persisted once the user hits Save.
+  function resetToDefaults() {
+    beeNodeUrl = DEFAULT_BEE_NODE_URL
+    gnosisRpcUrl = DEFAULT_GNOSIS_RPC_URL
+  }
+</script>
+
+<Dialog title="Network settings" {onclose}>
+  <div class="flex w-full flex-col gap-2">
+    <label for="bee-node-url" class="text-sm font-medium">Bee node URL</label>
+    <Input
+      id="bee-node-url"
+      bind:value={beeNodeUrl}
+      placeholder={DEFAULT_BEE_NODE_URL}
+      class="font-mono"
+      aria-invalid={beeNodeUrlError}
+    />
+    {#if beeNodeUrlError}
+      <p class="text-destructive text-xs">Please enter a valid URL</p>
+    {/if}
+  </div>
+
+  <div class="flex w-full flex-col gap-2">
+    <label for="gnosis-rpc-url" class="text-sm font-medium">Gnosis RPC endpoint</label>
+    <Input
+      id="gnosis-rpc-url"
+      bind:value={gnosisRpcUrl}
+      placeholder={DEFAULT_GNOSIS_RPC_URL}
+      class="font-mono"
+      aria-invalid={gnosisRpcUrlError}
+    />
+    {#if gnosisRpcUrlError}
+      <p class="text-destructive text-xs">Please enter a valid URL</p>
+    {/if}
+  </div>
+
+  <div class="flex w-full items-center gap-2">
+    <Button class="flex-1" disabled={!canSave} onclick={save}>Save settings</Button>
+    <Button variant="outline" onclick={resetToDefaults}>Reset to defaults</Button>
+  </div>
+</Dialog>

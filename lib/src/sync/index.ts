@@ -57,7 +57,10 @@ export {
   ensureInRoster,
   ROSTER_TOPIC_PREFIX,
 } from "./device-roster"
-export { foldAccountFromSwarm } from "./fold-account-from-swarm"
+export {
+  foldAccountFromSwarm,
+  foldedToAccountData,
+} from "./fold-account-from-swarm"
 export type { FoldAccountResult } from "./fold-account-from-swarm"
 
 // Store interfaces

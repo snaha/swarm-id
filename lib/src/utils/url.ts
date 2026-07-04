@@ -11,6 +11,22 @@ export function normalizeUrl(url: string): string {
 }
 
 /**
+ * True only for a well-formed `http:`/`https:` URL. Unlike a bare
+ * `new URL(value)` / zod `.url()` check, this rejects a scheme-less paste like
+ * `localhost:1633` (which `new URL` happily parses with protocol `localhost:`)
+ * — the single validator shared by the network-settings schema and its editor
+ * dialog so a broken Bee/RPC endpoint can't be saved or persisted.
+ */
+export function isHttpUrl(value: string): boolean {
+  try {
+    const { protocol } = new URL(value)
+    return protocol === "http:" || protocol === "https:"
+  } catch {
+    return false
+  }
+}
+
+/**
  * Configuration options for building the authentication URL.
  */
 export interface BuildAuthUrlOptions {

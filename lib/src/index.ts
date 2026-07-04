@@ -28,6 +28,9 @@ export {
 // Hex address utility
 export { hexAddress } from "./utils/hex"
 
+// Cross-tab coalescing: run a task at most once per window across same-origin tabs
+export { runCoalescedAcrossTabs } from "./utils/coalesced-task"
+
 // Stamp worker pool for parallel ECDSA signing
 export { StampWorkerPool } from "./proxy/stamp-worker-pool"
 
@@ -228,6 +231,7 @@ export {
   ensureInRoster,
   ROSTER_TOPIC_PREFIX,
   foldAccountFromSwarm,
+  foldedToAccountData,
 } from "./sync"
 
 // State sync types
@@ -454,6 +458,7 @@ export { downloadDataWithChunkAPI } from "./proxy/download-data"
 export { downloadEncryptedSOC } from "./proxy/download-data"
 export {
   uploadSOC,
+  SocUploadError,
   type UploadTarget,
   type UploadSOCOptions,
 } from "./proxy/upload"
@@ -477,7 +482,7 @@ export type { ActEntry } from "./proxy/act"
 export { SWARM_SECRET_PREFIX, STORAGE_CHALLENGE_KEY } from "./types"
 
 // URL building utilities
-export { buildAuthUrl } from "./utils/url"
+export { buildAuthUrl, isHttpUrl } from "./utils/url"
 
 // Browser detection utilities
 export { isWebKit } from "./utils/browser"

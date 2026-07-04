@@ -4,7 +4,6 @@
 -->
 
 <script lang="ts">
-  import { onMount } from 'svelte'
   import { SvelteMap } from 'svelte/reactivity'
 
   import { BatchId, Bee, EthAddress, Identifier, PrivateKey, Utils } from '@ethersphere/bee-js'
@@ -15,6 +14,7 @@
     fetchChainState,
     formatTTL,
     rejectAfter,
+    resolvePostageStampContractAddress,
     uint8ArrayToHex,
     uploadSOC,
   } from '@snaha/swarm-id'
@@ -28,10 +28,13 @@
   import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
-  import { triggerSync } from '$lib/dev/sync-hooks'
   import { syncStore } from '$lib/dev/sync.svelte'
+  import {
+    LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS,
+    fetchExistingBatchFromChain,
+  } from '$lib/payment/contract'
   import routes from '$lib/routes'
-  import { accountsStore, setAccountsSyncHook } from '$lib/stores/accounts.svelte'
+  import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -39,14 +42,10 @@
   import DeviceList from './device-list.svelte'
   import StatusDot from './status-dot.svelte'
 
-  // Dev tooling drives Swarm publishing: register the sync hook while this page
-  // is mounted so account mutations (here and in child panels) publish to Swarm
-  // after a debounce — and reset it on unmount so the product UI stops
-  // publishing once the user navigates away from /dev.
-  onMount(() => {
-    setAccountsSyncHook(triggerSync)
-    return () => setAccountsSyncHook(undefined)
-  })
+  // The Swarm publish hook is now installed app-wide in the root layout
+  // (`+layout.svelte`), so /dev no longer manages it — a local install +
+  // unmount cleanup here would toggle publishing off for the whole app on
+  // navigating away.
 
   // Milliseconds per second — for converting TTL/Unix seconds to JS `Date` ms.
   const MS_PER_SECOND = 1000
@@ -582,6 +581,70 @@ Check console logs for details:
     }
   }
 
+  // Import a batch by ID, reading its parameters from the PostageStamp contract
+  // ON-CHAIN (not from a Bee node) — works for any batch id even when the
+  // configured node never saw it. The signer key is NOT on-chain, so the user
+  // supplies it (required to sign uploads with the batch). The local anvil
+  // deployment address is shared from `$lib/payment/contract`.
+
+  let importBatchId = $state('')
+  let importSignerKey = $state('')
+  let importRpcUrl = $state('http://localhost:9545')
+  // Blank → auto-detect from the RPC (local vs Gnosis mainnet); a value overrides.
+  let importContractOverride = $state('')
+  let importSetDefault = $state(true)
+  let importing = $state(false)
+  let importMessage = $state('')
+  let importError = $state('')
+
+  // Contract address the read will use: the override if set, else auto-detected
+  // from the RPC — local RPC → local anvil deployment, any remote RPC → Gnosis
+  // mainnet (resolvePostageStampContractAddress encodes that rule).
+  const resolvedContract = $derived(
+    resolvePostageStampContractAddress(importRpcUrl.trim(), LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS),
+  )
+  const effectiveContract = $derived(importContractOverride.trim() || resolvedContract)
+
+  async function importBatchById() {
+    importError = ''
+    importMessage = ''
+    if (!importBatchId.trim() || !importSignerKey.trim() || !selectedAccountId) {
+      importError = 'Enter a batch ID and signer key, and select an account.'
+      return
+    }
+    importing = true
+    try {
+      const batchId = new BatchId(importBatchId.trim())
+      const signerKey = new PrivateKey(importSignerKey.trim())
+      const account = accountsStore.getAccount(new EthAddress(selectedAccountId))
+      if (!account) {
+        importError = 'Account not found.'
+        return
+      }
+
+      const stamp = await fetchExistingBatchFromChain(batchId.toHex(), signerKey, '', {
+        rpcUrl: importRpcUrl.trim(),
+        contractAddress: effectiveContract,
+      })
+      if (!stamp) {
+        importError =
+          'Could not read the batch from the chain — no such batch here, or the RPC URL / contract address is wrong.'
+        return
+      }
+
+      account.addStamp(stamp)
+      if (importSetDefault) account.setDefaultStamp(stamp.batchID)
+      importMessage =
+        `✅ Imported ${batchId.toHex().slice(0, 12)}… (depth ${stamp.depth}` +
+        `${stamp.immutableFlag ? ', immutable — partition sharing needs a mutable batch' : ''}) ` +
+        `into ${account.name}`
+    } catch (error) {
+      importError = error instanceof Error ? error.message : String(error)
+    } finally {
+      importing = false
+    }
+  }
+
   // Clear this browser's accounts (which own their apps + stamps) + session.
   function clearAccount() {
     accountsStore.clear()
@@ -960,6 +1023,57 @@ Check console logs for details:
         <div class={CARD_CLASS}>
           <p class="text-destructive font-mono text-sm">❌ {stampError}</p>
         </div>
+      {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Import batch by ID</h3>
+      <p class="text-muted-foreground text-sm">
+        Read a batch's parameters straight from the PostageStamp contract on-chain (not from a Bee
+        node), so any batch id works even if the configured node never saw it. The signer key is not
+        on-chain — paste the one the batch was bought with.
+      </p>
+      <div class="flex flex-col gap-2">
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Batch ID</span>
+          <Input bind:value={importBatchId} placeholder="0x… (64 hex chars)" />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Signer Key</span>
+          <Input bind:value={importSignerKey} placeholder="64 hex chars" />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Gnosis RPC URL</span>
+          <Input bind:value={importRpcUrl} />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>PostageStamp contract</span>
+          <Input bind:value={importContractOverride} placeholder={resolvedContract} />
+          <span class="text-muted-foreground text-xs">
+            Auto from RPC: <span class="font-mono">{resolvedContract}</span> — leave blank to use it (local
+            RPC → local deployment, else Gnosis mainnet).
+          </span>
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Account</span>
+          <Select options={accountOptions} bind:value={selectedAccountId} />
+        </label>
+        <label class="flex cursor-pointer items-center gap-2 text-sm">
+          <input type="checkbox" bind:checked={importSetDefault} />
+          Set as account default
+        </label>
+      </div>
+      <Button
+        onclick={importBatchById}
+        disabled={importing || !importBatchId || !importSignerKey || !selectedAccountId}
+      >
+        {importing ? 'Importing…' : 'Import batch'}
+      </Button>
+      {#if importMessage}
+        <p class="text-success text-sm">{importMessage}</p>
+      {/if}
+      {#if importError}
+        <p class="text-destructive text-sm">{importError}</p>
       {/if}
 
       <div class="bg-border my-4 h-px"></div>
