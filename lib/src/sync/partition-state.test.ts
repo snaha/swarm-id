@@ -57,7 +57,20 @@ vi.mock("../chunk", async (importOriginal) => {
   }
 })
 
+// Wrap the real upload module so partition-state's own bindings resolve to these
+// spies (default behaviour passes through to the real round-trip). A test can
+// then fail a single chunk PUT and assert the pointer SOC never lands.
+vi.mock("../proxy/upload", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../proxy/upload")>()
+  return {
+    ...actual,
+    uploadData: vi.fn(actual.uploadData),
+    uploadSOC: vi.fn(actual.uploadSOC),
+  }
+})
+
 import { statePointerAddress, writePartitionState } from "./partition-state"
+import { uploadData, uploadSOC } from "../proxy/upload"
 import {
   intentEpochBucket,
   partitionOccupancyAddress,
@@ -228,6 +241,38 @@ describe("writePartitionState — distinct-bucket invariant guard", () => {
     // Every reserved-slot write lands at (bucket, slot=PARTITION); the parallel
     // publish is only race-free because those buckets are all distinct.
     expect(new Set(stateBuckets).size).toBe(stateBuckets.length)
+  })
+})
+
+describe("writePartitionState — two-phase publish (pointer after chunks)", () => {
+  it("does not write the state pointer when a chunk PUT fails", async () => {
+    const stamper = await makeBoundStamper()
+    const localCounter = new Uint32Array(NUM_BUCKETS)
+    localCounter[1000] = 1
+
+    // Fail the first counter-chunk PUT. The pointer must NOT land: a durable
+    // pointer referencing chunks Bee never stored bricks every future takeover
+    // (readFailed → read-only until batch expiry), since there is no
+    // older-pointer fallback. See #414.
+    vi.mocked(uploadData).mockRejectedValueOnce(new Error("chunk PUT failed"))
+    vi.mocked(uploadSOC).mockClear()
+
+    await expect(
+      writePartitionState({
+        bee: bee as unknown as Bee,
+        stamper,
+        batchId: TEST_BATCH_ID,
+        batchDepth: TEST_BATCH_DEPTH,
+        partition: PARTITION,
+        localCounter,
+        backupSigner: BACKUP_SIGNER,
+        swarmEncryptionKey: TEST_ENC_KEY,
+        deviceId: DEVICE_ID,
+      }),
+    ).rejects.toThrow()
+
+    // Two-phase: the pointer SOC is written ONLY after every chunk PUT acks.
+    expect(uploadSOC).not.toHaveBeenCalled()
   })
 })
 
