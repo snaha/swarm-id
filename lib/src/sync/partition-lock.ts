@@ -307,15 +307,17 @@ export async function acquirePartitionLock(opts: {
   if (verified.holderDeviceId !== opts.deviceId) {
     return { outcome: "acquired", payload: ourPayload }
   }
-  // Our own claim, read back at a generation OLDER than the one we just wrote:
-  // the gateway served a frozen cached copy of the lock SOC. Trust the fresh
-  // claim we wrote — otherwise a self-refresh silently keeps the stale
-  // leasedUntil, the lease never extends, and the holder believes it holds
-  // while peers see it expire and take the slot (a dual-acquire).
-  if (compareGenerations(verified.generation, ourGeneration) < 0) {
-    return { outcome: "acquired", payload: ourPayload }
+  // Our own claim, read back at our generation — or an OLDER frozen-cache copy
+  // of it. Refresh now REUSES the claim's generation (issue #413), so a stale
+  // gateway read of a prior tick compares EQUAL, not older; keying on `< 0`
+  // alone would let it through with a stale `leasedUntil`, silently stalling
+  // the lease (the holder believes it holds while peers see it expire and take
+  // the slot — a dual-acquire). Trust the freshest lease we know either way.
+  return {
+    outcome: "acquired",
+    payload:
+      verified.leasedUntil >= ourPayload.leasedUntil ? verified : ourPayload,
   }
-  return { outcome: "acquired", payload: verified }
 }
 
 /**

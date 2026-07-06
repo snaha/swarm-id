@@ -915,6 +915,10 @@ export class PartitionLease {
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
       guardMs: this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS,
+      // Reuse the held claim's generation — it identifies the claim SESSION.
+      // Re-minting a fresh generation each tick stamps a later timestamp than
+      // the rightful first claimant, inverting claim order (issue #413).
+      generation: this.self.generation,
       now: () => this.now(),
       // A release closes the lease session; a refresh that overlaps it must
       // not mint a fresh ghost claim — the generation-fenced release would
