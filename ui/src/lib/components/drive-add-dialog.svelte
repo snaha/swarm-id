@@ -68,7 +68,6 @@
   let password = $state('')
 
   let currentPrice = $state<bigint | undefined>(undefined)
-  let entropy: Uint8Array | undefined
   // Bumped on cancel/close so a late ceremony or widget callback can't complete.
   let attempt = 0
   // In-flight widget purchase; cancelled on close so the popup can't settle a
@@ -164,10 +163,6 @@
       void attachExisting()
       return
     }
-    if (entropy) {
-      void runWithEntropy(entropy)
-      return
-    }
     if (account.access.type === 'password') {
       phase = 'unlock'
       return
@@ -185,9 +180,9 @@
         account.access.type === 'password' ? password : undefined,
       )
       if (myAttempt !== attempt) {
+        unlocked.fill(0)
         return
       }
-      entropy = unlocked
       password = ''
       await runWithEntropy(unlocked)
     } catch (caught) {
@@ -221,6 +216,7 @@
     const driveName = name.trim() || undefined
     try {
       const { signerKey, destination } = await derivePostageSigner(seed)
+      seed.fill(0)
       // The user may have cancelled during the derivation — bail before the
       // popup opens, or a payment window would appear after they backed out.
       if (myAttempt !== attempt) {
@@ -294,6 +290,7 @@
           return
         }
         signerKey = (await derivePostageSigner(seed)).signerKey
+        seed.fill(0)
       }
       // Read the batch straight from the PostageStamp contract on-chain, not the
       // Bee node — a public gateway has no /stamps and won't know a batch bought
