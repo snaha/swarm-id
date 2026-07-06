@@ -577,7 +577,8 @@ describe("Sequential Feeds Integration", () => {
       // Finder should return undefined, not crash
       const result = await finder.findAt(0n, 0n)
       expect(result.current).toBeUndefined()
-      expect(countingBee.downloadCalls).toBe(1) // Only tried index 0
+      // Index 0 only, read twice (initial + one retry before concluding free).
+      expect(countingBee.downloadCalls).toBe(2)
     })
 
     it("should handle mixed error types", async () => {
@@ -613,8 +614,8 @@ describe("Sequential Feeds Integration", () => {
       const result = await finder.findAt(0n, 0n)
       expect(result.current).toBe(2n)
       expect(result.next).toBe(3n)
-      // Should have probed indices 0, 1, 2, 3 (where 3 returns 404)
-      expect(countingBee.downloadCalls).toBe(4)
+      // Probes 0,1,2 (present) then 3 twice (miss + one retry) = 5.
+      expect(countingBee.downloadCalls).toBe(5)
     })
 
     it("should handle empty payload gracefully", async () => {
@@ -798,8 +799,8 @@ describe("Sequential Feeds Integration", () => {
         const result = await finder.findAt(0n, 0n)
 
         expect(result.current).toBe(BigInt(updateCount - 1))
-        // Linear scan should probe exactly updateCount + 1 times (0 to 100 inclusive, where 100 is 404)
-        expect(countingBee.downloadCalls).toBe(updateCount + 1)
+        // Probes 0..99 (present) then 100 twice (miss + one retry) = updateCount + 2.
+        expect(countingBee.downloadCalls).toBe(updateCount + 2)
       },
     )
 
