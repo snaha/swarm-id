@@ -18,14 +18,10 @@
   import Info from '@lucide/svelte/icons/info'
   import KeyRound from '@lucide/svelte/icons/key-round'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
-  import Lock from '@lucide/svelte/icons/lock'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Trash2 from '@lucide/svelte/icons/trash-2'
   import Wallet from '@lucide/svelte/icons/wallet'
   import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
-
-  import { goto } from '$app/navigation'
-  import { resolve } from '$app/paths'
 
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
@@ -46,12 +42,9 @@
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
   import { unlockAccount } from '$lib/crypto/unlock'
-  import routes from '$lib/routes'
-  import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { sessionStore } from '$lib/stores/session.svelte'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
-  import { copyToClipboard, truncateAddress } from '$lib/utils'
+  import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
 
   const MIN_PASSWORD_LENGTH = 8
   const MASKED_KEY = '•'.repeat(66)
@@ -69,11 +62,10 @@
 
   type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
   /** What the unlock confirmation is for; completes once the seed decrypts. */
-  type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method' | 'delete'
+  type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method'
   type DialogState =
     | { kind: 'unlock'; target: UnlockTarget; pending: boolean }
     | { kind: 'set-method'; pending: boolean }
-    | { kind: 'delete' }
 
   let name = $derived(account.name)
   let expanded = $state<Record<SectionId, boolean>>({
@@ -215,9 +207,6 @@
       seed.fill(0)
     } else if (target === 'export') {
       void exportBackupFile(seed)
-    } else if (target === 'delete') {
-      seed.fill(0)
-      deleteAccount()
     } else {
       changeMethodSeed = seed
       newMethod = 'passkey'
@@ -308,30 +297,6 @@
     anchor.download = 'swarm-id-recovery-phrase.txt'
     anchor.click()
     URL.revokeObjectURL(url)
-  }
-
-  function lockAccount() {
-    changeMethodSeed?.fill(0)
-    changeMethodSeed = undefined
-    revealedPrivateKey = undefined
-    revealedPhrase = undefined
-    sessionStore.clearCurrentAccount()
-    goto(resolve(routes.ROOT))
-  }
-
-  function deleteAccount() {
-    // The account's connected apps and stamps are nested in the record, so they
-    // are removed with it; the resulting storage event de-authenticates any
-    // connected dApp proxy iframes.
-    accountsStore.remove(account.id)
-    const next = accountsStore.accounts[0]
-    if (next) {
-      sessionStore.setCurrentAccount(next.id)
-    } else {
-      sessionStore.clearCurrentAccount()
-      goto(resolve(routes.ROOT))
-    }
-    dialog = undefined
   }
 </script>
 
@@ -605,12 +570,8 @@
 
   <div class="bg-border h-px w-full"></div>
 
-  <div class="flex w-full items-center justify-between">
-    <Button variant="outline" onclick={lockAccount}>
-      <Lock />
-      Lock account
-    </Button>
-    <Button variant="destructive" onclick={() => (dialog = { kind: 'delete' })}>
+  <div class="flex w-full items-center justify-end">
+    <Button variant="destructive" onclick={notImplemented}>
       <Trash2 />
       Delete account
     </Button>
@@ -636,9 +597,7 @@
           ? 'Reveal secret recovery phrase'
           : dialog.target === 'export'
             ? 'Export backup'
-            : dialog.target === 'delete'
-              ? 'Delete account'
-              : 'Change unlock method'}
+            : 'Change unlock method'}
     >
       <p class="text-sm">
         {#if dialog.target === 'change-method'}
@@ -646,8 +605,6 @@
           your current {accessLabel.toLowerCase()}.
         {:else if dialog.target === 'export'}
           Unlock your account to export an encrypted backup file.
-        {:else if dialog.target === 'delete'}
-          Unlock your account to confirm the deletion.
         {:else}
           Make sure no one is watching your screen.
         {/if}
@@ -760,20 +717,6 @@
       </Button>
     </Dialog>
   {/if}
-{:else if dialog?.kind === 'delete'}
-  <Dialog onclose={closeDialog} title="Delete account">
-    <p class="text-sm">
-      This removes the account and its data from this device. You can get it back later with a
-      backup file or its secret recovery phrase. You'll be asked to unlock your account to confirm.
-    </p>
-    <div class="flex w-full flex-col gap-2">
-      <Button variant="destructive" class="w-full" onclick={() => openUnlock('delete')}>
-        <Trash2 />
-        Delete account
-      </Button>
-      <Button variant="outline" class="w-full" onclick={closeDialog}>Cancel</Button>
-    </div>
-  </Dialog>
 {/if}
 
 {#if addDriveOpen}
