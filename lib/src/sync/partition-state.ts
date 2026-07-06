@@ -852,7 +852,7 @@ export async function writePartitionState(opts: {
   // so a counter/reference chunk sharing one of their buckets would evict — or
   // be evicted by — them under Bee's newer-stamp-wins replacement. Exclude their
   // buckets (current + previous epoch, covering the rotation boundary):
-  //  - the state-pointer SOC this publish writes in the same Promise.all below
+  //  - the state-pointer SOC this publish writes (phase 2 below)
   //    (an intra-publish self-collision otherwise);
   //  - the deviceId-independent occupancy beacon, and (when known) this device's
   //    intent beacon, both re-written off-lock by the refresh tick concurrently.
@@ -932,12 +932,17 @@ export async function writePartitionState(opts: {
     )
   }
 
-  // One batch: dirty counter chunks + the reference chunk + the state-pointer
-  // SOC (at the current rotating bucket, naming the COMPUTED reference-chunk
-  // ref). All addresses are known up front, so they land together; the caller
-  // awaits all before acking (ack-after-publish).
+  // TWO-PHASE PUBLISH (#414). Phase 1: the dirty counter chunks + the reference
+  // chunk. Phase 2 (only after ALL of phase 1 acks): the state-pointer SOC that
+  // NAMES the reference chunk. The pointer must never become durable before the
+  // chunks it references — with `deferred: false` a chunk PUT can fail while the
+  // pointer PUT succeeds; if the holder then crashes, every takeover finds the
+  // fresh pointer, fails to read its missing chunk(s) → `readFailed` → read-only
+  // with no older-pointer fallback (stuck until batch expiry). Ordering the
+  // pointer after the chunk acks costs one extra round-trip and closes that gap:
+  // a failed chunk PUT rejects phase 1 before any pointer is written.
   //
-  // CONCURRENCY: these PUTs share one `stamper`. They are safe to fire in
+  // CONCURRENCY: the phase-1 PUTs share one `stamper`. They are safe to fire in
   // parallel ONLY because (a) every chunk here lands in a DISTINCT bucket
   // (`claimedBuckets` above guarantees it) and (b) the reserved-slot `stamp()`
   // branches set `stamper.buckets[bucket]` and call `stamp()` with NO await
@@ -957,17 +962,17 @@ export async function writePartitionState(opts: {
       encryptionKey: refPicked.key,
       deferred: false,
     }),
-    writeStatePointer({
-      bee,
-      stamper,
-      backupSigner,
-      swarmEncryptionKey,
-      batchId,
-      partition,
-      referenceHex,
-      nowMs: now,
-    }),
   ])
+  await writeStatePointer({
+    bee,
+    stamper,
+    backupSigner,
+    swarmEncryptionKey,
+    batchId,
+    partition,
+    referenceHex,
+    nowMs: now,
+  })
 
   // Diagnostic (visible in the browser console): how many chunks this publish
   // actually wrote — counter chunks + the reference chunk + the pointer SOC —
