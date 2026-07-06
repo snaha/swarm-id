@@ -1,1 +1,0 @@
-import{o,l as r,g as a}from"./Csv9OgxL.js";const i=4e3;function m(){let t=r(void 0),e;return{get message(){return a(t)},show:s=>{o(t,s,!0),clearTimeout(e),e=setTimeout(()=>o(t,void 0),i)}}}const u=m();export{u as t};
