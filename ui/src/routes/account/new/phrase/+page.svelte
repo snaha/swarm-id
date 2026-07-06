@@ -6,6 +6,7 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
+  import { EthAddress } from '@ethersphere/bee-js'
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
   import Copy from '@lucide/svelte/icons/copy'
@@ -20,7 +21,13 @@
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
   import { Textarea } from '$lib/components/ui/textarea'
-  import { generatePhrase, isValidPhrase, normalizePhrase } from '$lib/crypto/mnemonic'
+  import {
+    generatePhrase,
+    isValidPhrase,
+    normalizePhrase,
+    walletFromPhrase,
+  } from '$lib/crypto/mnemonic'
+  import { generateDockerName } from '$lib/docker-name'
   import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
   import { toastStore } from '$lib/stores/toast.svelte'
@@ -79,7 +86,14 @@
   }
 
   function onContinue() {
-    sessionStore.setDraftPhrase(mode === 'generate' ? generated : normalizePhrase(imported))
+    const phrase = mode === 'generate' ? generated : normalizePhrase(imported)
+    sessionStore.setDraftPhrase(phrase)
+    // Importing a different phrase changes the account id, so keep the derived
+    // default name in sync with it — unless the user picked a custom name.
+    if (!sessionStore.draft?.nameCustomized) {
+      const accountId = new EthAddress(walletFromPhrase(phrase).address).toHex()
+      sessionStore.setDraftName(generateDockerName(accountId))
+    }
     goto(resolve(routes.ACCOUNT_NEW_ACCESS))
   }
 </script>

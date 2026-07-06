@@ -9,6 +9,9 @@ const CURRENT_ACCOUNT_KEY = 'swarm-id-current-account-v2'
 interface SetupDraft {
   flow: 'create' | 'sign-in' | 'restore'
   name: string
+  /** True once the user edited the name away from the derived default, so a
+   * later phrase change must not overwrite their choice. */
+  nameCustomized?: boolean
   phrase?: string
   /** Account data carried over by a restore (stamps, apps, original name). */
   restored?: AccountData
@@ -42,10 +45,18 @@ function createSessionStore() {
     get draft() {
       return draft
     },
-    startDraft(name: string) {
+    startDraft(name: string, phrase?: string, nameCustomized?: boolean) {
       // Keep an in-progress create draft (and its generated phrase) so going
       // back to rename does not silently swap in a new recovery phrase.
-      draft = draft?.flow === 'create' ? { ...draft, name } : { flow: 'create', name }
+      draft =
+        draft?.flow === 'create'
+          ? { ...draft, name, phrase: phrase ?? draft.phrase, nameCustomized }
+          : { flow: 'create', name, phrase, nameCustomized }
+    },
+    setDraftName(name: string) {
+      if (draft) {
+        draft = { ...draft, name }
+      }
     },
     startSignIn(name: string, phrase: string, restored?: AccountData) {
       draft = { flow: 'sign-in', name, phrase, restored }
