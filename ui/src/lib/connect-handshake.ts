@@ -86,19 +86,29 @@ export async function completeConnect(
   sendSecretToOpener(account, request, appSecret)
 }
 
+/** The still-valid prior connection to this app, if the account has one. */
+function findReusableConnection(account: Account, appOrigin: string): ConnectedApp | undefined {
+  return account.connectedApps.find(
+    (app) =>
+      app.appUrl === appOrigin &&
+      app.appSecret !== undefined &&
+      app.revokedAt === undefined &&
+      (app.connectedUntil ?? 0) > Date.now(),
+  )
+}
+
+/** Whether connecting can skip the unlock ceremony (see `reuseConnection`). */
+export function hasReusableConnection(account: Account, appOrigin: string): boolean {
+  return findReusableConnection(account, appOrigin) !== undefined
+}
+
 /**
  * Reconnect with the secret of a still-valid prior connection, skipping the
  * unlock ceremony. Returns false when there is none and a full
  * unlock + derivation is required.
  */
 export function reuseConnection(account: Account, request: ConnectRequest): boolean {
-  const existing = account.connectedApps.find(
-    (app) =>
-      app.appUrl === request.appOrigin &&
-      app.appSecret !== undefined &&
-      app.revokedAt === undefined &&
-      (app.connectedUntil ?? 0) > Date.now(),
-  )
+  const existing = findReusableConnection(account, request.appOrigin)
   if (!existing?.appSecret) {
     return false
   }

@@ -6,8 +6,11 @@
 <script lang="ts">
   import { onMount } from 'svelte'
 
+  import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
+  import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
+  import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -15,11 +18,11 @@
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
   import Polycon from '$lib/components/polycon.svelte'
+  import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
-  import { Tabs } from '$lib/components/ui/tabs'
-  import { completeConnect, reuseConnection } from '$lib/connect-handshake'
+  import { completeConnect, hasReusableConnection, reuseConnection } from '$lib/connect-handshake'
   import { unlockAccount } from '$lib/crypto/unlock'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -36,6 +39,8 @@
   let dialogError = $state<string | undefined>(undefined)
   /** Bumped on cancel/retry — a stale ceremony resolution must not connect. */
   let attempt = 0
+  /** Shows the create/import choice while other accounts exist on the device. */
+  let addingAccount = $state(false)
 
   const request = $derived(connectStore.request)
   const appIcon = $derived(
@@ -43,37 +48,36 @@
   )
   const accounts = $derived(accountsStore.accounts)
 
-  // Accounts previously connected to this app, most recently used first.
-  const previouslyUsed = $derived.by(() => {
+  // Accounts previously connected to this app first, most recently used on top;
+  // the stable sort keeps never-connected accounts in their stored order.
+  const sortedAccounts = $derived.by(() => {
     const appOrigin = request?.appOrigin
     if (!appOrigin) {
-      return []
+      return accounts
     }
-    return accounts
-      .map((account) => ({
-        account,
-        connection: account.connectedApps.find((app) => app.appUrl === appOrigin),
-      }))
-      .filter((entry) => entry.connection !== undefined)
-      .sort((a, b) => (b.connection?.lastConnectedAt ?? 0) - (a.connection?.lastConnectedAt ?? 0))
-      .map((entry) => entry.account)
+    const lastConnected = (account: Account) =>
+      account.connectedApps.find((app) => app.appUrl === appOrigin)?.lastConnectedAt ?? 0
+    return [...accounts].sort((a, b) => lastConnected(b) - lastConnected(a))
   })
-
-  const TABS = [
-    { value: 'previously-used', label: 'Previously used' },
-    { value: 'all-accounts', label: 'All accounts' },
-  ]
-
-  // Defaults to "Previously used" when available; a user selection takes precedence.
-  let selectedTab = $state<string | undefined>(undefined)
-  const activeTab = $derived(
-    selectedTab ?? (previouslyUsed.length > 0 ? 'previously-used' : 'all-accounts'),
-  )
-  const shownAccounts = $derived(activeTab === 'previously-used' ? previouslyUsed : accounts)
 
   onMount(() => {
     missingRequest = !connectStore.initFromHash(window.location.hash)
   })
+
+  /**
+   * Previously connected to this app but the session lapsed (expired or
+   * revoked) — connecting again will ask for an unlock.
+   */
+  function signedOut(account: Account): boolean {
+    const appOrigin = request?.appOrigin
+    if (!appOrigin) {
+      return false
+    }
+    return (
+      account.connectedApps.some((app) => app.appUrl === appOrigin) &&
+      !hasReusableConnection(account, appOrigin)
+    )
+  }
 
   async function select(account: Account) {
     if (!request) {
@@ -89,6 +93,10 @@
     password = ''
     pendingCeremony = false
     unlocking = account
+  }
+
+  function startAdding() {
+    addingAccount = true
   }
 
   async function confirmUnlock() {
@@ -155,6 +163,18 @@
       </div>
     {:else if request}
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
+        {#if addingAccount && accounts.length > 0}
+          <Button
+            variant="outline"
+            size="icon"
+            aria-label="Back to your accounts"
+            class="size-6 self-start rounded-md [&_svg]:size-3"
+            onclick={() => (addingAccount = false)}
+          >
+            <ChevronLeft />
+          </Button>
+        {/if}
+
         <div class="flex flex-col items-center gap-2">
           <AppIcon src={appIcon} name={request.appName} size={48} />
           <div class="flex flex-col items-center text-center">
@@ -163,54 +183,57 @@
           </div>
         </div>
 
-        {#if accounts.length > 0}
+        {#if accounts.length > 0 && !addingAccount}
           <div class="flex w-full flex-col gap-2">
-            <p class="text-muted-foreground text-xs">Connect with an account on this device</p>
-            {#if previouslyUsed.length > 0}
-              <Tabs tabs={TABS} bind:value={() => activeTab, (value) => (selectedTab = value)} />
-            {/if}
-            <div class="flex w-full flex-col rounded-lg border p-1">
-              {#each shownAccounts as account (account.id.toHex())}
-                <button
-                  type="button"
-                  class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1.5 text-left text-sm outline-none"
-                  onclick={() => select(account)}
-                >
-                  <Polycon
-                    value={account.id.toHex()}
-                    size={32}
-                    class="shrink-0 overflow-hidden rounded-md"
-                  />
-                  <span class="flex min-w-0 flex-col">
-                    <span class="truncate font-medium">{account.name}</span>
-                    <span class="text-muted-foreground text-xs">
-                      {truncateAddress(account.id.toChecksum())}
-                    </span>
+            {#each sortedAccounts as account (account.id.toHex())}
+              <button
+                type="button"
+                class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-lg border p-2 text-left outline-none"
+                onclick={() => select(account)}
+              >
+                <Polycon
+                  value={account.id.toHex()}
+                  size={36}
+                  class="shrink-0 overflow-hidden rounded-md"
+                />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-sm font-medium">{account.name}</span>
+                  <span class="text-muted-foreground text-xs">
+                    {truncateAddress(account.id.toChecksum())}
                   </span>
-                </button>
-              {/each}
-            </div>
+                </span>
+                {#if signedOut(account)}
+                  <Badge>Signed out</Badge>
+                {/if}
+              </button>
+            {/each}
+
+            <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
+              <UserRoundMinus />
+              Remove an account
+            </Button>
+            <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
+              <UserRoundPlus />
+              Add an account
+            </Button>
+          </div>
+        {:else}
+          <div class="flex w-full flex-col items-center gap-4">
+            <Button size="lg" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
+              Create a new account
+            </Button>
+            <Button
+              size="lg"
+              variant="secondary"
+              class="w-full"
+              href={resolve(routes.ACCOUNT_IMPORT)}
+            >
+              I already have an account
+            </Button>
           </div>
         {/if}
 
-        <div class="flex w-full flex-col items-center gap-4">
-          <Button
-            size="lg"
-            variant={accounts.length > 0 ? 'secondary' : 'default'}
-            class="w-full"
-            href={resolve(routes.ACCOUNT_NEW)}>Create a new account</Button
-          >
-          <Button
-            size="lg"
-            variant="secondary"
-            class="w-full"
-            href={resolve(routes.ACCOUNT_IMPORT)}
-          >
-            I already have an account
-          </Button>
-        </div>
-
-        <Button variant="ghost" size="xs" onclick={notImplemented}>WTF is Swarm ID?</Button>
+        <Button variant="ghost" size="xs" onclick={notImplemented}>What is Swarm ID?</Button>
       </div>
     {/if}
   </main>
