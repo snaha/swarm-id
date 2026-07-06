@@ -2614,6 +2614,41 @@ describe("PartitionLease.acquire — holder presence beacons (gateway holder-exi
     // DEVICE_A is the earlier holder → keeps the lease.
     expect(await lease.refresh()).toBe("held")
   })
+
+  it("refresh keeps the earlier claimant's lease across an ADVANCING clock (issue #413)", async () => {
+    // The frozen-clock test above passes even with the bug because a re-minted
+    // generation lands on the SAME timestamp. Under a real advancing clock, a
+    // refresh that re-mints its generation stamps a LATER timestamp than the
+    // rightful first claimant ever had — inverting claim order so the first
+    // claimant wrongly yields. This test advances the clock across the tick.
+    let clock = NOW
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => clock,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+      intentReadTimeoutMs: 50,
+    })
+    expect(
+      (await lease.acquire({ partitionCount: PARTITION_COUNT })).partition,
+    ).toBe(0)
+
+    // DEVICE_B dual-acquired LATER than DEVICE_A (generation NOW + 1000): its
+    // beacon must always order after DEVICE_A's, so DEVICE_A keeps the lease.
+    await writeBeacon({
+      partition: 0,
+      deviceId: DEVICE_B,
+      epochBucket: intentEpochBucket(NOW),
+      leasedUntil: NOW + LEASE_TTL_MS,
+      genTimestamp: NOW + 1000,
+    })
+
+    // A refresh tick later (still the same epoch bucket). With the bug, refresh
+    // re-mints generation NOW + 5000 > B's NOW + 1000, so B now orders first and
+    // DEVICE_A is displaced. With the fix the generation stays NOW → still "held".
+    clock = NOW + 5000
+    expect(await lease.refresh()).toBe("held")
+  })
 })
 
 describe("PartitionLease.refresh — occupancy displacement vs a PRUNED peer", () => {
