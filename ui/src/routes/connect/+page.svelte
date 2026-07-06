@@ -327,9 +327,9 @@
   {:else}
     <Dialog onclose={closeDialog} title="Remove {removing.name}?">
       <p class="text-sm">
-        This removes the account from this device only. You can add it back by signing in with its
-        recovery phrase — without the phrase the account cannot be recovered. Unlock the account to
-        confirm.
+        This removes the account from this device only. You can sign back in anytime with its secret
+        recovery phrase — its drives and connected apps are recovered from Swarm. Without the
+        phrase, the account cannot be recovered. Unlock the account to confirm.
       </p>
 
       {#if removing.access.type === 'password'}
