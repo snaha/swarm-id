@@ -86,9 +86,12 @@
   let bannerInfoShown = $state(false)
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
-  let entropy = $state<Uint8Array | undefined>(undefined)
-  let privateKeyRevealed = $state(false)
-  let phraseRevealed = $state(false)
+  // Reveals cache only their derived display value — never the raw seed, which
+  // is zeroed the moment each ceremony finishes with it (issue #412).
+  let revealedPrivateKey = $state<string | undefined>(undefined)
+  let revealedPhrase = $state<string[] | undefined>(undefined)
+  // Seed held only across the change-method two-step ceremony; zeroed after.
+  let changeMethodSeed: Uint8Array | undefined
 
   let dialog = $state<DialogState | undefined>(undefined)
   let dialogError = $state<string | undefined>(undefined)
@@ -112,8 +115,6 @@
         : KeyRound,
   )
   const publicKeyDisplay = $derived(prefix0x(account.publicKey))
-  const privateKey = $derived(entropy ? privateKeyFromEntropy(entropy) : undefined)
-  const phraseWords = $derived(entropy ? phraseFromEntropy(entropy).split(' ') : [])
   const newPasswordTooShort = $derived(
     newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH,
   )
@@ -150,10 +151,6 @@
   function openUnlock(target: UnlockTarget) {
     dialogError = undefined
     password = ''
-    if (entropy) {
-      complete(target)
-      return
-    }
     dialog = { kind: 'unlock', target, pending: false }
   }
 
@@ -162,6 +159,8 @@
     // a later approval of a cancelled prompt must not complete.
     attempt++
     abortController?.abort()
+    changeMethodSeed?.fill(0)
+    changeMethodSeed = undefined
     dialog = undefined
     dialogError = undefined
     busy = false
@@ -187,12 +186,12 @@
         account.access.type === 'password' ? password : undefined,
       )
       if (myAttempt !== attempt) {
+        unlocked.fill(0)
         return
       }
-      entropy = unlocked
       password = ''
       dialog = undefined
-      complete(target)
+      complete(target, unlocked)
     } catch (caught) {
       if (myAttempt === attempt) {
         dialogError = caught instanceof Error ? caught.message : 'Unlock failed.'
@@ -205,16 +204,22 @@
     }
   }
 
-  function complete(target: UnlockTarget) {
+  // Consumes `seed`: zeroed here for transient targets, handed to the export /
+  // change-method flows that zero it when they finish.
+  function complete(target: UnlockTarget, seed: Uint8Array) {
     if (target === 'private-key') {
-      privateKeyRevealed = true
+      revealedPrivateKey = privateKeyFromEntropy(seed)
+      seed.fill(0)
     } else if (target === 'phrase') {
-      phraseRevealed = true
+      revealedPhrase = phraseFromEntropy(seed).split(' ')
+      seed.fill(0)
     } else if (target === 'export') {
-      void exportBackupFile()
+      void exportBackupFile(seed)
     } else if (target === 'delete') {
+      seed.fill(0)
       deleteAccount()
     } else {
+      changeMethodSeed = seed
       newMethod = 'passkey'
       newPassword = ''
       verifyNewPassword = ''
@@ -223,7 +228,7 @@
   }
 
   async function confirmNewMethod() {
-    if (busy || dialog?.kind !== 'set-method' || !entropy) {
+    if (busy || dialog?.kind !== 'set-method' || !changeMethodSeed) {
       return
     }
     const myAttempt = ++attempt
@@ -260,7 +265,9 @@
       if (myAttempt !== attempt) {
         return
       }
-      account.setAccess(access, await encryptSeed(entropy, key))
+      account.setAccess(access, await encryptSeed(changeMethodSeed, key))
+      changeMethodSeed.fill(0)
+      changeMethodSeed = undefined
       dialog = undefined
       newPassword = ''
       verifyNewPassword = ''
@@ -278,11 +285,9 @@
     }
   }
 
-  async function exportBackupFile() {
-    if (!entropy) {
-      return
-    }
-    const contents = await createBackup(account, entropy)
+  async function exportBackupFile(seed: Uint8Array) {
+    const contents = await createBackup(account, seed)
+    seed.fill(0)
     const blob = new Blob([contents], { type: 'application/json' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
@@ -293,10 +298,10 @@
   }
 
   function downloadPhrase() {
-    if (!entropy) {
+    if (!revealedPhrase) {
       return
     }
-    const blob = new Blob([phraseFromEntropy(entropy)], { type: 'text/plain' })
+    const blob = new Blob([revealedPhrase.join(' ')], { type: 'text/plain' })
     const url = URL.createObjectURL(blob)
     const anchor = document.createElement('a')
     anchor.href = url
@@ -306,7 +311,10 @@
   }
 
   function lockAccount() {
-    entropy = undefined
+    changeMethodSeed?.fill(0)
+    changeMethodSeed = undefined
+    revealedPrivateKey = undefined
+    revealedPhrase = undefined
     sessionStore.clearCurrentAccount()
     goto(resolve(routes.ROOT))
   }
@@ -496,14 +504,15 @@
                   'Grants full control over your account. Never share it.',
                 )}
                 <div class="flex items-center gap-2">
-                  {#if privateKeyRevealed && privateKey}
-                    <p class="min-w-0 flex-1 text-sm break-all">{privateKey}</p>
+                  {#if revealedPrivateKey}
+                    <p class="min-w-0 flex-1 text-sm break-all">{revealedPrivateKey}</p>
                     <Button
                       variant="ghost"
                       size="icon"
                       class="size-7 shrink-0"
                       aria-label="Copy private key"
-                      onclick={() => copyText(privateKey, 'Private key')}
+                      onclick={() =>
+                        revealedPrivateKey && copyText(revealedPrivateKey, 'Private key')}
                     >
                       <Copy />
                     </Button>
@@ -537,15 +546,15 @@
     )}
     {#if expanded.phrase}
       <div class="flex w-full flex-col gap-4 pl-5">
-        {#if phraseRevealed && phraseWords.length > 0}
-          <PhraseGrid words={phraseWords} />
+        {#if revealedPhrase}
+          <PhraseGrid words={revealedPhrase} />
           <div class="flex w-full items-center gap-4">
             <div class="flex items-center gap-2">
               <Button
                 variant="outline"
                 size="icon"
                 aria-label="Copy phrase"
-                onclick={() => entropy && copyText(phraseFromEntropy(entropy), 'Seed phrase')}
+                onclick={() => revealedPhrase && copyText(revealedPhrase.join(' '), 'Seed phrase')}
               >
                 <Copy />
               </Button>
@@ -562,7 +571,7 @@
               Save in a safe place. If someone has it, they can access your account.
             </p>
           </div>
-          <Button variant="outline" class="w-full" onclick={() => (phraseRevealed = false)}>
+          <Button variant="outline" class="w-full" onclick={() => (revealedPhrase = undefined)}>
             <EyeOff />
             Hide secret recovery phrase
           </Button>
@@ -755,8 +764,7 @@
   <Dialog onclose={closeDialog} title="Delete account">
     <p class="text-sm">
       This removes the account and its data from this device. You can get it back later with a
-      backup file or its secret recovery phrase.{#if !entropy}
-        You'll be asked to unlock your account to confirm.{/if}
+      backup file or its secret recovery phrase. You'll be asked to unlock your account to confirm.
     </p>
     <div class="flex w-full flex-col gap-2">
       <Button variant="destructive" class="w-full" onclick={() => openUnlock('delete')}>
