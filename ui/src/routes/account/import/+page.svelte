@@ -24,7 +24,7 @@
   import { strip0x } from '$lib/crypto/hex'
   import { isValidPhrase, normalizePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
   import { noteAccountFolded } from '$lib/dev/account-refresh'
-  import { generateName } from '$lib/name-generator'
+  import { generateDockerName } from '$lib/docker-name'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -133,7 +133,9 @@
   // `finalize`'s `accountsStore.get` returns undefined, so it builds a new
   // account under the same phrase; a drive added later publishes it.
   function setupFresh() {
-    sessionStore.startSignIn(generateName(), normalizePhrase(phrase))
+    const normalized = normalizePhrase(phrase)
+    const accountId = new EthAddress(walletFromPhrase(normalized).address).toHex()
+    sessionStore.startSignIn(generateDockerName(accountId), normalized)
     goto(resolve(routes.ACCOUNT_NEW_ACCESS))
   }
 </script>
