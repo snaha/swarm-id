@@ -22,6 +22,9 @@ import {
   extractChunk,
   getChunkIndexForBucket,
   getChunkLayout,
+  hasBucketCapacity,
+  updateAfterWrite,
+  calculateUtilization,
   initializeBatchUtilization,
   LEASE_SKEW_MARGIN_MS,
   LEASE_TTL_MS,
@@ -1256,5 +1259,52 @@ describe("UtilizationAwareStamper synced reference", () => {
     // Partition 1's set does not leak into partition 0's saves.
     expect(reloaded.getProtectedBuckets().has(22)).toBe(false)
     expect(await reloaded.getSyncedReference(0)).toBe("ref-zero")
+  })
+})
+
+describe("hasBucketCapacity (partition-aware, #416)", () => {
+  // dataCounters hold the per-partition `j`, so capacity is the partition's
+  // lane (partitionCapacity), NOT the raw slots-per-bucket.
+  const DEPTH = 24 // 2^(24-16)=256 slots/bucket → partitionCapacity(2)=127
+
+  it("is full when j reaches the partition capacity, not the raw slot count", () => {
+    const cap = partitionCapacity(DEPTH, PARTITION_COUNT)
+    expect(hasBucketCapacity(cap - 1, DEPTH, PARTITION_COUNT)).toBe(true)
+    // j === cap means the lane is full — the bug let this through (127 < 256).
+    expect(hasBucketCapacity(cap, DEPTH, PARTITION_COUNT)).toBe(false)
+  })
+
+  it("defaults to PARTITION_COUNT so callers get the partitioned capacity", () => {
+    const cap = partitionCapacity(DEPTH, PARTITION_COUNT)
+    expect(hasBucketCapacity(cap, DEPTH)).toBe(false)
+  })
+
+  it("K=1 uses the full lane (raw slots minus the reserved slot)", () => {
+    const cap = partitionCapacity(DEPTH, 1)
+    expect(hasBucketCapacity(cap - 1, DEPTH, 1)).toBe(true)
+    expect(hasBucketCapacity(cap, DEPTH, 1)).toBe(false)
+  })
+})
+
+describe("updateAfterWrite capacity guard (#416)", () => {
+  const cache = {
+    getAllChunks: async () => [],
+    putChunk: async () => undefined,
+  } as unknown as UtilizationStoreDB
+
+  it("throws 'Bucket is full' at the partition capacity, before bee-js would", async () => {
+    const DEPTH = 20 // 2^(20-16)=16 slots/bucket → partitionCapacity(2)=7
+    const cap = partitionCapacity(DEPTH, PARTITION_COUNT)
+    const BUCKET = 0x1234
+    // Distinct content-addressed chunks that all hash into the same bucket.
+    const chunks = Array.from({ length: cap + 1 }, (_, i) => {
+      const c = makeChunkInBucket(BUCKET, i)
+      return {
+        address: { toUint8Array: () => c.hash() },
+      } as unknown as Parameters<typeof updateAfterWrite>[1][number]
+    })
+    await expect(
+      updateAfterWrite(TEST_BATCH_ID, chunks, DEPTH, { cache }),
+    ).rejects.toThrow(/is full/)
   })
 })
