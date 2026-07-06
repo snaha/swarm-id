@@ -137,7 +137,7 @@ export class SwarmIdClient {
   private containerId?: string
   private subsidisedGatewayUrl?: string
   private ready: boolean = false
-  private readyPromise: Promise<void>
+  private readyPromise: Promise<void> | undefined
   private readyResolve?: () => void
   private readyReject?: (error: Error) => void
   private pendingRequests: Map<
@@ -151,7 +151,7 @@ export class SwarmIdClient {
   > = new Map()
   private requestIdCounter = 0
   private messageListener: ((event: MessageEvent) => void) | undefined
-  private proxyInitializedPromise: Promise<void>
+  private proxyInitializedPromise: Promise<void> | undefined
   private proxyInitializedResolve?: () => void
   private proxyInitializedReject?: (error: Error) => void
 
@@ -198,42 +198,12 @@ export class SwarmIdClient {
       throw new Error(`Invalid app metadata: ${error}`)
     }
 
-    // Create promise that resolves when iframe is ready
-    this.readyPromise = new Promise<void>((resolve, reject) => {
-      this.readyResolve = resolve
-      this.readyReject = reject
-
-      // Timeout if proxy doesn't respond
-      setTimeout(() => {
-        reject(
-          new Error(
-            `Proxy initialization timeout - proxy did not respond within ${this.initializationTimeout}ms`,
-          ),
-        )
-      }, this.initializationTimeout)
-    })
-
-    // Note: `firstConnectionInfoPromise` (and its timeout) is created in
-    // `initialize()`, not here — starting the timer at construction would
-    // make it expire on consumers that instantiate the client and call
-    // `initialize()` later (or never, in tests).
-
-    // Create promise for proxyInitialized message
-    this.proxyInitializedPromise = new Promise<void>((resolve, reject) => {
-      this.proxyInitializedResolve = resolve
-      this.proxyInitializedReject = reject
-
-      // Timeout if proxy doesn't send proxyInitialized
-      setTimeout(() => {
-        if (this.proxyInitializedReject) {
-          this.proxyInitializedReject(
-            new Error(
-              `Proxy initialization timeout - proxy did not signal readiness within ${this.initializationTimeout}ms`,
-            ),
-          )
-        }
-      }, this.initializationTimeout)
-    })
+    // Note: `readyPromise`, `proxyInitializedPromise`, and
+    // `firstConnectionInfoPromise` (with their timeouts) are all created in
+    // `initialize()`, not here — starting the timers at construction would
+    // make them expire on consumers that instantiate the client and call
+    // `initialize()` later (or never, in tests), and leak an armed timer plus
+    // an unguarded rejection in the meantime.
 
     this.setupMessageListener()
   }
@@ -293,6 +263,30 @@ export class SwarmIdClient {
     // The original promise is still rejected; the `await` on line 359 will
     // re-throw it normally.
     this.firstConnectionInfoPromise.catch(() => {})
+
+    // Same deferred+timeout pattern for the proxyReady handshake and the
+    // iframe-ready signal: created here (not the constructor) so the timers
+    // start when init begins and `withTimeout` clears them on settle. The
+    // stashed resolve/reject are invoked later from `handleIframeMessage`.
+    this.proxyInitializedPromise = withTimeout(
+      new Promise<void>((resolve, reject) => {
+        this.proxyInitializedResolve = resolve
+        this.proxyInitializedReject = reject
+      }),
+      this.initializationTimeout,
+      `Proxy initialization timeout - proxy did not signal readiness within ${this.initializationTimeout}ms`,
+    )
+    this.proxyInitializedPromise.catch(() => {})
+
+    this.readyPromise = withTimeout(
+      new Promise<void>((resolve, reject) => {
+        this.readyResolve = resolve
+        this.readyReject = reject
+      }),
+      this.initializationTimeout,
+      `Proxy initialization timeout - proxy did not respond within ${this.initializationTimeout}ms`,
+    )
+    this.readyPromise.catch(() => {})
 
     // Create iframe for proxy
     this.iframe = document.createElement("iframe")
@@ -3213,6 +3207,19 @@ export class SwarmIdClient {
       this.iframe.parentNode.removeChild(this.iframe)
       this.iframe = undefined
     }
+
+    // Reject any still-pending init deferreds so their `withTimeout` timers
+    // clear now instead of lingering the full initializationTimeout. The
+    // `.catch(() => {})` guards attached in initialize() keep these from
+    // surfacing as unhandled when nothing is awaiting.
+    this.readyReject?.(new Error("Client destroyed"))
+    this.proxyInitializedReject?.(new Error("Client destroyed"))
+    this.readyResolve = undefined
+    this.readyReject = undefined
+    this.proxyInitializedResolve = undefined
+    this.proxyInitializedReject = undefined
+    this.readyPromise = undefined
+    this.proxyInitializedPromise = undefined
 
     this.ready = false
   }
