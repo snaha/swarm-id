@@ -86,58 +86,68 @@
     <div
       role="menu"
       tabindex="-1"
-      class="bg-popover text-popover-foreground absolute top-full right-0 z-50 mt-2 flex w-72 flex-col gap-2 rounded-lg border p-2 shadow-md"
+      class="bg-popover text-popover-foreground absolute top-0 right-0 z-50 flex w-80 flex-col gap-4 rounded-lg border p-2.5 shadow-md"
     >
-      <div class="flex flex-col items-center gap-1 py-2">
-        <Polycon value={account.id.toHex()} size={48} class="overflow-hidden rounded-lg" />
-        <div class="flex flex-col items-center">
-          <p class="text-sm font-medium">{account.name}</p>
-          <p class="text-muted-foreground text-xs">{truncateAddress(account.id.toChecksum())}</p>
+      <div class="flex flex-col gap-2">
+        <div class="flex flex-col items-center gap-2 pt-0.5">
+          <Polycon value={account.id.toHex()} size={48} class="overflow-hidden rounded-lg" />
+          <div class="flex flex-col items-center">
+            <p class="text-sm font-medium">{account.name}</p>
+            <p class="text-muted-foreground text-xs">{truncateAddress(account.id.toChecksum())}</p>
+          </div>
         </div>
+
+        <Button variant="outline" class="w-full" onclick={manage}>Manage account</Button>
+        <Button variant="outline" class="w-full" onclick={notImplemented}>Sign out</Button>
       </div>
 
-      <Button variant="outline" size="sm" class="w-full" onclick={manage}>Manage account</Button>
-      <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>Sign out</Button>
-
       {#if addingAccount}
-        <Button variant="ghost" size="xs" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
-          Create a new account
-        </Button>
-        <Button variant="ghost" size="xs" class="w-full" href={resolve(routes.ACCOUNT_IMPORT)}>
-          I already have an account
-        </Button>
-      {:else}
-        {#each others as candidate (candidate.id.toHex())}
-          <button
-            type="button"
-            role="menuitem"
-            class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left outline-none"
-            onclick={() => select(candidate)}
-          >
-            <Polycon
-              value={candidate.id.toHex()}
-              size={28}
-              class="shrink-0 overflow-hidden rounded-md"
-            />
-            <span class="flex min-w-0 flex-1 flex-col">
-              <span class="truncate text-sm font-medium">{candidate.name}</span>
-              <span class="text-muted-foreground text-xs">
-                {truncateAddress(candidate.id.toChecksum())}
-              </span>
-            </span>
-          </button>
-        {/each}
-
-        {#if others.length > 0}
-          <Button variant="ghost" size="xs" class="w-full" onclick={notImplemented}>
-            <UserRoundMinus />
-            Remove an account
+        <div class="flex flex-col gap-2">
+          <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
+            Create a new account
           </Button>
+          <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_IMPORT)}>
+            I already have an account
+          </Button>
+        </div>
+      {:else}
+        {#if others.length > 0}
+          <div class="flex flex-col">
+            {#each others as candidate (candidate.id.toHex())}
+              <button
+                type="button"
+                role="menuitem"
+                class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md p-1 text-left outline-none"
+                onclick={() => select(candidate)}
+              >
+                <Polycon
+                  value={candidate.id.toHex()}
+                  size={36}
+                  class="shrink-0 overflow-hidden rounded-md"
+                />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-sm font-medium">{candidate.name}</span>
+                  <span class="text-muted-foreground text-xs">
+                    {truncateAddress(candidate.id.toChecksum())}
+                  </span>
+                </span>
+              </button>
+            {/each}
+          </div>
         {/if}
-        <Button variant="ghost" size="xs" class="w-full" onclick={() => (addingAccount = true)}>
-          <UserRoundPlus />
-          Add an account
-        </Button>
+
+        <div class="flex flex-col gap-2">
+          {#if others.length > 0}
+            <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>
+              <UserRoundMinus />
+              Remove an account
+            </Button>
+          {/if}
+          <Button variant="ghost" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
+            <UserRoundPlus />
+            Add an account
+          </Button>
+        </div>
       {/if}
     </div>
   {/if}
