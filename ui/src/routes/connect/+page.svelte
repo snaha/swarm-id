@@ -11,7 +11,6 @@
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
   import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
-  import X from '@lucide/svelte/icons/x'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -40,10 +39,6 @@
   let dialogError = $state<string | undefined>(undefined)
   /** Bumped on cancel/retry — a stale ceremony resolution must not connect. */
   let attempt = 0
-  /** Rows become remove targets instead of connect choices. */
-  let removeMode = $state(false)
-  /** Account awaiting removal confirmation (unlock-gated, like account deletion). */
-  let removing = $state<Account | undefined>(undefined)
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
 
@@ -88,13 +83,6 @@
     if (!request) {
       return
     }
-    if (removeMode) {
-      dialogError = undefined
-      password = ''
-      pendingCeremony = false
-      removing = account
-      return
-    }
     // A still-valid prior connection carries the secret — no unlock needed.
     if (reuseConnection(account, request)) {
       sessionStore.setCurrentAccount(account.id)
@@ -107,48 +95,7 @@
     unlocking = account
   }
 
-  async function confirmRemove() {
-    const account = removing
-    if (busy || !account) {
-      return
-    }
-    const myAttempt = ++attempt
-    dialogError = undefined
-    busy = true
-    if (account.access.type !== 'password') {
-      pendingCeremony = true
-    }
-    try {
-      // Re-authenticate as a confirmation gate before the destructive removal
-      // (the unlocked seed itself is discarded).
-      await unlockAccount(account, account.access.type === 'password' ? password : undefined)
-      if (myAttempt !== attempt) {
-        return
-      }
-      if (sessionStore.currentAccountId === account.id.toHex()) {
-        sessionStore.clearCurrentAccount()
-      }
-      accountsStore.remove(account.id)
-      removing = undefined
-      pendingCeremony = false
-      password = ''
-      if (accountsStore.accounts.length === 0) {
-        removeMode = false
-      }
-    } catch (caught) {
-      if (myAttempt === attempt) {
-        dialogError = caught instanceof Error ? caught.message : 'Unlock failed.'
-        pendingCeremony = false
-      }
-    } finally {
-      if (myAttempt === attempt) {
-        busy = false
-      }
-    }
-  }
-
   function startAdding() {
-    removeMode = false
     addingAccount = true
   }
 
@@ -190,10 +137,9 @@
 
   function closeDialog() {
     // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
-    // a later approval of a cancelled prompt must not connect (or remove).
+    // a later approval of a cancelled prompt must not connect.
     attempt++
     unlocking = undefined
-    removing = undefined
     pendingCeremony = false
     busy = false
     password = ''
@@ -256,26 +202,15 @@
                     {truncateAddress(account.id.toChecksum())}
                   </span>
                 </span>
-                {#if removeMode}
-                  <X class="text-destructive size-4 shrink-0" aria-hidden="true" />
-                {:else if signedOut(account)}
+                {#if signedOut(account)}
                   <Badge>Signed out</Badge>
                 {/if}
               </button>
             {/each}
 
-            <Button
-              variant="outline"
-              size="sm"
-              class="w-full"
-              onclick={() => (removeMode = !removeMode)}
-            >
-              {#if removeMode}
-                Done
-              {:else}
-                <UserRoundMinus />
-                Remove an account
-              {/if}
+            <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
+              <UserRoundMinus />
+              Remove an account
             </Button>
             <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
               <UserRoundPlus />
@@ -304,70 +239,22 @@
   </main>
 </div>
 
-{#snippet ceremonyPending(accessType: string)}
-  <Dialog onclose={closeDialog} dismissable={false}>
-    <div class="flex flex-col items-center gap-2 py-4 text-center">
-      <LoaderCircle class="size-5 animate-spin" />
-      <p class="text-sm font-bold">
-        {accessType === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
-      </p>
-      <p class="text-sm">
-        {accessType === 'eth-wallet'
-          ? 'Approve the request in your Ethereum wallet.'
-          : 'Follow the prompts on your device.'}
-      </p>
-    </div>
-    <Button variant="outline" class="w-full" onclick={closeDialog}>Cancel</Button>
-  </Dialog>
-{/snippet}
-
-{#if removing}
-  {#if pendingCeremony}
-    {@render ceremonyPending(removing.access.type)}
-  {:else}
-    <Dialog onclose={closeDialog} title="Remove {removing.name}?">
-      <p class="text-sm">
-        This removes the account from this device only. You can sign back in anytime with its secret
-        recovery phrase — its drives and connected apps are recovered from Swarm. Without the
-        phrase, the account cannot be recovered. Unlock the account to confirm.
-      </p>
-
-      {#if removing.access.type === 'password'}
-        <Input
-          type="password"
-          bind:value={password}
-          placeholder="Account password"
-          autocomplete="current-password"
-          onkeydown={(event: KeyboardEvent) => event.key === 'Enter' && confirmRemove()}
-        />
-      {/if}
-
-      {#if dialogError}
-        <p class="text-destructive text-xs">{dialogError}</p>
-      {/if}
-
-      <Button
-        variant="destructive"
-        class="w-full"
-        disabled={busy || (removing.access.type === 'password' && password.length === 0)}
-        onclick={confirmRemove}
-      >
-        {#if busy}
-          <LoaderCircle class="animate-spin" />
-        {/if}
-        {removing.access.type === 'passkey'
-          ? 'Confirm with passkey'
-          : removing.access.type === 'eth-wallet'
-            ? 'Confirm with wallet'
-            : 'Remove account'}
-      </Button>
-    </Dialog>
-  {/if}
-{/if}
-
 {#if unlocking}
   {#if pendingCeremony}
-    {@render ceremonyPending(unlocking.access.type)}
+    <Dialog onclose={closeDialog} dismissable={false}>
+      <div class="flex flex-col items-center gap-2 py-4 text-center">
+        <LoaderCircle class="size-5 animate-spin" />
+        <p class="text-sm font-bold">
+          {unlocking.access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
+        </p>
+        <p class="text-sm">
+          {unlocking.access.type === 'eth-wallet'
+            ? 'Approve the request in your Ethereum wallet.'
+            : 'Follow the prompts on your device.'}
+        </p>
+      </div>
+      <Button variant="outline" class="w-full" onclick={closeDialog}>Cancel</Button>
+    </Dialog>
   {:else}
     <Dialog onclose={closeDialog} title="Connect as {unlocking.name}">
       <p class="text-sm">
