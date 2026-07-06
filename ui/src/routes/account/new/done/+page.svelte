@@ -29,7 +29,7 @@
   let addDriveOpen = $state(false)
 
   function onDriveAdded() {
-    goto(resolve(routes.HOME))
+    goto(resolve(routes.ROOT))
   }
 
   onMount(() => {
@@ -73,7 +73,7 @@
         <div class="flex w-full flex-col items-center gap-4">
           <div class="flex w-full flex-col items-center gap-2">
             <Button class="w-full" onclick={() => (addDriveOpen = true)}>Add a drive</Button>
-            <Button variant="outline" class="w-full" href={resolve(routes.HOME)}>
+            <Button variant="outline" class="w-full" href={resolve(routes.ROOT)}>
               Stay local for now
             </Button>
           </div>

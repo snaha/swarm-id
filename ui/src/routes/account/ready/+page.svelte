@@ -49,7 +49,7 @@
         </div>
 
         <div class="flex w-full flex-col items-center gap-2">
-          <Button class="w-full" href={resolve(routes.HOME)}>Continue with this account</Button>
+          <Button class="w-full" href={resolve(routes.ROOT)}>Continue with this account</Button>
           {#if restored}
             <Button variant="outline" class="w-full" href={resolve(routes.ACCOUNT_RESTORE)}>
               Restore another account
