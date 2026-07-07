@@ -1,5 +1,53 @@
 # Changelog
 
+## [0.2.0](https://github.com/snaha/swarm-id/compare/v0.1.3...v0.2.0) (2026-07-07)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** removes the `passkey`/`ethereum`/`agent` account types and the per-type backup headers from `@snaha/swarm-id`. Consumers read a single account model; "local vs synced" is the runtime `isLocalAccount` predicate.
+* `ClientOptions.onAuthChange` and `SwarmIdClient.getConnectionInfo()` are removed. Both were strict subsets of the new `onConnectionChange` / `client.connectionInfo` surface introduced in the previous commit.
+* uint16 utilization counter ([#320](https://github.com/snaha/swarm-id/issues/320))
+
+### Features
+
+* emit ConnectionInfo changes from the iframe proxy ([#317](https://github.com/snaha/swarm-id/issues/317)) ([197b25c](https://github.com/snaha/swarm-id/commit/197b25cea12d3f4074e2a5aaca1d379e976430ae))
+* extract a BatchWriteCoordinator from the proxy ([#346](https://github.com/snaha/swarm-id/issues/346)) ([380aabe](https://github.com/snaha/swarm-id/commit/380aabef6da8e0c50e193bd14aa142c96b2364d3))
+* multi-device postage batch sharing + account-state sync ([#335](https://github.com/snaha/swarm-id/issues/335)) ([ab0c963](https://github.com/snaha/swarm-id/commit/ab0c96317492517edf4af5a36bdb1fff5faa987e))
+* nested single-level account model ([#339](https://github.com/snaha/swarm-id/issues/339)/[#313](https://github.com/snaha/swarm-id/issues/313)) + multi-device read/pull ([#338](https://github.com/snaha/swarm-id/issues/338)) ([#367](https://github.com/snaha/swarm-id/issues/367)) ([6e93ef4](https://github.com/snaha/swarm-id/commit/6e93ef4b97d16c4f002fba71fbaca7a1b305dc1a))
+* **stamps:** compute dev-page stamp amount from chainstate ([#325](https://github.com/snaha/swarm-id/issues/325)) ([8a538ac](https://github.com/snaha/swarm-id/commit/8a538acadd7942447b8c70d03b531ecfabdbe2b4))
+* **sync:** add PartitionStateSchemaV1 + decode-time validation for the partition-state wire format ([#350](https://github.com/snaha/swarm-id/issues/350)) ([a7cfc96](https://github.com/snaha/swarm-id/commit/a7cfc9663ccd54c7400781b91595eee2ab00bba9)), closes [#340](https://github.com/snaha/swarm-id/issues/340)
+* **sync:** crash-safe commit-ordered partition handoff + fast acquire/upload ([#382](https://github.com/snaha/swarm-id/issues/382)) ([8d4ac6f](https://github.com/snaha/swarm-id/commit/8d4ac6f0b3725545cadd41f5b04aec8de15c10f2))
+* **sync:** intent SOCs resolve free-partition races across disjoint gateways ([#359](https://github.com/snaha/swarm-id/issues/359)) ([6cb8d4f](https://github.com/snaha/swarm-id/commit/6cb8d4fde8caf662f357382ab50dd97ff2684289))
+* **sync:** multi-device account-state sync (tombstones + per-device feeds) ([#374](https://github.com/snaha/swarm-id/issues/374)) ([4c7ba25](https://github.com/snaha/swarm-id/commit/4c7ba25f6db6e772d8e2ca81a520b504d5bb7c37))
+* **ui:** developer tools page on the unified account model ([#384](https://github.com/snaha/swarm-id/issues/384)) ([9099893](https://github.com/snaha/swarm-id/commit/9099893d79cb6dfa25ea5bddb3467e4f731f36a4))
+* **ui:** sign-in recovery, product account sync (publish + fold), existing-batch attach ([#399](https://github.com/snaha/swarm-id/issues/399)) ([f79decc](https://github.com/snaha/swarm-id/commit/f79decc196047ecd5c3b062fe3b21e53d8459f55))
+* **ui:** Storage tab for managing drives — buy, attach, rename, resize, extend ([#375](https://github.com/snaha/swarm-id/issues/375)) ([e6bf345](https://github.com/snaha/swarm-id/commit/e6bf3452a71a4f96026e7ee714f119e4aac75eb6))
+* **ui:** unified account store ([#379](https://github.com/snaha/swarm-id/issues/379)) ([f990605](https://github.com/snaha/swarm-id/commit/f990605b7074ff1550c9105e90fa55aa6f578735))
+
+
+### Bug Fixes
+
+* **dev:** serve lib source in Vite dev for reliable HMR ([#352](https://github.com/snaha/swarm-id/issues/352)) ([a840617](https://github.com/snaha/swarm-id/commit/a840617d2486f6cf22b0e2114f7756711762b365)), closes [#347](https://github.com/snaha/swarm-id/issues/347)
+* **lib:** arm init-timeout timers in initialize(), not the constructor ([#440](https://github.com/snaha/swarm-id/issues/440)) ([6180566](https://github.com/snaha/swarm-id/commit/6180566d6a78db23eaa41b0d5969c8392f366b7f)), closes [#421](https://github.com/snaha/swarm-id/issues/421)
+* **lib:** don't treat read failures as a free slot in feed finder and roster ([#438](https://github.com/snaha/swarm-id/issues/438)) ([808b5d8](https://github.com/snaha/swarm-id/commit/808b5d80efb484c5304f2908a8f6731e328363fd)), closes [#415](https://github.com/snaha/swarm-id/issues/415)
+* **lib:** migrate remaining rejectAfter races to withTimeout ([#398](https://github.com/snaha/swarm-id/issues/398)) ([cec89ad](https://github.com/snaha/swarm-id/commit/cec89ad8b09a15bd6641e4effd8e35aebcc1a036))
+* **lib:** partition-aware bucket capacity check ([#439](https://github.com/snaha/swarm-id/issues/439)) ([a02e21c](https://github.com/snaha/swarm-id/commit/a02e21c931d52dae7bab07df09a5665c2ae5627a)), closes [#416](https://github.com/snaha/swarm-id/issues/416)
+* postage batch id association ([#322](https://github.com/snaha/swarm-id/issues/322)) ([9bd3562](https://github.com/snaha/swarm-id/commit/9bd35620626290717cc86ba4afbbeb098da44aa8))
+* show live postage stamp usable status in the demo app ([#353](https://github.com/snaha/swarm-id/issues/353)) ([a1833c9](https://github.com/snaha/swarm-id/commit/a1833c94b8f77ba82e42e43361abfa6381ff8bd3)), closes [#351](https://github.com/snaha/swarm-id/issues/351)
+* **stamps:** compute stamp expiry from the PostageStamp contract ([#345](https://github.com/snaha/swarm-id/issues/345)) ([4376ead](https://github.com/snaha/swarm-id/commit/4376ead3e3c1c3d4766547ccc6b796e6ae5d5657))
+* **sync:** fence the partition-lock release against re-acquire eviction ([#356](https://github.com/snaha/swarm-id/issues/356)) ([8d4f33d](https://github.com/snaha/swarm-id/commit/8d4f33d24d2ba5326accd990d1b4ace0ea44ffa2))
+* **sync:** publish state pointer after its referenced chunks ([#432](https://github.com/snaha/swarm-id/issues/432)) ([4c8463e](https://github.com/snaha/swarm-id/commit/4c8463e24961422b8acd6a3590df0d1b79949378)), closes [#414](https://github.com/snaha/swarm-id/issues/414)
+* **sync:** reuse lock generation on lease refresh ([#430](https://github.com/snaha/swarm-id/issues/430)) ([30058e2](https://github.com/snaha/swarm-id/commit/30058e28f6d98c525e00bb78791328bdc91daa7f)), closes [#413](https://github.com/snaha/swarm-id/issues/413)
+* **ui:** derive unnamed drive fallback name from batch id ([#396](https://github.com/snaha/swarm-id/issues/396)) ([dc9e1cd](https://github.com/snaha/swarm-id/commit/dc9e1cd4221ddc206d03f7cf263b9080b25467b1))
+* uint16 utilization counter ([#320](https://github.com/snaha/swarm-id/issues/320)) ([413d9ad](https://github.com/snaha/swarm-id/commit/413d9ad4336cd417dec6bac9bccf856138e220c7))
+* use Bee node batchTTL for stamp expiry, show Expired badge ([#319](https://github.com/snaha/swarm-id/issues/319)) ([b4e25bf](https://github.com/snaha/swarm-id/commit/b4e25bff12145084a6e88dba4fdfc2ed7471ee3c))
+
+
+### Code Refactoring
+
+* **lib:** unify the account model — one BIP-39 seed account ([#377](https://github.com/snaha/swarm-id/issues/377)) ([e3e93e1](https://github.com/snaha/swarm-id/commit/e3e93e11808579045dd0676b70b15ef294df48cb))
+
 ## [0.1.3](https://github.com/snaha/swarm-id/compare/v0.1.2...v0.1.3) (2026-04-10)
 
 
