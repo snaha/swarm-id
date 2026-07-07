@@ -1,7 +1,6 @@
 # Build outputs
 dist/
 demo/build/
-swarm-id-build/
 
 # Dependencies
 node_modules/

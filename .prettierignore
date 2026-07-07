@@ -3,7 +3,6 @@ dist
 build
 .astro
 .svelte-kit
-swarm-id-build
 bee-js
 bee
 swarm-cli

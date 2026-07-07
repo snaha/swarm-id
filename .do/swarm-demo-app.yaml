@@ -7,7 +7,7 @@ domains:
     type: PRIMARY
 
 # Static site for swarm-demo.snaha.net
-# Serves SvelteKit demo app
+# Serves the SvelteKit demo dApp, run against the new identity UI at swarm-id.snaha.net
 static_sites:
   - name: demo-app
     # GitHub auto-deploy configuration

@@ -7,7 +7,7 @@ domains:
     type: PRIMARY
 
 # Static site for swarm-id.snaha.net
-# Serves SvelteKit identity management UI plus proxy/auth pages
+# Serves the new SvelteKit identity UI (ui/), including the proxy/connect pages
 static_sites:
   - name: id-app
     # GitHub auto-deploy configuration
@@ -18,13 +18,14 @@ static_sites:
       deploy_on_push: false
 
     source_dir: /
-    output_dir: swarm-id-build
+    output_dir: ui/build
 
     # Build using monorepo scripts.
     # `corepack enable` reads the version from package.json's packageManager field.
-    build_command: corepack enable && pnpm install --frozen-lockfile && pnpm build:swarm-id
+    # The lib must build first: the UI resolves @snaha/swarm-id from lib/dist.
+    build_command: corepack enable && pnpm install --frozen-lockfile && pnpm build:lib && pnpm build:ui
 
-    # SPA routing - all routes go to index.html except /demo
+    # SPA routing - all routes go to index.html
     catchall_document: index.html
 
     # CORS headers for cross-origin communication with swarm-demo
@@ -49,9 +50,6 @@ envs:
     value: production
 
   - key: CI
-    value: 'true'
-
-  - key: EXCLUDE_DEV_ROUTE
     value: 'true'
 
 # Deployment alerts

@@ -155,7 +155,7 @@ app at root paths, plus per-PR previews under `…/pr-N/` (`deploy-main-pages.ym
 | `swarm.snaha.net/demo-legacy/` | demo, run against `/id-legacy`  |
 | `swarm.snaha.net/docs/`        | docs site                       |
 
-DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical legacy domains:
+DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains, serving the new UI:
 
-- **Demo**: https://swarm-demo.snaha.net
-- **Identity UI (legacy)**: https://swarm-id.snaha.net
+- **Identity UI (new, `ui/`)**: https://swarm-id.snaha.net
+- **Demo**: https://swarm-demo.snaha.net, run against swarm-id.snaha.net

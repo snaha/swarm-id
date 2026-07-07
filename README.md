@@ -2,7 +2,7 @@
 
 Cross-browser compatible authentication and identity management for Swarm dApps.
 
-**[Documentation](https://swarm.snaha.net/docs)** | **[New UI](https://swarm.snaha.net/id/)** | **[Demo](https://swarm.snaha.net/demo/)** | **[Legacy Identity UI](https://swarm-id.snaha.net)**
+**[Documentation](https://swarm.snaha.net/docs)** | **[Identity UI](https://swarm-id.snaha.net)** | **[Demo](https://swarm-demo.snaha.net)** | **[Legacy Identity UI](https://swarm.snaha.net/id-legacy/)**
 
 ## Packages
 
@@ -68,17 +68,19 @@ The latest `main` build of every app deploys to root paths, and every PR gets pr
 | `swarm.snaha.net/demo-legacy/` | demo, running against `/id-legacy`  |
 | `swarm.snaha.net/docs/`        | documentation site                  |
 
-### DigitalOcean App Platform (legacy canonical domains)
+### DigitalOcean App Platform (canonical domains)
+
+Deployed on every push to `main` (workflow: `deploy-do.yml`):
+
+**swarm-id.snaha.net** (`ui/build/`)
+
+- New SvelteKit identity UI (`ui/`)
+- Proxy/connect pages for iframe communication
 
 **swarm-demo.snaha.net** (`demo/build/`)
 
-- SvelteKit demo app showcasing SwarmIdClient integration
+- SvelteKit demo app showcasing SwarmIdClient integration, run against swarm-id.snaha.net
 - Built with `@sveltejs/adapter-static`
-
-**swarm-id.snaha.net** (`swarm-id-build/`)
-
-- Legacy SvelteKit identity management UI
-- Proxy/auth pages for iframe communication
 
 ## Local Development
 
@@ -177,8 +179,7 @@ The Identity UI includes a Developer Tools page at http://localhost:5510/dev wit
 ├── ui/                   # New identity UI (SvelteKit + Tailwind v4 + shadcn-svelte style)
 ├── demo/                 # Demo app (SvelteKit)
 ├── swarm-ui/             # Legacy identity management UI (SvelteKit)
-├── docs-site/            # Documentation website (Starlight/Astro)
-└── swarm-id-build/       # Build output (deployed to swarm-id.snaha.net)
+└── docs-site/            # Documentation website (Starlight/Astro)
 ```
 
 ## Troubleshooting
