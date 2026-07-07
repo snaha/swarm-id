@@ -72,8 +72,8 @@ const client = new SwarmIdClient({
   iframeOrigin: proxyOrigin,
   iframePath: '/proxy',
   timeout: 60000,
-  onAuthChange: async (auth: boolean) => {
-    // Handle auth status changes
+  onConnectionChange: (info) => {
+    // Handle connection/auth status changes
   },
   metadata: {
     name: 'Swarm ID Demo',

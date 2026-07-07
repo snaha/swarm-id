@@ -33,27 +33,33 @@ const client = new SwarmIdClient({
     name: "My dApp",
     description: "A demo Swarm application",
   },
-  onAuthChange: (authenticated) => {
-    console.log("Auth status:", authenticated)
+  onConnectionChange: (info) => {
+    console.log(
+      "Connection changed:",
+      info.identity?.name,
+      "canUpload=",
+      info.canUpload,
+    )
   },
 })
 
-// 2. Initialize (creates hidden iframe)
+// 2. Initialize (creates hidden iframe; populates client.connectionInfo)
 await client.initialize()
 
 // 3a. Option A: Use iframe authentication button
 // The iframe will show a connect/disconnect button automatically
 
 // 3b. Option B: Manual authentication with connect()
-// Open authentication page in new window/browser tab (useful for custom UI)
-const authUrl = client.connect()
-console.log("Authentication opened at:", authUrl)
+// Opens the authentication page in a new window/tab (useful for custom UI)
+await client.connect()
 
-// 4. Check if user is authenticated
-const status = await client.checkAuthStatus()
+// 4. Read current connection state synchronously
+const info = client.connectionInfo
 
-// 5. Upload data (after authentication)
-if (status.authenticated) {
+// 5. Upload data (requires authentication AND upload capability — a connected
+//    user can still have canUpload=false with no postage stamp and no
+//    subsidised gateway)
+if (info.identity && info.canUpload) {
   const result = await client.uploadData(
     new TextEncoder().encode("Hello, Swarm!"),
   )
