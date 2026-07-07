@@ -37,9 +37,6 @@
   const others = $derived(
     accountsStore.accounts.filter((candidate) => !candidate.id.equals(account.id)),
   )
-  // A local account has nothing on Swarm to come back to — signing it out
-  // would destroy it, so it only gets Delete (on the Account tab), no Sign out.
-  const isLocal = $derived(account.stamps.length === 0)
 
   function close() {
     open = false
@@ -116,7 +113,9 @@
         </div>
 
         <Button variant="outline" class="w-full" onclick={manage}>Manage account</Button>
-        {#if !isLocal}
+        <!-- A local account has nothing on Swarm to come back to — signing it out
+             would destroy it, so it only gets Delete (on the Account tab), no Sign out. -->
+        {#if !account.isLocal}
           <Button variant="outline" class="w-full" onclick={startSignOut}>Sign out</Button>
         {/if}
       </div>

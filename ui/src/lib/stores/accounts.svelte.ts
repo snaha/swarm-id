@@ -72,8 +72,9 @@ export class Account {
   partitionCount = $state<number | undefined>(undefined)
   // Persist-and-publish this account's change, bound to `this` in the ctor so
   // mutators just call `this.#commit()`. `skipSync: true` saves the collection
-  // WITHOUT a Swarm publish (the change came from a remote fold, or is a
-  // volatile field peers don't need) — only ever passed by the dev mutators.
+  // WITHOUT a Swarm publish: the change came from a remote fold, is a volatile
+  // field peers don't need, or is a device-local de-auth that must not
+  // propagate (`signOut`).
   readonly #commit: (options?: { skipSync?: boolean }) => void
 
   constructor(
@@ -120,6 +121,11 @@ export class Account {
   /** Live (non-tombstoned) stamps — what the UI displays (mutators are dev-only, below). */
   get stamps(): PostageStamp[] {
     return this.postageStamps.filter((stamp) => stamp.deletedAt === undefined)
+  }
+
+  /** Local: no live drives, so nothing of this account lives on Swarm yet. */
+  get isLocal(): boolean {
+    return this.stamps.length === 0
   }
 
   /** Signed out on this device: the seed vault was wiped by `signOut()`. */

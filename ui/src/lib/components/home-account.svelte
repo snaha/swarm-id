@@ -98,7 +98,7 @@
   let newPassword = $state('')
   let verifyNewPassword = $state('')
 
-  const isLocal = $derived(account.stamps.length === 0)
+  const isLocal = $derived(account.isLocal)
   // The Account tab only renders for the signed-in current account, but the
   // vault fields are optional on the record — fall back to an empty label.
   const accessLabel = $derived(account.access ? methodLabel(account.access.type) : '')
