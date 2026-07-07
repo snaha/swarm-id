@@ -35,15 +35,17 @@ const client = new SwarmIdClient({
     name: 'My dApp',
     description: 'A demo Swarm application',
   },
-  onAuthChange: (authenticated) => {
-    console.log('Auth status:', authenticated)
+  onConnectionChange: (info) => {
+    console.log('Connection changed:', info.identity?.name, 'canUpload=', info.canUpload)
   },
 })
 
 await client.initialize()
 
-const status = await client.checkAuthStatus()
-if (status.authenticated) {
+// A connected user can still have canUpload=false (no postage stamp and no
+// subsidised gateway), so gate uploads on both.
+const info = client.connectionInfo
+if (info.identity && info.canUpload) {
   const result = await client.uploadData(new TextEncoder().encode('Hello, Swarm!'))
   console.log('Uploaded:', result.reference)
 }

@@ -1604,11 +1604,12 @@ Derive an AES-GCM-256 `CryptoKey` for backup encryption from the `swarmEncryptio
 ### Types
 
 ```typescript
-// Discriminated union of backup headers (passkey | ethereum | agent)
-type EncryptedSwarmIdExport = PasskeyBackupHeader | EthereumBackupHeader | AgentBackupHeader
-
-// Common fields in all headers
-interface BackupHeaderBase {
+// There is a single account model (a BIP-39 seed account), so the header
+// carries no account-type discriminant and no key material. Only the account
+// name and timestamps travel in plaintext; on import the user re-enters the
+// recovery phrase, from which the master key (and everything derived from it)
+// is recomputed.
+interface EncryptedSwarmIdExport {
   version: 1
   accountName: string
   exportedAt: number // Unix timestamp
