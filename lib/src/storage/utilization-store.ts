@@ -153,12 +153,6 @@ export class UtilizationStoreDB {
         // Index for querying by batchId
         chunksStore.createIndex("batchId", "batchId", { unique: false })
 
-        // Unused since LRU eviction was removed (#419); kept to avoid a
-        // schema version bump just to drop an index.
-        chunksStore.createIndex("lastAccess", "lastAccess", {
-          unique: false,
-        })
-
         // Metadata store
         db.createObjectStore(METADATA_STORE, { keyPath: "batchId" })
       }
