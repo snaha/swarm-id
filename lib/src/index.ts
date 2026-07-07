@@ -111,15 +111,11 @@ export {
 } from "./schemas"
 
 // Utilization storage (IndexedDB cache)
-export {
-  UtilizationStoreDB,
-  evictOldEntries,
-} from "./storage/utilization-store"
+export { UtilizationStoreDB } from "./storage/utilization-store"
 
 export type {
   ChunkCacheEntry,
   BatchMetadata,
-  CacheEvictionPolicy,
 } from "./storage/utilization-store"
 
 // Debounced utilization uploader

@@ -153,11 +153,6 @@ export class UtilizationStoreDB {
         // Index for querying by batchId
         chunksStore.createIndex("batchId", "batchId", { unique: false })
 
-        // Index for eviction by lastAccess
-        chunksStore.createIndex("lastAccess", "lastAccess", {
-          unique: false,
-        })
-
         // Metadata store
         db.createObjectStore(METADATA_STORE, { keyPath: "batchId" })
       }
@@ -367,82 +362,4 @@ export class UtilizationStoreDB {
       this.db = undefined
     }
   }
-}
-
-// ============================================================================
-// Cache Eviction
-// ============================================================================
-
-/**
- * Policy for cache eviction
- */
-export interface CacheEvictionPolicy {
-  /** Maximum age in milliseconds (default: 7 days) */
-  maxAge?: number
-
-  /** Maximum number of chunks to keep (default: 640) */
-  maxChunks?: number
-}
-
-/**
- * Evict old cache entries based on policy
- * @param cache - Cache database instance
- * @param policy - Eviction policy
- */
-export async function evictOldEntries(
-  cache: UtilizationStoreDB,
-  policy: CacheEvictionPolicy = {},
-): Promise<void> {
-  const maxAge = policy.maxAge ?? 7 * 24 * 60 * 60 * 1000 // 7 days
-  const maxChunks = policy.maxChunks ?? 640 // ≈10–20 batches depending on depth
-
-  await cache.open()
-
-  const db = (cache as never)["db"] as IDBDatabase
-
-  return new Promise((resolve, reject) => {
-    const transaction = db.transaction([CHUNKS_STORE], "readwrite")
-    const store = transaction.objectStore(CHUNKS_STORE)
-    const index = store.index("lastAccess")
-
-    const oldestAllowed = Date.now() - maxAge
-    const entries: Array<{ key: IDBValidKey; lastAccess: number }> = []
-
-    // Collect all entries with their lastAccess times
-    const request = index.openCursor()
-
-    request.onsuccess = () => {
-      const cursor = request.result
-      if (cursor) {
-        const entry = cursor.value as ChunkCacheEntry
-        entries.push({
-          key: cursor.primaryKey,
-          lastAccess: entry.lastAccess,
-        })
-        cursor.continue()
-      } else {
-        // All entries collected, now evict
-        // 1. Delete entries older than maxAge
-        for (const entry of entries) {
-          if (entry.lastAccess < oldestAllowed) {
-            store.delete(entry.key)
-          }
-        }
-
-        // 2. If still over maxChunks, delete oldest entries
-        if (entries.length > maxChunks) {
-          entries.sort((a, b) => a.lastAccess - b.lastAccess)
-          const toDelete = entries.slice(0, entries.length - maxChunks)
-          for (const entry of toDelete) {
-            store.delete(entry.key)
-          }
-        }
-      }
-    }
-
-    transaction.oncomplete = () => resolve()
-    transaction.onerror = () => {
-      reject(new Error(`Failed to evict entries: ${transaction.error}`))
-    }
-  })
 }
