@@ -746,14 +746,19 @@ export function calculateMaxSlotsPerBucket(batchDepth: number): number {
 }
 
 /**
- * Check if a bucket has capacity for more chunks
+ * Check if a bucket has capacity for more chunks.
+ *
+ * `dataCounter` is the per-partition `j`, so it must be compared against the
+ * partition's lane capacity — not the raw slots-per-bucket. Comparing against
+ * the latter let `j` run past the lane and only surfaced as a mid-stamp bee-js
+ * throw with counters already incremented (#416).
  */
 export function hasBucketCapacity(
   dataCounter: number,
   batchDepth: number,
+  partitionCount: number = PARTITION_COUNT,
 ): boolean {
-  const maxSlots = calculateMaxSlotsPerBucket(batchDepth)
-  return dataCounter < maxSlots
+  return dataCounter < partitionCapacity(batchDepth, partitionCount)
 }
 
 /**
