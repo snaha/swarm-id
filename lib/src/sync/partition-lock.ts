@@ -32,6 +32,8 @@ import { Bee, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
+import { withTimeout } from "../utils/promise"
+import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { makePartitionLockIdentifier } from "../utils/lock-soc"
 import {
   PartitionLockPayloadSchemaV1,
@@ -247,12 +249,36 @@ export async function acquirePartitionLock(opts: {
    * to wait out the TTL).
    */
   shouldAbort?: () => boolean
+  /**
+   * Skip the pre-write read entirely. Pass when the caller ALREADY read this
+   * partition's lock (timeout-bounded) moments ago and classified it as
+   * claimable — `PartitionLease.acquire`'s scan — so the duplicate read (an
+   * absent chunk that can block for tens of seconds on a gateway) stays off
+   * the acquire path. The live-foreign-holder "blocked" check is the caller's
+   * responsibility; the guard-window verify below still catches races.
+   */
+  skipInitialRead?: boolean
+  /**
+   * Bound for the initial + verify reads (default {@link SYNC_READ_TIMEOUT_MS}).
+   * Bee has no fast authoritative "not found", so an absent lock would
+   * otherwise block on peer exhaustion. A timed-out read maps to the same
+   * "unobserved" handling as any other read failure: initial → treated absent
+   * (claim proceeds; guard+verify arbitrate), verify → the optimistic
+   * "couldn't confirm our own write" branch.
+   */
+  readTimeoutMs?: number
 }): Promise<AcquirePartitionLockResult> {
   const now = opts.now ?? Date.now
   const wait =
     opts.wait ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
+  const readBounded = () =>
+    withTimeout(
+      readPartitionLock(opts),
+      opts.readTimeoutMs ?? SYNC_READ_TIMEOUT_MS,
+      "lock read timed out",
+    ).catch(() => undefined)
 
-  const current = await readPartitionLock(opts)
+  const current = opts.skipInitialRead ? undefined : await readBounded()
   const t = now()
 
   // Live foreign holder — refuse without writing.
@@ -286,7 +312,7 @@ export async function acquirePartitionLock(opts: {
 
   await wait(opts.guardMs)
 
-  const verified = await readPartitionLock(opts)
+  const verified = await readBounded()
   if (!verified) {
     // The verify-read couldn't confirm our write — e.g. the Bee node is
     // transiently 500ing on the just-written chunk, or it hasn't propagated

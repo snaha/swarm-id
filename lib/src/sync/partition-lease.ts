@@ -66,12 +66,15 @@ import {
   resolveIntentRound,
   writePartitionIntent,
   writePartitionOccupancy,
+  type PartitionIntentPayload,
 } from "./partition-intent"
 import {
   readPartitionState,
+  readStatePointer,
   statePointerAddress,
   writePartitionState,
   writeStatePointer,
+  type StatePointerLookup,
 } from "./partition-state"
 
 /** Default guard time δ for the lock protocol (iteration-2 doc § δ tuning). */
@@ -231,6 +234,14 @@ export class PartitionLease {
    * release would then refuse to clear (peers would wait out the TTL).
    */
   private closed = false
+  /**
+   * The claim-time presence/occupancy beacon publish, fired OFF the acquire
+   * critical path (best-effort, never rejects — `publishPresenceBeacon`
+   * swallows errors). `refresh()`/`release()` await it first so a later beacon
+   * (fresher `leasedUntil`) can never be overwritten by the still-in-flight
+   * claim beacon, and tests get a deterministic settle point.
+   */
+  private pendingBeaconPublish: Promise<void> = Promise.resolve()
 
   constructor(
     private readonly opts: {
@@ -395,16 +406,30 @@ export class PartitionLease {
    * foreign holder marks the partition held. No-op without known rivals.
    */
   async refreshHoldersFromPresence(partitionCount: number): Promise<void> {
+    this.applyPresence(await this.readPresence(partitionCount))
+  }
+
+  /** Network half of `refreshHoldersFromPresence` — no state mutation, so it
+   *  can be overlapped with `refreshFromSwarm` (whose `releasedPartitions`
+   *  classification `applyPresence` consumes). */
+  private async readPresence(partitionCount: number): Promise<
+    {
+      partition: number
+      deviceId: string
+      bucket: number
+      intent: PartitionIntentPayload | undefined
+    }[]
+  > {
     const now = this.now()
     const rivals = (this.opts.knownDeviceIds?.() ?? []).filter(
       (id) => id !== this.opts.deviceId,
     )
-    if (rivals.length === 0) return
+    if (rivals.length === 0) return []
 
     const currentBucket = intentEpochBucket(now)
     const buckets = [currentBucket, currentBucket - 1]
 
-    const results = await Promise.all(
+    return Promise.all(
       Array.from({ length: partitionCount }).flatMap((_unused, p) =>
         rivals.flatMap((deviceId) =>
           buckets.map(async (bucket) => ({
@@ -424,7 +449,14 @@ export class PartitionLease {
         ),
       ),
     )
+  }
 
+  /** Classification half of `refreshHoldersFromPresence`. Call AFTER
+   *  `refreshFromSwarm` has populated `releasedPartitions`/`holders`. */
+  private applyPresence(
+    results: Awaited<ReturnType<PartitionLease["readPresence"]>>,
+  ): void {
+    const now = this.now()
     for (const { partition, deviceId, bucket, intent } of results) {
       if (!intent) continue
       // An explicit release sentinel on the lock authoritatively freed this
@@ -480,11 +512,20 @@ export class PartitionLease {
    * SOC, when accurate, would already show as expired).
    */
   async refreshHoldersFromOccupancy(partitionCount: number): Promise<void> {
+    this.applyOccupancy(await this.readOccupancy(partitionCount))
+  }
+
+  /** Network half of `refreshHoldersFromOccupancy` — see `readPresence`. */
+  private async readOccupancy(
+    partitionCount: number,
+  ): Promise<
+    { partition: number; occupancy: PartitionIntentPayload | undefined }[]
+  > {
     const now = this.now()
     const currentBucket = intentEpochBucket(now)
     const buckets = [currentBucket, currentBucket - 1]
 
-    const results = await Promise.all(
+    return Promise.all(
       Array.from({ length: partitionCount }).flatMap((_unused, p) =>
         buckets.map(async (bucket) => ({
           partition: p,
@@ -499,7 +540,13 @@ export class PartitionLease {
         })),
       ),
     )
+  }
 
+  /** Classification half of `refreshHoldersFromOccupancy` — see `applyPresence`. */
+  private applyOccupancy(
+    results: Awaited<ReturnType<PartitionLease["readOccupancy"]>>,
+  ): void {
+    const now = this.now()
     for (const { partition, occupancy } of results) {
       if (!occupancy || occupancy.leasedUntil === undefined) continue
       if (occupancy.leasedUntil <= now) continue // genuinely expired holder
@@ -605,22 +652,58 @@ export class PartitionLease {
       }
     }
 
-    await this.refreshFromSwarm(partitionCount)
-    // Union in holders detected via presence beacons (fresh per-epoch reads
-    // that work on the gateway where the static lock SOC is unreadable). This
-    // is what lets us detect a peer that ALREADY holds a partition.
-    await this.refreshHoldersFromPresence(partitionCount)
-    // Also union in the deviceId-INDEPENDENT occupancy beacons. Unlike the two
-    // channels above (keyed on `knownDeviceIds`), this detects a live holder we
-    // have NEVER heard of — the registry-lag dual-acquire where a re-claiming
-    // device hasn't synced a peer yet and is blind to it on every keyed channel.
-    await this.refreshHoldersFromOccupancy(partitionCount)
+    // All FOUR read channels are independent network reads — only their
+    // interpretation is ordered — so fire them concurrently and the cold
+    // acquire pays ~one read-timeout instead of stacking three or four:
+    //  - the lock-SOC scan (`refreshFromSwarm`, reads + classifies itself);
+    //  - the per-device presence beacons (fresh per-epoch reads that work on a
+    //    gateway where the static lock SOC is unreadable — what lets us detect
+    //    a peer that ALREADY holds a partition);
+    //  - the deviceId-INDEPENDENT occupancy beacons (detect a live holder we
+    //    have NEVER heard of — the registry-lag dual-acquire where a
+    //    re-claiming device hasn't synced a peer yet and is blind to it on
+    //    every keyed channel);
+    //  - a SPECULATIVE state-pointer read for this device's home partition —
+    //    the pointer lookup `claimPartition` would run serially afterwards.
+    // The presence/occupancy classification (`applyPresence`/`applyOccupancy`)
+    // runs strictly after the barrier because it consumes the released-sentinel
+    // watermarks `refreshFromSwarm` populates.
+    const nowMs = this.now()
+    const home = deviceHomePartition(this.opts.deviceId, partitionCount)
+    const [, presenceReads, occupancyReads, speculativePointer] =
+      await Promise.all([
+        this.refreshFromSwarm(partitionCount),
+        this.readPresence(partitionCount),
+        this.readOccupancy(partitionCount),
+        this.speculativeStatePointer(home, nowMs),
+      ])
+    this.applyPresence(presenceReads)
+    this.applyOccupancy(occupancyReads)
 
     // Prefer the partition we already hold; otherwise the first free/expired.
     // A re-acquire of our own partition is not a contended claim — skip the
     // intent round (which only guards taking a free/expired slot).
     const held = this.heldPartition()
     const chosenPartition = held ?? this.pickFreeOrExpired(partitionCount)
+
+    // SOLO-CLEAN: no rival known and no trace of any other device on any
+    // channel — no live/expired holder or release sentinel on any lock, every
+    // lock read conclusive, no foreign beacon. The claim's guard window exists
+    // to arbitrate two contenders racing the same lock write; with zero
+    // evidence of a second device it only taxes the single-device cold path,
+    // and the residual unknown-peer dual-acquire (a peer whose every channel
+    // was invisible RIGHT NOW) is already backstopped by the occupancy-beacon
+    // displacement check on the ≤10s refresh tick.
+    const soloClean =
+      !(this.opts.knownDeviceIds?.() ?? []).some(
+        (id) => id !== this.opts.deviceId,
+      ) &&
+      Array.from(this.holders.values()).every(
+        (h) => h.deviceId === this.opts.deviceId,
+      ) &&
+      this.releasedPartitions.size === 0 &&
+      this.lastSeenLeasedUntil.size === 0 &&
+      this.unreadableLocks.size === 0
     // Why this partition was chosen — `home` is our deterministic scan start,
     // `liveHolders` the count refreshFromSwarm saw. If we pick a partition a
     // peer actually holds, that means we couldn't read its lock SOC above.
@@ -642,7 +725,42 @@ export class PartitionLease {
       partition: chosenPartition,
       partitionCount,
       freshClaim: held === undefined,
+      nowMs,
+      // Only valid for the partition it was read for.
+      speculativePointer:
+        chosenPartition === home ? speculativePointer : undefined,
+      soloClean,
     })
+  }
+
+  /**
+   * Speculative half of `claimPartition`'s pointer lookup, overlapped with the
+   * `acquire` scan: read the state pointer for the partition we will most
+   * likely claim (the home partition) at the `now`/`now−1` buckets — exactly
+   * the lookup `readPartitionState` performs when the partition has no known
+   * prior holder (`holderLeasedUntilMs` undefined; `readPartitionState`
+   * enforces that before trusting the prefetch). Best-effort: `undefined` on a
+   * read-only lease (no batch) or a thrown read → the claim falls back to its
+   * own serial lookup.
+   */
+  private async speculativeStatePointer(
+    partition: number,
+    nowMs: number,
+  ): Promise<StatePointerLookup | undefined> {
+    const { batchId } = this.opts
+    if (!batchId) return undefined
+    try {
+      return await readStatePointer({
+        bee: this.opts.bee,
+        owner: this.opts.backupSigner.publicKey().address(),
+        swarmEncryptionKey: this.opts.swarmEncryptionKey,
+        batchId,
+        partition,
+        nowMs,
+      })
+    } catch {
+      return undefined
+    }
   }
 
   /**
@@ -656,6 +774,16 @@ export class PartitionLease {
     partitionCount: number
     /** A first-time claim of a free/expired slot (vs. a re-acquire of ours). */
     freshClaim: boolean
+    /** Clock capture from `acquire` — one rendezvous instant for the whole
+     *  scan + claim (also what makes `speculativePointer` exactly equivalent
+     *  to the serial lookup). */
+    nowMs: number
+    /** Overlapped pointer lookup for THIS partition (see
+     *  `speculativeStatePointer`); undefined → serial lookup. */
+    speculativePointer?: StatePointerLookup
+    /** No rival known + no trace of another device on any channel — skip the
+     *  contention guard window (see the note in `acquire`). */
+    soloClean: boolean
   }): Promise<AcquireResult> {
     const { partition, partitionCount, freshClaim } = args
     const { stamper, batchId, batchDepth } = this.requireWriteContext()
@@ -688,8 +816,13 @@ export class PartitionLease {
         // If this partition's lock read was inconclusive (timed out), a
         // "no pointer found" result must fail safe rather than zero-seed.
         lockUnreadable: this.unreadableLocks.has(partition),
-        // Reader half of the rendezvous — this device's clock (#385).
-        nowMs: this.now(),
+        // Reader half of the rendezvous — this device's clock (#385), captured
+        // once in `acquire` so the speculative pointer lookup and this read
+        // computed identical buckets.
+        nowMs: args.nowMs,
+        // The overlapped pointer lookup (ignored by `readPartitionState`
+        // whenever a holder span applies).
+        prefetchedPointer: args.speculativePointer,
       },
       knownReference,
     )
@@ -775,9 +908,18 @@ export class PartitionLease {
       partition,
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
-      guardMs: this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS,
+      // Solo-clean: no rival on any channel — the guard window would only
+      // arbitrate a contender that demonstrably isn't there. The verify read
+      // still runs; the refresh-tick displacement backstop covers the residual.
+      guardMs: args.soloClean
+        ? 0
+        : (this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS),
       generation,
       now: () => this.now(),
+      // `acquire`'s scan read this lock (timeout-bounded) moments ago and
+      // classified the partition claimable — don't pay the duplicate pre-write
+      // read (an absent chunk can block for tens of seconds on a gateway).
+      skipInitialRead: true,
     })
 
     if (lockResult.outcome !== "acquired" || !lockResult.payload) {
@@ -878,8 +1020,13 @@ export class PartitionLease {
     })
 
     // Publish presence immediately so a joiner appearing before our first
-    // refresh tick still detects us (don't wait ~10s for the first heartbeat).
-    await this.publishPresenceBeacon(
+    // refresh tick still detects us (don't wait ~10s for the first heartbeat)
+    // — but OFF the acquire critical path: it is best-effort (errors are
+    // swallowed; a lost beacon self-heals next tick) and its two SOC writes
+    // are internally serialized via `withIntentSocSlot`, so the claim result
+    // doesn't need to block on them. Tracked in `pendingBeaconPublish` for
+    // ordering with `refresh()`/`release()` (see the field doc).
+    this.pendingBeaconPublish = this.publishPresenceBeacon(
       partition,
       payload.generation,
       payload.leasedUntil,
@@ -895,6 +1042,15 @@ export class PartitionLease {
   }
 
   /**
+   * Resolves when the claim-time detached beacon publish has settled. Never
+   * rejects. Exposed so callers/tests that need the beacon to be readable
+   * (e.g. before simulating a joiner) have a deterministic sync point.
+   */
+  get beaconPublishSettled(): Promise<void> {
+    return this.pendingBeaconPublish
+  }
+
+  /**
    * Re-run the lock protocol on the currently-held partition to bump
    * `leasedUntil`. Returns `"lost"` when we don't hold a lease (legacy mode)
    * or the lock protocol returned `blocked` / `lost-race` / `aborted`,
@@ -903,6 +1059,10 @@ export class PartitionLease {
    * `LeaseRefreshOutcome` for how the coordinator must react to each.
    */
   async refresh(): Promise<LeaseRefreshOutcome> {
+    if (!this.self) return "lost"
+    // Let a still-in-flight claim-time beacon settle first, so this tick's
+    // fresher beacon can't be overwritten by it (same SOC addresses).
+    await this.pendingBeaconPublish
     if (!this.self) return "lost"
     const partition = this.self.partition
     const { stamper } = this.requireWriteContext()
@@ -1150,6 +1310,10 @@ export class PartitionLease {
     // refresh from minting a newer ghost claim mid-release.
     const { partition, generation, acquiredAt } = this.self
     this.closed = true
+    // Let the claim-time detached beacon settle before the release sequence —
+    // a beacon landing after the sentinel would re-mark the freed partition
+    // held for peers reading the presence channel.
+    await this.pendingBeaconPublish
     const { stamper } = this.requireWriteContext()
 
     await this.flushState(partition, localCounter)

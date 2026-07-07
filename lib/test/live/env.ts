@@ -100,6 +100,9 @@ export const liveEnv = {
   idleMs: num("IDLE_MS", 38_000),
   keepAliveEveryMs: num("KEEPALIVE_EVERY_MS", 10_000),
   acquireGapMs: num("ACQUIRE_GAP_MS", 2_000),
+  /** Repeat count for the timing scenarios (fresh account per run) — lets a
+   *  benchmark run collect statistically meaningful samples. */
+  acquireRuns: num("ACQUIRE_RUNS", 1),
   intentWindowMs: num("INTENT_WINDOW_MS", 2_000),
   guardMs: num("GUARD_MS", 1_000),
   /** True only when a batch + signer key are configured (else the suites skip). */

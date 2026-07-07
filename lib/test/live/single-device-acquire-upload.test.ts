@@ -17,6 +17,11 @@
  *   - upload       : the random SOC.
  *   - publish      : the incremental/parallel state-pointer publish (+ flush).
  *
+ * BENCHMARK MODE: `ACQUIRE_RUNS=N` repeats the whole scenario N times, each run
+ * on a FRESH throwaway account (so every acquire is genuinely cold — no lock,
+ * no pointer, no counter state), and prints min/median/mean/max across runs.
+ * Used to compare acquire-latency work before/after (see the plan/PR).
+ *
  * Coordinator-level (not just `PartitionLease`) so it exercises everything the
  * demo exercises. Node-feasible: the util-aware stamper takes an in-memory
  * `UtilizationStoreDB` (no IndexedDB), the cross-tab lock no-ops without
@@ -43,21 +48,42 @@ import {
   makeInMemoryCache,
 } from "./env"
 
+/** Per-run wall times (ms). */
+interface RunTimings {
+  acquireMs: number
+  uploadMs: number
+  publishMs: number
+  totalMs: number
+  rosterMs: number
+}
+
+/** Budget per run — matches the suite's single-scenario expectations. */
+const RUN_BUDGET_MS = 120_000
+
+function stats(values: number[]): string {
+  const sorted = [...values].sort((a, b) => a - b)
+  const mid = Math.floor(sorted.length / 2)
+  const median =
+    sorted.length % 2 === 1 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2
+  const mean = values.reduce((a, b) => a + b, 0) / values.length
+  return `min=${sorted[0]}  median=${median}  mean=${Math.round(mean)}  max=${sorted[sorted.length - 1]}`
+}
+
 describe.skipIf(!liveEnv.configured)(
   "live — single device: clean acquire + random SOC upload (timings)",
   () => {
     let ctx: LiveContext
-    let keys: Awaited<ReturnType<typeof deriveAgentKeys>>
-    let D: string
 
-    beforeAll(async () => {
+    beforeAll(() => {
       ctx = createContext()
-      keys = await deriveAgentKeys()
-      D = deviceId("device-solo")
-      console.log(`account ${keys.accountId}  device ${D}`)
     })
 
-    it("acquires from a clean account and uploads a random SOC", async () => {
+    /** One full scenario on a FRESH account: acquire → SOC upload → publish. */
+    async function runOnce(label: string): Promise<RunTimings> {
+      const keys = await deriveAgentKeys()
+      const D = deviceId("device-solo")
+      console.log(`${label} account ${keys.accountId}  device ${D}`)
+
       const encryptionKey = hexToUint8Array(keys.encryptionKey)
       const cache = makeInMemoryCache()
       const stamper = await UtilizationAwareStamper.create(
@@ -129,7 +155,7 @@ describe.skipIf(!liveEnv.configured)(
       const acquireMs = acquiredAt - t0
       const publishMs = totalMs - acquireMs - uploadMs
       console.log(
-        `\n  ⏱  single-device  acquire=${acquireMs}ms  upload=${uploadMs}ms  ` +
+        `\n  ⏱  ${label}  acquire=${acquireMs}ms  upload=${uploadMs}ms  ` +
           `publish≈${publishMs}ms  total=${totalMs}ms` +
           `  |  roster-fold(non-blocking)=${rosterMs}ms\n`,
       )
@@ -145,6 +171,29 @@ describe.skipIf(!liveEnv.configured)(
       // Regression guard: acquire must not crawl back toward the old 45s
       // feed-walk / lock-blocked stall.
       expect(acquireMs).toBeLessThan(45_000)
-    })
+
+      return { acquireMs, uploadMs, publishMs, totalMs, rosterMs }
+    }
+
+    it(
+      "acquires from a clean account and uploads a random SOC",
+      async () => {
+        const runs: RunTimings[] = []
+        for (let i = 0; i < liveEnv.acquireRuns; i++) {
+          runs.push(await runOnce(`run ${i + 1}/${liveEnv.acquireRuns}`))
+        }
+
+        if (runs.length > 1) {
+          console.log(
+            `\n  📊 single-device stats over ${runs.length} runs (ms)\n` +
+              `     acquire: ${stats(runs.map((r) => r.acquireMs))}\n` +
+              `     upload : ${stats(runs.map((r) => r.uploadMs))}\n` +
+              `     publish: ${stats(runs.map((r) => r.publishMs))}\n` +
+              `     total  : ${stats(runs.map((r) => r.totalMs))}\n`,
+          )
+        }
+      },
+      RUN_BUDGET_MS * Math.max(1, liveEnv.acquireRuns),
+    )
   },
 )
