@@ -1,1 +1,0 @@
-import{D as t,F as S,f as b,G as h,S as k}from"./Csv9OgxL.js";function u(r,f){return r===f||r?.[k]===f}function d(r={},f,a,T){return t(()=>{var i,s;return S(()=>{i=s,s=[],b(()=>{r!==a(...s)&&(f(r,...s),i&&u(a(...i),r)&&f(null,...i))})}),()=>{h(()=>{s&&u(a(...s),r)&&f(null,...s)})}}),r}export{d as b};
