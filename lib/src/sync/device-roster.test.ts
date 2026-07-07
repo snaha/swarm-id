@@ -15,6 +15,7 @@ vi.mock("../proxy/download-data", () => ({
 import {
   readRoster,
   ensureInRoster,
+  resetRosterScanCache,
   RosterScanInconclusiveError,
   rosterTopic,
   rosterIdentifier,
@@ -22,6 +23,12 @@ import {
 
 const OWNER = new EthAddress("a".repeat(40))
 const ACCOUNT_ID = "b".repeat(40)
+
+// Every test shares one ACCOUNT_ID/OWNER — forget the known-length memo between
+// tests so a warm scan in one test can't change another's probing.
+beforeEach(() => {
+  resetRosterScanCache()
+})
 
 function makeDevice(index: number): Device {
   return {
@@ -56,9 +63,10 @@ function serverError500(): Error {
 /**
  * Fake Bee that serves roster SOCs ONLY for `presentIndices`. Reverse-maps the
  * requested identifier back to its index via `rosterIdentifier`, so the windowed
- * scan exercises real gap detection.
+ * scan exercises real gap detection. Pass `probed` to record which indices the
+ * scan actually read (in request order).
  */
-function fakeBee(presentIndices: Set<number>) {
+function fakeBee(presentIndices: Set<number>, probed?: number[]) {
   const topic = rosterTopic(ACCOUNT_ID)
   const identToIndex = new Map<string, number>()
   for (let i = 0; i < 64; i++) {
@@ -68,6 +76,7 @@ function fakeBee(presentIndices: Set<number>) {
     makeSOCReader: () => ({
       download: async (identifier: { toHex(): string }) => {
         const index = identToIndex.get(identifier.toHex())
+        if (index !== undefined) probed?.push(index)
         if (index === undefined || !presentIndices.has(index)) {
           throw notFound404()
         }
@@ -351,5 +360,81 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
       target: { mode: "stamper" } as never,
     })
     expect(downloadChunk).not.toHaveBeenCalled()
+  })
+})
+
+describe("readRoster — known-length memo (#400)", () => {
+  const scan = (present: Set<number>, probed?: number[]) =>
+    readRoster({
+      bee: fakeBee(present, probed) as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+
+  beforeEach(() => {
+    mockDownloadData.mockReset()
+    mockDownloadData.mockImplementation((_bee: unknown, refHex: string) => {
+      const index = parseInt(refHex.slice(0, 2), 16)
+      return new TextEncoder().encode(JSON.stringify(makeDevice(index)))
+    })
+  })
+
+  it("keeps the full stop window on a cold scan (no memo yet)", async () => {
+    const probed: number[] = []
+    await scan(new Set([0, 1]), probed)
+    // Window [0..15] (2 present) + full empty stop window [16..31] — the
+    // conservative cold-scan margin is unchanged.
+    expect(probed).toHaveLength(32)
+  })
+
+  it("a warm rescan probes only the known range plus a short tail", async () => {
+    await scan(new Set([0, 1])) // cold scan primes the memo (length 2)
+    const probed: number[] = []
+    const devices = await scan(new Set([0, 1]), probed)
+    expect(devices.map((d) => d.deviceId).sort()).toEqual(["dev-0", "dev-1"])
+    // Known range [0,1] + ROSTER_TAIL_PROBES (2) past it — not another 32 reads.
+    expect(probed).toHaveLength(4)
+    expect(Math.max(...probed)).toBe(3)
+  })
+
+  it("a warm rescan still discovers entries appended past the memo", async () => {
+    await scan(new Set([0, 1])) // memo = 2
+    const probed: number[] = []
+    const devices = await scan(new Set([0, 1, 2]), probed) // peer appended at 2
+    expect(devices).toHaveLength(3)
+    expect(devices.some((d) => d.deviceId === "dev-2")).toBe(true)
+    // Tail probe hits index 2 → the scan continues past it, still far under a
+    // cold scan's 32 reads.
+    expect(probed.length).toBeLessThanOrEqual(8)
+  })
+
+  it("never shrinks the memo on a stale read (holes inside the known range)", async () => {
+    await scan(new Set([0, 1, 2])) // memo = 3
+    // A stale endpoint cleanly-404s indices 1 and 2 — holes, folded around.
+    const stale = await scan(new Set([0]))
+    expect(stale.map((d) => d.deviceId)).toEqual(["dev-0"])
+    // The memo must still cover index 2, so a later scan re-reads it directly.
+    const probed: number[] = []
+    const recovered = await scan(new Set([0, 1, 2]), probed)
+    expect(recovered).toHaveLength(3)
+    expect(probed).toHaveLength(5) // known range [0..2] + 2 tail probes
+  })
+
+  it("persists the length to localStorage and seeds a fresh session from it", async () => {
+    const store = new Map<string, string>()
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+    })
+    try {
+      await scan(new Set([0, 1])) // memo → localStorage
+      resetRosterScanCache() // "page reload": in-memory memo gone
+      const probed: number[] = []
+      const devices = await scan(new Set([0, 1]), probed)
+      expect(devices).toHaveLength(2)
+      expect(probed).toHaveLength(4) // seeded from localStorage, warm scan
+    } finally {
+      vi.unstubAllGlobals()
+    }
   })
 })

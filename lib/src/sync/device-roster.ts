@@ -56,6 +56,66 @@ const MAX_ROSTER_SCAN = 256
 // a single round-trip instead of K+1 serial ones.
 const ROSTER_SCAN_WINDOW = 16
 
+// How many indices to probe past a KNOWN roster length to detect new appends
+// (#400). Absent-slot probes are the expensive kind (Bee has no fast
+// authoritative 404), so once a scan has proven the roster reaches N we only
+// need a short lookahead — a transient 404 here can at worst delay discovering
+// a BRAND-NEW device until the next fold (minutes), never drop a known one.
+// Cold scans (no memo) keep the full ROSTER_SCAN_WINDOW stop margin.
+const ROSTER_TAIL_PROBES = 2
+
+/**
+ * Known roster length per `accountId:owner` — a monotonic LOWER bound learned
+ * from previous scans/appends (#400). The roster is append-only, so a once-seen
+ * length can never overshoot; it must also never shrink (a stale endpoint's
+ * truncated read must not poison later scans). Mirrored to localStorage when
+ * available so a page reload's first fold is warm too; in Node (tests, CLI) the
+ * mirror self-disables and only the in-memory memo applies.
+ */
+const knownRosterLength = new Map<string, number>()
+
+const ROSTER_LENGTH_STORAGE_PREFIX = "swarm-id-roster-len"
+
+function rosterMemoKey(accountId: string, owner: EthAddress): string {
+  return `${accountId}:${owner.toHex()}`
+}
+
+function getKnownRosterLength(key: string): number {
+  const cached = knownRosterLength.get(key)
+  if (cached !== undefined) return cached
+  if (typeof localStorage === "undefined") return 0
+  let raw: string | null
+  try {
+    raw = localStorage.getItem(`${ROSTER_LENGTH_STORAGE_PREFIX}:${key}`)
+  } catch {
+    return 0
+  }
+  const parsed = raw === null ? 0 : Number.parseInt(raw, 10)
+  const length =
+    Number.isInteger(parsed) && parsed > 0
+      ? Math.min(parsed, MAX_ROSTER_SCAN)
+      : 0
+  knownRosterLength.set(key, length)
+  return length
+}
+
+function bumpKnownRosterLength(key: string, length: number): void {
+  const capped = Math.min(length, MAX_ROSTER_SCAN)
+  if (capped <= getKnownRosterLength(key)) return
+  knownRosterLength.set(key, capped)
+  if (typeof localStorage === "undefined") return
+  try {
+    localStorage.setItem(`${ROSTER_LENGTH_STORAGE_PREFIX}:${key}`, `${capped}`)
+  } catch {
+    // Quota/permission failure only costs the cross-reload warm-up.
+  }
+}
+
+/** Test-only: forget every memoised roster length (in-memory module state). */
+export function resetRosterScanCache(): void {
+  knownRosterLength.clear()
+}
+
 // Per-read cap so an empty/unreachable slot on a slow gateway fails fast instead
 // of hanging on peer-exhaustion. A present slot retrieves well under this.
 // Matches the epoch finder's bound. An inconclusive read (timeout / 5xx /
@@ -154,7 +214,11 @@ export async function readRoster(opts: {
   owner: EthAddress
 }): Promise<Device[]> {
   const topic = rosterTopic(opts.accountId)
+  const memoKey = rosterMemoKey(opts.accountId, opts.owner)
+  const known = getKnownRosterLength(memoKey)
   let devices: Device[] = []
+  // One past the highest index seen present in THIS scan — feeds the memo.
+  let scanEnd = 0
   // Scan in parallel windows. Appends are contiguous (the same-index race
   // re-adds at the new tail, never leaving a permanent hole), so no real entry
   // lives past the true end. A hole *inside* an otherwise-present window is
@@ -162,11 +226,21 @@ export async function readRoster(opts: {
   // roster exists to survive — so we skip it and keep folding later entries
   // rather than truncating every device after it. Only a window with no present
   // entry means we may have scanned past the end of the feed.
-  for (let base = 0; base < MAX_ROSTER_SCAN; base += ROSTER_SCAN_WINDOW) {
-    const indices = Array.from(
-      { length: Math.min(ROSTER_SCAN_WINDOW, MAX_ROSTER_SCAN - base) },
-      (_, i) => BigInt(base + i),
-    )
+  //
+  // Window sizing (#400): the memoised known range [0..known) is read as ONE
+  // parallel window (all expected hits — cheap), and past it only
+  // ROSTER_TAIL_PROBES slots are probed to detect new appends. With no memo the
+  // full ROSTER_SCAN_WINDOW stop margin applies, so a cold scan (restore,
+  // first-ever fold) is exactly as conservative as before.
+  for (let base = 0; base < MAX_ROSTER_SCAN; ) {
+    const width =
+      base < known
+        ? known - base
+        : Math.min(
+            known > 0 ? ROSTER_TAIL_PROBES : ROSTER_SCAN_WINDOW,
+            MAX_ROSTER_SCAN - base,
+          )
+    const indices = Array.from({ length: width }, (_, i) => BigInt(base + i))
     let entries = await Promise.all(
       indices.map((index) =>
         readRosterEntry({ bee: opts.bee, topic, owner: opts.owner, index }),
@@ -194,9 +268,12 @@ export async function readRoster(opts: {
         ),
       )
     }
-    for (const entry of entries) {
-      if (isDevice(entry)) devices = mergeDevicesList(devices, [entry])
-    }
+    entries.forEach((entry, i) => {
+      if (isDevice(entry)) {
+        devices = mergeDevicesList(devices, [entry])
+        scanEnd = base + i + 1
+      }
+    })
     // Stop on a window with no present entry. If that window is still
     // inconclusive after the retry AND we have folded nothing, we cannot tell an
     // empty roster from an outage — surface it rather than lie "[] = no devices",
@@ -211,7 +288,9 @@ export async function readRoster(opts: {
       }
       break
     }
+    base += width
   }
+  if (devices.length > 0) bumpKnownRosterLength(memoKey, scanEnd)
   return devices
 }
 
@@ -247,6 +326,11 @@ async function appendToRoster(opts: {
   const updater = new BasicSequentialUpdater(opts.bee, topic, opts.accountKey)
   updater.setState({ nextIndex: next })
   await updater.update(refBytes, opts.target.stamper)
+  // Our own append proves the roster now reaches next+1 — warm the scan memo.
+  bumpKnownRosterLength(
+    rosterMemoKey(opts.accountId, opts.owner),
+    Number(next) + 1,
+  )
 }
 
 function isStamperTarget(

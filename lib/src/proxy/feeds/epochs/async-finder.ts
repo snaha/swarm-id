@@ -45,23 +45,23 @@ export class AsyncEpochFinder implements EpochFinder {
     after: bigint = 0n,
   ): Promise<Uint8Array | undefined> {
     // Fast path: exact timestamp updates are written at level-0 and should be
-    // retrievable without traversing potentially poisoned ancestors.
-    const exactEpoch = new EpochIndex(at, 0)
-    try {
-      const exact = await this.getEpochChunk(at, exactEpoch)
-      if (exact) {
-        return exact
-      }
-    } catch {
-      // Ignore and fall back to tree traversal.
-    }
-
-    // Start from top epoch and traverse down
-    const traversed = await this.findAtEpoch(
-      at,
-      new EpochIndex(0n, MAX_LEVEL),
-      undefined,
+    // retrievable without traversing potentially poisoned ancestors. It runs
+    // CONCURRENTLY with the traversal (#400): on a "latest as of now" read
+    // (every account fold) the exact probe virtually never hits, and awaiting
+    // it first serialised a full absent-chunk timeout before the traversal even
+    // started. Both are awaited — not raced — because an exact hit must win
+    // even when the traversal returns nothing (that IS the poisoned-ancestor
+    // recovery this fast path exists for).
+    const exactProbe = this.getEpochChunk(at, new EpochIndex(at, 0)).catch(
+      () => undefined,
     )
+    const [exact, traversed] = await Promise.all([
+      exactProbe,
+      this.findAtEpoch(at, new EpochIndex(0n, MAX_LEVEL), undefined),
+    ])
+    if (exact) {
+      return exact
+    }
     if (traversed) {
       return traversed
     }
