@@ -250,14 +250,16 @@ const AccountObjectSchemaV1 = z.object({
   // Device-local seed vault. Every account is a BIP-39 seed account: `access`
   // records how the seed is protected/unlocked on this device (passkey /
   // eth-wallet / password) and `encryptedSeed` is that seed encrypted at rest.
-  // Device-local: deliberately excluded from the sync snapshot. Absent only on
-  // a signed-out account (`signedOutAt` set) — the refinement on
-  // `AccountSchemaV1` enforces the pairing.
+  // Device-local: deliberately excluded from the sync snapshot. Optional
+  // because a signed-out account has no vault — but note the TYPE does not
+  // pair the three vault fields (they are independently optional); writers
+  // must keep them consistent themselves, and `AccountSchemaV1`'s refinement
+  // only quarantines an inconsistent record at load time (it is skipped, not
+  // repaired).
   access: AccessMethodSchemaV1.optional(),
   // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
-  // Non-empty, even-length hex — never blank while signed in. Width varies with
-  // the seed size (12-word seed → 88 chars, 24-word → 120), so it is not a
-  // fixed length.
+  // Non-empty, even-length hex whenever present. Width varies with the seed
+  // size (12-word seed → 88 chars, 24-word → 120), so it is not a fixed length.
   encryptedSeed: z
     .string()
     .regex(/^([0-9a-f]{2})+$/)
@@ -265,7 +267,8 @@ const AccountObjectSchemaV1 = z.object({
   // Set when the user signed this account out on THIS device: the seed vault
   // (`access` + `encryptedSeed`) was wiped, but the account row stays so the
   // user can see it and sign back in (recovery phrase + new access method).
-  // Device-local like the vault itself — excluded from sync/backup projections.
+  // Device-local like the vault itself — excluded from the `AccountData`
+  // projection that backup files and the sync feed serialize.
   signedOutAt: z.number().optional(),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
@@ -298,10 +301,13 @@ const AccountObjectSchemaV1 = z.object({
 
 /**
  * Parse entrypoint for stored account records: the base object plus the
- * vault-consistency invariant — a signed-in account (no `signedOutAt`) always
- * carries BOTH vault fields, a signed-out one carries NEITHER. Keeps the
- * "never blank" guarantee for signed-in accounts now that the fields are
- * schema-optional.
+ * vault-consistency check — a signed-in account (no `signedOutAt`) carries
+ * BOTH vault fields, a signed-out one carries NEITHER. This only validates at
+ * parse (load) time: writes are not checked, and the accounts loader SKIPS a
+ * violating record rather than failing the document — so writers (account
+ * creation, `signOut`, `setAccess`) are responsible for keeping the trio
+ * consistent; this refinement is the backstop that keeps a corrupt record
+ * from loading as a half-signed-out account.
  */
 export const AccountSchemaV1 = AccountObjectSchemaV1.superRefine(
   (account, ctx) => {
