@@ -155,6 +155,43 @@ export function rosterIdentifier(topic: Topic, index: bigint): Identifier {
   )
 }
 
+const HTTP_NOT_FOUND = 404
+
+/**
+ * Ask Bee's `GET /soc/{owner}/{id}` (raw request — bee-js has no GET wrapper)
+ * whether a roster slot is present. Used only after the `/chunks`-based read
+ * failed ambiguously: a small cluster answers an ABSENT chunk on `/chunks` with
+ * a persistent 500, never 404 (#457), so `/soc` is the only endpoint whose 404
+ * is authoritative there. Returns the SOC payload when present, `undefined` for
+ * a validated absent slot, or {@link ROSTER_READ_INCONCLUSIVE}.
+ *
+ * Only Bee's OWN 404 (a JSON body with `code: 404`) confirms absence: an
+ * endpoint that doesn't route `GET /soc` at all (the public gateway) 404s every
+ * probe with a plain-text "Not Found" — trusting that would read a mid-outage
+ * roster as empty and truncate it (device clobber).
+ */
+async function probeSocSlot(opts: {
+  bee: Bee
+  owner: EthAddress
+  identifier: Identifier
+}): Promise<Uint8Array | undefined | typeof ROSTER_READ_INCONCLUSIVE> {
+  const url = `${opts.bee.url}/soc/${opts.owner.toHex()}/${opts.identifier.toHex()}`
+  try {
+    const response = await withTimeout(
+      fetch(url),
+      ROSTER_READ_TIMEOUT_MS,
+      "roster /soc probe timed out",
+    )
+    if (response.ok) return new Uint8Array(await response.arrayBuffer())
+    if (response.status !== HTTP_NOT_FOUND) return ROSTER_READ_INCONCLUSIVE
+    const body = (await response.json()) as { code?: unknown }
+    return body.code === HTTP_NOT_FOUND ? undefined : ROSTER_READ_INCONCLUSIVE
+  } catch {
+    // Network failure, timeout, or a non-JSON 404 body — all inconclusive.
+    return ROSTER_READ_INCONCLUSIVE
+  }
+}
+
 /**
  * Read one roster entry (the device record) at `index`. Returns the `Device`
  * when present, `undefined` for a clean 404 / garbage blob (a confirmed-empty
@@ -178,10 +215,21 @@ async function readRosterEntry(opts: {
     )
     refBytes = soc.payload.toUint8Array()
   } catch (error) {
-    // Bee's `/soc` returns a clean 404 for a genuinely-absent slot (end-of-feed);
-    // a timeout / 5xx / network error is inconclusive (retried at the stop
-    // boundary) — NOT a confirmed empty slot.
-    return isNotFoundError(error) ? undefined : ROSTER_READ_INCONCLUSIVE
+    // A clean 404 from the `/chunks` read is a genuinely-absent slot
+    // (end-of-feed). Anything else is ambiguous THERE — on a small cluster an
+    // absent chunk 500s persistently (#457) — so ask `GET /soc`, whose 404 is
+    // authoritative, before surfacing the read as inconclusive.
+    if (isNotFoundError(error)) return undefined
+    const probe = await probeSocSlot({
+      bee: opts.bee,
+      owner: opts.owner,
+      identifier,
+    })
+    if (probe instanceof Uint8Array) {
+      refBytes = probe
+    } else {
+      return probe
+    }
   }
   // Split the blob download from the parse: a download failure is a read outcome
   // (404 = empty, else = inconclusive), whereas a parse failure is a genuinely

@@ -363,6 +363,214 @@ describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
   })
 })
 
+/**
+ * #457 — on a small cluster, Bee's `/chunks` answers an ABSENT chunk with a
+ * persistent 500 ("read chunk failed"), never 404, so the `/chunks`-based SOC
+ * read alone can never confirm an empty slot. `readRosterEntry` must then ask
+ * `GET /soc/{owner}/{id}` (raw fetch — bee-js has no GET wrapper), whose
+ * authoritative JSON 404 confirms absence. Only that validated 404 may stop the
+ * scan; a route-missing 404 (the public gateway's plain-text "Not Found"), any
+ * other status, or a network failure stays inconclusive (#438 fencing).
+ */
+describe("readRoster — /soc absence probe on an inconclusive /chunks read (#457)", () => {
+  const BEE_URL = "http://bee.test"
+
+  // Factories (a Response body is single-use; the retry round re-fetches).
+  type SocProbeResponse = () => Response | Error | "hang"
+
+  /**
+   * Small-cluster fake: `makeSOCReader` (the `/chunks` path) throws 500 for
+   * every slot NOT in `chunksPresent`; the stubbed global fetch serves
+   * `GET /soc/{owner}/{id}` from `socResponses` by roster index (defaulting to
+   * bee's authoritative JSON 404). Returns the fetch spy for call assertions.
+   */
+  function fakeSmallClusterBee(opts: {
+    chunksPresent?: Set<number>
+    socResponses?: Map<number, SocProbeResponse>
+  }) {
+    const topic = rosterTopic(ACCOUNT_ID)
+    const identToIndex = new Map<string, number>()
+    for (let i = 0; i < 64; i++) {
+      identToIndex.set(rosterIdentifier(topic, BigInt(i)).toHex(), i)
+    }
+    const fetchSpy = vi.fn(async (url: string | URL) => {
+      const match = /\/soc\/[0-9a-f]+\/([0-9a-f]+)$/.exec(String(url))
+      const index = match ? identToIndex.get(match[1]) : undefined
+      if (index === undefined) throw new Error(`unexpected fetch: ${url}`)
+      const response = (opts.socResponses?.get(index) ?? beeJson404)()
+      if (response === "hang") return new Promise<Response>(() => {})
+      if (response instanceof Error) throw response
+      return response
+    })
+    vi.stubGlobal("fetch", fetchSpy)
+    const bee = {
+      url: BEE_URL,
+      makeSOCReader: () => ({
+        download: async (identifier: { toHex(): string }) => {
+          const index = identToIndex.get(identifier.toHex())
+          if (index === undefined || !opts.chunksPresent?.has(index)) {
+            throw serverError500() // small cluster: absent chunk = 500, never 404
+          }
+          return { payload: { toUint8Array: () => refForIndex(index) } }
+        },
+      }),
+      downloadChunk: vi.fn(async () => {
+        throw serverError500()
+      }),
+    }
+    return { bee, fetchSpy }
+  }
+
+  /** Bee's authoritative absent-slot answer on `GET /soc`. */
+  function beeJson404(): Response {
+    return new Response(
+      JSON.stringify({
+        code: 404,
+        message: "requested chunk cannot be retrieved",
+      }),
+      {
+        status: 404,
+        headers: { "content-type": "application/json; charset=utf-8" },
+      },
+    )
+  }
+
+  /** A router that doesn't know the /soc route (the public gateway). */
+  function routeMiss404(): Response {
+    return new Response("Not Found", {
+      status: 404,
+      headers: { "content-type": "text/plain; charset=utf-8" },
+    })
+  }
+
+  function socPayload200(index: number): Response {
+    return new Response(new Uint8Array(refForIndex(index)), { status: 200 })
+  }
+
+  beforeEach(() => {
+    mockDownloadData.mockReset()
+    mockDownloadData.mockImplementation((_bee: unknown, refHex: string) => {
+      const index = parseInt(refHex.slice(0, 2), 16)
+      return new TextEncoder().encode(JSON.stringify(makeDevice(index)))
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("confirms an empty roster via /soc 404s: returns [] instead of throwing", async () => {
+    // The #457 deadlock: fresh account, every /chunks probe 500s. The /soc
+    // probe's JSON 404 confirms every slot empty → [] (today: inconclusive →
+    // RosterScanInconclusiveError → bootstrap never happens).
+    const { bee } = fakeSmallClusterBee({})
+    await expect(
+      readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
+    ).resolves.toEqual([])
+  })
+
+  it("lets ensureInRoster proceed to the bootstrap append on a confirmed-empty roster", async () => {
+    // Mirror of the "skips the append" test: with /soc confirming empty, the
+    // append must START (its sequential finder reads via downloadChunk).
+    const { bee } = fakeSmallClusterBee({})
+    await ensureInRoster({
+      bee: bee as never,
+      accountKey: new PrivateKey("11".repeat(32)),
+      owner: OWNER,
+      encryptionKey: "00".repeat(32),
+      accountId: ACCOUNT_ID,
+      device: makeDevice(0),
+      target: { mode: "subsidised" } as never, // append stops before uploading
+    })
+    expect(bee.downloadChunk).toHaveBeenCalled()
+  })
+
+  it("folds a device the /chunks blip hid when /soc serves the slot (200)", async () => {
+    // Slot 0 present but its /chunks read 500s; /soc returns the payload → the
+    // device is recovered, and the clean /soc 404 on the next window ends the scan.
+    const { bee } = fakeSmallClusterBee({
+      socResponses: new Map([[0, () => socPayload200(0)]]),
+    })
+    const devices = await readRoster({
+      bee: bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    expect(devices.map((d) => d.deviceId)).toEqual(["dev-0"])
+  })
+
+  it("treats a route-missing plain-text 404 as inconclusive, not absent", async () => {
+    // A gateway that doesn't route GET /soc 404s EVERY probe. Trusting it would
+    // read a mid-outage roster as empty (truncation → clobber); it must stay
+    // inconclusive and surface as a scan failure when nothing folded.
+    const { bee } = fakeSmallClusterBee({
+      socResponses: new Map(
+        Array.from({ length: 64 }, (_, i) => [i, routeMiss404] as const),
+      ),
+    })
+    await expect(
+      readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
+    ).rejects.toBeInstanceOf(RosterScanInconclusiveError)
+  })
+
+  it("treats a /soc network error as inconclusive", async () => {
+    const { bee } = fakeSmallClusterBee({
+      socResponses: new Map(
+        Array.from(
+          { length: 64 },
+          (_, i) => [i, () => new TypeError("fetch failed")] as const,
+        ),
+      ),
+    })
+    await expect(
+      readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
+    ).rejects.toBeInstanceOf(RosterScanInconclusiveError)
+  })
+
+  it("treats a hanging /soc probe as inconclusive (timeout)", async () => {
+    vi.useFakeTimers()
+    try {
+      const { bee } = fakeSmallClusterBee({
+        socResponses: new Map(
+          Array.from(
+            { length: 64 },
+            (_, i) => [i, () => "hang" as const] as const,
+          ),
+        ),
+      })
+      const promise = readRoster({
+        bee: bee as never,
+        accountId: ACCOUNT_ID,
+        owner: OWNER,
+      })
+      const assertion = expect(promise).rejects.toBeInstanceOf(
+        RosterScanInconclusiveError,
+      )
+      // First round + the one retry, each bounded by the per-read timeout.
+      await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS)
+      await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS)
+      await assertion
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("never touches /soc when /chunks answers (present slots and clean 404s)", async () => {
+    // The production-gateway hot path: /chunks 200s for present slots and the
+    // fakeBee helper's clean 404 ends the scan — the raw probe must not fire.
+    const fetchSpy = vi.fn()
+    vi.stubGlobal("fetch", fetchSpy)
+    const bee = fakeBee(new Set([0, 1]))
+    const devices = await readRoster({
+      bee: bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    expect(devices).toHaveLength(2)
+    expect(fetchSpy).not.toHaveBeenCalled()
+  })
+})
+
 describe("readRoster — known-length memo (#400)", () => {
   const scan = (present: Set<number>, probed?: number[]) =>
     readRoster({
