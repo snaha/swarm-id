@@ -782,6 +782,11 @@ describe("BatchWriteCoordinator — error classification", () => {
 })
 
 describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
+  // The idle-yield exists to hand the slot to a WAITING PEER; it is gated on a
+  // rival being known (a solo device re-paying the cold acquire after every
+  // 30s pause was pure UX cost). These tests declare one.
+  const RIVAL_DEPS = { knownDeviceIds: () => [SELF, "device-rival-1"] }
+
   it("yields an idle lease: releases, unbinds, and emits the transition", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
@@ -790,6 +795,7 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
         onLeaseChange,
+        ...RIVAL_DEPS,
       }),
     )
     const internals = coordinator as unknown as Internals
@@ -809,12 +815,38 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
     })
   })
 
+  it("keeps an idle lease when no rival is known (solo device)", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        // knownDeviceIds omitted — no rival could take the freed slot, so a
+        // yield would only force this device back through the cold acquire.
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+    const lease = makeLease({ partition: 0 })
+    internals.partitionLease = lease
+    internals.activeUploadCount = 0
+    internals.lastLeaseActivityAt = 0 // idle for longer than IDLE_YIELD_MS
+
+    await internals.refreshTick(lease)
+
+    expect(lease.release).not.toHaveBeenCalled()
+    expect(stamper.unbindPartition).not.toHaveBeenCalled()
+    expect(coordinator.currentPartition).toBe(0)
+    // The tick fell through to the normal renewal instead.
+    expect(lease.refresh).toHaveBeenCalled()
+  })
+
   it("aborts the yield when an upload slipped in while the tick queued on the lock", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        ...RIVAL_DEPS,
       }),
     )
     const internals = coordinator as unknown as Internals
@@ -847,6 +879,7 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
         stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        ...RIVAL_DEPS,
       }),
     )
     const internals = coordinator as unknown as Internals

@@ -837,6 +837,15 @@ export class BatchWriteCoordinator {
     // in flight, voluntarily release so a waiting peer takes the slot without
     // waiting out the TTL. We re-acquire on the next upload.
     //
+    // Gated on a KNOWN RIVAL: the yield only ever benefits a waiting peer, and
+    // for a solo device it converts every >30s pause into a full cold acquire
+    // on the next upload. With no rival in the registry the holder keeps its
+    // lease (renewed below) and later uploads hit the TTL-optimism fast path.
+    // A brand-new peer regains the yield as soon as the roster syncs it into
+    // `knownDeviceIds` (every acquire triggers `refreshKnownDeviceIds`); until
+    // then it can still take the OTHER partition, or this one via the TTL if
+    // this tab closes.
+    //
     // The yield itself MUST run under the write lock: this tick is off-lock, so
     // an upload can enter `withWrite` between the idle check here and the
     // unbind inside `yieldIdleLease` — releasing the partition to peers and
@@ -845,7 +854,11 @@ export class BatchWriteCoordinator {
     // Holding the lock excludes in-flight uploads; the re-checks inside cover
     // an upload that completed (or a demote/teardown that ran) while this tick
     // waited for the lock.
+    const rivalKnown = (this.deps.knownDeviceIds?.() ?? []).some(
+      (id) => id !== this.deps.deviceId,
+    )
     if (
+      rivalKnown &&
       this.activeUploadCount === 0 &&
       Date.now() - this.lastLeaseActivityAt >= IDLE_YIELD_MS
     ) {

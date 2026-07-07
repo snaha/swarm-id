@@ -166,6 +166,12 @@ type PointerBucketRead =
   | undefined
   | typeof POINTER_READ_TIMED_OUT
 
+/** Result of a `readStatePointer` lookup (see its doc for `inconclusive`). */
+export interface StatePointerLookup {
+  pointer?: { referenceHex: string }
+  inconclusive: boolean
+}
+
 /** `floor(nowMs / STATE_POINTER_EPOCH_MS)` — the current state-pointer epoch bucket. */
 export function statePointerEpochBucket(nowMs: number): number {
   return Math.floor(nowMs / STATE_POINTER_EPOCH_MS)
@@ -300,7 +306,7 @@ export function statePointerAddress(
  * `LEASE_TTL_MS + POINTER_LOOKUP_SLACK_BUCKETS·EPOCH` past its last heartbeat
  * resumes from zero.
  */
-async function readStatePointer(opts: {
+export async function readStatePointer(opts: {
   bee: Bee
   owner: EthAddress
   swarmEncryptionKey: Uint8Array
@@ -308,7 +314,7 @@ async function readStatePointer(opts: {
   partition: number
   nowMs: number
   holderLeasedUntilMs?: number
-}): Promise<{ pointer?: { referenceHex: string }; inconclusive: boolean }> {
+}): Promise<StatePointerLookup> {
   const topic = makePartitionStateTopic(opts.batchId, opts.partition)
   const buckets = new Set<number>()
   const cur = statePointerEpochBucket(opts.nowMs)
@@ -433,6 +439,16 @@ export async function readPartitionState(
      * per-device-skew tests (#385).
      */
     nowMs?: number
+    /**
+     * A `readStatePointer` result the caller already fetched (speculatively,
+     * overlapped with its lock/beacon scan) for this SAME
+     * (owner, batch, partition) with the SAME `nowMs` and NO
+     * `holderLeasedUntilMs` span. Only valid when `holderLeasedUntilMs` is
+     * undefined here too — identical inputs make it exactly the lookup this
+     * function would perform, so all fail-safe classification below applies
+     * unchanged. When provided, the pointer lookup is skipped.
+     */
+    prefetchedPointer?: StatePointerLookup
   },
   knownReferenceHex?: string,
 ): Promise<{
@@ -477,8 +493,13 @@ export async function readPartitionState(
     nowMs = Date.now(),
   } = opts
 
-  const { pointer, inconclusive: pointerInconclusive } = await readStatePointer(
-    {
+  // A prefetched lookup is only equivalent when no lease span widens the
+  // bucket set — enforce rather than trust the caller.
+  const prefetched =
+    holderLeasedUntilMs === undefined ? opts.prefetchedPointer : undefined
+  const { pointer, inconclusive: pointerInconclusive } =
+    prefetched ??
+    (await readStatePointer({
       bee,
       owner,
       swarmEncryptionKey,
@@ -486,8 +507,7 @@ export async function readPartitionState(
       partition,
       nowMs,
       holderLeasedUntilMs,
-    },
-  )
+    }))
 
   if (!pointer) {
     // No pointer in any candidate bucket (around `now` or the holder's

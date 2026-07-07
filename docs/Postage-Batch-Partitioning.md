@@ -159,7 +159,17 @@ lease (`LEASE_TTL_MS`) refreshed every 10 s (`LEASE_REFRESH_MS`). `PartitionLeas
   detected via the per-device **intent/presence beacons** and the deviceId-independent
   **occupancy beacon** (fresh per-epoch addresses that stay retrievable on a gateway whose
   static lock-SOC cache is frozen), then claim the first free/expired partition from this
-  device's deterministic home offset.
+  device's deterministic home offset. All four read channels (locks, presence, occupancy,
+  plus a **speculative state-pointer read** for the home partition) fire **concurrently** —
+  classification is ordered after the barrier — so a cold acquire pays ~one read-timeout,
+  not four stacked ones. Every lock read on the acquire path is timeout-bounded
+  (`SYNC_READ_TIMEOUT_MS`), and the claim (`acquirePartitionLock`) skips its pre-write
+  re-read (`skipInitialRead`) — the scan just did it. **Solo-clean fast path:** when no
+  rival is known and no channel shows any trace of another device (no holder, no expired
+  lock, no sentinel, no unreadable lock), the claim's guard window is skipped; the residual
+  unknown-peer race stays backstopped by the refresh-tick displacement check. The claim-time
+  presence/occupancy beacon publish is detached from the acquire (best-effort, ordered
+  before the next `refresh()`/`release()`).
 - **Intent round.** Only a _fresh_ claim of a free/expired slot _with a known rival_ runs
   the intent round (a short per-epoch announce + poll at `INTENT_GUARD_WINDOW_MS`) so two
   disjoint-gateway contenders agree on one winner before binding. A re-acquire of our own
@@ -174,7 +184,10 @@ lease (`LEASE_TTL_MS`) refreshed every 10 s (`LEASE_REFRESH_MS`). `PartitionLeas
 - **Cold re-entry.** If the local lease could have lapsed, the throttled freshness check
   re-reads the lock SOC once before writing; still ours → write, taken → demote+re-acquire.
 - **Idle yield.** After `IDLE_YIELD_MS` (30 s) with no upload and none in flight, the holder
-  voluntarily releases so a waiting peer takes the slot without waiting out the TTL.
+  voluntarily releases so a waiting peer takes the slot without waiting out the TTL. Gated on
+  a **known rival**: a solo device keeps its lease (renewed each tick) so later uploads hit
+  the TTL-optimism fast path instead of re-paying the cold acquire after every pause; a
+  newly-joined peer regains the yield once the roster syncs it into `knownDeviceIds`.
 - **Self-demote.** The refresh tick extends the local lease only on a _confirmed_ hold
   (write-verified renewal, or a read-verified lock SOC still naming us). An unconfirmable
   renewal tolerates a short blip but, once the lease lapses past skew, fences in-flight

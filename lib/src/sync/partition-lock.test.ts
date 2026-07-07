@@ -903,6 +903,79 @@ describe("acquirePartitionLock — shouldAbort", () => {
   })
 })
 
+describe("acquirePartitionLock — bounded reads / skipInitialRead", () => {
+  /** Make every SOC read hang forever (writes still work via mocked fetch). */
+  function hangReads(): void {
+    bee.downloadChunk = () => new Promise<never>(() => {})
+  }
+
+  /** Count SOC reads while delegating to the real mock store. */
+  function countReads(): { count: () => number } {
+    let reads = 0
+    const original = bee.downloadChunk.bind(bee)
+    bee.downloadChunk = (reference: string) => {
+      reads++
+      return original(reference)
+    }
+    return { count: () => reads }
+  }
+
+  it("completes despite HANGING reads (bounded initial + verify → optimistic acquired)", async () => {
+    hangReads()
+    const result = await acquirePartitionLock({
+      ...commonOpts(DEVICE_A),
+      readTimeoutMs: 30,
+    })
+    // Initial read timed out → treated as absent (same as any other read
+    // failure) → claim written; verify timed out → the documented optimistic
+    // "couldn't confirm our own write" branch.
+    expect(result.outcome).toBe("acquired")
+    expect(result.payload?.holderDeviceId).toBe(DEVICE_A)
+  })
+
+  it("performs only the verify read when skipInitialRead is set", async () => {
+    const reads = countReads()
+    const result = await acquirePartitionLock({
+      ...commonOpts(DEVICE_A),
+      skipInitialRead: true,
+    })
+    expect(result.outcome).toBe("acquired")
+    expect(reads.count()).toBe(1) // verify only — no duplicate initial read
+  })
+
+  it("still loses the race via the verify read when skipInitialRead is set", async () => {
+    // The skip only removes the duplicate pre-write read (the caller's scan
+    // already classified the partition); the guard-window verify must still
+    // catch a racing higher-generation claim.
+    const wait = controlledWait()
+    const acquireA = acquirePartitionLock({
+      ...commonOpts(DEVICE_A, { now: () => 1_000_000 }),
+      skipInitialRead: true,
+      wait: wait.fn,
+    })
+    await wait.triggered
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: PARTITION,
+      payload: {
+        holderDeviceId: DEVICE_B,
+        generation: {
+          timestampMs: 2_000_000,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+        },
+        acquiredAt: 2_000_000,
+        leasedUntil: 2_000_000 + TTL_MS,
+      },
+    })
+    wait.release()
+    const result = await acquireA
+    expect(result.outcome).toBe("lost-race")
+  })
+})
+
 describe("releasePartitionLock — generation fencing", () => {
   const NOW = 1_000_000
 

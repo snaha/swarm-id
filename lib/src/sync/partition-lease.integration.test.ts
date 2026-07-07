@@ -1697,6 +1697,11 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
     expect(
       (await leaseC.acquire({ partitionCount: PARTITION_COUNT })).partition,
     ).toBe(1)
+    // The claim-time beacon publish is detached from acquire; B arrives
+    // "later" in this scenario, so let C's beacon land before B scans. (The
+    // in-flight window is covered in production by the refresh-tick
+    // displacement backstop, not by this acquire-time guard.)
+    await leaseC.beaconPublishSettled
 
     // Frozen-cache simulation: B's gateway still serves B's OWN stale, expired
     // lock for p1 instead of C's live one (the logs show B reading "EXPIRED
@@ -1732,6 +1737,72 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
 
     expect(rB.partition).toBeUndefined()
     expect(rB.isReadOnly).toBe(true)
+  })
+})
+
+describe("PartitionLease.acquire — solo-clean guard skip", () => {
+  const BIG_GUARD_MS = 1_500
+
+  function makeGuardedLease(opts: {
+    deviceId: string
+    knownDeviceIds?: () => string[]
+  }): PartitionLease {
+    return new PartitionLease({
+      bee: bee as unknown as Bee,
+      deviceId: opts.deviceId,
+      batchId: TEST_BATCH_ID,
+      batchDepth: TEST_BATCH_DEPTH,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      backupSigner: BACKUP_SIGNER,
+      stamper: createMockStamper() as unknown as Stamper,
+      guardMs: BIG_GUARD_MS,
+      knownDeviceIds: opts.knownDeviceIds,
+      intentGuardWindowMs: 0,
+    })
+  }
+
+  it("skips the guard window when no rival is known and no channel shows another device", async () => {
+    const lease = makeGuardedLease({ deviceId: DEVICE_A })
+    const t0 = Date.now()
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const elapsed = Date.now() - t0
+    expect(result.partition).not.toBeUndefined()
+    expect(result.isReadOnly).toBe(false)
+    // Well under the guard: the solo-clean path must not sleep it out.
+    expect(elapsed).toBeLessThan(BIG_GUARD_MS / 2)
+  })
+
+  it("keeps the guard window when a release sentinel shows another device existed", async () => {
+    // A released partition is claimable, but the sentinel is evidence of a
+    // second device — the contention guard must stay.
+    const releaser = makeLease({
+      deviceId: "device-releaser-999",
+      bee: bee as unknown as Bee,
+    })
+    const acquired = await releaser.acquire({
+      partitionCount: PARTITION_COUNT,
+    })
+    expect(acquired.partition).not.toBeUndefined()
+    await releaser.release(new Uint32Array(NUM_BUCKETS))
+
+    const lease = makeGuardedLease({ deviceId: DEVICE_A })
+    const t0 = Date.now()
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const elapsed = Date.now() - t0
+    expect(result.partition).not.toBeUndefined()
+    expect(elapsed).toBeGreaterThanOrEqual(BIG_GUARD_MS)
+  })
+
+  it("keeps the guard window when a rival deviceId is known", async () => {
+    const lease = makeGuardedLease({
+      deviceId: DEVICE_A,
+      knownDeviceIds: () => [DEVICE_A, DEVICE_B],
+    })
+    const t0 = Date.now()
+    const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const elapsed = Date.now() - t0
+    expect(result.partition).not.toBeUndefined()
+    expect(elapsed).toBeGreaterThanOrEqual(BIG_GUARD_MS)
   })
 })
 
