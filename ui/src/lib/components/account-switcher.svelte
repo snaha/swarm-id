@@ -4,30 +4,39 @@
 -->
 
 <script lang="ts">
-  import { EthAddress } from '@ethersphere/bee-js'
-  import Check from '@lucide/svelte/icons/check'
+  import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
+  import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
+
+  import { resolve } from '$app/paths'
 
   import Polycon from '$lib/components/polycon.svelte'
   import { Button } from '$lib/components/ui/button'
+  import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
-  import { truncateAddress } from '$lib/utils'
-
-  const ITEM_CLASS =
-    'flex h-9 w-full cursor-pointer items-center gap-2 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
+  import { notImplemented, truncateAddress } from '$lib/utils'
 
   interface Props {
     account: Account
+    /** Called when the user picks "Manage account" (opens the Account tab). */
+    onmanage?: () => void
   }
 
-  let { account }: Props = $props()
+  let { account, onmanage }: Props = $props()
 
   let open = $state(false)
   let container = $state<HTMLDivElement>()
+  /** Replaces the panel actions with the create/import choice. */
+  let addingAccount = $state(false)
+
+  const others = $derived(
+    accountsStore.accounts.filter((candidate) => !candidate.id.equals(account.id)),
+  )
 
   function close() {
     open = false
+    addingAccount = false
   }
 
   function onWindowPointerDown(event: PointerEvent) {
@@ -42,9 +51,14 @@
     }
   }
 
-  function switchTo(id: EthAddress) {
-    sessionStore.setCurrentAccount(id)
+  function select(candidate: Account) {
+    sessionStore.setCurrentAccount(candidate.id)
     close()
+  }
+
+  function manage() {
+    close()
+    onmanage?.()
   }
 </script>
 
@@ -57,7 +71,7 @@
     aria-label="Switch account"
     aria-haspopup="menu"
     aria-expanded={open}
-    onclick={() => (open = !open)}
+    onclick={() => (open ? close() : (open = true))}
   >
     <span class="flex flex-col items-end">
       <span class="text-sm font-medium">{account.name}</span>
@@ -72,28 +86,69 @@
     <div
       role="menu"
       tabindex="-1"
-      class="bg-popover text-popover-foreground absolute top-full right-0 z-50 mt-2 min-w-56 rounded-lg border p-1 shadow-md"
+      class="bg-popover text-popover-foreground absolute top-0 right-0 z-50 flex w-80 flex-col gap-4 rounded-lg border p-2.5 shadow-md"
     >
-      <div class="text-muted-foreground px-1.5 py-1 text-xs">Account</div>
-      {#each accountsStore.accounts as candidate (candidate.id.toHex())}
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={candidate.id.equals(account.id)}
-          class={ITEM_CLASS}
-          onclick={() => switchTo(candidate.id)}
-        >
-          <Polycon
-            value={candidate.id.toHex()}
-            size={24}
-            class="shrink-0 overflow-hidden rounded-md"
-          />
-          <span class="flex-1 truncate whitespace-nowrap">{candidate.name}</span>
-          {#if candidate.id.equals(account.id)}
-            <Check class="size-4 shrink-0" />
+      <div class="flex flex-col gap-2">
+        <div class="flex flex-col items-center gap-2 pt-0.5">
+          <Polycon value={account.id.toHex()} size={48} class="overflow-hidden rounded-lg" />
+          <div class="flex flex-col items-center">
+            <p class="text-sm font-medium">{account.name}</p>
+            <p class="text-muted-foreground text-xs">{truncateAddress(account.id.toChecksum())}</p>
+          </div>
+        </div>
+
+        <Button variant="outline" class="w-full" onclick={manage}>Manage account</Button>
+        <Button variant="outline" class="w-full" onclick={notImplemented}>Sign out</Button>
+      </div>
+
+      {#if addingAccount}
+        <div class="flex flex-col gap-2">
+          <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_NEW)}>
+            Create a new account
+          </Button>
+          <Button variant="ghost" size="sm" class="w-full" href={resolve(routes.ACCOUNT_IMPORT)}>
+            I already have an account
+          </Button>
+        </div>
+      {:else}
+        {#if others.length > 0}
+          <div class="flex flex-col">
+            {#each others as candidate (candidate.id.toHex())}
+              <button
+                type="button"
+                role="menuitem"
+                class="hover:bg-muted focus-visible:bg-muted flex w-full cursor-pointer items-center gap-2 rounded-md p-1 text-left outline-none"
+                onclick={() => select(candidate)}
+              >
+                <Polycon
+                  value={candidate.id.toHex()}
+                  size={36}
+                  class="shrink-0 overflow-hidden rounded-md"
+                />
+                <span class="flex min-w-0 flex-1 flex-col">
+                  <span class="truncate text-sm font-medium">{candidate.name}</span>
+                  <span class="text-muted-foreground text-xs">
+                    {truncateAddress(candidate.id.toChecksum())}
+                  </span>
+                </span>
+              </button>
+            {/each}
+          </div>
+        {/if}
+
+        <div class="flex flex-col gap-2">
+          {#if others.length > 0}
+            <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>
+              <UserRoundMinus />
+              Remove an account
+            </Button>
           {/if}
-        </button>
-      {/each}
+          <Button variant="ghost" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
+            <UserRoundPlus />
+            Add an account
+          </Button>
+        </div>
+      {/if}
     </div>
   {/if}
 </div>
