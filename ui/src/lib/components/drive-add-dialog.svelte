@@ -17,7 +17,6 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
-  import { unlockAccount } from '$lib/crypto/unlock'
   import {
     LIFESPAN_UNIT_OPTIONS,
     type LifespanUnit,
@@ -52,7 +51,7 @@
   let { account, onClose, onAdded }: Props = $props()
 
   type Storage = 'new' | 'existing'
-  type Phase = 'form' | 'unlock' | 'pending' | 'error' | 'unconfirmed'
+  type Phase = 'form' | 'pending' | 'error' | 'unconfirmed'
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -65,7 +64,6 @@
   let phase = $state<Phase>('form')
   let pendingLabel = $state('')
   let errorMessage = $state('')
-  let password = $state('')
 
   let currentPrice = $state<bigint | undefined>(undefined)
   // Bumped on cancel/close so a late ceremony or widget callback can't complete.
@@ -126,16 +124,6 @@
     return estimateBzz ? `Estimated cost ≈ ${estimateBzz} BZZ` : 'Final cost is shown at payment.'
   })
 
-  function unlockLabel() {
-    if (account.access.type === 'eth-wallet') {
-      return 'Confirm with wallet'
-    }
-    if (account.access.type === 'password') {
-      return 'Verifying password…'
-    }
-    return 'Confirm with passkey'
-  }
-
   // Best-effort: the price only feeds the cost estimate here (and the TTL guess
   // for a settled purchase); the purchase itself never gates on it.
   $effect(() => {
@@ -157,52 +145,17 @@
 
   function proceed() {
     errorMessage = ''
-    // A user-supplied signer needs no account secret — attach the external
-    // batch directly, skipping the unlock ceremony.
-    if (storage === 'existing' && pastedSignerKey) {
-      void attachExisting()
-      return
-    }
-    if (account.access.type === 'password') {
-      phase = 'unlock'
-      return
-    }
-    void unlock()
-  }
-
-  async function unlock() {
-    const myAttempt = ++attempt
-    phase = 'pending'
-    pendingLabel = unlockLabel()
-    try {
-      const unlocked = await unlockAccount(
-        account,
-        account.access.type === 'password' ? password : undefined,
-      )
-      if (myAttempt !== attempt) {
-        unlocked.fill(0)
-        return
-      }
-      password = ''
-      await runWithEntropy(unlocked)
-    } catch (caught) {
-      if (myAttempt !== attempt) {
-        return
-      }
-      errorMessage = caught instanceof Error ? caught.message : 'Unlock failed.'
-      phase = 'error'
-    }
-  }
-
-  async function runWithEntropy(seed: Uint8Array) {
+    // The batch owner is a deterministic function of the account's (plaintext)
+    // derivation key, so no unlock is needed — buying spends real money in the
+    // widget, which is confirmation enough.
     if (storage === 'existing') {
-      await attachExisting(seed)
+      void attachExisting()
     } else {
-      await purchaseNew(seed)
+      void purchaseNew()
     }
   }
 
-  async function purchaseNew(seed: Uint8Array) {
+  async function purchaseNew() {
     const myAttempt = ++attempt
     phase = 'pending'
     // The popup-less /dev mock settles locally — telling the user to look for a
@@ -215,8 +168,7 @@
     // batch-ID-derived label.
     const driveName = name.trim() || undefined
     try {
-      const { signerKey, destination } = await derivePostageSigner(seed)
-      seed.fill(0)
+      const { signerKey, destination } = await derivePostageSigner(account.derivationKey)
       // The user may have cancelled during the derivation — bail before the
       // popup opens, or a payment window would appear after they backed out.
       if (myAttempt !== attempt) {
@@ -271,27 +223,17 @@
     }
   }
 
-  async function attachExisting(seed?: Uint8Array) {
+  async function attachExisting() {
     const myAttempt = ++attempt
     phase = 'pending'
     pendingLabel = 'Looking up the batch…'
     const driveName = name.trim() || undefined
     try {
       // A pasted signer key attaches an externally-owned batch; otherwise derive
-      // this account's signer. Without a pasted key the `seed` (from unlock) is
-      // required — guard it so no `as` cast is needed.
-      let signerKey: PrivateKey
-      if (pastedSignerKey) {
-        signerKey = new PrivateKey(strip0x(pastedSignerKey))
-      } else {
-        if (!seed) {
-          errorMessage = 'Unlock is required to derive the signer key.'
-          phase = 'error'
-          return
-        }
-        signerKey = (await derivePostageSigner(seed)).signerKey
-        seed.fill(0)
-      }
+      // this account's signer from its (plaintext) derivation key.
+      const signerKey = pastedSignerKey
+        ? new PrivateKey(strip0x(pastedSignerKey))
+        : (await derivePostageSigner(account.derivationKey)).signerKey
       // Read the batch straight from the PostageStamp contract on-chain, not the
       // Bee node — a public gateway has no /stamps and won't know a batch bought
       // independently of it.
@@ -355,20 +297,6 @@
       </p>
     </div>
     <Button variant="outline" class="w-full" onclick={close}>Close</Button>
-  </Dialog>
-{:else if phase === 'unlock'}
-  <Dialog onclose={close} title="Unlock to continue">
-    <p class="text-sm">Enter your account password to authorize this purchase.</p>
-    <Input
-      type="password"
-      bind:value={password}
-      placeholder="Account password"
-      autocomplete="current-password"
-      onkeydown={(event: KeyboardEvent) => event.key === 'Enter' && password.length > 0 && unlock()}
-    />
-    <Button class="w-full" disabled={password.length === 0} onclick={unlock}>
-      Unlock & continue
-    </Button>
   </Dialog>
 {:else}
   <Dialog onclose={close} title="Add drive">
