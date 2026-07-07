@@ -64,9 +64,7 @@
 
           <div class="bg-muted flex w-full flex-col items-center rounded-lg p-2 text-center">
             <p class="text-sm font-bold">Want the full experience?</p>
-            <p class="text-sm">
-              Upload data and sync your Swarm ID across devices with a postage stamp.
-            </p>
+            <p class="text-sm">Upload data and sync your Swarm ID across devices with a drive.</p>
           </div>
         </div>
 

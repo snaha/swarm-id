@@ -351,8 +351,8 @@
       </div>
       {#if bannerInfoShown}
         <p class="text-muted-foreground pl-6 text-sm">
-          This is a local account, view-only and not synced. Upgrade by adding a postage stamp to
-          upload data and use your Swarm ID across all your devices.
+          This is a local account, view-only and not synced. Upgrade by adding a drive to upload
+          data and use your Swarm ID across all your devices.
         </p>
       {/if}
     </div>
