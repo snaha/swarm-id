@@ -6,12 +6,9 @@ import {
   GNOSIS_BLOCK_TIME,
   type PostageStamp,
   calculateStampAmountForDays,
-  deriveAccountDerivationKey,
   derivePostageSignerKey,
 } from '@snaha/swarm-id'
 
-import { strip0x } from '$lib/crypto/hex'
-import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
 import { SECONDS_PER_DAY } from '$lib/drives'
 import type { BatchEvent } from '$lib/payment/multichain-widget'
 
@@ -32,19 +29,14 @@ export interface PostageSigner {
 }
 
 /**
- * Derive the account's deterministic postage signer and batch-owner address.
- * The seed (entropy) is the only input, so the same account always yields the
- * same batch owner — required for recovery and multi-device. Mirrors the legacy
- * UI and /dev: the signer hangs off the account DERIVATION key (the same
- * `master → derivation-key → postage-signer` chain as
- * `derivePostageSignerKey(account.derivationKey)`), so batches bought anywhere
- * are owned by the same key, and the master key is never shared for stamping.
+ * Derive the account's deterministic postage signer and batch-owner address from
+ * its (plaintext) derivation key. The signer hangs off the account DERIVATION
+ * key (the `derivation-key → postage-signer` leg of the master chain), so the
+ * same account always yields the same batch owner — required for recovery and
+ * multi-device — and no seed unlock is needed (the derivation key is already in
+ * the stored account, and the resulting signer is persisted in the stamp anyway).
  */
-export async function derivePostageSigner(entropy: Uint8Array): Promise<PostageSigner> {
-  // The derivation functions HMAC their input as raw hex bytes, so strip the
-  // 0x the ethers private key carries.
-  const masterKey = strip0x(privateKeyFromEntropy(entropy))
-  const derivationKey = await deriveAccountDerivationKey(masterKey)
+export async function derivePostageSigner(derivationKey: string): Promise<PostageSigner> {
   const signerKey = new PrivateKey(await derivePostageSignerKey(derivationKey))
   const destination = signerKey.publicKey().address().toChecksum()
   return { signerKey, destination }
