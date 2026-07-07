@@ -357,6 +357,7 @@ export {
   AccessMethodSchemaV1,
   PostageStampSchemaV1,
   isLocalAccount,
+  isSignedOutAccount,
 } from "./schemas"
 
 // Base validation schemas and types

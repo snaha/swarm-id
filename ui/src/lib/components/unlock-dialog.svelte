@@ -42,13 +42,13 @@
     const myAttempt = ++attempt
     error = undefined
     busy = true
-    if (account.access.type !== 'password') {
+    if (account.access?.type !== 'password') {
       pendingCeremony = true
     }
     try {
       const entropy = await unlockAccount(
         account,
-        account.access.type === 'password' ? password : undefined,
+        account.access?.type === 'password' ? password : undefined,
       )
       if (myAttempt !== attempt) {
         return
@@ -79,10 +79,10 @@
     <div class="flex flex-col items-center gap-2 py-4 text-center">
       <LoaderCircle class="size-5 animate-spin" />
       <p class="text-sm font-bold">
-        {account.access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
+        {account.access?.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
       </p>
       <p class="text-sm">
-        {account.access.type === 'eth-wallet'
+        {account.access?.type === 'eth-wallet'
           ? 'Approve the request in your Ethereum wallet.'
           : 'Follow the prompts on your device.'}
       </p>
@@ -93,7 +93,7 @@
   <Dialog onclose={close} {title}>
     <p class="text-sm">{description}</p>
 
-    {#if account.access.type === 'password'}
+    {#if account.access?.type === 'password'}
       <Input
         type="password"
         bind:value={password}
@@ -109,15 +109,15 @@
 
     <Button
       class="w-full"
-      disabled={busy || (account.access.type === 'password' && password.length === 0)}
+      disabled={busy || (account.access?.type === 'password' && password.length === 0)}
       onclick={confirm}
     >
       {#if busy}
         <LoaderCircle class="animate-spin" />
       {/if}
-      {account.access.type === 'passkey'
+      {account.access?.type === 'passkey'
         ? 'Confirm with passkey'
-        : account.access.type === 'eth-wallet'
+        : account.access?.type === 'eth-wallet'
           ? 'Confirm with wallet'
           : 'Confirm'}
     </Button>

@@ -249,7 +249,7 @@
 
     // Password accounts have no interactive ceremony — collect the password in
     // a modal, then re-run authentication.
-    if (account.access.type === 'password') {
+    if (account.access?.type === 'password') {
       pendingPasswordAccount = account
       passwordError = undefined
       showPasswordModal = true
@@ -346,9 +346,9 @@
   </Vertical>
 {:else if isAuthenticating && selected}
   <Confirmation
-    authenticationType={selected.access.type === 'eth-wallet'
+    authenticationType={selected.access?.type === 'eth-wallet'
       ? 'ethereum'
-      : selected.access.type === 'passkey'
+      : selected.access?.type === 'passkey'
         ? 'passkey'
         : 'agent'}
   />

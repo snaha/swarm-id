@@ -3,7 +3,7 @@
 
 import { describe, it, expect } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import { AccountSchemaV1, isLocalAccount } from "./schemas"
+import { AccountSchemaV1, isLocalAccount, isSignedOutAccount } from "./schemas"
 import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
@@ -111,5 +111,68 @@ describe("AccountSchemaV1 encryptedSeed", () => {
     expect(
       AccountSchemaV1.safeParse(serializedAccount(encryptedSeed)).success,
     ).toBe(false)
+  })
+})
+
+describe("AccountSchemaV1 signed-out vault consistency", () => {
+  // Same wire shape as above; the vault group (`access` + `encryptedSeed` +
+  // `signedOutAt`) varies per case.
+  function serializedAccount(vault: Record<string, unknown>) {
+    return {
+      id: "a".repeat(40),
+      name: "Test Account",
+      createdAt: 1700000000000,
+      derivationKey: "f".repeat(64),
+      publicKey: TEST_PUBLIC_KEY_HEX,
+      ...vault,
+    }
+  }
+
+  const VAULT = {
+    access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
+    encryptedSeed: "aabbccdd",
+  }
+
+  it("accepts a signed-out record: no vault, signedOutAt set", () => {
+    const result = AccountSchemaV1.safeParse(
+      serializedAccount({ signedOutAt: 1700000000001 }),
+    )
+    expect(result.success).toBe(true)
+  })
+
+  it("rejects a record with neither vault nor signedOutAt", () => {
+    expect(AccountSchemaV1.safeParse(serializedAccount({})).success).toBe(false)
+  })
+
+  it.each([
+    ["access", { access: VAULT.access }],
+    ["encryptedSeed", { encryptedSeed: VAULT.encryptedSeed }],
+  ])("rejects a signed-in record missing %s", (_label, partialVault) => {
+    expect(
+      AccountSchemaV1.safeParse(serializedAccount(partialVault)).success,
+    ).toBe(false)
+  })
+
+  it("rejects a signed-out record that retains vault fields", () => {
+    expect(
+      AccountSchemaV1.safeParse(
+        serializedAccount({ ...VAULT, signedOutAt: 1700000000001 }),
+      ).success,
+    ).toBe(false)
+  })
+})
+
+describe("isSignedOutAccount", () => {
+  it("is signed out when the vault is absent", () => {
+    const account = createAccount({
+      access: undefined,
+      encryptedSeed: undefined,
+      signedOutAt: 1700000000001,
+    })
+    expect(isSignedOutAccount(account)).toBe(true)
+  })
+
+  it("is signed in while the vault is present", () => {
+    expect(isSignedOutAccount(createAccount({}))).toBe(false)
   })
 })

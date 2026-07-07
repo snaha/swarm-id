@@ -63,6 +63,23 @@ describe("serializeAccount — device-local seed vault", () => {
       expect(reparsed.access).toEqual(access)
     }
   })
+
+  it("round-trips a signed-out account (vault wiped, signedOutAt set)", () => {
+    const account = createAccount({
+      access: undefined,
+      encryptedSeed: undefined,
+      signedOutAt: 1700000000123,
+    })
+
+    const serialized = serializeAccount(account)
+    const reparsed = AccountSchemaV1.parse(
+      JSON.parse(JSON.stringify(serialized)),
+    )
+
+    expect(reparsed.access).toBeUndefined()
+    expect(reparsed.encryptedSeed).toBeUndefined()
+    expect(reparsed.signedOutAt).toBe(1700000000123)
+  })
 })
 
 describe("createAccountsStorageManager().load() — invalid records", () => {

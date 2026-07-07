@@ -120,11 +120,13 @@ export function serializeAccount(account: Account): Record<string, unknown> {
     // how the seed is unlocked on THIS device (the method plus its params:
     // password KDF, passkey credential, or eth-wallet salt); `encryptedSeed` is
     // the BIP-39 seed encrypted at rest under the key that method derives. Plain
-    // JSON (no byte classes); both are always set, as every account is a seed
-    // account. This pair stays on the device: the portable copy that backups and
-    // the sync feed publish omits it (`AccountData` = the record without them).
+    // JSON (no byte classes); both are set on every signed-in account, and both
+    // are absent (with `signedOutAt` marking when) after a sign-out wiped them.
+    // This group stays on the device: the portable copy that backups and the
+    // sync feed publish omits it (`AccountData` = the record without them).
     access: account.access,
     encryptedSeed: account.encryptedSeed,
+    signedOutAt: account.signedOutAt,
   }
 }
 

@@ -19,6 +19,13 @@ import type { Account } from '$lib/types'
  */
 export async function unlockAccount(account: Account, password?: string): Promise<Uint8Array> {
   const access = account.access
+  const encryptedSeed = account.encryptedSeed
+  if (access === undefined || encryptedSeed === undefined) {
+    // Signed-out account: the vault was wiped, there is nothing to unlock.
+    // Callers hide unlock affordances for signed-out accounts, so reaching
+    // this is a programming error, not a user-facing state.
+    throw new Error('This account is signed out on this device.')
+  }
 
   let key: CryptoKey
   if (access.type === 'password') {
@@ -40,7 +47,7 @@ export async function unlockAccount(account: Account, password?: string): Promis
   }
 
   try {
-    return await decryptSeed(account.encryptedSeed, key)
+    return await decryptSeed(encryptedSeed, key)
   } catch {
     throw new Error(
       access.type === 'password' ? 'Wrong password.' : 'Could not decrypt the account seed.',

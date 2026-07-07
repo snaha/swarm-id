@@ -10,6 +10,7 @@ import {
   PostageStampSchemaV1,
   STORAGE_KEY_ACCOUNTS,
   createAccountsStorageManager,
+  isSignedOutAccount,
   serializePostageStamp,
 } from '@snaha/swarm-id'
 
@@ -54,8 +55,11 @@ export class Account {
   derivationKey = $state('')
   name = $state('')
   publicKey = $state('')
-  access = $state<AccessMethod>({ type: 'password', kdfSalt: '', kdfIterations: 0 })
-  encryptedSeed = $state('')
+  // The device-local seed vault. Both set while signed in; both wiped (and
+  // `signedOutAt` stamped) after `signOut()`.
+  access = $state<AccessMethod | undefined>(undefined)
+  encryptedSeed = $state<string | undefined>(undefined)
+  signedOutAt = $state<number | undefined>(undefined)
   settings = $state<AccountSettings | undefined>(undefined)
   defaultPostageStampBatchID = $state<BatchId | undefined>(undefined)
   devices = $state<Device[]>([])
@@ -95,6 +99,7 @@ export class Account {
     this.publicKey = record.publicKey
     this.access = record.access
     this.encryptedSeed = record.encryptedSeed
+    this.signedOutAt = record.signedOutAt
     this.settings = record.settings
     this.defaultPostageStampBatchID = record.defaultPostageStampBatchID
     this.devices = record.devices
@@ -117,6 +122,11 @@ export class Account {
     return this.postageStamps.filter((stamp) => stamp.deletedAt === undefined)
   }
 
+  /** Signed out on this device: the seed vault was wiped by `signOut()`. */
+  get isSignedOut(): boolean {
+    return isSignedOutAccount(this)
+  }
+
   rename(name: string) {
     const now = Date.now()
     this.name = name
@@ -129,8 +139,30 @@ export class Account {
   setAccess(access: AccessMethod, encryptedSeed: string) {
     this.access = access
     this.encryptedSeed = encryptedSeed
+    this.signedOutAt = undefined
     this.lastModified = Date.now()
     this.#commit()
+  }
+
+  /**
+   * Sign this account out on THIS device: wipe the seed vault and clear the
+   * live per-app session material so the dApp proxy can no longer authenticate
+   * from here. The row stays in the account list — signing back in requires
+   * the recovery phrase and a new access method. Deliberately NOT
+   * `disconnectApp` (no `updatedAt` bump): a device-local de-auth must not
+   * propagate as a synced disconnect. `skipSync` for the same reason — and
+   * with the keys gone there is nothing left to publish with anyway.
+   */
+  signOut() {
+    this.access = undefined
+    this.encryptedSeed = undefined
+    this.signedOutAt = Date.now()
+    this.connectedApps = this.connectedApps.map((app) => ({
+      ...app,
+      appSecret: undefined,
+      connectedUntil: undefined,
+    }))
+    this.#commit({ skipSync: true })
   }
 
   /** How long app connections stay valid, set in days (stored as ms). */

@@ -234,8 +234,12 @@ export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
  * after an explicit permission/signing request. The account OWNS its connected
  * apps and postage stamps as nested collections rather than via foreign-key
  * pointers.
+ *
+ * Unrefined base object: `AccountSchemaV1` (the parse entrypoint) adds the
+ * vault-consistency refinement, and `AccountDataSchemaV1` derives from this via
+ * `.omit` (object methods and refinements don't compose).
  */
-export const AccountSchemaV1 = z.object({
+const AccountObjectSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
@@ -246,12 +250,23 @@ export const AccountSchemaV1 = z.object({
   // Device-local seed vault. Every account is a BIP-39 seed account: `access`
   // records how the seed is protected/unlocked on this device (passkey /
   // eth-wallet / password) and `encryptedSeed` is that seed encrypted at rest.
-  // Device-local: deliberately excluded from the sync snapshot.
-  access: AccessMethodSchemaV1,
+  // Device-local: deliberately excluded from the sync snapshot. Absent only on
+  // a signed-out account (`signedOutAt` set) — the refinement on
+  // `AccountSchemaV1` enforces the pairing.
+  access: AccessMethodSchemaV1.optional(),
   // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
-  // Non-empty, even-length hex — never blank. Width varies with the seed size
-  // (12-word seed → 88 chars, 24-word → 120), so it is not a fixed length.
-  encryptedSeed: z.string().regex(/^([0-9a-f]{2})+$/),
+  // Non-empty, even-length hex — never blank while signed in. Width varies with
+  // the seed size (12-word seed → 88 chars, 24-word → 120), so it is not a
+  // fixed length.
+  encryptedSeed: z
+    .string()
+    .regex(/^([0-9a-f]{2})+$/)
+    .optional(),
+  // Set when the user signed this account out on THIS device: the seed vault
+  // (`access` + `encryptedSeed`) was wiped, but the account row stays so the
+  // user can see it and sign back in (recovery phrase + new access method).
+  // Device-local like the vault itself — excluded from sync/backup projections.
+  signedOutAt: z.number().optional(),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
   // Account-owned nested collections (replace the old flat identities/apps/
@@ -282,15 +297,47 @@ export const AccountSchemaV1 = z.object({
 })
 
 /**
- * The portable projection of the account — everything except the device-local
- * seed vault (`access` + `encryptedSeed`). This is the single definition of
- * what travels off the device: backup files serialize/parse it directly, and
- * the sync feed carries the same shape. Serialize with `serializeAccountData`,
- * which additionally strips the live per-app session material.
+ * Parse entrypoint for stored account records: the base object plus the
+ * vault-consistency invariant — a signed-in account (no `signedOutAt`) always
+ * carries BOTH vault fields, a signed-out one carries NEITHER. Keeps the
+ * "never blank" guarantee for signed-in accounts now that the fields are
+ * schema-optional.
  */
-export const AccountDataSchemaV1 = AccountSchemaV1.omit({
+export const AccountSchemaV1 = AccountObjectSchemaV1.superRefine(
+  (account, ctx) => {
+    const hasVault =
+      account.access !== undefined && account.encryptedSeed !== undefined
+    if (account.signedOutAt === undefined && !hasVault) {
+      ctx.addIssue({
+        code: "custom",
+        message:
+          "Signed-in account must have both access and encryptedSeed set",
+      })
+    }
+    if (
+      account.signedOutAt !== undefined &&
+      (account.access !== undefined || account.encryptedSeed !== undefined)
+    ) {
+      ctx.addIssue({
+        code: "custom",
+        message: "Signed-out account must not retain its seed vault",
+      })
+    }
+  },
+)
+
+/**
+ * The portable projection of the account — everything except the device-local
+ * seed vault (`access` + `encryptedSeed`) and its sign-out marker
+ * (`signedOutAt`). This is the single definition of what travels off the
+ * device: backup files serialize/parse it directly, and the sync feed carries
+ * the same shape. Serialize with `serializeAccountData`, which additionally
+ * strips the live per-app session material.
+ */
+export const AccountDataSchemaV1 = AccountObjectSchemaV1.omit({
   access: true,
   encryptedSeed: true,
+  signedOutAt: true,
 })
 
 // ============================================================================
@@ -384,6 +431,16 @@ export function isLocalAccount(account: Account): boolean {
     stamp.usable &&
     stamp.deletedAt === undefined
   )
+}
+
+/**
+ * An account is "signed out" on this device when its seed vault has been
+ * wiped: no keys remain, so nothing can be unlocked or signed until the user
+ * signs back in with the recovery phrase (and sets a new access method). The
+ * vault absence itself is the source of truth; `signedOutAt` only records when.
+ */
+export function isSignedOutAccount(account: Account): boolean {
+  return account.access === undefined || account.encryptedSeed === undefined
 }
 
 // ============================================================================
