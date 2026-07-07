@@ -1,1 +1,0 @@
-import{r as s,i as c,t as n}from"./sLeJZB-V.js";import{a as i}from"./DYwmjtSY.js";function a(o){const t=s(o.devices??[],n(),c()),e=o.connectedApps.map(r=>({...r,connectedUntil:void 0}));return i.addAccount({...o,devices:t,connectedApps:e})}export{a as r};
