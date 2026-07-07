@@ -245,3 +245,65 @@ describe("SwarmIdClient connectionInfo", () => {
     )
   })
 })
+
+describe("SwarmIdClient init-timeout timers (#421)", () => {
+  // A distinctive value so the init timers are identifiable by delay.
+  const INIT_TIMEOUT = 12345
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://localhost" },
+      open: vi.fn(),
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn().mockReturnValue({
+        style: {},
+        onload: null,
+        onerror: null,
+        src: "",
+        contentWindow: { postMessage: vi.fn() },
+      }),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+  })
+
+  function makeClient(): SwarmIdClient {
+    return new SwarmIdClient({
+      iframeOrigin: "https://swarm-id.example.com",
+      metadata: { name: "Test App", description: "A test application" },
+      initializationTimeout: INIT_TIMEOUT,
+    })
+  }
+
+  it("arms no init-timeout timer at construction", () => {
+    const setTimeoutSpy = vi.spyOn(globalThis, "setTimeout")
+    makeClient()
+    const initTimers = setTimeoutSpy.mock.calls.filter(
+      ([, ms]) => ms === INIT_TIMEOUT,
+    )
+    expect(initTimers).toHaveLength(0)
+  })
+
+  it("does not reject an init timeout when never initialized", async () => {
+    vi.useFakeTimers()
+    try {
+      const rejections: unknown[] = []
+      const onUnhandled = (reason: unknown) => rejections.push(reason)
+      process.on("unhandledRejection", onUnhandled)
+
+      makeClient()
+      await vi.advanceTimersByTimeAsync(INIT_TIMEOUT + 100)
+      // Let any microtask-queued rejection surface.
+      await Promise.resolve()
+
+      process.off("unhandledRejection", onUnhandled)
+      expect(rejections).toHaveLength(0)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
