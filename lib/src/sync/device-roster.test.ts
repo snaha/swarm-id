@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { EthAddress } from "@ethersphere/bee-js"
+import { EthAddress, PrivateKey } from "@ethersphere/bee-js"
 import type { Device } from "../schemas"
 
 // readRosterEntry downloads the device blob via downloadDataWithChunkAPI; mock it
@@ -12,7 +12,13 @@ vi.mock("../proxy/download-data", () => ({
   downloadDataWithChunkAPI: (...args: unknown[]) => mockDownloadData(...args),
 }))
 
-import { readRoster, rosterTopic, rosterIdentifier } from "./device-roster"
+import {
+  readRoster,
+  ensureInRoster,
+  RosterScanInconclusiveError,
+  rosterTopic,
+  rosterIdentifier,
+} from "./device-roster"
 
 const OWNER = new EthAddress("a".repeat(40))
 const ACCOUNT_ID = "b".repeat(40)
@@ -34,6 +40,19 @@ function refForIndex(index: number): Uint8Array {
   return ref
 }
 
+// Bee's /soc endpoint returns a real 404 for an absent single-owner chunk — the
+// only signal that a roster slot is genuinely empty (end-of-feed).
+function notFound404(): Error {
+  return Object.assign(new Error("requested chunk cannot be retrieved"), {
+    status: 404,
+  })
+}
+
+// A 5xx is a transient/inconclusive read, NOT a confirmed-empty slot.
+function serverError500(): Error {
+  return Object.assign(new Error("internal error"), { status: 500 })
+}
+
 /**
  * Fake Bee that serves roster SOCs ONLY for `presentIndices`. Reverse-maps the
  * requested identifier back to its index via `rosterIdentifier`, so the windowed
@@ -50,7 +69,7 @@ function fakeBee(presentIndices: Set<number>) {
       download: async (identifier: { toHex(): string }) => {
         const index = identToIndex.get(identifier.toHex())
         if (index === undefined || !presentIndices.has(index)) {
-          throw new Error("empty slot")
+          throw notFound404()
         }
         return { payload: { toUint8Array: () => refForIndex(index) } }
       },
@@ -138,6 +157,8 @@ function fakeBeeWithSlow(opts: {
   present: Set<number>
   slowOnce?: number
   alwaysSlow?: number
+  serverErrorOnce?: number
+  alwaysServerError?: number
 }): { readCount: number; bee: unknown } {
   const topic = rosterTopic(ACCOUNT_ID)
   const identToIndex = new Map<string, number>()
@@ -150,14 +171,21 @@ function fakeBeeWithSlow(opts: {
     makeSOCReader: () => ({
       download: (identifier: { toHex(): string }) => {
         const index = identToIndex.get(identifier.toHex())
-        if (index === undefined) throw new Error("empty slot")
+        if (index === undefined) throw notFound404()
         state.readCount++
         const n = (calls.get(index) ?? 0) + 1
         calls.set(index, n)
         if (index === opts.alwaysSlow) return new Promise(() => {}) // never settles
         if (index === opts.slowOnce && n === 1) return new Promise(() => {})
-        const present = opts.present.has(index) || index === opts.slowOnce
-        if (!present) throw new Error("empty slot") // clean miss → end of feed
+        // A 5xx is inconclusive, like a timeout — the scan must not read it as
+        // a confirmed-empty slot.
+        if (index === opts.alwaysServerError) throw serverError500()
+        if (index === opts.serverErrorOnce && n === 1) throw serverError500()
+        const present =
+          opts.present.has(index) ||
+          index === opts.slowOnce ||
+          index === opts.serverErrorOnce
+        if (!present) throw notFound404() // clean 404 → end of feed
         return Promise.resolve({
           payload: { toUint8Array: () => refForIndex(index) },
         })
@@ -217,16 +245,39 @@ describe("readRoster — a timed-out read is not end-of-feed", () => {
     expect(devices.some((d) => d.deviceId === "dev-16")).toBe(true)
   })
 
-  it("stops (bounded, one retry) when a slot times out on both the read and the retry", async () => {
+  it("throws when index 0 times out on both the read and the retry (nothing folded)", async () => {
+    // Index 0 inconclusive on both attempts, zero devices folded: an empty roster
+    // and an outage are indistinguishable, so surface it rather than return [].
     const { bee } = fakeBeeWithSlow({ present: new Set(), alwaysSlow: 0 })
     const promise = readRoster({
       bee: bee as never,
       accountId: ACCOUNT_ID,
       owner: OWNER,
     })
+    // Attach the rejection assertion before advancing timers so the rejection is
+    // handled (no unhandled-rejection noise).
+    const assertion = expect(promise).rejects.toBeInstanceOf(
+      RosterScanInconclusiveError,
+    )
     await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS) // first read
     await vi.advanceTimersByTimeAsync(ROSTER_READ_TIMEOUT_MS) // the one retry
-    expect(await promise).toEqual([])
+    await assertion
+  })
+
+  it("treats a 5xx like a timeout: retries and does NOT truncate the tail", async () => {
+    // Window 0 (0..15) full + index 16 present-but-500-once in window 1. A 5xx is
+    // inconclusive (not a confirmed-empty slot), so the retry recovers dev-16
+    // instead of reading window 1 as end-of-feed.
+    const present = new Set<number>()
+    for (let i = 0; i <= 15; i++) present.add(i)
+    const { bee } = fakeBeeWithSlow({ present, serverErrorOnce: 16 })
+    const devices = await readRoster({
+      bee: bee as never,
+      accountId: ACCOUNT_ID,
+      owner: OWNER,
+    })
+    expect(devices).toHaveLength(17)
+    expect(devices.some((d) => d.deviceId === "dev-16")).toBe(true)
   })
 
   it("does not retry a cleanly-empty window (clean 404s stop the scan immediately)", async () => {
@@ -243,5 +294,62 @@ describe("readRoster — a timed-out read is not end-of-feed", () => {
     expect(devices).toHaveLength(16)
     // 16 (window 0) + 16 (window 1, all clean miss → stop). No retry round.
     expect(fake.readCount).toBe(32)
+  })
+})
+
+describe("readRoster / ensureInRoster — inconclusive is not empty", () => {
+  beforeEach(() => {
+    mockDownloadData.mockReset()
+    mockDownloadData.mockImplementation((_bee: unknown, refHex: string) => {
+      const index = parseInt(refHex.slice(0, 2), 16)
+      return new TextEncoder().encode(JSON.stringify(makeDevice(index)))
+    })
+  })
+
+  it("throws (not []) when index 0 is persistently inconclusive", async () => {
+    // A 5xx on every read of index 0 can't be told apart from an outage — the
+    // roster is unknown, not empty. Returning [] would let a caller conclude
+    // "no devices" and clobber; instead the scan surfaces the ambiguity.
+    const { bee } = fakeBeeWithSlow({
+      present: new Set(),
+      alwaysServerError: 0,
+    })
+    await expect(
+      readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
+    ).rejects.toBeInstanceOf(RosterScanInconclusiveError)
+  })
+
+  it("still returns [] for a genuinely empty roster (clean 404 at index 0)", async () => {
+    const bee = fakeBee(new Set())
+    await expect(
+      readRoster({ bee: bee as never, accountId: ACCOUNT_ID, owner: OWNER }),
+    ).resolves.toEqual([])
+  })
+
+  it("ensureInRoster skips the append when the roster read is inconclusive", async () => {
+    // downloadChunk is the sequential finder's read inside appendToRoster. If
+    // ensureInRoster wrongly treated the failed read as "device absent", it would
+    // start the append and hit downloadChunk. Skipping means it never does.
+    const downloadChunk = vi.fn(async () => {
+      throw serverError500()
+    })
+    const bee = {
+      makeSOCReader: () => ({
+        download: async () => {
+          throw serverError500()
+        },
+      }),
+      downloadChunk,
+    }
+    await ensureInRoster({
+      bee: bee as never,
+      accountKey: new PrivateKey("11".repeat(32)),
+      owner: OWNER,
+      encryptionKey: "00".repeat(32),
+      accountId: ACCOUNT_ID,
+      device: makeDevice(0),
+      target: { mode: "stamper" } as never,
+    })
+    expect(downloadChunk).not.toHaveBeenCalled()
   })
 })

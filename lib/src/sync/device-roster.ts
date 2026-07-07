@@ -40,7 +40,8 @@ import {
 } from "../proxy/feeds/sequence"
 import { uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
-import { TimeoutError, withTimeout } from "../utils/promise"
+import { withTimeout } from "../utils/promise"
+import { isNotFoundError } from "../utils/bee-error"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { mergeDevicesList } from "./merge-snapshot"
 
@@ -57,20 +58,31 @@ const ROSTER_SCAN_WINDOW = 16
 
 // Per-read cap so an empty/unreachable slot on a slow gateway fails fast instead
 // of hanging on peer-exhaustion. A present slot retrieves well under this.
-// Matches the epoch finder's bound. A timed-out read is INCONCLUSIVE (not a
-// confirmed empty slot): `readRosterEntry` surfaces it as `ROSTER_READ_TIMED_OUT`
-// so `readRoster` retries it once at the stop boundary rather than mistaking it
-// for end-of-feed and truncating the roster.
+// Matches the epoch finder's bound. An inconclusive read (timeout / 5xx /
+// network) is NOT a confirmed empty slot: `readRosterEntry` surfaces it as
+// `ROSTER_READ_INCONCLUSIVE` so `readRoster` retries it once at the stop boundary
+// rather than mistaking it for end-of-feed and truncating the roster.
 const ROSTER_READ_TIMEOUT_MS = SYNC_READ_TIMEOUT_MS
 
 /**
- * Sentinel for a roster slot whose read TIMED OUT — distinct from `undefined`
- * (a clean miss / garbage blob). A timeout is inconclusive: the slot may well
- * hold a live device the slow gateway just couldn't return in time, so the scan
- * must not treat it as end-of-feed.
+ * Sentinel for a roster slot whose read was INCONCLUSIVE — a timeout, a 5xx, or
+ * a network error, as opposed to a clean 404 (`undefined`, a genuinely empty
+ * slot). An inconclusive read may hide a live device the gateway just couldn't
+ * return, so the scan must not treat it as end-of-feed. Only Bee's `/soc` 404
+ * confirms a slot is empty.
  */
-const ROSTER_READ_TIMED_OUT = Symbol("roster-read-timed-out")
-type RosterReadResult = Device | undefined | typeof ROSTER_READ_TIMED_OUT
+const ROSTER_READ_INCONCLUSIVE = Symbol("roster-read-inconclusive")
+type RosterReadResult = Device | undefined | typeof ROSTER_READ_INCONCLUSIVE
+
+/** Thrown by {@link readRoster} when it cannot distinguish an empty roster from
+ *  an outage (index 0 stays inconclusive after the retry, nothing folded).
+ *  Callers must NOT treat this as "no devices" — see {@link ensureInRoster}. */
+export class RosterScanInconclusiveError extends Error {
+  constructor() {
+    super("roster scan inconclusive: cannot confirm the roster is empty")
+    this.name = "RosterScanInconclusiveError"
+  }
+}
 
 export function rosterTopic(accountId: string): Topic {
   return Topic.fromString(`${ROSTER_TOPIC_PREFIX}:${accountId}`)
@@ -85,10 +97,10 @@ export function rosterIdentifier(topic: Topic, index: bigint): Identifier {
 
 /**
  * Read one roster entry (the device record) at `index`. Returns the `Device`
- * when present, `undefined` for a clean miss / garbage blob (a confirmed-empty
- * slot — the scan's stop signal), or {@link ROSTER_READ_TIMED_OUT} when the
- * read timed out (INCONCLUSIVE — the slot may hold a live device the slow
- * gateway couldn't return, so the scan must not stop on it).
+ * when present, `undefined` for a clean 404 / garbage blob (a confirmed-empty
+ * slot — the scan's stop signal), or {@link ROSTER_READ_INCONCLUSIVE} when the
+ * read was inconclusive (timeout / 5xx / network — the slot may hold a live
+ * device the gateway couldn't return, so the scan must not stop on it).
  */
 async function readRosterEntry(opts: {
   bee: Bee
@@ -106,23 +118,28 @@ async function readRosterEntry(opts: {
     )
     refBytes = soc.payload.toUint8Array()
   } catch (error) {
-    return error instanceof TimeoutError ? ROSTER_READ_TIMED_OUT : undefined
+    // Bee's `/soc` returns a clean 404 for a genuinely-absent slot (end-of-feed);
+    // a timeout / 5xx / network error is inconclusive (retried at the stop
+    // boundary) — NOT a confirmed empty slot.
+    return isNotFoundError(error) ? undefined : ROSTER_READ_INCONCLUSIVE
   }
+  // Split the blob download from the parse: a download failure is a read outcome
+  // (404 = empty, else = inconclusive), whereas a parse failure is a genuinely
+  // garbage blob (the SOC resolved) — a skippable hole `readRoster` folds around.
+  let data: Uint8Array
   try {
-    const data = await withTimeout(
+    data = await withTimeout(
       downloadDataWithChunkAPI(opts.bee, new Reference(refBytes).toHex()),
       ROSTER_READ_TIMEOUT_MS,
       "roster read timed out",
     )
-    return DeviceSchemaV1.parse(JSON.parse(new TextDecoder().decode(data)))
   } catch (error) {
-    // A timeout here is inconclusive (retried at the stop boundary). Otherwise
-    // the SOC was reachable but the blob is unretrievable/garbage: return
-    // `undefined` like an empty slot — `readRoster` treats a hole inside an
-    // otherwise-present window as a transient (skippable) read failure (the
-    // caching-gateway case this roster exists to survive) and only stops on a
-    // fully-empty window.
-    return error instanceof TimeoutError ? ROSTER_READ_TIMED_OUT : undefined
+    return isNotFoundError(error) ? undefined : ROSTER_READ_INCONCLUSIVE
+  }
+  try {
+    return DeviceSchemaV1.parse(JSON.parse(new TextDecoder().decode(data)))
+  } catch {
+    return undefined
   }
 }
 
@@ -155,18 +172,18 @@ export async function readRoster(opts: {
         readRosterEntry({ bee: opts.bee, topic, owner: opts.owner, index }),
       ),
     )
-    // A window with no present entry is a stop candidate — but a timed-out read
-    // is inconclusive (a slow gateway may have hidden a live device). Retry just
-    // the timed-out slots ONCE before concluding end-of-feed, so a transiently
-    // slow tail window doesn't truncate the roster. Bounded to one extra partial
-    // read; a still-timed-out slot reconciles on the next sync.
+    // A window with no present entry is a stop candidate — but an inconclusive
+    // read (timeout / 5xx) may have hidden a live device. Retry just the
+    // inconclusive slots ONCE before concluding end-of-feed, so a transiently
+    // flaky tail window doesn't truncate the roster. Bounded to one extra partial
+    // read; a still-inconclusive slot reconciles on the next sync.
     if (
       !entries.some(isDevice) &&
-      entries.some((entry) => entry === ROSTER_READ_TIMED_OUT)
+      entries.some((entry) => entry === ROSTER_READ_INCONCLUSIVE)
     ) {
       entries = await Promise.all(
         indices.map((index, i) =>
-          entries[i] === ROSTER_READ_TIMED_OUT
+          entries[i] === ROSTER_READ_INCONCLUSIVE
             ? readRosterEntry({
                 bee: opts.bee,
                 topic,
@@ -180,16 +197,27 @@ export async function readRoster(opts: {
     for (const entry of entries) {
       if (isDevice(entry)) devices = mergeDevicesList(devices, [entry])
     }
-    // Stop on a window with no present entry (clean end-of-feed, or one whose
-    // timeouts survived the retry — bounded, the slow slot reconciles later).
-    if (!entries.some(isDevice)) break
+    // Stop on a window with no present entry. If that window is still
+    // inconclusive after the retry AND we have folded nothing, we cannot tell an
+    // empty roster from an outage — surface it rather than lie "[] = no devices",
+    // which a caller could act on and clobber. A truncated but non-empty read is
+    // the existing bounded behaviour (reconciles next sync).
+    if (!entries.some(isDevice)) {
+      if (
+        devices.length === 0 &&
+        entries.some((entry) => entry === ROSTER_READ_INCONCLUSIVE)
+      ) {
+        throw new RosterScanInconclusiveError()
+      }
+      break
+    }
   }
   return devices
 }
 
-/** Narrow a roster read to a present device (not a miss or a timeout). */
+/** Narrow a roster read to a present device (not a miss or an inconclusive read). */
 function isDevice(entry: RosterReadResult): entry is Device {
-  return entry !== undefined && entry !== ROSTER_READ_TIMED_OUT
+  return entry !== undefined && entry !== ROSTER_READ_INCONCLUSIVE
 }
 
 /** Append one device record at the next free index. Each device writes only its own. */
@@ -241,13 +269,20 @@ export async function ensureInRoster(opts: {
   device: Device
   target: UploadTarget
 }): Promise<void> {
-  const existing = (
-    await readRoster({
+  // If the roster read is inconclusive we cannot tell "device absent" from "read
+  // failed" — skip rather than append on a guess (an append would compute its
+  // index against the same failing feed and could clobber a peer's entry).
+  let roster: Device[]
+  try {
+    roster = await readRoster({
       bee: opts.bee,
       accountId: opts.accountId,
       owner: opts.owner,
-    }).catch(() => [] as Device[])
-  ).find((d) => d.deviceId === opts.device.deviceId)
+    })
+  } catch {
+    return
+  }
+  const existing = roster.find((d) => d.deviceId === opts.device.deviceId)
 
   const upToDate =
     existing !== undefined &&
