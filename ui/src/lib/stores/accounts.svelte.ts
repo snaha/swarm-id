@@ -183,11 +183,13 @@ export class Account {
    * surfacing a routing bug rather than silently reading `undefined`.
    */
   get accessMethod(): AccessMethod {
-    const access = this.#deviceAuth.vault?.access
-    if (access === undefined) {
-      throw new Error('accessMethod read on a signed-out account')
+    const vault = this.#deviceAuth.vault
+    if (vault === undefined) {
+      throw new Error(
+        'Cannot read the access method: this account is signed out on this device (its seed vault was wiped). Read `accessMethod` only in signed-in-only UI; guard with `isSignedOut` otherwise.',
+      )
     }
-    return access
+    return vault.access
   }
 
   /** When `signOut()` wiped the vault; `undefined` while signed in. */

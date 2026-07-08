@@ -60,7 +60,13 @@
         account,
         access.type === 'password' ? password : undefined,
       )
-      if (myAttempt !== attempt) {
+      // Bail if this ceremony was superseded (cancel/retry) or the account was
+      // signed out mid-flight (e.g. cross-tab): a passkey/wallet unlock can take
+      // seconds, and `unlockAccount` captured the vault before the wipe so it
+      // still resolves — but completing the connection with a now-signed-out
+      // account would re-arm app session material the sign-out just cleared.
+      if (myAttempt !== attempt || account.isSignedOut) {
+        entropy.fill(0)
         return
       }
       await onunlocked(entropy)
