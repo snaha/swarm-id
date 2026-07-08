@@ -1,0 +1,1 @@
+import{g as c,w as n,m as r}from"./CA3mpqiC.js";import{a as d}from"./4swg1_w6.js";function i(o){const e=c(o.devices??[],r(),n()),t=o.connectedApps.map(s=>({...s,connectedUntil:void 0}));return d.addAccount({...o,devices:e,connectedApps:t})}export{i as r};
