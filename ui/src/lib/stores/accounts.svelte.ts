@@ -210,8 +210,19 @@ export class Account {
     this.#commit()
   }
 
-  /** Swap the unlock method: new access metadata + seed re-encrypted for it. */
+  /**
+   * Swap the unlock method: new access metadata + seed re-encrypted for it.
+   * Throws on a signed-out account — sign-out wiped the vault, and a late
+   * change-method ceremony re-arming it here would silently undo the
+   * sign-out. Signing back in replaces the whole record through the import
+   * flow (`accountsStore.add`) instead.
+   */
   setAccess(access: AccessMethod, encryptedSeed: string) {
+    if (this.isSignedOut) {
+      throw new Error(
+        'Cannot set an access method: this account is signed out on this device (its seed vault was wiped). Signing back in requires the recovery phrase, not a method change.',
+      )
+    }
     this.#deviceAuth = { vault: { access, encryptedSeed } }
     this.lastModified = Date.now()
     this.#commit()

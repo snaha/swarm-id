@@ -177,7 +177,12 @@
         account,
         access.type === 'password' ? password : undefined,
       )
-      if (myAttempt !== attempt) {
+      // Bail if this ceremony was superseded (cancel/retry) or the account was
+      // signed out mid-flight (e.g. cross-tab): the sign-out unmounts this
+      // component but not this continuation, and completing would still
+      // download a backup (export) or stage the seed for a change-method
+      // `setAccess` — acting on a vault the sign-out just wiped.
+      if (myAttempt !== attempt || account.isSignedOut) {
         unlocked.fill(0)
         return
       }
@@ -252,6 +257,15 @@
         }
       }
       if (myAttempt !== attempt) {
+        return
+      }
+      if (account.isSignedOut) {
+        // Signed out mid-ceremony (e.g. cross-tab): `setAccess` would re-arm
+        // the vault the sign-out just wiped. This is the live attempt, so the
+        // held seed is ours to destroy — a superseded attempt must NOT touch
+        // it, since a retry's seed lives in the same variable.
+        changeMethodSeed.fill(0)
+        changeMethodSeed = undefined
         return
       }
       account.setAccess(access, await encryptSeed(changeMethodSeed, key))
