@@ -81,7 +81,7 @@ export async function restoreAccountFromSwarm(
 
 /**
  * Project a folded account onto the legacy `AccountStateSnapshot` shape so
- * callers (the swarm-ui sign-in / import flows) consume it unchanged.
+ * callers (the identity UI sign-in / import flows) consume it unchanged.
  *
  * `foldAccountFromSwarm` shallow-FREEZES its result arrays (so coalesced
  * concurrent callers can't corrupt each other's shared view). The snapshot

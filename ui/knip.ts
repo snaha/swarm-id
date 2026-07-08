@@ -9,8 +9,8 @@ const config: KnipConfig = {
     '$env/*': ['.svelte-kit/ambient.d.ts'],
     '$lib/*': ['src/lib/*'],
   },
-  // Knip cannot resolve the workspace package through its exports map (same
-  // workaround as swarm-ui), so it would misreport the dependency as unused.
+  // Knip cannot resolve the workspace package through its exports map, so it
+  // would misreport the dependency as unused.
   ignoreDependencies: ['@snaha/swarm-id'],
   ignoreExportsUsedInFile: true,
 }

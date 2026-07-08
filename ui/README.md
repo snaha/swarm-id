@@ -1,7 +1,7 @@
 # @swarm-id/ui
 
-Next-generation identity & key management UI for the Swarm network — a standalone product,
-replacing the legacy `swarm-ui/` package screen by screen.
+Identity & key management UI for the Swarm network — the trusted-domain SPA that hosts the
+keystore UI and management (it superseded the removed legacy `swarm-ui/` package).
 
 Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy").
 
@@ -19,7 +19,7 @@ Design source: Figma file `FavekByQemhpaWZ5KZ6mlU` ("SwarmID MVP Copy").
 ```bash
 pnpm --filter @swarm-id/ui dev      # http://localhost:5500
 # or from the repo root:
-pnpm dev:ui:new
+pnpm dev:ui
 ```
 
 ## Build
@@ -52,5 +52,6 @@ Built and published to `https://swarm.snaha.net/id/` from `main` via
 for pull-request previews. The demo app at `https://swarm.snaha.net/demo/` runs
 against it (`PUBLIC_ID_DOMAIN=https://swarm.snaha.net/id`).
 
-> Coexists with the legacy `swarm-ui/` package (deployed to `/id-legacy` and the
-> DigitalOcean `swarm-id.snaha.net` domain) while functionality is ported over.
+Also deployed to the canonical DigitalOcean domain `https://swarm-id.snaha.net`
+on every push to `main` (`.github/workflows/deploy-do.yml`, config in
+`.do/swarm-id-app.yaml`).

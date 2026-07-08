@@ -9,7 +9,7 @@ The Swarm ID library provides a secure, iframe-based authentication system for S
 1. **SwarmIdClient** — For parent windows/dApps to interact with the authentication system
 2. **SwarmIdProxy** — Runs in the iframe, handles authentication and proxies Bee API calls
 
-Authentication is handled by the SvelteKit identity management UI ([swarm-ui](../swarm-ui/)).
+Authentication is handled by the SvelteKit identity management UI ([ui](../ui/)).
 
 ## Installation
 

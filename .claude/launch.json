@@ -2,31 +2,17 @@
   "version": "0.0.1",
   "configurations": [
     {
-      "name": "ui-new",
+      "name": "ui",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:ui:new"],
+      "runtimeArgs": ["dev:ui"],
       "port": 5500,
       "autoPort": false
     },
     {
-      "name": "ui-legacy",
+      "name": "demo",
       "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:ui:legacy"],
-      "port": 5510,
-      "autoPort": false
-    },
-    {
-      "name": "demo-new",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:demo:new"],
+      "runtimeArgs": ["dev:demo"],
       "port": 3500,
-      "autoPort": false
-    },
-    {
-      "name": "demo-legacy",
-      "runtimeExecutable": "pnpm",
-      "runtimeArgs": ["dev:demo:legacy"],
-      "port": 3000,
       "autoPort": false
     }
   ]

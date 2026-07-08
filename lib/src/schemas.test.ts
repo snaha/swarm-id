@@ -102,8 +102,8 @@ describe("LocalAccountSchemaV1 encryptedSeed", () => {
 
   // The format/length of real encrypted seeds (88 hex for a 12-word phrase, 120
   // for 24-word) is covered end-to-end against the actual encryption pipeline in
-  // swarm-ui/src/lib/crypto/encrypted-seed.test.ts. Here we just pin the schema
-  // constraint itself: valid even-length hex passes, everything else is rejected.
+  // the identity UI (ui/src/lib/crypto/). Here we just pin the schema constraint
+  // itself: valid even-length hex passes, everything else is rejected.
   it("accepts a valid even-length hex value", () => {
     expect(
       LocalAccountSchemaV1.safeParse(serializedAccount("aabbccdd")).success,
