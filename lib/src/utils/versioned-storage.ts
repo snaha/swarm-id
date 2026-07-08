@@ -130,12 +130,26 @@ export class MemoryStorageAdapter implements StorageAdapter {
 // ============================================================================
 
 /**
+ * Window-scoped event broadcast on `save()`/`clear()` so manager instances in
+ * the SAME window see each other's writes — the browser's `storage` event only
+ * fires in other windows.
+ */
+const SAME_WINDOW_WRITE_EVENT = "swarm-id-storage-write"
+
+interface SameWindowWriteDetail {
+  key: string
+  /** The writing manager, so it can skip notifying itself. */
+  source: object
+}
+
+/**
  * Generic versioned storage manager
  */
 export class VersionedStorageManager<T> {
   private options: VersionedStorageOptions<T>
   private listeners: Set<StorageChangeListener<T>> = new Set()
   private boundStorageHandler: ((event: StorageEvent) => void) | undefined
+  private boundSameWindowHandler: ((event: Event) => void) | undefined
 
   constructor(options: VersionedStorageOptions<T>) {
     this.options = options
@@ -183,16 +197,52 @@ export class VersionedStorageManager<T> {
     }
 
     window.addEventListener("storage", this.boundStorageHandler)
+
+    // Same-window writes by OTHER manager instances (the `storage` event never
+    // fires in the window that wrote).
+    this.boundSameWindowHandler = (event: Event) => {
+      const detail = (event as CustomEvent<SameWindowWriteDetail>).detail
+      if (!detail || detail.key !== this.options.key || detail.source === this)
+        return
+
+      const data = this.load()
+      this.notifyListeners(data)
+    }
+
+    window.addEventListener(
+      SAME_WINDOW_WRITE_EVENT,
+      this.boundSameWindowHandler,
+    )
   }
 
   /**
    * Clean up the storage event listener when no more subscribers
    */
   private cleanupStorageEventListener(): void {
-    if (this.boundStorageHandler && typeof window !== "undefined") {
+    if (typeof window === "undefined") return
+    if (this.boundStorageHandler) {
       window.removeEventListener("storage", this.boundStorageHandler)
       this.boundStorageHandler = undefined
     }
+    if (this.boundSameWindowHandler) {
+      window.removeEventListener(
+        SAME_WINDOW_WRITE_EVENT,
+        this.boundSameWindowHandler,
+      )
+      this.boundSameWindowHandler = undefined
+    }
+  }
+
+  /**
+   * Broadcast a write to other manager instances in this window.
+   */
+  private notifySameWindow(): void {
+    if (typeof window === "undefined") return
+    window.dispatchEvent(
+      new CustomEvent<SameWindowWriteDetail>(SAME_WINDOW_WRITE_EVENT, {
+        detail: { key: this.options.key, source: this },
+      }),
+    )
   }
 
   /**
@@ -268,6 +318,7 @@ export class VersionedStorageManager<T> {
       }
 
       this.options.storage.setItem(this.options.key, JSON.stringify(wrapped))
+      this.notifySameWindow()
     } catch (e) {
       console.error(`[${this.options.loggerName ?? "Storage"}] Save failed:`, e)
     }
@@ -278,6 +329,7 @@ export class VersionedStorageManager<T> {
    */
   clear(): void {
     this.options.storage.removeItem(this.options.key)
+    this.notifySameWindow()
   }
 }
 

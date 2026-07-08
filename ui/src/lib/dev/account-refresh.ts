@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Background fold-back for the signed-in account: pull peer/node state from Swarm
+ * Background fold-back for local accounts: pull peer/node state from Swarm
  * into the local account (name, connected apps, stamps, and node truth like a
  * batch's real utilization / TTL). The publish direction is wired app-wide in the
  * root layout; this is the read direction.
@@ -17,6 +17,7 @@ import { runCoalescedAcrossTabs } from '@snaha/swarm-id'
 import { browser } from '$app/environment'
 
 import { refreshAccountFromSwarm } from '$lib/dev/refresh-account-from-swarm'
+import { accountsStore } from '$lib/stores/accounts.svelte'
 import { sessionStore } from '$lib/stores/session.svelte'
 
 // "Every few minutes" — the cross-tab window doubles as the interval, so with N
@@ -36,12 +37,11 @@ const foldCooldownKey = (accountId: string) => `${FOLD_COOLDOWN_KEY_PREFIX}${acc
 const inFlight = new Set<string>()
 
 /**
- * Fold the currently-active account. `force` bypasses the cross-tab cooldown
- * (page load / account switch); the periodic tick passes `false` so it coalesces.
+ * Fold one account. `force` bypasses the cross-tab cooldown (page load /
+ * account switch); the periodic tick passes `false` so it coalesces.
  */
-export async function foldCurrentAccount(force: boolean): Promise<void> {
-  const accountId = sessionStore.currentAccountId
-  if (!accountId || inFlight.has(accountId)) {
+async function foldAccount(accountId: string, force: boolean): Promise<void> {
+  if (inFlight.has(accountId)) {
     return
   }
   inFlight.add(accountId)
@@ -64,6 +64,25 @@ export async function foldCurrentAccount(force: boolean): Promise<void> {
   }
 }
 
+/** Fold the currently-active account (page load / account switch). */
+export async function foldCurrentAccount(force: boolean): Promise<void> {
+  const accountId = sessionStore.currentAccountId
+  if (!accountId) {
+    return
+  }
+  await foldAccount(accountId, force)
+}
+
+/**
+ * Fold EVERY local account, cooldown-respecting. The periodic tick uses this
+ * rather than the current account so a proxy iframe (where the dApp-connected
+ * account need not be the session-current one — or any current is set at all)
+ * still converges on peer changes (#338).
+ */
+async function foldAllAccounts(): Promise<void> {
+  await Promise.all(accountsStore.accounts.map((account) => foldAccount(account.id.toHex(), false)))
+}
+
 /**
  * Stamp the fold cooldown for `accountId` as "just folded". The import/sign-in
  * flow folds directly (not via `foldCurrentAccount`); calling this after it lets
@@ -82,6 +101,10 @@ export function startFoldInterval(): () => void {
   if (!browser) {
     return () => undefined
   }
-  const timer = setInterval(() => void foldCurrentAccount(false), FOLD_INTERVAL_MS)
+  // Immediate first pass so a freshly loaded page (notably a dApp's proxy
+  // iframe) converges right away instead of waiting a full interval. Not
+  // forced, so the cross-tab cooldown still collapses a burst of loads.
+  void foldAllAccounts()
+  const timer = setInterval(() => void foldAllAccounts(), FOLD_INTERVAL_MS)
   return () => clearInterval(timer)
 }
