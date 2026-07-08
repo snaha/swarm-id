@@ -10,7 +10,7 @@
  */
 
 import type { EthAddress, BatchId, Stamper } from "@ethersphere/bee-js"
-import type { Account, PostageStamp } from "../schemas"
+import type { SyncedAccount, PostageStamp } from "../schemas"
 
 /**
  * Options for creating a stamper with utilization tracking
@@ -38,10 +38,12 @@ export interface FlushableStamper extends Stamper {
 
 /**
  * Interface for accessing account data. The account is the aggregate root and
- * owns its connected apps and postage stamps inline.
+ * owns its connected apps and postage stamps inline. The sync coordinator
+ * publishes to Swarm, so it sees only the `SyncedAccount` projection — the
+ * device-local vault never enters this seam.
  */
 export interface AccountsStoreInterface {
-  getAccount(id: EthAddress): Account | undefined
+  getAccount(id: EthAddress): SyncedAccount | undefined
 }
 
 /**

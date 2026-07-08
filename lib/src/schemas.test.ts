@@ -1,15 +1,22 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect } from "vitest"
+import { describe, it, expect, expectTypeOf } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
-import { AccountSchemaV1, isLocalAccount, isSignedOutAccount } from "./schemas"
+import {
+  LocalAccountSchemaV1,
+  isLocalAccount,
+  isSignedOutAccount,
+  type AccessMethod,
+  type Account,
+} from "./schemas"
 import {
   TEST_BATCH_ID_HEX,
   TEST_BATCH_ID_2_HEX,
   TEST_PRIVATE_KEY_HEX,
   TEST_PUBLIC_KEY_HEX,
   createAccount,
+  createSignedOutAccount,
   createPostageStamp,
 } from "./test-fixtures"
 
@@ -76,10 +83,11 @@ describe("isLocalAccount", () => {
   })
 })
 
-describe("AccountSchemaV1 encryptedSeed", () => {
-  // A serialized (plain-string) account — the wire shape AccountSchemaV1 parses,
-  // before its transforms produce bee-js runtime types. Only `encryptedSeed`
-  // varies; the array fields default to [] so they can be omitted.
+describe("LocalAccountSchemaV1 encryptedSeed", () => {
+  // A serialized (plain-string) account — the wire shape LocalAccountSchemaV1
+  // parses, before its transforms produce bee-js runtime types. Only
+  // `encryptedSeed` varies; the array fields default to [] so they can be
+  // omitted.
   function serializedAccount(encryptedSeed: string) {
     return {
       id: "a".repeat(40),
@@ -98,7 +106,7 @@ describe("AccountSchemaV1 encryptedSeed", () => {
   // constraint itself: valid even-length hex passes, everything else is rejected.
   it("accepts a valid even-length hex value", () => {
     expect(
-      AccountSchemaV1.safeParse(serializedAccount("aabbccdd")).success,
+      LocalAccountSchemaV1.safeParse(serializedAccount("aabbccdd")).success,
     ).toBe(true)
   })
 
@@ -109,12 +117,12 @@ describe("AccountSchemaV1 encryptedSeed", () => {
     ["uppercase hex", "AABB"],
   ])("rejects %s", (_label, encryptedSeed) => {
     expect(
-      AccountSchemaV1.safeParse(serializedAccount(encryptedSeed)).success,
+      LocalAccountSchemaV1.safeParse(serializedAccount(encryptedSeed)).success,
     ).toBe(false)
   })
 })
 
-describe("AccountSchemaV1 signed-out vault consistency", () => {
+describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
   // Same wire shape as above; the vault group (`access` + `encryptedSeed` +
   // `signedOutAt`) varies per case.
   function serializedAccount(vault: Record<string, unknown>) {
@@ -134,14 +142,16 @@ describe("AccountSchemaV1 signed-out vault consistency", () => {
   }
 
   it("accepts a signed-out record: no vault, signedOutAt set", () => {
-    const result = AccountSchemaV1.safeParse(
+    const result = LocalAccountSchemaV1.safeParse(
       serializedAccount({ signedOutAt: 1700000000001 }),
     )
     expect(result.success).toBe(true)
   })
 
   it("rejects a record with neither vault nor signedOutAt", () => {
-    expect(AccountSchemaV1.safeParse(serializedAccount({})).success).toBe(false)
+    expect(LocalAccountSchemaV1.safeParse(serializedAccount({})).success).toBe(
+      false,
+    )
   })
 
   it.each([
@@ -149,13 +159,13 @@ describe("AccountSchemaV1 signed-out vault consistency", () => {
     ["encryptedSeed", { encryptedSeed: VAULT.encryptedSeed }],
   ])("rejects a signed-in record missing %s", (_label, partialVault) => {
     expect(
-      AccountSchemaV1.safeParse(serializedAccount(partialVault)).success,
+      LocalAccountSchemaV1.safeParse(serializedAccount(partialVault)).success,
     ).toBe(false)
   })
 
   it("rejects a signed-out record that retains vault fields", () => {
     expect(
-      AccountSchemaV1.safeParse(
+      LocalAccountSchemaV1.safeParse(
         serializedAccount({ ...VAULT, signedOutAt: 1700000000001 }),
       ).success,
     ).toBe(false)
@@ -164,15 +174,23 @@ describe("AccountSchemaV1 signed-out vault consistency", () => {
 
 describe("isSignedOutAccount", () => {
   it("is signed out when the vault is absent", () => {
-    const account = createAccount({
-      access: undefined,
-      encryptedSeed: undefined,
-      signedOutAt: 1700000000001,
-    })
-    expect(isSignedOutAccount(account)).toBe(true)
+    expect(isSignedOutAccount(createSignedOutAccount())).toBe(true)
   })
 
   it("is signed in while the vault is present", () => {
     expect(isSignedOutAccount(createAccount({}))).toBe(false)
+  })
+
+  // The point of the union model: the guard narrows, so the signed-in branch
+  // sees non-optional vault fields and the signed-out branch a non-optional
+  // `signedOutAt` — no `!`/`??` juggling at call sites.
+  it("narrows each union variant", () => {
+    const account: Account = createSignedOutAccount()
+    if (isSignedOutAccount(account)) {
+      expectTypeOf(account.signedOutAt).toEqualTypeOf<number>()
+    } else {
+      expectTypeOf(account.access).toEqualTypeOf<AccessMethod>()
+      expectTypeOf(account.encryptedSeed).toEqualTypeOf<string>()
+    }
   })
 })

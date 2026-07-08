@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import type { EthAddress } from '@ethersphere/bee-js'
-import type { AccountData } from '@snaha/swarm-id'
+import type { SyncedAccount } from '@snaha/swarm-id'
 
 const CURRENT_ACCOUNT_KEY = 'swarm-id-current-account-v2'
 
@@ -14,7 +14,7 @@ interface SetupDraft {
   nameCustomized?: boolean
   phrase?: string
   /** Account data carried over by a restore (stamps, apps, original name). */
-  restored?: AccountData
+  restored?: SyncedAccount
 }
 
 function loadCurrentAccountId(): string | undefined {
@@ -58,10 +58,10 @@ function createSessionStore() {
         draft = { ...draft, name }
       }
     },
-    startSignIn(name: string, phrase: string, restored?: AccountData) {
+    startSignIn(name: string, phrase: string, restored?: SyncedAccount) {
       draft = { flow: 'sign-in', name, phrase, restored }
     },
-    startRestore(restored: AccountData, phrase: string) {
+    startRestore(restored: SyncedAccount, phrase: string) {
       draft = { flow: 'restore', name: restored.name, phrase, restored }
     },
     setDraftPhrase(phrase: string) {

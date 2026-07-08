@@ -17,7 +17,7 @@ import {
   type DeviceStateSnapshot,
   type FoldedAccount,
 } from "./device-state"
-import type { AccountData, Device } from "../schemas"
+import type { SyncedAccount, Device } from "../schemas"
 
 export interface FoldAccountResult {
   account: FoldedAccount
@@ -25,22 +25,22 @@ export interface FoldAccountResult {
 }
 
 /**
- * Project a folded account onto the local `AccountData` record — the single
- * place the field list lives so a new `AccountData`/`FoldedAccount` field can't
+ * Project a folded account onto the `SyncedAccount` record — the single place
+ * the field list lives so a new `SyncedAccount`/`FoldedAccount` field can't
  * be silently dropped by a hand-written copy on the sign-in path. `id` and
  * `derivationKey` aren't in the fold (they come from the recovering wallet), so
  * the caller supplies them.
  *
  * `foldAccountFromSwarm` shallow-FREEZES its result arrays so coalesced callers
- * can't corrupt each other's shared view; a persisted `AccountData` outlives that
- * window and is mutated in place downstream, so the arrays are COPIED here.
+ * can't corrupt each other's shared view; a persisted `SyncedAccount` outlives
+ * that window and is mutated in place downstream, so the arrays are COPIED here.
  */
-export function foldedToAccountData(opts: {
+export function foldedToSyncedAccount(opts: {
   id: EthAddress
   derivationKey: string
   account: FoldedAccount
   lastModified?: number
-}): AccountData {
+}): SyncedAccount {
   const { id, derivationKey, account } = opts
   return {
     id,

@@ -1703,7 +1703,7 @@ export interface ConnectOptions {
 
 export type {
   Account,
-  AccountData,
+  SyncedAccount,
   ConnectedApp,
   PostageStamp,
 } from "./schemas"
