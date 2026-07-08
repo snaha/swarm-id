@@ -71,6 +71,12 @@ export async function secureSeedWithPassword(
  */
 export async function getMasterKeyFromAccount(account: Account, password?: string): Promise<Bytes> {
   const access = account.access
+  const encryptedSeed = account.encryptedSeed
+  if (access === undefined || encryptedSeed === undefined) {
+    // The vault fields are optional on the shared record (the new UI wipes
+    // them on sign-out); the legacy app never signs out, so this is unreachable.
+    throw new Error('This account has no seed vault on this device.')
+  }
 
   let key: CryptoKey
   if (access.type === 'passkey') {
@@ -87,7 +93,7 @@ export async function getMasterKeyFromAccount(account: Account, password?: strin
 
   let entropy: Uint8Array
   try {
-    entropy = await decryptSeed(account.encryptedSeed, key)
+    entropy = await decryptSeed(encryptedSeed, key)
   } catch {
     throw new Error(
       access.type === 'password' ? 'Wrong password.' : 'Could not decrypt the account seed.',

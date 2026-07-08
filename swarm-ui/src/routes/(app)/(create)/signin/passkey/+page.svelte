@@ -31,7 +31,7 @@
       // restore from a passkey alone is therefore not possible — the account
       // must already exist locally. Unlock the first passkey account found on
       // this device.
-      const account = accountsStore.accounts.find((a) => a.access.type === 'passkey')
+      const account = accountsStore.accounts.find((a) => a.access?.type === 'passkey')
 
       if (!account) {
         error =

@@ -11,9 +11,9 @@
   import Laptop from '@lucide/svelte/icons/laptop'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import {
-    type Account,
     PartitionLease,
     type PartitionLeaseStateSnapshot,
+    type SyncedAccount,
     deriveSwarmEncryptionKey,
     getOrCreateDeviceId,
     hexToUint8Array,
@@ -28,7 +28,7 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
-  const { account }: { account: Account } = $props()
+  const { account }: { account: SyncedAccount } = $props()
 
   // Re-read the shared lease cache this often so the self row picks up the
   // proxy's per-tick `leasedUntil` advances even when `storage` events don't

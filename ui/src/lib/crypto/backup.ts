@@ -8,11 +8,10 @@
  */
 import { EthAddress } from '@ethersphere/bee-js'
 import {
-  type AccountData,
-  AccountDataSchemaV1,
-  type Account as AccountRecord,
+  type SyncedAccount,
+  SyncedAccountSchemaV1,
   hexToUint8Array,
-  serializeAccountData,
+  serializeSyncedAccount,
   uint8ArrayToHex,
 } from '@snaha/swarm-id'
 
@@ -53,13 +52,13 @@ function parseEnvelope(fileContents: string): BackupEnvelope | undefined {
 
 /**
  * Serialize and encrypt an account into .swarmid file contents. The payload is
- * the lib's portable projection (`serializeAccountData`): plain JSON with
+ * the lib's portable projection (`serializeSyncedAccount`): plain JSON with
  * byte-class fields as hex, never the seed vault or live per-app session
  * material (`appSecret`/`connectedUntil` — the secret is re-derived from the
  * master key on the next connect).
  */
-export async function createBackup(account: AccountRecord, entropy: Uint8Array): Promise<string> {
-  const data = serializeAccountData(account)
+export async function createBackup(account: SyncedAccount, entropy: Uint8Array): Promise<string> {
+  const data = serializeSyncedAccount(account)
 
   const salt = new Uint8Array(SALT_LENGTH)
   crypto.getRandomValues(salt)
@@ -98,7 +97,7 @@ export function isLegacyBackupFile(fileContents: string): boolean {
  * file is not a backup, the phrase does not match the file, or the backed-up
  * account does not belong to the phrase.
  */
-export async function restoreBackup(fileContents: string, phrase: string): Promise<AccountData> {
+export async function restoreBackup(fileContents: string, phrase: string): Promise<SyncedAccount> {
   const envelope = parseEnvelope(fileContents)
   if (!envelope) {
     throw new Error('Not a valid backup file.')
@@ -130,7 +129,7 @@ export async function restoreBackup(fileContents: string, phrase: string): Promi
   }
   // Rehydrate byte-class fields through the shared portable schema — the exact
   // shape `createBackup` wrote (no device-local seed vault to fake or strip).
-  const result = AccountDataSchemaV1.safeParse(raw)
+  const result = SyncedAccountSchemaV1.safeParse(raw)
   if (!result.success) {
     throw new Error('Not a valid backup file.')
   }

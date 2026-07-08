@@ -6,7 +6,7 @@
  * mutators are methods on the object (`account.rename(…)`), wrapping the shared
  * `@snaha/swarm-id` `Account` record. Re-exported from the store so `$lib/types`
  * is the home for the UI-local account types. The lib's record and entity types
- * (`Account`, `AccountData`, `AccessMethod`, `PostageStamp`, …) are imported
+ * (`Account`, `SyncedAccount`, `AccessMethod`, `PostageStamp`, …) are imported
  * straight from `@snaha/swarm-id`.
  */
 export type { Account } from '$lib/stores/accounts.svelte'

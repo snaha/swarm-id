@@ -19,13 +19,13 @@
   import KeyRound from '@lucide/svelte/icons/key-round'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
-  import Trash2 from '@lucide/svelte/icons/trash-2'
   import Wallet from '@lucide/svelte/icons/wallet'
   import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
 
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Polycon from '$lib/components/polycon.svelte'
+  import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -78,6 +78,7 @@
   let bannerInfoShown = $state(false)
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
+  let signingOut = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
@@ -97,12 +98,14 @@
   let newPassword = $state('')
   let verifyNewPassword = $state('')
 
-  const isLocal = $derived(account.stamps.length === 0)
-  const accessLabel = $derived(methodLabel(account.access.type))
+  const isLocal = $derived(account.isLocal)
+  // The Account tab only renders for the signed-in current account, but the
+  // vault fields are optional on the record — fall back to an empty label.
+  const accessLabel = $derived(account.access ? methodLabel(account.access.type) : '')
   const AccessIcon: Component = $derived(
-    account.access.type === 'passkey'
+    account.access?.type === 'passkey'
       ? Fingerprint
-      : account.access.type === 'eth-wallet'
+      : account.access?.type === 'eth-wallet'
         ? Wallet
         : KeyRound,
   )
@@ -169,13 +172,13 @@
     const myAttempt = ++attempt
     dialogError = undefined
     busy = true
-    if (account.access.type !== 'password') {
+    if (account.access?.type !== 'password') {
       dialog = { kind: 'unlock', target, pending: true }
     }
     try {
       const unlocked = await unlockAccount(
         account,
-        account.access.type === 'password' ? password : undefined,
+        account.access?.type === 'password' ? password : undefined,
       )
       if (myAttempt !== attempt) {
         unlocked.fill(0)
@@ -570,11 +573,14 @@
 
   <div class="bg-border h-px w-full"></div>
 
-  <div class="flex w-full items-center justify-end">
-    <Button variant="destructive" onclick={notImplemented}>
-      <Trash2 />
-      Delete account
-    </Button>
+  <div class="flex w-full items-center justify-between">
+    {#if isLocal}
+      <!-- A local account only exists on this device: nothing to sign out of. -->
+      <span></span>
+    {:else}
+      <Button variant="outline" onclick={() => (signingOut = true)}>Sign out</Button>
+    {/if}
+    <Button variant="destructive" onclick={notImplemented}>Delete account</Button>
   </div>
 </div>
 
@@ -582,8 +588,8 @@
   {#if dialog.pending}
     <Dialog onclose={closeDialog} dismissable={false}>
       {@render pendingBody(
-        account.access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey',
-        account.access.type === 'eth-wallet'
+        account.access?.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey',
+        account.access?.type === 'eth-wallet'
           ? 'Approve the request in your Ethereum wallet.'
           : 'Follow the prompts on your device.',
       )}
@@ -610,7 +616,7 @@
         {/if}
       </p>
 
-      {#if account.access.type === 'password'}
+      {#if account.access?.type === 'password'}
         <Input
           type="password"
           bind:value={password}
@@ -626,15 +632,15 @@
 
       <Button
         class="w-full"
-        disabled={busy || (account.access.type === 'password' && password.length === 0)}
+        disabled={busy || (account.access?.type === 'password' && password.length === 0)}
         onclick={confirmUnlock}
       >
         {#if busy}
           <LoaderCircle class="animate-spin" />
         {/if}
-        {account.access.type === 'passkey'
+        {account.access?.type === 'passkey'
           ? 'Confirm with passkey'
-          : account.access.type === 'eth-wallet'
+          : account.access?.type === 'eth-wallet'
             ? 'Confirm with wallet'
             : 'Confirm'}
       </Button>
@@ -721,4 +727,8 @@
 
 {#if addDriveOpen}
   <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={toastStore.show} />
+{/if}
+
+{#if signingOut}
+  <SignOutDialog {account} onClose={() => (signingOut = false)} />
 {/if}

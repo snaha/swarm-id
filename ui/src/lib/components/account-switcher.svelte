@@ -7,9 +7,12 @@
   import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
   import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
+  import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
   import Polycon from '$lib/components/polycon.svelte'
+  import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
+  import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -29,6 +32,7 @@
   let container = $state<HTMLDivElement>()
   /** Replaces the panel actions with the create/import choice. */
   let addingAccount = $state(false)
+  let signingOut = $state(false)
 
   const others = $derived(
     accountsStore.accounts.filter((candidate) => !candidate.id.equals(account.id)),
@@ -52,8 +56,19 @@
   }
 
   function select(candidate: Account) {
+    if (candidate.isSignedOut) {
+      // No keys on this device — signing back in means importing the phrase.
+      close()
+      void goto(resolve(routes.ACCOUNT_IMPORT))
+      return
+    }
     sessionStore.setCurrentAccount(candidate.id)
     close()
+  }
+
+  function startSignOut() {
+    close()
+    signingOut = true
   }
 
   function manage() {
@@ -98,7 +113,11 @@
         </div>
 
         <Button variant="outline" class="w-full" onclick={manage}>Manage account</Button>
-        <Button variant="outline" class="w-full" onclick={notImplemented}>Sign out</Button>
+        <!-- A local account has nothing on Swarm to come back to — signing it out
+             would destroy it, so it only gets Delete (on the Account tab), no Sign out. -->
+        {#if !account.isLocal}
+          <Button variant="outline" class="w-full" onclick={startSignOut}>Sign out</Button>
+        {/if}
       </div>
 
       {#if addingAccount}
@@ -131,6 +150,9 @@
                     {truncateAddress(candidate.id.toChecksum())}
                   </span>
                 </span>
+                {#if candidate.isSignedOut}
+                  <Badge>Signed out</Badge>
+                {/if}
               </button>
             {/each}
           </div>
@@ -145,10 +167,14 @@
           {/if}
           <Button variant="ghost" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
             <UserRoundPlus />
-            Add an account
+            Sign in to another account
           </Button>
         </div>
       {/if}
     </div>
   {/if}
 </div>
+
+{#if signingOut}
+  <SignOutDialog {account} onClose={() => (signingOut = false)} />
+{/if}

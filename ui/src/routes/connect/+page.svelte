@@ -56,10 +56,11 @@
   })
 
   /**
-   * Previously connected to this app but the session lapsed (expired or
-   * revoked) — connecting again will ask for an unlock.
+   * Previously connected to this app but the app session lapsed (expired or
+   * revoked) — connecting again will ask for an unlock. Distinct from the
+   * account being signed out on this device (`account.isSignedOut`).
    */
-  function signedOut(account: Account): boolean {
+  function sessionLapsed(account: Account): boolean {
     const appOrigin = request?.appOrigin
     if (!appOrigin) {
       return false
@@ -72,6 +73,11 @@
 
   async function select(account: Account) {
     if (!request) {
+      return
+    }
+    if (account.isSignedOut) {
+      // No keys on this device — signing back in means importing the phrase.
+      await goto(resolve(routes.ACCOUNT_IMPORT))
       return
     }
     // A still-valid prior connection carries the secret — no unlock needed.
@@ -139,7 +145,8 @@
           <div class="flex w-full flex-col gap-2">
             <AccountList
               accounts={sortedAccounts}
-              badge={(account) => (signedOut(account) ? 'Signed out' : undefined)}
+              badge={(account) =>
+                account.isSignedOut || sessionLapsed(account) ? 'Signed out' : undefined}
               onselect={select}
             />
 
@@ -149,7 +156,7 @@
             </Button>
             <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
               <UserRoundPlus />
-              Add an account
+              Sign in to another account
             </Button>
           </div>
         {:else}

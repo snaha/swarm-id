@@ -6,10 +6,13 @@ import {
   type Account as AccountRecord,
   type ConnectedApp,
   type Device,
+  type LocalVault,
   type PostageStamp,
   PostageStampSchemaV1,
   STORAGE_KEY_ACCOUNTS,
+  type SyncedAccount,
   createAccountsStorageManager,
+  isSignedOutAccount,
   serializePostageStamp,
 } from '@snaha/swarm-id'
 
@@ -20,15 +23,26 @@ import { daysToMs } from '$lib/duration'
 type AccountSettings = { appSessionDuration?: number }
 
 /**
+ * The device-local tail of the account record, mirroring the lib's `Account`
+ * union: the seed vault while signed in, or the sign-out marker once
+ * `signOut()` wiped it. Held as ONE union-typed field (not three independently
+ * writable ones) so a half-signed-out live object is unrepresentable.
+ */
+type DeviceAuth =
+  | { vault: LocalVault; signedOutAt?: undefined }
+  | { vault?: undefined; signedOutAt: number }
+
+/**
  * The account aggregate root. Fields are reactive (`$state`) so component reads
  * update on mutation, and every mutator is a method **on the object** that
  * commits the whole collection through the injected `#commit` callback — callers
  * mutate the account they already hold (`account.rename(…)`), never a store
  * method that takes an id and looks the account up.
  *
- * The shape is the shared `@snaha/swarm-id` `Account` record (byte-class fields,
- * serialized to hex by the lib storage manager). The private `#commit` makes
- * the class nominal, so a plain record can't be mistaken for a live account.
+ * The shape mirrors the shared `@snaha/swarm-id` `Account` record union —
+ * `applyRecord`/`toRecord` project from/to it (byte-class fields are serialized
+ * to hex by the lib storage manager). The private `#commit` makes the class
+ * nominal, so a plain record can't be mistaken for a live account.
  *
  * Instances are stable per account id: a cross-tab storage refresh updates the
  * existing instance's fields via `applyRecord` rather than replacing it, so an
@@ -54,8 +68,9 @@ export class Account {
   derivationKey = $state('')
   name = $state('')
   publicKey = $state('')
-  access = $state<AccessMethod>({ type: 'password', kdfSalt: '', kdfIterations: 0 })
-  encryptedSeed = $state('')
+  // Device-local auth state: the seed vault while signed in, the sign-out
+  // marker after `signOut()` wiped it (exposed via the getters below).
+  #deviceAuth = $state<DeviceAuth>({ signedOutAt: 0 })
   settings = $state<AccountSettings | undefined>(undefined)
   defaultPostageStampBatchID = $state<BatchId | undefined>(undefined)
   devices = $state<Device[]>([])
@@ -68,8 +83,9 @@ export class Account {
   partitionCount = $state<number | undefined>(undefined)
   // Persist-and-publish this account's change, bound to `this` in the ctor so
   // mutators just call `this.#commit()`. `skipSync: true` saves the collection
-  // WITHOUT a Swarm publish (the change came from a remote fold, or is a
-  // volatile field peers don't need) — only ever passed by the dev mutators.
+  // WITHOUT a Swarm publish: the change came from a remote fold, is a volatile
+  // field peers don't need, or is a device-local de-auth that must not
+  // propagate (`signOut`).
   readonly #commit: (options?: { skipSync?: boolean }) => void
 
   constructor(
@@ -93,8 +109,9 @@ export class Account {
     this.derivationKey = record.derivationKey
     this.name = record.name
     this.publicKey = record.publicKey
-    this.access = record.access
-    this.encryptedSeed = record.encryptedSeed
+    this.#deviceAuth = isSignedOutAccount(record)
+      ? { signedOutAt: record.signedOutAt }
+      : { vault: { access: record.access, encryptedSeed: record.encryptedSeed } }
     this.settings = record.settings
     this.defaultPostageStampBatchID = record.defaultPostageStampBatchID
     this.devices = record.devices
@@ -107,6 +124,35 @@ export class Account {
     this.partitionCount = record.partitionCount
   }
 
+  /**
+   * Project the live instance back onto the lib's `Account` record union —
+   * `applyRecord`'s inverse, what `persist()` hands the storage manager. The
+   * union return type makes a half-signed-out projection a type error.
+   */
+  toRecord(): AccountRecord {
+    const synced: SyncedAccount = {
+      id: this.id,
+      name: this.name,
+      createdAt: this.createdAt,
+      derivationKey: this.derivationKey,
+      publicKey: this.publicKey,
+      settings: this.settings,
+      defaultPostageStampBatchID: this.defaultPostageStampBatchID,
+      devices: this.devices,
+      connectedApps: this.connectedApps,
+      postageStamps: this.postageStamps,
+      accountNameAt: this.accountNameAt,
+      defaultStampAt: this.defaultStampAt,
+      settingsAt: this.settingsAt,
+      lastModified: this.lastModified,
+      partitionCount: this.partitionCount,
+    }
+    const auth = this.#deviceAuth
+    return auth.vault === undefined
+      ? { ...synced, signedOutAt: auth.signedOutAt }
+      : { ...synced, ...auth.vault }
+  }
+
   /** Active (non-revoked) connected apps — what the UI displays. */
   get activeApps(): ConnectedApp[] {
     return this.connectedApps.filter((app) => !app.revokedAt)
@@ -115,6 +161,31 @@ export class Account {
   /** Live (non-tombstoned) stamps — what the UI displays (mutators are dev-only, below). */
   get stamps(): PostageStamp[] {
     return this.postageStamps.filter((stamp) => stamp.deletedAt === undefined)
+  }
+
+  /** Local: no live drives, so nothing of this account lives on Swarm yet. */
+  get isLocal(): boolean {
+    return this.stamps.length === 0
+  }
+
+  /** Device-local seed vault; `undefined` once `signOut()` wiped it. */
+  get vault(): LocalVault | undefined {
+    return this.#deviceAuth.vault
+  }
+
+  /** How the seed is unlocked on this device; `undefined` when signed out. */
+  get access(): AccessMethod | undefined {
+    return this.#deviceAuth.vault?.access
+  }
+
+  /** When `signOut()` wiped the vault; `undefined` while signed in. */
+  get signedOutAt(): number | undefined {
+    return this.#deviceAuth.signedOutAt
+  }
+
+  /** Signed out on this device: the seed vault was wiped by `signOut()`. */
+  get isSignedOut(): boolean {
+    return this.#deviceAuth.vault === undefined
   }
 
   rename(name: string) {
@@ -127,10 +198,28 @@ export class Account {
 
   /** Swap the unlock method: new access metadata + seed re-encrypted for it. */
   setAccess(access: AccessMethod, encryptedSeed: string) {
-    this.access = access
-    this.encryptedSeed = encryptedSeed
+    this.#deviceAuth = { vault: { access, encryptedSeed } }
     this.lastModified = Date.now()
     this.#commit()
+  }
+
+  /**
+   * Sign this account out on THIS device: wipe the seed vault and clear the
+   * live per-app session material so the dApp proxy can no longer authenticate
+   * from here. The row stays in the account list — signing back in requires
+   * the recovery phrase and a new access method. Deliberately NOT
+   * `disconnectApp` (no `updatedAt` bump): a device-local de-auth must not
+   * propagate as a synced disconnect. `skipSync` for the same reason — and
+   * with the keys gone there is nothing left to publish with anyway.
+   */
+  signOut() {
+    this.#deviceAuth = { signedOutAt: Date.now() }
+    this.connectedApps = this.connectedApps.map((app) => ({
+      ...app,
+      appSecret: undefined,
+      connectedUntil: undefined,
+    }))
+    this.#commit({ skipSync: true })
   }
 
   /** How long app connections stay valid, set in days (stored as ms). */
@@ -383,10 +472,11 @@ const storageManager = createAccountsStorageManager()
 
 let accounts = $state<Account[]>([])
 
-/** Save the whole collection to storage — the lib serializer converts the class
- * instances' byte-class fields to hex. No sync. */
+/** Save the whole collection to storage — each live instance projects back onto
+ * the record union (`toRecord`); the lib serializer converts the byte-class
+ * fields to hex. No sync. */
 function persist(): void {
-  storageManager.save(accounts)
+  storageManager.save(accounts.map((account) => account.toRecord()))
 }
 
 /**

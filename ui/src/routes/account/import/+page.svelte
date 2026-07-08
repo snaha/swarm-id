@@ -11,7 +11,7 @@
   import {
     deriveAccountDerivationKey,
     foldAccountFromSwarm,
-    foldedToAccountData,
+    foldedToSyncedAccount,
   } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
@@ -98,9 +98,9 @@
       }
 
       // Recover the synced state so `finalize` rebuilds the real account rather
-      // than a fresh empty one. `foldedToAccountData` owns the projection + the
+      // than a fresh empty one. `foldedToSyncedAccount` owns the projection + the
       // frozen-array copy.
-      const restored = foldedToAccountData({
+      const restored = foldedToSyncedAccount({
         id: new EthAddress(wallet.address),
         derivationKey,
         account: folded.account,

@@ -5,7 +5,14 @@
  * Shared test fixtures for backup-encryption, account-state-snapshot, and sync tests.
  */
 import { EthAddress, BatchId, PrivateKey } from "@ethersphere/bee-js"
-import type { Account, Device, ConnectedApp, PostageStamp } from "./schemas"
+import type {
+  SyncedAccount,
+  SignedInAccount,
+  SignedOutAccount,
+  Device,
+  ConnectedApp,
+  PostageStamp,
+} from "./schemas"
 
 export const TEST_ETH_ADDRESS_HEX = "a".repeat(40)
 export const TEST_ETH_ADDRESS_2_HEX = "b".repeat(40)
@@ -29,23 +36,44 @@ export function createDevice(overrides?: Partial<Device>): Device {
   }
 }
 
-/**
- * The single account fixture. Every account is a BIP-39 seed account with a
- * required `access` + `encryptedSeed` vault (defaulted here to a password vault);
- * override them to model a different access method.
- */
-export function createAccount(overrides?: Partial<Account>): Account {
+/** The synced (portable) fields both account fixtures share. */
+function createSyncedAccount(): SyncedAccount {
   return {
     id: new EthAddress(TEST_ETH_ADDRESS_HEX),
     name: "Test Account",
     createdAt: 1700000000000,
     publicKey: TEST_PUBLIC_KEY_HEX,
-    access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
-    encryptedSeed: "aabbccdd",
     derivationKey: TEST_DERIVATION_KEY_HEX,
     devices: [],
     connectedApps: [],
     postageStamps: [],
+  }
+}
+
+/**
+ * The signed-in account fixture. Every account is a BIP-39 seed account with an
+ * `access` + `encryptedSeed` vault (defaulted here to a password vault);
+ * override them to model a different access method. For the signed-out variant
+ * (vault wiped) use `createSignedOutAccount`.
+ */
+export function createAccount(
+  overrides?: Partial<SignedInAccount>,
+): SignedInAccount {
+  return {
+    ...createSyncedAccount(),
+    access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
+    encryptedSeed: "aabbccdd",
+    ...overrides,
+  }
+}
+
+/** Signed-out counterpart of `createAccount`: no vault, `signedOutAt` set. */
+export function createSignedOutAccount(
+  overrides?: Partial<SignedOutAccount>,
+): SignedOutAccount {
+  return {
+    ...createSyncedAccount(),
+    signedOutAt: 1700000000001,
     ...overrides,
   }
 }

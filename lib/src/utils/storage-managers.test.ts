@@ -7,13 +7,14 @@ import {
   createAccountsStorageManager,
   serializeAccount,
 } from "./storage-managers"
-import { AccountSchemaV1 } from "../schemas"
+import { LocalAccountSchemaV1 } from "../schemas"
 import { STORAGE_KEY_ACCOUNTS } from "../types"
 import {
   TEST_BATCH_ID_HEX,
   TEST_ETH_ADDRESS_2_HEX,
   TEST_PRIVATE_KEY_HEX,
   createAccount,
+  createSignedOutAccount,
   createPostageStamp,
 } from "../test-fixtures"
 
@@ -34,7 +35,7 @@ describe("serializeAccount — device-local seed vault", () => {
     const serialized = serializeAccount(account)
 
     // Survives a JSON file round-trip (no class instances leak into storage).
-    const reparsed = AccountSchemaV1.parse(
+    const reparsed = LocalAccountSchemaV1.parse(
       JSON.parse(JSON.stringify(serialized)),
     )
 
@@ -57,11 +58,24 @@ describe("serializeAccount — device-local seed vault", () => {
       { type: "password", kdfSalt: "aa", kdfIterations: 200000 },
     ] as const) {
       const serialized = serializeAccount(createAccount({ access }))
-      const reparsed = AccountSchemaV1.parse(
+      const reparsed = LocalAccountSchemaV1.parse(
         JSON.parse(JSON.stringify(serialized)),
       )
       expect(reparsed.access).toEqual(access)
     }
+  })
+
+  it("round-trips a signed-out account (vault wiped, signedOutAt set)", () => {
+    const account = createSignedOutAccount({ signedOutAt: 1700000000123 })
+
+    const serialized = serializeAccount(account)
+    const reparsed = LocalAccountSchemaV1.parse(
+      JSON.parse(JSON.stringify(serialized)),
+    )
+
+    expect(reparsed.access).toBeUndefined()
+    expect(reparsed.encryptedSeed).toBeUndefined()
+    expect(reparsed.signedOutAt).toBe(1700000000123)
   })
 })
 

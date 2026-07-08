@@ -111,7 +111,7 @@
     // Re-authenticate as a confirmation gate before the destructive delete (the
     // derived key itself is discarded). Password accounts have no interactive
     // ceremony, so collect the password in a modal and verify it there.
-    if (account.access.type === 'password') {
+    if (account.access?.type === 'password') {
       showDeleteModal = false
       deletePasswordError = undefined
       showDeletePasswordModal = true
@@ -187,7 +187,7 @@
       a.click()
       document.body.removeChild(a)
 
-      if (account.access.type === 'passkey') {
+      if (account.access?.type === 'passkey') {
         showPasskeyExportWarning = true
       }
     } catch (err) {
@@ -227,9 +227,9 @@
           style="padding: var(--padding)"
         >
           <Horizontal --horizontal-gap="var(--half-padding)">
-            {account.access.type === 'eth-wallet'
+            {account.access?.type === 'eth-wallet'
               ? 'Ethereum'
-              : account.access.type === 'passkey'
+              : account.access?.type === 'passkey'
                 ? 'Passkey'
                 : 'Agent'}
             <Badge>{account.defaultPostageStampBatchID ? 'Synced' : 'Local'}</Badge>
@@ -341,9 +341,9 @@
                 --horizontal-justify-content="stretch"
                 style="flex: 1"
               >
-                {#if acc.access.type === 'eth-wallet'}
+                {#if acc.access?.type === 'eth-wallet'}
                   <EthereumLogo size={20} />
-                {:else if acc.access.type === 'passkey'}
+                {:else if acc.access?.type === 'passkey'}
                   <PasskeyLogo size={20} />
                 {:else}
                   <Bot size={20} />
@@ -411,9 +411,9 @@
               oninput={onAccountNameChange}
             />
             <Horizontal --horizontal-gap="var(--quarter-padding)">
-              {#if account.access.type === 'eth-wallet'}
+              {#if account.access?.type === 'eth-wallet'}
                 <EthereumLogo size={20} />Ethereum
-              {:else if account.access.type === 'passkey'}
+              {:else if account.access?.type === 'passkey'}
                 <PasskeyLogo size={20} />Passkey
               {:else}
                 <Bot size={20} />Agent

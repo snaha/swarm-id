@@ -137,7 +137,7 @@ export {
   createAccountsStorageManager,
   createNetworkSettingsStorageManager,
   serializeAccount,
-  serializeAccountData,
+  serializeSyncedAccount,
   serializeConnectedApp,
   serializePostageStamp,
   serializeNetworkSettings,
@@ -227,7 +227,7 @@ export {
   ensureInRoster,
   ROSTER_TOPIC_PREFIX,
   foldAccountFromSwarm,
-  foldedToAccountData,
+  foldedToSyncedAccount,
 } from "./sync"
 
 // State sync types
@@ -338,7 +338,10 @@ export type {
 export type {
   Device,
   Account,
-  AccountData,
+  SyncedAccount,
+  SignedInAccount,
+  SignedOutAccount,
+  LocalVault,
   AccessMethod,
   ConnectedApp,
   PostageStamp,
@@ -352,11 +355,13 @@ export {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
   NetworkSettingsSchemaV1,
-  AccountSchemaV1,
-  AccountDataSchemaV1,
+  LocalAccountSchemaV1,
+  SyncedAccountSchemaV1,
+  LocalVaultSchemaV1,
   AccessMethodSchemaV1,
   PostageStampSchemaV1,
   isLocalAccount,
+  isSignedOutAccount,
 } from "./schemas"
 
 // Base validation schemas and types

@@ -8,6 +8,7 @@
   import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
   import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
+  import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
   import AccountList from '$lib/components/account-list.svelte'
@@ -37,13 +38,27 @@
 
   const accounts = $derived(accountsStore.accounts)
   // The active session's account, if any: with one the page IS the app
-  // (apps/drives/account tabs); without one it is the account chooser.
-  const account = $derived(
-    sessionStore.currentAccountId ? accountsStore.get(sessionStore.currentAccountId) : undefined,
-  )
+  // (apps/drives/account tabs); without one it is the account chooser. A
+  // signed-out current account (sign-out in another tab arrives via the
+  // storage listener) has no keys left, so there is no session to show.
+  const account = $derived.by(() => {
+    const current = sessionStore.currentAccountId
+      ? accountsStore.get(sessionStore.currentAccountId)
+      : undefined
+    return current?.isSignedOut ? undefined : current
+  })
 
   function select(chosen: Account) {
+    if (chosen.isSignedOut) {
+      // No keys on this device — signing back in means importing the phrase.
+      void goto(resolve(routes.ACCOUNT_IMPORT))
+      return
+    }
     sessionStore.setCurrentAccount(chosen.id)
+  }
+
+  function signedOutBadge(candidate: Account): string | undefined {
+    return candidate.isSignedOut ? 'Signed out' : undefined
   }
 </script>
 
@@ -97,7 +112,7 @@
 
       {#if accounts.length > 0 && !addingAccount}
         <div class="flex w-full flex-col gap-2">
-          <AccountList {accounts} onselect={select} />
+          <AccountList {accounts} badge={signedOutBadge} onselect={select} />
 
           <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
             <UserRoundMinus />
@@ -105,7 +120,7 @@
           </Button>
           <Button variant="outline" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
             <UserRoundPlus />
-            Add an account
+            Sign in to another account
           </Button>
         </div>
       {:else}

@@ -15,10 +15,15 @@ import {
   createLocalStorageManager,
   type VersionParser,
 } from "./versioned-storage"
-import type { Account, AccountData, ConnectedApp, PostageStamp } from "../types"
+import type {
+  Account,
+  SyncedAccount,
+  ConnectedApp,
+  PostageStamp,
+} from "../types"
 import { STORAGE_KEY_ACCOUNTS, STORAGE_KEY_NETWORK_SETTINGS } from "../types"
 import {
-  AccountSchemaV1,
+  LocalAccountSchemaV1,
   NetworkSettingsSchemaV1,
   type NetworkSettings,
 } from "../schemas"
@@ -46,7 +51,7 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
 
   const accounts: Account[] = []
   for (const record of records.data) {
-    const result = AccountSchemaV1.safeParse(record)
+    const result = LocalAccountSchemaV1.safeParse(record)
     if (!result.success) {
       console.error("Skipping invalid account record:", result.error.format())
       continue
@@ -70,15 +75,16 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
 // ============================================================================
 
 /**
- * Serialize the portable projection of an account (`AccountData`) — what backup
- * files and the sync feed carry off the device. Beyond the schema-level omission
- * of the seed vault, it strips the live per-app session material: `appSecret`
- * (the secret the dApp proxy authenticates from, re-derivable from the master
- * key on the next connect) and `connectedUntil` (meaningless without the secret
- * — keeping it would show a "Connected" app that can no longer authenticate).
+ * Serialize the portable projection of an account (`SyncedAccount`) — what
+ * backup files and the sync feed carry off the device. Beyond the schema-level
+ * absence of the seed vault, it strips the live per-app session material:
+ * `appSecret` (the secret the dApp proxy authenticates from, re-derivable from
+ * the master key on the next connect) and `connectedUntil` (meaningless without
+ * the secret — keeping it would show a "Connected" app that can no longer
+ * authenticate).
  */
-export function serializeAccountData(
-  data: AccountData,
+export function serializeSyncedAccount(
+  data: SyncedAccount,
 ): Record<string, unknown> {
   return {
     id: data.id.toString(),
@@ -112,19 +118,18 @@ export function serializeAccountData(
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
   return {
-    ...serializeAccountData(account),
+    ...serializeSyncedAccount(account),
     // Local storage keeps the live per-app session secrets the portable
     // projection strips.
     connectedApps: account.connectedApps.map(serializeConnectedApp),
-    // Device-local seed vault — the account's only secret material. `access` is
-    // how the seed is unlocked on THIS device (the method plus its params:
-    // password KDF, passkey credential, or eth-wallet salt); `encryptedSeed` is
-    // the BIP-39 seed encrypted at rest under the key that method derives. Plain
-    // JSON (no byte classes); both are always set, as every account is a seed
-    // account. This pair stays on the device: the portable copy that backups and
-    // the sync feed publish omits it (`AccountData` = the record without them).
+    // The device-local tail of the record: the seed vault (the account's only
+    // secret material — plain JSON, no byte classes) while signed in, or
+    // `signedOutAt` after a sign-out wiped it. This group stays on the device:
+    // the portable copy that backups and the sync feed publish is
+    // `SyncedAccount` — the record without it.
     access: account.access,
     encryptedSeed: account.encryptedSeed,
+    signedOutAt: account.signedOutAt,
   }
 }
 

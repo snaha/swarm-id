@@ -59,7 +59,7 @@ export {
 } from "./device-roster"
 export {
   foldAccountFromSwarm,
-  foldedToAccountData,
+  foldedToSyncedAccount,
 } from "./fold-account-from-swarm"
 export type { FoldAccountResult } from "./fold-account-from-swarm"
 

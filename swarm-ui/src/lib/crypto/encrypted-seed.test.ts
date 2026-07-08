@@ -4,11 +4,11 @@
 /**
  * End-to-end check that a real BIP-39 seed phrase, encrypted by the actual
  * create/import pipeline, produces an `encryptedSeed` the lib's
- * `AccountSchemaV1` accepts (and that the constraint rejects a blanked one).
+ * `LocalAccountSchemaV1` accepts (and that the constraint rejects a blanked one).
  */
 import { describe, it, expect } from 'vitest'
 import { Mnemonic, Wallet } from 'ethers'
-import { AccountSchemaV1 } from '@snaha/swarm-id'
+import { LocalAccountSchemaV1 } from '@snaha/swarm-id'
 import { encryptSeed, deriveKeyFromPassword, randomSalt } from './encryption'
 import { bytesToHex } from './hex'
 import { walletFromPhrase } from './mnemonic'
@@ -40,7 +40,7 @@ async function encryptPhrase(phrase: string) {
   }
 }
 
-/** The serialized (wire) account shape AccountSchemaV1 parses, for a real wallet. */
+/** The serialized (wire) account shape LocalAccountSchemaV1 parses, for a real wallet. */
 function serializedAccount(phrase: string, vault: Awaited<ReturnType<typeof encryptPhrase>>) {
   const { address, publicKey } = walletFromPhrase(phrase)
   return {
@@ -59,7 +59,7 @@ describe('encryptedSeed from a real seed phrase', () => {
     [12, 88],
     [24, 120],
   ] as const)(
-    'a real %i-word phrase encrypts to %i-char hex that AccountSchemaV1 accepts',
+    'a real %i-word phrase encrypts to %i-char hex that LocalAccountSchemaV1 accepts',
     async (words, expectedLength) => {
       const phrase = realPhrase(words)
       expect(phrase.split(' ')).toHaveLength(words)
@@ -68,13 +68,13 @@ describe('encryptedSeed from a real seed phrase', () => {
       expect(vault.encryptedSeed).toMatch(/^[0-9a-f]+$/)
       expect(vault.encryptedSeed).toHaveLength(expectedLength)
 
-      expect(AccountSchemaV1.safeParse(serializedAccount(phrase, vault)).success).toBe(true)
+      expect(LocalAccountSchemaV1.safeParse(serializedAccount(phrase, vault)).success).toBe(true)
     },
   )
 
   it('rejects a real account whose encryptedSeed is blanked', async () => {
     const phrase = Wallet.createRandom().mnemonic!.phrase
     const account = serializedAccount(phrase, await encryptPhrase(phrase))
-    expect(AccountSchemaV1.safeParse({ ...account, encryptedSeed: '' }).success).toBe(false)
+    expect(LocalAccountSchemaV1.safeParse({ ...account, encryptedSeed: '' }).success).toBe(false)
   })
 })

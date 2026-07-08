@@ -218,13 +218,36 @@ export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
 ])
 
 /**
- * Account Schema V1
+ * Local Vault Schema V1
+ *
+ * The device-local seed vault. Every account is a BIP-39 seed account: `access`
+ * records how the seed is protected/unlocked on THIS device (passkey /
+ * eth-wallet / password) and `encryptedSeed` is that seed encrypted at rest
+ * under the key the access method derives (hex: IV || ciphertext — width varies
+ * with the seed size: 12-word seed → 88 chars, 24-word → 120, so no fixed
+ * length). The vault never leaves the device: `SyncedAccountSchemaV1` has no
+ * vault fields, and a sign-out wipes the vault while the synced data lives on.
+ */
+export const LocalVaultSchemaV1 = z.object({
+  access: AccessMethodSchemaV1,
+  encryptedSeed: z.string().regex(/^([0-9a-f]{2})+$/),
+})
+
+/**
+ * Synced Account Schema V1
  *
  * The single, unified account model. There is exactly one kind of account: a
  * BIP-39 seed account. What used to be distinct `type`s (passkey / ethereum /
  * agent) were really just different ways of protecting the seed — now expressed
- * uniformly by the `access` method + `encryptedSeed` vault every account carries.
- * No `type` discriminant remains.
+ * uniformly by the device-local vault (`LocalVaultSchemaV1`). No `type`
+ * discriminant remains.
+ *
+ * This is the portable projection of the account — every field that may travel
+ * off the device, and nothing device-local. Backup files serialize/parse it
+ * directly and the sync feed carries the same shape (serialize with
+ * `serializeSyncedAccount`, which additionally strips the live per-app session
+ * material). What localStorage holds is `LocalAccountSchemaV1` = this plus the
+ * device-local tail.
  *
  * The account is the single-level aggregate root (the identity tier was
  * collapsed into it). It is the app-facing identity: `id` is the address apps
@@ -235,7 +258,7 @@ export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
  * apps and postage stamps as nested collections rather than via foreign-key
  * pointers.
  */
-export const AccountSchemaV1 = z.object({
+export const SyncedAccountSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
@@ -243,15 +266,6 @@ export const AccountSchemaV1 = z.object({
   // App-facing public key (compressed secp256k1). Surfaced to dApps as the
   // identity public key in ConnectionInfo. Was previously on the identity.
   publicKey: CompressedPublicKeySchema,
-  // Device-local seed vault. Every account is a BIP-39 seed account: `access`
-  // records how the seed is protected/unlocked on this device (passkey /
-  // eth-wallet / password) and `encryptedSeed` is that seed encrypted at rest.
-  // Device-local: deliberately excluded from the sync snapshot.
-  access: AccessMethodSchemaV1,
-  // BIP-39 entropy encrypted with the access-method key (hex: IV || ciphertext).
-  // Non-empty, even-length hex — never blank. Width varies with the seed size
-  // (12-word seed → 88 chars, 24-word → 120), so it is not a fixed length.
-  encryptedSeed: z.string().regex(/^([0-9a-f]{2})+$/),
   defaultPostageStampBatchID: StoredBatchId.optional(),
   devices: z.array(DeviceSchemaV1).default([]),
   // Account-owned nested collections (replace the old flat identities/apps/
@@ -282,16 +296,50 @@ export const AccountSchemaV1 = z.object({
 })
 
 /**
- * The portable projection of the account — everything except the device-local
- * seed vault (`access` + `encryptedSeed`). This is the single definition of
- * what travels off the device: backup files serialize/parse it directly, and
- * the sync feed carries the same shape. Serialize with `serializeAccountData`,
- * which additionally strips the live per-app session material.
+ * Signed-in variant: the synced data plus the device vault. `signedOutAt` is
+ * declared undefined-only (not merely omitted) so a record carrying BOTH a
+ * vault and a sign-out marker fails this variant — and the signed-out one —
+ * and is quarantined at load, instead of silently parsing as signed-in and
+ * dropping the marker.
  */
-export const AccountDataSchemaV1 = AccountSchemaV1.omit({
-  access: true,
-  encryptedSeed: true,
+const SignedInAccountSchemaV1 = SyncedAccountSchemaV1.extend({
+  ...LocalVaultSchemaV1.shape,
+  signedOutAt: z.undefined().optional(),
 })
+
+/**
+ * Signed-out variant: the synced data plus the moment the user signed this
+ * account out on THIS device. The vault was wiped, but the account row stays
+ * so the user can see it and sign back in (recovery phrase + new access
+ * method). The vault keys are declared undefined-only so a record that kept
+ * half a vault is quarantined rather than loaded as signed-out. When a future
+ * "sign back in with the security method" flow wants to RETAIN the vault
+ * through a sign-out, it extends this variant with `LocalVaultSchemaV1.shape`.
+ */
+const SignedOutAccountSchemaV1 = SyncedAccountSchemaV1.extend({
+  access: z.undefined().optional(),
+  encryptedSeed: z.undefined().optional(),
+  signedOutAt: z.number(),
+})
+
+/**
+ * Local Account Schema V1 — parse entrypoint for stored account records (what
+ * localStorage holds): the synced projection plus the device-local tail,
+ * modeled as a union so the signed-in/signed-out states are encoded in the
+ * data itself — a signed-in account carries the vault and no `signedOutAt`, a
+ * signed-out one the reverse; half-signed-out states are unrepresentable.
+ *
+ * This only validates at parse (load) time — the accounts loader SKIPS a
+ * violating record rather than failing the document — but unlike a refinement
+ * the union also carries into the TYPE system: `Account` is a discriminated
+ * union (discriminate on `access`/`signedOutAt` presence, or narrow with
+ * `isSignedOutAccount`), so writers can't produce a half-signed-out record
+ * without a type error.
+ */
+export const LocalAccountSchemaV1 = z.union([
+  SignedInAccountSchemaV1,
+  SignedOutAccountSchemaV1,
+])
 
 // ============================================================================
 // Sync State Snapshot Schemas
@@ -311,7 +359,7 @@ export const AccountMetadataSchemaV1 = z.object({
       appSessionDuration: z.number().optional(),
     })
     .optional(),
-  // Per-field LWW clocks for the scalar fields (see `AccountSchemaV1`).
+  // Per-field LWW clocks for the scalar fields (see `SyncedAccountSchemaV1`).
   accountNameAt: z.number().optional(),
   defaultStampAt: z.number().optional(),
   settingsAt: z.number().optional(),
@@ -352,8 +400,12 @@ export const AccountStateSnapshotSchemaV1 = z.object({
 
 export type Device = z.infer<typeof DeviceSchemaV1>
 export type AccessMethod = z.infer<typeof AccessMethodSchemaV1>
-export type Account = z.infer<typeof AccountSchemaV1>
-export type AccountData = z.infer<typeof AccountDataSchemaV1>
+export type LocalVault = z.infer<typeof LocalVaultSchemaV1>
+export type SyncedAccount = z.infer<typeof SyncedAccountSchemaV1>
+export type SignedInAccount = z.infer<typeof SignedInAccountSchemaV1>
+export type SignedOutAccount = z.infer<typeof SignedOutAccountSchemaV1>
+/** The local (on-device) account record: `SignedInAccount | SignedOutAccount`. */
+export type Account = z.infer<typeof LocalAccountSchemaV1>
 export type ConnectedApp = z.infer<typeof ConnectedAppSchemaV1>
 export type PostageStamp = z.infer<typeof PostageStampSchemaV1>
 export type AccountMetadata = z.infer<typeof AccountMetadataSchemaV1>
@@ -384,6 +436,19 @@ export function isLocalAccount(account: Account): boolean {
     stamp.usable &&
     stamp.deletedAt === undefined
   )
+}
+
+/**
+ * An account is "signed out" on this device when its seed vault has been
+ * wiped: no keys remain, so nothing can be unlocked or signed until the user
+ * signs back in with the recovery phrase (and sets a new access method). The
+ * vault absence itself is the source of truth; `signedOutAt` only records
+ * when. Narrows: the false branch exposes the vault fields as non-optional.
+ */
+export function isSignedOutAccount(
+  account: Account,
+): account is SignedOutAccount {
+  return account.access === undefined
 }
 
 // ============================================================================
