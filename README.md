@@ -2,13 +2,12 @@
 
 Cross-browser compatible authentication and identity management for Swarm dApps.
 
-**[Documentation](https://swarm.snaha.net/docs)** | **[Identity UI](https://swarm-id.snaha.net)** | **[Demo](https://swarm-demo.snaha.net)** | **[Legacy Identity UI](https://swarm.snaha.net/id-legacy/)**
+**[Documentation](https://swarm.snaha.net/docs)** | **[Identity UI](https://swarm-id.snaha.net)** | **[Demo](https://swarm-demo.snaha.net)**
 
 ## Packages
 
 - **[lib/](./lib/README.md)** — `@snaha/swarm-id` TypeScript library for authentication and Bee API operations
-- **[ui/](./ui/README.md)** — `@swarm-id/ui` next-generation identity UI (standalone product, active redesign)
-- **[swarm-ui/](./swarm-ui/)** — legacy SvelteKit identity management UI (trusted domain), being superseded by `ui/`
+- **[ui/](./ui/README.md)** — `@swarm-id/ui` SvelteKit identity UI (trusted domain)
 - **[demo/](./demo/)** — Demo dApp with library integration examples
 - **[docs-site/](./docs-site/)** — Starlight (Astro) documentation website
 
@@ -62,13 +61,11 @@ client.destroy()
 The latest `main` build of every app deploys to root paths, and every PR gets previews under
 `…/pr-N/` (workflows: `deploy-main-pages.yml`, `deploy-preview.yml`):
 
-| Path                           | App                                 |
-| ------------------------------ | ----------------------------------- |
-| `swarm.snaha.net/id/`          | new identity UI (`ui/`)             |
-| `swarm.snaha.net/id-legacy/`   | legacy identity UI (`swarm-ui/`)    |
-| `swarm.snaha.net/demo/`        | demo, running against the new `/id` |
-| `swarm.snaha.net/demo-legacy/` | demo, running against `/id-legacy`  |
-| `swarm.snaha.net/docs/`        | documentation site                  |
+| Path                    | App                         |
+| ----------------------- | --------------------------- |
+| `swarm.snaha.net/id/`   | identity UI (`ui/`)         |
+| `swarm.snaha.net/demo/` | demo, running against `/id` |
+| `swarm.snaha.net/docs/` | documentation site          |
 
 ### DigitalOcean App Platform (canonical domains)
 
@@ -91,10 +88,10 @@ pnpm install
 pnpm dev
 ```
 
-Open http://localhost:3000 - that's it!
+Open http://localhost:3500 - that's it!
 
-- Demo app runs on port 3000
-- Identity UI runs on port 5510
+- Demo app runs on port 3500
+- Identity UI runs on port 5500
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
 **Note:** Safari operates in download-only mode — authentication and downloads work, but uploads are disabled due to ITP storage partitioning. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
@@ -102,18 +99,12 @@ Open http://localhost:3000 - that's it!
 ### Development Mode (with hot reload)
 
 ```bash
-# Start the full stack against the new identity UI (ui :5500 + demo :3500)
-pnpm dev:new
-
-# Start the full stack against the legacy identity UI (swarm-ui :5510 + demo :3000)
-pnpm dev:legacy      # `pnpm dev` is an alias
+# Start the full stack (identity UI :5500 + demo :3500 against it)
+pnpm dev
 
 # Or start individually
-pnpm dev:ui:new      # New identity UI on port 5500
-pnpm dev:ui:legacy   # Legacy identity UI on port 5510
-pnpm dev:demo:new    # Demo on port 3500, connected to the new identity UI (:5500)
-pnpm dev:demo:legacy # Demo on port 3000, connected to the legacy identity UI (:5510)
-pnpm dev:demo        # Demo on port 3000, identity UI origin from demo/.env (legacy)
+pnpm dev:ui          # Identity UI on port 5500
+pnpm dev:demo        # Demo on port 3500, connected to the identity UI (:5500)
 pnpm dev:lib         # Library watch mode (rebuilds on changes)
 ```
 
@@ -147,7 +138,7 @@ pnpm dev:bee:fresh
 
 The easiest way is to use the Developer Tools page in the Identity UI:
 
-1. Navigate to http://localhost:5510/dev
+1. Navigate to http://localhost:5500/dev
 2. Go to the **Stamps** tab
 3. Click **Buy Stamp** with the default settings
 
@@ -167,7 +158,7 @@ See the [Local Development guide](https://swarm.snaha.net/docs/local-development
 
 ### Developer Tools (/dev route)
 
-The Identity UI includes a Developer Tools page at http://localhost:5510/dev with utilities for local development:
+The Identity UI includes a Developer Tools page at http://localhost:5500/dev with utilities for local development:
 
 - **Overview**: Quick start guide and local Bee endpoint links with copy buttons
 - **Stamps**: Buy postage stamps from the local Bee node using pre-funded signer keys
@@ -178,9 +169,8 @@ The Identity UI includes a Developer Tools page at http://localhost:5510/dev wit
 ```
 .
 ├── lib/                  # @snaha/swarm-id TypeScript library
-├── ui/                   # New identity UI (SvelteKit + Tailwind v4 + shadcn-svelte style)
+├── ui/                   # Identity UI (SvelteKit + Tailwind v4 + shadcn-svelte style)
 ├── demo/                 # Demo app (SvelteKit)
-├── swarm-ui/             # Legacy identity management UI (SvelteKit)
 └── docs-site/            # Documentation website (Starlight/Astro)
 ```
 
@@ -188,7 +178,7 @@ The Identity UI includes a Developer Tools page at http://localhost:5510/dev wit
 
 ### Demo not loading
 
-- Check if ports 3000 and 5510 are already in use: `lsof -i :3000 -i :5510`
+- Check if ports 3500 and 5500 are already in use: `lsof -i :3500 -i :5500`
 - Ensure both servers are running: `pnpm dev`
 
 ### Authentication popup blocked

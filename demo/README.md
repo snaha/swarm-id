@@ -55,7 +55,7 @@ pnpm install
 pnpm dev
 ```
 
-Then open http://localhost:3000
+Then open http://localhost:3500
 
 No HTTPS or certificates required - `localhost` is a secure context.
 
@@ -93,7 +93,7 @@ The client automatically:
 - Validates all messages with Zod schemas
 - Provides a type-safe API for authentication and Bee operations
 
-The identity management (authentication, key derivation, storage) is handled by the Swarm ID UI at `swarm-id.snaha.net` (see `../swarm-ui/`)
+The identity management (authentication, key derivation, storage) is handled by the Swarm ID UI at `swarm-id.snaha.net` (see `../ui/`)
 
 ## API Examples
 

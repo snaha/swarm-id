@@ -10,8 +10,8 @@ Integration tests that exercise the **library's** real Swarm operations
 started with [`@snaha/bee-compose`](https://www.npmjs.com/package/@snaha/bee-compose).
 
 These test the library only — they call its functions directly against a real
-Bee node. The full dApp → popup → iframe flow is covered separately by the
-browser E2E (Playwright) suite in `swarm-ui/`. Unit tests in `src/` mock Bee;
+Bee node. The full dApp → popup → iframe flow is exercised separately against
+the identity UI (`ui/`) and the demo dApp. Unit tests in `src/` mock Bee;
 these do not.
 
 Originated as the POC for [#302](https://github.com/snaha/swarm-id/issues/302):

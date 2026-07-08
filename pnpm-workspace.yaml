@@ -1,7 +1,6 @@
 packages:
   - 'lib'
   - 'demo'
-  - 'swarm-ui'
   - 'ui'
   - 'docs-site'
 

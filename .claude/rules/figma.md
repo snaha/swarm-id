@@ -1,6 +1,6 @@
 ---
 paths:
-  - 'swarm-ui/**'
+  - 'ui/**'
 ---
 
 # Figma MCP Workflow

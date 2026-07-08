@@ -38,8 +38,7 @@ Master Key (from Passkey/SIWE challenge)
 ## Packages
 
 - **lib/**: TypeScript library (@snaha/swarm-id) — auth and Bee API operations
-- **ui/**: `@swarm-id/ui` — next-generation identity UI (standalone product, active redesign target)
-- **swarm-ui/**: legacy SvelteKit identity management UI (trusted domain) — being superseded by `ui/`
+- **ui/**: `@swarm-id/ui` — SvelteKit identity UI (trusted domain), hosts the keystore UI and management
 - **demo/**: Demo dApp showing library integration
 - **docs-site/**: Starlight (Astro) documentation website
 
@@ -47,9 +46,7 @@ Master Key (from Passkey/SIWE challenge)
 
 ```bash
 pnpm install          # Install dependencies
-pnpm dev:new          # Start the new identity UI (:5500) + demo (:3500) against it
-pnpm dev:legacy       # Start the legacy identity UI (:5510) + demo (:3000) against it
-pnpm dev              # Alias for dev:legacy
+pnpm dev              # Start the identity UI (:5500) + demo (:3500) against it
 pnpm build            # Build everything
 pnpm check:all        # All CI checks (format, lint, typecheck, knip)
 pnpm clean            # Clean build outputs
@@ -62,19 +59,19 @@ pnpm clean            # Clean build outputs
 Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
 
 - **@snaha/swarm-id**: `format:check`, `lint`, `typecheck`, `test`
-- **swarm-identity**: `lint`, `check`, `knip`
 - **@swarm-id/ui**: `lint` (includes license headers), `check`, `knip`
+- **@swarm-id/demo**: `lint`, `check`, `knip`
 
-## New UI (`ui/`)
+## UI (`ui/`)
 
-The new identity UI is a fresh SvelteKit product replacing `swarm-ui/` screen by screen.
+The identity UI is a SvelteKit SPA.
 
 - **Stack**: SvelteKit (Svelte 5 runes) + `@sveltejs/adapter-static` (pure SPA, `ssr = false`),
   Tailwind CSS v4 via `@tailwindcss/vite`, shadcn-svelte-style components (hand-written, no bits-ui)
 - **Components**: shadcn-style primitives live in `src/lib/components/ui/`; app-level components
   in `src/lib/components/`; stores in `src/lib/stores/` (e.g. theming: `auto`/`light`/`dark`
   preference persisted in localStorage, applied as a `dark` class on `<html>`)
-- **Toolchain**: versions are pinned to match `swarm-ui` (eslint 9, vite 7, svelte 5.48,
+- **Toolchain**: versions are pinned across the monorepo (eslint 9, vite 7, svelte 5.48,
   vite-plugin-svelte 6) — do NOT bump these independently of the rest of the monorepo
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
@@ -147,15 +144,13 @@ GitHub Pages (`gh-pages` branch, CNAME `swarm.snaha.net`) hosts the latest `main
 app at root paths, plus per-PR previews under `…/pr-N/` (`deploy-main-pages.yml` /
 `deploy-preview.yml`):
 
-| Path                           | App                             |
-| ------------------------------ | ------------------------------- |
-| `swarm.snaha.net/id/`          | new UI (`ui/`)                  |
-| `swarm.snaha.net/id-legacy/`   | legacy UI (`swarm-ui/`)         |
-| `swarm.snaha.net/demo/`        | demo, run against the new `/id` |
-| `swarm.snaha.net/demo-legacy/` | demo, run against `/id-legacy`  |
-| `swarm.snaha.net/docs/`        | docs site                       |
+| Path                    | App                     |
+| ----------------------- | ----------------------- |
+| `swarm.snaha.net/id/`   | identity UI (`ui/`)     |
+| `swarm.snaha.net/demo/` | demo, run against `/id` |
+| `swarm.snaha.net/docs/` | docs site               |
 
-DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains, serving the new UI:
+DigitalOcean (`deploy-do.yml`, push to main) keeps the canonical domains:
 
-- **Identity UI (new, `ui/`)**: https://swarm-id.snaha.net
+- **Identity UI (`ui/`)**: https://swarm-id.snaha.net
 - **Demo**: https://swarm-demo.snaha.net, run against swarm-id.snaha.net
