@@ -173,9 +173,21 @@ export class Account {
     return this.#deviceAuth.vault
   }
 
-  /** How the seed is unlocked on this device; `undefined` when signed out. */
-  get access(): AccessMethod | undefined {
-    return this.#deviceAuth.vault?.access
+  /**
+   * How the seed is unlocked on this device, asserted present. The unlock
+   * ceremonies and the whole signed-in account UI (`HomeAccount`,
+   * `UnlockDialog`) only ever render for a signed-in account — `routes/+page`
+   * maps a signed-out current account to no session — so those callers read
+   * the method directly instead of `?`-chaining a union getter. Two-state
+   * callers use `isSignedOut` / `vault` instead. Throws if the vault was wiped,
+   * surfacing a routing bug rather than silently reading `undefined`.
+   */
+  get accessMethod(): AccessMethod {
+    const access = this.#deviceAuth.vault?.access
+    if (access === undefined) {
+      throw new Error('accessMethod read on a signed-out account')
+    }
+    return access
   }
 
   /** When `signOut()` wiped the vault; `undefined` while signed in. */
