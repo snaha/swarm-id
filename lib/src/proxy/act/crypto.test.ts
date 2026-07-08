@@ -109,6 +109,41 @@ describe("ecdhSharedSecret", () => {
       ecdhSharedSecret(validPriv, pubKey.x, new Uint8Array(16)),
     ).toThrow()
   })
+
+  it("should reject a point that is not on the curve (invalid-curve attack)", () => {
+    const privKey = new Uint8Array(32)
+    privKey[31] = 7
+
+    // (1, 1) is not on secp256k1: 1² ≠ 1³ + 7
+    const offCurveX = new Uint8Array(32)
+    offCurveX[31] = 1
+    const offCurveY = new Uint8Array(32)
+    offCurveY[31] = 1
+
+    expect(() => ecdhSharedSecret(privKey, offCurveX, offCurveY)).toThrow()
+  })
+
+  it("should reject the all-zero point (point at infinity encoding)", () => {
+    const privKey = new Uint8Array(32)
+    privKey[31] = 7
+
+    expect(() =>
+      ecdhSharedSecret(privKey, new Uint8Array(32), new Uint8Array(32)),
+    ).toThrow()
+  })
+
+  it("should match known-answer vector: priv=2 with G gives x(2G)", () => {
+    const privKey = new Uint8Array(32)
+    privKey[31] = 2
+
+    const shared = ecdhSharedSecret(privKey, GENERATOR_X, GENERATOR_Y)
+    const hex = Array.from(shared)
+      .map((b) => b.toString(16).padStart(2, "0"))
+      .join("")
+    expect(hex).toBe(
+      "c6047f9441ed7d6d3045406e95c07cd85c778e4b8cef3ca7abac09b95c709ee5",
+    )
+  })
 })
 
 describe("deriveKeys", () => {
@@ -332,6 +367,14 @@ describe("publicKeyFromCompressed", () => {
   it("should throw error for invalid length", () => {
     expect(() => publicKeyFromCompressed(new Uint8Array(32))).toThrow()
     expect(() => publicKeyFromCompressed(new Uint8Array(34))).toThrow()
+  })
+
+  it("should throw error when x has no valid y on the curve", () => {
+    // x=5: 5³+7 = 132 is a quadratic non-residue mod p — no point exists
+    const invalid = new Uint8Array(33)
+    invalid[0] = 0x02
+    invalid[32] = 5
+    expect(() => publicKeyFromCompressed(invalid)).toThrow()
   })
 
   it("should roundtrip through compress/decompress", () => {
