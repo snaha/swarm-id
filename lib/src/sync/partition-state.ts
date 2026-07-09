@@ -44,7 +44,7 @@ import {
   downloadDataWithChunkAPI,
   downloadEncryptedSOC,
 } from "../proxy/download-data"
-import { uploadData, uploadSOC, type UploadTarget } from "../proxy/upload"
+import { uploadChunk, uploadSOC, type UploadTarget } from "../proxy/upload"
 import { TimeoutError, withTimeout } from "../utils/promise"
 import { makeEncryptedContentAddressedChunk } from "../chunk"
 import {
@@ -920,7 +920,7 @@ export async function writePartitionState(opts: {
     const picked = pickReservedChunkKey(plaintext, claimedBuckets)
     references[i] = picked.reference
     reserve?.markReservedUtilizationChunk(picked.address, partition)
-    return { plaintext, key: picked.key }
+    return { data: picked.data }
   })
 
   // The reference chunk lists every ref (N·64 bytes; ≤ 4096 even at N=64).
@@ -970,18 +970,14 @@ export async function writePartitionState(opts: {
   // before another starts. If a future change introduces an await inside those
   // branches, concurrent stamps would race on the shared `buckets` array —
   // serialize the PUTs (or guard the slot) before doing so.
+  // Upload the EXACT encrypted bytes picked above — re-encrypting here would
+  // randomize the padding (sub-4096 plaintexts, e.g. the reference chunk) and
+  // land the chunk at a different address than the one already reserved and
+  // written into `references` / the pointer.
   const publishStart = Date.now()
   await Promise.all([
-    ...prepared.map((p) =>
-      uploadData(target, p.plaintext, {
-        encryptionKey: p.key,
-        deferred: false,
-      }),
-    ),
-    uploadData(target, referenceChunk, {
-      encryptionKey: refPicked.key,
-      deferred: false,
-    }),
+    ...prepared.map((p) => uploadChunk(target, p.data, { deferred: false })),
+    uploadChunk(target, refPicked.data, { deferred: false }),
   ])
   await writeStatePointer({
     bee,
@@ -1041,14 +1037,16 @@ function bytesEqual(a: Uint8Array, b: Uint8Array): boolean {
 /**
  * Pick a random encryption key whose encrypted address lands in a bucket not
  * yet claimed (reserved chunks share one slot, so each must occupy a distinct
- * bucket), claim that bucket, and return the address + key + 64-byte reference.
- * CPU only — the upload happens later, batched. The bucket-distinctness retry
+ * bucket), claim that bucket, and return the address + 64-byte reference +
+ * encrypted chunk bytes. CPU only — the upload happens later, batched, and
+ * must PUT these exact bytes: encryption padding is random, so re-encrypting
+ * the plaintext would yield a different address. The bucket-distinctness retry
  * is why addresses are chosen in one synchronous pass before any PUT.
  */
 function pickReservedChunkKey(
   plaintext: Uint8Array,
   claimedBuckets: Set<number>,
-): { address: Uint8Array; key: Uint8Array; reference: Uint8Array } {
+): { address: Uint8Array; reference: Uint8Array; data: Uint8Array } {
   let encrypted = makeEncryptedContentAddressedChunk(plaintext)
   while (claimedBuckets.has(toBucket(encrypted.address.toUint8Array()))) {
     encrypted = makeEncryptedContentAddressedChunk(plaintext)
@@ -1057,7 +1055,7 @@ function pickReservedChunkKey(
   claimedBuckets.add(toBucket(address))
   return {
     address,
-    key: encrypted.encryptionKey,
     reference: encrypted.reference.toUint8Array(),
+    data: encrypted.data,
   }
 }

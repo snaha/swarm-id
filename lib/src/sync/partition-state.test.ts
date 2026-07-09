@@ -64,13 +64,13 @@ vi.mock("../proxy/upload", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../proxy/upload")>()
   return {
     ...actual,
-    uploadData: vi.fn(actual.uploadData),
+    uploadChunk: vi.fn(actual.uploadChunk),
     uploadSOC: vi.fn(actual.uploadSOC),
   }
 })
 
 import { statePointerAddress, writePartitionState } from "./partition-state"
-import { uploadData, uploadSOC } from "../proxy/upload"
+import { uploadChunk, uploadSOC } from "../proxy/upload"
 import {
   intentEpochBucket,
   partitionOccupancyAddress,
@@ -254,7 +254,7 @@ describe("writePartitionState — two-phase publish (pointer after chunks)", () 
     // pointer referencing chunks Bee never stored bricks every future takeover
     // (readFailed → read-only until batch expiry), since there is no
     // older-pointer fallback. See #414.
-    vi.mocked(uploadData).mockRejectedValueOnce(new Error("chunk PUT failed"))
+    vi.mocked(uploadChunk).mockRejectedValueOnce(new Error("chunk PUT failed"))
     vi.mocked(uploadSOC).mockClear()
 
     await expect(

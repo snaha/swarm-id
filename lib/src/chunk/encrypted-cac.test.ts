@@ -76,8 +76,11 @@ describe("makeEncryptedContentAddressedChunk", () => {
       expect(chunk1.encryptionKey).not.toEqual(chunk2.encryptionKey)
     })
 
-    it("should produce same encrypted data with same key", () => {
-      const payload = new Uint8Array([1, 2, 3, 4, 5])
+    it("should produce same encrypted data with same key (full-size payload)", () => {
+      // A full 4096-byte payload has no random padding, so the ciphertext and
+      // address are fully deterministic — the property batch-utilization
+      // relies on for dedup. Smaller payloads get random padding.
+      const payload = new Uint8Array(4096).fill(7)
       const key = generateRandomKey()
 
       const chunk1 = makeEncryptedContentAddressedChunk(payload, key)

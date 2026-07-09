@@ -215,15 +215,22 @@ describe("SOC upload signature validation", () => {
       const unencryptedCAC = makeContentAddressedChunk(data)
       expect(captured!.body).not.toEqual(unencryptedCAC.data)
 
-      // Create the same encrypted chunk using the returned key
+      // Re-encrypting with the returned key reproduces the ciphertext of the
+      // data itself (padding beyond it is random, so compare only the prefix:
+      // 8-byte encrypted span + data.length encrypted bytes)
       const encryptedChunk = makeEncryptedContentAddressedChunk(
         data,
         result.encryptionKey,
       )
-      expect(captured!.body).toEqual(encryptedChunk.data)
+      expect(captured!.body.slice(0, 8 + data.length)).toEqual(
+        encryptedChunk.data.slice(0, 8 + data.length),
+      )
 
       // Verify: signature was computed over hash(identifier + encrypted_chunk_address)
-      const expectedAddress = encryptedChunk.address.toUint8Array()
+      // where the address is the BMT hash of the body actually sent
+      const expectedAddress = calculateChunkAddress(
+        captured!.body,
+      ).toUint8Array()
       const toSign = Binary.concatBytes(
         identifier.toUint8Array(),
         expectedAddress,
@@ -299,9 +306,12 @@ describe("SOC upload signature validation", () => {
       const captured = capturingFetch.getCaptured()
       expect(captured).toBeDefined()
 
-      // Create expected encrypted chunk with the custom key
+      // Create expected encrypted chunk with the custom key; padding is
+      // random, so compare only the encrypted span + data prefix
       const encryptedChunk = makeEncryptedContentAddressedChunk(data, customKey)
-      expect(captured!.body).toEqual(encryptedChunk.data)
+      expect(captured!.body.slice(0, 8 + data.length)).toEqual(
+        encryptedChunk.data.slice(0, 8 + data.length),
+      )
     })
   })
 
