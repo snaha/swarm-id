@@ -48,7 +48,7 @@
 
 <Dialog title="Network settings" {onclose}>
   <div class="flex w-full flex-col gap-2">
-    <label for="bee-node-url" class="text-sm font-medium">Bee node URL</label>
+    <label for="bee-node-url" class="text-sm font-medium">Bee address</label>
     <Input
       id="bee-node-url"
       bind:value={beeNodeUrl}
@@ -62,7 +62,7 @@
   </div>
 
   <div class="flex w-full flex-col gap-2">
-    <label for="gnosis-rpc-url" class="text-sm font-medium">Gnosis RPC endpoint</label>
+    <label for="gnosis-rpc-url" class="text-sm font-medium">RPC endpoint</label>
     <Input
       id="gnosis-rpc-url"
       bind:value={gnosisRpcUrl}
@@ -76,7 +76,8 @@
   </div>
 
   <div class="flex w-full items-center gap-2">
-    <Button class="flex-1" disabled={!canSave} onclick={save}>Save settings</Button>
-    <Button variant="outline" onclick={resetToDefaults}>Reset to defaults</Button>
+    <Button disabled={!canSave} onclick={save}>Save</Button>
+    <Button variant="outline" onclick={onclose}>Cancel</Button>
+    <Button variant="ghost" class="ml-auto" onclick={resetToDefaults}>Reset</Button>
   </div>
 </Dialog>
