@@ -497,11 +497,27 @@ const storageManager = createAccountsStorageManager()
 
 let accounts = $state<Account[]>([])
 
-/** Save the whole collection to storage — each live instance projects back onto
- * the record union (`toRecord`); the lib serializer converts the byte-class
- * fields to hex. No sync. */
-function persist(): void {
-  storageManager.save(accounts.map((account) => account.toRecord()))
+/**
+ * Persist one account by read-merge-write: re-read the stored collection and
+ * overwrite ONLY this account's record (the live instance projected back onto
+ * the record union via `toRecord`), so a save→save interleaving with another
+ * tab mutating a DIFFERENT account can't clobber that tab's write (in-memory
+ * convergence still comes from the cross-tab `storage` event).
+ * Accepted edge: merging by id means a mutation racing another tab's remove of
+ * the SAME account re-adds it — benign, last-writer-wins. No sync.
+ */
+function persistAccount(account: Account): void {
+  const record = account.toRecord()
+  const stored = storageManager.load()
+  const merged = stored.some((existing) => existing.id.equals(account.id))
+    ? stored.map((existing) => (existing.id.equals(account.id) ? record : existing))
+    : [...stored, record]
+  storageManager.save(merged)
+}
+
+/** Remove one account from storage by read-merge-write (see `persistAccount`). */
+function persistRemoval(id: EthAddress): void {
+  storageManager.save(storageManager.load().filter((record) => !record.id.equals(id)))
 }
 
 /**
@@ -511,7 +527,7 @@ function persist(): void {
  * each `Account` as its `#commit`.
  */
 function commitAccount(account: Account, options?: { skipSync?: boolean }): void {
-  persist()
+  persistAccount(account)
   if (!options?.skipSync) syncHook?.(account.id.toHex())
 }
 
@@ -547,10 +563,18 @@ if (browser) {
   })
 }
 
-function toEthAddress(id: string | EthAddress): EthAddress {
+function toEthAddress(id: string | EthAddress): EthAddress | undefined {
   // `EthAddress` parses a bare or `0x`-prefixed hex string, so a raw stored id
-  // and a caller's `.toHex()` both work.
-  return typeof id === 'string' ? new EthAddress(id) : id
+  // and a caller's `.toHex()` both work. `undefined` on malformed input: ids
+  // arrive from localStorage (`swarm-id-current-account-v2`) inside render-time
+  // `$derived`s, so a tampered value must fall through to the "no account"
+  // paths instead of white-screening every page.
+  if (typeof id !== 'string') return id
+  try {
+    return new EthAddress(id)
+  } catch {
+    return undefined
+  }
 }
 
 export const accountsStore = {
@@ -560,7 +584,7 @@ export const accountsStore = {
 
   get(id: string | EthAddress): Account | undefined {
     const ethId = toEthAddress(id)
-    return accounts.find((account) => account.id.equals(ethId))
+    return ethId && accounts.find((account) => account.id.equals(ethId))
   },
 
   /** Create — or replace, for sign-in / restore — an account; returns the live object. */
@@ -569,19 +593,20 @@ export const accountsStore = {
     if (existing) {
       // Reuse the instance so references held elsewhere keep working.
       existing.applyRecord(record)
-      persist()
+      persistAccount(existing)
       return existing
     }
     const account = hydrate(record)
     accounts = [...accounts, account]
-    persist()
+    persistAccount(account)
     return account
   },
 
   remove(id: string | EthAddress): void {
     const ethId = toEthAddress(id)
+    if (!ethId) return
     accounts = accounts.filter((account) => !account.id.equals(ethId))
-    persist()
+    persistRemoval(ethId)
   },
 
   // ----- Dev-only: consumed only by the /dev tooling (see the class banner) ---
