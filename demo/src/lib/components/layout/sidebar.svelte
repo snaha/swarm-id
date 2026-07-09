@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import { cn } from '$lib/utils'
+  import { resolveProxyOrigin } from '$lib/utils/environment'
   import { sidebarStore } from '$lib/stores/sidebar.svelte'
   import NavLink from './nav-link.svelte'
   import SidebarAuth from './sidebar-auth.svelte'
@@ -38,6 +39,31 @@
     {#each NAV_ITEMS as item (item.href)}
       <NavLink href={item.href} label={item.label} />
     {/each}
+    <!-- external URL, not an app route -->
+    <!-- eslint-disable svelte/no-navigation-without-resolve -->
+    <a
+      href={resolveProxyOrigin()}
+      target="_blank"
+      rel="noopener noreferrer"
+      class="flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium text-muted-foreground transition-colors hover:bg-accent hover:text-accent-foreground"
+    >
+      SwarmID
+      <svg
+        class="h-3.5 w-3.5"
+        viewBox="0 0 24 24"
+        fill="none"
+        stroke="currentColor"
+        stroke-width="2"
+        stroke-linecap="round"
+        stroke-linejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M15 3h6v6" />
+        <path d="M10 14 21 3" />
+        <path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6" />
+      </svg>
+    </a>
+    <!-- eslint-enable svelte/no-navigation-without-resolve -->
   </nav>
 
   <!-- Auth section -->
