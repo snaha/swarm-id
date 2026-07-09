@@ -175,7 +175,9 @@
           </div>
         {/if}
 
-        <Button variant="ghost" size="xs" onclick={notImplemented}>What is Swarm ID?</Button>
+        <Button variant="ghost" size="xs" href={resolve(routes.PRODUCT)} target="_blank">
+          What is Swarm ID?
+        </Button>
       </div>
     {/if}
   </main>
