@@ -10,12 +10,14 @@
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
+  import { page } from '$app/state'
 
   import AccountList from '$lib/components/account-list.svelte'
   import AccountSwitcher from '$lib/components/account-switcher.svelte'
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
   import HomeDrives from '$lib/components/home-drives.svelte'
+  import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Button } from '$lib/components/ui/button'
@@ -47,6 +49,11 @@
       : undefined
     return current?.isSignedOut ? undefined : current
   })
+  // A first visit (no accounts on this device) lands on the product page;
+  // `?signin` (the product page's "Get started") opts into the chooser below.
+  const showProduct = $derived(
+    !account && accounts.length === 0 && !page.url.searchParams.has('signin'),
+  )
 
   function select(chosen: Account) {
     if (chosen.isSignedOut) {
@@ -89,6 +96,8 @@
       </div>
     </main>
   </div>
+{:else if showProduct}
+  <ProductPage />
 {:else}
   <div class="relative flex min-h-svh flex-col items-center justify-center p-8">
     <div class="absolute top-8 right-8">
