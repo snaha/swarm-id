@@ -4,8 +4,11 @@
 -->
 
 <script lang="ts">
+  import BookOpen from '@lucide/svelte/icons/book-open'
   import Check from '@lucide/svelte/icons/check'
   import Contrast from '@lucide/svelte/icons/contrast'
+  import ExternalLink from '@lucide/svelte/icons/external-link'
+  import Globe from '@lucide/svelte/icons/globe'
   import History from '@lucide/svelte/icons/history'
   import Moon from '@lucide/svelte/icons/moon'
   import Settings from '@lucide/svelte/icons/settings'
@@ -24,6 +27,9 @@
     { value: 'light', label: 'Light', icon: Sun },
     { value: 'dark', label: 'Dark', icon: Moon },
   ] as const
+
+  const PRODUCT_PAGE_URL = 'https://swarm-id.snaha.net'
+  const DOCUMENTATION_URL = 'https://swarm.snaha.net/docs'
 
   const ITEM_CLASS =
     'flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
@@ -92,6 +98,33 @@
         <History class="size-4 shrink-0" />
         <span class="flex-1 whitespace-nowrap">Restore account from backup</span>
       </button>
+
+      <div class="bg-border -mx-1 my-1 h-px"></div>
+
+      <a
+        href={PRODUCT_PAGE_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        role="menuitem"
+        class={ITEM_CLASS}
+        onclick={close}
+      >
+        <Globe class="size-4 shrink-0" />
+        <span class="flex-1 whitespace-nowrap">Product page</span>
+        <ExternalLink class="text-muted-foreground size-3.5 shrink-0" />
+      </a>
+      <a
+        href={DOCUMENTATION_URL}
+        target="_blank"
+        rel="noopener noreferrer"
+        role="menuitem"
+        class={ITEM_CLASS}
+        onclick={close}
+      >
+        <BookOpen class="size-4 shrink-0" />
+        <span class="flex-1 whitespace-nowrap">Documentation</span>
+        <ExternalLink class="text-muted-foreground size-3.5 shrink-0" />
+      </a>
 
       <div class="bg-border -mx-1 my-1 h-px"></div>
 
