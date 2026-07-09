@@ -3,6 +3,7 @@
 
 import type {
   ParentToIframeMessage,
+  ParentIdentifyMessage,
   IframeToParentMessage,
   ButtonStyles,
   ButtonConfig,
@@ -47,6 +48,7 @@ import type {
 } from "./types"
 import {
   ParentToIframeMessageSchema,
+  ParentIdentifyMessageSchema,
   PopupToIframeMessageSchema,
   STORAGE_CHALLENGE_KEY,
   leaseCacheStorageKey,
@@ -863,9 +865,20 @@ export class SwarmIdProxy {
     window.addEventListener("message", async (event: MessageEvent) => {
       const { type } = event.data
 
-      // Handle parent identification (must come first)
+      // Handle parent identification (must come first). Only the embedding
+      // parent window may identify itself — any co-embedded iframe can obtain
+      // our WindowProxy and race the real parent otherwise (#410).
       if (type === "parentIdentify") {
-        await this.handleParentIdentify(event)
+        if (event.source !== window.parent) {
+          console.warn("[Proxy] Rejected parentIdentify from non-parent window")
+          return
+        }
+        const result = ParentIdentifyMessageSchema.safeParse(event.data)
+        if (!result.success) {
+          console.warn("[Proxy] Invalid parentIdentify message:", result.error)
+          return
+        }
+        await this.handleParentIdentify(result.data, event)
         return
       }
 
@@ -927,15 +940,16 @@ export class SwarmIdProxy {
   /**
    * Handle parent identification
    */
-  private async handleParentIdentify(event: MessageEvent): Promise<void> {
+  private async handleParentIdentify(
+    message: ParentIdentifyMessage,
+    event: MessageEvent,
+  ): Promise<void> {
     // Prevent parent from changing after first identification
     if (this.parentIdentified) {
       console.error("[Proxy] Parent already identified! Ignoring duplicate.")
       return
     }
 
-    // Parse the message to get optional parameters
-    const message = event.data
     const parentPopupMode = message.popupMode
     const parentMetadata = message.metadata
     const parentButtonConfig = message.buttonConfig
