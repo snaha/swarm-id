@@ -14,7 +14,6 @@
 <script lang="ts">
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import BookText from '@lucide/svelte/icons/book-text'
-  import Contrast from '@lucide/svelte/icons/contrast'
   import Github from '@lucide/svelte/icons/github'
 
   import { resolve } from '$app/paths'
@@ -59,7 +58,13 @@
         <ArrowRight />
       </Button>
       <Button variant="ghost" size="icon" aria-label="Toggle theme" onclick={toggleTheme}>
-        <Contrast />
+        <!-- Remix Icon contrast-fill, per the Figma design (no lucide equivalent) -->
+        <svg viewBox="0 0 16 16" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+          <path
+            d="M8 14.6667C4.318 14.6667 1.33333 11.682 1.33333 8C1.33333 4.318 4.318 1.33333 8 1.33333C11.682 1.33333 14.6667 4.318 14.6667 8C14.6667 11.682 11.682 14.6667 8 14.6667ZM8 13.3333V2.66667C6.58551 2.66667 5.22896 3.22857 4.22876 4.22876C3.22857 5.22896 2.66667 6.58551 2.66667 8C2.66667 9.41449 3.22857 10.771 4.22876 11.7712C5.22896 12.7714 6.58551 13.3333 8 13.3333Z"
+            fill="currentColor"
+          />
+        </svg>
       </Button>
     </div>
   </header>
