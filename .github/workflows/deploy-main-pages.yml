@@ -25,9 +25,10 @@ on:
 permissions:
   contents: write
 
-# Share the gh-pages lock with itself so concurrent main pushes serialise.
+# Serialise all gh-pages pushes (shared with deploy-preview.yml) so
+# concurrent main pushes and PR preview deploys never race each other.
 concurrency:
-  group: pages-main
+  group: gh-pages
   cancel-in-progress: false
 
 jobs:
