@@ -10,6 +10,8 @@
   error thrown from `onunlocked` is shown in the dialog for a retry.
 -->
 <script lang="ts">
+  import { untrack } from 'svelte'
+
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
 
   import { Button } from '$lib/components/ui/button'
@@ -28,6 +30,14 @@
 
   let { account, title, description, onunlocked, onclose }: Props = $props()
 
+  // The unlock ceremony only runs for a signed-in account, so the method is
+  // present at mount. Read ONCE via `untrack` (not `$derived`): the method is
+  // fixed for a ceremony, and an untracked read can never be re-triggered by a
+  // mid-ceremony sign-out (e.g. cross-tab) — so the dialog cannot re-read
+  // `accessMethod` on a wiped vault and throw. `unlockAccount` still rejects a
+  // wiped vault at confirm, surfacing it as a dialog error rather than a crash.
+  const access = untrack(() => account.accessMethod)
+
   let password = $state('')
   let busy = $state(false)
   let pendingCeremony = $state(false)
@@ -42,15 +52,21 @@
     const myAttempt = ++attempt
     error = undefined
     busy = true
-    if (account.access?.type !== 'password') {
+    if (access.type !== 'password') {
       pendingCeremony = true
     }
     try {
       const entropy = await unlockAccount(
         account,
-        account.access?.type === 'password' ? password : undefined,
+        access.type === 'password' ? password : undefined,
       )
-      if (myAttempt !== attempt) {
+      // Bail if this ceremony was superseded (cancel/retry) or the account was
+      // signed out mid-flight (e.g. cross-tab): a passkey/wallet unlock can take
+      // seconds, and `unlockAccount` captured the vault before the wipe so it
+      // still resolves — but completing the connection with a now-signed-out
+      // account would re-arm app session material the sign-out just cleared.
+      if (myAttempt !== attempt || account.isSignedOut) {
+        entropy.fill(0)
         return
       }
       await onunlocked(entropy)
@@ -79,10 +95,10 @@
     <div class="flex flex-col items-center gap-2 py-4 text-center">
       <LoaderCircle class="size-5 animate-spin" />
       <p class="text-sm font-bold">
-        {account.access?.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
+        {access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey'}
       </p>
       <p class="text-sm">
-        {account.access?.type === 'eth-wallet'
+        {access.type === 'eth-wallet'
           ? 'Approve the request in your Ethereum wallet.'
           : 'Follow the prompts on your device.'}
       </p>
@@ -93,7 +109,7 @@
   <Dialog onclose={close} {title}>
     <p class="text-sm">{description}</p>
 
-    {#if account.access?.type === 'password'}
+    {#if access.type === 'password'}
       <Input
         type="password"
         bind:value={password}
@@ -109,15 +125,15 @@
 
     <Button
       class="w-full"
-      disabled={busy || (account.access?.type === 'password' && password.length === 0)}
+      disabled={busy || (access.type === 'password' && password.length === 0)}
       onclick={confirm}
     >
       {#if busy}
         <LoaderCircle class="animate-spin" />
       {/if}
-      {account.access?.type === 'passkey'
+      {access.type === 'passkey'
         ? 'Confirm with passkey'
-        : account.access?.type === 'eth-wallet'
+        : access.type === 'eth-wallet'
           ? 'Confirm with wallet'
           : 'Confirm'}
     </Button>

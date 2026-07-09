@@ -173,9 +173,23 @@ export class Account {
     return this.#deviceAuth.vault
   }
 
-  /** How the seed is unlocked on this device; `undefined` when signed out. */
-  get access(): AccessMethod | undefined {
-    return this.#deviceAuth.vault?.access
+  /**
+   * How the seed is unlocked on this device, asserted present. The unlock
+   * ceremonies and the whole signed-in account UI (`HomeAccount`,
+   * `UnlockDialog`) only ever render for a signed-in account — `routes/+page`
+   * maps a signed-out current account to no session — so those callers read
+   * the method directly instead of `?`-chaining a union getter. Two-state
+   * callers use `isSignedOut` / `vault` instead. Throws if the vault was wiped,
+   * surfacing a routing bug rather than silently reading `undefined`.
+   */
+  get accessMethod(): AccessMethod {
+    const vault = this.#deviceAuth.vault
+    if (vault === undefined) {
+      throw new Error(
+        'Cannot read the access method: this account is signed out on this device (its seed vault was wiped). Read `accessMethod` only in signed-in-only UI; guard with `isSignedOut` otherwise.',
+      )
+    }
+    return vault.access
   }
 
   /** When `signOut()` wiped the vault; `undefined` while signed in. */
@@ -196,8 +210,19 @@ export class Account {
     this.#commit()
   }
 
-  /** Swap the unlock method: new access metadata + seed re-encrypted for it. */
+  /**
+   * Swap the unlock method: new access metadata + seed re-encrypted for it.
+   * Throws on a signed-out account — sign-out wiped the vault, and a late
+   * change-method ceremony re-arming it here would silently undo the
+   * sign-out. Signing back in replaces the whole record through the import
+   * flow (`accountsStore.add`) instead.
+   */
   setAccess(access: AccessMethod, encryptedSeed: string) {
+    if (this.isSignedOut) {
+      throw new Error(
+        'Cannot set an access method: this account is signed out on this device (its seed vault was wiped). Signing back in requires the recovery phrase, not a method change.',
+      )
+    }
     this.#deviceAuth = { vault: { access, encryptedSeed } }
     this.lastModified = Date.now()
     this.#commit()

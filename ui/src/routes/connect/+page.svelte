@@ -181,7 +181,11 @@
   </main>
 </div>
 
-{#if unlocking}
+<!-- Drop the unlock dialog if this account is signed out from another tab mid-
+     ceremony (`unlocking` is a captured reference, not session-derived): the
+     account then reads as signed-out in the list and selecting it routes to
+     import, matching the chooser. -->
+{#if unlocking && !unlocking.isSignedOut}
   <UnlockDialog
     account={unlocking}
     title="Connect as {unlocking.name}"

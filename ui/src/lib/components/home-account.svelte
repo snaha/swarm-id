@@ -99,15 +99,12 @@
   let verifyNewPassword = $state('')
 
   const isLocal = $derived(account.isLocal)
-  // The Account tab only renders for the signed-in current account, but the
-  // vault fields are optional on the record — fall back to an empty label.
-  const accessLabel = $derived(account.access ? methodLabel(account.access.type) : '')
+  // The Account tab only renders for the signed-in current account, so the
+  // access method is always present (`accessMethod` asserts it).
+  const access = $derived(account.accessMethod)
+  const accessLabel = $derived(methodLabel(access.type))
   const AccessIcon: Component = $derived(
-    account.access?.type === 'passkey'
-      ? Fingerprint
-      : account.access?.type === 'eth-wallet'
-        ? Wallet
-        : KeyRound,
+    access.type === 'passkey' ? Fingerprint : access.type === 'eth-wallet' ? Wallet : KeyRound,
   )
   const publicKeyDisplay = $derived(prefix0x(account.publicKey))
   const newPasswordTooShort = $derived(
@@ -172,15 +169,20 @@
     const myAttempt = ++attempt
     dialogError = undefined
     busy = true
-    if (account.access?.type !== 'password') {
+    if (access.type !== 'password') {
       dialog = { kind: 'unlock', target, pending: true }
     }
     try {
       const unlocked = await unlockAccount(
         account,
-        account.access?.type === 'password' ? password : undefined,
+        access.type === 'password' ? password : undefined,
       )
-      if (myAttempt !== attempt) {
+      // Bail if this ceremony was superseded (cancel/retry) or the account was
+      // signed out mid-flight (e.g. cross-tab): the sign-out unmounts this
+      // component but not this continuation, and completing would still
+      // download a backup (export) or stage the seed for a change-method
+      // `setAccess` — acting on a vault the sign-out just wiped.
+      if (myAttempt !== attempt || account.isSignedOut) {
         unlocked.fill(0)
         return
       }
@@ -255,6 +257,15 @@
         }
       }
       if (myAttempt !== attempt) {
+        return
+      }
+      if (account.isSignedOut) {
+        // Signed out mid-ceremony (e.g. cross-tab): `setAccess` would re-arm
+        // the vault the sign-out just wiped. This is the live attempt, so the
+        // held seed is ours to destroy — a superseded attempt must NOT touch
+        // it, since a retry's seed lives in the same variable.
+        changeMethodSeed.fill(0)
+        changeMethodSeed = undefined
         return
       }
       account.setAccess(access, await encryptSeed(changeMethodSeed, key))
@@ -588,8 +599,8 @@
   {#if dialog.pending}
     <Dialog onclose={closeDialog} dismissable={false}>
       {@render pendingBody(
-        account.access?.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey',
-        account.access?.type === 'eth-wallet'
+        access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey',
+        access.type === 'eth-wallet'
           ? 'Approve the request in your Ethereum wallet.'
           : 'Follow the prompts on your device.',
       )}
@@ -616,7 +627,7 @@
         {/if}
       </p>
 
-      {#if account.access?.type === 'password'}
+      {#if access.type === 'password'}
         <Input
           type="password"
           bind:value={password}
@@ -632,15 +643,15 @@
 
       <Button
         class="w-full"
-        disabled={busy || (account.access?.type === 'password' && password.length === 0)}
+        disabled={busy || (access.type === 'password' && password.length === 0)}
         onclick={confirmUnlock}
       >
         {#if busy}
           <LoaderCircle class="animate-spin" />
         {/if}
-        {account.access?.type === 'passkey'
+        {access.type === 'passkey'
           ? 'Confirm with passkey'
-          : account.access?.type === 'eth-wallet'
+          : access.type === 'eth-wallet'
             ? 'Confirm with wallet'
             : 'Confirm'}
       </Button>
