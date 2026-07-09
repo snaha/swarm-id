@@ -7,7 +7,6 @@
   import Check from '@lucide/svelte/icons/check'
   import Contrast from '@lucide/svelte/icons/contrast'
   import History from '@lucide/svelte/icons/history'
-  import Menu from '@lucide/svelte/icons/menu'
   import Moon from '@lucide/svelte/icons/moon'
   import Settings from '@lucide/svelte/icons/settings'
   import Sun from '@lucide/svelte/icons/sun'
@@ -69,14 +68,14 @@
 
 <div bind:this={container} class="relative">
   <Button
-    variant="ghost"
+    variant="outline"
     size="icon"
-    aria-label="Menu"
+    aria-label="Settings"
     aria-haspopup="menu"
     aria-expanded={open}
     onclick={() => (open = !open)}
   >
-    <Menu />
+    <Settings />
   </Button>
 
   {#if open}
