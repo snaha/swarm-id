@@ -110,10 +110,7 @@ export class Encryption implements EncryptionInterface {
     }
 
     // Pad the rest if out is longer
-    // Use deterministic padding based on encryption key
-    if (out.length > inLength) {
-      padDeterministic(out.subarray(inLength), this.encryptionKey, inLength)
-    }
+    getRandomValues(out.subarray(inLength))
   }
 
   /**
@@ -141,14 +138,7 @@ export class Encryption implements EncryptionInterface {
     }
 
     // Insert padding if out is longer
-    // Use deterministic padding based on encryption key
-    if (out.length > inLength) {
-      padDeterministic(
-        out.subarray(inLength),
-        this.encryptionKey,
-        i * this.keyLen + inLength,
-      )
-    }
+    getRandomValues(out.subarray(inLength))
   }
 }
 
@@ -161,41 +151,6 @@ function getRandomValues(buffer: Uint8Array): void {
 
   // Use Web Crypto API for secure random bytes
   crypto.getRandomValues(buffer)
-}
-
-/**
- * Fills buffer with pseudo-random data derived from a key
- * This makes padding deterministic for testing purposes
- *
- * @param buffer Buffer to fill with padding
- * @param key Encryption key to use as seed for deterministic padding
- * @param offset Offset within the logical data stream (for uniqueness)
- */
-function padDeterministic(buffer: Uint8Array, key: Key, offset: number): void {
-  if (buffer.length === 0) return
-
-  // Generate deterministic padding by hashing key + offset
-  let filled = 0
-  let counter = offset
-
-  while (filled < buffer.length) {
-    // Hash: key || counter
-    const counterBytes = new Uint8Array(4)
-    new DataView(counterBytes.buffer).setUint32(0, counter, true)
-
-    const seedData = new Uint8Array(key.length + counterBytes.length)
-    seedData.set(key)
-    seedData.set(counterBytes, key.length)
-
-    const hash = Binary.keccak256(seedData)
-
-    // Copy as many bytes as needed from the hash
-    const toCopy = Math.min(hash.length, buffer.length - filled)
-    buffer.set(hash.subarray(0, toCopy), filled)
-
-    filled += toCopy
-    counter++
-  }
 }
 
 /**

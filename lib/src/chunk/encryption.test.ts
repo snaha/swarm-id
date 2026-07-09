@@ -78,7 +78,26 @@ describe("Encryption class", () => {
       const encrypted1 = encrypter1.encrypt(data)
       const encrypted2 = encrypter2.encrypt(data)
 
-      expect(encrypted1).toEqual(encrypted2)
+      // Only the ciphertext of the actual data is deterministic;
+      // padding beyond it is random (like Bee)
+      expect(encrypted1.slice(0, data.length)).toEqual(
+        encrypted2.slice(0, data.length),
+      )
+    })
+
+    it("should pad with random bytes unrelated to the keystream (#409)", () => {
+      const key = generateRandomKey()
+      const data = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8])
+      const padding = 4096
+
+      const encrypted1 = new Encryption(key, padding, 0).encrypt(data)
+      const encrypted2 = new Encryption(key, padding, 0).encrypt(data)
+
+      // Same key + data → padding must still differ: it is random, not a
+      // deterministic function of the key (which leaked plaintext length)
+      expect(encrypted1.slice(data.length)).not.toEqual(
+        encrypted2.slice(data.length),
+      )
     })
 
     it("should produce different ciphertext with different keys", () => {
@@ -109,8 +128,10 @@ describe("Encryption class", () => {
       encrypter.reset()
       const encrypted2 = encrypter.encrypt(data)
 
-      // Should produce same result after reset
-      expect(encrypted1).toEqual(encrypted2)
+      // Should produce same ciphertext after reset (padding is random)
+      expect(encrypted1.slice(0, data.length)).toEqual(
+        encrypted2.slice(0, data.length),
+      )
     })
 
     it("should encrypt without padding when padding is 0", () => {

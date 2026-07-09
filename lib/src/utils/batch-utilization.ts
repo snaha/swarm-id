@@ -32,7 +32,7 @@ import {
 } from "../chunk"
 import { Binary, type Chunk as CafeChunk } from "cafe-utility"
 import type { UtilizationStoreDB } from "../storage/utilization-store"
-import { uploadData, type UploadTarget } from "../proxy/upload"
+import { uploadChunk, type UploadTarget } from "../proxy/upload"
 import { tryCreateTag } from "./tag"
 import { lockSocAddress } from "./lock-soc"
 import { deriveSecret } from "./key-derivation"
@@ -603,9 +603,10 @@ export async function uploadUtilizationChunk(
     stamper,
   }
 
-  // Upload using unified interface (with deferred: false for fast return)
-  await uploadData(target, data, {
-    encryptionKey,
+  // Upload the exact encrypted bytes the reference was computed from —
+  // re-encrypting would randomize the padding of sub-4096 plaintexts and
+  // change the address (deferred: false for fast return)
+  await uploadChunk(target, encryptedChunk.data, {
     deferred: false,
     tag,
   })
