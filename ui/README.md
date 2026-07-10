@@ -35,8 +35,15 @@ pnpm --filter @swarm-id/ui build    # outputs to ./build
 ```bash
 pnpm --filter @swarm-id/ui check:all   # prettier + eslint + svelte-check + knip
 pnpm --filter @swarm-id/ui test        # vitest unit tests
+pnpm --filter @swarm-id/ui test:e2e    # Playwright end-to-end tests (tests/)
 pnpm --filter @swarm-id/ui format      # prettier --write + eslint --fix
 ```
+
+`test:e2e` starts the UI (`:5500`) and demo (`:3500`) dev servers itself and drives them
+with Playwright. First run locally needs the browser once:
+`pnpm --filter @swarm-id/ui exec playwright install chromium` (CI runs in the
+`mcr.microsoft.com/playwright` image, which ships them). Append `--ui` for the interactive
+runner, or a path (e.g. `tests/home.test.ts`) to run a single spec.
 
 Conventions:
 
