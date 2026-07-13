@@ -19,9 +19,16 @@ const clusterReachable = await isClusterReachable()
 const MAX_CHUNK = 4096
 const PLAIN_FANOUT = 128
 
-function sequentialPayload(size: number): Uint8Array {
+/**
+ * Payload whose 4096-byte chunks are all DISTINCT (the `i >> 12` term shifts
+ * each chunk's byte pattern). A plain `i % 256` pattern repeats every 256
+ * bytes, making every full chunk identical — 129 copies of one address all
+ * stamp into the same postage bucket and overflow its 2^(depth-16) slots at
+ * the test stamp's depth 20.
+ */
+function distinctChunkPayload(size: number): Uint8Array {
   const data = new Uint8Array(size)
-  for (let i = 0; i < size; i++) data[i] = i % 256
+  for (let i = 0; i < size; i++) data[i] = (i * 3 + (i >> 12)) & 0xff
   return data
 }
 
@@ -49,7 +56,7 @@ describe.skipIf(!clusterReachable)(
         `Bee serves a ${size}-byte plain upload via /bytes`,
         { timeout: LARGE_UPLOAD_TIMEOUT_MS },
         async () => {
-          const data = sequentialPayload(size)
+          const data = distinctChunkPayload(size)
           const { reference } = await uploadData(target, data)
           const downloaded = (await bee.downloadData(reference)).toUint8Array()
           expect(downloaded.length).toBe(size)
