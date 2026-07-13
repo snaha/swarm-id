@@ -120,15 +120,6 @@ Authentication uses storage events: popup writes to localStorage → storage eve
   armed and leaks its handle. `withTimeout(work, ms, message)` clears the timer and rejects with
   `TimeoutError`, so discriminate timeouts with `instanceof TimeoutError`, not by message.
   `rejectAfter` is deprecated and kept only for the public API.
-- **Cancellable async flows in `ui/`: use the attempt guard** (`ui/src/lib/attempt.ts`) — never
-  hand-roll `myAttempt`/counter staleness checks; a forgotten post-await re-check caused #423.
-  `attempts.begin()` starts an attempt (superseding the one in flight); route every await that
-  precedes a side effect through `attempt.guard(work, onDiscard?)`, which throws
-  `SupersededError` once cancelled/retried/superseded (`onDiscard` destroys secrets, e.g. zeroing
-  a decrypted seed); gate catch/finally blocks and callbacks on `attempt.current`; and call
-  `attempts.supersede()` on cancel/close/leave. Awaits that must complete even after a cancel
-  (e.g. an on-chain spend whose record must land) deliberately stay outside the guard, with a
-  comment saying so.
 
 ## Testing
 
