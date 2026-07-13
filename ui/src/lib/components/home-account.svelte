@@ -22,6 +22,7 @@
   import Wallet from '@lucide/svelte/icons/wallet'
   import type { AccessMethod } from '@snaha/swarm-id'
 
+  import { createAttemptTracker } from '$lib/attempt'
   import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
@@ -83,8 +84,8 @@
   let setMethodDialog = $state<'form' | 'pending' | undefined>(undefined)
   let dialogError = $state<string | undefined>(undefined)
   let busy = $state(false)
-  /** Bumped on cancel/retry — a stale ceremony resolution must not complete. */
-  let attempt = 0
+  /** Cancel/retry supersedes the in-flight ceremony — it must not complete. */
+  const attempts = createAttemptTracker()
   let abortController: AbortController | undefined
 
   let newMethod = $state('passkey')
@@ -178,7 +179,7 @@
   function closeSetMethod() {
     // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
     // a later approval of a cancelled prompt must not complete.
-    attempt++
+    attempts.supersede()
     abortController?.abort()
     changeMethodSeed?.fill(0)
     changeMethodSeed = undefined
@@ -193,7 +194,7 @@
     if (busy || setMethodDialog === undefined || !changeMethodSeed) {
       return
     }
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     dialogError = undefined
     busy = true
     if (newMethod !== 'password') {
@@ -201,24 +202,27 @@
     }
     try {
       abortController = newMethod === 'passkey' ? new AbortController() : undefined
-      const { access: newAccess, key } = await createAccess(newMethod, {
-        accountName: account.name,
-        password: newPassword,
-        signal: abortController?.signal,
-      })
-      if (myAttempt !== attempt) {
-        return
-      }
+      const { access: newAccess, key } = await attempt.guard(
+        createAccess(newMethod, {
+          accountName: account.name,
+          password: newPassword,
+          signal: abortController?.signal,
+        }),
+      )
+      // Guarded too: cancelling while the seed re-encrypts must not go on to
+      // `setAccess` — the superseded attempt leaves the held seed alone, since
+      // closeSetMethod owns destroying it and a retry's seed lives in the same
+      // variable.
+      const encryptedSeed = await attempt.guard(encryptSeed(changeMethodSeed, key))
       if (account.isSignedOut) {
         // Signed out mid-ceremony (e.g. cross-tab): `setAccess` would re-arm
         // the vault the sign-out just wiped. This is the live attempt, so the
-        // held seed is ours to destroy — a superseded attempt must NOT touch
-        // it, since a retry's seed lives in the same variable.
+        // held seed is ours to destroy.
         changeMethodSeed.fill(0)
         changeMethodSeed = undefined
         return
       }
-      account.setAccess(newAccess, await encryptSeed(changeMethodSeed, key))
+      account.setAccess(newAccess, encryptedSeed)
       changeMethodSeed.fill(0)
       changeMethodSeed = undefined
       setMethodDialog = undefined
@@ -226,12 +230,12 @@
       verifyNewPassword = ''
       toastStore.show('Unlock method updated')
     } catch (caught) {
-      if (myAttempt === attempt) {
+      if (attempt.current) {
         dialogError = caught instanceof Error ? caught.message : 'Could not set the new method.'
         setMethodDialog = 'form'
       }
     } finally {
-      if (myAttempt === attempt) {
+      if (attempt.current) {
         busy = false
         abortController = undefined
       }
