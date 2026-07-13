@@ -250,9 +250,6 @@ await client.connect()
 
 // Open as popup window
 await client.connect({ popupMode: 'popup' })
-
-// Open with agent sign-up option visible
-await client.connect({ agent: true })
 ```
 
 **When to use `connect()`:**
@@ -310,14 +307,12 @@ This method creates the same authentication URL as used by the iframe proxy and 
 | ------------------- | --------------------- | -------- | ------------------------------------------------------------------------------ |
 | `options`           | `ConnectOptions`      | No       | Configuration options for the authentication window                            |
 | `options.popupMode` | `"window" \| "popup"` | No       | Whether to open as a popup window ("popup") or full window ("window", default) |
-| `options.agent`     | `boolean`             | No       | Whether to show the agent sign-up option on the authentication page            |
 
 **ConnectOptions Interface:**
 
 ```typescript
 interface ConnectOptions {
   popupMode?: 'popup' | 'window' // Default: "window"
-  agent?: boolean // Shows agent sign-up option
 }
 ```
 
@@ -339,9 +334,6 @@ await client.connect()
 
 // Open as popup window
 await client.connect({ popupMode: 'popup' })
-
-// Open with agent sign-up option visible
-await client.connect({ agent: true })
 ```
 
 ---

@@ -1024,7 +1024,6 @@ export const GetPostageBatchMessageSchema = z.object({
 export const ConnectMessageSchema = z.object({
   type: z.literal("connect"),
   requestId: z.string(),
-  agent: z.boolean().optional(),
   popupMode: z.enum(["popup", "window"]).optional(),
 })
 
@@ -1685,11 +1684,6 @@ export interface AuthOptions {
  * Configuration options for the connect() method.
  */
 export interface ConnectOptions {
-  /**
-   * When true, shows the agent sign-up option on the connect page.
-   * Agents are automated services that can perform operations on behalf of users.
-   */
-  agent?: boolean
   /**
    * Override popup mode for this connect call.
    * "popup" opens a sized popup window, "window" opens a full browser tab.

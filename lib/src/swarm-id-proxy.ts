@@ -1971,13 +1971,11 @@ export class SwarmIdProxy {
     message: {
       type: "connect"
       requestId: string
-      agent?: boolean
       popupMode?: "popup" | "window"
     },
     event: MessageEvent,
   ): void {
     const success = this.openAuthPopup({
-      agent: message.agent,
       popupMode: message.popupMode,
     })
     this.postMessage(event, {
@@ -1991,10 +1989,7 @@ export class SwarmIdProxy {
    * Open the authentication popup window.
    * Returns true if popup was opened, false if parent origin is not set.
    */
-  private openAuthPopup(options?: {
-    agent?: boolean
-    popupMode?: "popup" | "window"
-  }): boolean {
+  private openAuthPopup(options?: { popupMode?: "popup" | "window" }): boolean {
     if (!this.parentOrigin) {
       console.error("[Proxy] Cannot open auth window - parent origin not set")
       return false
@@ -2012,7 +2007,7 @@ export class SwarmIdProxy {
       window.location.origin + basePath,
       this.parentOrigin,
       this.appMetadata,
-      { challenge, agent: options?.agent },
+      { challenge },
     )
 
     // Open as popup or full window based on popupMode (per-call override takes precedence)

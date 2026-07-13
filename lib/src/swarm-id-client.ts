@@ -848,7 +848,6 @@ export class SwarmIdClient {
    * For Safari details, see https://github.com/snaha/swarm-id/issues/167
    *
    * @param options - Configuration options for the connect flow
-   * @param options.agent - When true, shows the agent sign-up option on the connect page
    * @throws {Error} If the client is not initialized or the popup fails to open
    *
    * @example
@@ -858,9 +857,6 @@ export class SwarmIdClient {
    *
    * // Open authentication page
    * await client.connect()
-   *
-   * // Open with agent sign-up option visible
-   * await client.connect({ agent: true })
    * ```
    */
   async connect(options: ConnectOptions = {}): Promise<void> {
@@ -876,7 +872,6 @@ export class SwarmIdClient {
       }>({
         type: "connect",
         requestId,
-        agent: options.agent,
         popupMode: options.popupMode,
       })
       if (!response.success) {
@@ -891,7 +886,6 @@ export class SwarmIdClient {
         this.iframeOrigin + basePath,
         window.location.origin,
         this.metadata,
-        { agent: options.agent },
       )
 
       const effectivePopupMode = options.popupMode ?? this.popupMode

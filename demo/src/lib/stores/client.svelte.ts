@@ -299,7 +299,7 @@ export const clientStore = {
     }
   },
 
-  async connect(options?: { agent?: boolean; useSubsidisedGateway?: boolean }) {
+  async connect(options?: { useSubsidisedGateway?: boolean }) {
     const useSubsidised = options?.useSubsidisedGateway ?? true
     const subsidisedUrl = useSubsidised ? DEFAULT_BEE_NODE_URL : undefined
 
@@ -321,7 +321,7 @@ export const clientStore = {
     if (status.authenticated) {
       await client.disconnect()
     } else {
-      await client.connect({ agent: options?.agent })
+      await client.connect()
     }
   },
 
