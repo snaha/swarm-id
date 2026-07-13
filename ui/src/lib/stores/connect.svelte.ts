@@ -13,8 +13,6 @@ export interface ConnectRequest {
   appName: string
   appDescription?: string
   appIcon?: string
-  /** Agent (automated service) sign-up requested by the dApp. */
-  agent: boolean
   /**
    * Set when the proxy iframe could not share localStorage with this popup
    * (storage partitioning). The app secret then goes back to the iframe via
@@ -79,7 +77,6 @@ export const connectStore = {
       appName: params.get('appName') ?? deriveAppName(appOrigin),
       appDescription: params.get('appDescription') ?? undefined,
       appIcon: params.get('appIcon') ?? undefined,
-      agent: params.has('agent'),
       partitionChallenge,
     }
     return true

@@ -82,40 +82,6 @@ describe("buildAuthUrl", () => {
     )
   })
 
-  it("should include agent parameter when option is true", () => {
-    const url = buildAuthUrl(
-      "https://swarm-id.example.com",
-      "https://myapp.example.com",
-      { name: "Test App" },
-      { agent: true },
-    )
-
-    expect(url).toContain("agent=")
-  })
-
-  it("should not include agent parameter when option is false", () => {
-    const url = buildAuthUrl(
-      "https://swarm-id.example.com",
-      "https://myapp.example.com",
-      { name: "Test App" },
-      { agent: false },
-    )
-
-    expect(url).not.toContain("agent")
-  })
-
-  it("should include challenge and agent when both options are set", () => {
-    const url = buildAuthUrl(
-      "https://swarm-id.example.com",
-      "https://myapp.example.com",
-      { name: "Test App" },
-      { agent: true, challenge: "test-challenge-123" },
-    )
-
-    expect(url).toContain("challenge=test-challenge-123")
-    expect(url).toContain("agent=")
-  })
-
   it("should include challenge when provided", () => {
     const url = buildAuthUrl(
       "https://swarm-id.example.com",

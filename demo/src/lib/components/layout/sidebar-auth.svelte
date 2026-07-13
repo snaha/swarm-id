@@ -12,7 +12,6 @@
   import InfoButton from '$lib/components/ui/tooltip/info-button.svelte'
   import { clientStore } from '$lib/stores/client.svelte'
 
-  let agentSignup = $state(false)
   let useSubsidisedGateway = $state(false)
   let popoverOpen = $state(false)
 
@@ -109,7 +108,7 @@
       </div>
       <Button
         onclick={() => {
-          clientStore.connect({ agent: agentSignup, useSubsidisedGateway })
+          clientStore.connect({ useSubsidisedGateway })
           popoverOpen = false
         }}
         size="sm"
@@ -139,14 +138,6 @@
 
     {#if !clientStore.authenticated}
       <Separator />
-
-      <!-- Agent sign-up -->
-      <div class="flex items-center gap-2">
-        <Checkbox bind:checked={agentSignup} id="popover-agent-signup" />
-        <Label for="popover-agent-signup" class="cursor-pointer text-xs text-muted-foreground">
-          Agent sign-up
-        </Label>
-      </div>
 
       <!-- Subsidised gateway -->
       <div class="flex items-center gap-2">

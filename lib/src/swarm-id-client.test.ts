@@ -59,17 +59,6 @@ describe("SwarmIdClient connect()", () => {
         "_blank",
       )
     })
-
-    it("should include agent param in auth URL", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-
-      await client.connect({ agent: true })
-
-      expect(window.open).toHaveBeenCalledWith(
-        expect.stringContaining("agent="),
-        "_blank",
-      )
-    })
   })
 
   describe("WebKit (Safari/iOS)", () => {
@@ -92,27 +81,6 @@ describe("SwarmIdClient connect()", () => {
       expect(sendRequestSpy).toHaveBeenCalledWith(
         expect.objectContaining({
           type: "connect",
-          agent: undefined,
-        }),
-      )
-    })
-
-    it("should send agent flag to proxy", async () => {
-      vi.spyOn(client, "ensureReady").mockImplementation(() => {})
-      const sendRequestSpy = vi
-        .spyOn(client as never, "sendRequest")
-        .mockResolvedValue({
-          type: "connectResponse",
-          requestId: "test",
-          success: true,
-        })
-
-      await client.connect({ agent: true })
-
-      expect(sendRequestSpy).toHaveBeenCalledWith(
-        expect.objectContaining({
-          type: "connect",
-          agent: true,
         }),
       )
     })

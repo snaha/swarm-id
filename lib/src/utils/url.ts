@@ -31,11 +31,6 @@ export function isHttpUrl(value: string): boolean {
  */
 export interface BuildAuthUrlOptions {
   /**
-   * When true, shows the agent sign-up option on the connect page.
-   * Agents are automated services that can perform operations on behalf of users.
-   */
-  agent?: boolean
-  /**
    * Challenge string for storage partitioning detection. When present, the popup checks
    * if it can read this challenge from localStorage to determine whether
    * storage is partitioned.
@@ -87,10 +82,6 @@ export function buildAuthUrl(
 
   if (options?.challenge) {
     params.set("challenge", options.challenge)
-  }
-
-  if (options?.agent) {
-    params.set("agent", "")
   }
 
   return `${baseUrl}/connect#${params.toString()}`
