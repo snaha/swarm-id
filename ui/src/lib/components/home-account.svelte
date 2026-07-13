@@ -22,6 +22,7 @@
   import Wallet from '@lucide/svelte/icons/wallet'
   import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
 
+  import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Polycon from '$lib/components/polycon.svelte'
@@ -44,7 +45,7 @@
   import { unlockAccount } from '$lib/crypto/unlock'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
-  import { copyToClipboard, notImplemented, truncateAddress } from '$lib/utils'
+  import { copyToClipboard, truncateAddress } from '$lib/utils'
 
   const MIN_PASSWORD_LENGTH = 8
   const MASKED_KEY = '•'.repeat(66)
@@ -79,6 +80,7 @@
   let addDriveOpen = $state(false)
   let keysDetailOpen = $state(false)
   let signingOut = $state(false)
+  let deleting = $state(false)
   // Reveals cache only their derived display value — never the raw seed, which
   // is zeroed the moment each ceremony finishes with it (issue #412).
   let revealedPrivateKey = $state<string | undefined>(undefined)
@@ -591,7 +593,7 @@
     {:else}
       <Button variant="outline" onclick={() => (signingOut = true)}>Sign out</Button>
     {/if}
-    <Button variant="destructive" onclick={notImplemented}>Delete account</Button>
+    <Button variant="destructive" onclick={() => (deleting = true)}>Delete account</Button>
   </div>
 </div>
 
@@ -742,4 +744,8 @@
 
 {#if signingOut}
   <SignOutDialog {account} onClose={() => (signingOut = false)} />
+{/if}
+
+{#if deleting}
+  <DeleteAccountDialog {account} onClose={() => (deleting = false)} />
 {/if}
