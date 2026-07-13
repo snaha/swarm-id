@@ -33,7 +33,7 @@
     encryptSeed,
     randomSalt,
   } from '$lib/crypto/encryption'
-  import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
+  import { createWalletKeySource, deriveWalletKey } from '$lib/crypto/eth-wallet'
   import { strip0x } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
@@ -179,7 +179,7 @@
     error = undefined
     pending = 'eth-wallet'
     try {
-      const source = await requestWalletKeySource()
+      const source = await createWalletKeySource()
       if (myAttempt !== attempt) {
         return
       }
@@ -251,7 +251,7 @@
             <p class="text-sm">
               {pending === 'passkey'
                 ? 'Follow the prompts on your device.'
-                : 'Approve the request in your Ethereum wallet.'}
+                : 'Approve both signing requests in your Ethereum wallet.'}
             </p>
           </div>
         </div>
@@ -286,7 +286,10 @@
                 or PIN.
               </p>
             {:else if method === 'eth-wallet'}
-              <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
+              <p class="text-sm">
+                Unlock by signing a message with your Ethereum wallet. Setup asks you to sign twice
+                to confirm your wallet signs consistently.
+              </p>
             {/if}
           </div>
 

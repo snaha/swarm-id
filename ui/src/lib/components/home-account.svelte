@@ -38,7 +38,7 @@
     encryptSeed,
     randomSalt,
   } from '$lib/crypto/encryption'
-  import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
+  import { createWalletKeySource, deriveWalletKey } from '$lib/crypto/eth-wallet'
   import { prefix0x } from '$lib/crypto/hex'
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
   import { createPasskeyKey } from '$lib/crypto/passkey'
@@ -242,7 +242,7 @@
         access = { type: 'passkey', credentialId: passkey.credentialId }
         key = passkey.key
       } else if (newMethod === 'eth-wallet') {
-        const source = await requestWalletKeySource()
+        const source = await createWalletKeySource()
         const salt = randomSalt()
         key = await deriveWalletKey(source, salt)
         access = {
@@ -665,7 +665,7 @@
       {@render pendingBody(
         newMethod === 'eth-wallet' ? 'Confirm with new wallet' : 'Confirm with new passkey',
         newMethod === 'eth-wallet'
-          ? 'Approve the request in your Ethereum wallet.'
+          ? 'Approve both signing requests in your Ethereum wallet.'
           : 'Follow the prompts on your device.',
       )}
     </Dialog>
@@ -678,7 +678,10 @@
           Unlock with your device&rsquo;s built-in authentication &mdash; fingerprint, face, or PIN.
         </p>
       {:else if newMethod === 'eth-wallet'}
-        <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
+        <p class="text-sm">
+          Unlock by signing a message with your Ethereum wallet. Setup asks you to sign twice to
+          confirm your wallet signs consistently.
+        </p>
       {:else}
         <div class="flex w-full flex-col gap-4">
           <div class="flex w-full flex-col gap-2">
