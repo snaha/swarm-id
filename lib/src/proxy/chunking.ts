@@ -7,7 +7,7 @@ import type { ChunkReference } from "./types"
 
 // Constants
 export const CHUNK_SIZE = 4096
-export const REFS_PER_CHUNK = 64 // 4096 / 64 = 64 refs per intermediate chunk
+export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) refs per intermediate chunk
 
 /**
  * Split data into 4096-byte chunks
@@ -41,11 +41,20 @@ export async function buildMerkleTree(
   // Build intermediate level
   const intermediateRefs: ChunkReference[] = []
 
-  for (let i = 0; i < chunkRefs.length; i += REFS_PER_CHUNK) {
+  for (let i = 0; i < chunkRefs.length; i += PLAIN_REFS_PER_CHUNK) {
     const refs = chunkRefs.slice(
       i,
-      Math.min(i + REFS_PER_CHUNK, chunkRefs.length),
+      Math.min(i + PLAIN_REFS_PER_CHUNK, chunkRefs.length),
     )
+
+    // Pass through single-ref batches without wrapping in an intermediate
+    // (Bee's "carrier chunk" rule). A ghost intermediate with span ≤ 4096
+    // would be misidentified as a leaf by the download path's span-based
+    // leaf check.
+    if (refs.length === 1) {
+      intermediateRefs.push(refs[0])
+      continue
+    }
 
     // Build payload with 32-byte references
     const payload = new Uint8Array(refs.length * 32)
