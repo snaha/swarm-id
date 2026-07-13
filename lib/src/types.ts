@@ -72,7 +72,6 @@ const UploadOptionsObjectSchema = z.object({
   encryptManifest: z.boolean().optional(),
   tag: z.number().optional(),
   deferred: z.boolean().optional(),
-  redundancyLevel: z.number().min(0).max(4).optional(),
 })
 
 export const UploadOptionsSchema = UploadOptionsObjectSchema.optional()
@@ -96,9 +95,11 @@ export const DownloadOptionsSchema = z
       .optional(),
     fallback: z.boolean().optional(),
     timeoutMs: z.number().optional(),
-    actPublisher: z.union([z.instanceof(Uint8Array), z.string()]),
-    actHistoryAddress: z.union([z.instanceof(Uint8Array), z.string()]),
-    actTimestamp: z.union([z.number(), z.string()]),
+    actPublisher: z.union([z.instanceof(Uint8Array), z.string()]).optional(),
+    actHistoryAddress: z
+      .union([z.instanceof(Uint8Array), z.string()])
+      .optional(),
+    actTimestamp: z.union([z.number(), z.string()]).optional(),
   })
   .optional()
 
@@ -113,7 +114,6 @@ export interface UploadOptions {
   encryptManifest?: boolean
   tag?: number
   deferred?: boolean
-  redundancyLevel?: number
   onProgress?: (progress: UploadProgress) => void
   /** Use WebSocket for chunk upload instead of HTTP. Per-chunk stamping is used. */
   useWebSocket?: boolean
@@ -600,28 +600,6 @@ export const ConnectionInfoSchema = z.object({
 })
 
 export type ConnectionInfo = z.infer<typeof ConnectionInfoSchema>
-
-// ============================================================================
-// Button Styles
-// ============================================================================
-
-export const ButtonStylesSchema = z
-  .object({
-    backgroundColor: z.string().optional(),
-    color: z.string().optional(),
-    border: z.string().optional(),
-    borderRadius: z.string().optional(),
-    padding: z.string().optional(),
-    fontSize: z.string().optional(),
-    fontFamily: z.string().optional(),
-    fontWeight: z.string().optional(),
-    cursor: z.string().optional(),
-    width: z.string().optional(),
-    height: z.string().optional(),
-  })
-  .optional()
-
-export type ButtonStyles = z.infer<typeof ButtonStylesSchema>
 
 // ============================================================================
 // App Metadata
@@ -1459,7 +1437,6 @@ export const GetPostageBatchResponseMessageSchema = z.object({
   type: z.literal("getPostageBatchResponse"),
   requestId: z.string(),
   postageBatch: PostageBatchSchema.optional(),
-  error: z.string().optional(),
 })
 
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [

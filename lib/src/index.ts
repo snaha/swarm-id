@@ -255,7 +255,6 @@ export type {
 export type {
   ClientOptions,
   AuthStatus,
-  ButtonStyles,
   UploadResult,
   FileData,
   PostageBatch,
@@ -432,7 +431,6 @@ export {
   FileDataSchema,
   PostageBatchSchema,
   AuthStatusSchema,
-  ButtonStylesSchema,
   ParentToIframeMessageSchema,
   IframeToParentMessageSchema,
   PopupToIframeMessageSchema,
