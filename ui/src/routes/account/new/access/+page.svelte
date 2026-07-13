@@ -4,7 +4,7 @@
 -->
 
 <script lang="ts">
-  import { onMount } from 'svelte'
+  import { onDestroy, onMount } from 'svelte'
 
   import { EthAddress } from '@ethersphere/bee-js'
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
@@ -68,7 +68,15 @@
     }
   })
 
-  async function finalize(access: AccessMethod, key: CryptoKey) {
+  onDestroy(() => {
+    // Leaving the page (back navigation) is an implicit cancel: an in-flight
+    // ceremony or finalize must not later create the account and yank the
+    // user to the done page.
+    attempt++
+    abortController?.abort()
+  })
+
+  async function finalize(access: AccessMethod, key: CryptoKey, myAttempt: number) {
     const draft = sessionStore.draft
     if (!draft?.phrase) {
       return
@@ -84,6 +92,11 @@
       deriveAccountDerivationKey(masterKey),
       encryptSeed(wallet.entropy, key),
     ])
+    // The derivation gave Cancel a window — a superseded attempt must not
+    // create the account or navigate (#423).
+    if (myAttempt !== attempt) {
+      return
+    }
     const account: AccountRecord = {
       id: new EthAddress(wallet.address),
       name: draft.name,
@@ -121,6 +134,12 @@
     const request = connectStore.request
     if (request) {
       await completeConnect(liveAccount, wallet.entropy, request)
+      // Cancelled while the handshake was in flight: the account exists and
+      // the dApp got its secret, but stay put — the intact draft lets the
+      // user confirm again rather than being yanked to the done page.
+      if (myAttempt !== attempt) {
+        return
+      }
       sessionStore.setCompletedFlow(flow)
       sessionStore.clearDraft()
       goto(resolve(routes.CONNECT_DONE))
@@ -153,7 +172,7 @@
       if (myAttempt !== attempt) {
         return
       }
-      await finalize(access, key)
+      await finalize(access, key, myAttempt)
     } catch (caught) {
       if (myAttempt === attempt) {
         error =
