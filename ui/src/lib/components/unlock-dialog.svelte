@@ -10,7 +10,7 @@
   error thrown from `onunlocked` is shown in the dialog for a retry.
 -->
 <script lang="ts">
-  import { untrack } from 'svelte'
+  import { type Snippet, untrack } from 'svelte'
 
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
 
@@ -23,12 +23,27 @@
   interface Props {
     account: Account
     title: string
-    description: string
+    description?: string
+    /** Richer body than a plain string — rendered in place of `description`. */
+    children?: Snippet
+    /** Overrides the access-method-derived confirm label. */
+    confirmLabel?: string
+    /** Destructive confirm styling for delete-style ceremonies. */
+    destructive?: boolean
     onunlocked: (entropy: Uint8Array) => void | Promise<void>
     onclose: () => void
   }
 
-  let { account, title, description, onunlocked, onclose }: Props = $props()
+  let {
+    account,
+    title,
+    description,
+    children,
+    confirmLabel,
+    destructive = false,
+    onunlocked,
+    onclose,
+  }: Props = $props()
 
   // The unlock ceremony only runs for a signed-in account, so the method is
   // present at mount. Read ONCE via `untrack` (not `$derived`): the method is
@@ -107,7 +122,11 @@
   </Dialog>
 {:else}
   <Dialog onclose={close} {title}>
-    <p class="text-sm">{description}</p>
+    {#if children}
+      {@render children()}
+    {:else if description}
+      <p class="text-sm">{description}</p>
+    {/if}
 
     {#if access.type === 'password'}
       <Input
@@ -125,6 +144,7 @@
     {/if}
 
     <Button
+      variant={destructive ? 'destructive' : 'default'}
       class="w-full"
       disabled={busy || (access.type === 'password' && password.length === 0)}
       onclick={confirm}
@@ -132,11 +152,12 @@
       {#if busy}
         <LoaderCircle class="animate-spin" />
       {/if}
-      {access.type === 'passkey'
-        ? 'Confirm with passkey'
-        : access.type === 'eth-wallet'
-          ? 'Confirm with wallet'
-          : 'Confirm'}
+      {confirmLabel ??
+        (access.type === 'passkey'
+          ? 'Confirm with passkey'
+          : access.type === 'eth-wallet'
+            ? 'Confirm with wallet'
+            : 'Confirm')}
     </Button>
   </Dialog>
 {/if}

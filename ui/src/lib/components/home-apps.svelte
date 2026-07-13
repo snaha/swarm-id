@@ -10,6 +10,7 @@
 
   import AppIcon from '$lib/components/app-icon.svelte'
   import { Button } from '$lib/components/ui/button'
+  import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
   import { Select } from '$lib/components/ui/select'
   import { msToDays } from '$lib/duration'
   import type { Account } from '$lib/types'
@@ -21,8 +22,6 @@
     { value: '30', label: '30 days' },
     { value: '90', label: '90 days' },
   ]
-  const MENU_ITEM_CLASS =
-    'flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
 
   interface Props {
     account: Account
@@ -39,31 +38,20 @@
   )
   // Revoked tombstones stay in the record for sync; only show live entries.
   const activeApps = $derived(account.activeApps)
-  let openMenuFor = $state<string | undefined>(undefined)
 
   function isConnected(connectedUntil: number | undefined): boolean {
     return connectedUntil !== undefined && connectedUntil > Date.now()
   }
 
-  function onWindowPointerDown(event: PointerEvent) {
-    if (openMenuFor && !(event.target as HTMLElement).closest('[data-app-menu]')) {
-      openMenuFor = undefined
-    }
-  }
-
   function disconnect(appUrl: string) {
     // Drops the app secret the dApp's proxy iframe authenticates from.
     account.disconnectApp(appUrl)
-    openMenuFor = undefined
   }
 
   function remove(appUrl: string) {
     account.removeApp(appUrl)
-    openMenuFor = undefined
   }
 </script>
-
-<svelte:window onpointerdown={onWindowPointerDown} />
 
 <div class="flex w-full flex-col gap-4">
   <div class="flex w-full items-center justify-between gap-4">
@@ -94,46 +82,24 @@
               Connected
             </span>
           {/if}
-          <div class="relative" data-app-menu>
-            <Button
-              variant="ghost"
-              size="icon"
-              aria-label="App actions"
-              aria-haspopup="menu"
-              aria-expanded={openMenuFor === app.appUrl}
-              onclick={() => (openMenuFor = openMenuFor === app.appUrl ? undefined : app.appUrl)}
-            >
-              <EllipsisVertical />
-            </Button>
-            {#if openMenuFor === app.appUrl}
-              <div
-                role="menu"
-                tabindex="-1"
-                class="bg-popover text-popover-foreground absolute top-full right-0 z-50 mt-1 min-w-36 rounded-lg border p-1 shadow-md"
-              >
-                {#if isConnected(app.connectedUntil)}
-                  <button
-                    type="button"
-                    role="menuitem"
-                    class={MENU_ITEM_CLASS}
-                    onclick={() => disconnect(app.appUrl)}
-                  >
-                    <Unlink class="size-4 shrink-0" />
-                    <span class="flex-1 whitespace-nowrap">Disconnect</span>
-                  </button>
-                {/if}
-                <button
-                  type="button"
-                  role="menuitem"
-                  class={MENU_ITEM_CLASS}
-                  onclick={() => remove(app.appUrl)}
-                >
-                  <Trash2 class="size-4 shrink-0" />
-                  <span class="flex-1 whitespace-nowrap">Remove</span>
-                </button>
-              </div>
+          <DropdownMenu class="top-full right-0 mt-1 min-w-36 p-1">
+            {#snippet trigger(props)}
+              <Button variant="ghost" size="icon" aria-label="App actions" {...props}>
+                <EllipsisVertical />
+              </Button>
+            {/snippet}
+
+            {#if isConnected(app.connectedUntil)}
+              <DropdownMenuItem onclick={() => disconnect(app.appUrl)}>
+                <Unlink class="size-4 shrink-0" />
+                <span class="flex-1 whitespace-nowrap">Disconnect</span>
+              </DropdownMenuItem>
             {/if}
-          </div>
+            <DropdownMenuItem onclick={() => remove(app.appUrl)}>
+              <Trash2 class="size-4 shrink-0" />
+              <span class="flex-1 whitespace-nowrap">Remove</span>
+            </DropdownMenuItem>
+          </DropdownMenu>
         </div>
       {/each}
     </div>

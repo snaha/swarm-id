@@ -19,8 +19,14 @@
 
   import NetworkSettingsDialog from '$lib/components/network-settings-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
+  import {
+    DropdownMenu,
+    DropdownMenuItem,
+    DropdownMenuLabel,
+    DropdownMenuSeparator,
+  } from '$lib/components/ui/dropdown-menu'
   import routes from '$lib/routes'
-  import { type ThemePreference, themeStore } from '$lib/stores/theme.svelte'
+  import { themeStore } from '$lib/stores/theme.svelte'
 
   const APPEARANCE_OPTIONS = [
     { value: 'auto', label: 'Automatic', icon: Contrast },
@@ -31,123 +37,63 @@
   const PRODUCT_PAGE_URL = 'https://swarm-id.snaha.net'
   const DOCUMENTATION_URL = 'https://swarm.snaha.net/docs'
 
-  const ITEM_CLASS =
-    'flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
-
-  let open = $state(false)
   let dialogOpen = $state(false)
-  let container = $state<HTMLDivElement>()
-
-  function close() {
-    open = false
-  }
-
-  function onWindowPointerDown(event: PointerEvent) {
-    if (open && container && !container.contains(event.target as Node)) {
-      close()
-    }
-  }
-
-  function onWindowKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      close()
-    }
-  }
 
   function restoreFromBackup() {
-    close()
     goto(resolve(routes.ACCOUNT_RESTORE))
   }
 
   function networkSettings() {
-    close()
     dialogOpen = true
-  }
-
-  function selectAppearance(value: ThemePreference) {
-    themeStore.set(value)
-    close()
   }
 </script>
 
-<svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeydown} />
+<DropdownMenu class="top-full right-0 mt-2 min-w-36 p-1">
+  {#snippet trigger(props)}
+    <Button variant="outline" size="icon" aria-label="Settings" {...props}>
+      <Settings />
+    </Button>
+  {/snippet}
 
-<div bind:this={container} class="relative">
-  <Button
-    variant="outline"
-    size="icon"
-    aria-label="Settings"
-    aria-haspopup="menu"
-    aria-expanded={open}
-    onclick={() => (open = !open)}
-  >
-    <Settings />
-  </Button>
+  <DropdownMenuItem onclick={networkSettings}>
+    <Settings class="size-4 shrink-0" />
+    <span class="flex-1 whitespace-nowrap">Network settings</span>
+  </DropdownMenuItem>
+  <DropdownMenuItem onclick={restoreFromBackup}>
+    <History class="size-4 shrink-0" />
+    <span class="flex-1 whitespace-nowrap">Restore account from backup</span>
+  </DropdownMenuItem>
 
-  {#if open}
-    <div
-      role="menu"
-      tabindex="-1"
-      class="bg-popover text-popover-foreground absolute top-full right-0 z-50 mt-2 min-w-36 rounded-lg border p-1 shadow-md"
+  <DropdownMenuSeparator />
+
+  <DropdownMenuItem href={PRODUCT_PAGE_URL} target="_blank" rel="noopener noreferrer">
+    <Globe class="size-4 shrink-0" />
+    <span class="flex-1 whitespace-nowrap">Product page</span>
+    <ExternalLink class="text-muted-foreground size-3.5 shrink-0" />
+  </DropdownMenuItem>
+  <DropdownMenuItem href={DOCUMENTATION_URL} target="_blank" rel="noopener noreferrer">
+    <BookOpen class="size-4 shrink-0" />
+    <span class="flex-1 whitespace-nowrap">Documentation</span>
+    <ExternalLink class="text-muted-foreground size-3.5 shrink-0" />
+  </DropdownMenuItem>
+
+  <DropdownMenuSeparator />
+
+  <DropdownMenuLabel>Appearance</DropdownMenuLabel>
+  {#each APPEARANCE_OPTIONS as option (option.value)}
+    {@const Icon = option.icon}
+    <DropdownMenuItem
+      checked={themeStore.preference === option.value}
+      onclick={() => themeStore.set(option.value)}
     >
-      <button type="button" role="menuitem" class={ITEM_CLASS} onclick={networkSettings}>
-        <Settings class="size-4 shrink-0" />
-        <span class="flex-1 whitespace-nowrap">Network settings</span>
-      </button>
-      <button type="button" role="menuitem" class={ITEM_CLASS} onclick={restoreFromBackup}>
-        <History class="size-4 shrink-0" />
-        <span class="flex-1 whitespace-nowrap">Restore account from backup</span>
-      </button>
-
-      <div class="bg-border -mx-1 my-1 h-px"></div>
-
-      <a
-        href={PRODUCT_PAGE_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        role="menuitem"
-        class={ITEM_CLASS}
-        onclick={close}
-      >
-        <Globe class="size-4 shrink-0" />
-        <span class="flex-1 whitespace-nowrap">Product page</span>
-        <ExternalLink class="text-muted-foreground size-3.5 shrink-0" />
-      </a>
-      <a
-        href={DOCUMENTATION_URL}
-        target="_blank"
-        rel="noopener noreferrer"
-        role="menuitem"
-        class={ITEM_CLASS}
-        onclick={close}
-      >
-        <BookOpen class="size-4 shrink-0" />
-        <span class="flex-1 whitespace-nowrap">Documentation</span>
-        <ExternalLink class="text-muted-foreground size-3.5 shrink-0" />
-      </a>
-
-      <div class="bg-border -mx-1 my-1 h-px"></div>
-
-      <div class="text-muted-foreground px-1.5 py-1 text-xs">Appearance</div>
-      {#each APPEARANCE_OPTIONS as option (option.value)}
-        {@const Icon = option.icon}
-        <button
-          type="button"
-          role="menuitemradio"
-          aria-checked={themeStore.preference === option.value}
-          class={ITEM_CLASS}
-          onclick={() => selectAppearance(option.value)}
-        >
-          <Icon class="size-4 shrink-0" />
-          <span class="flex-1 whitespace-nowrap">{option.label}</span>
-          {#if themeStore.preference === option.value}
-            <Check class="size-4 shrink-0" />
-          {/if}
-        </button>
-      {/each}
-    </div>
-  {/if}
-</div>
+      <Icon class="size-4 shrink-0" />
+      <span class="flex-1 whitespace-nowrap">{option.label}</span>
+      {#if themeStore.preference === option.value}
+        <Check class="size-4 shrink-0" />
+      {/if}
+    </DropdownMenuItem>
+  {/each}
+</DropdownMenu>
 
 {#if dialogOpen}
   <NetworkSettingsDialog onclose={() => (dialogOpen = false)} />
