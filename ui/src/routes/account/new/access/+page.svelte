@@ -19,6 +19,7 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
+  import { type Attempt, createAttemptTracker } from '$lib/attempt'
   import AppHeader from '$lib/components/app-header.svelte'
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
   import { Button } from '$lib/components/ui/button'
@@ -49,8 +50,8 @@
   let verifyPassword = $state('')
 
   let abortController: AbortController | undefined
-  /** Bumped on cancel/retry — a stale ceremony resolution must not finalize. */
-  let attempt = 0
+  /** Cancel/retry supersedes the in-flight ceremony — it must not finalize. */
+  const attempts = createAttemptTracker()
 
   const passwordValid = $derived(isNewPasswordValid(password, verifyPassword))
 
@@ -72,11 +73,11 @@
     // Leaving the page (back navigation) is an implicit cancel: an in-flight
     // ceremony or finalize must not later create the account and yank the
     // user to the done page.
-    attempt++
+    attempts.supersede()
     abortController?.abort()
   })
 
-  async function finalize(access: AccessMethod, key: CryptoKey, myAttempt: number) {
+  async function finalize(access: AccessMethod, key: CryptoKey, attempt: Attempt) {
     const draft = sessionStore.draft
     if (!draft?.phrase) {
       return
@@ -88,15 +89,11 @@
     // The derivation key is computed from the master key (the wallet private
     // key) while the entropy is in hand — the same chain the proxy/sync use.
     const masterKey = strip0x(wallet.privateKey)
-    const [derivationKey, encryptedSeed] = await Promise.all([
-      deriveAccountDerivationKey(masterKey),
-      encryptSeed(wallet.entropy, key),
-    ])
-    // The derivation gave Cancel a window — a superseded attempt must not
-    // create the account or navigate (#423).
-    if (myAttempt !== attempt) {
-      return
-    }
+    // The derivation gives Cancel a window — a superseded attempt must not
+    // create the account or navigate (#423); the guard throws it out.
+    const [derivationKey, encryptedSeed] = await attempt.guard(
+      Promise.all([deriveAccountDerivationKey(masterKey), encryptSeed(wallet.entropy, key)]),
+    )
     const account: AccountRecord = {
       id: new EthAddress(wallet.address),
       name: draft.name,
@@ -133,13 +130,10 @@
     // leaves the Confirm buttons functional for a retry.
     const request = connectStore.request
     if (request) {
-      await completeConnect(liveAccount, wallet.entropy, request)
       // Cancelled while the handshake was in flight: the account exists and
       // the dApp got its secret, but stay put — the intact draft lets the
       // user confirm again rather than being yanked to the done page.
-      if (myAttempt !== attempt) {
-        return
-      }
+      await attempt.guard(completeConnect(liveAccount, wallet.entropy, request))
       sessionStore.setCompletedFlow(flow)
       sessionStore.clearDraft()
       goto(resolve(routes.CONNECT_DONE))
@@ -156,7 +150,7 @@
     if (busy || !draft) {
       return
     }
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     error = undefined
     busy = true
     if (method !== 'password') {
@@ -164,17 +158,16 @@
     }
     try {
       abortController = method === 'passkey' ? new AbortController() : undefined
-      const { access, key } = await createAccess(method, {
-        accountName: draft.name,
-        password,
-        signal: abortController?.signal,
-      })
-      if (myAttempt !== attempt) {
-        return
-      }
-      await finalize(access, key, myAttempt)
+      const { access, key } = await attempt.guard(
+        createAccess(method, {
+          accountName: draft.name,
+          password,
+          signal: abortController?.signal,
+        }),
+      )
+      await finalize(access, key, attempt)
     } catch (caught) {
-      if (myAttempt === attempt) {
+      if (attempt.current) {
         error =
           caught instanceof Error
             ? caught.message
@@ -185,7 +178,7 @@
                 : 'Encryption failed.'
       }
     } finally {
-      if (myAttempt === attempt) {
+      if (attempt.current) {
         pending = false
         busy = false
         abortController = undefined
@@ -196,7 +189,7 @@
   function cancelPending() {
     // Invalidate the in-flight ceremony — wallet prompts can't be aborted, so
     // a later approval of a cancelled prompt must not finalize.
-    attempt++
+    attempts.supersede()
     abortController?.abort()
     pending = false
     busy = false

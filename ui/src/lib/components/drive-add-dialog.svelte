@@ -11,6 +11,7 @@
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
 
+  import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -66,8 +67,8 @@
   let errorMessage = $state('')
 
   let currentPrice = $state<bigint | undefined>(undefined)
-  // Bumped on cancel/close so a late ceremony or widget callback can't complete.
-  let attempt = 0
+  // Superseded on cancel/close so a late ceremony or widget callback can't complete.
+  const attempts = createAttemptTracker()
   // In-flight widget purchase; cancelled on close so the popup can't settle a
   // payment we would silently drop.
   let purchase: StampPurchaseHandle | undefined
@@ -133,7 +134,7 @@
   })
 
   function close() {
-    attempt++
+    attempts.supersede()
     purchase?.cancel()
     purchase = undefined
     onClose()
@@ -156,7 +157,7 @@
   }
 
   async function purchaseNew() {
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     phase = 'pending'
     // The popup-less /dev mock settles locally — telling the user to look for a
     // popup window there is wrong.
@@ -168,12 +169,11 @@
     // batch-ID-derived label.
     const driveName = name.trim() || undefined
     try {
-      const { signerKey, destination } = await derivePostageSigner(account.derivationKey)
       // The user may have cancelled during the derivation — bail before the
       // popup opens, or a payment window would appear after they backed out.
-      if (myAttempt !== attempt) {
-        return
-      }
+      const { signerKey, destination } = await attempt.guard(
+        derivePostageSigner(account.derivationKey),
+      )
       purchase = openStampPurchaseWidget({
         destination,
         // /dev mock (see dev-settings): simulate the purchase without a real
@@ -182,7 +182,7 @@
         mockPopup: devSettingsStore.data.mockStampPopup,
         mockError: devSettingsStore.data.mockStampResult === 'error',
         onSuccess: (batch) => {
-          if (myAttempt !== attempt) {
+          if (!attempt.current) {
             return
           }
           // The size/lifespan actually bought are chosen INSIDE the widget —
@@ -197,25 +197,25 @@
           succeed()
         },
         onError: (error) => {
-          if (myAttempt !== attempt) {
+          if (!attempt.current) {
             return
           }
           errorMessage = error.message
           phase = 'error'
         },
         onCancel: () => {
-          if (myAttempt === attempt) {
+          if (attempt.current) {
             phase = 'form'
           }
         },
         onUnconfirmedClose: () => {
-          if (myAttempt === attempt) {
+          if (attempt.current) {
             phase = 'unconfirmed'
           }
         },
       })
     } catch (caught) {
-      if (myAttempt !== attempt) {
+      if (!attempt.current) {
         return
       }
       errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
@@ -224,7 +224,7 @@
   }
 
   async function attachExisting() {
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     phase = 'pending'
     pendingLabel = 'Looking up the batch…'
     const driveName = name.trim() || undefined
@@ -233,14 +233,13 @@
       // this account's signer from its (plaintext) derivation key.
       const signerKey = pastedSignerKey
         ? new PrivateKey(strip0x(pastedSignerKey))
-        : (await derivePostageSigner(account.derivationKey)).signerKey
+        : (await attempt.guard(derivePostageSigner(account.derivationKey))).signerKey
       // Read the batch straight from the PostageStamp contract on-chain, not the
       // Bee node — a public gateway has no /stamps and won't know a batch bought
       // independently of it.
-      const stamp = await fetchExistingBatchFromChain(batchIdInput.trim(), signerKey, driveName)
-      if (myAttempt !== attempt) {
-        return
-      }
+      const stamp = await attempt.guard(
+        fetchExistingBatchFromChain(batchIdInput.trim(), signerKey, driveName),
+      )
       if (!stamp) {
         errorMessage =
           'Couldn’t find that batch on chain. Check the Batch ID, or the Gnosis RPC endpoint in Network settings.'
@@ -250,10 +249,9 @@
       // Existence isn't enough — upload one stamped test chunk to prove the
       // signer key can actually stamp uploads for this batch before attaching.
       pendingLabel = 'Verifying the batch…'
-      const stampable = await verifyBatchStampable(stamp.batchID, signerKey, stamp.depth)
-      if (myAttempt !== attempt) {
-        return
-      }
+      const stampable = await attempt.guard(
+        verifyBatchStampable(stamp.batchID, signerKey, stamp.depth),
+      )
       if (!stampable) {
         errorMessage =
           'That batch exists, but this signer key can’t stamp uploads for it. Check the signer key.'
@@ -263,7 +261,7 @@
       account.addStamp(stamp)
       succeed()
     } catch (caught) {
-      if (myAttempt !== attempt) {
+      if (!attempt.current) {
         return
       }
       errorMessage = caught instanceof Error ? caught.message : 'Could not add the drive.'

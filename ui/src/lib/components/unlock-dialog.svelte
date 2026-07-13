@@ -14,6 +14,7 @@
 
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
 
+  import { createAttemptTracker } from '$lib/attempt'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -57,41 +58,43 @@
   let busy = $state(false)
   let pendingCeremony = $state(false)
   let error = $state<string | undefined>(undefined)
-  /** Bumped on cancel/retry — a stale ceremony resolution must not complete. */
-  let attempt = 0
+  /** Cancel/retry supersedes the in-flight ceremony — it must not complete. */
+  const attempts = createAttemptTracker()
 
   async function confirm() {
     if (busy) {
       return
     }
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     error = undefined
     busy = true
     if (access.type !== 'password') {
       pendingCeremony = true
     }
     try {
-      const entropy = await unlockAccount(
-        account,
-        access.type === 'password' ? password : undefined,
+      // A passkey/wallet unlock can take seconds; a ceremony superseded while
+      // it ran (cancel/retry) must not complete, and its decrypted entropy is
+      // zeroed on the way out.
+      const entropy = await attempt.guard(
+        unlockAccount(account, access.type === 'password' ? password : undefined),
+        (seed) => seed.fill(0),
       )
-      // Bail if this ceremony was superseded (cancel/retry) or the account was
-      // signed out mid-flight (e.g. cross-tab): a passkey/wallet unlock can take
-      // seconds, and `unlockAccount` captured the vault before the wipe so it
-      // still resolves — but completing the connection with a now-signed-out
-      // account would re-arm app session material the sign-out just cleared.
-      if (myAttempt !== attempt || account.isSignedOut) {
+      // Signed out mid-flight (e.g. cross-tab): `unlockAccount` captured the
+      // vault before the wipe so it still resolves — but completing the
+      // connection with a now-signed-out account would re-arm app session
+      // material the sign-out just cleared.
+      if (account.isSignedOut) {
         entropy.fill(0)
         return
       }
       await onunlocked(entropy)
     } catch (caught) {
-      if (myAttempt === attempt) {
+      if (attempt.current) {
         error = caught instanceof Error ? caught.message : 'Unlock failed.'
         pendingCeremony = false
       }
     } finally {
-      if (myAttempt === attempt) {
+      if (attempt.current) {
         busy = false
       }
     }
@@ -100,7 +103,7 @@
   function close() {
     // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
     // a later approval of a cancelled prompt must not complete.
-    attempt++
+    attempts.supersede()
     onclose()
   }
 </script>
