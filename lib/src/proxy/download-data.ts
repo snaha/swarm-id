@@ -334,8 +334,10 @@ export async function downloadDataWithChunkAPI(
   const rootRef = parseReference(reference)
   const isEncrypted = rootRef.encryptionKey !== undefined
 
+  // Log only the address half: for encrypted references the trailing
+  // 32 bytes are the decryption key and must never reach the console.
   console.log(
-    `[DownloadData] start ref=${reference} encrypted=${isEncrypted} bee.url=${bee.url}`,
+    `[DownloadData] start addr=${Binary.uint8ArrayToHex(rootRef.address)} encrypted=${isEncrypted} bee.url=${bee.url}`,
   )
 
   // First, download root chunk to get span for progress estimation
