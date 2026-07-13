@@ -8,8 +8,8 @@ This is a Starlight (Astro) documentation website for the Swarm ID project. Star
 
 ## Technology Stack
 
-- **Framework**: [Astro](https://astro.build/) v5.x
-- **Documentation Theme**: [@astrojs/starlight](https://starlight.astro.build/) v0.31.x
+- **Framework**: [Astro](https://astro.build/) v7.x
+- **Documentation Theme**: [@astrojs/starlight](https://starlight.astro.build/) v0.41.x
 - **Content Format**: MDX (Markdown with JSX support)
 - **Search**: Pagefind (built-in, local search)
 - **Build Output**: Static HTML
@@ -24,8 +24,8 @@ docs-site/
 ├── CLAUDE.md               # This file
 ├── plans/                  # Implementation plans
 ├── src/
+│   ├── content.config.ts   # Content collection schema
 │   ├── content/
-│   │   ├── config.ts       # Content collection schema
 │   │   └── docs/           # Documentation pages (MDX)
 │   │       ├── index.mdx           # Introduction/home page
 │   │       ├── getting-started.mdx # Quick start guide
@@ -132,7 +132,7 @@ sidebar: [
   },
   {
     label: 'API Reference',
-    autogenerate: { directory: 'api' },  // Auto-generates from api/ folder
+    items: [{ autogenerate: { directory: 'api' } }],  // Auto-generates from api/ folder
   },
 ],
 ```

@@ -16,9 +16,13 @@ export default defineConfig({
     starlight({
       title: 'Swarm ID',
       description: 'Cross-browser identity management for Swarm dApps',
-      social: {
-        github: 'https://github.com/snaha/swarm-id',
-      },
+      social: [
+        {
+          icon: 'github',
+          label: 'GitHub',
+          href: 'https://github.com/snaha/swarm-id',
+        },
+      ],
       sidebar: [
         {
           label: 'Getting Started',
@@ -41,7 +45,7 @@ export default defineConfig({
         },
         {
           label: 'API Reference',
-          autogenerate: { directory: 'api' },
+          items: [{ autogenerate: { directory: 'api' } }],
         },
       ],
       customCss: [],
