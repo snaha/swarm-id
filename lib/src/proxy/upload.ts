@@ -32,7 +32,7 @@ import {
   type EncryptedChunk,
   DEFAULT_UPLOAD_CONCURRENCY,
 } from "../chunk"
-import { splitDataIntoChunks, REFS_PER_CHUNK } from "./chunking"
+import { splitDataIntoChunks, CHUNK_SIZE, REFS_PER_CHUNK } from "./chunking"
 import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import { marshalEnvelope } from "./stamp-marshal"
@@ -103,7 +103,11 @@ export function isSubsidisedTarget(
  * Unified options for data upload
  */
 export interface UploadDataOptions {
-  /** Encryption key: undefined = plain, Uint8Array = use this key, true = auto-generate */
+  /**
+   * Encryption key: undefined = plain, Uint8Array = use this key, true =
+   * auto-generate. An explicit key only applies to single-chunk data
+   * (≤ 4096 bytes); larger data throws — pass true instead.
+   */
   encryptionKey?: Uint8Array | true
   /** Pin the uploaded data */
   pin?: boolean
@@ -258,11 +262,22 @@ interface EncryptedChunkRef {
 
 /**
  * Encrypt all payloads into EncryptedChunks and collect their references.
+ *
+ * An explicit key is only valid for a single payload: every chunk of a
+ * multi-chunk upload carries its own key, so honouring one shared key is
+ * impossible and substituting random keys would silently break the caller's
+ * expectation of a key-addressed reference.
  */
 function encryptChunkPayloads(
   payloads: Uint8Array[],
   encryptionKey?: Uint8Array,
 ): { chunks: EncryptedChunk[]; refs: EncryptedChunkRef[] } {
+  if (encryptionKey && payloads.length > 1) {
+    throw new Error(
+      `Explicit encryption key is only supported for single-chunk data (up to ${CHUNK_SIZE} bytes), got ${payloads.length} chunks — pass encryptionKey: true to auto-generate per-chunk keys`,
+    )
+  }
+
   const chunks: EncryptedChunk[] = []
   const refs: EncryptedChunkRef[] = []
 
@@ -697,10 +712,7 @@ async function uploadDataEncrypted(
   // Split and encrypt
   const payloads = splitDataIntoChunks(data)
   const { chunks: encryptedChunks, refs: encryptedChunkRefs } =
-    encryptChunkPayloads(
-      payloads,
-      payloads.length === 1 ? encryptionKey : undefined,
-    )
+    encryptChunkPayloads(payloads, encryptionKey)
 
   // Prepare chunk data for upload
   const chunksToUpload = encryptedChunks.map((chunk) => ({
