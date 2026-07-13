@@ -103,20 +103,6 @@ describe("makeContentAddressedChunk", () => {
   })
 
   describe("error handling", () => {
-    it("should throw error on empty payload", () => {
-      const emptyPayload = new Uint8Array(0)
-
-      expect(() => makeContentAddressedChunk(emptyPayload)).toThrow(
-        /payload size .* exceeds limits/,
-      )
-    })
-
-    it("should throw error on empty string", () => {
-      expect(() => makeContentAddressedChunk("")).toThrow(
-        /payload size .* exceeds limits/,
-      )
-    })
-
     it("should throw error on payload larger than 4096 bytes", () => {
       const largePayload = new Uint8Array(4097)
 
@@ -154,6 +140,20 @@ describe("makeContentAddressedChunk", () => {
   })
 
   describe("payload size variations", () => {
+    it("should handle a zero-length payload (Bee's empty-file chunk)", () => {
+      const chunk = makeContentAddressedChunk(new Uint8Array(0))
+
+      expect(chunk.span.toBigInt()).toBe(BigInt(0))
+      expect(chunk.data.length).toBe(8) // span only
+      // Canonical reference for empty content — bee builder_test.go TestEmpty
+      expect(chunk.address.toHex()).toBe(
+        "b34ca8c22b9e982354f9c7f50b470d66db428d880c8a904d5fe4ec9713171526",
+      )
+      expect(makeContentAddressedChunk("").address.toHex()).toBe(
+        chunk.address.toHex(),
+      )
+    })
+
     it("should handle minimum payload size (1 byte)", () => {
       const payload = new Uint8Array([42])
       const chunk = makeContentAddressedChunk(payload)

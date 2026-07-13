@@ -122,20 +122,6 @@ describe("makeEncryptedContentAddressedChunk", () => {
   })
 
   describe("error handling", () => {
-    it("should throw error on empty payload", () => {
-      const emptyPayload = new Uint8Array(0)
-
-      expect(() => makeEncryptedContentAddressedChunk(emptyPayload)).toThrow(
-        /payload size .* exceeds limits/,
-      )
-    })
-
-    it("should throw error on empty string", () => {
-      expect(() => makeEncryptedContentAddressedChunk("")).toThrow(
-        /payload size .* exceeds limits/,
-      )
-    })
-
     it("should throw error on payload larger than 4096 bytes", () => {
       const largePayload = new Uint8Array(4097)
 
@@ -146,6 +132,17 @@ describe("makeEncryptedContentAddressedChunk", () => {
   })
 
   describe("payload size variations", () => {
+    it("should handle a zero-length payload (empty content)", () => {
+      const chunk = makeEncryptedContentAddressedChunk(new Uint8Array(0))
+
+      expect(chunk.span.toBigInt()).toBe(BigInt(0))
+      expect(chunk.data.length).toBe(4104) // span + fully random-padded data
+
+      // Span must decrypt back to 0 so downloads slice the payload to empty
+      const decrypted = decryptEncryptedChunk(chunk.data, chunk.encryptionKey)
+      expect(decrypted.slice(0, 8)).toEqual(new Uint8Array(8))
+    })
+
     it("should handle minimum payload size (1 byte)", () => {
       const payload = new Uint8Array([42])
       const chunk = makeEncryptedContentAddressedChunk(payload)

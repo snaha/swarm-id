@@ -13,6 +13,11 @@ export const REFS_PER_CHUNK = 64 // 4096 / 64 = 64 refs per intermediate chunk
  * Split data into 4096-byte chunks
  */
 export function splitDataIntoChunks(data: Uint8Array): Uint8Array[] {
+  // Zero-length content is a single empty chunk (span 0) — Bee's canonical
+  // representation of an empty file.
+  if (data.length === 0) {
+    return [new Uint8Array(0)]
+  }
   const chunks: Uint8Array[] = []
   for (let i = 0; i < data.length; i += CHUNK_SIZE) {
     chunks.push(data.slice(i, Math.min(i + CHUNK_SIZE, data.length)))

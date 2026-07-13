@@ -1,8 +1,10 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-// Chunk size constants
-export const MIN_PAYLOAD_SIZE = 1
+// Chunk size constants. An empty payload is valid — Bee represents
+// zero-length content as a single chunk with span 0 (cac.validateDataLength
+// allows 0..4096).
+export const MIN_PAYLOAD_SIZE = 0
 export const MAX_PAYLOAD_SIZE = 4096
 
 // Span size (8 bytes for uint64 little-endian)
