@@ -3,7 +3,8 @@
 
 /**
  * Upload → download round-trips for payloads large enough to build a Merkle
- * tree with ≥2 levels (more than `REFS_PER_CHUNK` leaf chunks).
+ * tree with ≥2 levels (more leaf chunks than one intermediate holds:
+ * `PLAIN_REFS_PER_CHUNK` plain, `ENCRYPTED_REFS_PER_CHUNK` encrypted).
  *
  * These guard the span-based leaf detection on the download path against the
  * intermediate-chunk layout the upload path produces — in particular the
@@ -20,7 +21,8 @@ import { describe, it, expect } from "vitest"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
-import { CHUNK_SIZE, REFS_PER_CHUNK } from "./chunking"
+import { CHUNK_SIZE, PLAIN_REFS_PER_CHUNK } from "./chunking"
+import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
 import {
   MockBee,
   MockChunkStore,
@@ -32,7 +34,8 @@ const ENCRYPTED_REF_HEX_LEN = 128 // 32-byte address + 32-byte key
 
 // More than one full intermediate's worth of leaves ⇒ the tree needs a 2nd
 // level. The +9 keeps the final batch comfortably multi-ref (no edge case).
-const TWO_LEVEL_LEAF_COUNT = REFS_PER_CHUNK + 9
+const PLAIN_TWO_LEVEL_LEAF_COUNT = PLAIN_REFS_PER_CHUNK + 9
+const ENCRYPTED_TWO_LEVEL_LEAF_COUNT = ENCRYPTED_REFS_PER_CHUNK + 9
 
 /** Build `length` bytes with position-dependent variation so chunks differ. */
 function makeData(length: number): Uint8Array {
@@ -57,7 +60,7 @@ function setup(): { bee: Bee; target: UploadTarget } {
 describe("uploadData ↔ downloadDataWithChunkAPI (multi-level Merkle tree)", () => {
   it("round-trips plain data spanning ≥2 tree levels", async () => {
     const { bee, target } = setup()
-    const data = makeData(TWO_LEVEL_LEAF_COUNT * CHUNK_SIZE)
+    const data = makeData(PLAIN_TWO_LEVEL_LEAF_COUNT * CHUNK_SIZE)
 
     const { reference } = await uploadData(target, data)
     expect(reference.length).toBe(PLAIN_REF_HEX_LEN)
@@ -68,7 +71,7 @@ describe("uploadData ↔ downloadDataWithChunkAPI (multi-level Merkle tree)", ()
 
   it("round-trips encrypted data spanning ≥2 tree levels", async () => {
     const { bee, target } = setup()
-    const data = makeData(TWO_LEVEL_LEAF_COUNT * CHUNK_SIZE)
+    const data = makeData(ENCRYPTED_TWO_LEVEL_LEAF_COUNT * CHUNK_SIZE)
 
     const { reference } = await uploadData(target, data, {
       encryptionKey: true,
@@ -80,12 +83,13 @@ describe("uploadData ↔ downloadDataWithChunkAPI (multi-level Merkle tree)", ()
   })
 
   it("round-trips encrypted data whose final intermediate batch holds a single ref", async () => {
-    // REFS_PER_CHUNK + 1 leaves ⇒ intermediate batches [REFS_PER_CHUNK], [1].
-    // The trailing single-ref batch is exactly the case the span fix passes
-    // through; without it the lone ref would be wrapped in a ghost
-    // intermediate whose ≤CHUNK_SIZE span the downloader misreads as a leaf.
+    // ENCRYPTED_REFS_PER_CHUNK + 1 leaves ⇒ intermediate batches
+    // [ENCRYPTED_REFS_PER_CHUNK], [1]. The trailing single-ref batch is
+    // exactly the case the span fix passes through; without it the lone ref
+    // would be wrapped in a ghost intermediate whose ≤CHUNK_SIZE span the
+    // downloader misreads as a leaf.
     const { bee, target } = setup()
-    const data = makeData(REFS_PER_CHUNK * CHUNK_SIZE + 1)
+    const data = makeData(ENCRYPTED_REFS_PER_CHUNK * CHUNK_SIZE + 1)
 
     const { reference } = await uploadData(target, data, {
       encryptionKey: true,

@@ -24,6 +24,8 @@ import {
   UNENCRYPTED_REF_SIZE,
 } from "../chunk"
 import { Binary } from "cafe-utility"
+import { PLAIN_REFS_PER_CHUNK } from "./chunking"
+import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"
@@ -293,9 +295,11 @@ async function joinChunks(
 
 /**
  * Estimate total chunks for progress tracking
- * This is an approximation based on span
+ * This is an approximation based on span. The branching factor depends on
+ * the reference width: 128 refs per intermediate for plain trees (32-byte
+ * refs), 64 for encrypted trees (64-byte refs).
  */
-function estimateTotalChunks(span: number): number {
+function estimateTotalChunks(span: number, refsPerChunk: number): number {
   if (span <= MAX_PAYLOAD_SIZE) {
     return 1
   }
@@ -303,13 +307,12 @@ function estimateTotalChunks(span: number): number {
   // Number of leaf chunks
   const leafChunks = Math.ceil(span / MAX_PAYLOAD_SIZE)
 
-  // For a full binary tree with 64-way branching, intermediate chunks
+  // Intermediate chunks for a tree with refsPerChunk-way branching
   // This is a rough estimate - actual count depends on tree structure
   let intermediateChunks = 0
   let level = leafChunks
   while (level > 1) {
-    const branchingFactor = 64 // REFS_PER_CHUNK
-    level = Math.ceil(level / branchingFactor)
+    level = Math.ceil(level / refsPerChunk)
     intermediateChunks += level
   }
 
@@ -356,7 +359,10 @@ export async function downloadDataWithChunkAPI(
   }
 
   // Estimate total chunks for progress tracking
-  const estimatedTotal = estimateTotalChunks(span)
+  const estimatedTotal = estimateTotalChunks(
+    span,
+    isEncrypted ? ENCRYPTED_REFS_PER_CHUNK : PLAIN_REFS_PER_CHUNK,
+  )
   let processedChunks = 1 // Already downloaded root
 
   const onChunkDownloaded = () => {
