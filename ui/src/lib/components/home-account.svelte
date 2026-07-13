@@ -635,6 +635,7 @@
           bind:value={password}
           placeholder="Account password"
           autocomplete="current-password"
+          data-autofocus
           onkeydown={(event: KeyboardEvent) => event.key === 'Enter' && confirmUnlock()}
         />
       {/if}

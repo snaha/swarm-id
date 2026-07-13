@@ -3,8 +3,14 @@
   SPDX-License-Identifier: Apache-2.0
 -->
 
+<!--
+  Modal dialog implementing the WAI-ARIA dialog focus contract: on open, focus
+  moves into the dialog — to a `[data-autofocus]` element if the consumer marked
+  one, else the first focusable control, else the panel itself; Tab and
+  Shift+Tab wrap within the dialog; on close, focus returns to the opener.
+-->
 <script lang="ts">
-  import type { Snippet } from 'svelte'
+  import { type Snippet, onMount } from 'svelte'
 
   import X from '@lucide/svelte/icons/x'
 
@@ -23,9 +29,64 @@
 
   let { title, dismissable = true, onclose, class: className, children }: Props = $props()
 
+  let panel = $state<HTMLDivElement>()
+
+  const FOCUSABLE_SELECTOR = [
+    'a[href]',
+    'button:not([disabled])',
+    'input:not([disabled]):not([type="hidden"])',
+    'select:not([disabled])',
+    'textarea:not([disabled])',
+    '[tabindex]:not([tabindex="-1"])',
+  ].join(', ')
+
+  function focusables(): HTMLElement[] {
+    return panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)] : []
+  }
+
+  onMount(() => {
+    const opener = document.activeElement
+    const autofocus = panel?.querySelector<HTMLElement>('[data-autofocus]')
+    const target = autofocus ?? focusables()[0] ?? panel
+    target?.focus()
+    return () => {
+      // The opener may be gone by now (e.g. swapping to a pending-state
+      // dialog unmounts the previous one while its trigger persists).
+      if (opener instanceof HTMLElement && opener.isConnected) {
+        opener.focus()
+      }
+    }
+  })
+
+  // Keep Tab cycling inside the dialog; also pulls focus back in if it ever
+  // lands outside (e.g. after a click on the overlay).
+  function trapTab(event: KeyboardEvent) {
+    const items = focusables()
+    if (items.length === 0) {
+      event.preventDefault()
+      panel?.focus()
+      return
+    }
+    const first = items[0]
+    const last = items[items.length - 1]
+    const active = document.activeElement
+    const inside = active instanceof HTMLElement && panel?.contains(active) === true
+    if (event.shiftKey) {
+      if (!inside || active === first) {
+        event.preventDefault()
+        last.focus()
+      }
+    } else if (!inside || active === last) {
+      event.preventDefault()
+      first.focus()
+    }
+  }
+
   function onWindowKeydown(event: KeyboardEvent) {
     if (event.key === 'Escape' && dismissable) {
       onclose()
+    } else if (event.key === 'Tab') {
+      trapTab(event)
     }
   }
 </script>
@@ -34,11 +95,13 @@
 
 <div class="bg-background/60 fixed inset-0 z-50 flex items-center justify-center backdrop-blur-sm">
   <div
+    bind:this={panel}
     role="dialog"
     aria-modal="true"
     aria-label={title}
+    tabindex="-1"
     class={cn(
-      'bg-popover flex w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 rounded-lg border p-4 shadow-lg',
+      'bg-popover flex w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 rounded-lg border p-4 shadow-lg outline-none',
       className,
     )}
   >
