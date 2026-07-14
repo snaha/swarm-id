@@ -19,15 +19,13 @@
   import DriveResizeDialog from '$lib/components/drive-resize-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
+  import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import UtilizationBar from '$lib/components/utilization-bar.svelte'
   import { describeDrive } from '$lib/drives'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
   import { cn } from '$lib/utils'
-
-  const MENU_ITEM_CLASS =
-    'flex h-7 w-full cursor-pointer items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-sm outline-none hover:bg-muted focus-visible:bg-muted'
 
   interface Props {
     account: Account
@@ -36,7 +34,6 @@
   let { account }: Props = $props()
 
   let expandedId = $state<string | undefined>(undefined)
-  let openMenuId = $state<string | undefined>(undefined)
   let nameDraft = $state('')
   let addOpen = $state(false)
   let resizeDrive = $state<PostageStamp | undefined>(undefined)
@@ -50,7 +47,6 @@
     }
     expandedId = batchId
     nameDraft = currentName
-    openMenuId = undefined
   }
 
   function commitRename(drive: PostageStamp) {
@@ -63,13 +59,11 @@
 
   function setDefault(drive: PostageStamp) {
     account.setDefaultStamp(drive.batchID)
-    openMenuId = undefined
     toastStore.show('Default drive updated')
   }
 
   function remove(drive: PostageStamp) {
     removeDrive = drive
-    openMenuId = undefined
   }
 
   function onDriveRemoved(message: string) {
@@ -77,20 +71,6 @@
       expandedId = undefined
     }
     toastStore.show(message)
-  }
-
-  function onWindowPointerDown(event: PointerEvent) {
-    // `target` can be a Text node (Firefox), which has no `.closest`.
-    const target = event.target instanceof Element ? event.target : undefined
-    if (openMenuId && !target?.closest('[data-drive-menu]')) {
-      openMenuId = undefined
-    }
-  }
-
-  function onWindowKeydown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
-      openMenuId = undefined
-    }
   }
 
   function addDrive() {
@@ -104,8 +84,6 @@
     extendDrive = drive
   }
 </script>
-
-<svelte:window onpointerdown={onWindowPointerDown} onkeydown={onWindowKeydown} />
 
 <div class="flex w-full flex-col gap-4">
   <div class="flex flex-col gap-1">
@@ -271,47 +249,30 @@
             <!-- Footer: purchase date + overflow menu -->
             <div class="border-border flex items-center justify-between gap-2 border-t px-4 py-2">
               <p class="text-muted-foreground text-xs">Purchased on {d.purchasedOn}</p>
-              <div class="relative" data-drive-menu>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  class="size-7"
-                  aria-label="Drive actions"
-                  aria-haspopup="menu"
-                  aria-expanded={openMenuId === batchKey}
-                  onclick={() => (openMenuId = openMenuId === batchKey ? undefined : batchKey)}
-                >
-                  <EllipsisVertical />
-                </Button>
-                {#if openMenuId === batchKey}
-                  <div
-                    role="menu"
-                    tabindex="-1"
-                    class="bg-popover text-popover-foreground absolute right-0 bottom-full z-50 mb-1 min-w-40 rounded-lg border p-1 shadow-md"
+              <DropdownMenu class="right-0 bottom-full mb-1 min-w-40 p-1">
+                {#snippet trigger(props)}
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    class="size-7"
+                    aria-label="Drive actions"
+                    {...props}
                   >
-                    {#if !isDefault}
-                      <button
-                        type="button"
-                        role="menuitem"
-                        class={MENU_ITEM_CLASS}
-                        onclick={() => setDefault(drive)}
-                      >
-                        <Star class="size-4 shrink-0" />
-                        <span class="flex-1 whitespace-nowrap">Set as default</span>
-                      </button>
-                    {/if}
-                    <button
-                      type="button"
-                      role="menuitem"
-                      class={MENU_ITEM_CLASS}
-                      onclick={() => remove(drive)}
-                    >
-                      <Trash2 class="size-4 shrink-0" />
-                      <span class="flex-1 whitespace-nowrap">Remove</span>
-                    </button>
-                  </div>
+                    <EllipsisVertical />
+                  </Button>
+                {/snippet}
+
+                {#if !isDefault}
+                  <DropdownMenuItem onclick={() => setDefault(drive)}>
+                    <Star class="size-4 shrink-0" />
+                    <span class="flex-1 whitespace-nowrap">Set as default</span>
+                  </DropdownMenuItem>
                 {/if}
-              </div>
+                <DropdownMenuItem onclick={() => remove(drive)}>
+                  <Trash2 class="size-4 shrink-0" />
+                  <span class="flex-1 whitespace-nowrap">Remove</span>
+                </DropdownMenuItem>
+              </DropdownMenu>
             </div>
           {/if}
         </div>

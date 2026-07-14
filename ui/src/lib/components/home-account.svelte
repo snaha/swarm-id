@@ -20,10 +20,11 @@
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import RefreshCw from '@lucide/svelte/icons/refresh-cw'
   import Wallet from '@lucide/svelte/icons/wallet'
-  import { type AccessMethod, uint8ArrayToHex } from '@snaha/swarm-id'
+  import type { AccessMethod } from '@snaha/swarm-id'
 
   import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
+  import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
   import Polycon from '$lib/components/polycon.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
@@ -31,23 +32,16 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
+  import UnlockDialog from '$lib/components/unlock-dialog.svelte'
+  import { createAccess } from '$lib/crypto/access-setup'
   import { backupFilename, createBackup } from '$lib/crypto/backup'
-  import {
-    PASSWORD_KDF_ITERATIONS,
-    deriveKeyFromPassword,
-    encryptSeed,
-    randomSalt,
-  } from '$lib/crypto/encryption'
-  import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
+  import { encryptSeed } from '$lib/crypto/encryption'
   import { prefix0x } from '$lib/crypto/hex'
   import { phraseFromEntropy, privateKeyFromEntropy } from '$lib/crypto/mnemonic'
-  import { createPasskeyKey } from '$lib/crypto/passkey'
-  import { unlockAccount } from '$lib/crypto/unlock'
   import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
   import { copyToClipboard, truncateAddress } from '$lib/utils'
 
-  const MIN_PASSWORD_LENGTH = 8
   const MASKED_KEY = '•'.repeat(66)
   const METHOD_TABS = [
     { value: 'passkey', label: 'Passkey' },
@@ -64,9 +58,6 @@
   type SectionId = 'identity' | 'access' | 'keys' | 'phrase' | 'backup'
   /** What the unlock confirmation is for; completes once the seed decrypts. */
   type UnlockTarget = 'private-key' | 'phrase' | 'export' | 'change-method'
-  type DialogState =
-    | { kind: 'unlock'; target: UnlockTarget; pending: boolean }
-    | { kind: 'set-method'; pending: boolean }
 
   let name = $derived(account.name)
   let expanded = $state<Record<SectionId, boolean>>({
@@ -88,14 +79,14 @@
   // Seed held only across the change-method two-step ceremony; zeroed after.
   let changeMethodSeed: Uint8Array | undefined
 
-  let dialog = $state<DialogState | undefined>(undefined)
+  let unlockTarget = $state<UnlockTarget | undefined>(undefined)
+  let setMethodDialog = $state<'form' | 'pending' | undefined>(undefined)
   let dialogError = $state<string | undefined>(undefined)
   let busy = $state(false)
   /** Bumped on cancel/retry — a stale ceremony resolution must not complete. */
   let attempt = 0
   let abortController: AbortController | undefined
 
-  let password = $state('')
   let newMethod = $state('passkey')
   let newPassword = $state('')
   let verifyNewPassword = $state('')
@@ -109,14 +100,23 @@
     access.type === 'passkey' ? Fingerprint : access.type === 'eth-wallet' ? Wallet : KeyRound,
   )
   const publicKeyDisplay = $derived(prefix0x(account.publicKey))
-  const newPasswordTooShort = $derived(
-    newPassword.length > 0 && newPassword.length < MIN_PASSWORD_LENGTH,
+  const newPasswordValid = $derived(isNewPasswordValid(newPassword, verifyNewPassword))
+
+  const unlockTitle = $derived(
+    unlockTarget === 'private-key'
+      ? 'Reveal private key'
+      : unlockTarget === 'phrase'
+        ? 'Reveal secret recovery phrase'
+        : unlockTarget === 'export'
+          ? 'Export backup'
+          : 'Change unlock method',
   )
-  const newPasswordMismatch = $derived(
-    verifyNewPassword.length > 0 && newPassword !== verifyNewPassword,
-  )
-  const newPasswordValid = $derived(
-    newPassword.length >= MIN_PASSWORD_LENGTH && newPassword === verifyNewPassword,
+  const unlockDescription = $derived(
+    unlockTarget === 'change-method'
+      ? `This changes how you unlock your account on this device only. To continue, confirm with your current ${accessLabel.toLowerCase()}.`
+      : unlockTarget === 'export'
+        ? 'Unlock your account to export an encrypted backup file.'
+        : 'Make sure no one is watching your screen.',
   )
 
   function methodLabel(type: AccessMethod['type']): string {
@@ -142,65 +142,16 @@
     }
   }
 
-  function openUnlock(target: UnlockTarget) {
-    dialogError = undefined
-    password = ''
-    dialog = { kind: 'unlock', target, pending: false }
-  }
-
-  function closeDialog() {
-    // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
-    // a later approval of a cancelled prompt must not complete.
-    attempt++
-    abortController?.abort()
-    changeMethodSeed?.fill(0)
-    changeMethodSeed = undefined
-    dialog = undefined
-    dialogError = undefined
-    busy = false
-    password = ''
-    newPassword = ''
-    verifyNewPassword = ''
-  }
-
-  async function confirmUnlock() {
-    if (busy || dialog?.kind !== 'unlock') {
+  // Called by the unlock dialog with the decrypted seed; a throw from
+  // `complete` surfaces as a dialog error, so only success closes it.
+  function onUnlocked(seed: Uint8Array) {
+    const target = unlockTarget
+    if (!target) {
+      seed.fill(0)
       return
     }
-    const target = dialog.target
-    const myAttempt = ++attempt
-    dialogError = undefined
-    busy = true
-    if (access.type !== 'password') {
-      dialog = { kind: 'unlock', target, pending: true }
-    }
-    try {
-      const unlocked = await unlockAccount(
-        account,
-        access.type === 'password' ? password : undefined,
-      )
-      // Bail if this ceremony was superseded (cancel/retry) or the account was
-      // signed out mid-flight (e.g. cross-tab): the sign-out unmounts this
-      // component but not this continuation, and completing would still
-      // download a backup (export) or stage the seed for a change-method
-      // `setAccess` — acting on a vault the sign-out just wiped.
-      if (myAttempt !== attempt || account.isSignedOut) {
-        unlocked.fill(0)
-        return
-      }
-      password = ''
-      dialog = undefined
-      complete(target, unlocked)
-    } catch (caught) {
-      if (myAttempt === attempt) {
-        dialogError = caught instanceof Error ? caught.message : 'Unlock failed.'
-        dialog = { kind: 'unlock', target, pending: false }
-      }
-    } finally {
-      if (myAttempt === attempt) {
-        busy = false
-      }
-    }
+    complete(target, seed)
+    unlockTarget = undefined
   }
 
   // Consumes `seed`: zeroed here for transient targets, handed to the export /
@@ -219,45 +170,42 @@
       newMethod = 'passkey'
       newPassword = ''
       verifyNewPassword = ''
-      dialog = { kind: 'set-method', pending: false }
+      dialogError = undefined
+      setMethodDialog = 'form'
     }
   }
 
+  function closeSetMethod() {
+    // Invalidate any in-flight ceremony — wallet prompts can't be aborted, so
+    // a later approval of a cancelled prompt must not complete.
+    attempt++
+    abortController?.abort()
+    changeMethodSeed?.fill(0)
+    changeMethodSeed = undefined
+    setMethodDialog = undefined
+    dialogError = undefined
+    busy = false
+    newPassword = ''
+    verifyNewPassword = ''
+  }
+
   async function confirmNewMethod() {
-    if (busy || dialog?.kind !== 'set-method' || !changeMethodSeed) {
+    if (busy || setMethodDialog === undefined || !changeMethodSeed) {
       return
     }
     const myAttempt = ++attempt
     dialogError = undefined
     busy = true
     if (newMethod !== 'password') {
-      dialog = { kind: 'set-method', pending: true }
+      setMethodDialog = 'pending'
     }
     try {
-      let access: AccessMethod
-      let key: CryptoKey
-      if (newMethod === 'passkey') {
-        abortController = new AbortController()
-        const passkey = await createPasskeyKey(account.name, abortController.signal)
-        access = { type: 'passkey', credentialId: passkey.credentialId }
-        key = passkey.key
-      } else if (newMethod === 'eth-wallet') {
-        const source = await requestWalletKeySource()
-        const salt = randomSalt()
-        key = await deriveWalletKey(source, salt)
-        access = {
-          type: 'eth-wallet',
-          encryptionSalt: uint8ArrayToHex(salt),
-        }
-      } else {
-        const salt = randomSalt()
-        key = await deriveKeyFromPassword(newPassword, salt)
-        access = {
-          type: 'password',
-          kdfSalt: uint8ArrayToHex(salt),
-          kdfIterations: PASSWORD_KDF_ITERATIONS,
-        }
-      }
+      abortController = newMethod === 'passkey' ? new AbortController() : undefined
+      const { access: newAccess, key } = await createAccess(newMethod, {
+        accountName: account.name,
+        password: newPassword,
+        signal: abortController?.signal,
+      })
       if (myAttempt !== attempt) {
         return
       }
@@ -270,17 +218,17 @@
         changeMethodSeed = undefined
         return
       }
-      account.setAccess(access, await encryptSeed(changeMethodSeed, key))
+      account.setAccess(newAccess, await encryptSeed(changeMethodSeed, key))
       changeMethodSeed.fill(0)
       changeMethodSeed = undefined
-      dialog = undefined
+      setMethodDialog = undefined
       newPassword = ''
       verifyNewPassword = ''
       toastStore.show('Unlock method updated')
     } catch (caught) {
       if (myAttempt === attempt) {
         dialogError = caught instanceof Error ? caught.message : 'Could not set the new method.'
-        dialog = { kind: 'set-method', pending: false }
+        setMethodDialog = 'form'
       }
     } finally {
       if (myAttempt === attempt) {
@@ -342,17 +290,6 @@
   </div>
 {/snippet}
 
-{#snippet pendingBody(label: string, caption: string)}
-  <div class="flex flex-col items-center gap-2 py-2">
-    <LoaderCircle class="size-5 animate-spin" />
-    <div class="flex flex-col items-center text-center">
-      <p class="text-sm font-bold">{label}</p>
-      <p class="text-sm">{caption}</p>
-    </div>
-  </div>
-  <Button variant="outline" class="w-full" onclick={closeDialog}>Cancel</Button>
-{/snippet}
-
 <div class="flex w-full flex-col gap-6">
   {#if isLocal}
     <!-- Local account banner: no stamps yet, so the account is view-only. -->
@@ -401,7 +338,7 @@
             variant="ghost"
             size="sm"
             class="-mr-2"
-            onclick={() => openUnlock('change-method')}
+            onclick={() => (unlockTarget = 'change-method')}
           >
             <RefreshCw />
             Change
@@ -504,7 +441,7 @@
                       size="icon"
                       class="size-7 shrink-0"
                       aria-label="Reveal private key"
-                      onclick={() => openUnlock('private-key')}
+                      onclick={() => (unlockTarget = 'private-key')}
                     >
                       <Eye />
                     </Button>
@@ -560,7 +497,7 @@
           <div
             class="border-border flex h-38 w-full flex-col items-center justify-center gap-2 rounded-lg border"
           >
-            <Button variant="ghost" onclick={() => openUnlock('phrase')}>
+            <Button variant="ghost" onclick={() => (unlockTarget = 'phrase')}>
               <Eye />
               Reveal
             </Button>
@@ -576,7 +513,7 @@
     {@render sectionHeader('backup', 'Backup', 'Exports an encrypted backup of your account.')}
     {#if expanded.backup}
       <div class="pl-5">
-        <Button variant="outline" onclick={() => openUnlock('export')}>
+        <Button variant="outline" onclick={() => (unlockTarget = 'export')}>
           <FileDown />
           Export .swarmid file
         </Button>
@@ -597,146 +534,64 @@
   </div>
 </div>
 
-{#if dialog?.kind === 'unlock'}
-  {#if dialog.pending}
-    <Dialog onclose={closeDialog} dismissable={false}>
-      {@render pendingBody(
-        access.type === 'eth-wallet' ? 'Confirm with wallet' : 'Confirm with passkey',
-        access.type === 'eth-wallet'
-          ? 'Approve the request in your Ethereum wallet.'
-          : 'Follow the prompts on your device.',
-      )}
-    </Dialog>
-  {:else}
-    <Dialog
-      onclose={closeDialog}
-      title={dialog.target === 'private-key'
-        ? 'Reveal private key'
-        : dialog.target === 'phrase'
-          ? 'Reveal secret recovery phrase'
-          : dialog.target === 'export'
-            ? 'Export backup'
-            : 'Change unlock method'}
-    >
-      <p class="text-sm">
-        {#if dialog.target === 'change-method'}
-          This changes how you unlock your account on this device only. To continue, confirm with
-          your current {accessLabel.toLowerCase()}.
-        {:else if dialog.target === 'export'}
-          Unlock your account to export an encrypted backup file.
-        {:else}
-          Make sure no one is watching your screen.
-        {/if}
-      </p>
-
-      {#if access.type === 'password'}
-        <Input
-          type="password"
-          bind:value={password}
-          placeholder="Account password"
-          autocomplete="current-password"
-          data-autofocus
-          onkeydown={(event: KeyboardEvent) => event.key === 'Enter' && confirmUnlock()}
-        />
-      {/if}
-
-      {#if dialogError}
-        <p class="text-destructive text-xs">{dialogError}</p>
-      {/if}
-
-      <Button
-        class="w-full"
-        disabled={busy || (access.type === 'password' && password.length === 0)}
-        onclick={confirmUnlock}
-      >
-        {#if busy}
-          <LoaderCircle class="animate-spin" />
-        {/if}
-        {access.type === 'passkey'
-          ? 'Confirm with passkey'
-          : access.type === 'eth-wallet'
-            ? 'Confirm with wallet'
-            : 'Confirm'}
-      </Button>
-    </Dialog>
-  {/if}
-{:else if dialog?.kind === 'set-method'}
-  {#if dialog.pending}
-    <Dialog onclose={closeDialog} dismissable={false}>
-      {@render pendingBody(
-        newMethod === 'eth-wallet' ? 'Confirm with new wallet' : 'Confirm with new passkey',
-        newMethod === 'eth-wallet'
-          ? 'Approve the request in your Ethereum wallet.'
-          : 'Follow the prompts on your device.',
-      )}
-    </Dialog>
-  {:else}
-    <Dialog onclose={closeDialog} title="Set new unlock method">
-      <Tabs tabs={METHOD_TABS} bind:value={newMethod} />
-
-      {#if newMethod === 'passkey'}
-        <p class="text-sm">
-          Unlock with your device&rsquo;s built-in authentication &mdash; fingerprint, face, or PIN.
+{#if unlockTarget}
+  <UnlockDialog
+    {account}
+    title={unlockTitle}
+    description={unlockDescription}
+    onunlocked={onUnlocked}
+    onclose={() => (unlockTarget = undefined)}
+  />
+{:else if setMethodDialog === 'pending'}
+  <Dialog onclose={closeSetMethod} dismissable={false}>
+    <div class="flex flex-col items-center gap-2 py-2">
+      <LoaderCircle class="size-5 animate-spin" />
+      <div class="flex flex-col items-center text-center">
+        <p class="text-sm font-bold">
+          {newMethod === 'eth-wallet' ? 'Confirm with new wallet' : 'Confirm with new passkey'}
         </p>
-      {:else if newMethod === 'eth-wallet'}
-        <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
-      {:else}
-        <div class="flex w-full flex-col gap-4">
-          <div class="flex w-full flex-col gap-2">
-            <label for="change-new-password" class="text-sm font-medium">
-              Create new password
-            </label>
-            <Input
-              id="change-new-password"
-              type="password"
-              bind:value={newPassword}
-              autocomplete="new-password"
-              aria-invalid={newPasswordTooShort}
-            />
-            <p
-              class={newPasswordTooShort
-                ? 'text-destructive text-xs'
-                : 'text-muted-foreground text-xs'}
-            >
-              Must be at least {MIN_PASSWORD_LENGTH} characters
-            </p>
-          </div>
-          <div class="flex w-full flex-col gap-2">
-            <label for="change-verify-password" class="text-sm font-medium">Verify password</label>
-            <Input
-              id="change-verify-password"
-              type="password"
-              bind:value={verifyNewPassword}
-              autocomplete="new-password"
-              aria-invalid={newPasswordMismatch}
-            />
-            {#if newPasswordMismatch}
-              <p class="text-destructive text-xs">Passwords do not match</p>
-            {/if}
-          </div>
-        </div>
-      {/if}
+        <p class="text-sm">
+          {newMethod === 'eth-wallet'
+            ? 'Approve the request in your Ethereum wallet.'
+            : 'Follow the prompts on your device.'}
+        </p>
+      </div>
+    </div>
+    <Button variant="outline" class="w-full" onclick={closeSetMethod}>Cancel</Button>
+  </Dialog>
+{:else if setMethodDialog === 'form'}
+  <Dialog onclose={closeSetMethod} title="Set new unlock method">
+    <Tabs tabs={METHOD_TABS} bind:value={newMethod} />
 
-      {#if dialogError}
-        <p class="text-destructive text-xs">{dialogError}</p>
-      {/if}
+    {#if newMethod === 'passkey'}
+      <p class="text-sm">
+        Unlock with your device&rsquo;s built-in authentication &mdash; fingerprint, face, or PIN.
+      </p>
+    {:else if newMethod === 'eth-wallet'}
+      <p class="text-sm">Unlock by signing a message with your Ethereum wallet.</p>
+    {:else}
+      <NewPasswordFields bind:password={newPassword} bind:verify={verifyNewPassword} />
+    {/if}
 
-      <Button
-        class="w-full"
-        disabled={busy || (newMethod === 'password' && !newPasswordValid)}
-        onclick={confirmNewMethod}
-      >
-        {#if busy}
-          <LoaderCircle class="animate-spin" />
-        {/if}
-        {newMethod === 'passkey'
-          ? 'Confirm with new passkey'
-          : newMethod === 'eth-wallet'
-            ? 'Confirm with new wallet'
-            : 'Confirm'}
-      </Button>
-    </Dialog>
-  {/if}
+    {#if dialogError}
+      <p class="text-destructive text-xs">{dialogError}</p>
+    {/if}
+
+    <Button
+      class="w-full"
+      disabled={busy || (newMethod === 'password' && !newPasswordValid)}
+      onclick={confirmNewMethod}
+    >
+      {#if busy}
+        <LoaderCircle class="animate-spin" />
+      {/if}
+      {newMethod === 'passkey'
+        ? 'Confirm with new passkey'
+        : newMethod === 'eth-wallet'
+          ? 'Confirm with new wallet'
+          : 'Confirm'}
+    </Button>
+  </Dialog>
 {/if}
 
 {#if addDriveOpen}

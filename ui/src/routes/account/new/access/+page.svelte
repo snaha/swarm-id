@@ -8,42 +8,32 @@
 
   import { EthAddress } from '@ethersphere/bee-js'
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
-  import Eye from '@lucide/svelte/icons/eye'
-  import EyeOff from '@lucide/svelte/icons/eye-off'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import {
     type AccessMethod,
     type Account as AccountRecord,
     PARTITION_COUNT,
     deriveAccountDerivationKey,
-    uint8ArrayToHex,
   } from '@snaha/swarm-id'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
   import AppHeader from '$lib/components/app-header.svelte'
+  import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
   import { Button } from '$lib/components/ui/button'
-  import { Input } from '$lib/components/ui/input'
   import { Tabs } from '$lib/components/ui/tabs'
   import { completeConnect } from '$lib/connect-handshake'
-  import {
-    PASSWORD_KDF_ITERATIONS,
-    deriveKeyFromPassword,
-    encryptSeed,
-    randomSalt,
-  } from '$lib/crypto/encryption'
-  import { deriveWalletKey, requestWalletKeySource } from '$lib/crypto/eth-wallet'
+  import { createAccess } from '$lib/crypto/access-setup'
+  import { encryptSeed } from '$lib/crypto/encryption'
   import { strip0x } from '$lib/crypto/hex'
   import { walletFromPhrase } from '$lib/crypto/mnemonic'
-  import { createPasskeyKey } from '$lib/crypto/passkey'
   import { triggerSync } from '$lib/dev/sync-hooks'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
 
-  const MIN_PASSWORD_LENGTH = 8
   const TABS = [
     { value: 'passkey', label: 'Passkey' },
     { value: 'eth-wallet', label: 'ETH wallet' },
@@ -51,24 +41,18 @@
   ]
 
   let method = $state('passkey')
-  let pending = $state<'passkey' | 'eth-wallet' | undefined>(undefined)
+  let pending = $state(false)
   let busy = $state(false)
   let error = $state<string | undefined>(undefined)
 
   let password = $state('')
   let verifyPassword = $state('')
-  let showPassword = $state(false)
-  let showVerifyPassword = $state(false)
 
   let abortController: AbortController | undefined
   /** Bumped on cancel/retry — a stale ceremony resolution must not finalize. */
   let attempt = 0
 
-  const passwordTooShort = $derived(password.length > 0 && password.length < MIN_PASSWORD_LENGTH)
-  const passwordMismatch = $derived(verifyPassword.length > 0 && password !== verifyPassword)
-  const passwordValid = $derived(
-    password.length >= MIN_PASSWORD_LENGTH && password === verifyPassword,
-  )
+  const passwordValid = $derived(isNewPasswordValid(password, verifyPassword))
 
   const backHref = $derived(
     sessionStore.draft?.flow === 'sign-in'
@@ -148,82 +132,45 @@
     goto(resolve(flow === 'create' ? routes.ACCOUNT_NEW_DONE : routes.ACCOUNT_READY))
   }
 
-  async function confirmWithPasskey() {
+  async function confirm() {
     const draft = sessionStore.draft
-    if (!draft) {
+    if (busy || !draft) {
       return
     }
     const myAttempt = ++attempt
-    error = undefined
-    pending = 'passkey'
-    abortController = new AbortController()
-    try {
-      const passkey = await createPasskeyKey(draft.name, abortController.signal)
-      if (myAttempt !== attempt) {
-        return
-      }
-      await finalize({ type: 'passkey', credentialId: passkey.credentialId }, passkey.key)
-    } catch (caught) {
-      if (myAttempt === attempt) {
-        error = caught instanceof Error ? caught.message : 'Passkey creation failed.'
-      }
-    } finally {
-      if (myAttempt === attempt) {
-        pending = undefined
-      }
-    }
-  }
-
-  async function confirmWithWallet() {
-    const myAttempt = ++attempt
-    error = undefined
-    pending = 'eth-wallet'
-    try {
-      const source = await requestWalletKeySource()
-      if (myAttempt !== attempt) {
-        return
-      }
-      const salt = randomSalt()
-      const key = await deriveWalletKey(source, salt)
-      await finalize(
-        {
-          type: 'eth-wallet',
-          encryptionSalt: uint8ArrayToHex(salt),
-        },
-        key,
-      )
-    } catch (caught) {
-      if (myAttempt === attempt) {
-        error = caught instanceof Error ? caught.message : 'Wallet signing failed.'
-      }
-    } finally {
-      if (myAttempt === attempt) {
-        pending = undefined
-      }
-    }
-  }
-
-  async function confirmWithPassword() {
-    if (busy) {
-      return
-    }
     error = undefined
     busy = true
+    if (method !== 'password') {
+      pending = true
+    }
     try {
-      const salt = randomSalt()
-      const key = await deriveKeyFromPassword(password, salt)
-      await finalize(
-        {
-          type: 'password',
-          kdfSalt: uint8ArrayToHex(salt),
-          kdfIterations: PASSWORD_KDF_ITERATIONS,
-        },
-        key,
-      )
+      abortController = method === 'passkey' ? new AbortController() : undefined
+      const { access, key } = await createAccess(method, {
+        accountName: draft.name,
+        password,
+        signal: abortController?.signal,
+      })
+      if (myAttempt !== attempt) {
+        return
+      }
+      await finalize(access, key)
     } catch (caught) {
-      error = caught instanceof Error ? caught.message : 'Encryption failed.'
+      if (myAttempt === attempt) {
+        error =
+          caught instanceof Error
+            ? caught.message
+            : method === 'passkey'
+              ? 'Passkey creation failed.'
+              : method === 'eth-wallet'
+                ? 'Wallet signing failed.'
+                : 'Encryption failed.'
+      }
     } finally {
-      busy = false
+      if (myAttempt === attempt) {
+        pending = false
+        busy = false
+        abortController = undefined
+      }
     }
   }
 
@@ -232,7 +179,8 @@
     // a later approval of a cancelled prompt must not finalize.
     attempt++
     abortController?.abort()
-    pending = undefined
+    pending = false
+    busy = false
   }
 </script>
 
@@ -246,10 +194,10 @@
           <LoaderCircle class="size-5 animate-spin" />
           <div class="flex flex-col items-center text-center">
             <p class="text-sm font-bold">
-              {pending === 'passkey' ? 'Confirm with passkey' : 'Confirm with wallet'}
+              {method === 'passkey' ? 'Confirm with passkey' : 'Confirm with wallet'}
             </p>
             <p class="text-sm">
-              {pending === 'passkey'
+              {method === 'passkey'
                 ? 'Follow the prompts on your device.'
                 : 'Approve the request in your Ethereum wallet.'}
             </p>
@@ -291,69 +239,7 @@
           </div>
 
           {#if method === 'password'}
-            <div class="flex w-full flex-col gap-4">
-              <div class="flex w-full flex-col gap-2">
-                <label for="new-password" class="text-sm font-medium">Create new password</label>
-                <div class="flex w-full items-center gap-2">
-                  <Input
-                    id="new-password"
-                    type={showPassword ? 'text' : 'password'}
-                    bind:value={password}
-                    autocomplete="new-password"
-                    aria-invalid={passwordTooShort}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-6 shrink-0 rounded-md [&_svg]:size-3.5"
-                    aria-label={showPassword ? 'Hide password' : 'Show password'}
-                    onclick={() => (showPassword = !showPassword)}
-                  >
-                    {#if showPassword}
-                      <EyeOff />
-                    {:else}
-                      <Eye />
-                    {/if}
-                  </Button>
-                </div>
-                <p
-                  class={passwordTooShort
-                    ? 'text-destructive text-xs'
-                    : 'text-muted-foreground text-xs'}
-                >
-                  Must be at least {MIN_PASSWORD_LENGTH} characters
-                </p>
-              </div>
-
-              <div class="flex w-full flex-col gap-2">
-                <label for="verify-password" class="text-sm font-medium">Verify password</label>
-                <div class="flex w-full items-center gap-2">
-                  <Input
-                    id="verify-password"
-                    type={showVerifyPassword ? 'text' : 'password'}
-                    bind:value={verifyPassword}
-                    autocomplete="new-password"
-                    aria-invalid={passwordMismatch}
-                  />
-                  <Button
-                    variant="ghost"
-                    size="icon"
-                    class="size-6 shrink-0 rounded-md [&_svg]:size-3.5"
-                    aria-label={showVerifyPassword ? 'Hide password' : 'Show password'}
-                    onclick={() => (showVerifyPassword = !showVerifyPassword)}
-                  >
-                    {#if showVerifyPassword}
-                      <EyeOff />
-                    {:else}
-                      <Eye />
-                    {/if}
-                  </Button>
-                </div>
-                {#if passwordMismatch}
-                  <p class="text-destructive text-xs">Passwords do not match</p>
-                {/if}
-              </div>
-            </div>
+            <NewPasswordFields bind:password bind:verify={verifyPassword} />
           {/if}
 
           {#if error}
@@ -361,19 +247,15 @@
           {/if}
 
           {#if method === 'passkey'}
-            <Button class="w-full" onclick={confirmWithPasskey}>Confirm with passkey</Button>
+            <Button class="w-full" onclick={confirm}>Confirm with passkey</Button>
           {:else if method === 'eth-wallet'}
-            <Button class="w-full" onclick={confirmWithWallet}>Confirm with wallet</Button>
+            <Button class="w-full" onclick={confirm}>Confirm with wallet</Button>
           {:else}
             <div class="flex w-full flex-col gap-8">
               <p class="text-muted-foreground text-xs">
                 Save your password &mdash; it can&rsquo;t be reset or recovered.
               </p>
-              <Button
-                class="w-full"
-                disabled={!passwordValid || busy}
-                onclick={confirmWithPassword}
-              >
+              <Button class="w-full" disabled={!passwordValid || busy} onclick={confirm}>
                 {#if busy}
                   <LoaderCircle class="animate-spin" />
                 {/if}
