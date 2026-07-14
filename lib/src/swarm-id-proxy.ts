@@ -5,7 +5,6 @@ import type {
   ParentToIframeMessage,
   ParentIdentifyMessage,
   IframeToParentMessage,
-  ButtonStyles,
   ButtonConfig,
   UploadDataMessage,
   DownloadDataMessage,
@@ -231,7 +230,6 @@ export class SwarmIdProxy {
   private gnosisRpcUrl: string
   private postageStampContractAddress: string
   private authButtonContainer: HTMLElement | undefined
-  private currentStyles: ButtonStyles | undefined
   private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
   private appMetadata: AppMetadata | undefined
@@ -878,7 +876,18 @@ export class SwarmIdProxy {
           console.warn("[Proxy] Invalid parentIdentify message:", result.error)
           return
         }
-        await this.handleParentIdentify(result.data, event)
+        try {
+          await this.handleParentIdentify(result.data, event)
+        } catch (error) {
+          // Without this the parent never hears back and its initialize()
+          // hangs until the initialization timeout.
+          console.error("[Proxy] Initialization failed:", error)
+          this.postMessage(event, {
+            type: "initError",
+            error:
+              error instanceof Error ? error.message : "Initialization failed",
+          })
+        }
         return
       }
 
@@ -903,16 +912,6 @@ export class SwarmIdProxy {
           "[Proxy] Rejected message from unauthorized origin:",
           event.origin,
         )
-        return
-      }
-
-      // Handle setButtonStyles message (UI-only, not in schema)
-      if (type === "setButtonStyles") {
-        this.currentStyles = event.data.styles
-        // Re-render button if not authenticated
-        if (!this.authenticated && this.authButtonContainer) {
-          this.showAuthButton()
-        }
         return
       }
 
@@ -1922,9 +1921,6 @@ export class SwarmIdProxy {
       button.textContent = connectText
     }
 
-    // Apply styles from currentStyles (for backward compat) and buttonConfig
-    const styles = this.currentStyles || {}
-
     // Make button fill container
     button.style.width = "100%"
     button.style.height = "100%"
@@ -1936,22 +1932,19 @@ export class SwarmIdProxy {
       button.style.backgroundColor = "#999"
       button.style.cursor = "default"
     } else if (isAuthenticated) {
-      // Different color for disconnect button (use default gray unless overridden)
+      // Different color for disconnect button
       button.style.backgroundColor = "#666"
-      button.style.cursor = styles.cursor || "pointer"
+      button.style.cursor = "pointer"
     } else {
-      // Use buttonConfig colors, then fall back to currentStyles, then defaults
-      button.style.backgroundColor =
-        config.backgroundColor || styles.backgroundColor || "#dd7200"
-      button.style.cursor = styles.cursor || "pointer"
+      button.style.backgroundColor = config.backgroundColor || "#dd7200"
+      button.style.cursor = "pointer"
     }
-    button.style.color = config.color || styles.color || "white"
-    button.style.border = styles.border || "none"
-    button.style.borderRadius =
-      config.borderRadius || styles.borderRadius || "0"
-    button.style.padding = styles.padding || "0"
-    button.style.fontSize = styles.fontSize || "14px"
-    button.style.fontWeight = styles.fontWeight || "600"
+    button.style.color = config.color || "white"
+    button.style.border = "none"
+    button.style.borderRadius = config.borderRadius || "0"
+    button.style.padding = "0"
+    button.style.fontSize = "14px"
+    button.style.fontWeight = "600"
 
     // Click handler
     button.addEventListener("click", () => {

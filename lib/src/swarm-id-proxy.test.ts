@@ -113,3 +113,58 @@ describe("SwarmIdProxy parentIdentify security (#410)", () => {
     })
   })
 })
+
+describe("SwarmIdProxy initialization failure (#420)", () => {
+  let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
+  let messageListener: MessageListener
+  let proxy: SwarmIdProxy
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+
+    parentWindow = { postMessage: vi.fn() }
+
+    const listeners: Record<string, unknown> = {}
+    const mockWindow = {
+      addEventListener: vi.fn((type: string, listener: unknown) => {
+        listeners[type] = listener
+      }),
+      removeEventListener: vi.fn(),
+      parent: parentWindow,
+      location: { origin: "https://id.example.com" },
+    }
+    vi.stubGlobal("window", mockWindow)
+
+    proxy = new SwarmIdProxy()
+    messageListener = listeners["message"] as MessageListener
+  })
+
+  const messagesOfType = (type: string) =>
+    parentWindow.postMessage.mock.calls.filter(
+      ([message]) => message?.type === type,
+    )
+
+  it("sends initError to the parent when parentIdentify handling throws", async () => {
+    vi.spyOn(proxy as never, "loadAuthData").mockRejectedValue(
+      new Error("storage exploded"),
+    )
+
+    await messageListener({
+      data: {
+        type: "parentIdentify",
+        requestId: "r1",
+        metadata: { name: "Test App" },
+      },
+      origin: PARENT_ORIGIN,
+      source: parentWindow,
+    } as MessageEvent)
+
+    expect(messagesOfType("proxyReady")).toHaveLength(0)
+    const initErrors = messagesOfType("initError")
+    expect(initErrors).toHaveLength(1)
+    expect(initErrors[0][0]).toMatchObject({
+      type: "initError",
+      error: "storage exploded",
+    })
+  })
+})

@@ -780,15 +780,10 @@ export class SwarmIdClient {
       type: "getPostageBatchResponse"
       requestId: string
       postageBatch?: PostageBatch
-      error?: string
     }>({
       type: "getPostageBatch",
       requestId,
     })
-
-    if (response.error) {
-      throw new Error(response.error)
-    }
 
     return response.postageBatch
   }
@@ -1035,7 +1030,6 @@ export class SwarmIdClient {
    * @param options.encrypt - Whether to encrypt the data (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
-   * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
    * @param options.onProgress - Optional callback for tracking upload progress
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result
@@ -1194,7 +1188,6 @@ export class SwarmIdClient {
    * @param options.encrypt - Whether to encrypt the file (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
-   * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded file
@@ -1383,7 +1376,6 @@ export class SwarmIdClient {
    * @param options.encrypt - Whether to encrypt the chunk (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
-   * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the upload result
    * @returns return.reference - The Swarm reference (hash) of the uploaded chunk
@@ -2819,7 +2811,6 @@ export class SwarmIdClient {
    * @param options.pin - Whether to pin the data locally (defaults to false)
    * @param options.tag - Tag ID for tracking upload progress
    * @param options.deferred - Whether to use deferred upload (defaults to false)
-   * @param options.redundancyLevel - Redundancy level from 0-4 for data availability
    * @param options.onProgress - Optional callback for tracking upload progress
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the ACT upload result

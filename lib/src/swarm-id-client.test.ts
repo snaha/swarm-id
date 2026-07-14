@@ -214,6 +214,83 @@ describe("SwarmIdClient connectionInfo", () => {
   })
 })
 
+describe("SwarmIdClient request seam", () => {
+  let client: SwarmIdClient
+  let postMessage: ReturnType<typeof vi.fn>
+
+  // Deliver an iframe→parent message as if it passed the origin/source checks
+  const deliver = (message: unknown) =>
+    (client as never)["handleIframeMessage"](message)
+
+  const lastPostedMessage = () =>
+    postMessage.mock.calls[postMessage.mock.calls.length - 1][0]
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://localhost" },
+      open: vi.fn(),
+    })
+    vi.stubGlobal("document", {
+      createElement: vi.fn().mockReturnValue({
+        style: {},
+        onload: null,
+        onerror: null,
+        src: "",
+        contentWindow: { postMessage: vi.fn() },
+      }),
+      body: { appendChild: vi.fn(), removeChild: vi.fn() },
+    })
+
+    client = new SwarmIdClient({
+      iframeOrigin: "https://swarm-id.example.com",
+      metadata: { name: "Test App", description: "A test application" },
+    })
+    postMessage = vi.fn()
+    ;(client as never)["ready"] = true
+    ;(client as never)["iframe"] = {
+      style: {},
+      contentWindow: { postMessage },
+    }
+  })
+
+  it("downloadData sends plain non-ACT options (#420)", async () => {
+    const reference = "a".repeat(64)
+    const data = new Uint8Array([1, 2, 3])
+
+    const promise = client.downloadData(reference, { timeoutMs: 5000 })
+
+    // The outgoing message passed the client's schema validation and was posted
+    expect(postMessage).toHaveBeenCalledTimes(1)
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({
+      type: "downloadData",
+      reference,
+      options: { timeoutMs: 5000 },
+    })
+
+    deliver({ type: "downloadDataResponse", requestId: sent.requestId, data })
+    await expect(promise).resolves.toEqual(data)
+  })
+
+  it("getPostageBatch rejects on a proxy error message", async () => {
+    const promise = client.getPostageBatch()
+
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "getPostageBatch" })
+
+    deliver({
+      type: "error",
+      requestId: sent.requestId,
+      error: "Bee node unreachable",
+    })
+    await expect(promise).rejects.toThrow("Bee node unreachable")
+  })
+})
+
 describe("SwarmIdClient init-timeout timers (#421)", () => {
   // A distinctive value so the init timers are identifiable by delay.
   const INIT_TIMEOUT = 12345
