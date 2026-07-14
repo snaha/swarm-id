@@ -9,6 +9,7 @@
   import Info from '@lucide/svelte/icons/info'
   import type { PostageStamp } from '@snaha/swarm-id'
 
+  import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -36,7 +37,7 @@
   let keepLifespan = $state(true)
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
-  let attempt = 0
+  const attempts = createAttemptTracker()
   // Set once the dilute has landed on-chain: dilute and top-up are two separate
   // node transactions, so a failed top-up must NOT re-run the dilute on retry
   // (the node rejects a dilution to the batch's now-current depth). While set,
@@ -92,7 +93,7 @@
   })
 
   function close() {
-    attempt++
+    attempts.supersede()
     onClose()
   }
 
@@ -103,9 +104,12 @@
     if (!active) {
       return
     }
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     phase = 'pending'
     errorMessage = ''
+    // Deliberately no guards on the awaits below: dilute and top-up are
+    // on-chain spends whose record updates must land even if the dialog was
+    // closed mid-flight — only the UI epilogue is skipped when superseded.
     try {
       const batchId = drive.batchID.toHex()
       if (!committedPlan) {
@@ -125,13 +129,13 @@
         await topUpStamp(batchId, active.topUpAmount)
         account.updateStamp(drive.batchID, active.afterTopUp)
       }
-      if (myAttempt !== attempt) {
+      if (!attempt.current) {
         return
       }
       onUpdated?.('Drive size increased')
       close()
     } catch (caught) {
-      if (myAttempt !== attempt) {
+      if (!attempt.current) {
         return
       }
       errorMessage = caught instanceof Error ? caught.message : 'Could not increase the size.'

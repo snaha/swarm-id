@@ -9,6 +9,7 @@
   import Plus from '@lucide/svelte/icons/plus'
   import type { PostageStamp } from '@snaha/swarm-id'
 
+  import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -44,7 +45,7 @@
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
   let currentPrice = $state<bigint | undefined>(undefined)
-  let attempt = 0
+  const attempts = createAttemptTracker()
 
   const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
 
@@ -76,7 +77,7 @@
   }
 
   function close() {
-    attempt++
+    attempts.supersede()
     onClose()
   }
 
@@ -84,29 +85,33 @@
     if (!changed) {
       return
     }
-    const myAttempt = ++attempt
+    const attempt = attempts.begin()
     phase = 'pending'
     errorMessage = ''
     try {
-      const price = (currentPrice ??= await currentChainPrice())
+      // Guarded: closing during the price fetch must not go on to spend.
+      const price = (currentPrice ??= await attempt.guard(currentChainPrice()))
       const topUpAmount = stampAmountForSeconds(price, addedSeconds)
       // The drive may have been removed meanwhile (another tab, a sync fold) —
       // check before spending on the node against a record we'd never show.
       if (!account.hasLiveStamp(drive.batchID)) {
         throw new Error('This drive was removed in the meantime.')
       }
+      // Deliberately unguarded from here: once the top-up is sent the money is
+      // spent, so the record update must land even if the dialog was closed —
+      // only the UI epilogue below is skipped for a superseded attempt.
       await topUpStamp(drive.batchID.toHex(), topUpAmount)
       account.updateStamp(
         drive.batchID,
         extendedStamp(drive, addedSeconds, topUpAmount, remainingLifespanSeconds(drive)),
       )
-      if (myAttempt !== attempt) {
+      if (!attempt.current) {
         return
       }
       onUpdated?.('Lifespan extended')
       close()
     } catch (caught) {
-      if (myAttempt !== attempt) {
+      if (!attempt.current) {
         return
       }
       errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
