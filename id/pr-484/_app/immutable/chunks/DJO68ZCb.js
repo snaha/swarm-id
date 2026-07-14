@@ -1,1 +1,0 @@
-import{B as b,C as h,v as k,D as B,S as T}from"./BeCb-HGq.js";function u(r,i){return r===i||r?.[T]===i}function d(r={},i,a,S){return b(()=>{var f,s;return h(()=>{f=s,s=S?.()||[],k(()=>{r!==a(...s)&&(i(r,...s),f&&u(a(...f),r)&&i(null,...f))})}),()=>{B(()=>{s&&u(a(...s),r)&&i(null,...s)})}}),r}export{d as b};
