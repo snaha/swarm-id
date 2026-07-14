@@ -5,9 +5,11 @@
 
 <!--
   Modal dialog implementing the WAI-ARIA dialog focus contract: on open, focus
-  moves into the dialog — to a `[data-autofocus]` element if the consumer marked
-  one, else the first focusable control, else the panel itself; Tab and
-  Shift+Tab wrap within the dialog; on close, focus returns to the opener.
+  moves into the dialog — to a visible `[data-autofocus]` element if the
+  consumer marked one, else the first visible focusable control, else the panel
+  itself (also on touch-primary devices when the target is a text field, so the
+  software keyboard stays down); Tab and Shift+Tab wrap within the dialog; on
+  close, focus returns to the opener.
 -->
 <script lang="ts">
   import { type Snippet, onMount } from 'svelte'
@@ -40,14 +42,37 @@
     '[tabindex]:not([tabindex="-1"])',
   ].join(', ')
 
+  // Text-entry controls summon the software keyboard when focused on touch devices.
+  const TEXT_ENTRY_SELECTOR = 'input, textarea, [contenteditable]'
+
+  // The selector alone also matches controls that are currently invisible
+  // (`display: none` or `visibility: hidden`, own or inherited); those are not
+  // focusable, so counting them would make focus() calls silently fail.
+  function isVisible(element: HTMLElement): boolean {
+    return element.getClientRects().length > 0 && getComputedStyle(element).visibility === 'visible'
+  }
+
   function focusables(): HTMLElement[] {
-    return panel ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)] : []
+    return panel
+      ? [...panel.querySelectorAll<HTMLElement>(FOCUSABLE_SELECTOR)].filter(isVisible)
+      : []
   }
 
   onMount(() => {
     const opener = document.activeElement
-    const autofocus = panel?.querySelector<HTMLElement>('[data-autofocus]')
-    const target = autofocus ?? focusables()[0] ?? panel
+    const autofocus = panel
+      ? [...panel.querySelectorAll<HTMLElement>('[data-autofocus]')].find(isVisible)
+      : undefined
+    let target: HTMLElement | undefined = autofocus ?? focusables()[0] ?? panel
+    // On touch-primary devices, focusing a text field on open would also pop
+    // the software keyboard over the opening dialog — too much movement at
+    // once — so land on the panel instead; the field is one tap away.
+    if (
+      target?.matches(TEXT_ENTRY_SELECTOR) === true &&
+      window.matchMedia('(pointer: coarse)').matches
+    ) {
+      target = panel
+    }
     target?.focus()
     return () => {
       // The opener may be gone by now (e.g. swapping to a pending-state
