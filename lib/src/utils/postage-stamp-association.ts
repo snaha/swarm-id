@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import type { BatchId } from "@ethersphere/bee-js"
-import type { Account, ConnectedApp, PostageStamp } from "../schemas"
+import type { ConnectedApp, PostageStamp, SignedInAccount } from "../schemas"
 
 /**
  * Resolve which postage stamp an app should upload with.
@@ -17,7 +17,7 @@ import type { Account, ConnectedApp, PostageStamp } from "../schemas"
  */
 export function resolveStampForApp(
   app: Pick<ConnectedApp, "postageStampBatchID">,
-  account: Pick<Account, "defaultPostageStampBatchID">,
+  account: Pick<SignedInAccount, "defaultPostageStampBatchID">,
   stamps: PostageStamp[],
 ): PostageStamp | undefined {
   const candidates = [
@@ -40,7 +40,7 @@ export function resolveStampForApp(
  */
 export function collectAccountStampBatchIds(
   account: Pick<
-    Account,
+    SignedInAccount,
     "defaultPostageStampBatchID" | "postageStamps" | "connectedApps"
   >,
 ): BatchId[] {

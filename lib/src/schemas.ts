@@ -226,7 +226,8 @@ export const AccessMethodSchemaV1 = z.discriminatedUnion("type", [
  * under the key the access method derives (hex: IV || ciphertext — width varies
  * with the seed size: 12-word seed → 88 chars, 24-word → 120, so no fixed
  * length). The vault never leaves the device: `SyncedAccountSchemaV1` has no
- * vault fields, and a sign-out wipes the vault while the synced data lives on.
+ * vault fields. A sign-out RETAINS the vault (it is encrypted at rest) while
+ * stripping the synced data, so signing back in only takes the access method.
  */
 export const LocalVaultSchemaV1 = z.object({
   access: AccessMethodSchemaV1,
@@ -308,31 +309,37 @@ const SignedInAccountSchemaV1 = SyncedAccountSchemaV1.extend({
 })
 
 /**
- * Signed-out variant: the synced data plus the moment the user signed this
- * account out on THIS device. The vault was wiped, but the account row stays
- * so the user can see it and sign back in (recovery phrase + new access
- * method). The vault keys are declared undefined-only so a record that kept
- * half a vault is quarantined rather than loaded as signed-out. When a future
- * "sign back in with the security method" flow wants to RETAIN the vault
- * through a sign-out, it extends this variant with `LocalVaultSchemaV1.shape`.
+ * Signed-out variant: the minimal remnant of a sign-out. The vault SURVIVES
+ * (it is encrypted at rest, so retaining it matches the sign-out security
+ * posture) and lets the user sign back in with the existing access method —
+ * no recovery phrase. Everything else — `derivationKey` (secret material),
+ * `publicKey`, the collections, settings, and clocks — is stripped from disk
+ * and re-derived from the seed / re-folded from Swarm on sign-back-in. The
+ * display fields (`name`, `createdAt`) stay so the account chooser can list
+ * the row. Being a plain object (not a `SyncedAccountSchemaV1` extension),
+ * parsing a pre-shrink record under this arm strips its synced fields.
  */
-const SignedOutAccountSchemaV1 = SyncedAccountSchemaV1.extend({
-  access: z.undefined().optional(),
-  encryptedSeed: z.undefined().optional(),
+const SignedOutAccountSchemaV1 = z.object({
+  id: StoredEthAddress,
+  name: z.string(),
+  createdAt: z.number(),
+  ...LocalVaultSchemaV1.shape,
   signedOutAt: z.number(),
 })
 
 /**
  * Local Account Schema V1 — parse entrypoint for stored account records (what
- * localStorage holds): the synced projection plus the device-local tail,
- * modeled as a union so the signed-in/signed-out states are encoded in the
- * data itself — a signed-in account carries the vault and no `signedOutAt`, a
- * signed-out one the reverse; half-signed-out states are unrepresentable.
+ * localStorage holds), modeled as a union so the signed-in/signed-out states
+ * are encoded in the data itself: a signed-in account is the synced projection
+ * plus the vault and no `signedOutAt`; a signed-out one is the minimal remnant
+ * (display fields + vault) with `signedOutAt` set. Both carry the vault —
+ * `signedOutAt` presence alone discriminates; vault-less records (the
+ * pre-retention sign-out shape) fail both arms and are quarantined.
  *
  * This only validates at parse (load) time — the accounts loader SKIPS a
  * violating record rather than failing the document — but unlike a refinement
  * the union also carries into the TYPE system: `Account` is a discriminated
- * union (discriminate on `access`/`signedOutAt` presence, or narrow with
+ * union (discriminate on `signedOutAt` presence, or narrow with
  * `isSignedOutAccount`), so writers can't produce a half-signed-out record
  * without a type error.
  */
@@ -426,7 +433,7 @@ export type AccountStateSnapshot = z.infer<typeof AccountStateSnapshotSchemaV1>
  * account with no default, or whose default is freshly-purchased-but-not-yet-
  * usable, therefore reads as local.
  */
-export function isLocalAccount(account: Account): boolean {
+export function isLocalAccount(account: SignedInAccount): boolean {
   const batchID = account.defaultPostageStampBatchID
   if (batchID === undefined) return true
   const stamp = account.postageStamps.find((s) => s.batchID.equals(batchID))
@@ -439,16 +446,16 @@ export function isLocalAccount(account: Account): boolean {
 }
 
 /**
- * An account is "signed out" on this device when its seed vault has been
- * wiped: no keys remain, so nothing can be unlocked or signed until the user
- * signs back in with the recovery phrase (and sets a new access method). The
- * vault absence itself is the source of truth; `signedOutAt` only records
- * when. Narrows: the false branch exposes the vault fields as non-optional.
+ * An account is "signed out" on this device when `signedOutAt` is set: the
+ * synced data was stripped from disk, but the encrypted vault survives, so the
+ * user signs back in with the existing access method (which re-derives and
+ * re-folds the rest). Narrows: the true branch exposes `signedOutAt` as a
+ * number; the vault fields are non-optional on BOTH branches.
  */
 export function isSignedOutAccount(
   account: Account,
 ): account is SignedOutAccount {
-  return account.access === undefined
+  return account.signedOutAt !== undefined
 }
 
 // ============================================================================
