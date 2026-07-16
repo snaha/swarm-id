@@ -41,17 +41,19 @@
   const accounts = $derived(accountsStore.accounts)
 
   // Accounts that have used this app before, most recently used first. A
-  // lapsed or revoked session still counts as "previously used" — it is NOT
-  // the account being signed out (#445), so these rows carry no badge; the
-  // section title says it. A signed-out account keeps no connected apps, so
-  // it always lists under the other accounts with its "Signed out" badge.
+  // lapsed session still counts as "previously used" — it is NOT the account
+  // being signed out (#445), so these rows carry no badge; the section title
+  // says it. `activeApps` (not the raw collection): a REMOVED app leaves a
+  // revoked tombstone behind for sync, which must not resurrect the account
+  // here. A signed-out account keeps no connected apps at all, so it always
+  // lists under the other accounts with its "Signed out" badge.
   const previouslyUsed = $derived.by(() => {
     const appOrigin = request?.appOrigin
     if (!appOrigin) {
       return []
     }
     const lastConnected = (account: Account) =>
-      account.connectedApps.find((app) => app.appUrl === appOrigin)?.lastConnectedAt
+      account.activeApps.find((app) => app.appUrl === appOrigin)?.lastConnectedAt
     return accounts
       .filter((account) => lastConnected(account) !== undefined)
       .sort((a, b) => (lastConnected(b) ?? 0) - (lastConnected(a) ?? 0))

@@ -124,4 +124,18 @@ test('connect flow shows the same done page and closes the popup', async ({ page
   await popup.getByRole('button', { name: 'Confirm' }).click()
 
   await expect.poll(() => popup.isClosed()).toBe(true)
+
+  // REMOVING the app from the account (Apps tab → Remove) revokes the
+  // association entirely — unlike a disconnect, the account must no longer
+  // list under "Previously used with this app" (the removal leaves a revoked
+  // tombstone in the record for sync, which must not resurrect it).
+  await page.goto('/')
+  await page.getByRole('tab', { name: 'Apps' }).click()
+  await page.getByRole('button', { name: 'App actions' }).click()
+  await page.getByRole('menuitem', { name: 'Remove' }).click()
+
+  await page.goto(DEMO_URL)
+  popup = await openConnectPopup(page)
+  await expect(popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ })).toBeVisible()
+  await expect(popup.getByText('Previously used with this app')).not.toBeVisible()
 })
