@@ -775,6 +775,9 @@ Check console logs for details:
             blockNumber: beeStamp.blockNumber,
             immutableFlag: beeStamp.immutableFlag,
             exists: beeStamp.exists,
+            // Without this the drive card's Lifespan section has nothing to
+            // show — the node listing knows the remaining TTL.
+            batchTTL: beeStamp.batchTTL,
           })
         } else {
           assignError = 'Stamp data not found. Reload stamps first.'

@@ -118,7 +118,9 @@
             ? 'Expired'
             : d.expiryDate
               ? `${d.timeLeftLabel} · Estimated until ${d.expiryDate}`
-              : d.timeLeftLabel}
+              : // No TTL data (e.g. a stamp stored before the source recorded
+                // it) — never render a blank line under the heading.
+                d.timeLeftLabel || 'Unknown'}
         <div class="border-border w-full overflow-hidden rounded-lg border">
           <!-- Header row: name (editable when open) + status + capacity + toggle -->
           <div class="flex items-center gap-3 px-4 py-3">
