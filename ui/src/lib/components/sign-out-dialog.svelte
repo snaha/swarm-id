@@ -6,9 +6,8 @@
 <!--
   Sign out a (synced) account on this device: strips the account data but
   keeps the encrypted vault, so signing back in only takes the security
-  method. The confirm is still gated on the user acknowledging they have
-  their Secret Recovery Phrase — it remains the only way back in if the
-  security method itself is lost. The row stays in the list ("Signed out").
+  method — no phrase acknowledgment needed. The row stays in the list
+  ("Signed out").
 -->
 <script lang="ts">
   import LogOut from '@lucide/svelte/icons/log-out'
@@ -25,8 +24,6 @@
   }
 
   let { account, onClose }: Props = $props()
-
-  let acknowledged = $state(false)
 
   function confirm() {
     // Capture once: the prop is a reactive getter, and callers derive it from
@@ -51,12 +48,8 @@
     To sign back in, unlock with your security method. If you ever lose it, your
     <span class="font-medium">Secret Recovery Phrase</span> is the only way back in.
   </p>
-  <label class="flex cursor-pointer items-start gap-2 text-sm">
-    <input type="checkbox" bind:checked={acknowledged} class="mt-0.5 cursor-pointer" />
-    I have my Secret Recovery Phrase.
-  </label>
   <div class="flex w-full flex-col gap-2">
-    <Button variant="destructive" class="w-full" disabled={!acknowledged} onclick={confirm}>
+    <Button variant="destructive" class="w-full" onclick={confirm}>
       <LogOut />
       Sign out
     </Button>
