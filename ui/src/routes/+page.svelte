@@ -19,7 +19,9 @@
   import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
-  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
+  import SignBackInDialog, {
+    checkStorageDescription,
+  } from '$lib/components/sign-back-in-dialog.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
@@ -43,6 +45,8 @@
   let tab = $state(TABS.some((t) => t.value === initialTab) ? (initialTab as string) : 'apps')
   /** Signed-out account being unlocked to sign back in. */
   let signingBackIn = $state<Account | undefined>(undefined)
+  /** Signed-out account being unlocked to check its storage. */
+  let checkingStorage = $state<Account | undefined>(undefined)
 
   const accounts = $derived(accountsStore.accounts)
   // The active session's account, if any: with one the page IS the app
@@ -74,8 +78,16 @@
     return candidate.isSignedOut ? 'Signed out' : undefined
   }
 
-  /** Storage warning on a chooser row: open that account's Storage tab. */
+  /**
+   * Storage warning on a chooser row: open that account's Storage tab. A
+   * signed-out account signs back in first — its drives only exist in the
+   * encrypted snapshot.
+   */
   function checkStorage(chosen: Account) {
+    if (chosen.isSignedOut) {
+      checkingStorage = chosen
+      return
+    }
     sessionStore.setCurrentAccount(chosen.id)
     tab = 'drives'
   }
@@ -199,5 +211,20 @@
       signingBackIn = undefined
     }}
     onclose={() => (signingBackIn = undefined)}
+  />
+{/if}
+
+<!-- Check storage on a signed-out row: sign back in (restoring the drives
+     from the snapshot), then land on the Storage tab. -->
+{#if checkingStorage}
+  <SignBackInDialog
+    account={checkingStorage}
+    description={checkStorageDescription(checkingStorage)}
+    onsignedin={(restored) => {
+      sessionStore.setCurrentAccount(restored.id)
+      tab = 'drives'
+      checkingStorage = undefined
+    }}
+    onclose={() => (checkingStorage = undefined)}
   />
 {/if}

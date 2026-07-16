@@ -17,7 +17,9 @@
   import AppIcon from '$lib/components/app-icon.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
-  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
+  import SignBackInDialog, {
+    checkStorageDescription,
+  } from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { completeConnect, reuseConnection } from '$lib/connect-handshake'
@@ -31,6 +33,8 @@
   let missingRequest = $state(false)
   /** Account being unlocked to approve the connection. */
   let unlocking = $state<Account | undefined>(undefined)
+  /** Signed-out account being unlocked to check its storage. */
+  let checkingStorage = $state<Account | undefined>(undefined)
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
 
@@ -110,9 +114,14 @@
   /**
    * Storage warning on a row: open that account's Storage tab in a NEW
    * window — navigating this popup away would lose the connect request
-   * (held in memory, dropped on navigation by design).
+   * (held in memory, dropped on navigation by design). A signed-out account
+   * signs back in first: its drives only exist in the encrypted snapshot.
    */
   function checkStorage(account: Account) {
+    if (account.isSignedOut) {
+      checkingStorage = account
+      return
+    }
     sessionStore.setCurrentAccount(account.id)
     window.open(resolve(routes.ROOT) + '?tab=drives', '_blank')
   }
@@ -233,4 +242,20 @@
       onclose={() => (unlocking = undefined)}
     />
   {/if}
+{/if}
+
+<!-- Check storage on a signed-out row: sign back in (restoring the drives
+     from the snapshot), then open the Storage tab in a new window so this
+     popup keeps its connect request. -->
+{#if checkingStorage}
+  <SignBackInDialog
+    account={checkingStorage}
+    description={checkStorageDescription(checkingStorage)}
+    onsignedin={(restored) => {
+      sessionStore.setCurrentAccount(restored.id)
+      window.open(resolve(routes.ROOT) + '?tab=drives', '_blank')
+      checkingStorage = undefined
+    }}
+    onclose={() => (checkingStorage = undefined)}
+  />
 {/if}

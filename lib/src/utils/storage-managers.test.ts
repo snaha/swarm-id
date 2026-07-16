@@ -80,8 +80,9 @@ describe("serializeAccount — device-local seed vault", () => {
   })
 
   // Pins the sign-out privacy contract: nothing but the vault, the encrypted
-  // state snapshot, and the display fields survives in localStorage — no
-  // plaintext derivationKey, collections, or clocks.
+  // state snapshot, the storage-warning remnant, and the display fields
+  // survives in localStorage — no plaintext derivationKey, collections, or
+  // clocks.
   it("serializes a signed-out account to exactly the minimal remnant keys", () => {
     const serialized = serializeAccount(createSignedOutAccount())
 
@@ -93,7 +94,23 @@ describe("serializeAccount — device-local seed vault", () => {
       "id",
       "name",
       "signedOutAt",
+      "soonestDriveExpiry",
+      "storageWarning",
     ])
+  })
+
+  it("round-trips the storage-warning fields", () => {
+    const account = createSignedOutAccount({
+      storageWarning: true,
+      soonestDriveExpiry: 1707776000000,
+    })
+    const reparsed = LocalAccountSchemaV1.parse(
+      JSON.parse(JSON.stringify(serializeAccount(account))),
+    )
+    expect(reparsed).toMatchObject({
+      storageWarning: true,
+      soonestDriveExpiry: 1707776000000,
+    })
   })
 })
 

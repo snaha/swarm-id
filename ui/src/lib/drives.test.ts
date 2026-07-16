@@ -5,12 +5,14 @@ import type { PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
 import {
+  accountNeedsStorageAttention,
   describeDrive,
   driveNeedsAttention,
   drivesNeedingAttention,
   formatBytes,
   formatRemaining,
   remainingLifespanSeconds,
+  soonestDriveExpiry,
 } from './drives'
 
 const DAY = 24 * 60 * 60
@@ -188,5 +190,43 @@ describe('drivesNeedingAttention', () => {
     expect(driveNeedsAttention(makeDrive({ batchTTL: 6 * DAY, utilization: 1 }), measuredAt)).toBe(
       true,
     )
+  })
+})
+
+describe('soonestDriveExpiry / accountNeedsStorageAttention', () => {
+  const measuredAt = Date.UTC(2026, 8, 21)
+  const DAY_MS = DAY * 1000
+
+  it('picks the soonest expiry among live drives, skipping expired and unknown TTLs', () => {
+    const stamps = [
+      makeDrive({ batchTTL: 90 * DAY }),
+      makeDrive({ batchTTL: 10 * DAY }), // soonest that still lives
+      makeDrive({ batchTTL: 0 }), // expired — skipped
+      makeDrive({ batchTTL: undefined }), // unknown — skipped
+    ]
+    expect(soonestDriveExpiry(stamps, measuredAt)).toBe(measuredAt + 10 * DAY_MS)
+  })
+
+  it('is undefined without any qualifying drive', () => {
+    expect(soonestDriveExpiry([], measuredAt)).toBeUndefined()
+    expect(soonestDriveExpiry([makeDrive({ batchTTL: undefined })], measuredAt)).toBeUndefined()
+  })
+
+  it('warns for a signed-out account via the captured flag', () => {
+    const account = { stamps: [], isSignedOut: true, storageWarning: true }
+    expect(accountNeedsStorageAttention(account, measuredAt)).toBe(true)
+  })
+
+  it('develops the signed-out warning as the stored expiry approaches', () => {
+    const expiry = measuredAt + 30 * DAY_MS
+    const account = { stamps: [], isSignedOut: true, soonestDriveExpiry: expiry }
+    expect(accountNeedsStorageAttention(account, measuredAt)).toBe(false)
+    expect(accountNeedsStorageAttention(account, expiry - 6 * DAY_MS)).toBe(true)
+    expect(accountNeedsStorageAttention(account, expiry + DAY_MS)).toBe(true) // past expiry: still warn
+  })
+
+  it('uses the live drive state for signed-in accounts', () => {
+    const account = { stamps: [makeDrive({ utilization: 1 })], isSignedOut: false }
+    expect(accountNeedsStorageAttention(account, measuredAt)).toBe(true)
   })
 })

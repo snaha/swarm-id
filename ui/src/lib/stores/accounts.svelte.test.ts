@@ -11,7 +11,7 @@
  *   memory and the projected record; a late `setAccess` (e.g. a change-method
  *   ceremony finishing after a cross-tab sign-out) may not undo the sign-out.
  */
-import { BatchId, EthAddress } from '@ethersphere/bee-js'
+import { BatchId, EthAddress, PrivateKey } from '@ethersphere/bee-js'
 import {
   type Account as AccountRecord,
   type SignedInAccount,
@@ -228,6 +228,8 @@ describe('Account.signOut', () => {
       'id',
       'name',
       'signedOutAt',
+      'soonestDriveExpiry',
+      'storageWarning',
     ])
   })
 
@@ -243,6 +245,53 @@ describe('Account.signOut', () => {
     expect(live.signedOutAt).toBeUndefined()
     expect(live.encryptedState).toBeUndefined()
     expect(live.derivationKey).toBe('f'.repeat(64))
+  })
+})
+
+describe('Account.signOut storage-warning remnant', () => {
+  const DAY_S = 24 * 60 * 60
+  const fullDrive = {
+    batchID: new BatchId('c'.repeat(64)),
+    signerKey: new PrivateKey('d'.repeat(64)),
+    utilization: 1,
+    usable: true,
+    depth: 20,
+    amount: 100000000n,
+    bucketDepth: 16,
+    blockNumber: 1,
+    immutableFlag: false,
+    exists: true,
+    batchTTL: 30 * DAY_S,
+    createdAt: Date.now(),
+  }
+
+  it('captures the warning flag and soonest expiry from the live drives', () => {
+    const account = new Account({ ...signedInRecord(), postageStamps: [fullDrive] }, noCommit)
+    account.signOut(ENCRYPTED_STATE)
+    expect(account.storageWarning).toBe(true)
+    expect(account.soonestDriveExpiry).toBeGreaterThan(Date.now())
+    expect(account.toRecord()).toMatchObject({
+      storageWarning: true,
+      soonestDriveExpiry: expect.any(Number),
+    })
+  })
+
+  it('records no warning for a healthy account', () => {
+    const account = new Account(
+      { ...signedInRecord(), postageStamps: [{ ...fullDrive, utilization: 0.1 }] },
+      noCommit,
+    )
+    account.signOut(ENCRYPTED_STATE)
+    expect(account.storageWarning).toBe(false)
+    expect(account.soonestDriveExpiry).toBeGreaterThan(Date.now())
+  })
+
+  it('round-trips the remnant through a record', () => {
+    const account = new Account({ ...signedInRecord(), postageStamps: [fullDrive] }, noCommit)
+    account.signOut(ENCRYPTED_STATE)
+    const rehydrated = new Account(account.toRecord(), noCommit)
+    expect(rehydrated.storageWarning).toBe(true)
+    expect(rehydrated.soonestDriveExpiry).toBe(account.soonestDriveExpiry)
   })
 })
 

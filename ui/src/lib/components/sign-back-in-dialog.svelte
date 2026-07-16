@@ -12,6 +12,19 @@
   with `allowEmpty`. Other restore errors (e.g. network unreachable) surface
   in the unlock dialog for a retry.
 -->
+<script lang="ts" module>
+  import { formatYmd } from '$lib/drives'
+
+  /** Unlock prompt for a check-storage sign-in, surfacing the expiry captured
+   * at sign-out when there is one. */
+  export function checkStorageDescription(account: { soonestDriveExpiry?: number }): string {
+    const expiry = account.soonestDriveExpiry
+    return expiry !== undefined
+      ? `A drive may expire around ${formatYmd(expiry)}. Sign in to check your storage.`
+      : 'Sign in to check your storage.'
+  }
+</script>
+
 <script lang="ts">
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -21,6 +34,8 @@
 
   interface Props {
     account: Account
+    /** Overrides the standard unlock prompt (e.g. the check-storage flow). */
+    description?: string
     /** Called with the restored live account and the entropy that unlocked it
      * (the connect flow completes the app handshake with it); the caller
      * unmounts the dialog. */
@@ -28,7 +43,12 @@
     onclose: () => void
   }
 
-  let { account, onsignedin, onclose }: Props = $props()
+  let {
+    account,
+    description = 'Unlock with your security method to sign back in on this device.',
+    onsignedin,
+    onclose,
+  }: Props = $props()
 
   /** Entropy stashed across the empty-account warning; zeroed on cancel. */
   let pendingEntropy = $state<Uint8Array | undefined>(undefined)
@@ -79,11 +99,5 @@
     </div>
   </Dialog>
 {:else}
-  <UnlockDialog
-    {account}
-    title="Sign in as {account.name}"
-    description="Unlock with your security method to sign back in on this device."
-    {onunlocked}
-    {onclose}
-  />
+  <UnlockDialog {account} title="Sign in as {account.name}" {description} {onunlocked} {onclose} />
 {/if}

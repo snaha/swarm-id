@@ -17,7 +17,7 @@
   import Polycon from '$lib/components/polycon.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
-  import { drivesNeedingAttention } from '$lib/drives'
+  import { accountNeedsStorageAttention } from '$lib/drives'
   import type { Account } from '$lib/types'
   import { truncateAddress } from '$lib/utils'
 
@@ -34,7 +34,7 @@
 </script>
 
 {#each accounts as account (account.id.toHex())}
-  {@const storageWarning = oncheckstorage !== undefined && drivesNeedingAttention(account) > 0}
+  {@const storageWarning = oncheckstorage !== undefined && accountNeedsStorageAttention(account)}
   {@const badgeText = storageWarning ? undefined : badge?.(account)}
   <div class="relative">
     <button

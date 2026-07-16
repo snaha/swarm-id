@@ -18,6 +18,7 @@ import {
 
 import { browser } from '$app/environment'
 
+import { drivesNeedingAttention, soonestDriveExpiry } from '$lib/drives'
 import { daysToMs } from '$lib/duration'
 
 type AccountSettings = { appSessionDuration?: number }
@@ -31,8 +32,22 @@ type AccountSettings = { appSessionDuration?: number }
  * its snapshot is unrepresentable.
  */
 type DeviceAuth =
-  | { vault: LocalVault; signedOutAt?: undefined; encryptedState?: undefined }
-  | { vault: LocalVault; signedOutAt: number; encryptedState: string }
+  | {
+      vault: LocalVault
+      signedOutAt?: undefined
+      encryptedState?: undefined
+      storageWarning?: undefined
+      soonestDriveExpiry?: undefined
+    }
+  | {
+      vault: LocalVault
+      signedOutAt: number
+      encryptedState: string
+      /** Any drive needed attention when the sign-out captured the state. */
+      storageWarning?: boolean
+      /** Soonest estimated drive expiry (epoch ms) captured at sign-out. */
+      soonestDriveExpiry?: number
+    }
 
 /**
  * The account aggregate root. Fields are reactive (`$state`) so component reads
@@ -119,6 +134,8 @@ export class Account {
         vault,
         signedOutAt: record.signedOutAt,
         encryptedState: record.encryptedState,
+        storageWarning: record.storageWarning,
+        soonestDriveExpiry: record.soonestDriveExpiry,
       }
       this.#resetSyncedFields()
       return
@@ -167,13 +184,15 @@ export class Account {
     const auth = this.#deviceAuth
     if (auth.signedOutAt !== undefined) {
       // The minimal sign-out remnant — display fields, the retained vault,
-      // and the encrypted snapshot of the synced state.
+      // the encrypted snapshot, and the storage-warning remnant.
       return {
         id: this.id,
         name: this.name,
         createdAt: this.createdAt,
         ...auth.vault,
         encryptedState: auth.encryptedState,
+        storageWarning: auth.storageWarning,
+        soonestDriveExpiry: auth.soonestDriveExpiry,
         signedOutAt: auth.signedOutAt,
       }
     }
@@ -240,6 +259,16 @@ export class Account {
     return this.#deviceAuth.encryptedState
   }
 
+  /** Whether any drive needed attention when the sign-out captured the state. */
+  get storageWarning(): boolean | undefined {
+    return this.#deviceAuth.storageWarning
+  }
+
+  /** Soonest estimated drive expiry (epoch ms) captured at sign-out. */
+  get soonestDriveExpiry(): number | undefined {
+    return this.#deviceAuth.soonestDriveExpiry
+  }
+
   /**
    * Signed out on this device: `signOut()` stripped the synced data, but the
    * vault remains — unlocking it signs back in.
@@ -286,10 +315,15 @@ export class Account {
    * anything to publish with.
    */
   signOut(encryptedState: string) {
+    // Capture the storage-warning remnant BEFORE the stamps are stripped: the
+    // chooser must keep warning about full/expiring drives while the stamps
+    // themselves are only in the encrypted snapshot.
     this.#deviceAuth = {
       vault: this.#deviceAuth.vault,
       signedOutAt: Date.now(),
       encryptedState,
+      storageWarning: drivesNeedingAttention(this) > 0,
+      soonestDriveExpiry: soonestDriveExpiry(this.stamps),
     }
     this.#resetSyncedFields()
     this.#commit({ skipSync: true })
