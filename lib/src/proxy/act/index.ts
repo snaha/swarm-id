@@ -77,10 +77,11 @@ export interface ActGranteeModifyResult {
 }
 
 /**
- * Result of ACT revocation (includes new encrypted reference due to key rotation)
+ * Result of ACT revocation. `encryptedReference` is returned unchanged (#496):
+ * revocation drops the revoked entries but must not re-encrypt the reference.
  */
 export interface ActRevocationResult extends ActGranteeModifyResult {
-  encryptedReference: string // New encrypted reference after key rotation
+  encryptedReference: string // Unchanged content reference (see #496)
 }
 
 /**
@@ -524,7 +525,8 @@ export async function addGranteesToAct(
 }
 
 /**
- * Revoke grantees from an ACT (performs key rotation)
+ * Revoke grantees from an ACT by dropping their entries. The content reference is
+ * returned unchanged — revocation must not re-encrypt it (#496).
  */
 export async function revokeGranteesFromAct(
   target: UploadTarget,
@@ -592,20 +594,16 @@ export async function revokeGranteesFromAct(
     throw new Error("Cannot find publisher entry in ACT")
   }
 
-  const oldAccessKey = counterModeDecrypt(
+  // Keep the existing access key. Rotating it and re-encrypting the SAME content
+  // reference under the new key was a revocation bypass (#496): counterModeEncrypt
+  // is nonce-free CTR, so two ciphertexts of the same reference expose the new
+  // keystream to any former grantee, who read both from immutable history. Re-keying
+  // is also pointless — immutability keeps the old ciphertext readable forever, so
+  // it can never un-share. Revocation only drops the revoked entries from the ACT.
+  const accessKey = counterModeDecrypt(
     publisherEntry.encryptedAccessKey,
     publisherKeys.accessKeyDecryptionKey,
   )
-
-  // Decrypt the content reference
-  const encryptedRef = hexToUint8Array(encryptedReference)
-  const decryptedRef = counterModeDecrypt(encryptedRef, oldAccessKey)
-
-  // Generate NEW access key for key rotation
-  const newAccessKey = generateRandomKey()
-
-  // Encrypt content reference with new access key
-  const newEncryptedRef = counterModeEncrypt(decryptedRef, newAccessKey)
 
   // Get current grantee list and filter out revoked
   let currentGrantees: UncompressedPublicKey[] = []
@@ -629,14 +627,14 @@ export async function revokeGranteesFromAct(
     )
   })
 
-  // Rebuild ALL entries with new access key
+  // Rebuild the ACT with the surviving entries under the same access key.
   const newEntries: ActEntry[] = []
 
   // Entry for publisher
   newEntries.push({
     lookupKey: publisherKeys.lookupKey,
     encryptedAccessKey: counterModeEncrypt(
-      newAccessKey,
+      accessKey,
       publisherKeys.accessKeyDecryptionKey,
     ),
   })
@@ -651,7 +649,7 @@ export async function revokeGranteesFromAct(
     newEntries.push({
       lookupKey: granteeKeys.lookupKey,
       encryptedAccessKey: counterModeEncrypt(
-        newAccessKey,
+        accessKey,
         granteeKeys.accessKeyDecryptionKey,
       ),
     })
@@ -708,7 +706,8 @@ export async function revokeGranteesFromAct(
   const historyTagUid = historyResult.tagUid
 
   return {
-    encryptedReference: uint8ArrayToHex(newEncryptedRef),
+    // Unchanged — see #496: revocation must not re-encrypt the reference.
+    encryptedReference,
     historyReference: newHistoryReference,
     granteeListReference: granteeListResult.reference,
     actReference: actResult.reference,

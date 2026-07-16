@@ -3882,7 +3882,7 @@ export class SwarmIdProxy {
         parseCompressedPublicKey(hex),
       )
 
-      // Revoke grantees from ACT (performs key rotation)
+      // Revoke grantees from ACT (drops their entries; reference unchanged, #496)
       const result = await this.withModeAwareWriteLock(
         { useWorkers: true },
         async (target) => {
