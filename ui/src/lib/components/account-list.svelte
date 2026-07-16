@@ -33,7 +33,7 @@
     <Polycon value={account.id.toHex()} size={36} class="shrink-0 overflow-hidden rounded-md" />
     <span class="flex min-w-0 flex-1 flex-col">
       <span class="truncate text-sm font-medium">{account.name}</span>
-      <span class="text-muted-foreground text-xs">
+      <span class="text-xs">
         {truncateAddress(account.id.toChecksum())}
       </span>
     </span>

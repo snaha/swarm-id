@@ -136,31 +136,37 @@
         </div>
 
         {#if accounts.length > 0 && !addingAccount}
-          <div class="flex w-full flex-col gap-2">
+          <div class="flex w-full flex-col gap-4">
             {#if previouslyUsed.length > 0}
-              <p class="text-muted-foreground text-sm">Previously used with this app</p>
-              <AccountList accounts={previouslyUsed} onselect={select} />
+              <div class="flex flex-col gap-2">
+                <p class="text-sm font-bold">Previously used with this app</p>
+                <AccountList accounts={previouslyUsed} onselect={select} />
+              </div>
             {/if}
 
             {#if otherAccounts.length > 0}
-              {#if previouslyUsed.length > 0}
-                <p class="text-muted-foreground mt-2 text-sm">Other accounts</p>
-              {/if}
-              <AccountList
-                accounts={otherAccounts}
-                badge={(account) => (account.isSignedOut ? 'Signed out' : undefined)}
-                onselect={select}
-              />
+              <div class="flex flex-col gap-2">
+                {#if previouslyUsed.length > 0}
+                  <p class="text-sm font-bold">Other accounts</p>
+                {/if}
+                <AccountList
+                  accounts={otherAccounts}
+                  badge={(account) => (account.isSignedOut ? 'Signed out' : undefined)}
+                  onselect={select}
+                />
+              </div>
             {/if}
 
-            <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
-              <UserRoundMinus />
-              Remove an account
-            </Button>
-            <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
-              <UserRoundPlus />
-              Sign in to another account
-            </Button>
+            <div class="flex flex-col gap-2">
+              <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
+                <UserRoundMinus />
+                Remove an account
+              </Button>
+              <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
+                <UserRoundPlus />
+                Sign in to another account
+              </Button>
+            </div>
           </div>
         {:else}
           <div class="flex w-full flex-col items-center gap-4">
@@ -177,10 +183,6 @@
             </Button>
           </div>
         {/if}
-
-        <Button variant="ghost" size="xs" href={resolve(routes.PRODUCT)} target="_blank">
-          What is Swarm ID?
-        </Button>
       </div>
     {/if}
   </main>
