@@ -138,7 +138,7 @@ const FALLBACK_NAME_HEX_CHARS = 4
  * Deriving the fallback from the batch ID (not the list position) keeps it
  * stable when drives are added/removed and identical on every device.
  */
-function driveDisplayName(drive: PostageStamp): string {
+export function driveDisplayName(drive: PostageStamp): string {
   return drive.name?.trim() || `Drive ${drive.batchID.toHex().slice(0, FALLBACK_NAME_HEX_CHARS)}`
 }
 
@@ -171,6 +171,64 @@ export function formatYmd(epochMs: number): string {
 }
 
 /** One-pass derivation of every display value for a drive row + detail. */
+/**
+ * Whether a drive should be flagged for the user's attention: about to expire
+ * or already full — the conditions of the destructive per-drive badges. An
+ * EXPIRED drive is deliberately not "attention": it is gone, not saveable.
+ */
+export function driveNeedsAttention(drive: PostageStamp, now = Date.now()): boolean {
+  const d = describeDrive(drive, now)
+  return d.status === 'expires-soon' || (d.status !== 'expired' && d.storageFull)
+}
+
+/** How many of the account's LIVE drives need attention (see above). */
+export function drivesNeedingAttention(
+  account: { stamps: PostageStamp[] },
+  now = Date.now(),
+): number {
+  return account.stamps.filter((drive) => driveNeedsAttention(drive, now)).length
+}
+
+/**
+ * The soonest estimated expiry (epoch ms) among live, not-yet-expired drives
+ * with a known TTL; `undefined` when none qualifies. Captured at sign-out so
+ * the "expires soon" warning can keep developing while the stamps themselves
+ * are locked away in the encrypted snapshot.
+ */
+export function soonestDriveExpiry(stamps: PostageStamp[], now = Date.now()): number | undefined {
+  const expiries = stamps
+    .map((drive) => remainingLifespanSeconds(drive, now))
+    .filter((ttl): ttl is number => ttl !== undefined && ttl > 0)
+    .map((ttl) => now + ttl * MS_PER_SECOND)
+  return expiries.length > 0 ? Math.min(...expiries) : undefined
+}
+
+/**
+ * Whether the account should carry the "Check storage" warning. Signed in:
+ * any live drive needs attention. Signed out: the flag captured at sign-out
+ * (storage full / already expiring), or the stored soonest expiry has since
+ * drifted inside the expires-soon window — the warning develops over time
+ * even though the stamps are unreadable.
+ */
+export function accountNeedsStorageAttention(
+  account: {
+    stamps: PostageStamp[]
+    isSignedOut: boolean
+    storageWarning?: boolean
+    soonestDriveExpiry?: number
+  },
+  now = Date.now(),
+): boolean {
+  if (account.isSignedOut) {
+    return (
+      account.storageWarning === true ||
+      (account.soonestDriveExpiry !== undefined &&
+        account.soonestDriveExpiry - now <= EXPIRES_SOON_THRESHOLD_SECONDS * MS_PER_SECOND)
+    )
+  }
+  return drivesNeedingAttention(account, now) > 0
+}
+
 export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDisplay {
   const ttl = remainingLifespanSeconds(drive, now)
   const known = ttl !== undefined

@@ -76,20 +76,20 @@ test('create flow ends on the done page with the drive pitch', async ({ page }) 
   await expect(page).toHaveURL(/\/$/)
 })
 
-test('connect flow shows the same done page and closes the popup', async ({ page }) => {
+test('connect flow shows the done screen variants and closes the popup', async ({ page }) => {
   await page.goto(DEMO_URL)
 
-  // Fresh profile: create the account inside the connect popup.
+  // Fresh profile: create the account inside the connect popup. No drives yet
+  // → the confirmation shows the (secondary) drive pitch card.
   let popup = await openConnectPopup(page)
   await completeCreateFlow(popup)
 
   await expect(popup).toHaveURL(/\/connect\/done$/)
-  await expect(popup.getByText(`Connected to ${APP_NAME}!`)).toBeVisible()
-  await expectDrivePitch(popup)
-  await expect(popup.getByRole('button', { name: 'Continue to app' })).toBeVisible()
-  await expect(popup.getByRole('button', { name: 'Stay local for now' })).not.toBeVisible()
+  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText('Want the full experience?')).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Set up a drive' })).toBeVisible()
 
-  await popup.getByRole('button', { name: 'Continue to app' }).click()
+  await popup.getByRole('button', { name: 'Go to app' }).click()
   await expect.poll(() => popup.isClosed()).toBe(true)
 
   // The demo picked up the session — the sidebar shows the account.
@@ -108,22 +108,108 @@ test('connect flow shows the same done page and closes the popup', async ({ page
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
 
-  // Disconnect and reconnect: the account now has a drive, so the done page
-  // skips the pitch and shows the "All set!" branch.
+  // Disconnect and reconnect: the lapsed connection lists the account under
+  // "Previously used with this app" — with NO "Signed out" badge, since the
+  // account is still signed in (#445). Reconnecting is NOT a first connect
+  // and the drive question was settled, so the done screen is the plain
+  // confirmation: no drive picker, no pitch.
   await page.goto(DEMO_URL)
   await accountButton.click()
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
 
   popup = await openConnectPopup(page)
-  await popup.getByRole('button', { name: /Signed out/ }).click()
+  await expect(popup.getByText('Previously used with this app')).toBeVisible()
+  await expect(popup.getByText('Signed out')).not.toBeVisible()
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
 
-  await expect(popup).toHaveURL(/\/connect\/done$/)
-  await expect(popup.getByText('All set!')).toBeVisible()
-  await expect(popup.getByText(`Your account is connected to ${APP_NAME}.`)).toBeVisible()
-  await expect(popup.getByRole('button', { name: 'Set up a drive' })).not.toBeVisible()
-
-  await popup.getByRole('button', { name: 'Continue to app' }).click()
+  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText('Select drive')).not.toBeVisible()
+  await expect(popup.getByText('Want the full experience?')).not.toBeVisible()
+  await popup.getByRole('button', { name: 'Go to app' }).click()
   await expect.poll(() => popup.isClosed()).toBe(true)
+
+  // REMOVING the app from the account (Apps tab → Remove) revokes the
+  // association entirely — unlike a disconnect, the account must no longer
+  // list under "Previously used with this app" (the removal leaves a revoked
+  // tombstone in the record for sync, which must not resurrect it).
+  await page.goto('/')
+  await page.getByRole('tab', { name: 'Apps' }).click()
+  await page.getByRole('button', { name: 'App actions' }).click()
+  await page.getByRole('menuitem', { name: 'Remove' }).click()
+
+  // A second drive, so the NEXT (first-again) connect must ask which drive
+  // the app should use.
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await page.getByRole('button', { name: 'Add drive' }).click()
+  await page.getByRole('dialog').getByRole('combobox').nth(1).selectOption({ index: 1 })
+  await page.getByRole('button', { name: 'Proceed' }).click()
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  await page.goto(DEMO_URL)
+  popup = await openConnectPopup(page)
+  await expect(popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ })).toBeVisible()
+  await expect(popup.getByText('Previously used with this app')).not.toBeVisible()
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+
+  // First connect (the removal reset the association) + two drives → the
+  // drive picker, with the account default preselected.
+  await expect(popup.getByText('Select drive')).toBeVisible()
+  const drivePicker = popup.getByRole('combobox')
+  await expect(drivePicker).toHaveValue(/[0-9a-f]{64}/)
+  expect(await drivePicker.locator('option', { hasText: '(default)' }).count()).toBe(1)
+  // Choose the non-default drive; the choice must land on the app entry.
+  await drivePicker.selectOption({ index: 1 })
+  await popup.getByRole('button', { name: 'Go to app' }).click()
+  await expect.poll(() => popup.isClosed()).toBe(true)
+
+  await page.goto('/')
+  const appDrive = await page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { connectedApps?: { appUrl: string; postageStampBatchID?: string }[] }[]
+    }
+    return doc.data
+      ?.flatMap((account) => account.connectedApps ?? [])
+      .find((app) => app.appUrl === 'http://localhost:3500')?.postageStampBatchID
+  })
+  expect(appDrive).toMatch(/^[0-9a-f]{64}$/)
+
+  // Storage warnings (#437): mark one drive full → the home page shows the
+  // attention alert (any tab), and its link jumps to Storage.
+  await page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { postageStamps?: { utilization: number }[] }[]
+    }
+    const stamps = doc.data?.[0]?.postageStamps
+    if (stamps?.[0]) stamps[0].utilization = 1
+    localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
+  })
+  await page.reload()
+  await expect(page.getByText('1 drive needs attention.')).toBeVisible()
+  await page.getByRole('button', { name: 'Check your storage' }).click()
+  await expect(page.getByText('Your drives')).toBeVisible()
+
+  // The connect chooser shows the destructive "Check storage" action on the
+  // account row instead of any badge; pressing it opens the Storage tab.
+  // (Disconnect first — with a live session the demo has no Connect button.)
+  await page.goto(DEMO_URL)
+  await accountButton.click()
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  popup = await openConnectPopup(page)
+  const checkStorage = popup.getByRole('button', { name: 'Check storage' })
+  await expect(checkStorage).toBeVisible()
+  // Press near the top edge: a pressed-state transform that shifts the button
+  // out from under the pointer would swallow this click (regression guard).
+  // Storage opens in a NEW window; the connect popup keeps its request.
+  const storagePagePromise = popup.waitForEvent('popup')
+  await checkStorage.click({ position: { x: 20, y: 4 } })
+  const storagePage = await storagePagePromise
+  await expect(storagePage.getByText('Your drives')).toBeVisible()
+  await expect(storagePage.getByText('1 drive needs attention.')).toBeVisible()
+  await expect(popup.getByText(`Connect to ${APP_NAME}`)).toBeVisible()
 })

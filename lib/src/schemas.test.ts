@@ -185,6 +185,30 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
     }
   })
 
+  // The storage-warning remnant captured at sign-out: a flag for drives that
+  // already needed attention, and the soonest estimated drive expiry so the
+  // "expires soon" warning can keep developing while signed out.
+  it("carries the storage-warning fields on a signed-out record", () => {
+    const result = LocalAccountSchemaV1.safeParse(
+      serializedAccount({
+        ...SIGNED_OUT,
+        storageWarning: true,
+        soonestDriveExpiry: 1707776000000,
+      }),
+    )
+    expect(result.success).toBe(true)
+    expect(result.success && result.data).toMatchObject({
+      storageWarning: true,
+      soonestDriveExpiry: 1707776000000,
+    })
+  })
+
+  it("accepts a signed-out record without the storage-warning fields", () => {
+    expect(
+      LocalAccountSchemaV1.safeParse(serializedAccount(SIGNED_OUT)).success,
+    ).toBe(true)
+  })
+
   it("rejects a vault-less signed-out record (pre-retention shape)", () => {
     expect(
       LocalAccountSchemaV1.safeParse(

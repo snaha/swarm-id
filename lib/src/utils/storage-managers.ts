@@ -133,6 +133,8 @@ export function serializeAccount(account: Account): Record<string, unknown> {
       access: account.access,
       encryptedSeed: account.encryptedSeed,
       encryptedState: account.encryptedState,
+      storageWarning: account.storageWarning,
+      soonestDriveExpiry: account.soonestDriveExpiry,
       signedOutAt: account.signedOutAt,
     }
   }

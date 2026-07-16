@@ -82,6 +82,8 @@ export function createSignedOutAccount(
     access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
     encryptedSeed: "aabbccdd",
     encryptedState: '{"format":"test-snapshot","payload":"aabb"}',
+    storageWarning: false,
+    soonestDriveExpiry: 1707776000000,
     signedOutAt: 1700000000001,
     ...overrides,
   }

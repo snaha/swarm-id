@@ -97,11 +97,6 @@ function findReusableConnection(account: Account, appOrigin: string): ConnectedA
   )
 }
 
-/** Whether connecting can skip the unlock ceremony (see `reuseConnection`). */
-export function hasReusableConnection(account: Account, appOrigin: string): boolean {
-  return findReusableConnection(account, appOrigin) !== undefined
-}
-
 /**
  * Reconnect with the secret of a still-valid prior connection, skipping the
  * unlock ceremony. Returns false when there is none and a full

@@ -5,8 +5,6 @@
 
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
-  import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
-  import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
   import { resolve } from '$app/paths'
   import { page } from '$app/state'
@@ -16,12 +14,18 @@
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
   import HomeDrives from '$lib/components/home-drives.svelte'
+  import AlertFill from '$lib/components/icons/alert-fill.svelte'
+  import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
+  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
-  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
+  import SignBackInDialog, {
+    checkStorageDescription,
+  } from '$lib/components/sign-back-in-dialog.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
+  import { drivesNeedingAttention } from '$lib/drives'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -36,9 +40,13 @@
 
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
-  let tab = $state('apps')
+  // Deep-linkable (`/?tab=drives`) — the "Check storage" actions land here.
+  const initialTab = page.url.searchParams.get('tab')
+  let tab = $state(TABS.some((t) => t.value === initialTab) ? (initialTab as string) : 'apps')
   /** Signed-out account being unlocked to sign back in. */
   let signingBackIn = $state<Account | undefined>(undefined)
+  /** Signed-out account being unlocked to check its storage. */
+  let checkingStorage = $state<Account | undefined>(undefined)
 
   const accounts = $derived(accountsStore.accounts)
   // The active session's account, if any: with one the page IS the app
@@ -69,6 +77,22 @@
   function signedOutBadge(candidate: Account): string | undefined {
     return candidate.isSignedOut ? 'Signed out' : undefined
   }
+
+  /**
+   * Storage warning on a chooser row: open that account's Storage tab. A
+   * signed-out account signs back in first — its drives only exist in the
+   * encrypted snapshot.
+   */
+  function checkStorage(chosen: Account) {
+    if (chosen.isSignedOut) {
+      checkingStorage = chosen
+      return
+    }
+    sessionStore.setCurrentAccount(chosen.id)
+    tab = 'drives'
+  }
+
+  const attentionCount = $derived(account ? drivesNeedingAttention(account) : 0)
 </script>
 
 {#if account}
@@ -83,6 +107,27 @@
 
     <main class="flex w-full flex-1 flex-col items-center px-8 pb-8">
       <div class="flex w-full max-w-144 flex-col items-center gap-8">
+        {#if attentionCount > 0}
+          <!-- Storage warning (frame 254-15824): visible on every tab while a
+               drive is about to expire or full; the link jumps to Storage. -->
+          <div class="bg-card flex w-full items-start gap-2 rounded-lg border px-2.5 py-2">
+            <span class="text-destructive pt-0.5">
+              <AlertFill class="size-4" />
+            </span>
+            <p class="text-destructive text-sm">
+              {attentionCount === 1 ? '1 drive needs' : `${attentionCount} drives need`} attention.
+              <button
+                type="button"
+                class="cursor-pointer underline underline-offset-2"
+                onclick={() => (tab = 'drives')}
+              >
+                Check your storage
+              </button>
+              to avoid losing data.
+            </p>
+          </div>
+        {/if}
+
         <Tabs tabs={TABS} bind:value={tab} />
 
         <!-- Keyed so per-account state (e.g. the unlocked seed) never survives a switch. -->
@@ -123,14 +168,19 @@
 
       {#if accounts.length > 0 && !addingAccount}
         <div class="flex w-full flex-col gap-2">
-          <AccountList {accounts} badge={signedOutBadge} onselect={select} />
+          <AccountList
+            {accounts}
+            badge={signedOutBadge}
+            onselect={select}
+            oncheckstorage={checkStorage}
+          />
 
           <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
-            <UserRoundMinus />
+            <UserUnfollowLine />
             Remove an account
           </Button>
           <Button variant="outline" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
-            <UserRoundPlus />
+            <UserAddFill />
             Sign in to another account
           </Button>
         </div>
@@ -161,5 +211,20 @@
       signingBackIn = undefined
     }}
     onclose={() => (signingBackIn = undefined)}
+  />
+{/if}
+
+<!-- Check storage on a signed-out row: sign back in (restoring the drives
+     from the snapshot), then land on the Storage tab. -->
+{#if checkingStorage}
+  <SignBackInDialog
+    account={checkingStorage}
+    description={checkStorageDescription(checkingStorage)}
+    onsignedin={(restored) => {
+      sessionStore.setCurrentAccount(restored.id)
+      tab = 'drives'
+      checkingStorage = undefined
+    }}
+    onclose={() => (checkingStorage = undefined)}
   />
 {/if}
