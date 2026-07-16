@@ -8,8 +8,6 @@
 
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
   import CircleAlert from '@lucide/svelte/icons/circle-alert'
-  import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
-  import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
@@ -17,6 +15,8 @@
   import AccountList from '$lib/components/account-list.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
+  import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
+  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
@@ -168,11 +168,11 @@
 
             <div class="flex flex-col gap-2">
               <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
-                <UserRoundMinus />
+                <UserUnfollowLine />
                 Remove an account
               </Button>
               <Button variant="outline" size="sm" class="w-full" onclick={startAdding}>
-                <UserRoundPlus />
+                <UserAddFill />
                 Sign in to another account
               </Button>
             </div>

@@ -5,8 +5,6 @@
 
 <script lang="ts">
   import ChevronLeft from '@lucide/svelte/icons/chevron-left'
-  import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
-  import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
   import { resolve } from '$app/paths'
   import { page } from '$app/state'
@@ -16,6 +14,8 @@
   import HomeAccount from '$lib/components/home-account.svelte'
   import HomeApps from '$lib/components/home-apps.svelte'
   import HomeDrives from '$lib/components/home-drives.svelte'
+  import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
+  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
@@ -126,11 +126,11 @@
           <AccountList {accounts} badge={signedOutBadge} onselect={select} />
 
           <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
-            <UserRoundMinus />
+            <UserUnfollowLine />
             Remove an account
           </Button>
           <Button variant="outline" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
-            <UserRoundPlus />
+            <UserAddFill />
             Sign in to another account
           </Button>
         </div>

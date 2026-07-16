@@ -4,11 +4,10 @@
 -->
 
 <script lang="ts">
-  import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
-  import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
-
   import { resolve } from '$app/paths'
 
+  import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
+  import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
   import Polycon from '$lib/components/polycon.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
@@ -134,12 +133,12 @@
     <div class="flex flex-col gap-2">
       {#if others.length > 0}
         <Button variant="ghost" size="sm" class="w-full" onclick={notImplemented}>
-          <UserRoundMinus />
+          <UserUnfollowLine />
           Remove an account
         </Button>
       {/if}
       <Button variant="ghost" size="sm" class="w-full" onclick={() => (addingAccount = true)}>
-        <UserRoundPlus />
+        <UserAddFill />
         Sign in to another account
       </Button>
     </div>
