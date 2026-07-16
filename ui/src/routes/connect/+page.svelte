@@ -20,7 +20,7 @@
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
-  import { completeConnect, hasReusableConnection, reuseConnection } from '$lib/connect-handshake'
+  import { completeConnect, reuseConnection } from '$lib/connect-handshake'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
@@ -40,37 +40,27 @@
   )
   const accounts = $derived(accountsStore.accounts)
 
-  // Accounts previously connected to this app first, most recently used on top;
-  // the stable sort keeps never-connected accounts in their stored order.
-  const sortedAccounts = $derived.by(() => {
+  // Accounts that have used this app before, most recently used first. A
+  // lapsed or revoked session still counts as "previously used" — it is NOT
+  // the account being signed out (#445), so these rows carry no badge; the
+  // section title says it. A signed-out account keeps no connected apps, so
+  // it always lists under the other accounts with its "Signed out" badge.
+  const previouslyUsed = $derived.by(() => {
     const appOrigin = request?.appOrigin
     if (!appOrigin) {
-      return accounts
+      return []
     }
     const lastConnected = (account: Account) =>
-      account.connectedApps.find((app) => app.appUrl === appOrigin)?.lastConnectedAt ?? 0
-    return [...accounts].sort((a, b) => lastConnected(b) - lastConnected(a))
+      account.connectedApps.find((app) => app.appUrl === appOrigin)?.lastConnectedAt
+    return accounts
+      .filter((account) => lastConnected(account) !== undefined)
+      .sort((a, b) => (lastConnected(b) ?? 0) - (lastConnected(a) ?? 0))
   })
+  const otherAccounts = $derived(accounts.filter((account) => !previouslyUsed.includes(account)))
 
   onMount(() => {
     missingRequest = !connectStore.initFromHash(window.location.hash)
   })
-
-  /**
-   * Previously connected to this app but the app session lapsed (expired or
-   * revoked) — connecting again will ask for an unlock. Distinct from the
-   * account being signed out on this device (`account.isSignedOut`).
-   */
-  function sessionLapsed(account: Account): boolean {
-    const appOrigin = request?.appOrigin
-    if (!appOrigin) {
-      return false
-    }
-    return (
-      account.connectedApps.some((app) => app.appUrl === appOrigin) &&
-      !hasReusableConnection(account, appOrigin)
-    )
-  }
 
   async function select(account: Account) {
     if (!request) {
@@ -147,12 +137,21 @@
 
         {#if accounts.length > 0 && !addingAccount}
           <div class="flex w-full flex-col gap-2">
-            <AccountList
-              accounts={sortedAccounts}
-              badge={(account) =>
-                account.isSignedOut || sessionLapsed(account) ? 'Signed out' : undefined}
-              onselect={select}
-            />
+            {#if previouslyUsed.length > 0}
+              <p class="text-muted-foreground text-sm">Previously used with this app</p>
+              <AccountList accounts={previouslyUsed} onselect={select} />
+            {/if}
+
+            {#if otherAccounts.length > 0}
+              {#if previouslyUsed.length > 0}
+                <p class="text-muted-foreground mt-2 text-sm">Other accounts</p>
+              {/if}
+              <AccountList
+                accounts={otherAccounts}
+                badge={(account) => (account.isSignedOut ? 'Signed out' : undefined)}
+                onselect={select}
+              />
+            {/if}
 
             <Button variant="outline" size="sm" class="w-full" onclick={notImplemented}>
               <UserRoundMinus />

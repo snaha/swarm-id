@@ -19,10 +19,13 @@
     sessionStore.currentAccountId ? accountsStore.get(sessionStore.currentAccountId) : undefined,
   )
   const request = connectStore.request
+  const hasDrive = $derived(account !== undefined && account.postageStamps.length > 0)
 
   onMount(() => {
     if (!account || !request) {
       goto(resolve(routes.ROOT))
+    } else if (hasDrive) {
+      continueToApp() // secret already delivered by completeConnect — nothing left to show
     }
   })
 
@@ -32,7 +35,7 @@
   }
 </script>
 
-{#if account && request}
+{#if account && request && !hasDrive}
   <AccountDone
     {account}
     toast="Connected to {request.appName}!"

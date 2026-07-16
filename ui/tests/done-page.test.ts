@@ -108,22 +108,20 @@ test('connect flow shows the same done page and closes the popup', async ({ page
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
 
-  // Disconnect and reconnect: the account now has a drive, so the done page
-  // skips the pitch and shows the "All set!" branch.
+  // Disconnect and reconnect: the lapsed connection lists the account under
+  // "Previously used with this app" — with NO "Signed out" badge, since the
+  // account is still signed in (#445) — and once unlocked, the account has a
+  // drive so the done page is skipped and the popup closes on its own (#474).
   await page.goto(DEMO_URL)
   await accountButton.click()
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
 
   popup = await openConnectPopup(page)
-  await popup.getByRole('button', { name: /Signed out/ }).click()
+  await expect(popup.getByText('Previously used with this app')).toBeVisible()
+  await expect(popup.getByText('Signed out')).not.toBeVisible()
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
 
-  await expect(popup).toHaveURL(/\/connect\/done$/)
-  await expect(popup.getByText('All set!')).toBeVisible()
-  await expect(popup.getByText(`Your account is connected to ${APP_NAME}.`)).toBeVisible()
-  await expect(popup.getByRole('button', { name: 'Set up a drive' })).not.toBeVisible()
-
-  await popup.getByRole('button', { name: 'Continue to app' }).click()
   await expect.poll(() => popup.isClosed()).toBe(true)
 })
