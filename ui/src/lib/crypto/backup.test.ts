@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { EthAddress } from '@ethersphere/bee-js'
-import type { Account as AccountRecord } from '@snaha/swarm-id'
+import type { SignedInAccount } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
 import { daysToMs } from '../duration'
@@ -12,7 +12,7 @@ import { walletFromPhrase } from './mnemonic'
 const PHRASE = 'test test test test test test test test test test test junk'
 const OTHER_PHRASE = 'legal winner thank year wave sausage worth useful legal winner thank yellow'
 
-function accountFor(phrase: string): AccountRecord {
+function accountFor(phrase: string): SignedInAccount {
   const wallet = walletFromPhrase(phrase)
   return {
     id: new EthAddress(wallet.address),

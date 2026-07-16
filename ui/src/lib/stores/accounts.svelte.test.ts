@@ -5,10 +5,11 @@
  *
  * - Store-level: the persist read-merge-write (two-tab race) and tolerance of
  *   a malformed (tampered) current-account id.
- * - Class-level: the signed-out invariants — `accessMethod` only exists while
- *   the vault does, and neither a getter read nor a late `setAccess` (e.g. a
- *   change-method ceremony finishing after a cross-tab sign-out) may act on —
- *   or resurrect — a wiped vault.
+ * - Class-level: the sign-out invariants — the vault (and `accessMethod`)
+ *   survives a sign-out so the sign-back-in ceremony can unlock it, while
+ *   every synced field (incl. the secret `derivationKey`) is stripped from
+ *   memory and the projected record; a late `setAccess` (e.g. a change-method
+ *   ceremony finishing after a cross-tab sign-out) may not undo the sign-out.
  */
 import { EthAddress } from '@ethersphere/bee-js'
 import {
@@ -167,26 +168,67 @@ function signedInRecord(): SignedInAccount {
 }
 
 function signedOutRecord(): SignedOutAccount {
-  const { access: _access, encryptedSeed: _encryptedSeed, ...synced } = signedInRecord()
-  return { ...synced, signedOutAt: 1700000000001 }
+  const { id, name, createdAt, access, encryptedSeed } = signedInRecord()
+  return { id, name, createdAt, access, encryptedSeed, signedOutAt: 1700000000001 }
 }
 
-describe('Account.accessMethod', () => {
+describe('Account sign-out state', () => {
   it('returns the vault access method while signed in', () => {
     const account = new Account(signedInRecord(), noCommit)
     expect(account.accessMethod.type).toBe('password')
   })
 
-  it('throws for an account loaded as signed out', () => {
+  it('keeps the access method readable for an account loaded as signed out', () => {
     const account = new Account(signedOutRecord(), noCommit)
     expect(account.isSignedOut).toBe(true)
-    expect(() => account.accessMethod).toThrow(/signed out/)
+    expect(account.accessMethod.type).toBe('password')
   })
 
-  it('throws once signOut() wipes the vault', () => {
+  it('hydrates a signed-out record with empty synced fields', () => {
+    const account = new Account(signedOutRecord(), noCommit)
+    expect(account.derivationKey).toBe('')
+    expect(account.publicKey).toBe('')
+    expect(account.connectedApps).toEqual([])
+    expect(account.postageStamps).toEqual([])
+    expect(account.devices).toEqual([])
+  })
+})
+
+describe('Account.signOut', () => {
+  it('retains the vault and strips the synced fields from memory', () => {
     const account = new Account(signedInRecord(), noCommit)
     account.signOut()
-    expect(() => account.accessMethod).toThrow(/signed out/)
+    expect(account.isSignedOut).toBe(true)
+    expect(account.accessMethod.type).toBe('password')
+    expect(account.vault.encryptedSeed).toBe('aabbccdd')
+    expect(account.derivationKey).toBe('')
+    expect(account.connectedApps).toEqual([])
+  })
+
+  it('projects exactly the minimal remnant record', () => {
+    const account = new Account(signedInRecord(), noCommit)
+    account.signOut()
+    expect(Object.keys(account.toRecord()).sort()).toEqual([
+      'access',
+      'createdAt',
+      'encryptedSeed',
+      'id',
+      'name',
+      'signedOutAt',
+    ])
+  })
+
+  it('signs back in when a full record replaces it through accountsStore.add', () => {
+    const live = accountsStore.add(record(X_ID_HEX, 'x'))
+    live.signOut()
+    expect(live.isSignedOut).toBe(true)
+
+    const restored = accountsStore.add(record(X_ID_HEX, 'x'))
+
+    expect(restored).toBe(live) // instance reused, held references stay valid
+    expect(live.isSignedOut).toBe(false)
+    expect(live.signedOutAt).toBeUndefined()
+    expect(live.derivationKey).toBe('f'.repeat(64))
   })
 })
 
@@ -197,14 +239,15 @@ describe('Account.setAccess', () => {
     expect(account.accessMethod.type).toBe('passkey')
   })
 
-  it('throws on a signed-out account instead of re-arming the vault', () => {
+  it('throws on a signed-out account instead of undoing the sign-out', () => {
     const account = new Account(signedInRecord(), noCommit)
     account.signOut()
     expect(() =>
       account.setAccess({ type: 'password', kdfSalt: '11', kdfIterations: 100000 }, 'bbccddee'),
     ).toThrow(/signed out/)
-    // The sign-out survived: still no vault, and the record projects signed out.
+    // The sign-out survived, and the original vault is untouched.
     expect(account.isSignedOut).toBe(true)
+    expect(account.vault.encryptedSeed).toBe('aabbccdd')
     expect(account.toRecord()).toMatchObject({ signedOutAt: expect.any(Number) })
   })
 })
