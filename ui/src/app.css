@@ -1,5 +1,12 @@
 @import 'tailwindcss';
 
+/* Dark mode is driven by the theming store's `dark` class on <html> (see
+   $lib/stores/theme.svelte.ts), which also flips the variable set below.
+   Without this override, Tailwind compiles `dark:` utilities to the OS-level
+   prefers-color-scheme media query — so an OS-dark user with the app set to
+   light got dark-mode utilities leaking onto the light theme (and vice versa). */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @font-face {
   src: url('/fonts/iAWriterQuattroV.ttf') format('truetype');
   font-family: 'iA Writer Quattro V';
