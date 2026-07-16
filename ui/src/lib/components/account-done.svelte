@@ -14,6 +14,7 @@
   import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import type { Account } from '$lib/types'
+  import { truncateAddress } from '$lib/utils'
 
   interface Props {
     account: Account
@@ -47,15 +48,18 @@
 <div class="flex min-h-svh flex-col">
   <AppHeader />
 
-  <main class="flex w-full flex-1 flex-col items-center justify-center px-8 pb-24">
+  <main class="flex w-full flex-1 flex-col items-center px-8">
     <div class="flex w-full max-w-96 flex-col items-center gap-8">
-      <div class="flex flex-col items-center gap-4">
+      <div class="flex w-full flex-col items-center gap-4">
         <Polycon
           value={account.id.toHex()}
           size={IDENTICON_SIZE}
           class="shrink-0 overflow-hidden rounded-lg"
         />
-        <p class="text-sm font-bold">{account.name}</p>
+        <div class="flex w-full flex-col items-center gap-2 text-center">
+          <p class="w-full truncate text-lg leading-none font-bold">{account.name}</p>
+          <p class="text-sm">{truncateAddress(account.id.toChecksum())}</p>
+        </div>
       </div>
 
       {#if hasDrive}
@@ -68,11 +72,11 @@
         <Button class="w-full" onclick={onFinish}>{finishLabel}</Button>
       {:else}
         <div class="flex w-full flex-col gap-4">
-          <p class="text-center text-sm">
+          <p class="text-center text-base">
             Your Swarm ID is ready! You can browse and view content on this device straight away.
           </p>
 
-          <div class="bg-muted flex w-full flex-col items-center rounded-lg p-2 text-center">
+          <div class="bg-muted flex w-full flex-col items-center rounded-xl p-2 text-center">
             <p class="text-sm font-bold">Want the full experience?</p>
             <p class="text-sm">
               Upload data and sync your Swarm ID across devices with a Swarm drive.
