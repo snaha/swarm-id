@@ -72,6 +72,7 @@
     // (A signed-out account kept no connections, so it always falls through
     // to the unlock, which doubles as its sign-back-in ceremony.)
     if (reuseConnection(account, request)) {
+      connectStore.setFirstConnect(false) // a valid entry exists by definition
       sessionStore.setCurrentAccount(account.id)
       await goto(resolve(routes.CONNECT_DONE))
       return
@@ -84,6 +85,12 @@
     if (!request) {
       return
     }
+    // Capture BEFORE the handshake writes the connected-app entry: whether the
+    // account has ever used this app (removed apps' tombstones don't count).
+    // The done page keys the drive-picker variant off it.
+    connectStore.setFirstConnect(
+      account.activeApps.every((app) => app.appUrl !== request.appOrigin),
+    )
     await completeConnect(account, entropy, request)
     sessionStore.setCurrentAccount(account.id)
     unlocking = undefined

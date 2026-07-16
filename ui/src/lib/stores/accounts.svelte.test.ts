@@ -11,7 +11,7 @@
  *   memory and the projected record; a late `setAccess` (e.g. a change-method
  *   ceremony finishing after a cross-tab sign-out) may not undo the sign-out.
  */
-import { EthAddress } from '@ethersphere/bee-js'
+import { BatchId, EthAddress } from '@ethersphere/bee-js'
 import {
   type Account as AccountRecord,
   type SignedInAccount,
@@ -243,6 +243,43 @@ describe('Account.signOut', () => {
     expect(live.signedOutAt).toBeUndefined()
     expect(live.encryptedState).toBeUndefined()
     expect(live.derivationKey).toBe('f'.repeat(64))
+  })
+})
+
+describe('Account.setAppStamp', () => {
+  const APP_URL = 'https://app.example.com'
+  const BATCH_HEX = 'c'.repeat(64)
+
+  function accountWithApp(): Account {
+    return new Account(
+      {
+        ...signedInRecord(),
+        connectedApps: [{ appUrl: APP_URL, appName: 'Test App', lastConnectedAt: 1 }],
+      },
+      noCommit,
+    )
+  }
+
+  it('points the app at a drive and stamps updatedAt', () => {
+    const account = accountWithApp()
+    account.setAppStamp(APP_URL, new BatchId(BATCH_HEX))
+    const app = account.connectedApps[0]
+    expect(app.postageStampBatchID?.toHex()).toBe(BATCH_HEX)
+    expect(app.updatedAt).toEqual(expect.any(Number))
+  })
+
+  it('clears the pointer back to the account default', () => {
+    const account = accountWithApp()
+    account.setAppStamp(APP_URL, new BatchId(BATCH_HEX))
+    account.setAppStamp(APP_URL, undefined)
+    expect(account.connectedApps[0].postageStampBatchID).toBeUndefined()
+  })
+
+  it('is a no-op for an unknown app', () => {
+    const account = accountWithApp()
+    account.setAppStamp('https://other.example.com', new BatchId(BATCH_HEX))
+    expect(account.connectedApps[0].postageStampBatchID).toBeUndefined()
+    expect(account.connectedApps).toHaveLength(1)
   })
 })
 

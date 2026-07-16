@@ -138,7 +138,7 @@ const FALLBACK_NAME_HEX_CHARS = 4
  * Deriving the fallback from the batch ID (not the list position) keeps it
  * stable when drives are added/removed and identical on every device.
  */
-function driveDisplayName(drive: PostageStamp): string {
+export function driveDisplayName(drive: PostageStamp): string {
   return drive.name?.trim() || `Drive ${drive.batchID.toHex().slice(0, FALLBACK_NAME_HEX_CHARS)}`
 }
 

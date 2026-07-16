@@ -38,10 +38,22 @@ function deriveAppName(origin: string): string {
 }
 
 let request = $state<ConnectRequest | undefined>(undefined)
+// Whether the connect that just completed was the account's FIRST to this app
+// (no active connected-app entry at select time). Set by the chooser right
+// before the handshake; the done page keys the drive-picker variant off it.
+let firstConnect = $state(false)
 
 export const connectStore = {
   get request() {
     return request
+  },
+
+  get firstConnect() {
+    return firstConnect
+  },
+
+  setFirstConnect(value: boolean) {
+    firstConnect = value
   },
 
   /**
@@ -84,5 +96,6 @@ export const connectStore = {
 
   clear() {
     request = undefined
+    firstConnect = false
   },
 }

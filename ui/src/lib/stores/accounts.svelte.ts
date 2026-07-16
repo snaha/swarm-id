@@ -328,6 +328,23 @@ export class Account {
     this.#commit()
   }
 
+  /**
+   * Point an app at a specific drive — or back at the account default with
+   * `undefined`. `updatedAt` carries the choice through the cross-device
+   * merge. No-op when the app has no entry (nothing to point).
+   */
+  setAppStamp(appUrl: string, batchID: BatchId | undefined) {
+    if (!this.connectedApps.some((app) => app.appUrl === appUrl)) {
+      return
+    }
+    const now = Date.now()
+    this.connectedApps = this.connectedApps.map((app) =>
+      app.appUrl === appUrl ? { ...app, postageStampBatchID: batchID, updatedAt: now } : app,
+    )
+    this.lastModified = now
+    this.#commit()
+  }
+
   /** Disconnect and tombstone so the removal propagates to sync. */
   removeApp(appUrl: string) {
     this.connectedApps = this.connectedApps.map((app) =>

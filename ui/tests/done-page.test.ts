@@ -76,20 +76,20 @@ test('create flow ends on the done page with the drive pitch', async ({ page }) 
   await expect(page).toHaveURL(/\/$/)
 })
 
-test('connect flow shows the same done page and closes the popup', async ({ page }) => {
+test('connect flow shows the done screen variants and closes the popup', async ({ page }) => {
   await page.goto(DEMO_URL)
 
-  // Fresh profile: create the account inside the connect popup.
+  // Fresh profile: create the account inside the connect popup. No drives yet
+  // → the confirmation shows the (secondary) drive pitch card.
   let popup = await openConnectPopup(page)
   await completeCreateFlow(popup)
 
   await expect(popup).toHaveURL(/\/connect\/done$/)
-  await expect(popup.getByText(`Connected to ${APP_NAME}!`)).toBeVisible()
-  await expectDrivePitch(popup)
-  await expect(popup.getByRole('button', { name: 'Continue to app' })).toBeVisible()
-  await expect(popup.getByRole('button', { name: 'Stay local for now' })).not.toBeVisible()
+  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText('Want the full experience?')).toBeVisible()
+  await expect(popup.getByRole('button', { name: 'Set up a drive' })).toBeVisible()
 
-  await popup.getByRole('button', { name: 'Continue to app' }).click()
+  await popup.getByRole('button', { name: 'Go to app' }).click()
   await expect.poll(() => popup.isClosed()).toBe(true)
 
   // The demo picked up the session — the sidebar shows the account.
@@ -110,8 +110,9 @@ test('connect flow shows the same done page and closes the popup', async ({ page
 
   // Disconnect and reconnect: the lapsed connection lists the account under
   // "Previously used with this app" — with NO "Signed out" badge, since the
-  // account is still signed in (#445) — and once unlocked, the account has a
-  // drive so the done page is skipped and the popup closes on its own (#474).
+  // account is still signed in (#445). Reconnecting is NOT a first connect
+  // and the drive question was settled, so the done screen is the plain
+  // confirmation: no drive picker, no pitch.
   await page.goto(DEMO_URL)
   await accountButton.click()
   await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
@@ -123,6 +124,10 @@ test('connect flow shows the same done page and closes the popup', async ({ page
   await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
   await popup.getByRole('button', { name: 'Confirm' }).click()
 
+  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText('Select drive')).not.toBeVisible()
+  await expect(popup.getByText('Want the full experience?')).not.toBeVisible()
+  await popup.getByRole('button', { name: 'Go to app' }).click()
   await expect.poll(() => popup.isClosed()).toBe(true)
 
   // REMOVING the app from the account (Apps tab → Remove) revokes the
@@ -134,8 +139,43 @@ test('connect flow shows the same done page and closes the popup', async ({ page
   await page.getByRole('button', { name: 'App actions' }).click()
   await page.getByRole('menuitem', { name: 'Remove' }).click()
 
+  // A second drive, so the NEXT (first-again) connect must ask which drive
+  // the app should use.
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await page.getByRole('button', { name: 'Add drive' }).click()
+  await page.getByRole('dialog').getByRole('combobox').nth(1).selectOption({ index: 1 })
+  await page.getByRole('button', { name: 'Proceed' }).click()
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
   await page.goto(DEMO_URL)
   popup = await openConnectPopup(page)
   await expect(popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ })).toBeVisible()
   await expect(popup.getByText('Previously used with this app')).not.toBeVisible()
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+
+  // First connect (the removal reset the association) + two drives → the
+  // drive picker, with the account default preselected.
+  await expect(popup.getByText('Select drive')).toBeVisible()
+  const drivePicker = popup.getByRole('combobox')
+  await expect(drivePicker).toHaveValue(/[0-9a-f]{64}/)
+  expect(await drivePicker.locator('option', { hasText: '(default)' }).count()).toBe(1)
+  // Choose the non-default drive; the choice must land on the app entry.
+  await drivePicker.selectOption({ index: 1 })
+  await popup.getByRole('button', { name: 'Go to app' }).click()
+  await expect.poll(() => popup.isClosed()).toBe(true)
+
+  await page.goto('/')
+  const appDrive = await page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { connectedApps?: { appUrl: string; postageStampBatchID?: string }[] }[]
+    }
+    return doc.data
+      ?.flatMap((account) => account.connectedApps ?? [])
+      .find((app) => app.appUrl === 'http://localhost:3500')?.postageStampBatchID
+  })
+  expect(appDrive).toMatch(/^[0-9a-f]{64}$/)
 })
