@@ -107,11 +107,14 @@
     addingAccount = true
   }
 
-  /** Storage warning on a row: jump to that account's Storage tab. */
-  async function checkStorage(account: Account) {
+  /**
+   * Storage warning on a row: open that account's Storage tab in a NEW
+   * window — navigating this popup away would lose the connect request
+   * (held in memory, dropped on navigation by design).
+   */
+  function checkStorage(account: Account) {
     sessionStore.setCurrentAccount(account.id)
-    // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() plus a query string
-    await goto(resolve(routes.ROOT) + '?tab=drives')
+    window.open(resolve(routes.ROOT) + '?tab=drives', '_blank')
   }
 </script>
 

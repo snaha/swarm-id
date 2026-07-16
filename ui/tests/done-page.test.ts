@@ -205,7 +205,11 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await expect(checkStorage).toBeVisible()
   // Press near the top edge: a pressed-state transform that shifts the button
   // out from under the pointer would swallow this click (regression guard).
+  // Storage opens in a NEW window; the connect popup keeps its request.
+  const storagePagePromise = popup.waitForEvent('popup')
   await checkStorage.click({ position: { x: 20, y: 4 } })
-  await expect(popup.getByText('Your drives')).toBeVisible()
-  await expect(popup.getByText('1 drive needs attention.')).toBeVisible()
+  const storagePage = await storagePagePromise
+  await expect(storagePage.getByText('Your drives')).toBeVisible()
+  await expect(storagePage.getByText('1 drive needs attention.')).toBeVisible()
+  await expect(popup.getByText(`Connect to ${APP_NAME}`)).toBeVisible()
 })
