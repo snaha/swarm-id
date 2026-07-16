@@ -65,7 +65,7 @@ describe("serializeAccount — device-local seed vault", () => {
     }
   })
 
-  it("round-trips a signed-out account (vault wiped, signedOutAt set)", () => {
+  it("round-trips a signed-out account (vault retained, signedOutAt set)", () => {
     const account = createSignedOutAccount({ signedOutAt: 1700000000123 })
 
     const serialized = serializeAccount(account)
@@ -73,9 +73,27 @@ describe("serializeAccount — device-local seed vault", () => {
       JSON.parse(JSON.stringify(serialized)),
     )
 
-    expect(reparsed.access).toBeUndefined()
-    expect(reparsed.encryptedSeed).toBeUndefined()
+    expect(reparsed.access).toEqual(account.access)
+    expect(reparsed.encryptedSeed).toBe(account.encryptedSeed)
+    expect(reparsed.encryptedState).toBe(account.encryptedState)
     expect(reparsed.signedOutAt).toBe(1700000000123)
+  })
+
+  // Pins the sign-out privacy contract: nothing but the vault, the encrypted
+  // state snapshot, and the display fields survives in localStorage — no
+  // plaintext derivationKey, collections, or clocks.
+  it("serializes a signed-out account to exactly the minimal remnant keys", () => {
+    const serialized = serializeAccount(createSignedOutAccount())
+
+    expect(Object.keys(serialized).sort()).toEqual([
+      "access",
+      "createdAt",
+      "encryptedSeed",
+      "encryptedState",
+      "id",
+      "name",
+      "signedOutAt",
+    ])
   })
 })
 
@@ -113,6 +131,33 @@ describe("createAccountsStorageManager().load() — invalid records", () => {
     stubLocalStorage({
       version: 1,
       data: [serializeAccount(good), corrupt],
+    })
+
+    const loaded = createAccountsStorageManager().load()
+
+    expect(loaded).toHaveLength(1)
+    expect(loaded[0].id.equals(good.id)).toBe(true)
+  })
+
+  // Pre-vault-retention releases wiped the vault on sign-out; those records
+  // can't be signed back into and are quarantined by the loader (pre-prod,
+  // no migration).
+  it("skips a vault-less signed-out record from an old release", () => {
+    vi.spyOn(console, "error").mockImplementation(() => undefined)
+    const good = createAccount()
+    const {
+      access: _access,
+      encryptedSeed: _encryptedSeed,
+      ...oldSignedOut
+    } = serializeAccount(
+      createAccount({ id: new EthAddress(TEST_ETH_ADDRESS_2_HEX) }),
+    )
+    stubLocalStorage({
+      version: 1,
+      data: [
+        serializeAccount(good),
+        { ...oldSignedOut, signedOutAt: 1700000000001 },
+      ],
     })
 
     const loaded = createAccountsStorageManager().load()

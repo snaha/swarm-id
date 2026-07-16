@@ -24,13 +24,15 @@ type AccountSettings = { appSessionDuration?: number }
 
 /**
  * The device-local tail of the account record, mirroring the lib's `Account`
- * union: the seed vault while signed in, or the sign-out marker once
- * `signOut()` wiped it. Held as ONE union-typed field (not three independently
- * writable ones) so a half-signed-out live object is unrepresentable.
+ * union: the seed vault — which SURVIVES a sign-out so the user can sign back
+ * in with the existing access method — plus, while signed out, the sign-out
+ * marker and the encrypted snapshot of the synced state (restored on
+ * sign-back-in). Held as ONE union-typed field so a signed-out state without
+ * its snapshot is unrepresentable.
  */
 type DeviceAuth =
-  | { vault: LocalVault; signedOutAt?: undefined }
-  | { vault?: undefined; signedOutAt: number }
+  | { vault: LocalVault; signedOutAt?: undefined; encryptedState?: undefined }
+  | { vault: LocalVault; signedOutAt: number; encryptedState: string }
 
 /**
  * The account aggregate root. Fields are reactive (`$state`) so component reads
@@ -68,9 +70,12 @@ export class Account {
   derivationKey = $state('')
   name = $state('')
   publicKey = $state('')
-  // Device-local auth state: the seed vault while signed in, the sign-out
-  // marker after `signOut()` wiped it (exposed via the getters below).
-  #deviceAuth = $state<DeviceAuth>({ signedOutAt: 0 })
+  // Device-local auth state: the seed vault plus the sign-out marker (exposed
+  // via the getters below). The placeholder is overwritten by `applyRecord` in
+  // the constructor before any read.
+  #deviceAuth = $state<DeviceAuth>({
+    vault: { access: { type: 'password', kdfSalt: '', kdfIterations: 0 }, encryptedSeed: '' },
+  })
   settings = $state<AccountSettings | undefined>(undefined)
   defaultPostageStampBatchID = $state<BatchId | undefined>(undefined)
   devices = $state<Device[]>([])
@@ -106,12 +111,21 @@ export class Account {
    */
   applyRecord(record: AccountRecord) {
     this.createdAt = record.createdAt
-    this.derivationKey = record.derivationKey
     this.name = record.name
+    const vault = { access: record.access, encryptedSeed: record.encryptedSeed }
+    if (isSignedOutAccount(record)) {
+      // The stored record is the minimal sign-out remnant — no synced fields.
+      this.#deviceAuth = {
+        vault,
+        signedOutAt: record.signedOutAt,
+        encryptedState: record.encryptedState,
+      }
+      this.#resetSyncedFields()
+      return
+    }
+    this.#deviceAuth = { vault }
+    this.derivationKey = record.derivationKey
     this.publicKey = record.publicKey
-    this.#deviceAuth = isSignedOutAccount(record)
-      ? { signedOutAt: record.signedOutAt }
-      : { vault: { access: record.access, encryptedSeed: record.encryptedSeed } }
     this.settings = record.settings
     this.defaultPostageStampBatchID = record.defaultPostageStampBatchID
     this.devices = record.devices
@@ -125,11 +139,45 @@ export class Account {
   }
 
   /**
+   * Reset every synced field to its empty default — a signed-out account keeps
+   * only the vault and display fields, in memory as on disk, so no stale (or
+   * secret: `derivationKey`) synced data lingers past a sign-out.
+   */
+  #resetSyncedFields() {
+    this.derivationKey = ''
+    this.publicKey = ''
+    this.settings = undefined
+    this.defaultPostageStampBatchID = undefined
+    this.devices = []
+    this.connectedApps = []
+    this.postageStamps = []
+    this.accountNameAt = undefined
+    this.defaultStampAt = undefined
+    this.settingsAt = undefined
+    this.lastModified = undefined
+    this.partitionCount = undefined
+  }
+
+  /**
    * Project the live instance back onto the lib's `Account` record union —
    * `applyRecord`'s inverse, what `persist()` hands the storage manager. The
    * union return type makes a half-signed-out projection a type error.
    */
   toRecord(): AccountRecord {
+    const auth = this.#deviceAuth
+    if (auth.signedOutAt !== undefined) {
+      // The minimal sign-out remnant — display fields, the retained vault,
+      // and the encrypted snapshot of the synced state.
+      return {
+        id: this.id,
+        name: this.name,
+        createdAt: this.createdAt,
+        ...auth.vault,
+        encryptedState: auth.encryptedState,
+        signedOutAt: auth.signedOutAt,
+      }
+    }
+    const { vault } = auth
     const synced: SyncedAccount = {
       id: this.id,
       name: this.name,
@@ -147,10 +195,7 @@ export class Account {
       lastModified: this.lastModified,
       partitionCount: this.partitionCount,
     }
-    const auth = this.#deviceAuth
-    return auth.vault === undefined
-      ? { ...synced, signedOutAt: auth.signedOutAt }
-      : { ...synced, ...auth.vault }
+    return { ...synced, ...vault }
   }
 
   /** Active (non-revoked) connected apps — what the UI displays. */
@@ -168,38 +213,39 @@ export class Account {
     return this.stamps.length === 0
   }
 
-  /** Device-local seed vault; `undefined` once `signOut()` wiped it. */
-  get vault(): LocalVault | undefined {
+  /** Device-local seed vault — survives a sign-out (encrypted at rest). */
+  get vault(): LocalVault {
     return this.#deviceAuth.vault
   }
 
   /**
-   * How the seed is unlocked on this device, asserted present. The unlock
-   * ceremonies and the whole signed-in account UI (`HomeAccount`,
-   * `UnlockDialog`) only ever render for a signed-in account — `routes/+page`
-   * maps a signed-out current account to no session — so those callers read
-   * the method directly instead of `?`-chaining a union getter. Two-state
-   * callers use `isSignedOut` / `vault` instead. Throws if the vault was wiped,
-   * surfacing a routing bug rather than silently reading `undefined`.
+   * How the seed is unlocked on this device. Always present — the vault
+   * survives a sign-out, which is what lets the sign-back-in ceremony unlock
+   * with the existing method instead of the recovery phrase.
    */
   get accessMethod(): AccessMethod {
-    const vault = this.#deviceAuth.vault
-    if (vault === undefined) {
-      throw new Error(
-        'Cannot read the access method: this account is signed out on this device (its seed vault was wiped). Read `accessMethod` only in signed-in-only UI; guard with `isSignedOut` otherwise.',
-      )
-    }
-    return vault.access
+    return this.#deviceAuth.vault.access
   }
 
-  /** When `signOut()` wiped the vault; `undefined` while signed in. */
+  /** When `signOut()` stripped the synced data; `undefined` while signed in. */
   get signedOutAt(): number | undefined {
     return this.#deviceAuth.signedOutAt
   }
 
-  /** Signed out on this device: the seed vault was wiped by `signOut()`. */
+  /**
+   * The encrypted snapshot of the synced state a sign-out kept; `undefined`
+   * while signed in. Sign-back-in decrypts and restores it.
+   */
+  get encryptedState(): string | undefined {
+    return this.#deviceAuth.encryptedState
+  }
+
+  /**
+   * Signed out on this device: `signOut()` stripped the synced data, but the
+   * vault remains — unlocking it signs back in.
+   */
   get isSignedOut(): boolean {
-    return this.#deviceAuth.vault === undefined
+    return this.#deviceAuth.signedOutAt !== undefined
   }
 
   rename(name: string) {
@@ -212,15 +258,14 @@ export class Account {
 
   /**
    * Swap the unlock method: new access metadata + seed re-encrypted for it.
-   * Throws on a signed-out account — sign-out wiped the vault, and a late
-   * change-method ceremony re-arming it here would silently undo the
-   * sign-out. Signing back in replaces the whole record through the import
-   * flow (`accountsStore.add`) instead.
+   * Throws on a signed-out account — a late change-method ceremony landing
+   * here would silently undo the sign-out. Sign back in first (the
+   * sign-back-in flow replaces the whole record via `accountsStore.add`).
    */
   setAccess(access: AccessMethod, encryptedSeed: string) {
     if (this.isSignedOut) {
       throw new Error(
-        'Cannot set an access method: this account is signed out on this device (its seed vault was wiped). Signing back in requires the recovery phrase, not a method change.',
+        'Cannot set an access method: this account is signed out on this device. Sign back in first.',
       )
     }
     this.#deviceAuth = { vault: { access, encryptedSeed } }
@@ -229,21 +274,24 @@ export class Account {
   }
 
   /**
-   * Sign this account out on THIS device: wipe the seed vault and clear the
-   * live per-app session material so the dApp proxy can no longer authenticate
-   * from here. The row stays in the account list — signing back in requires
-   * the recovery phrase and a new access method. Deliberately NOT
-   * `disconnectApp` (no `updatedAt` bump): a device-local de-auth must not
-   * propagate as a synced disconnect. `skipSync` for the same reason — and
-   * with the keys gone there is nothing left to publish with anyway.
+   * Sign this account out on THIS device: keep the encrypted seed vault (so
+   * signing back in only takes the access method) but strip every synced
+   * field — including the secret `derivationKey` and the live per-app session
+   * material the dApp proxy authenticates from. What is stripped survives as
+   * `encryptedState`, the AES-encrypted snapshot the caller built from this
+   * account BEFORE calling (encryption is async WebCrypto; this mutator stays
+   * synchronous), so sign-back-in can restore losslessly without the network.
+   * The row stays in the account list as a minimal remnant. `skipSync`: a
+   * device-local de-auth must not propagate, and the record no longer carries
+   * anything to publish with.
    */
-  signOut() {
-    this.#deviceAuth = { signedOutAt: Date.now() }
-    this.connectedApps = this.connectedApps.map((app) => ({
-      ...app,
-      appSecret: undefined,
-      connectedUntil: undefined,
-    }))
+  signOut(encryptedState: string) {
+    this.#deviceAuth = {
+      vault: this.#deviceAuth.vault,
+      signedOutAt: Date.now(),
+      encryptedState,
+    }
+    this.#resetSyncedFields()
     this.#commit({ skipSync: true })
   }
 

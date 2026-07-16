@@ -20,7 +20,7 @@ import {
   deserializeAccountStateSnapshot,
 } from "./account-state-snapshot"
 import type { AccountStateSnapshotResult } from "./account-state-snapshot"
-import type { Account } from "../schemas"
+import type { SignedInAccount } from "../schemas"
 
 // ============================================================================
 // Constants
@@ -152,7 +152,7 @@ export type BackupHeaderWithoutCiphertext = Omit<
 >
 
 export function buildBackupHeader(
-  account: Account,
+  account: SignedInAccount,
 ): BackupHeaderWithoutCiphertext {
   return {
     version: BACKUP_VERSION as typeof BACKUP_VERSION,
@@ -174,7 +174,7 @@ export function buildBackupHeader(
  * 4. Builds a header with account metadata + ciphertext
  */
 export async function createEncryptedExport(
-  account: Account,
+  account: SignedInAccount,
   swarmEncryptionKeyHex: string,
 ): Promise<EncryptedSwarmIdExport> {
   const now = Date.now()

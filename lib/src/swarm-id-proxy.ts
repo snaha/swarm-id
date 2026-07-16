@@ -39,7 +39,6 @@ import type {
   GetPostageBatchMessage,
   CreateFeedManifestMessage,
   AppMetadata,
-  Account,
   PostageStamp,
   PostageBatch,
   ConnectedApp,
@@ -134,7 +133,9 @@ import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
   UtilizationUpdateMessageSchema,
+  isSignedOutAccount,
   type AccountStateSnapshot,
+  type SignedInAccount,
 } from "./schemas"
 import { buildAuthUrl } from "./utils/url"
 import {
@@ -1264,7 +1265,7 @@ export class SwarmIdProxy {
     try {
       const accounts = createAccountsStorageManager().load()
       const account = accounts.find((a) => a.id.toHex() === accountId)
-      if (!account) return []
+      if (!account || isSignedOutAccount(account)) return []
       // Bound the partition rival set to recently-active devices: removed
       // (tombstoned) devices won't write, and long-dead ghosts from old sessions
       // (the device list is append-only) would each add an absent intent read to
@@ -1308,7 +1309,7 @@ export class SwarmIdProxy {
       const manager = createAccountsStorageManager()
       const accounts = manager.load()
       const account = accounts.find((a) => a.id.toHex() === accountId)
-      if (!account) return
+      if (!account || isSignedOutAccount(account)) return
 
       // Feed owner = backup signer (derived from the swarm encryption key).
       // Phase 3a: discovery is the append-only device roster, not a shared doc.
@@ -1538,14 +1539,17 @@ export class SwarmIdProxy {
    * descending and returning the most recent.
    */
   private findConnectionForParent():
-    | { account: Account; app: ConnectedApp }
+    | { account: SignedInAccount; app: ConnectedApp }
     | undefined {
     if (!this.parentOrigin) {
       return undefined
     }
     const accounts = createAccountsStorageManager().load()
-    const matches: { account: Account; app: ConnectedApp }[] = []
+    const matches: { account: SignedInAccount; app: ConnectedApp }[] = []
     for (const account of accounts) {
+      // A signed-out account keeps no connected apps (and no derivationKey to
+      // serve them with) — its record is just the vault remnant.
+      if (isSignedOutAccount(account)) continue
       for (const app of account.connectedApps) {
         if (app.appUrl === this.parentOrigin && this.isConnectionValid(app)) {
           matches.push({ account, app })
@@ -1601,6 +1605,7 @@ export class SwarmIdProxy {
       const accounts = manager.load()
       let changed = false
       const updated = accounts.map((account) => {
+        if (isSignedOutAccount(account)) return account
         const connectedApps = account.connectedApps.map((app) => {
           if (app.appUrl === this.parentOrigin) {
             changed = true

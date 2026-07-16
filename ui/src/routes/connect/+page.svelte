@@ -17,6 +17,7 @@
   import AccountList from '$lib/components/account-list.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
+  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { completeConnect, hasReusableConnection, reuseConnection } from '$lib/connect-handshake'
@@ -75,12 +76,9 @@
     if (!request) {
       return
     }
-    if (account.isSignedOut) {
-      // No keys on this device — signing back in means importing the phrase.
-      await goto(resolve(routes.ACCOUNT_IMPORT))
-      return
-    }
     // A still-valid prior connection carries the secret — no unlock needed.
+    // (A signed-out account kept no connections, so it always falls through
+    // to the unlock, which doubles as its sign-back-in ceremony.)
     if (reuseConnection(account, request)) {
       sessionStore.setCurrentAccount(account.id)
       await goto(resolve(routes.CONNECT_DONE))
@@ -89,15 +87,21 @@
     unlocking = account
   }
 
-  async function onUnlockedConnect(entropy: Uint8Array) {
-    const account = unlocking
-    if (!account || !request) {
+  /** Shared tail of both ceremonies: hand the secret over and close up. */
+  async function finishConnect(account: Account, entropy: Uint8Array) {
+    if (!request) {
       return
     }
     await completeConnect(account, entropy, request)
     sessionStore.setCurrentAccount(account.id)
     unlocking = undefined
     await goto(resolve(routes.CONNECT_DONE))
+  }
+
+  async function onUnlockedConnect(entropy: Uint8Array) {
+    if (unlocking) {
+      await finishConnect(unlocking, entropy)
+    }
   }
 
   function startAdding() {
@@ -183,16 +187,25 @@
   </main>
 </div>
 
-<!-- Drop the unlock dialog if this account is signed out from another tab mid-
-     ceremony (`unlocking` is a captured reference, not session-derived): the
-     account then reads as signed-out in the list and selecting it routes to
-     import, matching the chooser. -->
-{#if unlocking && !unlocking.isSignedOut}
-  <UnlockDialog
-    account={unlocking}
-    title="Connect as {unlocking.name}"
-    description="Unlock your account to approve the connection to {request?.appName}."
-    onunlocked={onUnlockedConnect}
-    onclose={() => (unlocking = undefined)}
-  />
+<!-- A signed-out account goes through the sign-back-in ceremony (unlock +
+     state restore, incl. the no-synced-data warning) and then completes the
+     connection; a signed-in one just unlocks. A mid-ceremony cross-tab
+     sign-out/sign-in is caught inside the unlock dialog by its signedOutAt
+     transition check. -->
+{#if unlocking}
+  {#if unlocking.isSignedOut}
+    <SignBackInDialog
+      account={unlocking}
+      onsignedin={finishConnect}
+      onclose={() => (unlocking = undefined)}
+    />
+  {:else}
+    <UnlockDialog
+      account={unlocking}
+      title="Connect as {unlocking.name}"
+      description="Unlock your account to approve the connection to {request?.appName}."
+      onunlocked={onUnlockedConnect}
+      onclose={() => (unlocking = undefined)}
+    />
+  {/if}
 {/if}

@@ -18,14 +18,9 @@ import type { Account } from '$lib/types'
  * or wallet.
  */
 export async function unlockAccount(account: Account, password?: string): Promise<Uint8Array> {
-  const vault = account.vault
-  if (vault === undefined) {
-    // Signed-out account: the vault was wiped, there is nothing to unlock.
-    // Callers hide unlock affordances for signed-out accounts, so reaching
-    // this is a programming error, not a user-facing state.
-    throw new Error('This account is signed out on this device.')
-  }
-  const { access, encryptedSeed } = vault
+  // The vault survives a sign-out, so this works for signed-out accounts too —
+  // that IS the sign-back-in ceremony.
+  const { access, encryptedSeed } = account.vault
 
   let key: CryptoKey
   if (access.type === 'password') {

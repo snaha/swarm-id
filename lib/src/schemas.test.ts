@@ -140,12 +140,57 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
     access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
     encryptedSeed: "aabbccdd",
   }
+  // The remnant a sign-out persists beyond the vault: the AES-encrypted
+  // snapshot of the synced state, restored on sign-back-in.
+  const SIGNED_OUT = {
+    ...VAULT,
+    encryptedState: '{"format":"test-snapshot","payload":"aabb"}',
+    signedOutAt: 1700000000001,
+  }
 
-  it("accepts a signed-out record: no vault, signedOutAt set", () => {
+  it("accepts a signed-out record that retains the vault and state snapshot", () => {
+    const result = LocalAccountSchemaV1.safeParse(serializedAccount(SIGNED_OUT))
+    expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data.signedOutAt).toBe(1700000000001)
+      expect(result.data.access).toEqual(VAULT.access)
+      expect(result.data.encryptedSeed).toBe(VAULT.encryptedSeed)
+      expect(result.data.encryptedState).toBe(SIGNED_OUT.encryptedState)
+    }
+  })
+
+  it("rejects a signed-out record without the encrypted state snapshot", () => {
+    expect(
+      LocalAccountSchemaV1.safeParse(
+        serializedAccount({ ...VAULT, signedOutAt: 1700000000001 }),
+      ).success,
+    ).toBe(false)
+  })
+
+  // A record written before the sign-out shrank to the minimal remnant (full
+  // synced fields + signedOutAt) still parses — under the signed-out arm, which
+  // strips the synced fields (incl. the plaintext derivationKey) on parse.
+  it("strips the synced fields off a signed-out record", () => {
     const result = LocalAccountSchemaV1.safeParse(
-      serializedAccount({ signedOutAt: 1700000000001 }),
+      serializedAccount({
+        ...SIGNED_OUT,
+        postageStamps: [],
+      }),
     )
     expect(result.success).toBe(true)
+    if (result.success) {
+      expect(result.data).not.toHaveProperty("derivationKey")
+      expect(result.data).not.toHaveProperty("publicKey")
+      expect(result.data).not.toHaveProperty("postageStamps")
+    }
+  })
+
+  it("rejects a vault-less signed-out record (pre-retention shape)", () => {
+    expect(
+      LocalAccountSchemaV1.safeParse(
+        serializedAccount({ signedOutAt: 1700000000001 }),
+      ).success,
+    ).toBe(false)
   })
 
   it("rejects a record with neither vault nor signedOutAt", () => {
@@ -163,34 +208,43 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
     ).toBe(false)
   })
 
-  it("rejects a signed-out record that retains vault fields", () => {
-    expect(
-      LocalAccountSchemaV1.safeParse(
-        serializedAccount({ ...VAULT, signedOutAt: 1700000000001 }),
-      ).success,
-    ).toBe(false)
-  })
+  it.each([
+    ["access", { access: VAULT.access }],
+    ["encryptedSeed", { encryptedSeed: VAULT.encryptedSeed }],
+  ])(
+    "rejects a signed-out record with only %s of the vault",
+    (_label, partialVault) => {
+      expect(
+        LocalAccountSchemaV1.safeParse(
+          serializedAccount({
+            ...partialVault,
+            encryptedState: SIGNED_OUT.encryptedState,
+            signedOutAt: 1700000000001,
+          }),
+        ).success,
+      ).toBe(false)
+    },
+  )
 })
 
 describe("isSignedOutAccount", () => {
-  it("is signed out when the vault is absent", () => {
+  it("is signed out when signedOutAt is set (vault retained)", () => {
     expect(isSignedOutAccount(createSignedOutAccount())).toBe(true)
   })
 
-  it("is signed in while the vault is present", () => {
+  it("is signed in without signedOutAt", () => {
     expect(isSignedOutAccount(createAccount({}))).toBe(false)
   })
 
-  // The point of the union model: the guard narrows, so the signed-in branch
-  // sees non-optional vault fields and the signed-out branch a non-optional
-  // `signedOutAt` — no `!`/`??` juggling at call sites.
+  // The point of the union model: the guard narrows, so the signed-out branch
+  // sees a non-optional `signedOutAt` — and BOTH branches keep the vault, so
+  // the sign-back-in unlock can read it without `!`/`??` juggling.
   it("narrows each union variant", () => {
     const account: Account = createSignedOutAccount()
     if (isSignedOutAccount(account)) {
       expectTypeOf(account.signedOutAt).toEqualTypeOf<number>()
-    } else {
-      expectTypeOf(account.access).toEqualTypeOf<AccessMethod>()
-      expectTypeOf(account.encryptedSeed).toEqualTypeOf<string>()
     }
+    expectTypeOf(account.access).toEqualTypeOf<AccessMethod>()
+    expectTypeOf(account.encryptedSeed).toEqualTypeOf<string>()
   })
 })

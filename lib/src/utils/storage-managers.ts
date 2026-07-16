@@ -25,6 +25,7 @@ import { STORAGE_KEY_ACCOUNTS, STORAGE_KEY_NETWORK_SETTINGS } from "../types"
 import {
   LocalAccountSchemaV1,
   NetworkSettingsSchemaV1,
+  isSignedOutAccount,
   type NetworkSettings,
 } from "../schemas"
 import { PARTITION_COUNT } from "./batch-utilization"
@@ -60,7 +61,11 @@ const parseAccountsV1: VersionParser<Account> = (data: unknown) => {
   }
 
   return accounts.map((account) => {
-    if (account.partitionCount === undefined && account.devices.length > 0) {
+    if (
+      !isSignedOutAccount(account) &&
+      account.partitionCount === undefined &&
+      account.devices.length > 0
+    ) {
       return {
         ...account,
         partitionCount: PARTITION_COUNT,
@@ -114,22 +119,34 @@ export function serializeSyncedAccount(
 
 /**
  * Serialize Account for storage (nested: includes its connected apps and
- * postage stamps inline).
+ * postage stamps inline). A signed-out account persists only its minimal
+ * remnant — display fields, the encrypted vault, and the encrypted state
+ * snapshot — so no synced data (in particular the plaintext `derivationKey`)
+ * stays on disk in the clear while signed out.
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
+  if (isSignedOutAccount(account)) {
+    return {
+      id: account.id.toString(),
+      name: account.name,
+      createdAt: account.createdAt,
+      access: account.access,
+      encryptedSeed: account.encryptedSeed,
+      encryptedState: account.encryptedState,
+      signedOutAt: account.signedOutAt,
+    }
+  }
   return {
     ...serializeSyncedAccount(account),
     // Local storage keeps the live per-app session secrets the portable
     // projection strips.
     connectedApps: account.connectedApps.map(serializeConnectedApp),
     // The device-local tail of the record: the seed vault (the account's only
-    // secret material — plain JSON, no byte classes) while signed in, or
-    // `signedOutAt` after a sign-out wiped it. This group stays on the device:
-    // the portable copy that backups and the sync feed publish is
+    // secret material — plain JSON, no byte classes). This group stays on the
+    // device: the portable copy that backups and the sync feed publish is
     // `SyncedAccount` — the record without it.
     access: account.access,
     encryptedSeed: account.encryptedSeed,
-    signedOutAt: account.signedOutAt,
   }
 }
 

@@ -80,7 +80,12 @@ export async function foldCurrentAccount(force: boolean): Promise<void> {
  * still converges on peer changes (#338).
  */
 async function foldAllAccounts(): Promise<void> {
-  await Promise.all(accountsStore.accounts.map((account) => foldAccount(account.id.toHex(), false)))
+  // Signed-out accounts kept no derivationKey — nothing to derive feeds from.
+  await Promise.all(
+    accountsStore.accounts
+      .filter((account) => !account.isSignedOut)
+      .map((account) => foldAccount(account.id.toHex(), false)),
+  )
 }
 
 /**
