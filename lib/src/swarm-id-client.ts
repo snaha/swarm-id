@@ -3034,20 +3034,22 @@ export class SwarmIdClient {
   /**
    * Revokes grantees from an existing ACT.
    *
-   * This method removes public keys from the ACT's access list and performs
-   * key rotation to ensure revoked grantees cannot decrypt new versions.
-   * Returns new references including a new encrypted reference.
+   * This method removes public keys from the ACT's access list, producing a new
+   * ACT/history without the revoked entries.
    *
-   * IMPORTANT: The original encrypted reference can still be decrypted by
-   * revoked grantees if they have cached it. Key rotation only protects
-   * access through the new references.
+   * IMPORTANT: Revocation cannot un-share already-published content. A former
+   * grantee kept the access key while granted and the reference lives in
+   * immutable history, so they can still decrypt content published before
+   * revocation. Revocation only stops access to content published afterwards.
+   * The returned `encryptedReference` is unchanged — it is NOT re-encrypted, as
+   * that would leak the keystream to former grantees (#496).
    *
    * @param historyReference - The current history reference
-   * @param encryptedReference - The current encrypted reference (needed for key rotation)
+   * @param encryptedReference - The current encrypted reference
    * @param revokeGrantees - Array of grantee public keys to revoke as compressed hex strings
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
    * @returns A promise resolving to the new references after revocation
-   * @returns return.encryptedReference - The new encrypted reference (key rotated)
+   * @returns return.encryptedReference - The content reference, unchanged
    * @returns return.historyReference - The new history reference after revocation
    * @returns return.granteeListReference - The new grantee list reference
    * @returns return.actReference - The new ACT reference after revocation
@@ -3060,8 +3062,7 @@ export class SwarmIdClient {
    * const revokeKeys = ['03a1b2c3...'] // Public keys to revoke
    * const result = await client.actRevokeGrantees(historyReference, encryptedReference, revokeKeys)
    * console.log('New History Reference:', result.historyReference)
-   * console.log('New Encrypted Reference:', result.encryptedReference)
-   * // All references are new due to key rotation
+   * // encryptedReference is unchanged; historyReference/actReference are new
    * ```
    */
   async actRevokeGrantees(

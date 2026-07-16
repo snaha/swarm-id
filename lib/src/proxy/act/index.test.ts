@@ -494,7 +494,7 @@ describe("revokeGranteesFromAct", () => {
     vi.clearAllMocks()
   })
 
-  it("should revoke grantees and rotate keys", async () => {
+  it("should revoke grantees and drop their entries", async () => {
     const publisher = createTestKeyPair(80)
     const grantee1 = createTestKeyPair(81)
     const grantee2 = createTestKeyPair(82) // Will be revoked
@@ -535,8 +535,8 @@ describe("revokeGranteesFromAct", () => {
       [grantee2.publicKey],
     )
 
-    // Should have new encrypted reference (key rotation)
-    expect(result.encryptedReference).not.toBe(createResult.encryptedReference)
+    // Reference is unchanged — revocation must not re-encrypt it (#496)
+    expect(result.encryptedReference).toBe(createResult.encryptedReference)
     expect(result.actReference).toBeDefined()
 
     // New ACT should have 2 entries (publisher + grantee1)
@@ -569,6 +569,64 @@ describe("revokeGranteesFromAct", () => {
     )
     const grantee1Entry = findActEntryByKey(newActData, grantee1Keys.lookupKey)
     expect(grantee1Entry).toBeDefined()
+  })
+
+  it("does not re-encrypt the content reference under a rotated key (#496)", async () => {
+    // A nonce-free CTR cipher must never produce a second ciphertext of the same
+    // content reference under a different key. A revoked grantee keeps the access
+    // key it learned while granted and can read both ciphertexts from immutable
+    // history, so a re-encrypted reference leaks the new keystream (KS = C_new XOR
+    // R) and defeats revocation. Revocation must return the reference unchanged.
+    const publisher = createTestKeyPair(90)
+    const revoked = createTestKeyPair(91)
+
+    const contentRef = randomBytes(32)
+    const { storage, uploadMock, downloadMock } =
+      createContentAddressedUploadMock()
+    vi.mocked(uploadData).mockImplementation(uploadMock)
+
+    const target = createMockTarget()
+    const createResult = await createActForContent(
+      target,
+      contentRef,
+      publisher.privateKey,
+      [revoked.publicKey],
+    )
+    vi.mocked(downloadDataWithChunkAPI).mockImplementation(downloadMock)
+
+    // The revoked grantee legitimately learned the access key while granted.
+    const actData = loadActDataFromStorage(storage, createResult.actReference)
+    const revokedKeys = deriveKeys(
+      revoked.privateKey,
+      publisher.publicKey.x,
+      publisher.publicKey.y,
+    )
+    const cachedAccessKey = counterModeDecrypt(
+      findActEntryByKey(actData, revokedKeys.lookupKey)!,
+      revokedKeys.accessKeyDecryptionKey,
+    )
+
+    const result = await revokeGranteesFromAct(
+      target,
+      mockBee,
+      createResult.historyReference,
+      createResult.encryptedReference,
+      publisher.privateKey,
+      [revoked.publicKey],
+    )
+
+    // No second ciphertext of the reference exists to XOR against.
+    expect(result.encryptedReference).toBe(createResult.encryptedReference)
+
+    // The unchanged reference is still the real content pointer — the revoked
+    // grantee could already read it before revocation (immutability), which
+    // revocation cannot undo; the fix only avoids leaking anything *new*.
+    expect(
+      counterModeDecrypt(
+        fromHex(result.encryptedReference),
+        cachedAccessKey,
+      ).slice(0, contentRef.length),
+    ).toEqual(contentRef)
   })
 })
 
