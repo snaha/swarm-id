@@ -55,19 +55,25 @@
       </span>
     </button>
     {#if storageWarning}
-      <Button
-        variant="outline"
-        size="sm"
-        class="text-destructive absolute top-1/2 right-2 -translate-y-1/2"
-        onclick={() => oncheckstorage?.(account)}
-      >
-        <AlertFill />
-        Check storage
-      </Button>
+      <!-- Centering lives on the wrapper, NOT the button: the button's pressed
+           state sets translate-y-px, which would REPLACE a -translate-y-1/2 on
+           the element itself and lurch it out from under the pointer, eating
+           the click. -->
+      <span class="absolute inset-y-0 right-2 flex items-center">
+        <Button
+          variant="outline"
+          size="sm"
+          class="text-destructive"
+          onclick={() => oncheckstorage?.(account)}
+        >
+          <AlertFill />
+          Check storage
+        </Button>
+      </span>
     {:else if badgeText}
-      <Badge class="pointer-events-none absolute top-1/2 right-2 -translate-y-1/2">
-        {badgeText}
-      </Badge>
+      <span class="pointer-events-none absolute inset-y-0 right-2 flex items-center">
+        <Badge>{badgeText}</Badge>
+      </span>
     {/if}
   </div>
 {/each}

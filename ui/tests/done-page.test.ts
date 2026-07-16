@@ -203,7 +203,9 @@ test('connect flow shows the done screen variants and closes the popup', async (
   popup = await openConnectPopup(page)
   const checkStorage = popup.getByRole('button', { name: 'Check storage' })
   await expect(checkStorage).toBeVisible()
-  await checkStorage.click()
+  // Press near the top edge: a pressed-state transform that shifts the button
+  // out from under the pointer would swallow this click (regression guard).
+  await checkStorage.click({ position: { x: 20, y: 4 } })
   await expect(popup.getByText('Your drives')).toBeVisible()
   await expect(popup.getByText('1 drive needs attention.')).toBeVisible()
 })
