@@ -50,6 +50,11 @@ export async function refreshAccountFromSwarm(accountId: string): Promise<Refres
   if (!account) {
     return { ok: false, kind: 'error', error: 'No local account for this id' }
   }
+  if (account.isSignedOut) {
+    // The sign-out stripped the derivationKey — folding would derive garbage
+    // feed owners. Sign-back-in restores the state itself.
+    return { ok: false, kind: 'error', error: 'Account is signed out on this device' }
+  }
 
   const bee = new Bee(networkSettingsStore.beeNodeUrl)
 

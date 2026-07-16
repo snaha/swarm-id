@@ -26,6 +26,7 @@
   import { noteAccountFolded } from '$lib/dev/account-refresh'
   import { generateDockerName } from '$lib/docker-name'
   import routes from '$lib/routes'
+  import { signBackIn } from '$lib/sign-back-in'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
@@ -48,9 +49,14 @@
       const normalized = normalizePhrase(phrase)
       const wallet = walletFromPhrase(normalized)
 
-      // Already set up on this device — just switch to it.
+      // Already set up on this device — just switch to it. A signed-out
+      // record first restores its synced state (the phrase already proved the
+      // entropy, so this is the same restore the unlock ceremony performs).
       const existing = accountsStore.get(wallet.address)
       if (existing) {
+        if (existing.isSignedOut) {
+          await signBackIn(existing, wallet.entropy)
+        }
         sessionStore.setCurrentAccount(existing.id)
 
         // Came from a dApp connect popup — the phrase already unlocked the

@@ -46,13 +46,15 @@
     onclose,
   }: Props = $props()
 
-  // The unlock ceremony only runs for a signed-in account, so the method is
-  // present at mount. Read ONCE via `untrack` (not `$derived`): the method is
-  // fixed for a ceremony, and an untracked read can never be re-triggered by a
-  // mid-ceremony sign-out (e.g. cross-tab) — so the dialog cannot re-read
-  // `accessMethod` on a wiped vault and throw. `unlockAccount` still rejects a
-  // wiped vault at confirm, surfacing it as a dialog error rather than a crash.
+  // The method is fixed for a ceremony — read ONCE via `untrack` (not
+  // `$derived`) so a mid-ceremony record change (e.g. cross-tab) can never
+  // re-render the dialog against different access metadata.
   const access = untrack(() => account.accessMethod)
+  // Snapshot the sign-out state to detect a mid-ceremony transition below:
+  // this dialog serves both signed-in unlocks and sign-back-in ceremonies, so
+  // what invalidates a ceremony is the state CHANGING under it, not being
+  // signed out per se.
+  const initialSignedOutAt = untrack(() => account.signedOutAt)
 
   let password = $state('')
   let busy = $state(false)
@@ -79,11 +81,13 @@
         unlockAccount(account, access.type === 'password' ? password : undefined),
         (seed) => seed.fill(0),
       )
-      // Signed out mid-flight (e.g. cross-tab): `unlockAccount` captured the
-      // vault before the wipe so it still resolves — but completing the
-      // connection with a now-signed-out account would re-arm app session
-      // material the sign-out just cleared.
-      if (account.isSignedOut) {
+      // Bail if the account's sign-out state flipped mid-flight (e.g.
+      // cross-tab) — supersession itself is the attempt guard's job. A
+      // signed-in unlock completing after a sign-out would re-arm app session
+      // material the sign-out just cleared; a sign-back-in completing after
+      // another tab already signed back in (or re-signed-out) would act on a
+      // state it no longer knows.
+      if (account.signedOutAt !== initialSignedOutAt) {
         entropy.fill(0)
         return
       }

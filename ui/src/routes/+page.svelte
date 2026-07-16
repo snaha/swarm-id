@@ -8,7 +8,6 @@
   import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
   import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
-  import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
   import { page } from '$app/state'
 
@@ -19,6 +18,7 @@
   import HomeDrives from '$lib/components/home-drives.svelte'
   import ProductPage from '$lib/components/product-page.svelte'
   import SettingsMenu from '$lib/components/settings-menu.svelte'
+  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SwarmWordmark from '$lib/components/swarm-wordmark.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Tabs } from '$lib/components/ui/tabs'
@@ -37,12 +37,14 @@
   /** Shows the create/import choice while other accounts exist on the device. */
   let addingAccount = $state(false)
   let tab = $state('apps')
+  /** Signed-out account being unlocked to sign back in. */
+  let signingBackIn = $state<Account | undefined>(undefined)
 
   const accounts = $derived(accountsStore.accounts)
   // The active session's account, if any: with one the page IS the app
   // (apps/drives/account tabs); without one it is the account chooser. A
   // signed-out current account (sign-out in another tab arrives via the
-  // storage listener) has no keys left, so there is no session to show.
+  // storage listener) has no synced data left, so there is no session to show.
   const account = $derived.by(() => {
     const current = sessionStore.currentAccountId
       ? accountsStore.get(sessionStore.currentAccountId)
@@ -57,8 +59,8 @@
 
   function select(chosen: Account) {
     if (chosen.isSignedOut) {
-      // No keys on this device — signing back in means importing the phrase.
-      void goto(resolve(routes.ACCOUNT_IMPORT))
+      // The vault survived the sign-out — unlock it to sign back in.
+      signingBackIn = chosen
       return
     }
     sessionStore.setCurrentAccount(chosen.id)
@@ -149,4 +151,15 @@
       {/if}
     </div>
   </div>
+{/if}
+
+{#if signingBackIn}
+  <SignBackInDialog
+    account={signingBackIn}
+    onsignedin={(restored) => {
+      sessionStore.setCurrentAccount(restored.id)
+      signingBackIn = undefined
+    }}
+    onclose={() => (signingBackIn = undefined)}
+  />
 {/if}

@@ -23,7 +23,15 @@ export function isValidPhrase(phrase: string): boolean {
 }
 
 export function walletFromPhrase(phrase: string): DerivedWallet {
-  const mnemonic = Mnemonic.fromPhrase(normalizePhrase(phrase))
+  return walletFromMnemonic(Mnemonic.fromPhrase(normalizePhrase(phrase)))
+}
+
+/** Rebuild the wallet from decrypted vault entropy (the sign-back-in path). */
+export function walletFromEntropy(entropy: Uint8Array): DerivedWallet {
+  return walletFromMnemonic(Mnemonic.fromEntropy(entropy))
+}
+
+function walletFromMnemonic(mnemonic: Mnemonic): DerivedWallet {
   const wallet = HDNodeWallet.fromMnemonic(mnemonic)
   return {
     address: wallet.address,

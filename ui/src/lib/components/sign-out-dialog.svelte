@@ -4,9 +4,11 @@
 -->
 
 <!--
-  Sign out a (synced) account on this device: wipes the seed vault, so the
-  confirm is gated on the user acknowledging they can get back in with their
-  Secret Recovery Phrase. The row stays in the account list ("Signed out").
+  Sign out a (synced) account on this device: strips the account data but
+  keeps the encrypted vault, so signing back in only takes the security
+  method. The confirm is still gated on the user acknowledging they have
+  their Secret Recovery Phrase — it remains the only way back in if the
+  security method itself is lost. The row stays in the list ("Signed out").
 -->
 <script lang="ts">
   import LogOut from '@lucide/svelte/icons/log-out'
@@ -42,12 +44,12 @@
 
 <Dialog onclose={onClose} title="Sign out">
   <p class="text-sm">
-    This signs <span class="font-medium">{account.name}</span> out on this device and removes its security
-    keys from it. Your account and its drives keep living on the Swarm network.
+    This signs <span class="font-medium">{account.name}</span> out on this device and removes its account
+    data from it. Your account and its drives keep living on the Swarm network.
   </p>
   <p class="text-sm">
-    To sign back in you will need your <span class="font-medium">Secret Recovery Phrase</span> and to
-    set up a new security method.
+    To sign back in, unlock with your security method. If you ever lose it, your
+    <span class="font-medium">Secret Recovery Phrase</span> is the only way back in.
   </p>
   <label class="flex cursor-pointer items-start gap-2 text-sm">
     <input type="checkbox" bind:checked={acknowledged} class="mt-0.5 cursor-pointer" />

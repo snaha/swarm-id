@@ -7,10 +7,10 @@
   import UserRoundMinus from '@lucide/svelte/icons/user-round-minus'
   import UserRoundPlus from '@lucide/svelte/icons/user-round-plus'
 
-  import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
   import Polycon from '$lib/components/polycon.svelte'
+  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
@@ -33,6 +33,8 @@
   /** Replaces the panel actions with the create/import choice. */
   let addingAccount = $state(false)
   let signingOut = $state(false)
+  /** Signed-out account being unlocked to sign back in. */
+  let signingBackIn = $state<Account | undefined>(undefined)
 
   const others = $derived(
     accountsStore.accounts.filter((candidate) => !candidate.id.equals(account.id)),
@@ -48,8 +50,8 @@
 
   function select(candidate: Account) {
     if (candidate.isSignedOut) {
-      // No keys on this device — signing back in means importing the phrase.
-      void goto(resolve(routes.ACCOUNT_IMPORT))
+      // The vault survived the sign-out — unlock it to sign back in.
+      signingBackIn = candidate
       return
     }
     sessionStore.setCurrentAccount(candidate.id)
@@ -146,4 +148,15 @@
 
 {#if signingOut}
   <SignOutDialog {account} onClose={() => (signingOut = false)} />
+{/if}
+
+{#if signingBackIn}
+  <SignBackInDialog
+    account={signingBackIn}
+    onsignedin={(restored) => {
+      sessionStore.setCurrentAccount(restored.id)
+      signingBackIn = undefined
+    }}
+    onclose={() => (signingBackIn = undefined)}
+  />
 {/if}

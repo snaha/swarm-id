@@ -21,6 +21,7 @@
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { completeConnect, hasReusableConnection, reuseConnection } from '$lib/connect-handshake'
   import routes from '$lib/routes'
+  import { signBackIn } from '$lib/sign-back-in'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -75,12 +76,9 @@
     if (!request) {
       return
     }
-    if (account.isSignedOut) {
-      // No keys on this device — signing back in means importing the phrase.
-      await goto(resolve(routes.ACCOUNT_IMPORT))
-      return
-    }
     // A still-valid prior connection carries the secret — no unlock needed.
+    // (A signed-out account kept no connections, so it always falls through
+    // to the unlock, which doubles as its sign-back-in ceremony.)
     if (reuseConnection(account, request)) {
       sessionStore.setCurrentAccount(account.id)
       await goto(resolve(routes.CONNECT_DONE))
@@ -93,6 +91,12 @@
     const account = unlocking
     if (!account || !request) {
       return
+    }
+    if (account.isSignedOut) {
+      // Unlocking a signed-out account signs it back in for the whole device
+      // (restores the synced state from Swarm), not just for this app. The
+      // store reuses the instance, so `account` is signed in afterwards.
+      await signBackIn(account, entropy)
     }
     await completeConnect(account, entropy, request)
     sessionStore.setCurrentAccount(account.id)
@@ -183,11 +187,11 @@
   </main>
 </div>
 
-<!-- Drop the unlock dialog if this account is signed out from another tab mid-
-     ceremony (`unlocking` is a captured reference, not session-derived): the
-     account then reads as signed-out in the list and selecting it routes to
-     import, matching the chooser. -->
-{#if unlocking && !unlocking.isSignedOut}
+<!-- Serves signed-in unlocks AND sign-back-in ceremonies (a signed-out
+     account's vault survives, so the same unlock works); a mid-ceremony
+     cross-tab sign-out/sign-in is caught inside the dialog by its
+     signedOutAt transition check. -->
+{#if unlocking}
   <UnlockDialog
     account={unlocking}
     title="Connect as {unlocking.name}"
