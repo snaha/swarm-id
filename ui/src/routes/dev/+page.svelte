@@ -397,6 +397,9 @@
   // Custom signer key settings
   let useCustomSigner = $state(false)
   let customSignerKey = $state('')
+  // Unchecked = stack the batch onto the account WITHOUT stealing the default
+  // pointer, so an account can hold multiple drives.
+  let assignSetDefault = $state(true)
   let customSignerError = $state<string | undefined>(undefined)
 
   // Mock stamp widget settings — `devSettingsStore` is the single source of
@@ -746,44 +749,57 @@ Check console logs for details:
           ? new PrivateKey(customSignerKey)
           : new PrivateKey(selectedSigner)
 
-      if (!postageStampsStore.getStamp(batchId)) {
+      // Existence is per-ACCOUNT (`hasLiveStamp`), not the cross-account
+      // runtime view: a batch already owned by another account must still be
+      // added to THIS one, else only the default pointer would move and dangle
+      // at a batch the account doesn't own.
+      if (!account.hasLiveStamp(batchId)) {
+        // Stamp data source: another account's live copy, or the node list.
+        const stored = postageStampsStore.getStamp(batchId)
         const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
-        if (!beeStamp) {
+        if (stored) {
+          account.addStamp({ ...stored, signerKey: signerKeyToUse })
+        } else if (beeStamp) {
+          account.addStamp({
+            batchID: batchId,
+            signerKey: signerKeyToUse,
+            utilization: Utils.getStampUsage(
+              beeStamp.utilization,
+              beeStamp.depth,
+              beeStamp.bucketDepth,
+            ),
+            usable: beeStamp.usable,
+            depth: beeStamp.depth,
+            amount: BigInt(beeStamp.amount),
+            bucketDepth: beeStamp.bucketDepth,
+            blockNumber: beeStamp.blockNumber,
+            immutableFlag: beeStamp.immutableFlag,
+            exists: beeStamp.exists,
+          })
+        } else {
           assignError = 'Stamp data not found. Reload stamps first.'
           return
         }
-        account.addStamp({
-          batchID: batchId,
-          signerKey: signerKeyToUse,
-          utilization: Utils.getStampUsage(
-            beeStamp.utilization,
-            beeStamp.depth,
-            beeStamp.bucketDepth,
-          ),
-          usable: beeStamp.usable,
-          depth: beeStamp.depth,
-          amount: BigInt(beeStamp.amount),
-          bucketDepth: beeStamp.bucketDepth,
-          blockNumber: beeStamp.blockNumber,
-          immutableFlag: beeStamp.immutableFlag,
-          exists: beeStamp.exists,
-        })
       } else if (useCustomSigner) {
-        const beeStamp = postageStampsStore.getStamp(batchId)
-        if (!beeStamp) {
-          assignError = 'Stamp not found in local storage.'
+        const owned = account.stamps.find((s) => s.batchID.equals(batchId))
+        if (!owned) {
+          assignError = 'Stamp not found on the account.'
           return
         }
         // Compare by value — `signerKey` is a bee-js PrivateKey, so `!==` would
         // always be true (distinct instances) and re-add the stamp needlessly.
-        if (!beeStamp.signerKey.equals(signerKeyToUse)) {
+        if (!owned.signerKey.equals(signerKeyToUse)) {
           account.removeStamp(batchId)
-          account.addStamp({ ...beeStamp, signerKey: signerKeyToUse })
+          account.addStamp({ ...owned, signerKey: signerKeyToUse })
         }
       }
 
-      account.setDefaultStamp(batchId)
-      assignMessage = `✅ Set account stamp for ${accountId.toHex().slice(0, 8)}…`
+      if (assignSetDefault) {
+        account.setDefaultStamp(batchId)
+        assignMessage = `✅ Set account stamp for ${accountId.toHex().slice(0, 8)}…`
+      } else {
+        assignMessage = `✅ Added stamp to ${accountId.toHex().slice(0, 8)}…`
+      }
     } catch (error) {
       assignError = error instanceof Error ? error.message : String(error)
     }
@@ -1258,11 +1274,16 @@ Check console logs for details:
             {/if}
           </label>
         {/if}
+
+        <label class="flex cursor-pointer items-center gap-2 text-sm">
+          <input type="checkbox" bind:checked={assignSetDefault} />
+          Set as account default
+        </label>
       </div>
 
       <div class="flex items-center gap-2">
         <Button onclick={assignAccountStamp} disabled={!selectedStampId || !selectedAccountId}>
-          Set account stamp
+          {assignSetDefault ? 'Set account stamp' : 'Add stamp to account'}
         </Button>
         <Button
           variant="destructive"
