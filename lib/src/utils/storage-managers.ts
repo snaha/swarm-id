@@ -120,8 +120,9 @@ export function serializeSyncedAccount(
 /**
  * Serialize Account for storage (nested: includes its connected apps and
  * postage stamps inline). A signed-out account persists only its minimal
- * remnant — display fields plus the encrypted vault — so no synced data (in
- * particular the plaintext `derivationKey`) stays on disk while signed out.
+ * remnant — display fields, the encrypted vault, and the encrypted state
+ * snapshot — so no synced data (in particular the plaintext `derivationKey`)
+ * stays on disk in the clear while signed out.
  */
 export function serializeAccount(account: Account): Record<string, unknown> {
   if (isSignedOutAccount(account)) {
@@ -131,6 +132,7 @@ export function serializeAccount(account: Account): Record<string, unknown> {
       createdAt: account.createdAt,
       access: account.access,
       encryptedSeed: account.encryptedSeed,
+      encryptedState: account.encryptedState,
       signedOutAt: account.signedOutAt,
     }
   }

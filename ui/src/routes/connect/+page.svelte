@@ -17,11 +17,11 @@
   import AccountList from '$lib/components/account-list.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import AppIcon from '$lib/components/app-icon.svelte'
+  import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import UnlockDialog from '$lib/components/unlock-dialog.svelte'
   import { completeConnect, hasReusableConnection, reuseConnection } from '$lib/connect-handshake'
   import routes from '$lib/routes'
-  import { signBackIn } from '$lib/sign-back-in'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
@@ -87,21 +87,21 @@
     unlocking = account
   }
 
-  async function onUnlockedConnect(entropy: Uint8Array) {
-    const account = unlocking
-    if (!account || !request) {
+  /** Shared tail of both ceremonies: hand the secret over and close up. */
+  async function finishConnect(account: Account, entropy: Uint8Array) {
+    if (!request) {
       return
-    }
-    if (account.isSignedOut) {
-      // Unlocking a signed-out account signs it back in for the whole device
-      // (restores the synced state from Swarm), not just for this app. The
-      // store reuses the instance, so `account` is signed in afterwards.
-      await signBackIn(account, entropy)
     }
     await completeConnect(account, entropy, request)
     sessionStore.setCurrentAccount(account.id)
     unlocking = undefined
     await goto(resolve(routes.CONNECT_DONE))
+  }
+
+  async function onUnlockedConnect(entropy: Uint8Array) {
+    if (unlocking) {
+      await finishConnect(unlocking, entropy)
+    }
   }
 
   function startAdding() {
@@ -187,16 +187,25 @@
   </main>
 </div>
 
-<!-- Serves signed-in unlocks AND sign-back-in ceremonies (a signed-out
-     account's vault survives, so the same unlock works); a mid-ceremony
-     cross-tab sign-out/sign-in is caught inside the dialog by its
-     signedOutAt transition check. -->
+<!-- A signed-out account goes through the sign-back-in ceremony (unlock +
+     state restore, incl. the no-synced-data warning) and then completes the
+     connection; a signed-in one just unlocks. A mid-ceremony cross-tab
+     sign-out/sign-in is caught inside the unlock dialog by its signedOutAt
+     transition check. -->
 {#if unlocking}
-  <UnlockDialog
-    account={unlocking}
-    title="Connect as {unlocking.name}"
-    description="Unlock your account to approve the connection to {request?.appName}."
-    onunlocked={onUnlockedConnect}
-    onclose={() => (unlocking = undefined)}
-  />
+  {#if unlocking.isSignedOut}
+    <SignBackInDialog
+      account={unlocking}
+      onsignedin={finishConnect}
+      onclose={() => (unlocking = undefined)}
+    />
+  {:else}
+    <UnlockDialog
+      account={unlocking}
+      title="Connect as {unlocking.name}"
+      description="Unlock your account to approve the connection to {request?.appName}."
+      onunlocked={onUnlockedConnect}
+      onclose={() => (unlocking = undefined)}
+    />
+  {/if}
 {/if}

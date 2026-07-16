@@ -69,7 +69,8 @@ export function createAccount(
 
 /**
  * Signed-out counterpart of `createAccount`: the minimal sign-out remnant —
- * the retained vault plus display fields, everything synced stripped.
+ * the retained vault, the encrypted state snapshot, and display fields;
+ * everything synced stripped.
  */
 export function createSignedOutAccount(
   overrides?: Partial<SignedOutAccount>,
@@ -80,6 +81,7 @@ export function createSignedOutAccount(
     createdAt: 1700000000000,
     access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
     encryptedSeed: "aabbccdd",
+    encryptedState: '{"format":"test-snapshot","payload":"aabb"}',
     signedOutAt: 1700000000001,
     ...overrides,
   }

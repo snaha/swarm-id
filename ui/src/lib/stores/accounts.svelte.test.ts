@@ -167,9 +167,20 @@ function signedInRecord(): SignedInAccount {
   }
 }
 
+const ENCRYPTED_STATE =
+  '{"format":"swarm-id-signout-state","version":1,"salt":"00","payload":"aabb"}'
+
 function signedOutRecord(): SignedOutAccount {
   const { id, name, createdAt, access, encryptedSeed } = signedInRecord()
-  return { id, name, createdAt, access, encryptedSeed, signedOutAt: 1700000000001 }
+  return {
+    id,
+    name,
+    createdAt,
+    access,
+    encryptedSeed,
+    encryptedState: ENCRYPTED_STATE,
+    signedOutAt: 1700000000001,
+  }
 }
 
 describe('Account sign-out state', () => {
@@ -195,23 +206,25 @@ describe('Account sign-out state', () => {
 })
 
 describe('Account.signOut', () => {
-  it('retains the vault and strips the synced fields from memory', () => {
+  it('retains the vault and the snapshot, strips the synced fields from memory', () => {
     const account = new Account(signedInRecord(), noCommit)
-    account.signOut()
+    account.signOut(ENCRYPTED_STATE)
     expect(account.isSignedOut).toBe(true)
     expect(account.accessMethod.type).toBe('password')
     expect(account.vault.encryptedSeed).toBe('aabbccdd')
+    expect(account.encryptedState).toBe(ENCRYPTED_STATE)
     expect(account.derivationKey).toBe('')
     expect(account.connectedApps).toEqual([])
   })
 
   it('projects exactly the minimal remnant record', () => {
     const account = new Account(signedInRecord(), noCommit)
-    account.signOut()
+    account.signOut(ENCRYPTED_STATE)
     expect(Object.keys(account.toRecord()).sort()).toEqual([
       'access',
       'createdAt',
       'encryptedSeed',
+      'encryptedState',
       'id',
       'name',
       'signedOutAt',
@@ -220,7 +233,7 @@ describe('Account.signOut', () => {
 
   it('signs back in when a full record replaces it through accountsStore.add', () => {
     const live = accountsStore.add(record(X_ID_HEX, 'x'))
-    live.signOut()
+    live.signOut(ENCRYPTED_STATE)
     expect(live.isSignedOut).toBe(true)
 
     const restored = accountsStore.add(record(X_ID_HEX, 'x'))
@@ -228,6 +241,7 @@ describe('Account.signOut', () => {
     expect(restored).toBe(live) // instance reused, held references stay valid
     expect(live.isSignedOut).toBe(false)
     expect(live.signedOutAt).toBeUndefined()
+    expect(live.encryptedState).toBeUndefined()
     expect(live.derivationKey).toBe('f'.repeat(64))
   })
 })
@@ -241,7 +255,7 @@ describe('Account.setAccess', () => {
 
   it('throws on a signed-out account instead of undoing the sign-out', () => {
     const account = new Account(signedInRecord(), noCommit)
-    account.signOut()
+    account.signOut(ENCRYPTED_STATE)
     expect(() =>
       account.setAccess({ type: 'password', kdfSalt: '11', kdfIterations: 100000 }, 'bbccddee'),
     ).toThrow(/signed out/)

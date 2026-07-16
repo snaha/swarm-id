@@ -75,11 +75,13 @@ describe("serializeAccount — device-local seed vault", () => {
 
     expect(reparsed.access).toEqual(account.access)
     expect(reparsed.encryptedSeed).toBe(account.encryptedSeed)
+    expect(reparsed.encryptedState).toBe(account.encryptedState)
     expect(reparsed.signedOutAt).toBe(1700000000123)
   })
 
-  // Pins the sign-out privacy contract: nothing but the vault and the display
-  // fields survives in localStorage — no derivationKey, collections, or clocks.
+  // Pins the sign-out privacy contract: nothing but the vault, the encrypted
+  // state snapshot, and the display fields survives in localStorage — no
+  // plaintext derivationKey, collections, or clocks.
   it("serializes a signed-out account to exactly the minimal remnant keys", () => {
     const serialized = serializeAccount(createSignedOutAccount())
 
@@ -87,6 +89,7 @@ describe("serializeAccount — device-local seed vault", () => {
       "access",
       "createdAt",
       "encryptedSeed",
+      "encryptedState",
       "id",
       "name",
       "signedOutAt",

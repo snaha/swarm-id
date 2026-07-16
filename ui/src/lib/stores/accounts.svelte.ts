@@ -25,10 +25,14 @@ type AccountSettings = { appSessionDuration?: number }
 /**
  * The device-local tail of the account record, mirroring the lib's `Account`
  * union: the seed vault — which SURVIVES a sign-out so the user can sign back
- * in with the existing access method — plus the sign-out marker while signed
- * out. Held as ONE field so the vault and the marker can't drift apart.
+ * in with the existing access method — plus, while signed out, the sign-out
+ * marker and the encrypted snapshot of the synced state (restored on
+ * sign-back-in). Held as ONE union-typed field so a signed-out state without
+ * its snapshot is unrepresentable.
  */
-type DeviceAuth = { vault: LocalVault; signedOutAt?: number }
+type DeviceAuth =
+  | { vault: LocalVault; signedOutAt?: undefined; encryptedState?: undefined }
+  | { vault: LocalVault; signedOutAt: number; encryptedState: string }
 
 /**
  * The account aggregate root. Fields are reactive (`$state`) so component reads
@@ -108,15 +112,18 @@ export class Account {
   applyRecord(record: AccountRecord) {
     this.createdAt = record.createdAt
     this.name = record.name
-    this.#deviceAuth = {
-      vault: { access: record.access, encryptedSeed: record.encryptedSeed },
-      signedOutAt: record.signedOutAt,
-    }
+    const vault = { access: record.access, encryptedSeed: record.encryptedSeed }
     if (isSignedOutAccount(record)) {
       // The stored record is the minimal sign-out remnant — no synced fields.
+      this.#deviceAuth = {
+        vault,
+        signedOutAt: record.signedOutAt,
+        encryptedState: record.encryptedState,
+      }
       this.#resetSyncedFields()
       return
     }
+    this.#deviceAuth = { vault }
     this.derivationKey = record.derivationKey
     this.publicKey = record.publicKey
     this.settings = record.settings
@@ -157,17 +164,20 @@ export class Account {
    * union return type makes a half-signed-out projection a type error.
    */
   toRecord(): AccountRecord {
-    const { vault, signedOutAt } = this.#deviceAuth
-    if (signedOutAt !== undefined) {
-      // The minimal sign-out remnant — display fields plus the retained vault.
+    const auth = this.#deviceAuth
+    if (auth.signedOutAt !== undefined) {
+      // The minimal sign-out remnant — display fields, the retained vault,
+      // and the encrypted snapshot of the synced state.
       return {
         id: this.id,
         name: this.name,
         createdAt: this.createdAt,
-        ...vault,
-        signedOutAt,
+        ...auth.vault,
+        encryptedState: auth.encryptedState,
+        signedOutAt: auth.signedOutAt,
       }
     }
+    const { vault } = auth
     const synced: SyncedAccount = {
       id: this.id,
       name: this.name,
@@ -223,6 +233,14 @@ export class Account {
   }
 
   /**
+   * The encrypted snapshot of the synced state a sign-out kept; `undefined`
+   * while signed in. Sign-back-in decrypts and restores it.
+   */
+  get encryptedState(): string | undefined {
+    return this.#deviceAuth.encryptedState
+  }
+
+  /**
    * Signed out on this device: `signOut()` stripped the synced data, but the
    * vault remains — unlocking it signs back in.
    */
@@ -259,12 +277,20 @@ export class Account {
    * Sign this account out on THIS device: keep the encrypted seed vault (so
    * signing back in only takes the access method) but strip every synced
    * field — including the secret `derivationKey` and the live per-app session
-   * material the dApp proxy authenticates from. The row stays in the account
-   * list as a minimal remnant. `skipSync`: a device-local de-auth must not
-   * propagate, and the record no longer carries anything to publish with.
+   * material the dApp proxy authenticates from. What is stripped survives as
+   * `encryptedState`, the AES-encrypted snapshot the caller built from this
+   * account BEFORE calling (encryption is async WebCrypto; this mutator stays
+   * synchronous), so sign-back-in can restore losslessly without the network.
+   * The row stays in the account list as a minimal remnant. `skipSync`: a
+   * device-local de-auth must not propagate, and the record no longer carries
+   * anything to publish with.
    */
-  signOut() {
-    this.#deviceAuth = { vault: this.#deviceAuth.vault, signedOutAt: Date.now() }
+  signOut(encryptedState: string) {
+    this.#deviceAuth = {
+      vault: this.#deviceAuth.vault,
+      signedOutAt: Date.now(),
+      encryptedState,
+    }
     this.#resetSyncedFields()
     this.#commit({ skipSync: true })
   }

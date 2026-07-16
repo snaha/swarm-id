@@ -140,17 +140,31 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
     access: { type: "password", kdfSalt: "00", kdfIterations: 100000 },
     encryptedSeed: "aabbccdd",
   }
+  // The remnant a sign-out persists beyond the vault: the AES-encrypted
+  // snapshot of the synced state, restored on sign-back-in.
+  const SIGNED_OUT = {
+    ...VAULT,
+    encryptedState: '{"format":"test-snapshot","payload":"aabb"}',
+    signedOutAt: 1700000000001,
+  }
 
-  it("accepts a signed-out record that retains the vault", () => {
-    const result = LocalAccountSchemaV1.safeParse(
-      serializedAccount({ ...VAULT, signedOutAt: 1700000000001 }),
-    )
+  it("accepts a signed-out record that retains the vault and state snapshot", () => {
+    const result = LocalAccountSchemaV1.safeParse(serializedAccount(SIGNED_OUT))
     expect(result.success).toBe(true)
     if (result.success) {
       expect(result.data.signedOutAt).toBe(1700000000001)
       expect(result.data.access).toEqual(VAULT.access)
       expect(result.data.encryptedSeed).toBe(VAULT.encryptedSeed)
+      expect(result.data.encryptedState).toBe(SIGNED_OUT.encryptedState)
     }
+  })
+
+  it("rejects a signed-out record without the encrypted state snapshot", () => {
+    expect(
+      LocalAccountSchemaV1.safeParse(
+        serializedAccount({ ...VAULT, signedOutAt: 1700000000001 }),
+      ).success,
+    ).toBe(false)
   })
 
   // A record written before the sign-out shrank to the minimal remnant (full
@@ -159,8 +173,7 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
   it("strips the synced fields off a signed-out record", () => {
     const result = LocalAccountSchemaV1.safeParse(
       serializedAccount({
-        ...VAULT,
-        signedOutAt: 1700000000001,
+        ...SIGNED_OUT,
         postageStamps: [],
       }),
     )
@@ -203,7 +216,11 @@ describe("LocalAccountSchemaV1 signed-in/signed-out union", () => {
     (_label, partialVault) => {
       expect(
         LocalAccountSchemaV1.safeParse(
-          serializedAccount({ ...partialVault, signedOutAt: 1700000000001 }),
+          serializedAccount({
+            ...partialVault,
+            encryptedState: SIGNED_OUT.encryptedState,
+            signedOutAt: 1700000000001,
+          }),
         ).success,
       ).toBe(false)
     },

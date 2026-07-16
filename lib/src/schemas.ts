@@ -312,18 +312,22 @@ const SignedInAccountSchemaV1 = SyncedAccountSchemaV1.extend({
  * Signed-out variant: the minimal remnant of a sign-out. The vault SURVIVES
  * (it is encrypted at rest, so retaining it matches the sign-out security
  * posture) and lets the user sign back in with the existing access method —
- * no recovery phrase. Everything else — `derivationKey` (secret material),
- * `publicKey`, the collections, settings, and clocks — is stripped from disk
- * and re-derived from the seed / re-folded from Swarm on sign-back-in. The
- * display fields (`name`, `createdAt`) stay so the account chooser can list
- * the row. Being a plain object (not a `SyncedAccountSchemaV1` extension),
- * parsing a pre-shrink record under this arm strips its synced fields.
+ * no recovery phrase. The synced state (collections, settings, clocks, and
+ * the secret `derivationKey`) is stripped from disk as PLAINTEXT but kept as
+ * `encryptedState`: an AES-GCM snapshot keyed off the derivation-key chain,
+ * decrypted and restored on sign-back-in so a sign-out can never lose data —
+ * even offline or when the Swarm copy is gone. Required: a signed-out record
+ * without the snapshot is malformed and quarantined at load. The display
+ * fields (`name`, `createdAt`) stay so the account chooser can list the row.
+ * Being a plain object (not a `SyncedAccountSchemaV1` extension), parsing a
+ * pre-shrink record under this arm strips its plaintext synced fields.
  */
 const SignedOutAccountSchemaV1 = z.object({
   id: StoredEthAddress,
   name: z.string(),
   createdAt: z.number(),
   ...LocalVaultSchemaV1.shape,
+  encryptedState: z.string(),
   signedOutAt: z.number(),
 })
 

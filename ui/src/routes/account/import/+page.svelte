@@ -52,10 +52,13 @@
       // Already set up on this device — just switch to it. A signed-out
       // record first restores its synced state (the phrase already proved the
       // entropy, so this is the same restore the unlock ceremony performs).
+      // `allowEmpty`: the phrase is the explicit recovery authority, so a
+      // missing snapshot + empty network restores a fresh shell rather than
+      // blocking the recovery.
       const existing = accountsStore.get(wallet.address)
       if (existing) {
         if (existing.isSignedOut) {
-          await signBackIn(existing, wallet.entropy)
+          await signBackIn(existing, wallet.entropy, { allowEmpty: true })
         }
         sessionStore.setCurrentAccount(existing.id)
 
