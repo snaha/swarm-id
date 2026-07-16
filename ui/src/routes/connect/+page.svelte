@@ -106,6 +106,13 @@
   function startAdding() {
     addingAccount = true
   }
+
+  /** Storage warning on a row: jump to that account's Storage tab. */
+  async function checkStorage(account: Account) {
+    sessionStore.setCurrentAccount(account.id)
+    // eslint-disable-next-line svelte/no-navigation-without-resolve -- resolve() plus a query string
+    await goto(resolve(routes.ROOT) + '?tab=drives')
+  }
 </script>
 
 <div class="flex min-h-svh flex-col">
@@ -149,7 +156,11 @@
             {#if previouslyUsed.length > 0}
               <div class="flex flex-col gap-2">
                 <p class="text-sm font-bold">Previously used with this app</p>
-                <AccountList accounts={previouslyUsed} onselect={select} />
+                <AccountList
+                  accounts={previouslyUsed}
+                  onselect={select}
+                  oncheckstorage={checkStorage}
+                />
               </div>
             {/if}
 
@@ -162,6 +173,7 @@
                   accounts={otherAccounts}
                   badge={(account) => (account.isSignedOut ? 'Signed out' : undefined)}
                   onselect={select}
+                  oncheckstorage={checkStorage}
                 />
               </div>
             {/if}

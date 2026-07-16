@@ -171,6 +171,24 @@ export function formatYmd(epochMs: number): string {
 }
 
 /** One-pass derivation of every display value for a drive row + detail. */
+/**
+ * Whether a drive should be flagged for the user's attention: about to expire
+ * or already full — the conditions of the destructive per-drive badges. An
+ * EXPIRED drive is deliberately not "attention": it is gone, not saveable.
+ */
+export function driveNeedsAttention(drive: PostageStamp, now = Date.now()): boolean {
+  const d = describeDrive(drive, now)
+  return d.status === 'expires-soon' || (d.status !== 'expired' && d.storageFull)
+}
+
+/** How many of the account's LIVE drives need attention (see above). */
+export function drivesNeedingAttention(
+  account: { stamps: PostageStamp[] },
+  now = Date.now(),
+): number {
+  return account.stamps.filter((drive) => driveNeedsAttention(drive, now)).length
+}
+
 export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDisplay {
   const ttl = remainingLifespanSeconds(drive, now)
   const known = ttl !== undefined

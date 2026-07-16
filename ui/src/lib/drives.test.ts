@@ -4,7 +4,14 @@ import { BatchId, PrivateKey } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
-import { describeDrive, formatBytes, formatRemaining, remainingLifespanSeconds } from './drives'
+import {
+  describeDrive,
+  driveNeedsAttention,
+  drivesNeedingAttention,
+  formatBytes,
+  formatRemaining,
+  remainingLifespanSeconds,
+} from './drives'
 
 const DAY = 24 * 60 * 60
 
@@ -154,5 +161,32 @@ describe('describeDrive', () => {
     expect(display.status).toBe('active')
     expect(display.timeLeftLabel).toBe('')
     expect(display.expiryDate).toBeUndefined()
+  })
+})
+
+describe('drivesNeedingAttention', () => {
+  const measuredAt = Date.UTC(2026, 8, 21)
+
+  it('counts expiring and full drives, not expired or healthy ones', () => {
+    const account = {
+      stamps: [
+        makeDrive({ batchTTL: 90 * DAY }), // healthy
+        makeDrive({ batchTTL: 6 * DAY }), // expires soon
+        makeDrive({ utilization: 1 }), // storage full
+        makeDrive({ batchTTL: 0 }), // expired — gone, not actionable
+        makeDrive({ batchTTL: 0, utilization: 1 }), // expired AND full — still gone
+      ],
+    }
+    expect(drivesNeedingAttention(account, measuredAt)).toBe(2)
+  })
+
+  it('is zero for an account without drives (e.g. signed out)', () => {
+    expect(drivesNeedingAttention({ stamps: [] }, measuredAt)).toBe(0)
+  })
+
+  it('flags a drive that is both expiring and full once', () => {
+    expect(driveNeedsAttention(makeDrive({ batchTTL: 6 * DAY, utilization: 1 }), measuredAt)).toBe(
+      true,
+    )
   })
 })

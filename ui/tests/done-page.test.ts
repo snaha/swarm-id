@@ -178,4 +178,32 @@ test('connect flow shows the done screen variants and closes the popup', async (
       .find((app) => app.appUrl === 'http://localhost:3500')?.postageStampBatchID
   })
   expect(appDrive).toMatch(/^[0-9a-f]{64}$/)
+
+  // Storage warnings (#437): mark one drive full → the home page shows the
+  // attention alert (any tab), and its link jumps to Storage.
+  await page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { postageStamps?: { utilization: number }[] }[]
+    }
+    const stamps = doc.data?.[0]?.postageStamps
+    if (stamps?.[0]) stamps[0].utilization = 1
+    localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
+  })
+  await page.reload()
+  await expect(page.getByText('1 drive needs attention.')).toBeVisible()
+  await page.getByRole('button', { name: 'Check your storage' }).click()
+  await expect(page.getByText('Your drives')).toBeVisible()
+
+  // The connect chooser shows the destructive "Check storage" action on the
+  // account row instead of any badge; pressing it opens the Storage tab.
+  // (Disconnect first — with a live session the demo has no Connect button.)
+  await page.goto(DEMO_URL)
+  await accountButton.click()
+  await page.getByRole('button', { name: 'Disconnect', exact: true }).click()
+  popup = await openConnectPopup(page)
+  const checkStorage = popup.getByRole('button', { name: 'Check storage' })
+  await expect(checkStorage).toBeVisible()
+  await checkStorage.click()
+  await expect(popup.getByText('Your drives')).toBeVisible()
+  await expect(popup.getByText('1 drive needs attention.')).toBeVisible()
 })
