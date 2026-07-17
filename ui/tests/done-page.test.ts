@@ -13,6 +13,19 @@ import {
 const DEMO_URL = 'http://localhost:3500'
 const APP_NAME = 'Swarm ID Demo'
 
+/**
+ * "Go to app" closes the popup from its click handler — under load the window
+ * can be gone before the click roundtrip returns, so tolerate that error and
+ * assert the closure itself.
+ */
+async function goToApp(popup: Page) {
+  await popup
+    .getByRole('button', { name: 'Go to app' })
+    .click()
+    .catch(() => undefined)
+  await expect.poll(() => popup.isClosed()).toBe(true)
+}
+
 /** Asserts the shared done view's drive pitch (the no-drive branch). */
 async function expectDrivePitch(page: Page) {
   await expect(page.getByText('Your Swarm ID is ready!')).toBeVisible()
@@ -36,6 +49,33 @@ test('create flow ends on the done page with the drive pitch', async ({ page }) 
   await expect(page).toHaveURL(/\/$/)
 })
 
+test('first connect with a single drive confirms without picker or pitch', async ({ page }) => {
+  // Account created standalone with exactly one drive, never connected.
+  await page.goto('/')
+  await page.getByRole('link', { name: 'Get started' }).first().click()
+  await completeCreateFlow(page)
+  await page.getByRole('button', { name: 'Stay local for now' }).click()
+  await expect(page).toHaveURL(/\/$/)
+  await addMockedDrive(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  // First connect + one drive → the drive question answers itself: plain
+  // confirmation, no picker, no pitch.
+  await page.goto(DEMO_URL)
+  const popup = await openConnectPopup(page)
+  await expect(popup.getByText('Previously used with this app')).not.toBeVisible()
+  await popup.getByRole('button', { name: /0x[0-9a-fA-F]{4}/ }).click()
+  await popup.getByRole('textbox', { name: 'Account password' }).fill(PASSWORD)
+  await popup.getByRole('button', { name: 'Confirm' }).click()
+
+  await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
+  await expect(popup.getByText('Select drive')).not.toBeVisible()
+  await expect(popup.getByText('Want the full experience?')).not.toBeVisible()
+  await goToApp(popup)
+})
+
 test('connect flow shows the done screen variants and closes the popup', async ({ page }) => {
   await page.goto(DEMO_URL)
 
@@ -49,8 +89,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await expect(popup.getByText('Want the full experience?')).toBeVisible()
   await expect(popup.getByRole('button', { name: 'Set up a drive' })).toBeVisible()
 
-  await popup.getByRole('button', { name: 'Go to app' }).click()
-  await expect.poll(() => popup.isClosed()).toBe(true)
+  await goToApp(popup)
 
   // The demo picked up the session — the sidebar shows the account.
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
@@ -84,8 +123,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   await expect(popup.getByText(`Your Swarm ID is now connected to ${APP_NAME}!`)).toBeVisible()
   await expect(popup.getByText('Select drive')).not.toBeVisible()
   await expect(popup.getByText('Want the full experience?')).not.toBeVisible()
-  await popup.getByRole('button', { name: 'Go to app' }).click()
-  await expect.poll(() => popup.isClosed()).toBe(true)
+  await goToApp(popup)
 
   // REMOVING the app from the account (Apps tab → Remove) revokes the
   // association entirely — unlike a disconnect, the account must no longer
@@ -119,8 +157,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   expect(await drivePicker.locator('option', { hasText: '(default)' }).count()).toBe(1)
   // Choose the non-default drive; the choice must land on the app entry.
   await drivePicker.selectOption({ index: 1 })
-  await popup.getByRole('button', { name: 'Go to app' }).click()
-  await expect.poll(() => popup.isClosed()).toBe(true)
+  await goToApp(popup)
 
   await page.goto('/')
   const appDrive = await page.evaluate(() => {
