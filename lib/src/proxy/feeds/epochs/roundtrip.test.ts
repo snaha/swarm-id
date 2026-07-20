@@ -125,6 +125,8 @@ function payloadWithTimestamp(
 vi.mock("../../upload-encrypted-data", async (importOriginal) => {
   const mod =
     await importOriginal<typeof import("../../upload-encrypted-data")>()
+  // eslint-disable-next-line no-restricted-syntax -- vi.mock factories are hoisted
+  // above the file's static imports, so a top-level `Binary` would be in the TDZ here.
   const { Binary } = await import("cafe-utility")
 
   return {
