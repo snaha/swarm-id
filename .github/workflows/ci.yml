@@ -34,6 +34,18 @@ jobs:
         working-directory: ./lib
         run: pnpm build
 
+      - name: Code linting (lib)
+        working-directory: ./lib
+        run: pnpm lint
+
+      - name: Typecheck (lib)
+        working-directory: ./lib
+        run: pnpm typecheck
+
+      - name: Run lib unit tests
+        working-directory: ./lib
+        run: pnpm test
+
       - name: Build ui
         working-directory: ./ui
         run: pnpm build
