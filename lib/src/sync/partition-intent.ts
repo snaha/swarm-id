@@ -66,6 +66,7 @@ import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { UtilizationAwareStamper } from "../utils/batch-utilization"
 import { TimeoutError, withTimeout } from "../utils/promise"
+import { socAddress } from "../utils/soc-address"
 import { INTENT_EPOCH_MS, SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import {
   PartitionIntentPayloadSchemaV1,
@@ -166,13 +167,9 @@ export function intentSocAddress(
   epochBucket: number,
   owner: EthAddress,
 ): Uint8Array {
-  const identifier = makePartitionIntentIdentifier(
-    partition,
-    deviceId,
-    epochBucket,
-  )
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
+  return socAddress(
+    makePartitionIntentIdentifier(partition, deviceId, epochBucket),
+    owner,
   )
 }
 
@@ -195,9 +192,9 @@ export function partitionOccupancyAddress(
   epochBucket: number,
   owner: EthAddress,
 ): Uint8Array {
-  const identifier = makePartitionOccupancyIdentifier(partition, epochBucket)
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
+  return socAddress(
+    makePartitionOccupancyIdentifier(partition, epochBucket),
+    owner,
   )
 }
 
