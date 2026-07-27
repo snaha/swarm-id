@@ -460,6 +460,11 @@
 <td>Public key of the identity</td>
 </tr>
 <tr>
+<td><code dir="auto">identity.avatar</code></td>
+<td><code dir="auto">Avatar</code></td>
+<td>Ready-to-render account avatar. See <a href="#avatars">Avatars</a></td>
+</tr>
+<tr>
 <td><code dir="auto">appKey</code></td>
 <td><code dir="auto">object | undefined</code></td>
 <td>The app-specific key details</td>
@@ -2626,27 +2631,10 @@
 </div></div><div class="ec-line"><div class="code"><span class="indent">  </span><span style="--0:#919F9F;--1:#5D6376">// Backup &amp; Recovery types</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">EncryptedSwarmIdExport,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">ParseHeaderResult,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">AccountStateSnapshot,</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">RestoreAccountResult,</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">} </span><span style="--0:#C792EA;--1:#8844AE">from</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">@snaha/swarm-id</span><span style="--0:#D9F5DD;--1:#111111">'</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="import type {  // Client configuration  ClientOptions,  AuthStatus,  ConnectionInfo,  Avatar,  AvatarSource,  PostageBatch,  NodeInfo,  AppMetadata,  ButtonConfig,  RequestOptions,  // Upload/Download  UploadOptions,  DownloadOptions,  UploadResult,  FileData,  Reference,  // SOC  SingleOwnerChunk,  // Feed types  FeedReader,  FeedWriter,  SequentialFeedReader,  SequentialFeedWriter,  EpochFeedUploadResult,  EpochFeedDownloadReferenceResult,  EpochFeedDownloadPayloadResult,  // ACT types  ActUploadOptions,  // Backup &amp; Recovery types  EncryptedSwarmIdExport,  ParseHeaderResult,  AccountStateSnapshot,  RestoreAccountResult,} from &#x27;@snaha/swarm-id&#x27;"><div></div></button></div></figure></div>
 <hr>
 <div class="sl-heading-wrapper level-h2"><h2 id="avatars">Avatars</h2><a class="sl-anchor-link" href="#avatars"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Avatars”</span></a></div>
-<p>Every account has an avatar. Today it is generated from the account’s identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. Accounts will be able to upload their own, which is why the client method is async and returns a URL rather than markup.</p>
-<div class="sl-heading-wrapper level-h3"><h3 id="getavataroptions"><code dir="auto">getAvatar(options?)</code></h3><a class="sl-anchor-link" href="#getavataroptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “getAvatar(options?)”</span></a></div>
-<p>Avatar of the connected identity, ready to render.</p>
-<p><strong>Parameters:</strong></p>
-<table>
-<thead>
-<tr>
-<th>Parameter</th>
-<th>Type</th>
-<th>Description</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code dir="auto">options.size</code></td>
-<td><code dir="auto">number</code></td>
-<td>Width and height in pixels (default <code dir="auto">40</code>)</td>
-</tr>
-</tbody>
-</table>
-<p><strong>Returns:</strong> <code dir="auto">Promise&lt;Avatar | undefined&gt;</code> — <code dir="auto">undefined</code> when no identity is connected</p>
+<p>Every account has an avatar. Today it is generated from the account’s identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. Accounts will be able to upload their own, so treat the avatar as an image at a URL rather than as markup you can regenerate.</p>
+<p>It arrives already resolved on every connection snapshot — there is nothing to call:</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">identity</span><span style="--0:#C792EA;--1:#8844AE"> = </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#FAF39F;--1:#111111">connectionInfo</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">identity</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (identity) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">img</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">src</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#D6DEEB;--1:#403F53"> identity</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#FAF39F;--1:#111111">avatar</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">url</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const identity = client.connectionInfo.identityif (identity) {  img.src = identity.avatar.url}"><div></div></button></div></figure></div>
+<p><strong><code dir="auto">Avatar</code>:</strong></p>
 <table>
 <thead>
 <tr>
@@ -2668,8 +2656,28 @@
 </tr>
 </tbody>
 </table>
-<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">avatar</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getAvatar</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ size: </span><span style="--0:#F78C6C;--1:#AA0982">48</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">if</span><span style="--0:#D6DEEB;--1:#403F53"> (avatar) {</span></div></div><div class="ec-line"><div class="code"><span class="indent"><span style="--0:#D6DEEB;--1:#403F53">  </span></span><span style="--0:#D6DEEB;--1:#403F53">document</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">querySelector</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#ECC48D;--1:#984E4D">img.avatar</span><span style="--0:#D9F5DD;--1:#111111">'</span><span style="--0:#D6DEEB;--1:#403F53">)</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">src</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#C792EA;--1:#8844AE">=</span><span style="--0:#D6DEEB;--1:#403F53"> avatar</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#7FDBCA;--1:#096E72">url</span></div></div><div class="ec-line"><div class="code"><span style="--0:#D6DEEB;--1:#403F53">}</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const avatar = await client.getAvatar({ size: 48 })if (avatar) {  document.querySelector(&#x27;img.avatar&#x27;).src = avatar.url}"><div></div></button></div></figure></div>
 <p>Check <code dir="auto">source</code> rather than assuming an inline SVG — an uploaded avatar is a bitmap fetched from Swarm.</p>
+<div class="sl-heading-wrapper level-h3"><h3 id="getavataroptions"><code dir="auto">getAvatar(options?)</code></h3><a class="sl-anchor-link" href="#getavataroptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “getAvatar(options?)”</span></a></div>
+<p>The avatar at a specific size. Most apps do not need this — <code dir="auto">identity.avatar</code> is already resolved and, being vector today, scales to any size with CSS. Reach for it when you need the image rendered at a particular pixel size; it is async because an uploaded avatar has to be re-fetched at that size.</p>
+<p><strong>Parameters:</strong></p>
+<table>
+<thead>
+<tr>
+<th>Parameter</th>
+<th>Type</th>
+<th>Description</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code dir="auto">options.size</code></td>
+<td><code dir="auto">number</code></td>
+<td>Width and height in pixels (default <code dir="auto">40</code>)</td>
+</tr>
+</tbody>
+</table>
+<p><strong>Returns:</strong> <code dir="auto">Promise&lt;Avatar | undefined&gt;</code> — <code dir="auto">undefined</code> when no identity is connected</p>
+<div class="expressive-code"><figure class="frame not-content"><figcaption class="header"></figcaption><pre data-language="typescript"><code><div class="ec-line"><div class="code"><span style="--0:#C792EA;--1:#8844AE">const </span><span style="--0:#82AAFF;--1:#3B61B0">avatar</span><span style="--0:#C792EA;--1:#8844AE"> = await </span><span style="--0:#D6DEEB;--1:#403F53">client</span><span style="--0:#C792EA;--1:#8844AE">.</span><span style="--0:#82AAFF;--1:#3B61B0">getAvatar</span><span style="--0:#D6DEEB;--1:#403F53">(</span><span style="--0:#C792EA;--1:#8844AE">{ size: </span><span style="--0:#F78C6C;--1:#AA0982">128</span><span style="--0:#C792EA;--1:#8844AE"> }</span><span style="--0:#D6DEEB;--1:#403F53">)</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="const avatar = await client.getAvatar({ size: 128 })"><div></div></button></div></figure></div>
 <div class="sl-heading-wrapper level-h3"><h3 id="generatedavatarsvgseed-size"><code dir="auto">generatedAvatarSvg(seed, size?)</code></h3><a class="sl-anchor-link" href="#generatedavatarsvgseed-size"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “generatedAvatarSvg(seed, size?)”</span></a></div>
 <p>The generated avatar as a standalone SVG string, for callers that want to inline the markup instead of pointing an <code dir="auto">&lt;img&gt;</code> at a URL. Derived from the seed alone: no network access, no other dependency.</p>
 <p><strong>Parameters:</strong></p>
