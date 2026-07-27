@@ -379,6 +379,7 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 | `identity.name`      | `string`                                        | Display name of the identity                                                                                |
 | `identity.address`   | `string`                                        | Ethereum address associated with the identity                                                               |
 | `identity.publicKey` | `string \| undefined`                           | Public key of the identity                                                                                  |
+| `identity.avatar`    | `Avatar`                                        | Ready-to-render account avatar. See [Avatars](#avatars)                                                     |
 | `appKey`             | `object \| undefined`                           | The app-specific key details                                                                                |
 | `appKey.address`     | `string`                                        | Ethereum address of the app key                                                                             |
 | `appKey.publicKey`   | `string`                                        | Public key of the app key                                                                                   |
@@ -1516,11 +1517,29 @@ import type {
 
 ## Avatars
 
-Every account has an avatar. Today it is generated from the account's identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. Accounts will be able to upload their own, which is why the client method is async and returns a URL rather than markup.
+Every account has an avatar. Today it is generated from the account's identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. Accounts will be able to upload their own, so treat the avatar as an image at a URL rather than as markup you can regenerate.
+
+It arrives already resolved on every connection snapshot — there is nothing to call:
+
+```typescript
+const identity = client.connectionInfo.identity
+if (identity) {
+  img.src = identity.avatar.url
+}
+```
+
+**`Avatar`:**
+
+| Property | Type          | Description                                                                         |
+| -------- | ------------- | ----------------------------------------------------------------------------------- |
+| `source` | `"generated"` | Where the image came from. `generated` is the fallback derived from the identity id |
+| `url`    | `string`      | Renderable as an `<img>` source; a `data:` URL for generated avatars                |
+
+Check `source` rather than assuming an inline SVG — an uploaded avatar is a bitmap fetched from Swarm.
 
 ### `getAvatar(options?)`
 
-Avatar of the connected identity, ready to render.
+The avatar at a specific size. Most apps do not need this — `identity.avatar` is already resolved and, being vector today, scales to any size with CSS. Reach for it when you need the image rendered at a particular pixel size; it is async because an uploaded avatar has to be re-fetched at that size.
 
 **Parameters:**
 
@@ -1530,19 +1549,9 @@ Avatar of the connected identity, ready to render.
 
 **Returns:** `Promise<Avatar | undefined>` — `undefined` when no identity is connected
 
-| Property | Type          | Description                                                                         |
-| -------- | ------------- | ----------------------------------------------------------------------------------- |
-| `source` | `"generated"` | Where the image came from. `generated` is the fallback derived from the identity id |
-| `url`    | `string`      | Renderable as an `<img>` source; a `data:` URL for generated avatars                |
-
 ```typescript
-const avatar = await client.getAvatar({ size: 48 })
-if (avatar) {
-  document.querySelector('img.avatar').src = avatar.url
-}
+const avatar = await client.getAvatar({ size: 128 })
 ```
-
-Check `source` rather than assuming an inline SVG — an uploaded avatar is a bitmap fetched from Swarm.
 
 ### `generatedAvatarSvg(seed, size?)`
 

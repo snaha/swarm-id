@@ -11,18 +11,7 @@
  * color palette.
  */
 
-/** Where an {@link Avatar} image came from. */
-export type AvatarSource = "generated"
-
-export interface Avatar {
-  /** `generated` is the fallback derived from the identity id. */
-  source: AvatarSource
-  /**
-   * Renderable as an `<img>` source. A `data:` URL for generated avatars;
-   * uploaded ones will resolve to the image on Swarm.
-   */
-  url: string
-}
+import type { Avatar } from "../types"
 
 const NEAR_WHITE = "#FCFCFC"
 const NEAR_BLACK = "#131416"

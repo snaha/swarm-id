@@ -37,14 +37,12 @@
       </CardHeader>
       <div class="px-6 pb-6 space-y-3 p-6">
         <div class="flex items-center gap-3">
-          {#if clientStore.avatar}
-            <img
-              src={clientStore.avatar.url}
-              alt=""
-              class="size-12 shrink-0 rounded-lg"
-              data-avatar-source={clientStore.avatar.source}
-            />
-          {/if}
+          <img
+            src={clientStore.identity.avatar.url}
+            alt=""
+            class="size-12 shrink-0 rounded-lg"
+            data-avatar-source={clientStore.identity.avatar.source}
+          />
           <div>
             <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
               Name

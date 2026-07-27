@@ -5,6 +5,7 @@ import type {
   ClientOptions,
   ConnectOptions,
   AuthStatus,
+  Avatar,
   ConnectionInfo,
   UploadResult,
   FileData,
@@ -82,7 +83,7 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
-import { type Avatar, generatedAvatar } from "./utils/avatar"
+import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
@@ -921,29 +922,28 @@ export class SwarmIdClient {
   }
 
   /**
-   * Avatar of the connected identity, ready to render as an `<img>` source.
+   * Avatar of the connected identity at a specific size.
    *
-   * Today every account uses the avatar generated from its id, so this
-   * resolves immediately. It is async because an account will be able to
-   * upload its own, which has to be fetched from Swarm — check
-   * {@link Avatar.source} rather than assuming an inline SVG.
+   * Most callers want `connectionInfo.identity.avatar` instead — it is already
+   * resolved on every snapshot and needs no call. Reach for this only to
+   * render at a size the default does not suit; it is async because an
+   * uploaded avatar has to be re-fetched at that size.
    *
    * @param options.size - Width and height in pixels
    * @returns The avatar, or `undefined` when no identity is connected
-   *
-   * @example
-   * ```typescript
-   * const avatar = await client.getAvatar({ size: 48 })
-   * if (avatar) {
-   *   document.querySelector('img.avatar').src = avatar.url
-   * }
-   * ```
    */
   async getAvatar(
     options: { size?: number } = {},
   ): Promise<Avatar | undefined> {
     const { identity } = this.connectionInfo
-    return identity ? generatedAvatar(identity.id, options.size) : undefined
+    if (!identity) {
+      return undefined
+    }
+    // Only a generated avatar can be re-rendered from the id — an uploaded one
+    // is served as-is until there is a resize path for it.
+    return options.size !== undefined && identity.avatar.source === "generated"
+      ? generatedAvatar(identity.id, options.size)
+      : identity.avatar
   }
 
   // ============================================================================

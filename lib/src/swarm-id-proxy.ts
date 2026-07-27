@@ -42,6 +42,7 @@ import type {
   PostageStamp,
   PostageBatch,
   ConnectedApp,
+  ConnectionIdentity,
   ConnectionInfo,
 } from "./types"
 import {
@@ -108,6 +109,7 @@ import {
   deriveSecret,
   deriveSwarmEncryptionKey,
 } from "./utils/key-derivation"
+import { generatedAvatar } from "./utils/avatar"
 import { connectionInfoEqual } from "./utils/connection-info"
 import {
   activeDeviceIds,
@@ -223,9 +225,7 @@ export class SwarmIdProxy {
   private stampWorkerPool: StampWorkerPool | undefined
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
-  private storagePartitionedIdentity:
-    | { id: string; name: string; address: string; publicKey?: string }
-    | undefined
+  private storagePartitionedIdentity: ConnectionIdentity | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private gnosisRpcUrl: string
@@ -519,6 +519,7 @@ export class SwarmIdProxy {
           name: message.data.identityName,
           address: message.data.identityAddress,
           publicKey: message.data.identityPublicKey,
+          avatar: generatedAvatar(message.data.identityId),
         }
       }
 
@@ -1767,6 +1768,7 @@ export class SwarmIdProxy {
               name: account.name,
               address: account.id.toHex(),
               publicKey: account.publicKey,
+              avatar: generatedAvatar(account.id.toHex()),
             }
           }
         } catch (error) {

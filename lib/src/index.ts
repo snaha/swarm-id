@@ -31,7 +31,6 @@ export { hexAddress } from "./utils/hex"
 // Account avatars — `SwarmIdClient.getAvatar()` resolves the one to render;
 // the generator is exported for callers that want the SVG inline
 export { generatedAvatar, generatedAvatarSvg } from "./utils/avatar"
-export type { Avatar, AvatarSource } from "./utils/avatar"
 
 // Cross-tab coalescing: run a task at most once per window across same-origin tabs
 export { runCoalescedAcrossTabs } from "./utils/coalesced-task"
@@ -294,6 +293,9 @@ export type {
   AppMetadata,
   ButtonConfig,
   ConnectionInfo,
+  ConnectionIdentity,
+  Avatar,
+  AvatarSource,
   // ACT message types
   ActUploadDataMessage,
   ActDownloadDataMessage,

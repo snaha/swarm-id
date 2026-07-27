@@ -3,6 +3,7 @@
 
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { SwarmIdClient } from "./swarm-id-client"
+import { generatedAvatar } from "./utils/avatar"
 import * as browser from "./utils/browser"
 
 describe("SwarmIdClient connect()", () => {
@@ -149,6 +150,7 @@ describe("SwarmIdClient connectionInfo", () => {
         name: "alice",
         address: "0x1111111111111111111111111111111111111111",
         publicKey: "0x02" + "ab".repeat(32),
+        avatar: generatedAvatar("0x1111111111111111111111111111111111111111"),
       },
       appKey: {
         address: "0x2222222222222222222222222222222222222222",
@@ -194,6 +196,7 @@ describe("SwarmIdClient connectionInfo", () => {
         id: "0x3333333333333333333333333333333333333333",
         name: "bob",
         address: "0x3333333333333333333333333333333333333333",
+        avatar: generatedAvatar("0x3333333333333333333333333333333333333333"),
       },
       appKey: undefined,
     }
