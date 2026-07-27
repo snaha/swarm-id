@@ -4,11 +4,15 @@
 -->
 
 <!--
-  An account's avatar, rendered inline. The generator lives in the lib so dApps
-  show the same avatar for an account as this UI does.
+  An account's avatar. The generator lives in the lib so dApps show the same
+  avatar for an account as this UI does.
+
+  Rendered as an image rather than inline markup: inside a Button, the base
+  `[&_svg:not([class*='size-'])]:size-4` rule would shrink an inline SVG to
+  16px whatever size was asked for.
 -->
 <script lang="ts">
-  import { generatedAvatarSvg } from '@snaha/swarm-id'
+  import { generatedAvatar } from '@snaha/swarm-id'
 
   interface Props {
     value: string
@@ -18,20 +22,14 @@
 
   let { value, size = 40, class: className }: Props = $props()
 
-  const svg = $derived(generatedAvatarSvg(value, size))
+  const avatar = $derived(generatedAvatar(value, size))
 </script>
 
-<div class="account-avatar {className ?? ''}" style="width: {size}px; height: {size}px;">
-  <!-- eslint-disable-next-line svelte/no-at-html-tags -- SVG is generated internally from deterministic hash, not user input -->
-  {@html svg}
-</div>
-
-<style>
-  .account-avatar {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    line-height: 0;
-    flex-shrink: 0;
-  }
-</style>
+<img
+  src={avatar.url}
+  alt=""
+  width={size}
+  height={size}
+  class="shrink-0 {className ?? ''}"
+  style="width: {size}px; height: {size}px;"
+/>

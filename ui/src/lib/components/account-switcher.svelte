@@ -73,7 +73,15 @@
 <DropdownMenu bind:open class="top-0 right-0 flex w-80 flex-col gap-4 p-2.5">
   {#snippet trigger(props)}
     <!-- Frame 159-14402: the avatar leads, 36px square, 8px before the name. -->
-    <Button variant="ghost" class="h-9 gap-2 px-2" aria-label="Switch account" {...props}>
+    <!-- align-middle: the avatar fills the trigger's height, so without it the
+         inline-flex button sits on the text baseline and its wrapper keeps a
+         descender gap below. -->
+    <Button
+      variant="ghost"
+      class="h-9 gap-2 px-2 align-middle"
+      aria-label="Switch account"
+      {...props}
+    >
       <AccountAvatar
         value={account.id.toHex()}
         size={AVATAR_SIZE}
