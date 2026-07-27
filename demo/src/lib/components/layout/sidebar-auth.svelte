@@ -60,6 +60,9 @@
         class="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent"
         onclick={() => (popoverOpen = !popoverOpen)}
       >
+        {#if clientStore.avatar}
+          <img src={clientStore.avatar.url} alt="" class="size-8 shrink-0 rounded-md" />
+        {/if}
         <div class="min-w-0 flex-1">
           <div class="text-sm font-medium text-foreground truncate">
             {clientStore.identity.name}
