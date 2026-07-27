@@ -1512,6 +1512,34 @@ import type {
 
 ---
 
+## Account Icon
+
+### `identiconSvg(seed, size?)`
+
+Render the deterministic account icon as a standalone SVG string. Seeding it with `connectionInfo.identity.id` gives your app exactly the icon Swarm ID shows for that account, so the user recognises the same avatar in both places. No network access and no other dependency — the icon is derived from the seed alone.
+
+**Parameters:**
+
+| Parameter | Type     | Description                                        |
+| --------- | -------- | -------------------------------------------------- |
+| `seed`    | `string` | Value the icon is derived from — use `identity.id` |
+| `size`    | `number` | Width and height in pixels (default `40`)          |
+
+**Returns:** `string` — a complete `<svg>` element
+
+```typescript
+import { identiconSvg } from '@snaha/swarm-id'
+
+const identity = client.connectionInfo.identity
+if (identity) {
+  document.getElementById('avatar').innerHTML = identiconSvg(identity.id, 48)
+}
+```
+
+The same seed always produces the same icon, so it is safe to render on every `onConnectionChange` without caching.
+
+---
+
 ## Backup Encryption
 
 Functions for creating and reading encrypted `.swarmid` backup files. Exported from `@snaha/swarm-id`.

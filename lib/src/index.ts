@@ -28,6 +28,10 @@ export {
 // Hex address utility
 export { hexAddress } from "./utils/hex"
 
+// Deterministic account icon — seed it with `connectionInfo.identity.id` to
+// render the same icon Swarm ID shows for that account
+export { identiconSvg } from "./utils/identicon"
+
 // Cross-tab coalescing: run a task at most once per window across same-origin tabs
 export { runCoalescedAcrossTabs } from "./utils/coalesced-task"
 
