@@ -5,6 +5,7 @@ import {
   SwarmIdClient,
   formatTTL,
   DEFAULT_BEE_NODE_URL,
+  type Avatar,
   type ConnectionInfo,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
@@ -13,6 +14,7 @@ import { logStore } from './log.svelte'
 const PROXY_PATH = '/proxy'
 const CLIENT_TIMEOUT = 600000 // 10 minutes for large file uploads
 const STAMP_USABLE_POLL_INTERVAL = 10000 // fresh batches become usable after ~30s
+const AVATAR_SIZE = 48
 // Cap re-polling — on a public gateway the Bee node never learns about the
 // batch, so the proxy keeps reporting the stored snapshot and the stamp
 // would otherwise be polled forever.
@@ -51,6 +53,7 @@ let canUpload = $state(false)
 let storagePartitioned = $state(false)
 let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailable')
 let identity = $state<IdentityInfo | undefined>(undefined)
+let avatar = $state<Avatar | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
@@ -168,6 +171,11 @@ async function onConnectionChange(info: ConnectionInfo) {
     currentIdentityId = id
     currentIdentityName = name
     identity = { id, name, address, publicKey }
+    const resolved = await client?.getAvatar({ size: AVATAR_SIZE })
+    // A newer snapshot may have landed while the avatar resolved.
+    if (generation === connectionGeneration) {
+      avatar = resolved
+    }
   } else {
     if (currentIdentityId) {
       logStore.log(`Disconnected from identity "${currentIdentityName}"`)
@@ -175,6 +183,7 @@ async function onConnectionChange(info: ConnectionInfo) {
       currentIdentityName = undefined
     }
     identity = undefined
+    avatar = undefined
   }
 
   appKey = info.appKey
@@ -204,6 +213,9 @@ export const clientStore = {
   },
   get identity() {
     return identity
+  },
+  get avatar() {
+    return avatar
   },
   get appKey() {
     return appKey
@@ -337,6 +349,7 @@ export const clientStore = {
     storagePartitioned = false
     uploadMode = 'unavailable'
     identity = undefined
+    avatar = undefined
     appKey = undefined
     stamp = undefined
     partition = undefined

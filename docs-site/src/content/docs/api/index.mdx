@@ -1474,6 +1474,8 @@ import type {
   ClientOptions,
   AuthStatus,
   ConnectionInfo,
+  Avatar,
+  AvatarSource,
   PostageBatch,
   NodeInfo,
   AppMetadata,
@@ -1512,31 +1514,59 @@ import type {
 
 ---
 
-## Account Icon
+## Avatars
 
-### `identiconSvg(seed, size?)`
+Every account has an avatar. Today it is generated from the account's identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. Accounts will be able to upload their own, which is why the client method is async and returns a URL rather than markup.
 
-Render the deterministic account icon as a standalone SVG string. Seeding it with `connectionInfo.identity.id` gives your app exactly the icon Swarm ID shows for that account, so the user recognises the same avatar in both places. No network access and no other dependency — the icon is derived from the seed alone.
+### `getAvatar(options?)`
+
+Avatar of the connected identity, ready to render.
 
 **Parameters:**
 
-| Parameter | Type     | Description                                        |
-| --------- | -------- | -------------------------------------------------- |
-| `seed`    | `string` | Value the icon is derived from — use `identity.id` |
-| `size`    | `number` | Width and height in pixels (default `40`)          |
+| Parameter      | Type     | Description                               |
+| -------------- | -------- | ----------------------------------------- |
+| `options.size` | `number` | Width and height in pixels (default `40`) |
+
+**Returns:** `Promise<Avatar | undefined>` — `undefined` when no identity is connected
+
+| Property | Type          | Description                                                                         |
+| -------- | ------------- | ----------------------------------------------------------------------------------- |
+| `source` | `"generated"` | Where the image came from. `generated` is the fallback derived from the identity id |
+| `url`    | `string`      | Renderable as an `<img>` source; a `data:` URL for generated avatars                |
+
+```typescript
+const avatar = await client.getAvatar({ size: 48 })
+if (avatar) {
+  document.querySelector('img.avatar').src = avatar.url
+}
+```
+
+Check `source` rather than assuming an inline SVG — an uploaded avatar is a bitmap fetched from Swarm.
+
+### `generatedAvatarSvg(seed, size?)`
+
+The generated avatar as a standalone SVG string, for callers that want to inline the markup instead of pointing an `<img>` at a URL. Derived from the seed alone: no network access, no other dependency.
+
+**Parameters:**
+
+| Parameter | Type     | Description                                          |
+| --------- | -------- | ---------------------------------------------------- |
+| `seed`    | `string` | Value the avatar is derived from — use `identity.id` |
+| `size`    | `number` | Width and height in pixels (default `40`)            |
 
 **Returns:** `string` — a complete `<svg>` element
 
 ```typescript
-import { identiconSvg } from '@snaha/swarm-id'
+import { generatedAvatarSvg } from '@snaha/swarm-id'
 
 const identity = client.connectionInfo.identity
 if (identity) {
-  document.getElementById('avatar').innerHTML = identiconSvg(identity.id, 48)
+  document.getElementById('avatar').innerHTML = generatedAvatarSvg(identity.id, 48)
 }
 ```
 
-The same seed always produces the same icon, so it is safe to render on every `onConnectionChange` without caching.
+The same seed always produces the same image, so it is safe to render on every `onConnectionChange` without caching. `generatedAvatar(seed, size?)` is also exported, returning the same image as an `Avatar` with a `data:` URL.
 
 ---
 

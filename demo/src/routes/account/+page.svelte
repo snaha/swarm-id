@@ -4,13 +4,10 @@
 -->
 
 <script lang="ts">
-  import { identiconSvg } from '@snaha/swarm-id'
-
   import { Card, CardHeader, CardTitle, CardDescription } from '$lib/components/ui/card'
   import { clientStore } from '$lib/stores/client.svelte'
 
   const COPY_RESET_MS = 2000
-  const ICON_SIZE = 48
 
   let copiedField = $state<string | undefined>(undefined)
 
@@ -40,10 +37,14 @@
       </CardHeader>
       <div class="px-6 pb-6 space-y-3 p-6">
         <div class="flex items-center gap-3">
-          <div class="shrink-0 overflow-hidden rounded-lg leading-none">
-            <!-- eslint-disable-next-line svelte/no-at-html-tags -- deterministic SVG from the lib, not user input -->
-            {@html identiconSvg(clientStore.identity.id, ICON_SIZE)}
-          </div>
+          {#if clientStore.avatar}
+            <img
+              src={clientStore.avatar.url}
+              alt=""
+              class="size-12 shrink-0 rounded-lg"
+              data-avatar-source={clientStore.avatar.source}
+            />
+          {/if}
           <div>
             <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
               Name

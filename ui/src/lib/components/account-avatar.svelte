@@ -4,11 +4,11 @@
 -->
 
 <!--
-  Polycon — polygon-based identicon. The generator lives in the lib so dApps
-  render the same icon for an account as this UI does.
+  An account's avatar, rendered inline. The generator lives in the lib so dApps
+  show the same avatar for an account as this UI does.
 -->
 <script lang="ts">
-  import { identiconSvg } from '@snaha/swarm-id'
+  import { generatedAvatarSvg } from '@snaha/swarm-id'
 
   interface Props {
     value: string
@@ -18,16 +18,16 @@
 
   let { value, size = 40, class: className }: Props = $props()
 
-  const svg = $derived(identiconSvg(value, size))
+  const svg = $derived(generatedAvatarSvg(value, size))
 </script>
 
-<div class="polycon {className ?? ''}" style="width: {size}px; height: {size}px;">
+<div class="account-avatar {className ?? ''}" style="width: {size}px; height: {size}px;">
   <!-- eslint-disable-next-line svelte/no-at-html-tags -- SVG is generated internally from deterministic hash, not user input -->
   {@html svg}
 </div>
 
 <style>
-  .polycon {
+  .account-avatar {
     display: inline-flex;
     align-items: center;
     justify-content: center;

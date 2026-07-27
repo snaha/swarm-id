@@ -5,7 +5,7 @@
 
 <!--
   Bordered account rows for the chooser screens (connect popup, home chooser):
-  identicon, name, truncated address, and a right-side slot. The slot shows the
+  avatar, name, truncated address, and a right-side slot. The slot shows the
   "Check storage" action when the account has drives needing attention (and
   `oncheckstorage` is wired) — taking PRIORITY over any `badge` text, so
   "Signed out" and the storage warning never show together. The action is a
@@ -13,8 +13,8 @@
   wrapper with the select button underneath and the slot overlaid on the right.
 -->
 <script lang="ts">
+  import AccountAvatar from '$lib/components/account-avatar.svelte'
   import AlertFill from '$lib/components/icons/alert-fill.svelte'
-  import Polycon from '$lib/components/polycon.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import { accountNeedsStorageAttention } from '$lib/drives'
@@ -46,7 +46,11 @@
           : ''}"
       onclick={() => onselect(account)}
     >
-      <Polycon value={account.id.toHex()} size={36} class="shrink-0 overflow-hidden rounded-md" />
+      <AccountAvatar
+        value={account.id.toHex()}
+        size={36}
+        class="shrink-0 overflow-hidden rounded-md"
+      />
       <span class="flex min-w-0 flex-1 flex-col">
         <span class="truncate text-sm font-medium">{account.name}</span>
         <span class="text-xs">

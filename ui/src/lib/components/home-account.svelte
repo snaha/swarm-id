@@ -23,11 +23,11 @@
   import type { AccessMethod } from '@snaha/swarm-id'
 
   import { createAttemptTracker } from '$lib/attempt'
+  import AccountAvatar from '$lib/components/account-avatar.svelte'
   import DeleteAccountDialog from '$lib/components/delete-account-dialog.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
   import NewPasswordFields, { isNewPasswordValid } from '$lib/components/new-password-fields.svelte'
   import PhraseGrid from '$lib/components/phrase-grid.svelte'
-  import Polycon from '$lib/components/polycon.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -321,7 +321,11 @@
     {#if expanded.identity}
       <div class="flex w-full items-center gap-2 pl-5">
         <Input bind:value={name} onchange={onNameChange} />
-        <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />
+        <AccountAvatar
+          value={account.id.toHex()}
+          size={32}
+          class="shrink-0 overflow-hidden rounded-lg"
+        />
       </div>
     {/if}
   </div>

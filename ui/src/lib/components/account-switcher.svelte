@@ -6,9 +6,9 @@
 <script lang="ts">
   import { resolve } from '$app/paths'
 
+  import AccountAvatar from '$lib/components/account-avatar.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
-  import Polycon from '$lib/components/polycon.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
@@ -76,13 +76,17 @@
           {truncateAddress(account.id.toChecksum())}
         </span>
       </span>
-      <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />
+      <AccountAvatar
+        value={account.id.toHex()}
+        size={32}
+        class="shrink-0 overflow-hidden rounded-lg"
+      />
     </Button>
   {/snippet}
 
   <div class="flex flex-col gap-2">
     <div class="flex flex-col items-center gap-2 pt-0.5">
-      <Polycon value={account.id.toHex()} size={48} class="overflow-hidden rounded-lg" />
+      <AccountAvatar value={account.id.toHex()} size={48} class="overflow-hidden rounded-lg" />
       <div class="flex flex-col items-center">
         <p class="text-sm font-medium">{account.name}</p>
         <p class="text-muted-foreground text-xs">{truncateAddress(account.id.toChecksum())}</p>
@@ -111,7 +115,7 @@
       <div class="flex flex-col">
         {#each others as candidate (candidate.id.toHex())}
           <DropdownMenuItem class="h-auto gap-2 p-1" onclick={() => select(candidate)}>
-            <Polycon
+            <AccountAvatar
               value={candidate.id.toHex()}
               size={36}
               class="shrink-0 overflow-hidden rounded-md"

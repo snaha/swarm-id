@@ -2,12 +2,27 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Polycon — polygon-based identicon generator.
+ * Account avatars. Every account has a generated one derived from its id;
+ * accounts that upload their own will report a different {@link Avatar.source}.
  *
- * Based on Polycon by Christian Montoya (https://github.com/Montoya/polycon).
- * Original algorithm: SDBM hash → 2×2 grid of triangles/squares with color
- * pairs. Adapted here with a custom brand color palette.
+ * The generator is Polycon by Christian Montoya
+ * (https://github.com/Montoya/polycon). Original algorithm: SDBM hash → 2×2
+ * grid of triangles/squares with color pairs. Adapted here with a custom brand
+ * color palette.
  */
+
+/** Where an {@link Avatar} image came from. */
+export type AvatarSource = "generated"
+
+export interface Avatar {
+  /** `generated` is the fallback derived from the identity id. */
+  source: AvatarSource
+  /**
+   * Renderable as an `<img>` source. A `data:` URL for generated avatars;
+   * uploaded ones will resolve to the image on Swarm.
+   */
+  url: string
+}
 
 const NEAR_WHITE = "#FCFCFC"
 const NEAR_BLACK = "#131416"
@@ -97,16 +112,17 @@ function sdbmHash(value: string): number {
 }
 
 /**
- * Render a deterministic identicon for `seed` as a standalone SVG string.
+ * Render an account's generated avatar as a standalone SVG string.
  *
- * The same seed always yields the same icon, so a dApp passing the identity id
- * from `ConnectionInfo` renders exactly the icon Swarm ID shows for that
- * account.
+ * The same seed always yields the same image, so a dApp passing the identity
+ * id from `ConnectionInfo` renders exactly the avatar Swarm ID shows for that
+ * account. Prefer `SwarmIdClient.getAvatar()`, which falls back to this only
+ * while the account has no avatar of its own.
  *
- * @param seed - Value the icon is derived from (e.g. `connectionInfo.identity.id`)
+ * @param seed - Value the avatar is derived from (e.g. `connectionInfo.identity.id`)
  * @param size - Width and height in pixels
  */
-export function identiconSvg(seed: string, size = DEFAULT_SIZE): string {
+export function generatedAvatarSvg(seed: string, size = DEFAULT_SIZE): string {
   const padded =
     seed.length < MIN_SEED_LENGTH ? seed.padEnd(MIN_SEED_LENGTH, " ") : seed
   const hash = sdbmHash(padded)
@@ -173,4 +189,20 @@ export function identiconSvg(seed: string, size = DEFAULT_SIZE): string {
   }
 
   return `<svg xmlns="http://www.w3.org/2000/svg" width="${size}" height="${size}" viewBox="0 0 ${size} ${size}"><rect width="${size}" height="${size}" fill="${background}"/><path d="${pathData}" fill="${foreground}"/></svg>`
+}
+
+/**
+ * The generated avatar for `seed` as a renderable {@link Avatar}.
+ *
+ * @param seed - Value the avatar is derived from (e.g. `connectionInfo.identity.id`)
+ * @param size - Width and height in pixels
+ */
+export function generatedAvatar(seed: string, size = DEFAULT_SIZE): Avatar {
+  const svg = generatedAvatarSvg(seed, size)
+  return {
+    source: "generated",
+    // Percent-encoded rather than base64: the markup is ASCII, and this keeps
+    // the URL readable in devtools.
+    url: `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`,
+  }
 }

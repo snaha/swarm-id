@@ -82,6 +82,7 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
+import { type Avatar, generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
@@ -917,6 +918,32 @@ export class SwarmIdClient {
       throw new Error("SwarmIdClient connectionInfo not yet available.")
     }
     return this.lastConnectionInfo
+  }
+
+  /**
+   * Avatar of the connected identity, ready to render as an `<img>` source.
+   *
+   * Today every account uses the avatar generated from its id, so this
+   * resolves immediately. It is async because an account will be able to
+   * upload its own, which has to be fetched from Swarm — check
+   * {@link Avatar.source} rather than assuming an inline SVG.
+   *
+   * @param options.size - Width and height in pixels
+   * @returns The avatar, or `undefined` when no identity is connected
+   *
+   * @example
+   * ```typescript
+   * const avatar = await client.getAvatar({ size: 48 })
+   * if (avatar) {
+   *   document.querySelector('img.avatar').src = avatar.url
+   * }
+   * ```
+   */
+  async getAvatar(
+    options: { size?: number } = {},
+  ): Promise<Avatar | undefined> {
+    const { identity } = this.connectionInfo
+    return identity ? generatedAvatar(identity.id, options.size) : undefined
   }
 
   // ============================================================================

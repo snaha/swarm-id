@@ -22,9 +22,9 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
+  import AccountAvatar from '$lib/components/account-avatar.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
-  import Polycon from '$lib/components/polycon.svelte'
   import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select, type SelectOption } from '$lib/components/ui/select'
@@ -36,7 +36,7 @@
   import { truncateAddress } from '$lib/utils'
 
   const TOAST_DURATION_MS = 4000
-  const IDENTICON_SIZE = 80
+  const AVATAR_SIZE = 80
 
   const account = $derived(
     sessionStore.currentAccountId ? accountsStore.get(sessionStore.currentAccountId) : undefined,
@@ -92,9 +92,9 @@
     <main class="flex w-full flex-1 flex-col items-center justify-center px-8 pb-24">
       <div class="flex w-full max-w-96 flex-col items-center gap-8">
         <div class="flex w-full flex-col items-center gap-4">
-          <Polycon
+          <AccountAvatar
             value={account.id.toHex()}
-            size={IDENTICON_SIZE}
+            size={AVATAR_SIZE}
             class="shrink-0 overflow-hidden rounded-lg"
           />
           <div class="flex w-full flex-col items-center gap-2 text-center">
