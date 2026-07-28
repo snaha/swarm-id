@@ -570,8 +570,9 @@ export const UploadModeSchema = z.enum([
 export type UploadMode = z.infer<typeof UploadModeSchema>
 
 /**
- * Where an avatar image came from. `generated` is the one derived from the
- * identity id, which every account has until it uploads its own.
+ * Where an avatar image came from. Only `generated` — derived from the
+ * identity id — exists today; a union so another kind of image could be
+ * added without reshaping the value.
  */
 export const AvatarSourceSchema = z.enum(["generated"])
 
@@ -580,8 +581,9 @@ export type AvatarSource = z.infer<typeof AvatarSourceSchema>
 export const AvatarSchema = z.object({
   source: AvatarSourceSchema,
   /**
-   * Renderable as an `<img>` source. A `data:` URL for generated avatars;
-   * uploaded ones resolve to the image on Swarm.
+   * Renderable as an `<img>` source; a `data:` URL for generated avatars. A
+   * URL rather than markup, so the shape does not assume the image is an SVG
+   * the caller could regenerate.
    */
   url: z.string(),
 })

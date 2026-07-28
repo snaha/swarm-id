@@ -1517,7 +1517,7 @@ import type {
 
 ## Avatars
 
-Every account has an avatar. Today it is generated from the account's identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. Accounts will be able to upload their own, so treat the avatar as an image at a URL rather than as markup you can regenerate.
+Every account has an avatar, generated from its identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. It is handed to you as an image at a URL rather than as markup, so the shape still holds if an avatar ever comes from somewhere other than the generator.
 
 It arrives already resolved on every connection snapshot — there is nothing to call:
 
@@ -1530,16 +1530,16 @@ if (identity) {
 
 **`Avatar`:**
 
-| Property | Type          | Description                                                                         |
-| -------- | ------------- | ----------------------------------------------------------------------------------- |
-| `source` | `"generated"` | Where the image came from. `generated` is the fallback derived from the identity id |
-| `url`    | `string`      | Renderable as an `<img>` source; a `data:` URL for generated avatars                |
+| Property | Type          | Description                                                                             |
+| -------- | ------------- | --------------------------------------------------------------------------------------- |
+| `source` | `"generated"` | Where the image came from. Only `generated`, derived from the identity id, exists today |
+| `url`    | `string`      | Renderable as an `<img>` source; a `data:` URL for generated avatars                    |
 
-Check `source` rather than assuming an inline SVG — an uploaded avatar is a bitmap fetched from Swarm.
+Branch on `source` rather than assuming the URL always wraps an inline SVG — that keeps your code correct if another kind of image is ever added.
 
 ### `getAvatar(options?)`
 
-The avatar at a specific size. Most apps do not need this — `identity.avatar` is already resolved and, being vector today, scales to any size with CSS. Reach for it when you need the image rendered at a particular pixel size; it is async because an uploaded avatar has to be re-fetched at that size.
+The avatar at a specific size. Most apps do not need this — `identity.avatar` is already resolved and, being vector today, scales to any size with CSS. Reach for it when you need the image rendered at a particular pixel size. It is async so that honouring a size may involve fetching, which anything but the generated avatar would.
 
 **Parameters:**
 

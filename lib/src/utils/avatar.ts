@@ -2,8 +2,9 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Account avatars. Every account has a generated one derived from its id;
- * accounts that upload their own will report a different {@link Avatar.source}.
+ * Account avatars. Every account has one generated from its id, which
+ * {@link Avatar.source} reports — leaving room for another kind of image
+ * should one ever be added.
  *
  * The generator is Polycon by Christian Montoya
  * (https://github.com/Montoya/polycon). Original algorithm: SDBM hash → 2×2

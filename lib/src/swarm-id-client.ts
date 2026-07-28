@@ -926,8 +926,8 @@ export class SwarmIdClient {
    *
    * Most callers want `connectionInfo.identity.avatar` instead — it is already
    * resolved on every snapshot and needs no call. Reach for this only to
-   * render at a size the default does not suit; it is async because an
-   * uploaded avatar has to be re-fetched at that size.
+   * render at a size the default does not suit. Async so that honouring a size
+   * may involve fetching, which anything but the generated avatar would.
    *
    * @param options.size - Width and height in pixels
    * @returns The avatar, or `undefined` when no identity is connected
@@ -939,8 +939,8 @@ export class SwarmIdClient {
     if (!identity) {
       return undefined
     }
-    // Only a generated avatar can be re-rendered from the id — an uploaded one
-    // is served as-is until there is a resize path for it.
+    // Only a generated avatar can be re-rendered from the id; any other kind
+    // is served as-is.
     return options.size !== undefined && identity.avatar.source === "generated"
       ? generatedAvatar(identity.id, options.size)
       : identity.avatar
