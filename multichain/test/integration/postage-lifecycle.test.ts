@@ -15,7 +15,6 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { MultichainClient, localAnvilSettings } from "../../src/index"
-import { RollingValueProvider } from "cafe-utility"
 import { createLocalBatch, fundLocalAccount } from "../../src/dev"
 import { isAnvilReachable } from "./anvil"
 
@@ -28,7 +27,6 @@ const XDAI_GAS_FUNDING = 50_000_000_000_000_000n // 0.05 xDAI
 describe.skipIf(!anvilReachable)("postage lifecycle on anvil", () => {
   const settings = localAnvilSettings()
   const client = new MultichainClient(settings)
-  const rpcProvider = new RollingValueProvider(settings.rpcUrls)
   const ownerPrivateKey = generatePrivateKey()
   const owner = privateKeyToAccount(ownerPrivateKey).address
 
@@ -47,13 +45,11 @@ describe.skipIf(!anvilReachable)("postage lifecycle on anvil", () => {
     await fundLocalAccount(
       { to: owner, xdai: XDAI_GAS_FUNDING, bzzPlur: topUpTotal * 2n },
       settings,
-      rpcProvider,
     )
 
     const created = await createLocalBatch(
       { owner, depth: DEPTH, amountPerChunk: minimumPerChunk * 3n },
       settings,
-      rpcProvider,
     )
     batchId = created.batchId
   })
@@ -111,7 +107,6 @@ describe.skipIf(!anvilReachable)("postage lifecycle on anvil", () => {
     await fundLocalAccount(
       { to: stranger, xdai: XDAI_GAS_FUNDING, bzzPlur: 0n },
       settings,
-      rpcProvider,
     )
 
     const hash = await client.increaseDepth({

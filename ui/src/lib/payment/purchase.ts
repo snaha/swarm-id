@@ -132,56 +132,79 @@ export function extendedStamp(
   }
 }
 
-/** A dilution plan: the node operations' outcomes as local-record patches. */
-export interface DilutionPlan {
-  /** Batch state right after the dilute lands (per-chunk balance divided). */
-  afterDilute: StampUpdate
-  /** Extra per-chunk PLUR restoring the original lifespan; `0n` when shrinking. */
-  topUpAmount: bigint
-  /** Batch state after the compensating top-up (equals `afterDilute` when none). */
-  afterTopUp: StampUpdate
+/** Seconds of lifespan a per-chunk balance funds at `lastPrice` (PLUR per
+ * chunk per block); undefined on a zero price (dev chains without an oracle —
+ * no finite expiry to render). */
+export function ttlSecondsFor(perChunk: bigint, lastPrice: bigint): number | undefined {
+  if (perChunk <= 0n) {
+    return 0
+  }
+  if (lastPrice <= 0n) {
+    return undefined
+  }
+  return Number(perChunk / lastPrice) * GNOSIS_BLOCK_TIME
 }
 
 /**
- * Plan a dilution to `newDepth`. Dilution spreads the fixed deposit across
- * 2^(Δdepth) more chunks, dividing the per-chunk balance — and so the remaining
- * lifespan — by that factor. When `keepLifespan` is set, `topUpAmount` is the
- * extra per-chunk balance that restores the original lifespan; otherwise it is
- * `0n` and the lifespan shrinks. `remainingTtl` is the drive's CURRENT remaining
- * lifespan (see {@link extendedStamp}). The two node calls are separate
- * transactions, so the plan exposes both intermediate states — a failed top-up
- * leaves the batch at `afterDilute`, which the caller must record before
- * retrying the top-up alone.
+ * An on-chain resize plan. Order is contract-mandated: the compensating top-up
+ * runs FIRST (at the old depth), then `increaseDepth` — the contract checks
+ * the post-dilution per-chunk balance against the ~24h minimum BEFORE any
+ * compensation, so the node-era dilute-then-top-up order reverts exactly in
+ * the common keep-lifespan case.
  */
-export function dilutedStamp(
-  stamp: PostageStamp,
+export interface ResizePlan {
+  newDepth: number
+  /** Extra per-chunk PLUR topped up at the OLD depth, before the increase. */
+  topUpAmount: bigint
+  /** True when the contract's minimum-balance floor forced `topUpAmount`
+   * above what the lifespan goal alone required. */
+  clampedToFloor: boolean
+  /** Record patch once the top-up lands: depth unchanged, lifespan grown —
+   * the benign intermediate state a failed increase leaves behind. */
+  afterTopUp: StampUpdate
+  /** Final record patch once increaseDepth lands. */
+  afterDilute: StampUpdate
+}
+
+/**
+ * Plan a resize to `newDepth` from the batch's LIVE remaining per-chunk
+ * balance (chain truth — never the stored `stamp.amount`, which is a stale
+ * snapshot that would over- or under-top). With `keepLifespan`, the top-up
+ * restores the post-dilution balance to the current one (cost = remaining ×
+ * (2^Δ − 1) per chunk, identical in total to the old dilute-first model).
+ * Either way the plan is raised to clear `minimumInitialBalancePerChunk`
+ * after division — a plan below the floor would be a guaranteed revert.
+ */
+export function resizePlan(
+  currentDepth: number,
   newDepth: number,
   keepLifespan: boolean,
-  remainingTtl: number | undefined,
-): DilutionPlan {
-  const factor = 2n ** BigInt(Math.max(0, newDepth - stamp.depth))
-  const oldAmount = stamp.amount
-  const dilutedAmount = oldAmount / factor
-  const dilutedTtl =
-    remainingTtl === undefined ? undefined : Math.floor(Math.max(0, remainingTtl) / Number(factor))
+  liveRemaining: bigint,
+  minimumInitialBalancePerChunk: bigint,
+  lastPrice: bigint,
+): ResizePlan {
+  const factor = 2n ** BigInt(Math.max(0, newDepth - currentDepth))
+  const lifespanTopUp = keepLifespan ? liveRemaining * (factor - 1n) : 0n
 
-  const afterDilute: StampUpdate = {
-    depth: newDepth,
-    amount: dilutedAmount,
-    batchTTL: dilutedTtl,
-  }
+  // increaseDepth requires (remaining + topUp) / factor >= minimum.
+  const floorTarget = minimumInitialBalancePerChunk * factor
+  const clampedToFloor = liveRemaining + lifespanTopUp < floorTarget
+  const topUpAmount = clampedToFloor ? floorTarget - liveRemaining : lifespanTopUp
 
-  if (!keepLifespan) {
-    return { afterDilute, topUpAmount: 0n, afterTopUp: afterDilute }
-  }
-
+  const preDilute = liveRemaining + topUpAmount
+  const postDilute = preDilute / factor
   return {
-    afterDilute,
-    topUpAmount: oldAmount - dilutedAmount,
+    newDepth,
+    topUpAmount,
+    clampedToFloor,
     afterTopUp: {
+      amount: preDilute,
+      batchTTL: ttlSecondsFor(preDilute, lastPrice),
+    },
+    afterDilute: {
       depth: newDepth,
-      amount: oldAmount,
-      batchTTL: remainingTtl === undefined ? undefined : Math.max(0, remainingTtl),
+      amount: postDilute,
+      batchTTL: ttlSecondsFor(postDilute, lastPrice),
     },
   }
 }

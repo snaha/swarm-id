@@ -27,6 +27,7 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
+  import { createOwnedBatchOnChain, fundPostageSigner } from '$lib/dev/chain-funding'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
   import {
@@ -150,6 +151,33 @@
       accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
     })()
   })
+  // On-chain drive tooling: fund the account's postage signer and create a
+  // batch it OWNS, so extend/resize can run for real against the local chain.
+  let chainToolBusy = $state(false)
+  let chainToolMessage = $state('')
+  let chainToolError = $state('')
+  const DEV_FUND_BZZ_PLUR = 10_000_000_000_000_000n // 1 BZZ
+
+  async function runChainTool(label: string, action: (derivationKey: string) => Promise<string>) {
+    const account = selectedAccountId
+      ? accountsStore.getAccount(new EthAddress(selectedAccountId))
+      : undefined
+    if (!account) {
+      chainToolError = 'Select an account first.'
+      return
+    }
+    chainToolBusy = true
+    chainToolMessage = ''
+    chainToolError = ''
+    try {
+      chainToolMessage = `${label}: ${await action(account.derivationKey)}`
+    } catch (e) {
+      chainToolError = e instanceof Error ? e.message : String(e)
+    } finally {
+      chainToolBusy = false
+    }
+  }
+
   let beeStamps = $state<
     Array<{
       batchID: string
@@ -969,6 +997,48 @@ Check console logs for details:
             }
           />
         </label>
+      {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">On-chain drive tooling</h3>
+      <p class="text-muted-foreground text-sm">
+        Extend and resize are signed by the account's derived postage signer and sent straight to
+        the PostageStamp contract — no Bee node. On the local chain there is no Relay and no DEX, so
+        these actions stand in for the payment: they move xDAI and BZZ from the bee-compose queen
+        account. With <strong>mock purchases</strong> on (above), the drive dialogs fund themselves the
+        same way instead of opening the payment screen.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() =>
+            runChainTool('Funded postage signer', async (key) => {
+              await fundPostageSigner(key, DEV_FUND_BZZ_PLUR)
+              return 'xDAI + BZZ delivered'
+            })}
+        >
+          Fund postage signer
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() => runChainTool('Created owned batch', (key) => createOwnedBatchOnChain(key))}
+        >
+          Create owned batch (depth 20)
+        </Button>
+      </div>
+      <p class="text-muted-foreground text-sm">
+        Uses the account selected under <strong>Assign stamp to account</strong> below. After
+        creating a batch, add it as a drive via <em>Add drive → Use existing</em> with the batch ID and
+        the signer key shown there.
+      </p>
+      {#if chainToolMessage}
+        <p class="text-sm break-all">{chainToolMessage}</p>
+      {/if}
+      {#if chainToolError}
+        <p class="text-destructive text-sm">{chainToolError}</p>
       {/if}
 
       <div class="bg-border my-4 h-px"></div>

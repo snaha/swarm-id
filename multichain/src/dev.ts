@@ -41,8 +41,8 @@ export interface FundLocalAccountOptions {
 export async function fundLocalAccount(
   options: FundLocalAccountOptions,
   settings: MultichainSettings,
-  rpcProvider: RollingValueProvider<string>,
 ): Promise<void> {
+  const rpcProvider = new RollingValueProvider(settings.rpcUrls)
   if (options.xdai > 0n) {
     const hash = await transferNative(
       {
@@ -97,8 +97,8 @@ function randomNonce(): `0x${string}` {
 export async function createLocalBatch(
   options: CreateLocalBatchOptions,
   settings: MultichainSettings,
-  rpcProvider: RollingValueProvider<string>,
 ): Promise<CreateBatchResult> {
+  const rpcProvider = new RollingValueProvider(settings.rpcUrls)
   const totalPlur = options.amountPerChunk << BigInt(options.depth)
   const approveHash = await approveBzz(
     {

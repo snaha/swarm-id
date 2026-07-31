@@ -11,6 +11,7 @@
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
+  import PaymentDialog from '$lib/components/payment-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -22,9 +23,10 @@
     lifespanToSeconds,
     remainingLifespanSeconds,
   } from '$lib/drives'
-  import { topUpStamp } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
-  import { extendedStamp, stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
+  import { type OperationStep, runExtend } from '$lib/payment/drive-operation'
+  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
+  import { stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   const MS_PER_SECOND = 1000
@@ -45,7 +47,11 @@
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
   let currentPrice = $state<bigint | undefined>(undefined)
+  let step = $state<OperationStep>('checking')
   const attempts = createAttemptTracker()
+  // Owns the funding seam: on the dev chain it transfers from the queen, in
+  // production it surfaces the payment dialog and resolves once paid.
+  const funding = createFundingRequester(() => account)
 
   const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
 
@@ -64,20 +70,21 @@
     return stampCostBzz(drive.depth, stampAmountForSeconds(currentPrice, addedSeconds))
   })
 
-  // Best-effort prefetch for the live estimate; proceed() fetches for real (and
-  // therefore retries after a failure), so a miss here only hides the estimate.
+  // Best-effort prefetch for the live estimate; the run fetches for real, so a
+  // miss here only hides the estimate.
   $effect(() => {
     currentChainPrice()
       .then((price) => (currentPrice = price))
       .catch(() => undefined)
   })
 
-  function step(delta: number) {
+  function stepDelta(delta: number) {
     count = String(Math.max(0, (Number(count) || 0) + delta))
   }
 
   function close() {
     attempts.supersede()
+    funding.cancel()
     onClose()
   }
 
@@ -89,22 +96,16 @@
     phase = 'pending'
     errorMessage = ''
     try {
-      // Guarded: closing during the price fetch must not go on to spend.
-      const price = (currentPrice ??= await attempt.guard(currentChainPrice()))
-      const topUpAmount = stampAmountForSeconds(price, addedSeconds)
-      // The drive may have been removed meanwhile (another tab, a sync fold) —
-      // check before spending on the node against a record we'd never show.
-      if (!account.hasLiveStamp(drive.batchID)) {
-        throw new Error('This drive was removed in the meantime.')
-      }
-      // Deliberately unguarded from here: once the top-up is sent the money is
-      // spent, so the record update must land even if the dialog was closed —
-      // only the UI epilogue below is skipped for a superseded attempt.
-      await topUpStamp(drive.batchID.toHex(), topUpAmount)
-      account.updateStamp(
-        drive.batchID,
-        extendedStamp(drive, addedSeconds, topUpAmount, remainingLifespanSeconds(drive)),
-      )
+      // Deliberately unguarded: once a transaction is sent the money is spent,
+      // so the record update must land even if the dialog was closed — only
+      // the UI epilogue below is skipped for a superseded attempt.
+      await runExtend({
+        account,
+        drive,
+        addedSeconds,
+        requestFunding: funding.request,
+        onStep: (next) => (step = next),
+      })
       if (!attempt.current) {
         return
       }
@@ -120,11 +121,13 @@
   }
 </script>
 
-{#if phase !== 'form'}
+{#if funding.pending}
+  <PaymentDialog need={funding.pending} onPaid={funding.resolve} onCancel={funding.cancel} />
+{:else if phase !== 'form'}
   <DriveDialogStatus
     title={drive.name || 'Drive'}
     {phase}
-    pendingLabel="Extending the lifespan…"
+    pendingLabel={describeStep(step, 'extend')}
     {errorMessage}
     onRetry={() => (phase = 'form')}
     onClose={close}
@@ -139,12 +142,12 @@
           size="icon"
           aria-label="Decrease"
           disabled={Number(count) <= 0}
-          onclick={() => step(-1)}
+          onclick={() => stepDelta(-1)}
         >
           <Minus />
         </Button>
         <Input type="number" min="0" bind:value={count} class="flex-1 text-center" />
-        <Button variant="outline" size="icon" aria-label="Increase" onclick={() => step(1)}>
+        <Button variant="outline" size="icon" aria-label="Increase" onclick={() => stepDelta(1)}>
           <Plus />
         </Button>
         <Select options={LIFESPAN_UNIT_OPTIONS} bind:value={unit} class="w-32" />
