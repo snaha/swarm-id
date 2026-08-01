@@ -43,18 +43,47 @@ Deliberate changes from upstream:
 Two local chains, with different fidelity. Prefer the fork when the swap or the
 real contracts matter; prefer bee-compose when you want speed and no network.
 
-### Gnosis fork — the closest thing to production
+### Baked Gnosis chain — real mainnet state, **no internet**
 
-`pnpm dev:fork` (repo root) runs anvil forking Gnosis mainnet on `:8545`, so the
+`test/fixtures/gnosis-fork-state.json` is a state dump taken from a Gnosis
+mainnet fork, committed to the repo. Loading it gives a chain carrying the
 **real** PostageStamp, the **real** BZZ token and the **real** SushiSwap pools
-are all present. The whole production path then runs unmodified against them —
-swap, approve, createBatch, topUp, increaseDepth. The single thing a fork cannot
-reproduce is the cross-chain bridge, so the initial xDAI is minted with anvil's
-`setBalance`; everything downstream of it is genuine.
+with no upstream RPC at all, so the whole production path — swap, approve,
+createBatch, topUp, increaseDepth — runs offline against genuine contracts.
+
+```bash
+pnpm dev:chain:detach     # anvil --load-state <fixture> --chain-id 100
+pnpm test:fork            # full purchase path, offline
+pnpm dev:chain:stop
+```
+
+The one leg a fork cannot reproduce is the cross-chain bridge, so the initial
+xDAI is minted with anvil's `setBalance`; everything downstream is genuine.
+
+Two things to know about the baked chain:
+
+- **It is stateful.** Every run buys BZZ from the real (thin) pool and moves
+  its price, so the suites take an `evm_snapshot` and rewind afterwards.
+  Restarting the container also restores the fixture exactly.
+- **It is a point in time.** Prices, the storage cost and the pool's liquidity
+  are frozen at the block it was taken from. Re-bake when that matters:
+
+```bash
+pnpm dev:chain:bake       # NEEDS INTERNET — forks mainnet, rewrites the fixture
+```
+
+Baking warms every path the offline chain must serve (a fork fetches state
+lazily, and only what was touched lands in the dump), then splices back the
+contracts that are only ever _read_ — a state dump drops those, since nothing
+wrote to them. `scripts/bake.sh` does the whole dance.
+
+### Live Gnosis fork
+
+To test against the chain as it is right now rather than the baked snapshot:
 
 ```bash
 pnpm dev:fork:detach      # anvil --fork-url https://rpc.gnosischain.com
-pnpm test:fork            # full purchase path against real mainnet contracts
+pnpm test:fork
 pnpm dev:fork:stop
 ```
 

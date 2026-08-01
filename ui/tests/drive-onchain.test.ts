@@ -22,6 +22,15 @@ const BEE_NODE_URL = 'http://localhost:1633/'
 const ONCHAIN_TIMEOUT_MS = 120_000
 const PROBE_TIMEOUT_MS = 2000
 
+async function chainRpc(method: string, params: unknown[] = []): Promise<unknown> {
+  const response = await fetch(ANVIL_RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  return ((await response.json()) as { result?: unknown }).result
+}
+
 async function anvilReachable(): Promise<boolean> {
   try {
     const response = await fetch(ANVIL_RPC_URL, {
@@ -105,7 +114,21 @@ async function createAccountWithOnChainDrive(page: Page) {
 
 test.describe.configure({ mode: 'serial' })
 
-test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:bee:detach)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:chain:detach or pnpm dev:bee:detach)')
+
+// Each test buys BZZ on the chain's pool. On a Gnosis fork that pool is the
+// real one and it is thin, so without rewinding, successive tests would move
+// its price and eventually fail to fill. Snapshot/revert keeps every test on
+// identical chain state.
+let snapshot: unknown
+test.beforeEach(async () => {
+  snapshot = await chainRpc('evm_snapshot')
+})
+test.afterEach(async () => {
+  if (snapshot !== undefined) {
+    await chainRpc('evm_revert', [snapshot])
+  }
+})
 
 test('extend tops the batch up on chain and records the longer lifespan', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)

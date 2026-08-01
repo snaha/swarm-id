@@ -42,6 +42,19 @@ export async function isGnosisForkReachable(): Promise<boolean> {
 }
 
 /**
+ * Take a chain snapshot to rewind to. Every run buys BZZ from the real (thin)
+ * pool, so without rewinding, successive runs would move its price until a
+ * swap could no longer fill.
+ */
+export async function snapshot(): Promise<unknown> {
+  return rpc("evm_snapshot", [])
+}
+
+export async function revert(id: unknown): Promise<void> {
+  await rpc("evm_revert", [id])
+}
+
+/**
  * Give an address native xDAI out of thin air — anvil's cheat code. This is
  * the ONE thing a fork cannot do honestly: in production the cross-chain
  * bridge delivers this xDAI. Everything downstream of it is real.

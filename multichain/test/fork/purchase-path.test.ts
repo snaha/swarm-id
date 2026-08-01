@@ -21,10 +21,16 @@
  *   pnpm --filter @swarm-id/multichain test:fork
  */
 
-import { beforeAll, describe, expect, it } from "vitest"
+import { afterAll, beforeAll, describe, expect, it } from "vitest"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { MultichainClient, gnosisMainnetSettings } from "../../src/index"
-import { FORK_RPC_URL, isGnosisForkReachable, setNativeBalance } from "./fork"
+import {
+  FORK_RPC_URL,
+  isGnosisForkReachable,
+  revert,
+  setNativeBalance,
+  snapshot,
+} from "./fork"
 
 const forkUp = await isGnosisForkReachable()
 
@@ -63,8 +69,18 @@ describe.skipIf(!forkUp)("full purchase path on a Gnosis fork", () => {
 
   let minimumPerChunk = 0n
   let batchId: `0x${string}`
+  let restorePoint: unknown
+
+  // The steps below build on each other, so the rewind wraps the whole suite
+  // rather than each test: it returns the chain to the state it was handed.
+  afterAll(async () => {
+    if (restorePoint !== undefined) {
+      await revert(restorePoint)
+    }
+  })
 
   beforeAll(async () => {
+    restorePoint = await snapshot()
     expect(await client.getChainId()).toBe(settings.chainId)
     const constraints = await client.getPostageWriteConstraints()
     expect(constraints.paused).toBe(false)

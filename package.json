@@ -31,7 +31,11 @@
     "dev:fork": "docker run --rm --name gnosis-fork -p 8545:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --fork-url ${GNOSIS_RPC_URL:-https://rpc.gnosischain.com} --host 0.0.0.0 --port 8545",
     "dev:fork:detach": "docker run -d --rm --name gnosis-fork -p 8545:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --fork-url ${GNOSIS_RPC_URL:-https://rpc.gnosischain.com} --host 0.0.0.0 --port 8545",
     "dev:fork:stop": "docker rm -f gnosis-fork",
-    "test:fork": "pnpm --filter @swarm-id/multichain test:fork"
+    "test:fork": "pnpm --filter @swarm-id/multichain test:fork",
+    "dev:chain": "docker run --rm --name gnosis-chain -p 8545:8545 -v \"$PWD/multichain/test/fixtures:/state:ro\" --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --load-state /state/gnosis-fork-state.json --chain-id 100 --host 0.0.0.0 --port 8545",
+    "dev:chain:detach": "docker run -d --rm --name gnosis-chain -p 8545:8545 -v \"$PWD/multichain/test/fixtures:/state:ro\" --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --load-state /state/gnosis-fork-state.json --chain-id 100 --host 0.0.0.0 --port 8545",
+    "dev:chain:stop": "docker rm -f gnosis-chain",
+    "dev:chain:bake": "bash multichain/scripts/bake.sh"
   },
   "devDependencies": {
     "@snaha/bee-compose": "^0.1.5",
