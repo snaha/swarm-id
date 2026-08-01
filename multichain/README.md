@@ -38,10 +38,34 @@ Deliberate changes from upstream:
   5s; mainnet polling is slower), and dropped modules we do not use (USDC,
   token prices, multi-transfer, the deprecated Sushi HTTP API quote).
 
-## Local testing / mocking
+## Local testing
 
-Two legs cannot exist locally — Relay (cross-chain) and SushiSwap (no DEX on
-anvil). Everything else runs for real:
+Two local chains, with different fidelity. Prefer the fork when the swap or the
+real contracts matter; prefer bee-compose when you want speed and no network.
+
+### Gnosis fork — the closest thing to production
+
+`pnpm dev:fork` (repo root) runs anvil forking Gnosis mainnet on `:8545`, so the
+**real** PostageStamp, the **real** BZZ token and the **real** SushiSwap pools
+are all present. The whole production path then runs unmodified against them —
+swap, approve, createBatch, topUp, increaseDepth. The single thing a fork cannot
+reproduce is the cross-chain bridge, so the initial xDAI is minted with anvil's
+`setBalance`; everything downstream of it is genuine.
+
+```bash
+pnpm dev:fork:detach      # anvil --fork-url https://rpc.gnosischain.com
+pnpm test:fork            # full purchase path against real mainnet contracts
+pnpm dev:fork:stop
+```
+
+`simulateWidgetPurchase` (in `src/dev.ts`) reproduces the multichain widget's
+Gnosis-side step list on a fork: a throwaway payer receives xDAI, swaps it for
+BZZ, approves, creates the batch owned by the destination, and hands its
+leftovers over — the same role split the widget has in production.
+
+### bee-compose anvil — fast and offline
+
+No DEX exists there, so BZZ cannot be bought:
 
 - `localAnvilSettings()` targets the bee-compose chain (RPC `:9545`,
   PostageStamp + BZZ TestToken deployed by the cluster).

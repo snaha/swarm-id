@@ -25,8 +25,15 @@ The identity UI is a SvelteKit SPA.
 - **Paid drive operations are node-less**: extend and resize go straight to the PostageStamp
   contract signed by the derived postage signer (`payment/postage-onchain.ts`,
   `payment/drive-operation.ts`), with funding injected as a seam — the in-app payment flow in
-  production, the queen faucet locally. See `docs/Postage-On-Chain-Engine.md` and
+  production, a local faucet in dev. See `docs/Postage-On-Chain-Engine.md` and
   `docs/Drive-Payment-Flow.md`.
+- **Chain settings follow the chain id, never the URL** (`postageChain()` in
+  `payment/postage-onchain.ts`): the endpoint is probed once per URL and the preset chosen from
+  what it answers. That is what lets a **localhost fork of Gnosis** (`pnpm dev:fork`, chain 100
+  with the real contracts and real SushiSwap pools) be driven with the production addresses —
+  the closest local setup to production, and the one to use when the swap matters. A local URL
+  answering as Gnosis never falls back to the public RPCs, so a failed call cannot silently read
+  or write real mainnet. bee-compose (chain 4020) stays the fast offline option.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)

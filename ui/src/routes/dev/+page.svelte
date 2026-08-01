@@ -14,7 +14,6 @@
     fetchChainState,
     formatTTL,
     rejectAfter,
-    resolvePostageStampContractAddress,
     uint8ArrayToHex,
     uploadSOC,
   } from '@snaha/swarm-id'
@@ -34,6 +33,7 @@
     LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS,
     fetchExistingBatchFromChain,
   } from '$lib/payment/contract'
+  import { postageChain } from '$lib/payment/postage-onchain'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
@@ -620,21 +620,26 @@ Check console logs for details:
 
   let importBatchId = $state('')
   let importSignerKey = $state('')
-  let importRpcUrl = $state('http://localhost:9545')
-  // Blank → auto-detect from the RPC (local vs Gnosis mainnet); a value overrides.
+  // Defaults to the shared network setting, like every other dev tool here —
+  // reading a batch from one chain while the app talks to another is a trap.
+  let importRpcUrl = $state(networkSettingsStore.gnosisRpcUrl)
+  // Blank → resolve from the chain the RPC serves; a value overrides.
   let importContractOverride = $state('')
   let importSetDefault = $state(true)
   let importing = $state(false)
   let importMessage = $state('')
   let importError = $state('')
 
-  // Contract address the read will use: the override if set, else auto-detected
-  // from the RPC — local RPC → local anvil deployment, any remote RPC → Gnosis
-  // mainnet (resolvePostageStampContractAddress encodes that rule).
-  const resolvedContract = $derived(
-    resolvePostageStampContractAddress(importRpcUrl.trim(), LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS),
-  )
-  const effectiveContract = $derived(importContractOverride.trim() || resolvedContract)
+  // Contract address the read will use: the override if set, else whichever
+  // deployment the endpoint's CHAIN calls for — a localhost fork of Gnosis
+  // serves the mainnet contracts, so the hostname alone cannot decide.
+  let resolvedContract = $state(LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS)
+  $effect(() => {
+    const url = importRpcUrl.trim()
+    void postageChain(url)
+      .then((chain) => (resolvedContract = chain.settings.addresses.postageStamp))
+      .catch(() => (resolvedContract = LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS))
+  })
 
   async function importBatchById() {
     importError = ''
@@ -655,7 +660,9 @@ Check console logs for details:
 
       const stamp = await fetchExistingBatchFromChain(batchId.toHex(), signerKey, '', {
         rpcUrl: importRpcUrl.trim(),
-        contractAddress: effectiveContract,
+        // Only force an address when the user typed one; otherwise let the
+        // read resolve it from the chain the RPC actually serves.
+        contractAddress: importContractOverride.trim() || undefined,
       })
       if (!stamp) {
         importError =

@@ -12,7 +12,7 @@ import { withTimeout } from '@snaha/swarm-id'
 
 import { prefix0x } from '$lib/crypto/hex'
 import type { FundingNeed } from '$lib/payment/drive-operation'
-import { postageChainClient } from '$lib/payment/postage-onchain'
+import { postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 
 /** Swap slippage/rounding headroom on the quoted xDAI, as the widget uses.
@@ -70,7 +70,7 @@ function priceImpactPercent(
  *   when the trade would move the BZZ pool's price more than we accept.
  */
 export async function quoteFunding(need: FundingNeed): Promise<FundingQuote> {
-  const client = postageChainClient()
+  const client = await postageChain()
   let xdaiForBzzWei = 0n
   if (need.bzz > 0n) {
     const [quoted, reference] = await Promise.all([
@@ -102,7 +102,7 @@ export async function swapDeliveredXdai(derivationKey: string, quote: FundingQuo
   if (quote.bzzPlur === 0n || quote.xdaiForBzzWei === 0n) {
     return
   }
-  const client = postageChainClient()
+  const client = await postageChain()
   const { signerKey, destination } = await derivePostageSigner(derivationKey)
   const hash = await client.swapXdaiToBzz({
     originPrivateKey: prefix0x(signerKey.toHex()) as `0x${string}`,

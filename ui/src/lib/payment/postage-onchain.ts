@@ -14,9 +14,12 @@
  *   so the compensating top-up must run FIRST (see `resizePlan`).
  */
 import type { PrivateKey } from '@ethersphere/bee-js'
-import { type PostageStamp, resolvePostageStampContractAddress, withTimeout } from '@snaha/swarm-id'
+import { type PostageStamp, withTimeout } from '@snaha/swarm-id'
 import {
+  GNOSIS_CHAIN_ID,
+  LOCAL_ANVIL_CHAIN_ID,
   MultichainClient,
+  type MultichainSettings,
   type PostageBatch,
   type PostageWriteConstraints,
   gnosisMainnetSettings,
@@ -24,7 +27,6 @@ import {
 } from '@swarm-id/multichain'
 
 import { prefix0x } from '$lib/crypto/hex'
-import { LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS } from '$lib/payment/contract'
 import { ttlSecondsFor } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
@@ -37,42 +39,82 @@ const CONFIRMATION_TIMEOUT_MS = 90_000
 export const GAS_BUDGET_XDAI_WEI = 5_000_000_000_000_000n // 0.005 xDAI
 
 /**
- * Client for the configured Gnosis RPC. The settings preset follows the RPC's
- * locality exactly like `resolvePostageStampContractAddress`: a local RPC gets
- * the bee-compose anvil preset (chain 4020, dev contract addresses); any
- * remote RPC gets the mainnet preset with the configured URL tried first and
- * the preset's public RPCs as fallback.
+ * Which settings preset a chain id calls for. Resolving by chain id rather
+ * than by URL is what lets a LOCAL anvil forking Gnosis (chain 100, carrying
+ * the real contracts and real pools) be driven with the production addresses
+ * — the closest local setup to the real thing.
  */
-export function postageChainClient(
-  rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
-): MultichainClient {
-  const isLocal =
-    resolvePostageStampContractAddress(rpcUrl, LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS) ===
-    LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS
-  if (isLocal) {
-    const settings = localAnvilSettings()
-    return new MultichainClient({ ...settings, rpcUrls: [rpcUrl] })
+function settingsFor(chainId: number, rpcUrl: string): MultichainSettings {
+  if (chainId === LOCAL_ANVIL_CHAIN_ID) {
+    return localAnvilSettings({ rpcUrls: [rpcUrl] })
   }
-  const settings = gnosisMainnetSettings()
-  return new MultichainClient({
-    ...settings,
-    rpcUrls: [rpcUrl, ...settings.rpcUrls.filter((url) => url !== rpcUrl)],
-  })
+  if (chainId === GNOSIS_CHAIN_ID) {
+    // A local node answering as Gnosis is a fork: never fall back to the
+    // public RPCs, or a failed call would silently read REAL mainnet state.
+    const mainnet = gnosisMainnetSettings()
+    return gnosisMainnetSettings({
+      rpcUrls: isLocalUrl(rpcUrl)
+        ? [rpcUrl]
+        : [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)],
+    })
+  }
+  throw new Error(
+    `The configured Gnosis RPC reports chain id ${chainId}, which is neither Gnosis (${GNOSIS_CHAIN_ID}) nor the local dev chain (${LOCAL_ANVIL_CHAIN_ID}). Check the network settings.`,
+  )
 }
 
-/**
- * Refuse to sign against an RPC whose chain doesn't match the settings preset
- * (e.g. `gnosisRpcUrl` pointed at an Ethereum node) — an EIP-155 signature on
- * the wrong chain would just be rejected, but the money-touching path must
- * fail with a message that names the actual problem.
- */
-async function assertExpectedChain(client: MultichainClient): Promise<void> {
-  const actual = await client.getChainId()
-  if (actual !== client.settings.chainId) {
-    throw new Error(
-      `The configured Gnosis RPC reports chain id ${actual} (expected ${client.settings.chainId}). Check the network settings.`,
-    )
+function isLocalUrl(rpcUrl: string): boolean {
+  try {
+    const { hostname } = new URL(rpcUrl)
+    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
+  } catch {
+    return false
   }
+}
+
+const CHAIN_ID_PROBE_TIMEOUT_MS = 5000
+
+/** `eth_chainId` without a client — the client cannot be built until we know it. */
+async function probeChainId(rpcUrl: string): Promise<number> {
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+    signal: AbortSignal.timeout(CHAIN_ID_PROBE_TIMEOUT_MS),
+  })
+  const data = (await response.json()) as { result?: string }
+  if (typeof data.result !== 'string') {
+    throw new Error('The configured Gnosis RPC did not report a chain id.')
+  }
+  return Number(BigInt(data.result))
+}
+
+// One client per RPC URL: the chain a URL serves does not change under us, so
+// the probe is paid once. A failure is never cached — the node may just have
+// been starting up.
+const clients = new Map<string, Promise<MultichainClient>>()
+
+/**
+ * The chain client for the configured Gnosis RPC, built from whichever preset
+ * the endpoint's chain id calls for.
+ * @throws when the endpoint is unreachable or serves an unsupported chain —
+ *   deliberately, since every caller goes on to sign or spend.
+ */
+export function postageChain(
+  rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
+): Promise<MultichainClient> {
+  const existing = clients.get(rpcUrl)
+  if (existing) {
+    return existing
+  }
+  const client = probeChainId(rpcUrl)
+    .then((chainId) => new MultichainClient(settingsFor(chainId, rpcUrl)))
+    .catch((error: unknown) => {
+      clients.delete(rpcUrl)
+      throw error
+    })
+  clients.set(rpcUrl, client)
+  return client
 }
 
 /** The batch-owner key in the 0x-hex form the multichain package signs with. */
@@ -90,15 +132,10 @@ export interface OwnerFunds {
 }
 
 /** Current balances at the batch-owner address. */
-export async function ownerFunds(
-  address: string,
-  client: MultichainClient = postageChainClient(),
-): Promise<OwnerFunds> {
+export async function ownerFunds(address: string, client?: MultichainClient): Promise<OwnerFunds> {
+  const chain = client ?? (await postageChain())
   const owner = prefix0x(address) as `0x${string}`
-  const [xdai, bzz] = await Promise.all([
-    client.getNativeBalance(owner),
-    client.getBzzBalance(owner),
-  ])
+  const [xdai, bzz] = await Promise.all([chain.getNativeBalance(owner), chain.getBzzBalance(owner)])
   return { xdai, bzz }
 }
 
@@ -110,9 +147,10 @@ export async function ownerFunds(
 export async function fundingShortfall(
   address: string,
   bzzPlur: bigint,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<OwnerFunds> {
-  const funds = await ownerFunds(address, client)
+  const chain = client ?? (await postageChain())
+  const funds = await ownerFunds(address, chain)
   return {
     xdai: funds.xdai >= GAS_BUDGET_XDAI_WEI ? 0n : GAS_BUDGET_XDAI_WEI - funds.xdai,
     bzz: funds.bzz >= bzzPlur ? 0n : bzzPlur - funds.bzz,
@@ -126,23 +164,23 @@ export async function fundingShortfall(
 export async function ensureBzzAllowance(
   signerKey: PrivateKey,
   totalPlur: bigint,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<void> {
-  await assertExpectedChain(client)
+  const chain = client ?? (await postageChain())
   const owner = ownerHexKey(signerKey)
   const ownerAddress = signerKey.publicKey().address().toChecksum() as `0x${string}`
-  const spender = client.settings.addresses.postageStamp
-  const allowance = await client.getBzzAllowance(ownerAddress, spender)
+  const spender = chain.settings.addresses.postageStamp
+  const allowance = await chain.getBzzAllowance(ownerAddress, spender)
   if (allowance >= totalPlur) {
     return
   }
-  const hash = await client.approveBzz({
+  const hash = await chain.approveBzz({
     amount: totalPlur,
     originPrivateKey: owner,
     spender,
   })
   await withTimeout(
-    client.waitForTransactionSuccess(hash),
+    chain.waitForTransactionSuccess(hash),
     CONFIRMATION_TIMEOUT_MS,
     'The BZZ approval transaction was not confirmed in time.',
   )
@@ -156,16 +194,16 @@ export async function topUpOnChain(
   signerKey: PrivateKey,
   stamp: Pick<PostageStamp, 'batchID'>,
   amountPerChunk: bigint,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<void> {
-  await assertExpectedChain(client)
-  const hash = await client.topUpBatch({
+  const chain = client ?? (await postageChain())
+  const hash = await chain.topUpBatch({
     originPrivateKey: ownerHexKey(signerKey),
     batchId: batchIdHex(stamp),
     amountPerChunk,
   })
   await withTimeout(
-    client.waitForTransactionSuccess(hash),
+    chain.waitForTransactionSuccess(hash),
     CONFIRMATION_TIMEOUT_MS,
     'The top-up transaction was not confirmed in time.',
   )
@@ -176,16 +214,16 @@ export async function increaseDepthOnChain(
   signerKey: PrivateKey,
   stamp: Pick<PostageStamp, 'batchID'>,
   newDepth: number,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<void> {
-  await assertExpectedChain(client)
-  const hash = await client.increaseDepth({
+  const chain = client ?? (await postageChain())
+  const hash = await chain.increaseDepth({
     originPrivateKey: ownerHexKey(signerKey),
     batchId: batchIdHex(stamp),
     newDepth,
   })
   await withTimeout(
-    client.waitForTransactionSuccess(hash),
+    chain.waitForTransactionSuccess(hash),
     CONFIRMATION_TIMEOUT_MS,
     'The resize transaction was not confirmed in time.',
   )
@@ -205,11 +243,12 @@ export interface PostagePreflight {
  */
 export async function preflightExtend(
   stamp: Pick<PostageStamp, 'batchID'>,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<PostagePreflight> {
+  const chain = client ?? (await postageChain())
   const [batch, constraints] = await Promise.all([
-    client.getPostageBatch(batchIdHex(stamp)),
-    client.getPostageWriteConstraints(),
+    chain.getPostageBatch(batchIdHex(stamp)),
+    chain.getPostageWriteConstraints(),
   ])
   if (!batch) {
     throw new Error('This drive no longer exists on chain — it may have expired.')
@@ -217,7 +256,7 @@ export async function preflightExtend(
   if (constraints.paused) {
     throw new Error("Swarm's payment contract is temporarily paused. Try again later.")
   }
-  const remaining = await client.getRemainingBalance(batchIdHex(stamp))
+  const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
   if (remaining <= 0n) {
     throw new Error('This drive has expired and can no longer be extended.')
   }
@@ -235,9 +274,10 @@ export async function preflightResize(
   stamp: Pick<PostageStamp, 'batchID'>,
   signerKey: PrivateKey,
   newDepth: number,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<PostagePreflight & { alreadyResized: boolean }> {
-  const preflight = await preflightExtend(stamp, client)
+  const chain = client ?? (await postageChain())
+  const preflight = await preflightExtend(stamp, chain)
   const ownerAddress = signerKey.publicKey().address().toChecksum()
   if (preflight.batch.owner.toLowerCase() !== ownerAddress.toLowerCase()) {
     throw new Error('This drive is owned by a different key, so its size cannot be changed here.')
@@ -257,17 +297,18 @@ export async function preflightResize(
 export async function reconcileStampFromChain(
   account: Account,
   stamp: PostageStamp,
-  client: MultichainClient = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<boolean> {
+  const chain = client ?? (await postageChain())
   try {
     const [batch, constraints] = await Promise.all([
-      client.getPostageBatch(batchIdHex(stamp)),
-      client.getPostageWriteConstraints(),
+      chain.getPostageBatch(batchIdHex(stamp)),
+      chain.getPostageWriteConstraints(),
     ])
     if (!batch) {
       return false
     }
-    const remaining = await client.getRemainingBalance(batchIdHex(stamp))
+    const remaining = await chain.getRemainingBalance(batchIdHex(stamp))
     account.updateStamp(stamp.batchID, {
       depth: batch.depth,
       amount: remaining,

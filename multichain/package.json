@@ -25,7 +25,8 @@
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
-    "check:all": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+    "check:all": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
+    "test:fork": "vitest run --config vitest.fork.config.ts"
   },
   "license": "Apache-2.0",
   "dependencies": {

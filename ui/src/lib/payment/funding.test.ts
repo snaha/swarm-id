@@ -9,9 +9,10 @@ const PLUR = 10n ** 16n
 
 const quoteXdaiInForBzzOut = vi.fn()
 vi.mock('$lib/payment/postage-onchain', () => ({
-  postageChainClient: () => ({
-    quoteXdaiInForBzzOut: (bzz: bigint) => quoteXdaiInForBzzOut(bzz),
-  }),
+  postageChain: () =>
+    Promise.resolve({
+      quoteXdaiInForBzzOut: (bzz: bigint) => quoteXdaiInForBzzOut(bzz),
+    }),
 }))
 
 /** Fill BZZ at a fixed rate, degrading by `impactPercent` for the real trade

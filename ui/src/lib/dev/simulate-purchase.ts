@@ -17,11 +17,11 @@
  * exercises end to end (as the drive e2e suite needs), the resulting drive is
  * simply not on any chain.
  */
-import { LOCAL_ANVIL_CHAIN_ID } from '@swarm-id/multichain'
+import { GNOSIS_CHAIN_ID, LOCAL_ANVIL_CHAIN_ID } from '@swarm-id/multichain'
 
 import { createOwnedBatchOnChain } from '$lib/dev/chain-funding'
 import type { BatchEvent } from '$lib/payment/multichain-widget'
-import { postageChainClient } from '$lib/payment/postage-onchain'
+import { postageChain } from '$lib/payment/postage-onchain'
 
 const BATCH_ID_HEX_LENGTH = 64
 const FABRICATED_DEPTH = 20
@@ -44,12 +44,31 @@ function fabricatedBatch(): BatchEvent {
 }
 
 /**
- * Settle a simulated purchase, creating a real local batch when the configured
- * Gnosis RPC is the local dev chain and answering.
+ * True for a chain we may freely spend on: bee-compose, or a Gnosis fork
+ * served from localhost. Real Gnosis is deliberately excluded — no dev toggle
+ * may reach mainnet.
+ */
+function isLocalChain(chainId: number, rpcUrl: string): boolean {
+  if (chainId === LOCAL_ANVIL_CHAIN_ID) {
+    return true
+  }
+  try {
+    const { hostname } = new URL(rpcUrl)
+    const local = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
+    return chainId === GNOSIS_CHAIN_ID && local
+  } catch {
+    return false
+  }
+}
+
+/**
+ * Settle a simulated purchase, creating a REAL batch when the configured
+ * Gnosis RPC is a local chain — bee-compose, or a fork of mainnet where the
+ * widget's whole step list runs against the real contracts.
  */
 export async function simulateBatchPurchase(derivationKey: string): Promise<BatchEvent> {
-  const client = postageChainClient()
-  if (client.settings.chainId !== LOCAL_ANVIL_CHAIN_ID) {
+  const client = await postageChain().catch(() => undefined)
+  if (!client || !isLocalChain(client.settings.chainId, client.settings.rpcUrls[0])) {
     return fabricatedBatch()
   }
   try {

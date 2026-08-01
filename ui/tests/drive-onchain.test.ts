@@ -13,7 +13,10 @@ import { type Page, expect, test } from '@playwright/test'
 
 import { completeCreateFlow } from './helpers'
 
-const ANVIL_RPC_URL = 'http://localhost:9545'
+// Defaults to the bee-compose chain; set CHAIN_RPC_URL=http://localhost:8545
+// to run the identical suite against a Gnosis mainnet fork (`pnpm dev:fork`),
+// where the swap, the BZZ token and the PostageStamp are all the real ones.
+const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 const BEE_NODE_URL = 'http://localhost:1633/'
 /** On-chain work spans several 5s-block confirmations. */
 const ONCHAIN_TIMEOUT_MS = 120_000

@@ -1,6 +1,6 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { postageChainClient } from '$lib/payment/postage-onchain'
+import { postageChain } from '$lib/payment/postage-onchain'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 /** How long a fetched chain price stays fresh. The oracle price moves slowly;
@@ -20,7 +20,7 @@ export async function currentChainPrice(): Promise<bigint> {
   if (cached && cached.url === url && Date.now() - cached.fetchedAt < PRICE_TTL_MS) {
     return cached.price
   }
-  const { lastPrice } = await postageChainClient(url).getPostageWriteConstraints()
+  const { lastPrice } = await (await postageChain(url)).getPostageWriteConstraints()
   cached = { price: lastPrice, fetchedAt: Date.now(), url }
   return lastPrice
 }

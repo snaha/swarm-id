@@ -15,13 +15,14 @@
  * detected and continued rather than repeated.
  */
 import type { PostageStamp } from '@snaha/swarm-id'
+import type { MultichainClient } from '@swarm-id/multichain'
 
 import {
   type OwnerFunds,
   ensureBzzAllowance,
   fundingShortfall,
   increaseDepthOnChain,
-  postageChainClient,
+  postageChain,
   preflightExtend,
   preflightResize,
   reconcileStampFromChain,
@@ -79,15 +80,16 @@ async function ensureFunded(
   bzzNeeded: bigint,
   requestFunding: RequestFunding,
   onStep: ((step: OperationStep) => void) | undefined,
-  client = postageChainClient(),
+  client?: MultichainClient,
 ): Promise<void> {
-  const shortfall: OwnerFunds = await fundingShortfall(destination, bzzNeeded, client)
+  const chain = client ?? (await postageChain())
+  const shortfall: OwnerFunds = await fundingShortfall(destination, bzzNeeded, chain)
   if (shortfall.bzz === 0n && shortfall.xdai === 0n) {
     return
   }
   onStep?.('funding')
   await requestFunding({ destination, bzz: shortfall.bzz, xdai: shortfall.xdai })
-  const remainingShortfall = await fundingShortfall(destination, bzzNeeded, client)
+  const remainingShortfall = await fundingShortfall(destination, bzzNeeded, chain)
   if (remainingShortfall.bzz > 0n || remainingShortfall.xdai > 0n) {
     throw new Error('The payment did not deliver enough funds. You can retry to finish it.')
   }
@@ -106,7 +108,7 @@ export interface ExtendOptions extends RunOptions {
  */
 export async function runExtend(options: ExtendOptions): Promise<void> {
   const { account, drive, addedSeconds, requestFunding, onStep } = options
-  const client = postageChainClient()
+  const client = await postageChain()
   onStep?.('checking')
 
   if (!account.hasLiveStamp(drive.batchID)) {
@@ -152,7 +154,7 @@ export interface ResizeOptions extends RunOptions {
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
   const { account, drive, newDepth, keepLifespan, requestFunding, onStep } = options
-  const client = postageChainClient()
+  const client = await postageChain()
   onStep?.('checking')
 
   if (!account.hasLiveStamp(drive.batchID)) {
@@ -211,7 +213,7 @@ export async function previewResize(
   keepLifespan: boolean,
 ): Promise<{ plan: ResizePlan; currentDepth: number } | undefined> {
   try {
-    const client = postageChainClient()
+    const client = await postageChain()
     const preflight = await preflightExtend(drive, client)
     return {
       plan: resizePlan(

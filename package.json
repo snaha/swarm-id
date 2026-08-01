@@ -27,7 +27,11 @@
     "test:live": "pnpm --filter @snaha/swarm-id test:live",
     "check:all": "pnpm --filter @snaha/swarm-id check:all && pnpm --filter @swarm-id/multichain check:all && pnpm --filter @swarm-id/ui check:all && pnpm --filter @swarm-id/demo check:all",
     "format:all": "pnpm --filter @snaha/swarm-id format && pnpm --filter @swarm-id/multichain format && pnpm --filter @swarm-id/ui format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format && prettier --write .",
-    "format:lib": "pnpm --filter @snaha/swarm-id format"
+    "format:lib": "pnpm --filter @snaha/swarm-id format",
+    "dev:fork": "docker run --rm --name gnosis-fork -p 8545:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --fork-url ${GNOSIS_RPC_URL:-https://rpc.gnosischain.com} --host 0.0.0.0 --port 8545",
+    "dev:fork:detach": "docker run -d --rm --name gnosis-fork -p 8545:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --fork-url ${GNOSIS_RPC_URL:-https://rpc.gnosischain.com} --host 0.0.0.0 --port 8545",
+    "dev:fork:stop": "docker rm -f gnosis-fork",
+    "test:fork": "pnpm --filter @swarm-id/multichain test:fork"
   },
   "devDependencies": {
     "@snaha/bee-compose": "^0.1.5",
