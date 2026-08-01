@@ -1,0 +1,3 @@
+[submodule "vendor/bee-compose"]
+	path = vendor/bee-compose
+	url = https://github.com/snaha/bee-compose.git
