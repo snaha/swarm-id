@@ -18,6 +18,7 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
+  import { simulateBatchPurchase } from '$lib/dev/simulate-purchase'
   import {
     LIFESPAN_UNIT_OPTIONS,
     type LifespanUnit,
@@ -181,6 +182,10 @@
         mocked: devSettingsStore.data.mockStampEnabled,
         mockPopup: devSettingsStore.data.mockStampPopup,
         mockError: devSettingsStore.data.mockStampResult === 'error',
+        // Settle the mock against the local chain when one is configured, so
+        // the simulated purchase yields a real batch the account owns —
+        // extend and resize can then run on it like any bought drive.
+        simulateSettlement: () => simulateBatchPurchase(account.derivationKey),
         onSuccess: (batch) => {
           if (!attempt.current) {
             return

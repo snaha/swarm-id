@@ -961,7 +961,9 @@ Check console logs for details:
       <h3 class="text-lg font-semibold">Mock stamp purchase</h3>
       <p class="text-muted-foreground text-sm">
         Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real cross-chain
-        payment. When enabled, the purchase widget resolves locally after a short delay.
+        payment. With the Gnosis RPC pointed at the local chain the settlement is real: a batch is created
+        on chain, owned by this account's postage signer, so the new drive can be extended and resized
+        straight away. Against any other chain the batch id is fabricated and the drive is backed by nothing.
       </p>
       <label class="flex items-center gap-2">
         <Switch
@@ -1024,15 +1026,20 @@ Check console logs for details:
         <Button
           variant="secondary"
           disabled={chainToolBusy || !selectedAccountId}
-          onclick={() => runChainTool('Created owned batch', (key) => createOwnedBatchOnChain(key))}
+          onclick={() =>
+            runChainTool(
+              'Created owned batch',
+              async (key) => (await createOwnedBatchOnChain(key)).batchId,
+            )}
         >
           Create owned batch (depth 20)
         </Button>
       </div>
       <p class="text-muted-foreground text-sm">
-        Uses the account selected under <strong>Assign stamp to account</strong> below. After
-        creating a batch, add it as a drive via <em>Add drive → Use existing</em> with the batch ID and
-        the signer key shown there.
+        Uses the account selected under <strong>Assign stamp to account</strong> below. For the
+        normal path just use <em>Add drive</em> with mock purchases on — it creates the batch the
+        same way. These buttons are for driving the chain directly: topping the signer up, or making
+        a batch to attach by hand via <em>Add drive → Use existing</em>.
       </p>
       {#if chainToolMessage}
         <p class="text-sm break-all">{chainToolMessage}</p>

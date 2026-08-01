@@ -40,6 +40,12 @@ export interface PurchaseStampOptions {
   mocked?: boolean // For testing - simulate the settlement instead of paying
   mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
   mockError?: boolean // For testing - simulate error instead of success
+  /**
+   * Produces the settlement when `mocked` — supplied by the caller so this
+   * module stays free of dev-only machinery. /dev wires it to a real local
+   * batch creation; without it the mock fabricates one.
+   */
+  simulateSettlement?: () => Promise<BatchEvent>
 }
 
 /** How long to keep listening for a trailing `batch` message after the popup
@@ -214,6 +220,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     mocked,
     mockPopup,
     mockError,
+    simulateSettlement,
   } = options
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
@@ -226,26 +233,41 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     const popup = mockPopup
       ? window.open(buildWidgetUrl(destination, true), 'stamp-purchase', POPUP_FEATURES)
       : undefined
+    let cancelled = false
     const mockTimer = setTimeout(() => {
       popup?.close()
       if (mockError) {
         onError(new Error('Mock error: Purchase failed'))
         return
       }
-      // A 64-character hex batch ID, as the real widget would return.
-      const batchId = (crypto.randomUUID() + crypto.randomUUID())
-        .replace(/-/g, '')
-        .slice(0, BATCH_ID_HEX_LENGTH)
-      settle(onSuccess, onError, {
-        event: 'batch',
-        batchId,
-        depth: MOCK_BATCH_DEPTH,
-        amount: MOCK_BATCH_AMOUNT,
-        blockNumber: '0x' + Math.floor(Date.now() / MS_PER_SECOND).toString(HEX_RADIX),
-      })
+      const settlement =
+        simulateSettlement?.() ??
+        // A 64-character hex batch ID, as the real widget would return.
+        Promise.resolve({
+          event: 'batch' as const,
+          batchId: (crypto.randomUUID() + crypto.randomUUID())
+            .replace(/-/g, '')
+            .slice(0, BATCH_ID_HEX_LENGTH),
+          depth: MOCK_BATCH_DEPTH,
+          amount: MOCK_BATCH_AMOUNT,
+          blockNumber: '0x' + Math.floor(Date.now() / MS_PER_SECOND).toString(HEX_RADIX),
+        })
+      void settlement.then(
+        (batch) => {
+          if (!cancelled) {
+            settle(onSuccess, onError, batch)
+          }
+        },
+        (error: unknown) => {
+          if (!cancelled) {
+            onError(error instanceof Error ? error : new Error('Simulated purchase failed.'))
+          }
+        },
+      )
     }, MOCK_DELAY_MS)
     return {
       cancel: () => {
+        cancelled = true
         clearTimeout(mockTimer)
         popup?.close()
       },

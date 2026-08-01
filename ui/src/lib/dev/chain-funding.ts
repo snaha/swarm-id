@@ -38,32 +38,44 @@ export async function fundPostageSigner(derivationKey: string, bzzPlur: bigint):
   )
 }
 
+/** A batch created on the local chain, in the terms a purchase reports. */
+export interface LocalBatch {
+  batchId: string
+  depth: number
+  /** Initial balance per chunk, in PLUR. */
+  amountPerChunk: bigint
+  /** Block the creation landed in, as the widget reports it (hex). */
+  blockNumber: string
+}
+
 /**
  * Create a batch on the local chain that the account's postage signer OWNS,
  * paid for by the queen — mirroring production, where the payment machinery
- * creates the batch and the derived signer owns it. Returns the batch id.
+ * creates the batch and the derived signer owns it. The signer is also topped
+ * up with gas, since extend and resize are signed by it rather than the payer.
  */
 export async function createOwnedBatchOnChain(
   derivationKey: string,
   depth: number = DEV_BATCH_DEPTH,
-): Promise<string> {
+): Promise<LocalBatch> {
   const { destination } = await derivePostageSigner(derivationKey)
   const settings = localSettings()
   const client = postageChainClient(networkSettingsStore.gnosisRpcUrl)
   const { minimumInitialBalancePerChunk } = await client.getPostageWriteConstraints()
-  const { batchId } = await createLocalBatch(
-    {
-      owner: destination as `0x${string}`,
-      depth,
-      amountPerChunk: minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE,
-    },
+  const amountPerChunk = minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE
+  const { batchId, transactionHash } = await createLocalBatch(
+    { owner: destination as `0x${string}`, depth, amountPerChunk },
     settings,
   )
-  // Gas for the owner's own later operations (the batch creation was paid by
-  // the queen, but extend/resize are signed by the owner).
   await fundLocalAccount(
     { to: destination as `0x${string}`, xdai: DEV_XDAI_FUNDING, bzzPlur: 0n },
     settings,
   )
-  return batchId
+  const receipt = await client.getTransactionReceipt(transactionHash)
+  return {
+    batchId,
+    depth,
+    amountPerChunk,
+    blockNumber: receipt?.blockNumber ?? '0x0',
+  }
 }
