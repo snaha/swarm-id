@@ -26,3 +26,6 @@ vite.config.ts.timestamp-*
 /playwright-report
 /test-results
 .cache
+
+# Screenshot capture output (tests/*.capture.ts)
+/screenshots

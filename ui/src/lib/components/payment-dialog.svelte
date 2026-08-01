@@ -214,10 +214,17 @@
   </Dialog>
 {:else}
   <Dialog onclose={cancel} title={screen === 'method' ? 'Payment' : 'Pay with crypto'}>
-    <Button variant="ghost" size="sm" class="-mt-1 self-start" onclick={back}>
-      <ArrowLeft />
-      Back
-    </Button>
+    {#snippet leading()}
+      <Button
+        variant="ghost"
+        size="icon"
+        class="-mt-1.5 -ml-1.5 size-6 rounded-md [&_svg]:size-3.5"
+        aria-label="Back"
+        onclick={back}
+      >
+        <ArrowLeft />
+      </Button>
+    {/snippet}
 
     {#if screen === 'method'}
       <div class="flex w-full flex-col gap-2">

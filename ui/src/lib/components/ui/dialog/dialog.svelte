@@ -22,6 +22,8 @@
   interface Props {
     /** Omitted for pending states which render their own centered content. */
     title?: string
+    /** Rendered left of the title — e.g. a back arrow in a multi-step flow. */
+    leading?: Snippet
     /** Hide the X button while an operation is pending. */
     dismissable?: boolean
     onclose: () => void
@@ -29,7 +31,7 @@
     children: Snippet
   }
 
-  let { title, dismissable = true, onclose, class: className, children }: Props = $props()
+  let { title, leading, dismissable = true, onclose, class: className, children }: Props = $props()
 
   let panel = $state<HTMLDivElement>()
 
@@ -132,7 +134,10 @@
   >
     {#if title !== undefined}
       <div class="flex items-start justify-between gap-2">
-        <p class="text-sm font-bold">{title}</p>
+        <div class="flex min-w-0 items-center gap-1.5">
+          {#if leading}{@render leading()}{/if}
+          <p class="truncate text-sm font-bold">{title}</p>
+        </div>
         {#if dismissable}
           <Button
             variant="ghost"
