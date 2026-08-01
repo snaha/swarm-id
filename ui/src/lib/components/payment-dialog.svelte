@@ -70,8 +70,12 @@
   const tokenOptions = $derived(
     (PAYMENT_TOKENS[Number(chainId)] ?? []).map((token) => ({
       value: token.address,
-      label: token.symbol,
+      label: `${token.symbol} (${token.name})`,
     })),
+  )
+  const tokenSymbol = $derived(
+    (PAYMENT_TOKENS[Number(chainId)] ?? []).find((token) => token.address === tokenAddress)
+      ?.symbol ?? '',
   )
   const shortAddress = $derived(
     walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
@@ -80,6 +84,21 @@
   function formatAmount(value: bigint, decimals: number): string {
     const asNumber = Number(formatUnits(value, decimals))
     return asNumber.toPrecision(AMOUNT_DIGITS).replace(/\.?0+$/, '')
+  }
+
+  /**
+   * What one leg of the funding costs in the token the user is paying with —
+   * its share of the quoted total, as the designs show each breakdown row
+   * priced in the source token.
+   */
+  function shareOfTotal(partWei: bigint): string {
+    const total = fundingQuote?.xdaiWei ?? 0n
+    const paid = Number(paymentQuote?.amountFormatted ?? '')
+    if (total === 0n || !Number.isFinite(paid) || paid === 0) {
+      return ''
+    }
+    const share = (paid * Number(partWei)) / Number(total)
+    return `${share.toPrecision(AMOUNT_DIGITS).replace(/\.?0+$/, '')} ${tokenSymbol}`
   }
 
   /** Price the Gnosis side once — the same xDAI target drives every quote. */
@@ -275,7 +294,7 @@
               …
             {:else if paymentQuote}
               {paymentQuote.amountFormatted}
-              {tokenOptions.find((option) => option.value === tokenAddress)?.label}
+              {tokenSymbol}
             {:else}
               —
             {/if}
@@ -286,13 +305,13 @@
             {#if fundingQuote.bzzPlur > 0n}
               <div class="flex items-center justify-between gap-2">
                 <span>{formatAmount(fundingQuote.bzzPlur, BZZ_DECIMALS)} xBZZ</span>
-                <span>storage</span>
+                <span>{shareOfTotal(fundingQuote.xdaiForBzzWei)}</span>
               </div>
             {/if}
             {#if fundingQuote.xdaiForGasWei > 0n}
               <div class="flex items-center justify-between gap-2">
                 <span>{formatAmount(fundingQuote.xdaiForGasWei, GNOSIS_DECIMALS)} xDAI</span>
-                <span>network fees</span>
+                <span>{shareOfTotal(fundingQuote.xdaiForGasWei)}</span>
               </div>
             {/if}
           </div>

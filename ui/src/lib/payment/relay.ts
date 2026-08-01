@@ -40,6 +40,8 @@ export interface EthereumProvider {
 export interface PaymentToken {
   address: string
   symbol: string
+  /** Full name, shown alongside the symbol as in the designs ("ETH (Ether)"). */
+  name: string
   decimals: number
 }
 
@@ -47,28 +49,58 @@ export interface PaymentToken {
  * the obvious alternative (matching the designs' Base/USDC example). */
 export const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
   [mainnet.id]: [
-    { address: NATIVE_CURRENCY, symbol: 'ETH', decimals: 18 },
-    { address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48', symbol: 'USDC', decimals: 6 },
+    { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: 18 },
+    {
+      address: '0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+    },
   ],
   [base.id]: [
-    { address: NATIVE_CURRENCY, symbol: 'ETH', decimals: 18 },
-    { address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913', symbol: 'USDC', decimals: 6 },
+    { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: 18 },
+    {
+      address: '0x833589fcd6edb6e08f4c7c32d4f71b54bda02913',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+    },
   ],
   [arbitrum.id]: [
-    { address: NATIVE_CURRENCY, symbol: 'ETH', decimals: 18 },
-    { address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831', symbol: 'USDC', decimals: 6 },
+    { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: 18 },
+    {
+      address: '0xaf88d065e77c8cc2239327c5edb3a432268e5831',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+    },
   ],
   [optimism.id]: [
-    { address: NATIVE_CURRENCY, symbol: 'ETH', decimals: 18 },
-    { address: '0x0b2c639c533813f4aa9d7837caf62653d097ff85', symbol: 'USDC', decimals: 6 },
+    { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: 18 },
+    {
+      address: '0x0b2c639c533813f4aa9d7837caf62653d097ff85',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+    },
   ],
   [polygon.id]: [
-    { address: NATIVE_CURRENCY, symbol: 'POL', decimals: 18 },
-    { address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359', symbol: 'USDC', decimals: 6 },
+    { address: NATIVE_CURRENCY, symbol: 'POL', name: 'Polygon Ecosystem Token', decimals: 18 },
+    {
+      address: '0x3c499c542cef5e3811e1192ce70d8cc03d5c3359',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+    },
   ],
   [gnosis.id]: [
-    { address: NATIVE_CURRENCY, symbol: 'xDAI', decimals: 18 },
-    { address: '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0', symbol: 'USDC', decimals: 6 },
+    { address: NATIVE_CURRENCY, symbol: 'xDAI', name: 'xDAI', decimals: 18 },
+    {
+      address: '0x2a22f9c3b484c3629090feed35f17ff8f88f76f0',
+      symbol: 'USDC',
+      name: 'USD Coin',
+      decimals: 6,
+    },
   ],
 }
 
