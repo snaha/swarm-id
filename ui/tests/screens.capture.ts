@@ -176,6 +176,14 @@ async function stubInjectedWallet(page: Page) {
   })
 }
 
+/** Screenshot after CSS transitions settle, so toggles and buttons are
+ * captured in their final state rather than mid-animation. */
+const TRANSITION_SETTLE_MS = 400
+async function shoot(page: Page, name: string) {
+  await page.waitForTimeout(TRANSITION_SETTLE_MS)
+  await page.screenshot({ path: `${OUT_DIR}/${name}.png` })
+}
+
 function storedDriveDepth(page: Page) {
   return page.evaluate(() => {
     const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
@@ -236,40 +244,40 @@ test('capture: extend, resize and on-chain progress', async ({ page }) => {
   // --- Extend -------------------------------------------------------------
   await page.getByRole('button', { name: 'Extend lifespan' }).click()
   const extend = page.getByRole('dialog')
-  await page.screenshot({ path: `${OUT_DIR}/01-extend-empty.png` })
+  await shoot(page, '01-extend-empty')
 
   await extend.getByRole('combobox').selectOption('days')
   await extend.getByRole('button', { name: 'Increase' }).click()
   await extend.getByRole('button', { name: 'Increase' }).click()
   await expect(extend.getByText(/Estimated cost/)).toBeVisible()
-  await page.screenshot({ path: `${OUT_DIR}/02-extend-filled.png` })
+  await shoot(page, '02-extend-filled')
 
   // Progress while the on-chain sequence runs.
   await extend.getByRole('button', { name: 'Proceed' }).click()
   await expect(page.getByText(/Approving|Extending|Checking|Waiting/)).toBeVisible()
-  await page.screenshot({ path: `${OUT_DIR}/03-extend-progress.png` })
+  await shoot(page, '03-extend-progress')
   await expect(page.getByText('Lifespan extended')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
-  await page.screenshot({ path: `${OUT_DIR}/04-extend-done.png` })
+  await shoot(page, '04-extend-done')
 
   // --- Resize -------------------------------------------------------------
   await page.getByRole('button', { name: 'Increase size' }).click()
   const resize = page.getByRole('dialog')
-  await page.screenshot({ path: `${OUT_DIR}/05-resize-empty.png` })
+  await shoot(page, '05-resize-empty')
 
   await resize.getByRole('combobox').selectOption('21')
   await expect(resize.getByText(/Estimated cost/)).toBeVisible()
-  await page.screenshot({ path: `${OUT_DIR}/06-resize-keep-lifespan.png` })
+  await shoot(page, '06-resize-keep-lifespan')
 
   await resize.getByRole('switch', { name: 'Keep current lifespan' }).click()
   await expect(resize.getByText(/Lifespan reduced to/)).toBeVisible()
-  await page.screenshot({ path: `${OUT_DIR}/07-resize-shorter-lifespan.png` })
+  await shoot(page, '07-resize-shorter-lifespan')
 
   await resize.getByRole('switch', { name: 'Keep current lifespan' }).click()
   await resize.getByRole('button', { name: 'Proceed' }).click()
   await expect(page.getByText(/Checking|Waiting|Approving|Paying|Increasing/)).toBeVisible()
-  await page.screenshot({ path: `${OUT_DIR}/08-resize-progress.png` })
+  await shoot(page, '08-resize-progress')
   await expect(page.getByText('Drive size increased')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
-  await page.screenshot({ path: `${OUT_DIR}/09-resize-done.png` })
+  await shoot(page, '09-resize-done')
 })
 
 test('capture: payment screens', async ({ page }) => {
@@ -305,7 +313,7 @@ test('capture: payment screens', async ({ page }) => {
   await expect(page.getByText('Connect wallet to proceed')).toBeVisible({
     timeout: ONCHAIN_TIMEOUT_MS,
   })
-  await page.screenshot({ path: `${OUT_DIR}/10-payment-method.png` })
+  await shoot(page, '10-payment-method')
 
   // Connected: chain / token / quoted cost with the xBZZ + xDAI breakdown.
   // web3-onboard asks which wallet to use (its own modal) before connecting.
@@ -315,5 +323,5 @@ test('capture: payment screens', async ({ page }) => {
   // Let onboard's own connect modal finish dismissing before capturing.
   await expect(page.getByText('Connection Successful')).toBeHidden({ timeout: 30_000 })
   await expect(page.getByText(/Estimated cost/)).toBeVisible()
-  await page.screenshot({ path: `${OUT_DIR}/11-payment-pay.png` })
+  await shoot(page, '11-payment-pay')
 })

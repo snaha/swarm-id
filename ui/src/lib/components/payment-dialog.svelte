@@ -5,6 +5,7 @@
 
 <script lang="ts">
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
+  import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import Wallet from '@lucide/svelte/icons/wallet'
   import { formatUnits } from 'viem'
@@ -231,10 +232,13 @@
         <span class="text-sm font-medium">Method</span>
         <Select options={[{ value: 'crypto', label: 'Pay with crypto' }]} value="crypto" />
       </div>
-      <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">
+      <p class="bg-muted rounded-md px-3 py-2 text-sm">
         {errorMessage || 'Connect wallet to proceed'}
       </p>
-      <Button class="w-full" onclick={connect}>Connect wallet</Button>
+      <Button class="w-full" onclick={connect}>
+        Connect wallet
+        <ArrowRight />
+      </Button>
     {:else}
       <div
         class="bg-muted flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-sm"

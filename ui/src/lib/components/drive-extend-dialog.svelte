@@ -11,6 +11,7 @@
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
+  import DriveInfoStrip from '$lib/components/drive-info-strip.svelte'
   import PaymentDialog from '$lib/components/payment-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -155,13 +156,13 @@
       <p class="text-muted-foreground text-sm">Estimated until {estimatedUntil}</p>
     </div>
 
-    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">
-      {!changed
-        ? 'No changes made yet.'
-        : estimateBzz
-          ? `Estimated cost ≈ ${estimateBzz} BZZ`
-          : 'Final cost is shown at payment.'}
-    </p>
+    {#if !changed}
+      <DriveInfoStrip label="No changes made yet" />
+    {:else if estimateBzz}
+      <DriveInfoStrip label="Estimated cost" value={`~${estimateBzz} BZZ`} />
+    {:else}
+      <DriveInfoStrip label="Final cost is shown at payment" />
+    {/if}
 
     <Button class="w-full" disabled={!changed} onclick={proceed}>
       Proceed

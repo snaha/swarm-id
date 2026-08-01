@@ -40,7 +40,9 @@
 </script>
 
 {#if phase === 'pending'}
-  <Dialog onclose={onClose} dismissable={false} {title}>
+  <!-- Headerless while working, per the designs: the step label is the whole
+       message, and there is nothing to dismiss or navigate. -->
+  <Dialog onclose={onClose} dismissable={false}>
     <div class="flex flex-col items-center gap-2 py-2 text-center">
       <LoaderCircle class="size-5 animate-spin" />
       <p class="text-sm">{pendingLabel}</p>

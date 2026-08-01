@@ -11,6 +11,7 @@
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
+  import DriveInfoStrip from '$lib/components/drive-info-strip.svelte'
   import PaymentDialog from '$lib/components/payment-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
@@ -60,15 +61,24 @@
 
   // Price the selection against chain truth. A failed read only hides the
   // estimate — proceeding re-reads and plans authoritatively.
+  //
+  // The pending plan is cleared before each read and late replies are dropped:
+  // the chain read is async, so keeping the previous plan on screen would
+  // price the NEW selection with the OLD plan's numbers for a moment, and two
+  // quick changes could otherwise land out of order.
+  let previewRequest = 0
   $effect(() => {
     const depth = Number(newDepth)
     const keep = keepLifespan
+    preview = undefined
     if (!changed) {
-      preview = undefined
       return
     }
+    const request = ++previewRequest
     void previewResize(drive, depth, keep).then((result) => {
-      preview = result?.plan
+      if (request === previewRequest) {
+        preview = result?.plan
+      }
     })
   })
 
@@ -87,23 +97,25 @@
     return formatRemaining(preview.afterDilute.batchTTL).replace(/ left$/, '')
   })
 
-  const infoText = $derived.by(() => {
+  // The strip above the action: a label, plus the figure that matters on the
+  // right when there is one to show.
+  const info = $derived.by<{ label: string; value?: string }>(() => {
     if (!changed) {
-      return 'No changes made yet.'
+      return { label: 'No changes made yet' }
     }
     if (preview?.clampedToFloor) {
       return estimateBzz
-        ? `Resizing needs at least ~1 day of lifespan — estimated cost ≈ ${estimateBzz} BZZ`
-        : 'Resizing needs at least ~1 day of lifespan, so a small top-up is included.'
+        ? { label: 'Includes the ~1 day minimum', value: `~${estimateBzz} BZZ` }
+        : { label: 'Resizing needs at least ~1 day of lifespan' }
     }
     if (keepLifespan) {
       return estimateBzz
-        ? `Estimated cost ≈ ${estimateBzz} BZZ`
-        : 'Keeps your current lifespan — you pay to top up the larger size.'
+        ? { label: 'Estimated cost', value: `~${estimateBzz} BZZ` }
+        : { label: 'Keeps your current lifespan — you pay to top up the larger size' }
     }
     return reducedLifespan
-      ? `Lifespan reduced to ~${reducedLifespan}`
-      : 'Lifespan shortens as the deposit spreads over more storage.'
+      ? { label: 'Lifespan reduced to', value: `~${reducedLifespan}` }
+      : { label: 'Lifespan shortens as the deposit spreads over more storage' }
   })
 
   function close() {
@@ -175,7 +187,7 @@
       </span>
     </div>
 
-    <p class="bg-muted text-muted-foreground rounded-md px-3 py-2 text-sm">{infoText}</p>
+    <DriveInfoStrip label={info.label} value={info.value} />
 
     <Button class="w-full" disabled={!changed} onclick={proceed}>
       Proceed
