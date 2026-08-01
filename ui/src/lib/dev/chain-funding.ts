@@ -28,16 +28,28 @@ import { GAS_BUDGET_XDAI_WEI, postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
-/** Default drive size for the dev batch actions. */
+/** Default drive size for the dev batch actions. Small on a Gnosis chain,
+ * where every chunk of depth costs real BZZ out of a thin pool. */
 const DEV_BATCH_DEPTH = 20
+const DEV_GNOSIS_BATCH_DEPTH = 17
 /** Funds a dev batch well above the contract's ~24h floor. */
 const DEV_BATCH_FLOOR_MULTIPLE = 3n
+/**
+ * Per-chunk funding a Bee node following a Gnosis SNAPSHOT will accept. Such a
+ * node has no chain history to work from, so it synthesises a total-outpayment
+ * baseline of roughly `price × block height` — around 1.14e12 per chunk at the
+ * snapshot's block. A batch created now carries the contract's real
+ * outpayment, which is lower, so anything funded normally is written off as a
+ * `low balance batch` and ignored. Clear the baseline instead.
+ */
+const DEV_GNOSIS_AMOUNT_PER_CHUNK = 1_500_000_000_000n
 /** Generous gas dust so a dev address can run many operations. */
 const DEV_XDAI_FUNDING = GAS_BUDGET_XDAI_WEI * 10n
 /** Bankrolls the fork's throwaway payer: swap input, batch cost and gas. */
-const FORK_PAYER_XDAI = 10n ** 18n // 1 xDAI
-/** Of that, what goes into BZZ — small enough not to move the shallow pool. */
-const FORK_SWAP_XDAI = FORK_PAYER_XDAI / 20n
+const FORK_PAYER_XDAI = 5n * 10n ** 18n // 5 xDAI
+/** Of that, what goes into BZZ — enough to fund a batch the node will accept,
+ * still small against the pool. */
+const FORK_SWAP_XDAI = 2n * 10n ** 18n
 
 function isBeeComposeChain(settings: MultichainSettings): boolean {
   return settings.chainId === LOCAL_ANVIL_CHAIN_ID
@@ -89,15 +101,20 @@ export interface LocalBatch {
  */
 export async function createOwnedBatchOnChain(
   derivationKey: string,
-  depth: number = DEV_BATCH_DEPTH,
+  requestedDepth?: number,
 ): Promise<LocalBatch> {
   const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
   const owner = destination as `0x${string}`
+  const depth =
+    requestedDepth ?? (isBeeComposeChain(chain.settings) ? DEV_BATCH_DEPTH : DEV_GNOSIS_BATCH_DEPTH)
   const { minimumInitialBalancePerChunk } = await chain.getPostageWriteConstraints()
-  const amountPerChunk = minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE
+  const onBeeCompose = isBeeComposeChain(chain.settings)
+  const amountPerChunk = onBeeCompose
+    ? minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE
+    : DEV_GNOSIS_AMOUNT_PER_CHUNK
 
-  const created = isBeeComposeChain(chain.settings)
+  const created = onBeeCompose
     ? await createLocalBatch({ owner, depth, amountPerChunk }, chain.settings)
     : await simulateWidgetPurchase(
         {
