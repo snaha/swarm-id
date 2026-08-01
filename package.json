@@ -35,7 +35,11 @@
     "dev:chain": "docker run --rm --name gnosis-chain -p 8545:8545 -v \"$PWD/multichain/test/fixtures:/state:ro\" --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --load-state /state/gnosis-fork-state.json --chain-id 100 --host 0.0.0.0 --port 8545",
     "dev:chain:detach": "docker run -d --rm --name gnosis-chain -p 8545:8545 -v \"$PWD/multichain/test/fixtures:/state:ro\" --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --load-state /state/gnosis-fork-state.json --chain-id 100 --host 0.0.0.0 --port 8545",
     "dev:chain:stop": "docker rm -f gnosis-chain",
-    "dev:chain:bake": "bash multichain/scripts/bake.sh"
+    "dev:chain:bake": "bash multichain/scripts/bake.sh",
+    "dev:gnosis": "bash dev/gnosis-cluster/up.sh up",
+    "dev:gnosis:detach": "bash dev/gnosis-cluster/up.sh up -d",
+    "dev:gnosis:stop": "bash dev/gnosis-cluster/up.sh down -v",
+    "dev:gnosis:logs": "bash dev/gnosis-cluster/up.sh logs -f bee"
   },
   "devDependencies": {
     "@snaha/bee-compose": "^0.1.5",

@@ -23,3 +23,6 @@ lib/test/live/.env
 # OS files
 .DS_Store
 Thumbs.db
+
+# Bee node data for the local Gnosis cluster (identities are copied in)
+/dev/gnosis-cluster/data

@@ -1,0 +1,98 @@
+name: swarm-id-gnosis
+
+# A Bee node that follows the SAME chain the app buys postage on: the baked
+# Gnosis state (real PostageStamp, real BZZ, real SushiSwap), served offline.
+#
+# bee-compose's cluster runs its own chain with its own contract deployment, so
+# a batch bought through the multichain path there is invisible to its nodes —
+# they only ingest BatchCreated events from their own PostageStamp. Pointing Bee
+# at the Gnosis chain instead joins the two halves: pay, swap, create the batch
+# and then actually upload with it, all locally.
+#
+# Everything a node needs is a parameter here; nothing is patched into Bee.
+# Once this settles it belongs in bee-compose as a second chain profile — which
+# also brings the two things a single node cannot give:
+#
+#   * PEERS. Non-deferred uploads need a pushsync receipt from another node, so
+#     with one node they stall (see .claude/rules/bee-cluster.md). Deferred
+#     writes and batch ingestion work fine here.
+#   * A PRICE. The baked state carries the PriceOracle's code but not its
+#     storage — a dump keeps only accounts something wrote to — so the node
+#     reads price 0 and reports batchTTL -1. Harmless (batches simply never
+#     drain) and invisible to the app, which reads lastPrice from the
+#     PostageStamp itself. Capturing read-only storage needs a prestate trace
+#     at bake time.
+
+x-mainnet-contracts: &mainnet-contracts
+  # Gnosis mainnet deployments — present in the baked state because it is a
+  # fork of mainnet (docs.ethswarm.org/docs/references/smart-contracts).
+  BEE_POSTAGE_STAMP_ADDRESS: '0x45a1502382541Cd610CC9068e88727426b696293'
+  BEE_PRICE_ORACLE_ADDRESS: '0x47EeF336e7fE5bED98499A4696bce8f28c1B0a8b'
+  BEE_STAKING_ADDRESS: '0xda2a16EE889E7F04980A8d597b48c8D51B9518F4'
+  BEE_REDISTRIBUTION_ADDRESS: '0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d'
+
+services:
+  chain:
+    image: ghcr.io/foundry-rs/foundry:stable
+    entrypoint: anvil
+    command:
+      - --load-state=/state/gnosis-fork-state.json
+      - --chain-id=100
+      # Bee's accounting advances with blocks, so mine on a cadence rather
+      # than only on transactions.
+      - --block-time=5
+      - --host=0.0.0.0
+      - --port=8545
+    volumes:
+      - ../../multichain/test/fixtures:/state:ro
+    ports:
+      - '8545:8545'
+
+  # Bee's wallet must hold xDAI before it starts, or it waits for funding. The
+  # address is fixed (the keystore below), so mint to it up front — the same
+  # anvil cheat the bridge stand-in uses.
+  fund:
+    image: ghcr.io/foundry-rs/foundry:stable
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        until cast chain-id --rpc-url http://chain:8545 >/dev/null 2>&1; do sleep 1; done
+        cast rpc anvil_setBalance ${BEE_WALLET_ADDRESS} 0x21e19e0c9bab2400000 \
+          --rpc-url http://chain:8545
+        echo "funded ${BEE_WALLET_ADDRESS}"
+    depends_on:
+      - chain
+
+  bee:
+    image: ethersphere/bee:${BEE_VERSION:-2.8.0}
+    depends_on:
+      fund:
+        condition: service_completed_successfully
+    environment:
+      <<: *mainnet-contracts
+      BEE_PASSWORD: password
+      BEE_VERBOSITY: '4'
+      BEE_MAINNET: 'false'
+      BEE_BLOCK_TIME: '5'
+      BEE_API_ADDR: 0.0.0.0:1633
+      BEE_CORS_ALLOWED_ORIGINS: '*'
+      BEE_ALLOW_PRIVATE_CIDRS: 'true'
+      BEE_BOOTNODE_MODE: 'false'
+      BEE_FULL_NODE: 'true'
+      # A private p2p network — network id is the swarm's identity and has
+      # nothing to do with the chain id, so the node stays isolated from the
+      # real Swarm even while following Gnosis.
+      BEE_NETWORK_ID: '4020'
+      # Chequebooks need xBZZ and a factory deployment; uploading with our own
+      # stamps needs neither.
+      BEE_SWAP_ENABLE: 'false'
+      # Scanning from mainnet genesis would take forever and find nothing —
+      # the baked chain has no history before its snapshot. Batches created
+      # after it (ours) are what matter. Set by up.sh from the fixture.
+      BEE_POSTAGE_STAMP_START_BLOCK: '${POSTAGE_STAMP_START_BLOCK:?run via up.sh}'
+    command: ['start', '--blockchain-rpc-endpoint', 'http://chain:8545']
+    volumes:
+      - ./data:/home/bee/.bee
+    ports:
+      - '1633:1633'

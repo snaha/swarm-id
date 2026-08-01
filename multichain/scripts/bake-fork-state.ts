@@ -124,6 +124,11 @@ async function main(): Promise<void> {
  */
 export const READ_ONLY_CONTRACTS: `0x${string}`[] = [
   "0xb1E835Dc2785b52265711e17fCCb0fd018226a6e", // SushiSwap V3 quoter
+  // Read by a Bee node following this chain (dev/gnosis-cluster): it calls
+  // each at startup and refuses to boot if one answers with no code.
+  "0x47EeF336e7fE5bED98499A4696bce8f28c1B0a8b", // PriceOracle
+  "0xda2a16EE889E7F04980A8d597b48c8D51B9518F4", // Staking
+  "0x5069cdfB3D9E56d23B1cAeE83CE6109A7E4fd62d", // Redistribution
 ]
 
 /** Fetch `eth_getCode` for each read-only contract and splice it into a dump. */

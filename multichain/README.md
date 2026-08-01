@@ -77,6 +77,14 @@ lazily, and only what was touched lands in the dump), then splices back the
 contracts that are only ever _read_ — a state dump drops those, since nothing
 wrote to them. `scripts/bake.sh` does the whole dance.
 
+### A Bee node on the same chain
+
+`dev/gnosis-cluster` (repo root: `pnpm dev:gnosis`) runs Bee against the baked
+chain with the mainnet contract addresses, so a batch bought through the
+multichain path is one the node actually ingests — the halves that bee-compose
+keeps separate. See the notes in its compose file for what a single node still
+cannot do.
+
 ### Live Gnosis fork
 
 To test against the chain as it is right now rather than the baked snapshot:
