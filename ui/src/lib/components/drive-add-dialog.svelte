@@ -18,7 +18,7 @@
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
-  import { simulateBatchPurchase } from '$lib/dev/simulate-purchase'
+  import { simulateBatchPurchase, simulatedPurchases } from '$lib/dev/simulate-purchase'
   import {
     LIFESPAN_UNIT_OPTIONS,
     type LifespanUnit,
@@ -160,12 +160,13 @@
   async function purchaseNew() {
     const attempt = attempts.begin()
     phase = 'pending'
-    // The popup-less /dev mock settles locally — telling the user to look for a
-    // popup window there is wrong.
-    pendingLabel =
-      devSettingsStore.data.mockStampEnabled && !devSettingsStore.data.mockStampPopup
-        ? 'Simulating the purchase…'
-        : 'Complete the purchase in the popup window.'
+    // No cross-chain payment can complete off mainnet, so the purchase is
+    // simulated there and the user is told so rather than sent looking for a
+    // popup. See simulatedPurchases() for what decides it.
+    const simulated = await simulatedPurchases()
+    pendingLabel = simulated
+      ? 'Simulating the purchase…'
+      : 'Complete the purchase in the popup window.'
     // Left blank, the drive stays unnamed and the UI falls back to its stable
     // batch-ID-derived label.
     const driveName = name.trim() || undefined
@@ -177,10 +178,9 @@
       )
       purchase = openStampPurchaseWidget({
         destination,
-        // /dev mock (see dev-settings): simulate the purchase without a real
-        // cross-chain payment. No-op in production, where the toggle is off.
-        mocked: devSettingsStore.data.mockStampEnabled,
-        mockPopup: devSettingsStore.data.mockStampPopup,
+        // Simulate the purchase rather than opening the widget: off mainnet
+        // there is no cross-chain payment that could complete.
+        mocked: simulated,
         mockError: devSettingsStore.data.mockStampResult === 'error',
         // Settle the mock against the local chain when one is configured, so
         // the simulated purchase yields a real batch the account owns —

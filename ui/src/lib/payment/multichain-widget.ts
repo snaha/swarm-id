@@ -38,7 +38,6 @@ export interface PurchaseStampOptions {
   // caller MUST NOT treat this as a clean cancel that discards the purchase.
   onUnconfirmedClose: () => void
   mocked?: boolean // For testing - simulate the settlement instead of paying
-  mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
   mockError?: boolean // For testing - simulate error instead of success
   /**
    * Produces the settlement when `mocked` — supplied by the caller so this
@@ -218,24 +217,17 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     onCancel,
     onUnconfirmedClose,
     mocked,
-    mockPopup,
     mockError,
     simulateSettlement,
   } = options
 
-  // Mocked mode (the /dev toggle): settle locally without a real cross-chain
-  // payment. `mockPopup` still opens the widget's own `?mocked=true` popup (which
-  // never posts back, so we simulate anyway) — useful to eyeball the popup path
-  // in a real browser. Without it, no `window.open` at all, so the mock also
-  // works where popups are blocked (previews) or the widget origin is offline.
-  // Either way the settlement is simulated after a short, visible delay.
+  // Simulated mode (anywhere but mainnet): settle locally without a real
+  // cross-chain payment, after a short visible delay. Never opens a window —
+  // the widget's own `?mocked=true` popup never posts back, so it only ever
+  // added a dependency on popups being allowed and the widget origin being up.
   if (mocked) {
-    const popup = mockPopup
-      ? window.open(buildWidgetUrl(destination, true), 'stamp-purchase', POPUP_FEATURES)
-      : undefined
     let cancelled = false
     const mockTimer = setTimeout(() => {
-      popup?.close()
       if (mockError) {
         onError(new Error('Mock error: Purchase failed'))
         return
@@ -269,7 +261,6 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       cancel: () => {
         cancelled = true
         clearTimeout(mockTimer)
-        popup?.close()
       },
     }
   }

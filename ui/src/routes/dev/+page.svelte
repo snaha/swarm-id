@@ -20,7 +20,6 @@
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
-  import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
   import {
     type FundsRow,
@@ -918,48 +917,25 @@ Check console logs for details:
   <!-- Chain Tab -->
   {#if activeTab === 'chain'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Mock stamp purchase</h3>
+      <h3 class="text-lg font-semibold">Simulated purchase</h3>
       <p class="text-muted-foreground text-sm">
-        Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real cross-chain
-        payment. With the Gnosis RPC pointed at the local chain the settlement is real: a batch is created
-        on chain, owned by this account's postage signer, so the new drive can be extended and resized
-        straight away. Against any other chain the batch id is fabricated and the drive is backed by nothing.
+        Off mainnet, <strong>Add drive</strong> (Storage tab / Upgrade) and the paid drive operations
+        settle here instead of opening the widget or waiting on Relay — neither cross-chain leg exists
+        on a dev chain. The settlement itself is real: a batch is created on chain, owned by this account's
+        postage signer, so the new drive can be extended and resized straight away. There is no toggle
+        for it because there is no choice: on mainnet these flows always pay for real.
       </p>
-      <label class="flex items-center gap-2">
-        <Switch
-          bind:checked={
-            () => devSettingsStore.data.mockStampEnabled,
-            (enabled) => devSettingsStore.setMockStampEnabled(enabled)
+      <label class={`${LABEL_CLASS} w-64`}>
+        <span class={LABEL_TEXT_CLASS}>Outcome</span>
+        <Select
+          options={MOCK_RESULT_OPTIONS}
+          bind:value={
+            () => devSettingsStore.data.mockStampResult,
+            (result) =>
+              devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
           }
-          aria-label="Enable mock stamp purchase"
         />
-        <span class="text-sm">Enable mock purchases</span>
       </label>
-      {#if devSettingsStore.data.mockStampEnabled}
-        <label class="flex items-center gap-2">
-          <Switch
-            bind:checked={
-              () => devSettingsStore.data.mockStampPopup,
-              (popup) => devSettingsStore.setMockStampPopup(popup)
-            }
-            aria-label="Open widget popup while mocking"
-          />
-          <span class="text-sm"
-            >Open widget popup (off = local, works where popups are blocked)</span
-          >
-        </label>
-        <label class={`${LABEL_CLASS} w-64`}>
-          <span class={LABEL_TEXT_CLASS}>Outcome</span>
-          <Select
-            options={MOCK_RESULT_OPTIONS}
-            bind:value={
-              () => devSettingsStore.data.mockStampResult,
-              (result) =>
-                devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
-            }
-          />
-        </label>
-      {/if}
 
       <div class="bg-border my-4 h-px"></div>
 
@@ -1010,11 +986,10 @@ Check console logs for details:
       <p class="text-muted-foreground text-sm">
         Extend and resize are signed by the account's derived postage signer and sent straight to
         the PostageStamp contract — no Bee node. There is no Relay locally, so
-        <strong>Create owned batch</strong> stands in for the purchase, running the widget's real
-        step list against the local chain's BZZ pool. It swaps rather than drawing on the faucet
-        above: the purchase is the one leg worth simulating faithfully. With
-        <strong>mock purchases</strong> on (Stamps tab), the drive dialogs settle the same way instead
-        of opening the payment screen.
+        <strong>Create owned batch</strong> stands in for the purchase, running the widget's real step
+        list against the local chain's BZZ pool. It swaps rather than drawing on the faucet above: the
+        purchase is the one leg worth simulating faithfully. Off mainnet the drive dialogs settle the
+        same way, without opening the payment screen.
       </p>
       <div class="flex flex-wrap gap-2">
         <Button
@@ -1031,9 +1006,9 @@ Check console logs for details:
       </div>
       <p class="text-muted-foreground text-sm">
         Acts on the account selected at the top of the page. For the normal path just use
-        <em>Add drive</em> with mock purchases on — it creates the batch the same way. These buttons
-        are for driving the chain directly: topping the signer up, or making a batch to attach by
-        hand via <em>Add drive → Use existing</em>.
+        <em>Add drive</em> — off mainnet it creates the batch the same way. These buttons are for
+        driving the chain directly: topping the signer up, or making a batch to attach by hand via
+        <em>Add drive → Use existing</em>.
       </p>
       {#if chainToolMessage}
         <p class="text-sm break-all">{chainToolMessage}</p>

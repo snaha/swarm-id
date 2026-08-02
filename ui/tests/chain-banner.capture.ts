@@ -55,7 +55,6 @@ function seedSettings(page: Page, rpcUrl: string) {
         'swarm-id-network-settings',
         JSON.stringify({ beeNodeUrl: bee, gnosisRpcUrl: rpc }),
       )
-      localStorage.setItem('dev-mock-stamp-enabled', 'true')
     },
     [rpcUrl, BEE_NODE_URL],
   )

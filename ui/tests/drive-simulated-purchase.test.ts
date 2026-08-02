@@ -95,7 +95,6 @@ test('a simulated purchase creates a batch the account owns on chain', async ({ 
         'swarm-id-network-settings',
         JSON.stringify({ beeNodeUrl: beeUrl, gnosisRpcUrl: rpcUrl }),
       )
-      localStorage.setItem('dev-mock-stamp-enabled', 'true')
     },
     [ANVIL_RPC_URL, BEE_NODE_URL],
   )

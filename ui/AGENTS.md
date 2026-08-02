@@ -10,18 +10,16 @@ The identity UI is a SvelteKit SPA.
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
-- **Dev mock stamp purchase** (`/dev` → Stamps tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
-  toggles that make the product **Add drive** flow settle without a real cross-chain payment.
-  When `gnosisRpcUrl` points at the bee-compose chain the settlement is **real** —
-  `src/lib/dev/simulate-purchase.ts` creates an actual batch owned by the account's postage signer
-  (the queen account plays the widget's temp wallet), so the resulting drive can be extended and
-  resized like any bought one. Against any other chain it falls back to a fabricated batch id,
-  which keeps the add-drive flow exercisable but leaves the drive backed by nothing. "Open widget
-  popup" **off** simulates with **no `window.open`** — the only mode that works where popups are
-  blocked (headless previews) or the widget origin is offline; **on** also opens the
-  `fund.bzz.limo?mocked=true` popup. "Outcome" picks success vs. a failed purchase. Settings
-  persist in localStorage (`dev-mock-stamp-*`) and are read by `drive-add-dialog.svelte`;
-  production leaves them off.
+- **Purchases simulate themselves off mainnet, and there is no toggle for it.** The widget's
+  cross-chain payment and Relay cannot complete on a dev chain, so **Add drive** and the paid drive
+  operations settle locally there; on mainnet they always pay for real. `chainIdentity()` decides,
+  by genesis hash — a dev chain reports the same chain id as mainnet on purpose, and an unreachable
+  probe counts as mainnet so an unidentified chain never gets a free drive. The settlement is
+  **real**: `src/lib/dev/simulate-purchase.ts` creates an actual batch owned by the account's
+  postage signer, so the drive can be extended and resized like any bought one; the simulation
+  never opens a window. The one thing still chosen by hand is `/dev` → Chain tab → **Outcome**
+  (success vs. a failed purchase, `dev-mock-stamp-result` in localStorage), which
+  `drives.test.ts` uses to exercise the error path.
 - **Paid drive operations are node-less**: extend and resize go straight to the PostageStamp
   contract signed by the derived postage signer (`payment/postage-onchain.ts`,
   `payment/drive-operation.ts`), with funding injected as a seam — the in-app payment flow in

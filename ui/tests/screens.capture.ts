@@ -44,6 +44,7 @@ const LOCAL_POSTAGE_STAMP = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
 const MAINNET_BZZ = '0xdbf3ea6f5bee45c02255b2c26a16f300502f68da'
 const LOCAL_BZZ = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
 const GNOSIS_CHAIN_ID_HEX = '0x64'
+const GNOSIS_GENESIS_HASH = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
 
 async function anvilReachable(): Promise<boolean> {
   try {
@@ -90,6 +91,13 @@ async function mainnetFacadeOverAnvil(page: Page) {
 
     if (body?.method === 'eth_chainId') {
       await respond(GNOSIS_CHAIN_ID_HEX)
+      return
+    }
+
+    // Genesis is how the app tells mainnet from a dev chain, and the payment
+    // screens only exist on the mainnet side of that check.
+    if (body?.method === 'eth_getBlockByNumber' && body?.params?.[0] === '0x0') {
+      await respond({ hash: GNOSIS_GENESIS_HASH })
       return
     }
 
@@ -194,16 +202,15 @@ function storedDriveDepth(page: Page) {
 }
 
 /** Account + a drive whose batch the account's signer owns on the local chain. */
-async function seedDrive(page: Page, { mockFunding }: { mockFunding: boolean }) {
+async function seedDrive(page: Page) {
   await page.addInitScript(
-    ([rpcUrl, beeUrl, mock]) => {
+    ([rpcUrl, beeUrl]) => {
       localStorage.setItem(
         'swarm-id-network-settings',
         JSON.stringify({ beeNodeUrl: beeUrl, gnosisRpcUrl: rpcUrl }),
       )
-      localStorage.setItem('dev-mock-stamp-enabled', String(mock))
     },
-    [ANVIL_RPC_URL, BEE_NODE_URL, mockFunding] as const,
+    [ANVIL_RPC_URL, BEE_NODE_URL] as const,
   )
 
   await page.goto('/')
@@ -212,7 +219,7 @@ async function seedDrive(page: Page, { mockFunding }: { mockFunding: boolean }) 
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
   await page.goto('/dev')
-  await page.getByRole('tab', { name: 'Stamps' }).click()
+  await page.getByRole('tab', { name: 'Chain' }).click()
   await page.getByRole('button', { name: 'Create owned batch (depth 20)' }).click()
   const created = page.getByText(/^Created owned batch: 0x[0-9a-f]{64}$/)
   await expect(created).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
@@ -239,7 +246,7 @@ test.use({ viewport: VIEWPORT })
 
 test('capture: extend, resize and on-chain progress', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 3)
-  await seedDrive(page, { mockFunding: true })
+  await seedDrive(page)
 
   // --- Extend -------------------------------------------------------------
   await page.getByRole('button', { name: 'Extend lifespan' }).click()
@@ -286,7 +293,7 @@ test('capture: payment screens', async ({ page }) => {
   await mainnetFacadeOverAnvil(page)
   await stubRelayQuote(page)
   // Creating the batch needs REAL writes, so seed against anvil directly...
-  await seedDrive(page, { mockFunding: false })
+  await seedDrive(page)
   // ...then point the app at the mainnet-shaped RPC, which selects the
   // settings preset carrying the DEX addresses. Only reads and quotes run
   // from here on, so nothing is signed against the facade.

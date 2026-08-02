@@ -42,6 +42,30 @@ function fabricatedBatch(): BatchEvent {
 }
 
 /**
+ * Whether a purchase should settle locally instead of paying for real.
+ *
+ * Two conditions, and both matter:
+ *
+ * - **A dev build.** A production bundle never simulates, whatever chain it is
+ *   pointed at — a shipped build that fabricates drives when an RPC blips would
+ *   be far worse than one that fails.
+ * - **Not Gnosis mainnet.** Off mainnet the widget's cross-chain payment and
+ *   Relay cannot complete at all, so simulating is the only thing that works.
+ *   Judged by genesis hash, since a dev chain reports mainnet's chain id on
+ *   purpose. An unreachable RPC counts as "not mainnet": nothing can be paid or
+ *   spent against a chain that is not answering, and this keeps the add-drive
+ *   flow exercisable with no chain at all (the batch is then fabricated).
+ */
+export async function simulatedPurchases(): Promise<boolean> {
+  if (!import.meta.env.DEV) {
+    return false
+  }
+  return chainIdentity()
+    .then((identity) => !identity.isMainnet)
+    .catch(() => true)
+}
+
+/**
  * Settle a simulated purchase, creating a REAL batch when the configured RPC is
  * a dev chain — where the widget's whole step list runs against contracts that
  * behave like the real ones. Real Gnosis is excluded by genesis hash, not by a

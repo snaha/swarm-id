@@ -1,15 +1,30 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Drive (postage stamp) management on the Storage tab, against the mocked
- * purchase flow (/dev defaults: mock enabled, no widget popup): add, rename,
- * set default, remove, and the failed-purchase outcome.
+ * Drive (postage stamp) management on the Storage tab, against the simulated
+ * purchase flow: add, rename, set default, remove, and the failed-purchase
+ * outcome.
+ *
+ * Purchases only simulate off Gnosis mainnet, so these point at an RPC nothing
+ * answers: not mainnet, so the purchase simulates, and with no chain to settle
+ * against the batch is fabricated — instant, and this suite is about drive
+ * bookkeeping rather than what lands on chain. drive-simulated-purchase.test.ts
+ * is where a real settlement is exercised.
  */
 import { expect, test } from '@playwright/test'
 
 import { DRIVE_SETTLE_TIMEOUT_MS, addMockedDrive, completeCreateFlow } from './helpers'
 
+/** Refused immediately, so the simulated purchase settles as a fabricated batch. */
+const NO_CHAIN_RPC_URL = 'http://127.0.0.1:1'
+
 async function createLocalAccount(page: import('@playwright/test').Page) {
+  await page.addInitScript((rpcUrl) => {
+    localStorage.setItem(
+      'swarm-id-network-settings',
+      JSON.stringify({ beeNodeUrl: 'http://localhost:1633/', gnosisRpcUrl: rpcUrl }),
+    )
+  }, NO_CHAIN_RPC_URL)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)

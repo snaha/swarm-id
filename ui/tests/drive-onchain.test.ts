@@ -74,8 +74,6 @@ async function createAccountWithOnChainDrive(page: Page) {
         JSON.stringify({ beeNodeUrl: beeUrl, gnosisRpcUrl: rpcUrl }),
       )
       // Mock funding: the dev chain has no Relay and no DEX, so the drive
-      // dialogs fund themselves from the queen account instead of paying.
-      localStorage.setItem('dev-mock-stamp-enabled', 'true')
     },
     [ANVIL_RPC_URL, BEE_NODE_URL],
   )

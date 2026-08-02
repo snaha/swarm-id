@@ -6,10 +6,9 @@
  * pending payment the UI surfaces, resolving once the money has landed.
  */
 import { DEV_XDAI_FUNDING, fundPostageSigner } from '$lib/dev/chain-funding'
+import { simulatedPurchases } from '$lib/dev/simulate-purchase'
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, quoteFunding, swapDeliveredXdai } from '$lib/payment/funding'
-import { chainIdentity } from '$lib/payment/postage-onchain'
-import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
 import type { Account } from '$lib/types'
 
 /**
@@ -54,16 +53,9 @@ export function createFundingRequester(account: () => Account): FundingRequester
   let settle: { resolve: () => void; reject: (error: Error) => void } | undefined
 
   const request: RequestFunding = async (need) => {
-    // Dev chain: no Relay exists, so the chain's dev faucet stands in for the
-    // whole payment leg and the BZZ arrives directly. The toggle alone is not
-    // enough to authorise that — it says nothing about which chain is on the
-    // other end, and a dev chain answers the same chain id as mainnet.
-    if (devSettingsStore.data.mockStampEnabled) {
-      if ((await chainIdentity()).isMainnet) {
-        throw new Error(
-          'Mock purchases are on, but the configured RPC is Gnosis mainnet. Point it at a dev chain, or turn the mock off and pay for real.',
-        )
-      }
+    // No Relay exists off mainnet, so the faucet stands in for the whole
+    // payment leg there. See simulatedPurchases() for what decides it.
+    if (await simulatedPurchases()) {
       // Over-deliver: the need was computed from a chain read that is a block
       // or two old by the time the operation spends it, and a real payment
       // over-delivers too (the widget swaps a quoted amount with slippage).
