@@ -9,9 +9,16 @@
  */
 import { type Page, expect, test } from '@playwright/test'
 
-import { DRIVE_SETTLE_TIMEOUT_MS, PASSWORD, addMockedDrive, completeCreateFlow } from './helpers'
+import {
+  DRIVE_SETTLE_TIMEOUT_MS,
+  PASSWORD,
+  addMockedDrive,
+  completeCreateFlow,
+  seedNoChain,
+} from './helpers'
 
 async function createAccountWithDrive(page: Page) {
+  await seedNoChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)

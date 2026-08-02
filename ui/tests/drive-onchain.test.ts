@@ -22,15 +22,6 @@ const BEE_NODE_URL = 'http://localhost:1633/'
 const ONCHAIN_TIMEOUT_MS = 120_000
 const PROBE_TIMEOUT_MS = 2000
 
-async function chainRpc(method: string, params: unknown[] = []): Promise<unknown> {
-  const response = await fetch(ANVIL_RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  })
-  return ((await response.json()) as { result?: unknown }).result
-}
-
 async function anvilReachable(): Promise<boolean> {
   try {
     const response = await fetch(ANVIL_RPC_URL, {
@@ -114,19 +105,12 @@ test.describe.configure({ mode: 'serial' })
 
 test.skip(!chainUp, 'requires a local chain (pnpm dev:chain:detach or pnpm dev:bee:detach)')
 
-// Each test buys BZZ on the chain's pool. On a Gnosis fork that pool is the
-// real one and it is thin, so without rewinding, successive tests would move
-// its price and eventually fail to fill. Snapshot/revert keeps every test on
-// identical chain state.
-let snapshot: unknown
-test.beforeEach(async () => {
-  snapshot = await chainRpc('evm_snapshot')
-})
-test.afterEach(async () => {
-  if (snapshot !== undefined) {
-    await chainRpc('evm_revert', [snapshot])
-  }
-})
+// These used to snapshot/revert around each test to conserve the BZZ pool. They
+// must NOT: a Bee node following this chain records the block it has processed
+// and never re-scans below it, so rewinding under a running cluster desyncs it
+// permanently — it stops ingesting, and only a volume reset recovers it. The
+// cost of not rewinding is now small anyway: a purchase swaps 0.25 xDAI against
+// ~50 xDAI of warmed range, and `pnpm bake` resets the pool outright.
 
 test('extend tops the batch up on chain and records the longer lifespan', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)

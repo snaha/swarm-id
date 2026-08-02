@@ -57,6 +57,30 @@ export async function openConnectPopup(page: Page) {
 }
 
 /**
+ * Point the app at an RPC nothing answers, for suites that mock a purchase but
+ * have no chain to settle against.
+ *
+ * A purchase only simulates off Gnosis mainnet, and the default endpoint IS
+ * mainnet — so without this the flow would open the real payment widget and
+ * wait forever. Unreachable counts as "not mainnet", and with no chain behind
+ * it the batch is fabricated: instant, and nothing is spent anywhere.
+ *
+ * Must run before the first page load; the settings are read at app init.
+ */
+export function seedNoChain(page: Page) {
+  return page.addInitScript(() => {
+    localStorage.setItem(
+      'swarm-id-network-settings',
+      JSON.stringify({
+        beeNodeUrl: 'http://localhost:1633/',
+        // Connection refused immediately, rather than a slow DNS failure.
+        gnosisRpcUrl: 'http://127.0.0.1:1',
+      }),
+    )
+  })
+}
+
+/**
  * Starts a mocked Add-drive purchase from the home page (Storage tab). The
  * purchase settles asynchronously — callers assert the outcome (a "Drive
  * xxxx" card, or the error phase) with `DRIVE_SETTLE_TIMEOUT_MS`.

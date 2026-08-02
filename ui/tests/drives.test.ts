@@ -13,18 +13,10 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { DRIVE_SETTLE_TIMEOUT_MS, addMockedDrive, completeCreateFlow } from './helpers'
-
-/** Refused immediately, so the simulated purchase settles as a fabricated batch. */
-const NO_CHAIN_RPC_URL = 'http://127.0.0.1:1'
+import { DRIVE_SETTLE_TIMEOUT_MS, addMockedDrive, completeCreateFlow, seedNoChain } from './helpers'
 
 async function createLocalAccount(page: import('@playwright/test').Page) {
-  await page.addInitScript((rpcUrl) => {
-    localStorage.setItem(
-      'swarm-id-network-settings',
-      JSON.stringify({ beeNodeUrl: 'http://localhost:1633/', gnosisRpcUrl: rpcUrl }),
-    )
-  }, NO_CHAIN_RPC_URL)
+  await seedNoChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
