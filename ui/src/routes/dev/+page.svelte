@@ -33,7 +33,7 @@
     LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS,
     fetchExistingBatchFromChain,
   } from '$lib/payment/contract'
-  import { postageChain } from '$lib/payment/postage-onchain'
+  import { chainIdentity, postageChain } from '$lib/payment/postage-onchain'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
@@ -863,6 +863,17 @@ Check console logs for details:
   const CARD_CLASS = 'flex flex-col gap-2 rounded-lg border bg-card p-4'
 </script>
 
+{#snippet chainBanner(label: string, detail: string, alarming: boolean)}
+  <div
+    class="rounded-md border px-4 py-3 text-sm {alarming
+      ? 'border-destructive bg-destructive/10 text-destructive font-medium'
+      : 'border-border text-muted-foreground'}"
+  >
+    <span>{label}</span>
+    <span class="font-mono">{detail}</span>
+  </div>
+{/snippet}
+
 {#snippet copyRow(label: string, value: string, mono = true)}
   <div class="flex flex-col gap-1.5">
     <span class="text-muted-foreground text-sm">{label}</span>
@@ -883,6 +894,32 @@ Check console logs for details:
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 p-8">
   <h2 class="text-xl font-bold">Developer Tools</h2>
+
+  <!--
+    Which chain these tools are pointed at. Every action on this page spends,
+    and a dev chain reports the same chain id as mainnet on purpose — so the
+    only honest answer comes from the genesis hash. Red is for MAINNET: on this
+    page that is the state nobody intends to be in.
+  -->
+  {#await chainIdentity(networkSettingsStore.gnosisRpcUrl)}
+    {@render chainBanner('Checking the chain at ', networkSettingsStore.gnosisRpcUrl, false)}
+  {:then identity}
+    {#if identity.isMainnet}
+      {@render chainBanner(
+        'GNOSIS MAINNET — these tools spend real funds. ',
+        networkSettingsStore.gnosisRpcUrl,
+        true,
+      )}
+    {:else}
+      {@render chainBanner(
+        'Local dev chain, nothing here is real. ',
+        networkSettingsStore.gnosisRpcUrl,
+        false,
+      )}
+    {/if}
+  {:catch}
+    {@render chainBanner('No chain reachable at ', networkSettingsStore.gnosisRpcUrl, true)}
+  {/await}
 
   <Tabs {tabs} bind:value={activeTab} />
 

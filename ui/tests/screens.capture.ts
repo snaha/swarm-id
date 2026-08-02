@@ -6,7 +6,7 @@
  * is outside Playwright's default `*.test.ts` glob. Run explicitly:
  *
  *   pnpm dev:bee:detach   # repo root, for the anvil chain
- *   pnpm exec playwright test --testMatch='**âˆ•*.capture.ts' --reporter=list
+ *   pnpm exec playwright test --config=playwright.capture.config.ts
  *
  * PNGs land in `screenshots/`.
  *
