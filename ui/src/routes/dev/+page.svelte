@@ -77,9 +77,8 @@
 
   const tabs = [
     { value: 'overview', label: 'Overview' },
-    { value: 'stamps', label: 'Stamps' },
     { value: 'chain', label: 'Chain' },
-    { value: 'sync', label: 'Sync' },
+    { value: 'node', label: 'Node' },
     { value: 'devices', label: 'Devices' },
   ]
 
@@ -579,7 +578,8 @@ Check console logs for details:
   }
 
   // Clear this browser's accounts (which own their apps + stamps) + session.
-  function clearAccount() {
+  /** Every account on the device, not just a selected one. */
+  function clearAccounts() {
     accountsStore.clear()
     sessionStore.clearCurrentAccount()
   }
@@ -666,11 +666,14 @@ Check console logs for details:
     {@render chainBanner('No chain reachable at ', networkSettingsStore.gnosisRpcUrl, true)}
   {/await}
 
+  <Tabs {tabs} bind:value={activeTab} />
+
   <!--
-    Shown only for the tabs that act on ONE account: Chain signs with its
-    derived postage signer, Devices lists its devices. Overview and Stamps read
-    across every account, and Sync has no account of its own — a selector there
-    would imply a scoping that does not exist.
+    Under the tabs, and only for the tabs that act on ONE account: Chain signs
+    with its derived postage signer, Devices lists its devices. Overview and
+    Node read across every account, so a selector there would imply a scoping
+    they do not have — and placing it above would shift the tabs each time it
+    appeared.
   -->
   {#if activeTab === 'chain' || activeTab === 'devices'}
     <label class={LABEL_CLASS}>
@@ -678,8 +681,6 @@ Check console logs for details:
       <Select options={accountOptions} bind:value={selectedAccountId} />
     </label>
   {/if}
-
-  <Tabs {tabs} bind:value={activeTab} />
 
   <!-- Overview Tab -->
   {#if activeTab === 'overview'}
@@ -693,20 +694,25 @@ Check console logs for details:
     <div class="flex flex-col gap-4">
       <div class="flex flex-col gap-2">
         <h4 class="text-sm font-semibold">Local Bee Endpoints</h4>
+        <!--
+          These hrefs are absolute http(s) endpoints read from network settings —
+          never app routes — which a dynamic href cannot prove to the rule.
+        -->
+        <!-- eslint-disable svelte/no-navigation-without-resolve -->
         <div class="flex items-center gap-2">
-          <StatusDot endpoint="http://localhost:1633" />
-          <span class="font-mono text-sm">Queen API:</span>
+          <StatusDot endpoint={networkSettingsStore.beeNodeUrl} />
+          <span class="font-mono text-sm">Bee node:</span>
           <a
-            href="http://localhost:1633"
+            href={networkSettingsStore.beeNodeUrl}
             target="_blank"
             rel="noopener"
-            class="text-primary font-mono text-sm">http://localhost:1633</a
+            class="text-primary font-mono text-sm">{networkSettingsStore.beeNodeUrl}</a
           >
-          <CopyButton text="http://localhost:1633" />
+          <CopyButton text={networkSettingsStore.beeNodeUrl} />
         </div>
         <div class="flex items-center gap-2">
           <StatusDot endpoint="http://localhost:16331" />
-          <span class="font-mono text-sm">Worker API:</span>
+          <span class="font-mono text-sm">Cluster worker:</span>
           <a
             href="http://localhost:16331"
             target="_blank"
@@ -716,16 +722,17 @@ Check console logs for details:
           <CopyButton text="http://localhost:16331" />
         </div>
         <div class="flex items-center gap-2">
-          <StatusDot endpoint="http://localhost:9545" method="json-rpc" />
-          <span class="font-mono text-sm">Blockchain RPC:</span>
+          <StatusDot endpoint={networkSettingsStore.gnosisRpcUrl} method="json-rpc" />
+          <span class="font-mono text-sm">Chain RPC:</span>
           <a
-            href="http://localhost:9545"
+            href={networkSettingsStore.gnosisRpcUrl}
             target="_blank"
             rel="noopener"
-            class="text-primary font-mono text-sm">http://localhost:9545</a
+            class="text-primary font-mono text-sm">{networkSettingsStore.gnosisRpcUrl}</a
           >
-          <CopyButton text="http://localhost:9545" />
+          <CopyButton text={networkSettingsStore.gnosisRpcUrl} />
         </div>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </div>
 
       <div class="flex flex-col gap-2">
@@ -750,15 +757,15 @@ Check console logs for details:
           connection required).
         </p>
         <div class="flex gap-2">
-          <Button variant="destructive" onclick={clearAccount}>Clear account</Button>
-          <Button variant="destructive" onclick={clearAll}>Clear all</Button>
+          <Button variant="destructive" onclick={clearAccounts}>Clear accounts</Button>
+          <Button variant="destructive" onclick={clearAll}>Clear everything</Button>
         </div>
       </div>
     </div>
   {/if}
 
-  <!-- Stamps Tab -->
-  {#if activeTab === 'stamps'}
+  <!-- Node Tab: everything that talks to the Bee node -->
+  {#if activeTab === 'node'}
     <div class="flex flex-col gap-4">
       <h3 class="text-lg font-semibold">Stored Stamps (local)</h3>
       <p class="text-muted-foreground text-sm">
@@ -849,6 +856,32 @@ Check console logs for details:
           {/each}
         </div>
       {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Manual Sync Testing</h3>
+      <p class="text-sm">
+        Trigger a manual sync for ALL accounts to test postage stamp utilization tracking.
+      </p>
+      <div class="flex gap-4">
+        <Button onclick={triggerManualSync}>Sync All Accounts</Button>
+      </div>
+
+      {#if syncMessage}
+        <div class="flex flex-col gap-4 rounded-lg border bg-card p-4 whitespace-pre-wrap">
+          <p class="font-mono text-sm">{syncMessage}</p>
+        </div>
+      {/if}
+
+      <div class="flex flex-col gap-2">
+        <p class="text-muted-foreground text-sm">Requirements for sync:</p>
+        <p class="text-muted-foreground font-mono text-sm">
+          • At least one account with a default postage stamp
+        </p>
+        <p class="text-muted-foreground font-mono text-sm">
+          • Open browser console to see detailed logs
+        </p>
+      </div>
 
       <div class="bg-border my-4 h-px"></div>
 
@@ -1071,35 +1104,6 @@ Check console logs for details:
           {@render signerCard('Account-level signer', accountSigner)}
         </div>
       {/if}
-    </div>
-  {/if}
-
-  <!-- Sync Tab -->
-  {#if activeTab === 'sync'}
-    <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Manual Sync Testing</h3>
-      <p class="text-sm">
-        Trigger a manual sync for ALL accounts to test postage stamp utilization tracking.
-      </p>
-      <div class="flex gap-4">
-        <Button onclick={triggerManualSync}>Sync All Accounts</Button>
-      </div>
-
-      {#if syncMessage}
-        <div class="flex flex-col gap-4 rounded-lg border bg-card p-4 whitespace-pre-wrap">
-          <p class="font-mono text-sm">{syncMessage}</p>
-        </div>
-      {/if}
-
-      <div class="flex flex-col gap-2">
-        <p class="text-muted-foreground text-sm">Requirements for sync:</p>
-        <p class="text-muted-foreground font-mono text-sm">
-          • At least one account with a default postage stamp
-        </p>
-        <p class="text-muted-foreground font-mono text-sm">
-          • Open browser console to see detailed logs
-        </p>
-      </div>
     </div>
   {/if}
 
