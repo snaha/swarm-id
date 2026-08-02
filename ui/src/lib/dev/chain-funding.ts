@@ -5,13 +5,14 @@
  *
  * There are two local chains, and they are not equally faithful:
  *
- * - **bee-compose anvil** (chain 4020) has no DEX, so BZZ cannot be bought.
- *   The prefunded queen account transfers xDAI and TestToken BZZ directly.
- *   Fast, offline, and enough to exercise the postage operations themselves.
- * - **a Gnosis fork** (chain 100 on localhost, `pnpm dev:fork`) carries the
- *   real PostageStamp, the real BZZ and the real SushiSwap pools. There the
- *   only thing faked is the bridge: xDAI is minted with anvil's setBalance and
- *   everything after it — swap, approve, createBatch — is the production path.
+ * - **a chain answering as Gnosis (100)** — bee-compose's cluster
+ *   (`pnpm dev:bee`) or a live fork (`pnpm dev:fork`) — carries a real BZZ
+ *   market and the PostageStamp the nodes follow. There the only thing faked
+ *   is the bridge: xDAI is minted with anvil's setBalance and everything after
+ *   it — swap, approve, createBatch — is the production path.
+ * - **a DEX-less anvil** (chain 4020) has no BZZ market, so the prefunded
+ *   queen account transfers xDAI and TestToken BZZ directly instead. Enough to
+ *   exercise the postage operations themselves, nothing about the purchase.
  *
  * Production code must never import this module.
  */
@@ -28,28 +29,21 @@ import { GAS_BUDGET_XDAI_WEI, postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
-/** Default drive size for the dev batch actions. Small on a Gnosis chain,
- * where every chunk of depth costs real BZZ out of a thin pool. */
+/** Default drive size for the dev batch actions. */
 const DEV_BATCH_DEPTH = 20
-const DEV_GNOSIS_BATCH_DEPTH = 17
 /** Funds a dev batch well above the contract's ~24h floor. */
 const DEV_BATCH_FLOOR_MULTIPLE = 3n
-/**
- * Per-chunk funding a Bee node following a Gnosis SNAPSHOT will accept. Such a
- * node has no chain history to work from, so it synthesises a total-outpayment
- * baseline of roughly `price × block height` — around 1.14e12 per chunk at the
- * snapshot's block. A batch created now carries the contract's real
- * outpayment, which is lower, so anything funded normally is written off as a
- * `low balance batch` and ignored. Clear the baseline instead.
- */
-const DEV_GNOSIS_AMOUNT_PER_CHUNK = 1_500_000_000_000n
 /** Generous gas dust so a dev address can run many operations. */
 const DEV_XDAI_FUNDING = GAS_BUDGET_XDAI_WEI * 10n
 /** Bankrolls the fork's throwaway payer: swap input, batch cost and gas. */
-const FORK_PAYER_XDAI = 5n * 10n ** 18n // 5 xDAI
-/** Of that, what goes into BZZ — enough to fund a batch the node will accept,
- * still small against the pool. */
-const FORK_SWAP_XDAI = 2n * 10n ** 18n
+const FORK_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
+/**
+ * Of that, what goes into BZZ. Two orders of magnitude more than a dev batch
+ * costs, so price drift on a long-lived chain cannot starve a purchase, and
+ * still small against a ~$10k pool. The leftovers go to the batch owner, as
+ * they do in production.
+ */
+const FORK_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
 
 function isBeeComposeChain(settings: MultichainSettings): boolean {
   return settings.chainId === LOCAL_ANVIL_CHAIN_ID
@@ -96,8 +90,9 @@ export interface LocalBatch {
  * the production role split, where the payment machinery creates the batch and
  * the derived signer owns it.
  *
- * On a fork this runs the widget's actual step list (swap → approve →
- * createBatch → hand over the leftovers); on bee-compose the queen simply pays.
+ * On a chain with a BZZ market this runs the widget's actual step list (swap →
+ * approve → createBatch → hand over the leftovers); on a DEX-less anvil the
+ * queen simply pays.
  */
 export async function createOwnedBatchOnChain(
   derivationKey: string,
@@ -106,13 +101,10 @@ export async function createOwnedBatchOnChain(
   const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
   const owner = destination as `0x${string}`
-  const depth =
-    requestedDepth ?? (isBeeComposeChain(chain.settings) ? DEV_BATCH_DEPTH : DEV_GNOSIS_BATCH_DEPTH)
+  const depth = requestedDepth ?? DEV_BATCH_DEPTH
   const { minimumInitialBalancePerChunk } = await chain.getPostageWriteConstraints()
   const onBeeCompose = isBeeComposeChain(chain.settings)
-  const amountPerChunk = onBeeCompose
-    ? minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE
-    : DEV_GNOSIS_AMOUNT_PER_CHUNK
+  const amountPerChunk = minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE
 
   const created = onBeeCompose
     ? await createLocalBatch({ owner, depth, amountPerChunk }, chain.settings)

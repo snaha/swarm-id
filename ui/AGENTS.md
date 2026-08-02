@@ -29,12 +29,12 @@ The identity UI is a SvelteKit SPA.
   `docs/Drive-Payment-Flow.md`.
 - **Chain settings follow the chain id, never the URL** (`postageChain()` in
   `payment/postage-onchain.ts`): the endpoint is probed once per URL and the preset chosen from
-  what it answers. That is what lets the **baked Gnosis chain** (`pnpm dev:chain`, chain 100 —
-  real mainnet state committed to the repo, no internet needed) be driven with the production
-  addresses. Use it when the swap or the real contracts matter; run the drive e2e against it with
-  `CHAIN_RPC_URL=http://localhost:8545`. A local URL answering as Gnosis never falls back to the
-  public RPCs, so a failed call cannot silently read or write real mainnet. bee-compose
-  (chain 4020) stays the lighter option for everything that does not need a DEX.
+  what it answers. That is what lets the **baked hybrid chain** (chain 100 — a real BZZ market
+  from a mainnet fork with the Swarm contracts deployed on top, committed to the repo in
+  `vendor/bee-compose`, no internet needed) be driven with the production addresses. Run it as
+  the Bee cluster's chain (`pnpm dev:bee`, RPC `:9545`) or standalone (`pnpm dev:chain`, `:8545`),
+  and point the drive e2e at whichever with `CHAIN_RPC_URL`. A local URL answering as Gnosis never
+  falls back to the public RPCs, so a failed call cannot silently read or write real mainnet.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)

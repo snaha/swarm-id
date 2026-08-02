@@ -2,29 +2,29 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * The two halves of the local setup, joined: a batch bought through the
- * multichain path is one the local Bee node actually knows about.
+ * multichain path is one the local Bee cluster actually knows about, and can
+ * actually be uploaded with.
  *
- * bee-compose's nodes follow their own chain with their own PostageStamp
- * deployment, so a batch created on Gnosis is invisible to them — the node
- * never sees its BatchCreated event and refuses the stamp. The cluster under
- * `dev/gnosis-cluster` points Bee at the baked Gnosis chain instead, and this
- * is the proof that closes the loop:
- *
- *   swap on the real SushiSwap pool → createBatch on the real PostageStamp
+ *   swap on the real SushiSwap pool → createBatch on the PostageStamp
  *   → the node ingests that event into its batch store, owner and all
+ *   → a chunk stamped client-side by the owner uploads and reads back
  *
- * Uploading with the batch needs peers to pushsync a receipt from, which a
- * single-node cluster cannot do (see .claude/rules/bee-cluster.md); that
- * arrives with the worker fleet when this moves into bee-compose.
+ * This is what bee-compose's hybrid chain buys: the DEX and BZZ come from a
+ * Gnosis mainnet fork, the Swarm contracts are deployed from source on top at
+ * their mainnet addresses, so the nodes follow the same PostageStamp the
+ * purchase went through. See vendor/bee-compose/blockchain/HYBRID-CHAIN.md.
  *
- * Start the cluster with `pnpm dev:gnosis:detach`; skipped when it is down.
+ * Start it with `pnpm dev:bee:detach`; skipped when it is down. The upload
+ * needs a peer to pushsync a receipt from, so run with workers
+ * (`pnpm dev:bee:detach` brings up four full nodes).
  */
+import { Bee, MerkleTree, Stamper } from '@ethersphere/bee-js'
 import { expect, test } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { simulateWidgetPurchase } from '@swarm-id/multichain/dev'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 
-const CHAIN_RPC_URL = 'http://localhost:8545'
+const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 const BEE_URL = 'http://localhost:1633'
 const PROBE_TIMEOUT_MS = 2000
 /** Bee polls the postage contract on a ~25s cycle; leave room for a few. */
@@ -33,6 +33,13 @@ const POLL_INTERVAL_MS = 5000
 const XDAI = 10n ** 18n
 const DEPTH = 20
 const FLOOR_MULTIPLE = 3n
+const PAYER_XDAI = 2n * XDAI
+/**
+ * Generous next to what a batch costs, so the swap leg is exercised for real
+ * — but still small: the cluster's chain is long-lived and every purchase
+ * moves the real (thin) BZZ pool a little.
+ */
+const SWAP_XDAI = XDAI / 4n
 
 async function reachable(url: string, init?: RequestInit): Promise<boolean> {
   try {
@@ -61,14 +68,16 @@ async function knownBatches(): Promise<KnownBatch[]> {
   return ((await response.json()) as { batches?: KnownBatch[] }).batches ?? []
 }
 
-test.skip(!clusterUp, 'requires the Gnosis cluster (pnpm dev:gnosis:detach)')
+async function peerCount(): Promise<number> {
+  const response = await fetch(`${BEE_URL}/peers`)
+  return ((await response.json()) as { peers?: unknown[] }).peers?.length ?? 0
+}
 
-test('the node ingests a batch bought through the multichain path', async () => {
-  test.setTimeout(INGEST_TIMEOUT_MS * 2)
+/** The whole purchase, exactly as the widget arranges it in production. */
+async function buyBatch(): Promise<{ batchId: `0x${string}`; ownerKey: `0x${string}` }> {
   const settings = gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] })
 
-  // The account's postage signer owns the batch and a throwaway wallet pays,
-  // exactly as the widget arranges it in production.
+  // The account's postage signer owns the batch and a throwaway wallet pays.
   const ownerKey = generatePrivateKey()
   const owner = privateKeyToAccount(ownerKey).address
 
@@ -78,8 +87,8 @@ test('the node ingests a batch bought through the multichain path', async () => 
     body: JSON.stringify({
       jsonrpc: '2.0',
       id: 1,
-      method: 'eth_call',
       // minimumInitialBalancePerChunk()
+      method: 'eth_call',
       params: [{ to: settings.addresses.postageStamp, data: '0x90697842' }, 'latest'],
     }),
   })
@@ -91,27 +100,67 @@ test('the node ingests a batch bought through the multichain path', async () => 
       depth: DEPTH,
       amountPerChunk: minimum * FLOOR_MULTIPLE,
       payerPrivateKey: generatePrivateKey(),
-      payerXdai: 2n * XDAI,
-      // Generous: the cluster's chain is long-lived, so every purchase moves
-      // the real (thin) BZZ pool a little and later runs fill worse.
-      swapXdai: XDAI / 4n,
+      payerXdai: PAYER_XDAI,
+      swapXdai: SWAP_XDAI,
     },
     settings,
   )
-  const batchId = purchase.batchId.slice(2).toLowerCase()
+  return { batchId: purchase.batchId, ownerKey }
+}
 
-  // The node learns about it only by watching the contract we bought from.
+/** Wait for the node to see the batch on chain, as it only learns by watching. */
+async function waitForIngestion(batchId: `0x${string}`): Promise<KnownBatch | undefined> {
+  const wanted = batchId.slice(2).toLowerCase()
   const deadline = Date.now() + INGEST_TIMEOUT_MS
-  let ingested: KnownBatch | undefined
-  while (!ingested && Date.now() < deadline) {
-    ingested = (await knownBatches()).find((batch) => batch.batchID.toLowerCase() === batchId)
-    if (!ingested) {
-      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+  while (Date.now() < deadline) {
+    const found = (await knownBatches()).find((batch) => batch.batchID.toLowerCase() === wanted)
+    if (found) {
+      return found
     }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
   }
+  return undefined
+}
 
-  expect(ingested, `node never ingested ${batchId} from the Gnosis PostageStamp`).toBeDefined()
+test.skip(!clusterUp, 'requires the bee-compose cluster (pnpm dev:bee:detach)')
+
+test('the node ingests a batch bought through the multichain path', async () => {
+  test.setTimeout(INGEST_TIMEOUT_MS * 2)
+  const { batchId, ownerKey } = await buyBatch()
+  const owner = privateKeyToAccount(ownerKey).address
+
+  const ingested = await waitForIngestion(batchId)
+  expect(ingested, `node never ingested ${batchId} from the PostageStamp`).toBeDefined()
   // ...and it records the account's signer as the owner, not the payer.
   expect(ingested!.owner.toLowerCase()).toBe(owner.slice(2).toLowerCase())
   expect(ingested!.depth).toBe(DEPTH)
+})
+
+test('a chunk stamped client-side by the batch owner uploads and reads back', async () => {
+  test.setTimeout(INGEST_TIMEOUT_MS * 2)
+  // A non-deferred upload only returns once the chunk is pushsynced to a peer,
+  // which a lone queen cannot do.
+  test.skip((await peerCount()) === 0, 'needs peers — start workers')
+
+  const { batchId, ownerKey } = await buyBatch()
+  expect(await waitForIngestion(batchId), `node never ingested ${batchId}`).toBeDefined()
+
+  // The batch owner signs the stamp itself and the node only ever sees a signed
+  // envelope — the point of the key hierarchy is that the node is never trusted
+  // with the owner key.
+  const stamper = Stamper.fromBlank(ownerKey, batchId, DEPTH)
+  const payload = new TextEncoder().encode(`hybrid chain ${crypto.randomUUID()}`)
+  const chunk = await MerkleTree.root(payload)
+
+  const bee = new Bee(BEE_URL)
+  const uploaded = await bee.uploadChunk(stamper.stamp(chunk), chunk.build(), { deferred: false })
+  const stored = await bee.downloadChunk(uploaded.reference)
+
+  // A content-addressed chunk is `span (8 bytes) || payload`, zero-padded to
+  // the full 4096; the span is what says where the payload ends.
+  const span = Number(new DataView(stored.buffer, stored.byteOffset, 8).getBigUint64(0, true))
+  expect(span).toBe(payload.length)
+  expect(new TextDecoder().decode(stored.slice(8, 8 + span))).toBe(
+    new TextDecoder().decode(payload),
+  )
 })

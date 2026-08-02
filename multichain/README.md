@@ -40,50 +40,44 @@ Deliberate changes from upstream:
 
 ## Local testing
 
-Two local chains, with different fidelity. Prefer the fork when the swap or the
-real contracts matter; prefer bee-compose when you want speed and no network.
+Two local chains, both answering as Gnosis (100). Prefer the baked one — it is
+offline and it is what the Bee cluster follows; use a live fork only when the
+chain as it is _right now_ matters.
 
-### Baked Gnosis chain — real mainnet state, **no internet**
+### Baked chain — a real BZZ market, **no internet**
 
-`test/fixtures/gnosis-fork-state.json` is a state dump taken from a Gnosis
-mainnet fork, committed to the repo. Loading it gives a chain carrying the
-**real** PostageStamp, the **real** BZZ token and the **real** SushiSwap pools
-with no upstream RPC at all, so the whole production path — swap, approve,
-createBatch, topUp, increaseDepth — runs offline against genuine contracts.
+`vendor/bee-compose/blockchain/state.gnosis.json` carries the **real** BZZ
+token and the **real** SushiSwap pools taken from a Gnosis mainnet fork, with
+the Swarm contracts deployed from source on top at their mainnet addresses. So
+the whole production path — swap, approve, createBatch, topUp, increaseDepth —
+runs offline against a genuine market, and `createBatch` keeps working
+indefinitely (see `vendor/bee-compose/blockchain/HYBRID-CHAIN.md` for why a
+plain mainnet dump does not).
 
 ```bash
-pnpm dev:chain:detach     # anvil --load-state <fixture> --chain-id 100
+pnpm dev:chain:detach     # anvil --load-state <snapshot> --chain-id 100
 pnpm test:fork            # full purchase path, offline
 pnpm dev:chain:stop
 ```
 
-The one leg a fork cannot reproduce is the cross-chain bridge, so the initial
+The one leg this cannot reproduce is the cross-chain bridge, so the initial
 xDAI is minted with anvil's `setBalance`; everything downstream is genuine.
 
 Two things to know about the baked chain:
 
 - **It is stateful.** Every run buys BZZ from the real (thin) pool and moves
   its price, so the suites take an `evm_snapshot` and rewind afterwards.
-  Restarting the container also restores the fixture exactly.
+  Restarting the container also restores the snapshot exactly.
 - **It is a point in time.** Prices, the storage cost and the pool's liquidity
-  are frozen at the block it was taken from. Re-bake when that matters:
+  are frozen at the block it was baked from. Re-baking lives with the snapshot,
+  in bee-compose: `pnpm bake` there.
 
-```bash
-pnpm dev:chain:bake       # NEEDS INTERNET — forks mainnet, rewrites the fixture
-```
+### A Bee cluster on the same chain
 
-Baking warms every path the offline chain must serve (a fork fetches state
-lazily, and only what was touched lands in the dump), then splices back the
-contracts that are only ever _read_ — a state dump drops those, since nothing
-wrote to them. `scripts/bake.sh` does the whole dance.
-
-### A Bee node on the same chain
-
-`dev/gnosis-cluster` (repo root: `pnpm dev:gnosis`) runs Bee against the baked
-chain with the mainnet contract addresses, so a batch bought through the
-multichain path is one the node actually ingests — the halves that bee-compose
-keeps separate. See the notes in its compose file for what a single node still
-cannot do.
+bee-compose runs its nodes against this very snapshot, pointed at the same
+contract addresses, so a batch bought through the multichain path is one the
+nodes actually ingest and can be uploaded with —
+`ui/tests/gnosis-cluster.test.ts` is the proof.
 
 ### Live Gnosis fork
 
