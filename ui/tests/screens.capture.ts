@@ -39,10 +39,6 @@ const STUB_WEI_PER_PLUR = 40n
  * `mainnetFacadeOverAnvil` translates onto the local chain.
  */
 const FACADE_RPC_URL = 'http://gnosis-facade.test/rpc'
-const MAINNET_POSTAGE_STAMP = '0x45a1502382541cd610cc9068e88727426b696293'
-const LOCAL_POSTAGE_STAMP = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
-const MAINNET_BZZ = '0xdbf3ea6f5bee45c02255b2c26a16f300502f68da'
-const LOCAL_BZZ = '0x5FbDB2315678afecb367f032d93F642f64180aa3'
 const GNOSIS_CHAIN_ID_HEX = '0x64'
 const GNOSIS_GENESIS_HASH = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
 
@@ -67,14 +63,15 @@ function word(value: bigint): string {
 }
 
 /**
- * Present the local anvil chain as if it were Gnosis mainnet: report mainnet's
- * chain id, redirect the mainnet contract addresses to their local deploys,
- * and answer the SushiSwap quoter (there is no DEX locally) proportionally to
- * the requested BZZ, so the price-impact guard sees a flat market. Everything
- * else is forwarded to anvil untouched.
+ * Present the local chain as if it were Gnosis mainnet: report mainnet's chain
+ * id AND genesis hash (the app tells the two apart by genesis, since the chain
+ * id matches on purpose), and answer the SushiSwap quoter proportionally to the
+ * requested BZZ so the price-impact guard sees a flat market. Everything else
+ * is forwarded to the chain untouched — it already carries PostageStamp and BZZ
+ * at their Gnosis addresses.
  *
- * This exists ONLY so the payment screens — which the local settings preset
- * deliberately refuses — can be captured. No application code is aware of it.
+ * This exists ONLY so the payment screens — which off mainnet are replaced by a
+ * simulated settlement — can be captured. No application code is aware of it.
  */
 async function mainnetFacadeOverAnvil(page: Page) {
   await page.route(`${FACADE_RPC_URL}**`, async (route) => {
@@ -111,17 +108,12 @@ async function mainnetFacadeOverAnvil(page: Page) {
       return
     }
 
-    const forwarded = JSON.parse(JSON.stringify(body)) as typeof body
-    const forwardedCall = forwarded?.params?.[0] as { to?: string } | undefined
-    if (to === MAINNET_POSTAGE_STAMP) {
-      forwardedCall!.to = LOCAL_POSTAGE_STAMP
-    } else if (to === MAINNET_BZZ) {
-      forwardedCall!.to = LOCAL_BZZ
-    }
+    // No address translation: the local chain carries PostageStamp and BZZ at
+    // their Gnosis addresses, so a call to either already lands where it should.
     const response = await fetch(ANVIL_RPC_URL, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(forwarded),
+      body: JSON.stringify(body),
     })
     await route.fulfill({ contentType: 'application/json', body: await response.text() })
   })
@@ -312,7 +304,11 @@ test('capture: payment screens', async ({ page }) => {
 
   await page.getByRole('button', { name: 'Extend lifespan' }).click()
   const extend = page.getByRole('dialog')
-  await extend.getByRole('combobox').selectOption('days')
+  // Years, not days: the payment screens only appear when the operation raises
+  // a funding need, and the signer still holds the change from the purchase
+  // that seeded this drive — a day costs less than that, so a small extend
+  // settles silently and never reaches a payment screen.
+  await extend.getByRole('combobox').selectOption('years')
   await extend.getByRole('button', { name: 'Increase' }).click()
   await extend.getByRole('button', { name: 'Proceed' }).click()
 
