@@ -40,9 +40,10 @@ Deliberate changes from upstream:
 
 ## Local testing
 
-Two local chains, both answering as Gnosis (100). Prefer the baked one — it is
-offline and it is what the Bee cluster follows; use a live fork only when the
-chain as it is _right now_ matters.
+One local chain: the snapshot bee-compose bakes and its cluster runs on. It
+answers as Gnosis (100) — deliberately, so the production addresses resolve —
+which also means the chain id cannot tell it apart from mainnet. Genesis can;
+`chainIdentity()` in `ui/` is where that check lives.
 
 ### Baked chain — a real BZZ market, **no internet**
 
@@ -79,41 +80,25 @@ contract addresses, so a batch bought through the multichain path is one the
 nodes actually ingest and can be uploaded with —
 `ui/tests/gnosis-cluster.test.ts` is the proof.
 
-### Live Gnosis fork
-
-To test against the chain as it is right now rather than the baked snapshot:
-
-```bash
-pnpm dev:fork:detach      # anvil --fork-url https://rpc.gnosischain.com
-pnpm test:fork
-pnpm dev:fork:stop
-```
+### The purchase, simulated
 
 `simulateWidgetPurchase` (in `src/dev.ts`) reproduces the multichain widget's
-Gnosis-side step list on a fork: a throwaway payer receives xDAI, swaps it for
-BZZ, approves, creates the batch owned by the destination, and hands its
-leftovers over — the same role split the widget has in production.
-
-### bee-compose anvil — fast and offline
-
-No DEX exists there, so BZZ cannot be bought:
-
-- `localAnvilSettings()` targets the bee-compose chain (RPC `:9545`,
-  PostageStamp + BZZ TestToken deployed by the cluster).
-- `src/dev.ts` mocks the funding leg: the well-known queen dev account
-  (prefunded ~100 xDAI + 100k BZZ) transfers gas and BZZ to any address
-  (`fundLocalAccount`) and creates owner-key batches mirroring the production
-  roles (`createLocalBatch` — queen pays, your key owns). Never import it in
-  production code.
-- Swap functions throw a descriptive error on the local chain; mock that leg
-  with `fundLocalAccount` instead.
+Gnosis-side step list: a throwaway payer receives xDAI, swaps it for BZZ,
+approves, creates the batch owned by the destination, and hands its leftovers
+over — the same role split the widget has in production. `fundLocalAccount`
+handles the other half, transferring from the chain's dev faucet rather than
+trading, since only the purchase is worth spending a real pool on. Never import
+`src/dev.ts` in production code.
 
 ```bash
-pnpm dev:bee:detach                                  # repo root — starts anvil (+ cluster)
-pnpm --filter @swarm-id/multichain test              # unit tests, no chain needed
-pnpm --filter @swarm-id/multichain test:integration  # full lifecycle on anvil, auto-skips without it
+pnpm dev:bee:detach                          # repo root — cluster + chain
+pnpm --filter @swarm-id/multichain test      # unit tests, no chain needed
 ```
 
-The integration suite (`test/integration/postage-lifecycle.test.ts`) exercises
-fund → createBatch(owner=derived key) → approve → topUp → increaseDepth →
-non-owner revert, asserting on-chain state after each step.
+### The DEX-less anvil (chain 4020) is legacy
+
+`localAnvilSettings()` and `test/integration/` target the chain bee-compose ran
+before it gained a BZZ market: id 4020, its own PostageStamp, a BZZ TestToken,
+no DEX. Nothing serves that chain now, so the integration suite has nothing to
+run against — kept because the code paths are small and still correct for such a
+chain, not because one exists.

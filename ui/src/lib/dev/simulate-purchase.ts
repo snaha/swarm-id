@@ -17,11 +17,9 @@
  * exercises end to end (as the drive e2e suite needs), the resulting drive is
  * simply not on any chain.
  */
-import { GNOSIS_CHAIN_ID, LOCAL_ANVIL_CHAIN_ID } from '@swarm-id/multichain'
-
 import { createOwnedBatchOnChain } from '$lib/dev/chain-funding'
 import type { BatchEvent } from '$lib/payment/multichain-widget'
-import { postageChain } from '$lib/payment/postage-onchain'
+import { chainIdentity } from '$lib/payment/postage-onchain'
 
 const BATCH_ID_HEX_LENGTH = 64
 const FABRICATED_DEPTH = 20
@@ -44,31 +42,15 @@ function fabricatedBatch(): BatchEvent {
 }
 
 /**
- * True for a chain we may freely spend on: bee-compose, or a Gnosis fork
- * served from localhost. Real Gnosis is deliberately excluded — no dev toggle
- * may reach mainnet.
- */
-function isLocalChain(chainId: number, rpcUrl: string): boolean {
-  if (chainId === LOCAL_ANVIL_CHAIN_ID) {
-    return true
-  }
-  try {
-    const { hostname } = new URL(rpcUrl)
-    const local = hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
-    return chainId === GNOSIS_CHAIN_ID && local
-  } catch {
-    return false
-  }
-}
-
-/**
- * Settle a simulated purchase, creating a REAL batch when the configured
- * Gnosis RPC is a local chain — bee-compose, or a fork of mainnet where the
- * widget's whole step list runs against the real contracts.
+ * Settle a simulated purchase, creating a REAL batch when the configured RPC is
+ * a dev chain — where the widget's whole step list runs against contracts that
+ * behave like the real ones. Real Gnosis is excluded by genesis hash, not by a
+ * hostname guess: no dev toggle may reach mainnet, and a dev chain reports the
+ * same chain id on purpose.
  */
 export async function simulateBatchPurchase(derivationKey: string): Promise<BatchEvent> {
-  const client = await postageChain().catch(() => undefined)
-  if (!client || !isLocalChain(client.settings.chainId, client.settings.rpcUrls[0])) {
+  const identity = await chainIdentity().catch(() => undefined)
+  if (!identity || identity.isMainnet) {
     return fabricatedBatch()
   }
   try {

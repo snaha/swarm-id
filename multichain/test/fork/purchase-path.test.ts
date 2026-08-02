@@ -17,7 +17,7 @@
  * xDAI is minted with anvil's setBalance. Everything after it is genuine.
  *
  * Run with:
- *   pnpm dev:fork    # repo root; anvil forking Gnosis on :8545
+ *   pnpm dev:chain:detach    # repo root; the baked chain on :8545
  *   pnpm --filter @swarm-id/multichain test:fork
  */
 

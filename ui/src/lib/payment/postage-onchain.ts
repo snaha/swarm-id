@@ -39,42 +39,50 @@ const CONFIRMATION_TIMEOUT_MS = 90_000
 export const GAS_BUDGET_XDAI_WEI = 5_000_000_000_000_000n // 0.005 xDAI
 
 /**
- * Which settings preset a chain id calls for. Resolving by chain id rather
- * than by URL is what lets a LOCAL anvil forking Gnosis (chain 100, carrying
- * the real contracts and real pools) be driven with the production addresses
- * — the closest local setup to the real thing.
+ * Which settings preset a chain calls for. Resolving by chain id rather than by
+ * URL is what lets the baked local chain (id 100, carrying a real BZZ market
+ * and the contracts at their mainnet addresses) be driven with the production
+ * addresses — the closest local setup to the real thing.
  */
-function settingsFor(chainId: number, rpcUrl: string): MultichainSettings {
-  if (chainId === LOCAL_ANVIL_CHAIN_ID) {
+function settingsFor(identity: ChainIdentity, rpcUrl: string): MultichainSettings {
+  if (identity.chainId === LOCAL_ANVIL_CHAIN_ID) {
     return localAnvilSettings({ rpcUrls: [rpcUrl] })
   }
-  if (chainId === GNOSIS_CHAIN_ID) {
-    // A local node answering as Gnosis is a fork: never fall back to the
-    // public RPCs, or a failed call would silently read REAL mainnet state.
+  if (identity.chainId === GNOSIS_CHAIN_ID) {
+    // A dev chain answering as Gnosis must never fall back to the public RPCs:
+    // a failed call would silently read REAL mainnet state.
     const mainnet = gnosisMainnetSettings()
     return gnosisMainnetSettings({
-      rpcUrls: isLocalUrl(rpcUrl)
-        ? [rpcUrl]
-        : [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)],
+      rpcUrls: identity.isMainnet
+        ? [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)]
+        : [rpcUrl],
     })
   }
   throw new Error(
-    `The configured Gnosis RPC reports chain id ${chainId}, which is neither Gnosis (${GNOSIS_CHAIN_ID}) nor the local dev chain (${LOCAL_ANVIL_CHAIN_ID}). Check the network settings.`,
+    `The configured Gnosis RPC reports chain id ${identity.chainId}, which is neither Gnosis (${GNOSIS_CHAIN_ID}) nor the local dev chain (${LOCAL_ANVIL_CHAIN_ID}). Check the network settings.`,
   )
-}
-
-function isLocalUrl(rpcUrl: string): boolean {
-  try {
-    const { hostname } = new URL(rpcUrl)
-    return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0'
-  } catch {
-    return false
-  }
 }
 
 const CHAIN_ID_PROBE_TIMEOUT_MS = 5000
 
-/** `eth_chainId` without a client — the client cannot be built until we know it. */
+/**
+ * Gnosis mainnet's genesis block hash. A chain's genesis is its identity and
+ * cannot change, which is what makes this the honest way to ask "is this the
+ * real thing" — the local chain answers chain id 100 too, deliberately, so an
+ * app resolving contract addresses by chain id finds what it expects there.
+ */
+const GNOSIS_GENESIS_HASH = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
+
+export interface ChainIdentity {
+  chainId: number
+  /**
+   * True only for Gnosis mainnet itself. Anything else answering as chain 100
+   * is a dev chain, and spending on it is free.
+   */
+  isMainnet: boolean
+}
+
+/** One JSON-RPC call without a client — none can be built until we know the chain. */
 async function probeChainId(rpcUrl: string): Promise<number> {
   const response = await fetch(rpcUrl, {
     method: 'POST',
@@ -89,10 +97,55 @@ async function probeChainId(rpcUrl: string): Promise<number> {
   return Number(BigInt(data.result))
 }
 
-// One client per RPC URL: the chain a URL serves does not change under us, so
-// the probe is paid once. A failure is never cached — the node may just have
-// been starting up.
+/** The hash of block 0, or undefined when the endpoint keeps no genesis. */
+async function probeGenesisHash(rpcUrl: string): Promise<string | undefined> {
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      jsonrpc: '2.0',
+      id: 1,
+      method: 'eth_getBlockByNumber',
+      params: ['0x0', false],
+    }),
+    signal: AbortSignal.timeout(CHAIN_ID_PROBE_TIMEOUT_MS),
+  })
+  const data = (await response.json()) as { result?: { hash?: string } }
+  return data.result?.hash
+}
+
+// One identity per RPC URL: the chain a URL serves does not change under us,
+// so the probe is paid once. A failure is never cached — the node may just
+// have been starting up.
+const identities = new Map<string, Promise<ChainIdentity>>()
 const clients = new Map<string, Promise<MultichainClient>>()
+
+/**
+ * What chain is actually on the other end of `rpcUrl`.
+ *
+ * The chain id alone cannot answer this: the local chain deliberately reports
+ * 100 so that an app resolving contract addresses by chain id finds the Gnosis
+ * deployments there. Genesis can — it is the one thing a chain cannot borrow.
+ */
+export function chainIdentity(
+  rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
+): Promise<ChainIdentity> {
+  const existing = identities.get(rpcUrl)
+  if (existing) {
+    return existing
+  }
+  const identity = Promise.all([probeChainId(rpcUrl), probeGenesisHash(rpcUrl)])
+    .then(([chainId, genesisHash]) => ({
+      chainId,
+      isMainnet: chainId === GNOSIS_CHAIN_ID && genesisHash === GNOSIS_GENESIS_HASH,
+    }))
+    .catch((error: unknown) => {
+      identities.delete(rpcUrl)
+      throw error
+    })
+  identities.set(rpcUrl, identity)
+  return identity
+}
 
 /**
  * The chain client for the configured Gnosis RPC, built from whichever preset
@@ -107,8 +160,8 @@ export function postageChain(
   if (existing) {
     return existing
   }
-  const client = probeChainId(rpcUrl)
-    .then((chainId) => new MultichainClient(settingsFor(chainId, rpcUrl)))
+  const client = chainIdentity(rpcUrl)
+    .then((identity) => new MultichainClient(settingsFor(identity, rpcUrl)))
     .catch((error: unknown) => {
       clients.delete(rpcUrl)
       throw error

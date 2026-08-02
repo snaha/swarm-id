@@ -4,17 +4,17 @@
 import { defineConfig } from "vitest/config"
 
 /**
- * Tests against an anvil fork of Gnosis mainnet (`pnpm dev:fork`), where the
- * real PostageStamp, BZZ token and SushiSwap pools exist. Opt-in and skipped
- * automatically when no fork is reachable.
+ * Tests against the baked local chain (`pnpm dev:chain`), which carries a real
+ * BZZ market and the PostageStamp the cluster follows. Opt-in and skipped
+ * automatically when no chain is reachable.
  */
 export default defineConfig({
   test: {
     globals: true,
     environment: "node",
     include: ["test/fork/**/*.test.ts"],
-    // A fork mines instantly but every call still round-trips to the upstream
-    // RPC the first time it touches unseen state.
+    // The chain mines on a block cadence, so a purchase spans several
+     // confirmations.
     testTimeout: 180_000,
     hookTimeout: 180_000,
   },

@@ -5,11 +5,11 @@
  *
  * There are two local chains, and they are not equally faithful:
  *
- * - **a chain answering as Gnosis (100)** — bee-compose's cluster
- *   (`pnpm dev:bee`) or a live fork (`pnpm dev:fork`) — carries a real BZZ
- *   market and the PostageStamp the nodes follow. There the only thing faked
- *   is the bridge: xDAI is minted with anvil's setBalance and everything after
- *   it — swap, approve, createBatch — is the production path.
+ * - **the baked chain answering as Gnosis (100)** — bee-compose's cluster
+ *   (`pnpm dev:bee`) or the same snapshot standalone (`pnpm dev:chain`) —
+ *   carries a real BZZ market and the PostageStamp the nodes follow. There the
+ *   only thing faked is the bridge: xDAI is minted with anvil's setBalance and
+ *   everything after it — swap, approve, createBatch — is the production path.
  * - **a DEX-less anvil** (chain 4020) has no BZZ market, so the prefunded
  *   queen account transfers xDAI and TestToken BZZ directly instead. Enough to
  *   exercise the postage operations themselves, nothing about the purchase.

@@ -8,6 +8,7 @@
 import { fundPostageSigner } from '$lib/dev/chain-funding'
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, quoteFunding, swapDeliveredXdai } from '$lib/payment/funding'
+import { chainIdentity } from '$lib/payment/postage-onchain'
 import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
 import type { Account } from '$lib/types'
 
@@ -51,8 +52,15 @@ export function createFundingRequester(account: () => Account): FundingRequester
 
   const request: RequestFunding = async (need) => {
     // Dev chain: no Relay exists, so the chain's dev faucet stands in for the
-    // whole payment leg and the BZZ arrives directly.
+    // whole payment leg and the BZZ arrives directly. The toggle alone is not
+    // enough to authorise that — it says nothing about which chain is on the
+    // other end, and a dev chain answers the same chain id as mainnet.
     if (devSettingsStore.data.mockStampEnabled) {
+      if ((await chainIdentity()).isMainnet) {
+        throw new Error(
+          'Mock purchases are on, but the configured RPC is Gnosis mainnet. Point it at a dev chain, or turn the mock off and pay for real.',
+        )
+      }
       await fundPostageSigner(account().derivationKey, need.bzz)
       return
     }

@@ -2,10 +2,13 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * Helpers for an anvil node forking Gnosis mainnet, where the real
- * PostageStamp, the real BZZ token and the real SushiSwap pools all exist.
+ * Helpers for the baked local chain: a real BZZ token and real SushiSwap pools
+ * taken from a Gnosis mainnet fork, with the Swarm contracts deployed on top.
  *
- * Start it with `pnpm dev:fork` from the repo root.
+ * Start it with `pnpm dev:chain:detach` from the repo root. Point FORK_RPC_URL
+ * at :9545 to run against the Bee cluster's copy instead — but prefer the
+ * standalone one, since these tests rewind the chain and a node following it
+ * will not survive that (see bee-compose's gotchas).
  */
 
 const PROBE_TIMEOUT_MILLIS = 2000
@@ -30,7 +33,7 @@ async function rpc(method: string, params: unknown[]): Promise<unknown> {
   return data.result
 }
 
-/** True only when a node is answering AND it really is a Gnosis fork. */
+/** True only when a node is answering AND it really is the Gnosis chain. */
 export async function isGnosisForkReachable(): Promise<boolean> {
   try {
     return (
