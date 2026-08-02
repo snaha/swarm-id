@@ -2,19 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * LOCAL DEV / TEST ONLY — helpers for the bee-compose anvil chain.
+ * LOCAL DEV / TEST ONLY — helpers for bee-compose's chain.
  *
- * These stand in for the two legs that cannot run locally (no Relay, no DEX):
- * instead of a cross-chain payment + Sushi swap delivering funds, the
- * well-known queen dev account transfers xDAI and TestToken BZZ directly.
- * Production code must never import this module.
+ * The one leg that cannot run locally is the cross-chain payment, so its funds
+ * come from the faucet the bake leaves on the chain. Everything downstream —
+ * the Sushi swap, approve, createBatch — is the production path against a real
+ * BZZ market. Production code must never import this module.
  */
 
 import { RollingValueProvider } from "cafe-utility"
 import { privateKeyToAccount } from "viem/accounts"
 import { createBatch, type CreateBatchResult } from "./postage-write"
 import { getNativeBalance } from "./rpc"
-import { LOCAL_ANVIL_CHAIN_ID, type MultichainSettings } from "./settings"
+import type { MultichainSettings } from "./settings"
 import { swapXdaiToBzz } from "./sushi"
 import {
   approveBzz,
@@ -36,25 +36,10 @@ const GAS_RESERVE_WEI = 10n ** 16n // 0.01 xDAI
 export const DEV_FAUCET_PRIVATE_KEY: `0x${string}` =
   "0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9"
 
-/**
- * The bee-compose queen node's key (documented in .claude/rules/bee-cluster.md),
- * prefunded with xDAI and TestToken BZZ on the older DEX-less anvil chain,
- * which had no faucet of its own.
- */
-export const LOCAL_ANVIL_FUNDER_PRIVATE_KEY: `0x${string}` =
-  "0x566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9"
-
-/** Whichever account the chain in front of us actually prefunded. */
-function funderFor(settings: MultichainSettings): `0x${string}` {
-  return settings.chainId === LOCAL_ANVIL_CHAIN_ID
-    ? LOCAL_ANVIL_FUNDER_PRIVATE_KEY
-    : DEV_FAUCET_PRIVATE_KEY
-}
-
 /** Where the funds handed out by `fundLocalAccount` come from. */
-export function faucetAddress(settings: MultichainSettings): `0x${string}` {
-  return privateKeyToAccount(funderFor(settings)).address
-}
+export const DEV_FAUCET_ADDRESS: `0x${string}` = privateKeyToAccount(
+  DEV_FAUCET_PRIVATE_KEY,
+).address
 
 export const DEFAULT_BUCKET_DEPTH = 16
 
@@ -79,7 +64,7 @@ export async function fundLocalAccount(
     const hash = await transferNative(
       {
         amount: options.xdai,
-        originPrivateKey: funderFor(settings),
+        originPrivateKey: DEV_FAUCET_PRIVATE_KEY,
         to: options.to,
       },
       settings,
@@ -91,7 +76,7 @@ export async function fundLocalAccount(
     const hash = await transferBzz(
       {
         amount: options.bzzPlur,
-        originPrivateKey: funderFor(settings),
+        originPrivateKey: DEV_FAUCET_PRIVATE_KEY,
         to: options.to,
       },
       settings,
@@ -99,14 +84,6 @@ export async function fundLocalAccount(
     )
     await waitForTransactionSuccess(hash, settings, rpcProvider)
   }
-}
-
-export interface CreateLocalBatchOptions {
-  /** PostageStamp-level batch owner (e.g. the derived postage signer). */
-  owner: `0x${string}`
-  depth: number
-  /** Initial balance per chunk in PLUR. */
-  amountPerChunk: bigint
 }
 
 const NONCE_BYTES = 32
@@ -118,43 +95,6 @@ function randomNonce(): `0x${string}` {
     .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
     .join("")
   return `0x${hex}`
-}
-
-/**
- * Create a mutable batch on the local chain, paid for by the queen account,
- * owned by `owner` — mirroring production, where the widget's temp wallet is
- * the creator/payer and the derived signer is the owner. Gives extend/resize
- * a real owner-key batch to run against end-to-end.
- */
-export async function createLocalBatch(
-  options: CreateLocalBatchOptions,
-  settings: MultichainSettings,
-): Promise<CreateBatchResult> {
-  const rpcProvider = new RollingValueProvider(settings.rpcUrls)
-  const totalPlur = options.amountPerChunk << BigInt(options.depth)
-  const approveHash = await approveBzz(
-    {
-      amount: totalPlur,
-      originPrivateKey: funderFor(settings),
-      spender: settings.addresses.postageStamp,
-    },
-    settings,
-    rpcProvider,
-  )
-  await waitForTransactionSuccess(approveHash, settings, rpcProvider)
-  return createBatch(
-    {
-      originPrivateKey: funderFor(settings),
-      owner: options.owner,
-      depth: options.depth,
-      amount: options.amountPerChunk,
-      bucketDepth: DEFAULT_BUCKET_DEPTH,
-      batchNonce: randomNonce(),
-      immutable: false,
-    },
-    settings,
-    rpcProvider,
-  )
 }
 
 // ============================================================================

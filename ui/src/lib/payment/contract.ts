@@ -8,11 +8,6 @@ import { postageChain } from '$lib/payment/postage-onchain'
 import type { NewStamp } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
-// bee-compose anvil deploy of the PostageStamp contract; only used when the RPC
-// URL is local (resolvePostageStampContractAddress gates it — a remote RPC
-// resolves to Gnosis mainnet). Inert in production.
-export const LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
-
 /**
  * Read a batch's parameters straight from the PostageStamp contract ON-CHAIN
  * (not from a Bee node), so any batch id works even when the configured node

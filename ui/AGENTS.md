@@ -25,14 +25,14 @@ The identity UI is a SvelteKit SPA.
   `payment/drive-operation.ts`), with funding injected as a seam — the in-app payment flow in
   production, a local faucet in dev. See `docs/Postage-On-Chain-Engine.md` and
   `docs/Drive-Payment-Flow.md`.
-- **Chain settings follow the chain id, never the URL** (`postageChain()` in
-  `payment/postage-onchain.ts`): the endpoint is probed once per URL and the preset chosen from
-  what it answers. That is what lets the **baked hybrid chain** (chain 100 — a real BZZ market
-  from a mainnet fork with the Swarm contracts deployed on top, committed to the repo in
-  `vendor/bee-compose`, no internet needed) be driven with the production addresses. Run it as
-  the Bee cluster's chain (`pnpm dev:bee`, RPC `:9545`) or standalone (`pnpm dev:chain`, `:8545`),
-  and point the drive e2e at whichever with `CHAIN_RPC_URL`. A local URL answering as Gnosis never
-  falls back to the public RPCs, so a failed call cannot silently read or write real mainnet.
+- **There is one chain and one settings preset** (`postageChain()` in
+  `payment/postage-onchain.ts`): the **baked hybrid chain** (chain 100 — a real BZZ market from a
+  mainnet fork with the Swarm contracts deployed on top, committed to the repo in
+  `vendor/bee-compose`, no internet needed) is driven with the production addresses, which is what
+  makes it worth testing on. Run it as the Bee cluster's chain (`pnpm dev:bee`, RPC `:9545`) or
+  standalone (`pnpm dev:chain`, `:8545`), and point the drive e2e at whichever with
+  `CHAIN_RPC_URL`. An endpoint that is not mainnet never falls back to the public RPCs, so a failed
+  call cannot silently read or write real mainnet.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)

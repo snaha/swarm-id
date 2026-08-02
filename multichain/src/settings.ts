@@ -5,22 +5,17 @@
 
 import { Objects } from "cafe-utility"
 
-/**
- * Contract addresses the machinery talks to. The Sushi trio is optional: the
- * bee-compose anvil chain deploys the PostageStamp and a BZZ test token but no
- * DEX, so swap operations are unavailable there (see requireSushi in sushi.ts)
- * and callers mock the swap leg instead.
- */
+/** Contract addresses the machinery talks to. */
 export interface MultichainAddresses {
   bzz: `0x${string}`
   postageStamp: `0x${string}`
-  wxdai?: `0x${string}`
-  sushiV3Router?: `0x${string}`
-  sushiV3Quoter?: `0x${string}`
+  wxdai: `0x${string}`
+  sushiV3Router: `0x${string}`
+  sushiV3Quoter: `0x${string}`
 }
 
 export interface MultichainSettings {
-  /** EIP-155 chain id baked into every signature — 100 mainnet, 4020 anvil. */
+  /** EIP-155 chain id baked into every signature. */
   chainId: number
   chainName: string
   /** Rotated on transport failures (RollingValueProvider). */
@@ -35,7 +30,6 @@ export interface MultichainSettings {
 }
 
 export const GNOSIS_CHAIN_ID = 100
-export const LOCAL_ANVIL_CHAIN_ID = 4020
 
 const GNOSIS_MAINNET_DEFAULTS: MultichainSettings = {
   chainId: GNOSIS_CHAIN_ID,
@@ -57,38 +51,11 @@ const GNOSIS_MAINNET_DEFAULTS: MultichainSettings = {
   sushiV3BzzPoolFee: 3000,
 }
 
-// bee-compose anvil deploy (see .claude/rules/bee-cluster.md): PostageStamp and
-// a BZZ TestToken at deterministic CREATE addresses; no DEX exists locally.
-const LOCAL_ANVIL_DEFAULTS: MultichainSettings = {
-  chainId: LOCAL_ANVIL_CHAIN_ID,
-  chainName: "bee-compose anvil",
-  rpcUrls: ["http://localhost:9545"],
-  fetchTimeoutMillis: 15_000,
-  receiptPollMillis: 1_000,
-  receiptPollAttempts: 20,
-  balancePollMillis: 1_000,
-  balancePollAttempts: 20,
-  addresses: {
-    bzz: "0x5FbDB2315678afecb367f032d93F642f64180aa3",
-    postageStamp: "0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512",
-  },
-  sushiV3BzzPoolFee: 3000,
-}
-
 export function gnosisMainnetSettings(
   overrides?: Partial<MultichainSettings>,
 ): MultichainSettings {
   return Objects.deepMerge2(
     GNOSIS_MAINNET_DEFAULTS,
-    overrides ?? {},
-  ) as MultichainSettings
-}
-
-export function localAnvilSettings(
-  overrides?: Partial<MultichainSettings>,
-): MultichainSettings {
-  return Objects.deepMerge2(
-    LOCAL_ANVIL_DEFAULTS,
     overrides ?? {},
   ) as MultichainSettings
 }

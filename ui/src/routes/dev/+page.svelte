@@ -12,6 +12,7 @@
     uint8ArrayToHex,
     uploadSOC,
   } from '@snaha/swarm-id'
+  import { gnosisMainnetSettings } from '@swarm-id/multichain'
   import { formatUnits, parseUnits } from 'viem'
 
   import { resolve } from '$app/paths'
@@ -29,10 +30,7 @@
   } from '$lib/dev/chain-funding'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
-  import {
-    LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS,
-    fetchExistingBatchFromChain,
-  } from '$lib/payment/contract'
+  import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import { chainIdentity, postageChain } from '$lib/payment/postage-onchain'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -523,15 +521,16 @@ Check console logs for details:
   let importMessage = $state('')
   let importError = $state('')
 
-  // Contract address the read will use: the override if set, else whichever
-  // deployment the endpoint's CHAIN calls for — a localhost fork of Gnosis
-  // serves the mainnet contracts, so the hostname alone cannot decide.
-  let resolvedContract = $state(LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS)
+  // Contract address the read will use: the override if set, else whatever the
+  // endpoint's chain reports. Every chain the app supports carries PostageStamp
+  // at the Gnosis address, so that is also the fallback when the probe fails.
+  const DEFAULT_POSTAGE_STAMP = gnosisMainnetSettings().addresses.postageStamp
+  let resolvedContract = $state<string>(DEFAULT_POSTAGE_STAMP)
   $effect(() => {
     const url = importRpcUrl.trim()
     void postageChain(url)
       .then((chain) => (resolvedContract = chain.settings.addresses.postageStamp))
-      .catch(() => (resolvedContract = LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS))
+      .catch(() => (resolvedContract = DEFAULT_POSTAGE_STAMP))
   })
 
   async function importBatchById() {

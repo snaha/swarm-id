@@ -17,13 +17,11 @@ import type { PrivateKey } from '@ethersphere/bee-js'
 import { type PostageStamp, withTimeout } from '@snaha/swarm-id'
 import {
   GNOSIS_CHAIN_ID,
-  LOCAL_ANVIL_CHAIN_ID,
   MultichainClient,
   type MultichainSettings,
   type PostageBatch,
   type PostageWriteConstraints,
   gnosisMainnetSettings,
-  localAnvilSettings,
 } from '@swarm-id/multichain'
 
 import { prefix0x } from '$lib/crypto/hex'
@@ -39,28 +37,24 @@ const CONFIRMATION_TIMEOUT_MS = 90_000
 export const GAS_BUDGET_XDAI_WEI = 5_000_000_000_000_000n // 0.005 xDAI
 
 /**
- * Which settings preset a chain calls for. Resolving by chain id rather than by
- * URL is what lets the baked local chain (id 100, carrying a real BZZ market
- * and the contracts at their mainnet addresses) be driven with the production
- * addresses — the closest local setup to the real thing.
+ * Settings for the endpoint. There is one preset: the baked local chain carries
+ * a real BZZ market and the contracts at their mainnet addresses, so it is
+ * driven with the production ones — which is what makes it worth testing on.
  */
 function settingsFor(identity: ChainIdentity, rpcUrl: string): MultichainSettings {
-  if (identity.chainId === LOCAL_ANVIL_CHAIN_ID) {
-    return localAnvilSettings({ rpcUrls: [rpcUrl] })
+  if (identity.chainId !== GNOSIS_CHAIN_ID) {
+    throw new Error(
+      `The configured Gnosis RPC reports chain id ${identity.chainId}, not Gnosis (${GNOSIS_CHAIN_ID}). Check the network settings.`,
+    )
   }
-  if (identity.chainId === GNOSIS_CHAIN_ID) {
-    // A dev chain answering as Gnosis must never fall back to the public RPCs:
-    // a failed call would silently read REAL mainnet state.
-    const mainnet = gnosisMainnetSettings()
-    return gnosisMainnetSettings({
-      rpcUrls: identity.isMainnet
-        ? [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)]
-        : [rpcUrl],
-    })
-  }
-  throw new Error(
-    `The configured Gnosis RPC reports chain id ${identity.chainId}, which is neither Gnosis (${GNOSIS_CHAIN_ID}) nor the local dev chain (${LOCAL_ANVIL_CHAIN_ID}). Check the network settings.`,
-  )
+  // A dev chain answering as Gnosis must never fall back to the public RPCs:
+  // a failed call would silently read REAL mainnet state.
+  const mainnet = gnosisMainnetSettings()
+  return gnosisMainnetSettings({
+    rpcUrls: identity.isMainnet
+      ? [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)]
+      : [rpcUrl],
+  })
 }
 
 const CHAIN_ID_PROBE_TIMEOUT_MS = 5000

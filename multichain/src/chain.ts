@@ -9,9 +9,8 @@ import type { MultichainSettings } from "./settings"
 
 /**
  * Build the viem chain object from settings instead of importing the static
- * `gnosis` chain, so the same code signs correctly against the bee-compose
- * anvil chain (id 4020) — an EIP-155 signature carries the chain id, and a
- * hardcoded mainnet id is rejected by any other chain.
+ * `gnosis` chain: an EIP-155 signature carries the chain id, so the id has to
+ * come from whatever the endpoint actually reports.
  */
 export function chainFromSettings(settings: MultichainSettings): Chain {
   return defineChain({

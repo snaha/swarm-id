@@ -50,12 +50,7 @@ import {
   waitForTransactionSuccess,
 } from "./waiter"
 
-export {
-  gnosisMainnetSettings,
-  localAnvilSettings,
-  GNOSIS_CHAIN_ID,
-  LOCAL_ANVIL_CHAIN_ID,
-} from "./settings"
+export { gnosisMainnetSettings, GNOSIS_CHAIN_ID } from "./settings"
 export type { MultichainAddresses, MultichainSettings } from "./settings"
 export type {
   CreateBatchOptions,
@@ -69,9 +64,9 @@ export { POSTAGE_STAMP_ABI, ERC20_ABI } from "./abi"
 export { buildExactInputSwapData } from "./sushi"
 
 /**
- * One client per chain configuration. Construct with a settings preset
- * (gnosisMainnetSettings / localAnvilSettings) and optional overrides — every
- * method then talks to that chain with rotating RPC fallback.
+ * One client per chain configuration. Construct with `gnosisMainnetSettings()`
+ * and optional overrides — every method then talks to that chain with rotating
+ * RPC fallback.
  */
 export class MultichainClient {
   readonly settings: MultichainSettings

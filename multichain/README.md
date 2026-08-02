@@ -23,11 +23,11 @@ library for this (with our own UI)."_ Adapted files carry a provenance header.
 
 Deliberate changes from upstream:
 
-- **Injectable chain + addresses** (`MultichainSettings` presets
-  `gnosisMainnetSettings()` / `localAnvilSettings()`) instead of a hardcoded
-  viem `gnosis` chain and mainnet constants — the same code signs correctly
-  against the bee-compose anvil chain (id 4020), which is what makes local
-  testing possible at all.
+- **Injectable chain + addresses** (`MultichainSettings`, built with
+  `gnosisMainnetSettings()`) instead of a hardcoded viem `gnosis` chain and
+  mainnet constants — an EIP-155 signature carries the chain id, so it has to
+  come from whatever the endpoint reports, which is what makes local testing
+  possible at all.
 - **New PostageStamp operations**: `topUpBatch`, `increaseDepth`, and the read
   side (`getPostageBatch`, `getRemainingBalance`,
   `getPostageWriteConstraints`). Upstream only has `createBatch`.
@@ -94,11 +94,3 @@ trading, since only the purchase is worth spending a real pool on. Never import
 pnpm dev:bee:detach                          # repo root — cluster + chain
 pnpm --filter @swarm-id/multichain test      # unit tests, no chain needed
 ```
-
-### The DEX-less anvil (chain 4020) is legacy
-
-`localAnvilSettings()` and `test/integration/` target the chain bee-compose ran
-before it gained a BZZ market: id 4020, its own PostageStamp, a BZZ TestToken,
-no DEX. Nothing serves that chain now, so the integration suite has nothing to
-run against — kept because the code paths are small and still correct for such a
-chain, not because one exists.

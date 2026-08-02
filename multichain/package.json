@@ -19,7 +19,6 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:integration": "vitest run --config vitest.integration.config.ts",
     "lint": "eslint src/**/*.ts test/**/*.ts",
     "lint:fix": "eslint src/**/*.ts test/**/*.ts --fix",
     "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",

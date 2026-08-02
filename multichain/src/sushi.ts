@@ -35,18 +35,9 @@ interface SushiAddresses {
   quoter: `0x${string}`
 }
 
-/**
- * The bee-compose anvil chain deploys no DEX, so swaps only exist on
- * mainnet-like chains. Callers on the local chain mock the swap leg (transfer
- * BZZ from the dev funder instead) — see dev.ts.
- */
+/** The pool's three addresses, under the names the swap helpers use. */
 function requireSushi(settings: MultichainSettings): SushiAddresses {
   const { wxdai, sushiV3Router, sushiV3Quoter } = settings.addresses
-  if (!wxdai || !sushiV3Router || !sushiV3Quoter) {
-    throw new Error(
-      "SushiSwap is not configured for this chain (no DEX on the local dev chain — mock the swap leg instead).",
-    )
-  }
   return { wxdai, router: sushiV3Router, quoter: sushiV3Quoter }
 }
 
