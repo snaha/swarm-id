@@ -14,7 +14,7 @@ export default defineConfig({
     environment: "node",
     include: ["test/fork/**/*.test.ts"],
     // The chain mines on a block cadence, so a purchase spans several
-     // confirmations.
+    // confirmations.
     testTimeout: 180_000,
     hookTimeout: 180_000,
   },

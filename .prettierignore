@@ -15,3 +15,7 @@ playwright-report
 test-results
 The-Book-of-Swarm.pdf
 demo
+
+# Vendored repos carry their own formatting rules — and CI checks out without
+# submodules, so formatting them here would only diverge from what CI sees.
+vendor
