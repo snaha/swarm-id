@@ -23,12 +23,13 @@
 import { LOCAL_ANVIL_CHAIN_ID, type MultichainSettings } from '@swarm-id/multichain'
 import {
   createLocalBatch,
+  faucetAddress,
   fundLocalAccount,
   simulateWidgetPurchase,
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
-import { GAS_BUDGET_XDAI_WEI, postageChain } from '$lib/payment/postage-onchain'
+import { GAS_BUDGET_XDAI_WEI, ownerFunds, postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 
 /** Default drive size for the dev batch actions. */
@@ -36,14 +37,7 @@ const DEV_BATCH_DEPTH = 20
 /** Funds a dev batch well above the contract's ~24h floor. */
 const DEV_BATCH_FLOOR_MULTIPLE = 3n
 /** Generous gas dust so a dev address can run many operations. */
-const DEV_XDAI_FUNDING = GAS_BUDGET_XDAI_WEI * 10n
-/**
- * Headroom on a requested amount. A funding need is computed from a chain read
- * that is a block or two old by the time the operation spends it; a real
- * payment over-delivers too (the widget swaps a quoted amount with slippage),
- * and out of a faucet the margin is free.
- */
-const FUNDING_MARGIN = 2n
+export const DEV_XDAI_FUNDING = GAS_BUDGET_XDAI_WEI * 10n
 /** Bankrolls the simulated purchase's throwaway payer: swap, batch and gas. */
 const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 /**
@@ -59,20 +53,48 @@ function isBeeComposeChain(settings: MultichainSettings): boolean {
 }
 
 /**
- * Deliver BZZ (and gas dust) to the account's postage signer — the stand-in
- * for a completed payment.
+ * Deliver xDAI and BZZ to the account's postage signer — the stand-in for a
+ * completed payment.
  *
  * A transfer from the chain's faucet, not a swap: every swap moves a real and
  * thin BZZ pool, and topping a signer up is not the thing worth simulating
  * faithfully. The purchase path still trades — see `createOwnedBatchOnChain`.
  */
-export async function fundPostageSigner(derivationKey: string, bzzPlur: bigint): Promise<void> {
+export async function fundPostageSigner(
+  derivationKey: string,
+  amounts: { xdai: bigint; bzzPlur: bigint },
+): Promise<void> {
   const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
-  await fundLocalAccount(
-    { to: destination as `0x${string}`, xdai: DEV_XDAI_FUNDING, bzzPlur: bzzPlur * FUNDING_MARGIN },
-    chain.settings,
-  )
+  await fundLocalAccount({ to: destination as `0x${string}`, ...amounts }, chain.settings)
+}
+
+/** An address and what it currently holds, for the faucet panel. */
+export interface FundsRow {
+  address: `0x${string}`
+  xdai: bigint
+  bzz: bigint
+}
+
+/**
+ * What the faucet has left to give, and what the selected account's signer
+ * holds — the two numbers that decide whether a dev action can run at all.
+ */
+export async function devChainFunds(
+  derivationKey: string,
+): Promise<{ faucet: FundsRow; signer: FundsRow }> {
+  const chain = await postageChain()
+  const { destination } = await derivePostageSigner(derivationKey)
+  const faucet = faucetAddress(chain.settings)
+  const signer = destination as `0x${string}`
+  const [faucetFunds, signerFunds] = await Promise.all([
+    ownerFunds(faucet, chain),
+    ownerFunds(signer, chain),
+  ])
+  return {
+    faucet: { address: faucet, ...faucetFunds },
+    signer: { address: signer, ...signerFunds },
+  }
 }
 
 /** A batch created on a local chain, in the terms a purchase reports. */

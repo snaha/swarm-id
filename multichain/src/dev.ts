@@ -51,6 +51,11 @@ function funderFor(settings: MultichainSettings): `0x${string}` {
     : DEV_FAUCET_PRIVATE_KEY
 }
 
+/** Where the funds handed out by `fundLocalAccount` come from. */
+export function faucetAddress(settings: MultichainSettings): `0x${string}` {
+  return privateKeyToAccount(funderFor(settings)).address
+}
+
 export const DEFAULT_BUCKET_DEPTH = 16
 
 export interface FundLocalAccountOptions {

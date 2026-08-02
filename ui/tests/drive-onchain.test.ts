@@ -86,9 +86,9 @@ async function createAccountWithOnChainDrive(page: Page) {
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
   await page.goto('/dev')
-  await page.getByRole('tab', { name: 'Stamps' }).click()
-  // The chain tools act on the /dev account selection, which defaults to the
-  // only account this test creates.
+  await page.getByRole('tab', { name: 'Chain' }).click()
+  // The chain tools act on the page-level account selection, which defaults to
+  // the only account this test creates.
   await page.getByRole('button', { name: 'Create owned batch (depth 20)' }).click()
   const created = page.getByText(/^Created owned batch: 0x[0-9a-f]{64}$/)
   await expect(created).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })

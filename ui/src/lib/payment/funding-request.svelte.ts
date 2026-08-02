@@ -5,7 +5,7 @@
  * either a mocked local transfer (dev chain — no Relay, no DEX there) or a
  * pending payment the UI surfaces, resolving once the money has landed.
  */
-import { fundPostageSigner } from '$lib/dev/chain-funding'
+import { DEV_XDAI_FUNDING, fundPostageSigner } from '$lib/dev/chain-funding'
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, quoteFunding, swapDeliveredXdai } from '$lib/payment/funding'
 import { chainIdentity } from '$lib/payment/postage-onchain'
@@ -45,6 +45,9 @@ export interface FundingRequester {
   cancel: () => void
 }
 
+/** Headroom on a computed need; out of a faucet the margin is free. */
+const FUNDING_MARGIN = 2n
+
 export function createFundingRequester(account: () => Account): FundingRequester {
   let pending = $state<FundingNeed | undefined>(undefined)
   let quote: FundingQuote | undefined
@@ -61,7 +64,13 @@ export function createFundingRequester(account: () => Account): FundingRequester
           'Mock purchases are on, but the configured RPC is Gnosis mainnet. Point it at a dev chain, or turn the mock off and pay for real.',
         )
       }
-      await fundPostageSigner(account().derivationKey, need.bzz)
+      // Over-deliver: the need was computed from a chain read that is a block
+      // or two old by the time the operation spends it, and a real payment
+      // over-delivers too (the widget swaps a quoted amount with slippage).
+      await fundPostageSigner(account().derivationKey, {
+        xdai: DEV_XDAI_FUNDING,
+        bzzPlur: need.bzz * FUNDING_MARGIN,
+      })
       return
     }
     quote = await quoteFunding(need)

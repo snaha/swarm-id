@@ -98,7 +98,7 @@ test('dev page banner against mainnet', async ({ page }) => {
   await page.screenshot({ path: `${OUT_DIR}/dev-chain-banner-mainnet.png` })
 })
 
-test('funding a postage signer from the chain faucet', async ({ page }) => {
+test('sending xDAI and BZZ from the chain faucet', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)
   await page.setViewportSize(VIEWPORT)
   await seedSettings(page, ANVIL_RPC_URL)
@@ -109,26 +109,25 @@ test('funding a postage signer from the chain faucet', async ({ page }) => {
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
   await page.goto('/dev')
-  await page.getByRole('tab', { name: 'Stamps' }).click()
-  const fund = page.getByRole('button', { name: 'Fund postage signer' })
-  await fund.scrollIntoViewIfNeeded()
-  await fund.click()
-  await expect(page.getByText('Funded postage signer: xDAI + BZZ delivered')).toBeVisible({
-    timeout: ONCHAIN_TIMEOUT_MS,
-  })
+  await page.getByRole('tab', { name: 'Chain' }).click()
 
-  // Clip from the heading to the result line: the section is a run of siblings,
-  // not a wrapper, so there is no single element to shoot.
-  const heading = await page.getByRole('heading', { name: 'On-chain drive tooling' }).boundingBox()
-  const result = await page.getByText('Funded postage signer: xDAI + BZZ delivered').boundingBox()
+  const heading = page.getByRole('heading', { name: 'Faucet' })
+  await heading.scrollIntoViewIfNeeded()
+  // Balances land before the send, so the shot shows both rows populated.
+  await expect(page.getByText(/^Faucet 0x/)).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await page.getByRole('button', { name: 'Send to signer' }).click()
+  await expect(page.getByText(/^Sent from faucet:/)).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+
+  const top = await heading.boundingBox()
+  const send = await page.getByRole('button', { name: 'Send to signer' }).boundingBox()
   const PAD = 16
   await page.screenshot({
     path: `${OUT_DIR}/dev-faucet-funding.png`,
     clip: {
-      x: heading!.x - PAD,
-      y: heading!.y - PAD,
-      width: heading!.width + PAD * 2,
-      height: result!.y + result!.height - heading!.y + PAD * 2,
+      x: top!.x - PAD,
+      y: top!.y - PAD,
+      width: VIEWPORT.width - top!.x,
+      height: send!.y + send!.height - top!.y + PAD * 2,
     },
   })
 })
