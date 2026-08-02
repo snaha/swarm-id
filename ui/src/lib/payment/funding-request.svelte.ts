@@ -50,8 +50,8 @@ export function createFundingRequester(account: () => Account): FundingRequester
   let settle: { resolve: () => void; reject: (error: Error) => void } | undefined
 
   const request: RequestFunding = async (need) => {
-    // Dev chain: no Relay and no DEX exist, so the queen account stands in for
-    // the whole payment leg and the BZZ arrives directly.
+    // Dev chain: no Relay exists, so the chain's dev faucet stands in for the
+    // whole payment leg and the BZZ arrives directly.
     if (devSettingsStore.data.mockStampEnabled) {
       await fundPostageSigner(account().derivationKey, need.bzz)
       return

@@ -1013,10 +1013,11 @@ Check console logs for details:
       <h3 class="text-lg font-semibold">On-chain drive tooling</h3>
       <p class="text-muted-foreground text-sm">
         Extend and resize are signed by the account's derived postage signer and sent straight to
-        the PostageStamp contract — no Bee node. On the local chain there is no Relay and no DEX, so
-        these actions stand in for the payment: they move xDAI and BZZ from the bee-compose queen
-        account. With <strong>mock purchases</strong> on (above), the drive dialogs fund themselves the
-        same way instead of opening the payment screen.
+        the PostageStamp contract — no Bee node. There is no Relay locally, so these actions stand
+        in for the payment: <strong>Fund postage signer</strong> transfers xDAI and BZZ from the
+        chain's dev faucet, while <strong>Create owned batch</strong> runs the widget's real step
+        list against the local chain's BZZ pool. With <strong>mock purchases</strong> on (above), the
+        drive dialogs fund themselves the same way instead of opening the payment screen.
       </p>
       <div class="flex flex-wrap gap-2">
         <Button

@@ -14,7 +14,7 @@ import { RollingValueProvider } from "cafe-utility"
 import { privateKeyToAccount } from "viem/accounts"
 import { createBatch, type CreateBatchResult } from "./postage-write"
 import { getNativeBalance } from "./rpc"
-import type { MultichainSettings } from "./settings"
+import { LOCAL_ANVIL_CHAIN_ID, type MultichainSettings } from "./settings"
 import { swapXdaiToBzz } from "./sushi"
 import {
   approveBzz,
@@ -28,12 +28,28 @@ import { waitForTransactionSuccess } from "./waiter"
 const GAS_RESERVE_WEI = 10n ** 16n // 0.01 xDAI
 
 /**
- * The bee-compose queen node's key (documented in .claude/rules/bee-cluster.md),
- * prefunded by the cluster with ~100 xDAI and 100k BZZ on the local anvil
- * chain. A publicly known development key — worthless outside localhost.
+ * bee-compose's dev faucet, `keccak256("bee-compose dev faucet")` — its bake
+ * leaves it holding xDAI and a BZZ float precisely so dev tooling can fund an
+ * address by transfer instead of trading on the real (thin) pool. A publicly
+ * known development key, worthless outside that chain.
  */
-export const LOCAL_DEV_FUNDER_PRIVATE_KEY: `0x${string}` =
+export const DEV_FAUCET_PRIVATE_KEY: `0x${string}` =
+  "0xc50a4bc364bb2f90007c01e3dc68c5bbc5451d4f7465510e8cffde8c137e6cf9"
+
+/**
+ * The bee-compose queen node's key (documented in .claude/rules/bee-cluster.md),
+ * prefunded with xDAI and TestToken BZZ on the older DEX-less anvil chain,
+ * which had no faucet of its own.
+ */
+export const LOCAL_ANVIL_FUNDER_PRIVATE_KEY: `0x${string}` =
   "0x566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9"
+
+/** Whichever account the chain in front of us actually prefunded. */
+function funderFor(settings: MultichainSettings): `0x${string}` {
+  return settings.chainId === LOCAL_ANVIL_CHAIN_ID
+    ? LOCAL_ANVIL_FUNDER_PRIVATE_KEY
+    : DEV_FAUCET_PRIVATE_KEY
+}
 
 export const DEFAULT_BUCKET_DEPTH = 16
 
@@ -47,7 +63,7 @@ export interface FundLocalAccountOptions {
 
 /**
  * Mock of the production funding leg: deliver xDAI (gas) and BZZ (value) to
- * an address — typically the derived batch-owner — from the queen account.
+ * an address — typically the derived batch-owner — from the chain's faucet.
  */
 export async function fundLocalAccount(
   options: FundLocalAccountOptions,
@@ -58,7 +74,7 @@ export async function fundLocalAccount(
     const hash = await transferNative(
       {
         amount: options.xdai,
-        originPrivateKey: LOCAL_DEV_FUNDER_PRIVATE_KEY,
+        originPrivateKey: funderFor(settings),
         to: options.to,
       },
       settings,
@@ -70,7 +86,7 @@ export async function fundLocalAccount(
     const hash = await transferBzz(
       {
         amount: options.bzzPlur,
-        originPrivateKey: LOCAL_DEV_FUNDER_PRIVATE_KEY,
+        originPrivateKey: funderFor(settings),
         to: options.to,
       },
       settings,
@@ -114,7 +130,7 @@ export async function createLocalBatch(
   const approveHash = await approveBzz(
     {
       amount: totalPlur,
-      originPrivateKey: LOCAL_DEV_FUNDER_PRIVATE_KEY,
+      originPrivateKey: funderFor(settings),
       spender: settings.addresses.postageStamp,
     },
     settings,
@@ -123,7 +139,7 @@ export async function createLocalBatch(
   await waitForTransactionSuccess(approveHash, settings, rpcProvider)
   return createBatch(
     {
-      originPrivateKey: LOCAL_DEV_FUNDER_PRIVATE_KEY,
+      originPrivateKey: funderFor(settings),
       owner: options.owner,
       depth: options.depth,
       amount: options.amountPerChunk,

@@ -14,11 +14,14 @@
  *   queen account transfers xDAI and TestToken BZZ directly instead. Enough to
  *   exercise the postage operations themselves, nothing about the purchase.
  *
+ * Both prefund an account the tooling can draw on, so handing an address what
+ * it needs is a transfer rather than a trade — the BZZ pool is real and thin,
+ * and only the purchase itself is worth spending it on.
+ *
  * Production code must never import this module.
  */
 import { LOCAL_ANVIL_CHAIN_ID, type MultichainSettings } from '@swarm-id/multichain'
 import {
-  anvilSetBalance,
   createLocalBatch,
   fundLocalAccount,
   simulateWidgetPurchase,
@@ -27,7 +30,6 @@ import { generatePrivateKey } from 'viem/accounts'
 
 import { GAS_BUDGET_XDAI_WEI, postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
-import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 /** Default drive size for the dev batch actions. */
 const DEV_BATCH_DEPTH = 20
@@ -35,15 +37,22 @@ const DEV_BATCH_DEPTH = 20
 const DEV_BATCH_FLOOR_MULTIPLE = 3n
 /** Generous gas dust so a dev address can run many operations. */
 const DEV_XDAI_FUNDING = GAS_BUDGET_XDAI_WEI * 10n
-/** Bankrolls the fork's throwaway payer: swap input, batch cost and gas. */
-const FORK_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
+/**
+ * Headroom on a requested amount. A funding need is computed from a chain read
+ * that is a block or two old by the time the operation spends it; a real
+ * payment over-delivers too (the widget swaps a quoted amount with slippage),
+ * and out of a faucet the margin is free.
+ */
+const FUNDING_MARGIN = 2n
+/** Bankrolls the simulated purchase's throwaway payer: swap, batch and gas. */
+const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 /**
  * Of that, what goes into BZZ. Two orders of magnitude more than a dev batch
  * costs, so price drift on a long-lived chain cannot starve a purchase, and
  * still small against a ~$10k pool. The leftovers go to the batch owner, as
  * they do in production.
  */
-const FORK_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
+const PURCHASE_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
 
 function isBeeComposeChain(settings: MultichainSettings): boolean {
   return settings.chainId === LOCAL_ANVIL_CHAIN_ID
@@ -51,28 +60,19 @@ function isBeeComposeChain(settings: MultichainSettings): boolean {
 
 /**
  * Deliver BZZ (and gas dust) to the account's postage signer — the stand-in
- * for a completed payment. On a fork the BZZ is really bought on SushiSwap.
+ * for a completed payment.
+ *
+ * A transfer from the chain's faucet, not a swap: every swap moves a real and
+ * thin BZZ pool, and topping a signer up is not the thing worth simulating
+ * faithfully. The purchase path still trades — see `createOwnedBatchOnChain`.
  */
 export async function fundPostageSigner(derivationKey: string, bzzPlur: bigint): Promise<void> {
-  const { signerKey, destination } = await derivePostageSigner(derivationKey)
+  const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
-  const owner = destination as `0x${string}`
-
-  if (isBeeComposeChain(chain.settings)) {
-    await fundLocalAccount({ to: owner, xdai: DEV_XDAI_FUNDING, bzzPlur }, chain.settings)
-    return
-  }
-
-  // Fork: mint the gas, then buy the BZZ for real with the owner's own key.
-  await anvilSetBalance(networkSettingsStore.gnosisRpcUrl, owner, FORK_PAYER_XDAI)
-  if (bzzPlur > 0n) {
-    const hash = await chain.swapXdaiToBzz({
-      originPrivateKey: `0x${signerKey.toHex()}`,
-      amountXdai: FORK_SWAP_XDAI,
-      recipient: owner,
-    })
-    await chain.waitForTransactionSuccess(hash)
-  }
+  await fundLocalAccount(
+    { to: destination as `0x${string}`, xdai: DEV_XDAI_FUNDING, bzzPlur: bzzPlur * FUNDING_MARGIN },
+    chain.settings,
+  )
 }
 
 /** A batch created on a local chain, in the terms a purchase reports. */
@@ -114,8 +114,8 @@ export async function createOwnedBatchOnChain(
           depth,
           amountPerChunk,
           payerPrivateKey: generatePrivateKey(),
-          payerXdai: FORK_PAYER_XDAI,
-          swapXdai: FORK_SWAP_XDAI,
+          payerXdai: PURCHASE_PAYER_XDAI,
+          swapXdai: PURCHASE_SWAP_XDAI,
         },
         chain.settings,
       )
