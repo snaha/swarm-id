@@ -66,9 +66,12 @@ xDAI is minted with anvil's `setBalance`; everything downstream is genuine.
 
 Two things to know about the baked chain:
 
-- **It is stateful.** Every run buys BZZ from the real (thin) pool and moves
-  its price, so the suites take an `evm_snapshot` and rewind afterwards.
-  Restarting the container also restores the snapshot exactly.
+- **It is stateful, and nothing rewinds it.** Every run buys BZZ from the real
+  (thin) pool and moves its price a little. The suites deliberately do not
+  `evm_revert`: a Bee node following the chain records the block it has
+  processed and never re-scans below it, so a rewind desyncs any running
+  cluster permanently. Restarting the container restores the snapshot, and
+  `pnpm bake` in bee-compose rebuilds it.
 - **It is a point in time.** Prices, the storage cost and the pool's liquidity
   are frozen at the block it was baked from. Re-baking lives with the snapshot,
   in bee-compose: `pnpm bake` there.

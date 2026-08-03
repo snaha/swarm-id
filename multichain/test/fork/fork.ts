@@ -5,10 +5,9 @@
  * Helpers for the baked local chain: a real BZZ token and real SushiSwap pools
  * taken from a Gnosis mainnet fork, with the Swarm contracts deployed on top.
  *
- * Start it with `pnpm dev:chain:detach` from the repo root. Point FORK_RPC_URL
- * at :9545 to run against the Bee cluster's copy instead — but prefer the
- * standalone one, since these tests rewind the chain and a node following it
- * will not survive that (see bee-compose's gotchas).
+ * Start it with `pnpm dev:chain:detach` from the repo root, or point
+ * FORK_RPC_URL at :9545 to run against the Bee cluster's copy — either is fine
+ * now that nothing here rewinds the chain.
  */
 
 const PROBE_TIMEOUT_MILLIS = 2000
@@ -42,19 +41,6 @@ export async function isGnosisForkReachable(): Promise<boolean> {
   } catch {
     return false
   }
-}
-
-/**
- * Take a chain snapshot to rewind to. Every run buys BZZ from the real (thin)
- * pool, so without rewinding, successive runs would move its price until a
- * swap could no longer fill.
- */
-export async function snapshot(): Promise<unknown> {
-  return rpc("evm_snapshot", [])
-}
-
-export async function revert(id: unknown): Promise<void> {
-  await rpc("evm_revert", [id])
 }
 
 /**
