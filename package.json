@@ -31,7 +31,17 @@
     "test:fork": "pnpm --filter @swarm-id/multichain test:fork",
     "dev:chain": "docker run --rm --name gnosis-chain -p 8545:8545 -v \"$PWD/vendor/bee-compose/blockchain:/state:ro\" --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --load-state /state/state.gnosis.json --chain-id 100 --host 0.0.0.0 --port 8545",
     "dev:chain:detach": "docker run -d --rm --name gnosis-chain -p 8545:8545 -v \"$PWD/vendor/bee-compose/blockchain:/state:ro\" --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --load-state /state/state.gnosis.json --chain-id 100 --host 0.0.0.0 --port 8545",
-    "dev:chain:stop": "docker rm -f gnosis-chain"
+    "dev:chain:stop": "docker rm -f gnosis-chain",
+    "dev:source-chain": "docker run --rm --name source-chain -p 8546:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --chain-id 31337 --host 0.0.0.0 --port 8545",
+    "dev:source-chain:detach": "docker ps -q -f name=^source-chain$ | grep -q . || pnpm -s dev:source-chain:run",
+    "dev:source-chain:run": "docker run -d --rm --name source-chain -p 8546:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --chain-id 31337 --host 0.0.0.0 --port 8545",
+    "dev:source-chain:stop": "docker rm -f source-chain >/dev/null 2>&1 || true",
+    "dev:solver": "pnpm --filter @swarm-id/multichain solver",
+    "dev:cluster": "node vendor/bee-compose/bin/bee-compose.js",
+    "dev:local:run": "concurrently -n solver,ui,demo -c yellow,blue,green \"pnpm dev:solver\" \"pnpm dev:ui\" \"pnpm dev:demo\"",
+    "dev:local": "pnpm -s dev:cluster start --full 4 && pnpm dev:source-chain:detach && pnpm -s dev:local:run",
+    "dev:local:fresh": "pnpm dev:source-chain:stop && pnpm -s dev:cluster start --full 4 --fresh && pnpm dev:source-chain:detach && pnpm -s dev:local:run",
+    "dev:local:stop": "pnpm dev:source-chain:stop; pnpm -s dev:cluster stop"
   },
   "devDependencies": {
     "@snaha/bee-compose": "^0.1.5",

@@ -1,6 +1,8 @@
 # Drive Payment Flow (in-app, multichain) — Spec
 
-Status: ready for implementation. Depends on
+Status: **implemented**, with the §6 copy work outstanding — see §9. The design sections are kept
+as the record of why the flow is shaped this way; where the code has since moved on, the text has
+been corrected rather than left as the original proposal. Depends on
 [Postage-On-Chain-Engine.md](Postage-On-Chain-Engine.md) (owner-key signing, preflights,
 `resizePlan`, reconcile — consumed as a library here).
 Related issues: [#309](https://github.com/snaha/swarm-id/issues/309) — its conclusion comment
@@ -53,14 +55,24 @@ PostageStamp ABI contains only `createBatch`). Instead:
   account's access method (passkey/password users connect any wallet just for paying).
 
 Source chains (mirror the widget config): Ethereum, Polygon, Optimism, Arbitrum, Base, Gnosis.
-Token lists come from Relay's chain/currency metadata. Paying from Gnosis itself still goes through
-the same Relay quote (Relay handles same-chain swaps) — one code path.
+Token lists are a static table per chain (native + the obvious stablecoin) rather than Relay's
+chain/currency metadata as first planned — the metadata call bought nothing for a six-chain,
+two-token picker. Paying from Gnosis itself still goes through the same Relay quote (Relay handles
+same-chain swaps) — one code path.
+
+**Since implementation: the rail is a seam.** Relay is one implementation of a `PaymentRail`
+interface, not the only possible one, because Relay cannot run locally at all — it is an
+intent/solver network, so quotes come from a hosted API and deliveries from off-chain solvers
+paying out on real Gnosis. See §7.
 
 ## 3. Modules
 
-### 3.1 `ui/src/lib/payment/quote.ts`
+### 3.1 `ui/src/lib/payment/funding.ts` (planned as `quote.ts`)
 
-The quoting pipeline, pure functions + one Relay call, cached briefly like `chain-price.ts`:
+The quoting pipeline. It landed split in two rather than as one module: `quoteFunding` sizes the
+Gnosis side (steps 1–3 below) and the rail quotes the source side (step 4), because only the
+Gnosis half is rail-independent. `swapDeliveredXdai` lives here too — the leg that turns delivered
+xDAI into the BZZ the operation needs.
 
 1. From the operation: `plurNeeded` (per-chunk amount << depth) → `bzzNeeded` (1 BZZ = 1e16 PLUR).
 2. `@swarm-id/multichain`'s `quoteXdaiInForBzzOut(bzzNeeded)` (Sushi V3 `quoteExactOutputSingle`),
@@ -78,13 +90,22 @@ Owner residual balances are consumed first: the funds check subtracts existing o
 `bzzNeeded`/`totalXdai`; if residuals already cover the operation, skip payment entirely and go
 straight to execution (engine spec §4).
 
-### 3.2 `ui/src/lib/payment/relay.ts`
+### 3.2 The rail: `payment-rail.ts` + `relay.ts` + `resolve-rail.ts`
 
-Thin wrapper over `@relayprotocol/relay-sdk`: client singleton, `executePayment(quote, wallet,
-onProgress)` mapping SDK progress callbacks onto our step model. All awaits wrapped in
-`withTimeout` with generous bounds; Relay delivery is minutes-scale worst case. On failure surface
-the SDK error verbatim behind "View details" (Figma `135:9633`); Relay-level refund semantics are
-the SDK's own — consult its error surface during implementation, do not guess.
+Planned as a single `relay.ts`; implemented as a seam, so a second rail can exist locally.
+
+- **`payment-rail.ts`** — the `PaymentRail` contract: `chains`, `tokens(chainId)`, `quote()`,
+  `execute()`, plus `switchWalletChain`. A rail's quote reduces to an opaque `handle` only the rail
+  that produced it consumes, which is what lets a non-Relay implementation exist at all. This
+  module is deliberately a **leaf**: it imports no rail, so rails can import values from it with no
+  initialisation cycle.
+- **`relay.ts`** — the production rail. Thin wrapper over `@relayprotocol/relay-sdk`: client
+  singleton, SDK progress callbacks mapped onto our step model. On failure the SDK error surfaces
+  verbatim; Relay-level refund semantics are the SDK's own.
+- **`resolve-rail.ts`** — picks. A production build always returns the Relay rail whatever chain it
+  is pointed at; on Gnosis mainnet (by genesis hash) likewise. Only off mainnet, in a dev build,
+  with a local source chain answering, does it return the dev rail — and with no source chain it
+  returns `undefined`, meaning "no rail: fund from the faucet and never open the payment screens".
 
 ### 3.3 Swap leg
 
@@ -94,17 +115,28 @@ deliberate: quote exact-output to SIZE the xDAI, execute exact-input, then top u
 that actually arrived — slight over-delivery becomes slightly longer lifespan, never stranded
 BZZ beyond `< 2^depth` PLUR dust). Wrap the wait in `withTimeout` in the orchestrator.
 
-### 3.4 `ui/src/lib/payment/payment-flow.svelte.ts` (orchestrator)
+### 3.4 The orchestrator: `funding-request.svelte.ts` + `payment-dialog.svelte`
 
-State machine consumed by the dialogs. Phases:
+Planned as one `payment-flow.svelte.ts`; implemented as two, split along the seam the engine
+already had. `drive-operation.ts` raises a `FundingNeed` mid-operation and calls the
+`RequestFunding` seam; `createFundingRequester` decides what answers it — a resolved rail (surface
+the payment screens and wait) or none (silent faucet transfer). `payment-dialog.svelte` owns the
+screens and is rail-agnostic: it is handed a `PaymentRail` and never knows which one.
+
+The pending request carries the need **and** its rail as one `PendingPayment` value, so the dialog
+receives a rail it can rely on rather than an optional it would have to re-check.
+
+Phases, as implemented:
 
 ```
-method → connect → configure (chain/token/quote) → wallet-approval →
-relay (cross-chain) → gnosis (swap → approve → topUp [→ increaseDepth]) →
-success | failure
+                 ┌ no rail → faucet transfer, screens never open
+FundingNeed ─────┤
+                 └ rail → method → connecting → configure (chain/token/quote) →
+                          switching → approving → relaying → resolve()
+                          → back into the engine: swap → approve → topUp [→ increaseDepth]
 ```
 
-- `connect`/`wallet-approval`/chain-switch waits follow the attempt-guard rule
+- `connect`/chain-switch waits follow the attempt-guard rule
   (`.claude/rules/attempt-guard.md`): cancellable, `attempt.guard` on every await before a side
   effect.
 - Everything from the moment the user signs the source-chain tx runs OUTSIDE the attempt guard
@@ -117,10 +149,12 @@ success | failure
 
 ### 3.5 Dialog rewiring
 
-`drive-extend-dialog.svelte` / `drive-resize-dialog.svelte`: phases become
-`'form' | 'payment' | 'pending' | 'error'`. The form's Proceed runs the engine preflight + funds
-check; short funds → `'payment'` (embed the payment screens per Figma — they are dialog-sized
-cards, not a popup); once funds land → `'pending'` (engine execution) → success/close or error.
+`drive-extend-dialog.svelte` / `drive-resize-dialog.svelte`: phases are
+`'form' | 'pending' | 'error'` — three, not the four planned. "Payment" never became a dialog phase
+because a pending funding request is already a distinct piece of state (`funding.pending`), and the
+dialogs branch on it before their own phase. The form's Proceed runs the engine preflight + funds
+check; a shortfall raises the payment screens (dialog-sized cards per Figma, not a popup); once
+funds land the engine continues and the dialog shows `'pending'` → success/close or error.
 Resume on open: engine chain-truth reconciliation first (engine spec §4.2.4).
 
 ## 4. Slippage & liquidity guardrails
@@ -129,10 +163,15 @@ On-chain BZZ liquidity on Gnosis is shallow (~$10k total; deepest pool ≈ $9k S
 BZZ/USDC). Therefore:
 
 - Always quote before enabling Pay; refuse (with wording, not a revert) when the Sushi quote's
-  price impact exceeds `MAX_PRICE_IMPACT = 5%`.
-- Soft-cap suggested resize jumps in the size dropdown to keep single-swap BZZ amounts small;
-  surface the estimated BZZ prominently.
-- The quote's USD total uses Relay's pricing data; no separate price oracle.
+  price impact exceeds `MAX_PRICE_IMPACT = 5%`. **Done** — `quoteFunding` prices a small reference
+  trade alongside the real one and compares the fills, since the pool exposes no spot oracle.
+- Soft-cap suggested resize jumps in the size dropdown to keep single-swap BZZ amounts small.
+  **Not done** — the dropdown offers every larger size. The 5% impact refusal catches the bad case
+  after the fact, with wording, rather than the dropdown preventing it; whether that is enough is a
+  design call, not a correctness one.
+- The quote's USD total uses the rail's own pricing data; no separate price oracle. **Done** for
+  Relay (`currencyIn.amountUsd`); the dev rail derives USD from the xDAI figure, xDAI being a
+  dollar stablecoin.
 
 ## 5. Failure handling
 
@@ -156,30 +195,57 @@ The designed "Lifespan decreased" modal (`481:14324` / `481:14846`, from
 [#392](https://github.com/snaha/swarm-id/issues/392)) assumes the old dilute-first ordering. The
 engine inverts the order (contract floor check — engine spec §2), so that state is unreachable.
 The reachable partial state is: **payment succeeded, lifespan got longer, size increase pending,
-retry is free**. Required actions:
+retry is free**. Status:
 
-1. Replace the modal copy: headline like "Size increase pending", body "Your payment went through
-   and extended the drive's lifespan. The size increase didn't complete — retry to finish it. No
-   additional payment is needed." Keep Retry / Close + Learn more structure.
-2. The "Learn more" body must describe the corrected sequence (top-up first, then resize).
-3. After Close, the drive row needs no warning state (nothing was lost and nothing shrank), but
-   re-opening Increase size must detect the half-done state and offer to finish (engine resume
-   handles detection; the dialog pre-selects the pending target size and skips payment).
-4. Coordinate with design (issue comment on #392) to update the Figma nodes.
+1. **Done.** `runResize` throws a typed `SizeIncreasePendingError` when `increaseDepth` fails —
+   which by then can only mean everything payable already landed — carrying the wording "Your
+   payment went through and the drive's lifespan is longer. The size increase did not finish — try
+   again to complete it. No additional payment is needed." Retry / Close structure kept.
+2. **Done.** `DriveDialogStatus` gained a `tone`; this state renders as a neutral notice rather
+   than a red warning, because a warning icon sends the user looking for damage that did not
+   happen.
+3. **Done by construction.** Nothing shrank, so the drive row needs no warning state; re-opening
+   Increase size resumes from chain truth (`alreadyResized` / live remaining balance), skipping
+   whatever already landed and asking for no second payment.
+4. **Open:** no "Learn more" body describing the corrected sequence, and the Figma nodes still show
+   the unreachable "Lifespan decreased" design — coordinate with design on #392.
+5. **Open:** no e2e for the injected-failure path. The resume half is covered
+   (`drive-onchain.test.ts` "an interrupted resize resumes from chain truth without paying twice");
+   what is untested is the dialog presenting this specific copy.
 
 ## 7. Dev/testing
 
-- **Mock payment** dev toggle (extends the existing `dev-settings.svelte.ts` mock-purchase
-  pattern): skips wallet-connect/Relay entirely and transfers the quoted xDAI+BZZ from the queen
-  account (`fundLocalAccount` in `@swarm-id/multichain`'s dev.ts) — the whole orchestrator from
-  the `gnosis` phase onward
-  runs for real against bee-compose anvil, headless-CI-safe.
-- Component tests (`*.ct.spec.ts`) for the payment screens: method → connect → configure state
+- **The payment leg is a swappable rail** (`ui/src/lib/payment/payment-rail.ts`), chosen by
+  `resolvePaymentRail()`. Relay cannot be reproduced locally — it is an intent/solver network, so
+  the quote comes from a hosted API and the delivery is an off-chain solver paying out on real
+  Gnosis. Two local modes stand in:
+  - **No rail** (no local source chain running): funding transfers the needed xDAI+BZZ straight
+    from the chain's faucet (`fundLocalAccount` in `@swarm-id/multichain`'s dev.ts), the payment
+    screens never open, and the orchestrator from the `gnosis` phase onward runs for real —
+    headless-CI-safe, and what the drive e2e suites use.
+  - **Local rail** (`pnpm dev:local`, which adds a bare anvil on chain 31337 and the solver that fills from it): the wallet signs a
+    real deposit there, the faucet then plays solver and delivers the xDAI, and the real Sushi swap
+    runs on top. This is what makes the `method → connect → configure → wallet-approval` half of
+    §3.4 exercisable at all. The wallet needs no setup — the chain is offered to it through the
+    `wallet_addEthereumChain` path already in the flow, and the rail funds whatever account
+    connects, so no key is ever imported. It rehearses the UX only — Relay's pricing, routing, real
+    step model (an ERC-20 source needs an approve before the deposit) and refund semantics stay
+    untested, so a green local run must never be read as "the payment path works". See the README's
+    "Paying for storage locally".
+    Note the e2e consequence: which of the two modes is live depends on whether a source chain
+    happens to be running, so a test that needs funding would behave differently on a developer's
+    machine than in CI. Today no drive e2e is affected — their operations are covered by the batch
+    owner's residual balances, so `requestFunding` is never called and no rail is ever resolved (both
+    the `dev:local` and the bare-CI arrangement pass). A future test that does need funding should
+    pin the mode rather than inherit it.
+- **Open:** component tests (`*.ct.spec.ts`) for the payment screens — method → connect → configure
   transitions, quote rendering with the breakdown rows, chain-switch waiting state, error surface.
-- Playwright e2e with mock payment: extend end-to-end; resize end-to-end; resize with injected
-  increaseDepth failure → corrected partial-failure dialog → retry completes without new payment.
-- One production canary before release: a real small extend on mainnet against a throwaway batch
-  (manual, documented in the PR).
+  A working injected-provider Playwright harness exists (it drove the manual verification of this
+  flow end to end) but is not in the suite; it needs a source-chain reachability guard first.
+- **Open:** e2e for resize with an injected `increaseDepth` failure → the §6 dialog → retry
+  completes without new payment.
+- **Open:** one production canary before release — a real small extend on mainnet against a
+  throwaway batch (manual, documented in the PR). Nothing has yet exercised real Relay.
 
 ## 8. Out of scope
 
@@ -191,16 +257,25 @@ retry is free**. Required actions:
 
 ## 9. Acceptance criteria
 
-- [ ] Extend and resize run fully in-app: one wallet signature on the source chain, no external
+- [x] Extend and resize run fully in-app: one wallet signature on the source chain, no external
       popup, no Bee node.
-- [ ] Screens match the Figma nodes listed in §1 (structure and states; exact copy may be refined
+- [x] Screens match the Figma nodes listed in §1 (structure and states; exact copy may be refined
       with design).
-- [ ] Quote shows source-token cost, USD total, and the xDAI/xBZZ breakdown; Pay is disabled on
+- [x] Quote shows source-token cost, USD total, and the xDAI/xBZZ breakdown; Pay is disabled on
       no-route or excessive price impact.
-- [ ] Payment wallet never signs anything on Gnosis; owner key never signs anything on the source
-      chain.
-- [ ] Every post-payment failure is recoverable: residual owner balances are detected and consumed
-      on retry; interrupted flows resume after reload.
-- [ ] Resize partial failure shows the corrected copy (§6) and retry completes without a second
+- [x] Payment wallet never signs anything on Gnosis; owner key never signs anything on the source
+      chain — the rail's `execute` is the wallet's only signature, and the owner key is only ever
+      passed to `@swarm-id/multichain` calls bound to Gnosis settings.
+- [x] Every post-payment failure is recoverable: residual owner balances are detected and consumed
+      on retry (`fundingShortfall`); interrupted flows resume after reload (engine spec §4.2.4).
+- [x] Resize partial failure shows the corrected copy (§6) and retry completes without a second
       payment.
-- [ ] Mock-payment e2e suite passes on bee-compose anvil; `pnpm check:all` clean.
+- [x] `pnpm check:all` clean; the drive e2e suite passes against the local chain.
+
+Open:
+
+- The rail has never been exercised against **real Relay** — no production canary yet (§7's last
+  bullet). Everything proven locally is proven against the dev rail, whose prices are invented and
+  whose step list is shorter than Relay's. This is the single largest untested surface.
+- No e2e for the §6 copy, and no Figma update for it (§6.4, §6.5).
+- The size dropdown has no soft cap (§4).

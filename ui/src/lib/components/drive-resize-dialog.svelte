@@ -18,7 +18,12 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { formatBytes, formatRemaining } from '$lib/drives'
-  import { type OperationStep, previewResize, runResize } from '$lib/payment/drive-operation'
+  import {
+    type OperationStep,
+    SizeIncreasePendingError,
+    previewResize,
+    runResize,
+  } from '$lib/payment/drive-operation'
   import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
   import { type ResizePlan, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
@@ -40,6 +45,7 @@
   let keepLifespan = $state(true)
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
+  let errorTone = $state<'error' | 'notice'>('error')
   let step = $state<OperationStep>('checking')
   // The plan as the CHAIN sees it (live remaining balance), which is what the
   // operation will actually execute — the stored record can be stale.
@@ -131,6 +137,7 @@
     const attempt = attempts.begin()
     phase = 'pending'
     errorMessage = ''
+    errorTone = 'error'
     try {
       // Deliberately unguarded: the top-up and the depth increase are on-chain
       // spends whose record updates must land even if the dialog was closed —
@@ -153,6 +160,10 @@
       if (!attempt.current) {
         return
       }
+      // A pending size increase is not a loss — the payment landed and the
+      // lifespan grew, so it gets the benign presentation and its own wording
+      // rather than the generic failure surface (#392).
+      errorTone = caught instanceof SizeIncreasePendingError ? 'notice' : 'error'
       errorMessage = caught instanceof Error ? caught.message : 'Could not increase the size.'
       phase = 'error'
     }
@@ -160,13 +171,19 @@
 </script>
 
 {#if funding.pending}
-  <PaymentDialog need={funding.pending} onPaid={funding.resolve} onCancel={funding.cancel} />
+  <PaymentDialog
+    need={funding.pending.need}
+    rail={funding.pending.rail}
+    onPaid={funding.resolve}
+    onCancel={funding.cancel}
+  />
 {:else if phase !== 'form'}
   <DriveDialogStatus
     title={drive.name || 'Drive'}
     {phase}
     pendingLabel={describeStep(step, 'resize')}
     {errorMessage}
+    tone={errorTone}
     onRetry={() => (phase = 'form')}
     onClose={close}
   />

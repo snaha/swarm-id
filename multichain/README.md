@@ -61,8 +61,13 @@ pnpm test:fork            # full purchase path, offline
 pnpm dev:chain:stop
 ```
 
-The one leg this cannot reproduce is the cross-chain bridge, so the initial
-xDAI is minted with anvil's `setBalance`; everything downstream is genuine.
+The one leg this cannot reproduce is the cross-chain bridge — Relay is an
+intent/solver network, so its quote comes from a hosted API and its delivery is
+an off-chain solver paying out on real Gnosis, none of which can see a local
+chain. Here the initial xDAI is simply minted with anvil's `setBalance`;
+everything downstream is genuine. `ui/` goes one step further for hand-testing:
+a second local chain takes a real signature from the user's wallet and the
+chain's faucet plays solver — see its `dev/local-payment-rail.ts`.
 
 Two things to know about the baked chain:
 

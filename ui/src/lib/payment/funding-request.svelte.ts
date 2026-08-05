@@ -2,13 +2,15 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * The dialogs' funding seam: turns a `FundingNeed` raised mid-operation into
- * either a mocked local transfer (dev chain — no Relay, no DEX there) or a
- * pending payment the UI surfaces, resolving once the money has landed.
+ * either a pending payment the UI surfaces — resolving once the money has
+ * landed — or, when there is no rail to pay through at all, a silent transfer
+ * from the local faucet.
  */
 import { DEV_XDAI_FUNDING, fundPostageSigner } from '$lib/dev/chain-funding'
-import { simulatedPurchases } from '$lib/dev/simulate-purchase'
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, quoteFunding, swapDeliveredXdai } from '$lib/payment/funding'
+import type { PaymentRail } from '$lib/payment/payment-rail'
+import { resolvePaymentRail } from '$lib/payment/resolve-rail'
 import type { Account } from '$lib/types'
 
 /**
@@ -33,9 +35,19 @@ export function describeStep(step: OperationStep, operation: 'extend' | 'resize'
   }
 }
 
+/**
+ * A need awaiting payment, together with the rail it will be paid through.
+ * The two travel as one so the payment dialog is handed a rail it can rely on,
+ * rather than a possibly-absent one it would have to keep re-checking.
+ */
+export interface PendingPayment {
+  need: FundingNeed
+  rail: PaymentRail
+}
+
 export interface FundingRequester {
-  /** The need currently awaiting payment, or undefined. */
-  readonly pending: FundingNeed | undefined
+  /** The payment currently awaiting the user, or undefined. */
+  readonly pending: PendingPayment | undefined
   /** Pass to `runExtend`/`runResize` as their funding seam. */
   request: RequestFunding
   /** Called by the payment dialog once the source payment has settled. */
@@ -48,17 +60,18 @@ export interface FundingRequester {
 const FUNDING_MARGIN = 2n
 
 export function createFundingRequester(account: () => Account): FundingRequester {
-  let pending = $state<FundingNeed | undefined>(undefined)
+  let pending = $state<PendingPayment | undefined>(undefined)
   let quote: FundingQuote | undefined
   let settle: { resolve: () => void; reject: (error: Error) => void } | undefined
 
   const request: RequestFunding = async (need) => {
-    // No Relay exists off mainnet, so the faucet stands in for the whole
-    // payment leg there. See simulatedPurchases() for what decides it.
-    if (await simulatedPurchases()) {
+    const rail = await resolvePaymentRail()
+    if (!rail) {
+      // Nothing to pay through — a dev chain with no local source chain up. The
+      // faucet stands in for the whole payment leg and the screens never open.
       // Over-deliver: the need was computed from a chain read that is a block
       // or two old by the time the operation spends it, and a real payment
-      // over-delivers too (the widget swaps a quoted amount with slippage).
+      // over-delivers too (a swap of a quoted amount, with slippage).
       await fundPostageSigner(account().derivationKey, {
         xdai: DEV_XDAI_FUNDING,
         bzzPlur: need.bzz * FUNDING_MARGIN,
@@ -66,7 +79,7 @@ export function createFundingRequester(account: () => Account): FundingRequester
       return
     }
     quote = await quoteFunding(need)
-    pending = need
+    pending = { need, rail }
     await new Promise<void>((resolve, reject) => {
       settle = { resolve, reject }
     })

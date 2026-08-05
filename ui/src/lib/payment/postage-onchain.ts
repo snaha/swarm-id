@@ -77,7 +77,7 @@ export interface ChainIdentity {
 }
 
 /** One JSON-RPC call without a client — none can be built until we know the chain. */
-async function probeChainId(rpcUrl: string): Promise<number> {
+export async function probeChainId(rpcUrl: string): Promise<number> {
   const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

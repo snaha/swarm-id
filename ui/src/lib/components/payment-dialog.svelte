@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts">
+  import { untrack } from 'svelte'
+
   import ArrowLeft from '@lucide/svelte/icons/arrow-left'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
@@ -19,31 +21,34 @@
   import { type FundingQuote, quoteFunding } from '$lib/payment/funding'
   import {
     type EthereumProvider,
-    PAYMENT_CHAINS,
-    PAYMENT_TOKENS,
     type PaymentQuote,
-    executePayment,
-    quotePayment,
+    type PaymentRail,
     switchWalletChain,
-  } from '$lib/payment/relay'
+  } from '$lib/payment/payment-rail'
 
   /**
    * The shared "Pay with crypto" flow: connect a wallet, pick a source chain
-   * and token, review the quoted cost, sign ONE transaction. Relay then
+   * and token, review the quoted cost, sign ONE transaction. The rail then
    * delivers xDAI to the drive's batch-owner address on Gnosis; the caller
    * swaps it and runs the postage operation with the owner key.
+   *
+   * Which rail carries the money is the caller's choice (`resolve-rail.ts`),
+   * and nothing here depends on which one it is — the screens are identical
+   * against Relay and against the local dev rail.
    *
    * The connected wallet only ever signs on the source chain — it never sees
    * the owner key, so passkey and password accounts use this unchanged.
    */
   interface Props {
     need: FundingNeed
+    /** The rail this payment is carried by — chains, tokens, quoting, execution. */
+    rail: PaymentRail
     /** Resolves the operation's funding request once the payment lands. */
     onPaid: () => void
     onCancel: () => void
   }
 
-  let { need, onPaid, onCancel }: Props = $props()
+  let { need, rail, onPaid, onCancel }: Props = $props()
 
   type Screen = 'method' | 'connecting' | 'configure' | 'switching' | 'approving' | 'relaying'
 
@@ -55,27 +60,31 @@
   let errorMessage = $state('')
   let provider = $state<EthereumProvider | undefined>(undefined)
   let walletAddress = $state('')
-  let chainId = $state(String(PAYMENT_CHAINS[0].id))
-  let tokenAddress = $state(PAYMENT_TOKENS[PAYMENT_CHAINS[0].id][0].address)
+  // The rail is fixed for the life of one payment — the dialog is created fresh
+  // per pending request — so its first chain and token are read ONCE as the
+  // user's starting selection, not tracked.
+  let chainId = $state(untrack(() => String(rail.chains[0].id)))
+  let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
   let fundingQuote = $state<FundingQuote | undefined>(undefined)
   let paymentQuote = $state<PaymentQuote | undefined>(undefined)
   let quoting = $state(false)
   let relayStatus = $state('Cross-swap xDAI on Relay')
   const attempts = createAttemptTracker()
 
-  const chainOptions = PAYMENT_CHAINS.map((chain) => ({
-    value: String(chain.id),
-    label: chain.name,
-  }))
+  const chainOptions = $derived(
+    rail.chains.map((chain) => ({
+      value: String(chain.id),
+      label: chain.name,
+    })),
+  )
   const tokenOptions = $derived(
-    (PAYMENT_TOKENS[Number(chainId)] ?? []).map((token) => ({
+    rail.tokens(Number(chainId)).map((token) => ({
       value: token.address,
       label: `${token.symbol} (${token.name})`,
     })),
   )
   const tokenSymbol = $derived(
-    (PAYMENT_TOKENS[Number(chainId)] ?? []).find((token) => token.address === tokenAddress)
-      ?.symbol ?? '',
+    rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.symbol ?? '',
   )
   const shortAddress = $derived(
     walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
@@ -143,7 +152,7 @@
     try {
       const funding = await attempt.guard(loadFundingQuote())
       const quote = await attempt.guard(
-        quotePayment({
+        rail.quote({
           chainId: Number(chainId),
           currency: tokenAddress,
           user: walletAddress,
@@ -174,15 +183,21 @@
     errorMessage = ''
     try {
       screen = 'switching'
-      await attempt.guard(switchWalletChain(provider, Number(chainId)))
+      await attempt.guard(switchWalletChain(provider, Number(chainId), rail.chains))
       screen = 'approving'
       // Deliberately unguarded: once the user signs, the payment is in flight
       // and must be seen through — only the UI epilogue is attempt-gated.
-      await executePayment(quote, provider, Number(chainId), walletAddress, (status) => {
-        if (attempt.current) {
-          relayStatus = status
-          screen = 'relaying'
-        }
+      await rail.execute({
+        quote,
+        provider,
+        chainId: Number(chainId),
+        address: walletAddress,
+        onStatus: (status) => {
+          if (attempt.current) {
+            relayStatus = status
+            screen = 'relaying'
+          }
+        },
       })
       if (!attempt.current) {
         return
@@ -275,7 +290,7 @@
           options={chainOptions}
           bind:value={chainId}
           onchange={() => {
-            tokenAddress = (PAYMENT_TOKENS[Number(chainId)] ?? [])[0]?.address ?? ''
+            tokenAddress = rail.tokens(Number(chainId))[0]?.address ?? ''
             void refreshQuote()
           }}
         />

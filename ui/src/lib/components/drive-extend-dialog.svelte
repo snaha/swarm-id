@@ -123,7 +123,12 @@
 </script>
 
 {#if funding.pending}
-  <PaymentDialog need={funding.pending} onPaid={funding.resolve} onCancel={funding.cancel} />
+  <PaymentDialog
+    need={funding.pending.need}
+    rail={funding.pending.rail}
+    onPaid={funding.resolve}
+    onCancel={funding.cancel}
+  />
 {:else if phase !== 'form'}
   <DriveDialogStatus
     title={drive.name || 'Drive'}

@@ -25,7 +25,8 @@
     "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "check:all": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test",
-    "test:fork": "vitest run --config vitest.fork.config.ts"
+    "test:fork": "vitest run --config vitest.fork.config.ts",
+    "solver": "tsx src/local-solver.ts"
   },
   "license": "Apache-2.0",
   "dependencies": {
@@ -39,6 +40,7 @@
     "eslint": "9.39.1",
     "eslint-plugin-notice": "^1.0.0",
     "prettier": "3.7.3",
+    "tsx": "^4.19.2",
     "typescript": "5.8.3",
     "vitest": "4.0.14"
   },

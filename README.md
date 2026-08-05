@@ -156,6 +156,65 @@ curl "http://localhost:1633/stamps/<batchID>"
 
 See the [Local Development guide](https://swarm.snaha.net/docs/local-development) for client-side stamp signing, known dev keys, SSH tunnel setup, and more.
 
+### Paying for storage locally
+
+Extending and resizing a drive costs money, and the payment is cross-chain: the user pays on
+whatever chain they hold funds on, and xDAI arrives on Gnosis. That leg runs on
+[Relay Protocol](https://relay.link), an intent/solver network — its quotes come from a hosted API
+and its deliveries from off-chain solvers paying out on real Gnosis, so **no local chain can make a
+real payment complete**. What can be rehearsed is everything around it, against a second local
+chain: your wallet signs a genuine deposit there, and the Gnosis-side chain's faucet plays the
+solver.
+
+```bash
+pnpm dev:local         # everything: cluster, both chains, solver, identity UI, demo
+pnpm dev:local:fresh   # the same, from a clean chain and empty node state
+pnpm dev:local:stop    # tear the containers down
+```
+
+| What                         | Where                   |
+| ---------------------------- | ----------------------- |
+| Identity UI                  | `http://localhost:5500` |
+| Demo                         | `http://localhost:3500` |
+| Queen Bee API                | `http://localhost:1633` |
+| Gnosis-side chain (100)      | `http://localhost:9545` |
+| Payment source chain (31337) | `http://localhost:8546` |
+
+The containers run in the background; the solver, UI and demo run in the foreground so you can
+watch each delivery land. Re-running `dev:local` is a no-op for whatever is already up.
+
+Reach for `dev:local:fresh` when the chain has drifted — every purchase trades against a real,
+thin BZZ pool, and this restores the baked snapshot (it also wipes node state, so drives you
+created earlier will point at batches that no longer exist; clear the UI's site data too).
+
+Then, once: open the UI → **Settings** → **Network settings** → **Use local** → **Save**.
+
+> **`dev:local` uses `vendor/bee-compose`, not `pnpm dev:bee`.** The published
+> `@snaha/bee-compose` package still expects the old DEX-less chain — swap enabled, a chequebook
+> factory, and its own PostageStamp address — so pointing it at the hybrid chain crashes the queen
+> with `factory fail: abi: attempting to unmarshal an empty string`. The vendored copy is the one
+> that matches the chain it boots.
+
+Now extend a drive. Your wallet is prompted to add the source chain and approve one transaction —
+nothing else to configure, and no keys to import: the chain funds whatever account you connect.
+
+**Where the solver fits.** The browser signs the deposit and then waits for money it does not
+control, exactly as it waits on Relay; `multichain/src/local-solver.ts` is what watches the source
+chain and pays out from the Gnosis-side faucet. The deposit carries its own delivery instruction in
+its calldata, so the solver is stateless. Stop the solver and a payment hangs and then fails —
+which is what a solver outage looks like.
+
+**What this does and does not prove.** The Gnosis side is genuine — the delivered xDAI is swapped
+for BZZ through a real SushiSwap pool and spent against the real PostageStamp contract. The rail
+itself is not: its prices are invented, its step list is shorter than Relay's (an ERC-20 source
+would need an approval first), and its failure and refund behaviour is nothing like the real one.
+It rehearses the payment **experience** — connect, switch chain, quote, approve, progress, cancel,
+resume — which is otherwise untestable outside production.
+
+With no source chain running there is no rail at all: funding falls back to a direct faucet
+transfer, the payment screens never open, and the drive test suites run unchanged. See
+[docs/Drive-Payment-Flow.md](docs/Drive-Payment-Flow.md).
+
 ### Developer Tools (/dev route)
 
 The Identity UI includes a Developer Tools page at http://localhost:5500/dev with utilities for local development:

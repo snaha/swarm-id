@@ -144,6 +144,25 @@ export interface ResizeOptions extends RunOptions {
 }
 
 /**
+ * The depth increase failed after everything payable had already landed.
+ *
+ * Worth its own type because it is the ONLY partial state a resize can end in,
+ * and it is a benign one: the drive is bigger-lifespan, not smaller-anything.
+ * The design this replaced ("Lifespan decreased", #392) was drawn for the
+ * opposite outcome, which the engine's ordering makes unreachable — so the
+ * dialog must not present this as a loss, and must say the retry is free.
+ */
+export class SizeIncreasePendingError extends Error {
+  constructor(cause: unknown) {
+    super(
+      'Your payment went through and the drive’s lifespan is longer. The size increase did not finish — try again to complete it. No additional payment is needed.',
+      { cause },
+    )
+    this.name = 'SizeIncreasePendingError'
+  }
+}
+
+/**
  * Grow a drive: compensating top-up FIRST, then the depth increase — the order
  * the contract requires (it checks the post-dilution balance against its
  * minimum before any compensation).
@@ -193,7 +212,15 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   }
 
   onStep?.('resizing')
-  await increaseDepthOnChain(signerKey, drive, newDepth, client)
+  try {
+    await increaseDepthOnChain(signerKey, drive, newDepth, client)
+  } catch (caught) {
+    // By here everything the user pays for has already landed — either the
+    // top-up confirmed above, or none was needed. So this failure is the
+    // benign partial state, and a retry costs nothing but gas dust. Typed so
+    // the dialog can say that instead of showing a generic failure (#392).
+    throw new SizeIncreasePendingError(caught)
+  }
 
   onStep?.('recording')
   const reconciled = await reconcileStampFromChain(account, drive, client)

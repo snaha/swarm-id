@@ -8,23 +8,35 @@
  * native xDAI to the batch-owner address on Gnosis. Everything after that
  * (swap to BZZ, approve, topUp, increaseDepth) is signed locally by the owner
  * key — see drive-operation.ts.
+ *
+ * This is the production rail. It cannot run against a local chain: the quote
+ * comes from Relay's hosted API, which resolves chains against its own
+ * registry, and the delivery is an off-chain solver paying out of its own
+ * inventory on real Gnosis. See `payment-rail.ts` for what stands in locally.
  */
 import { type Execute, MAINNET_RELAY_API, createClient, getClient } from '@relayprotocol/relay-sdk'
 import { type Chain, createWalletClient, custom, defineChain } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
-/** Native-token sentinel Relay uses for "the chain's own currency". */
-const NATIVE_CURRENCY = '0x0000000000000000000000000000000000000000'
+import {
+  type EthereumProvider,
+  type ExecutePaymentOptions,
+  NATIVE_CURRENCY,
+  type PaymentQuote,
+  type PaymentRail,
+  type PaymentToken,
+  type QuoteRequest,
+} from '$lib/payment/payment-rail'
 
 const GNOSIS_CHAIN_ID = 100
 
 /** Source chains offered in the payment screen (mirrors the widget's set). */
-export const PAYMENT_CHAINS: Chain[] = [mainnet, base, arbitrum, optimism, polygon, gnosis]
+const PAYMENT_CHAINS: Chain[] = [mainnet, base, arbitrum, optimism, polygon, gnosis]
 
 let initialized = false
 
 /** The shared Relay client (public mainnet API — no key, as in the widget). */
-export function relayClient() {
+function relayClient() {
   if (!initialized) {
     createClient({ baseApiUrl: MAINNET_RELAY_API, source: 'swarm-id' })
     initialized = true
@@ -32,22 +44,9 @@ export function relayClient() {
   return getClient()
 }
 
-export interface EthereumProvider {
-  request(args: { method: string; params?: unknown[] }): Promise<unknown>
-}
-
-/** A token the user can pay with on a given source chain. */
-export interface PaymentToken {
-  address: string
-  symbol: string
-  /** Full name, shown alongside the symbol as in the designs ("ETH (Ether)"). */
-  name: string
-  decimals: number
-}
-
 /** Every chain offers its native token; stablecoins are listed where they are
  * the obvious alternative (matching the designs' Base/USDC example). */
-export const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
+const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
   [mainnet.id]: [
     { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: 18 },
     {
@@ -104,32 +103,12 @@ export const PAYMENT_TOKENS: Record<number, PaymentToken[]> = {
   ],
 }
 
-export interface PaymentQuote {
-  /** The SDK quote object, passed back to {@link executePayment}. */
-  quote: Execute
-  /** Source-token amount the user pays, formatted (e.g. "0.00000872"). */
-  amountFormatted: string
-  /** USD value of the payment, formatted (e.g. "0.17"). */
-  amountUsd: string
-}
-
-export interface QuoteRequest {
-  chainId: number
-  currency: string
-  /** The payer's address (their connected wallet). */
-  user: string
-  /** The batch-owner address the xDAI must land on. */
-  recipient: string
-  /** Exact xDAI (wei) that must arrive on Gnosis. */
-  xdaiWei: bigint
-}
-
 /**
  * Quote a payment that delivers exactly `xdaiWei` to `recipient` on Gnosis.
  * EXACT_OUTPUT so the delivered amount is the one the operation needs — any
  * source-side price movement is absorbed by the amount the user pays.
  */
-export async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
+async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
   const quote = await relayClient().actions.getQuote({
     chainId: request.chainId,
     currency: request.currency,
@@ -142,7 +121,7 @@ export async function quotePayment(request: QuoteRequest): Promise<PaymentQuote>
   })
   const currencyIn = quote.details?.currencyIn
   return {
-    quote,
+    handle: quote,
     amountFormatted: currencyIn?.amountFormatted ?? '',
     amountUsd: currencyIn?.amountUsd ?? '',
   }
@@ -165,65 +144,22 @@ function walletClientFor(provider: EthereumProvider, chainId: number, address: s
   })
 }
 
-/**
- * Execute a quoted payment. `onStatus` receives the SDK's current step
- * description so the pending screen can name what is happening (e.g. the
- * design's "Cross-swap xDAI on Relay").
- */
-export async function executePayment(
-  quote: PaymentQuote,
-  provider: EthereumProvider,
-  chainId: number,
-  address: string,
-  onStatus?: (status: string) => void,
-): Promise<void> {
+/** Execute a quoted payment, reporting the SDK's current step description. */
+async function executePayment(options: ExecutePaymentOptions): Promise<void> {
   await relayClient().actions.execute({
-    quote: quote.quote,
-    wallet: walletClientFor(provider, chainId, address),
+    quote: options.quote.handle as Execute,
+    wallet: walletClientFor(options.provider, options.chainId, options.address),
     onProgress: ({ currentStep }) => {
       if (currentStep?.action) {
-        onStatus?.(currentStep.action)
+        options.onStatus?.(currentStep.action)
       }
     },
   })
 }
 
-/**
- * Ask the wallet to switch to `chainId`, adding the chain when the wallet does
- * not know it. Rejects if the user declines — the caller shows the design's
- * "unconfirmed chain change" state while this is pending.
- */
-export async function switchWalletChain(
-  provider: EthereumProvider,
-  chainId: number,
-): Promise<void> {
-  const hexChainId = `0x${chainId.toString(16)}`
-  try {
-    await provider.request({
-      method: 'wallet_switchEthereumChain',
-      params: [{ chainId: hexChainId }],
-    })
-  } catch (error) {
-    const code = (error as { code?: number }).code
-    // 4902: the wallet has no such chain configured — offer to add it.
-    const CHAIN_NOT_ADDED = 4902
-    if (code !== CHAIN_NOT_ADDED) {
-      throw error
-    }
-    const chain = PAYMENT_CHAINS.find((candidate) => candidate.id === chainId)
-    if (!chain) {
-      throw error
-    }
-    await provider.request({
-      method: 'wallet_addEthereumChain',
-      params: [
-        {
-          chainId: hexChainId,
-          chainName: chain.name,
-          nativeCurrency: chain.nativeCurrency,
-          rpcUrls: [...chain.rpcUrls.default.http],
-        },
-      ],
-    })
-  }
+export const relayRail: PaymentRail = {
+  chains: PAYMENT_CHAINS,
+  tokens: (chainId) => PAYMENT_TOKENS[chainId] ?? [],
+  quote: quotePayment,
+  execute: executePayment,
 }

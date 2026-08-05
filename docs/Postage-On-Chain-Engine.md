@@ -1,6 +1,8 @@
 # Postage On-Chain Engine — Spec
 
-Status: ready for implementation.
+Status: **implemented** — see §10 for what is verified and what is still open. The design sections
+below are kept as the record of why the engine is shaped the way it is; where the code has since
+moved on, the text has been corrected rather than left as the original proposal.
 Related issues: [#309](https://github.com/snaha/swarm-id/issues/309) (top up / dilute checkboxes),
 [#392](https://github.com/snaha/swarm-id/issues/392) (resize partial failure),
 [#463](https://github.com/snaha/swarm-id/issues/463) (partition-state reaction to dilute — out of
@@ -38,10 +40,15 @@ reads it (`lib/src/utils/postage-contract.ts`).
 | Contract is Pausable (`whenNotPaused` on both ops); `paused()` selector `0x5c975abb` (verify in a unit test).                                                                                                                                                                                                                                                                                  | Preflight `paused()`; friendly error.                                                                                                                                           |
 | Batch IDs are `keccak256(msg.sender, nonce)` of the _creator_ (the widget's temp wallet), not the owner.                                                                                                                                                                                                                                                                                       | Never derive a batchId; always carry `stamp.batchID`.                                                                                                                           |
 
-Local dev (bee-compose anvil, `.claude/rules/bee-cluster.md`): RPC `http://localhost:9545`, chain id
-`4020`, PostageStamp `0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512`, BZZ TestToken
-`0x5FbDB2315678afecb367f032d93F642f64180aa3`, queen EOA `0x26234a2ad3ba8b398a762f279b792cfacd536a3f`
-(key in the rules file) funded with ~100 xDAI + 100k BZZ.
+Local dev — **superseded**. This spec was written against the old DEX-less anvil chain (id `4020`,
+its own PostageStamp and a BZZ TestToken), which has since been retired. There is now **one** local
+chain: the hybrid snapshot baked into `vendor/bee-compose` — mainnet's BZZ token and SushiSwap
+pools with the Swarm contracts deployed on top **at their mainnet addresses**, answering as chain
+`100`. So every address in the table above is the address used locally too, which is what makes the
+local runs worth anything. It is reached at `http://localhost:9545` (the Bee cluster's chain) or
+`http://localhost:8545` (the same snapshot standalone), and funded from a baked dev faucet rather
+than a queen EOA. See `vendor/bee-compose/blockchain/HYBRID-CHAIN.md` and the README's
+"Paying for storage locally".
 
 ## 3. Architecture
 
@@ -50,10 +57,12 @@ vendored and extended from `@upcoming/multichain-library` per the conclusion on 
 `multichain/README.md` for provenance and the changes made. It already provides: `topUpBatch`,
 `increaseDepth`, `createBatch`, `approveBzz`/`getBzzAllowance`, BZZ/native balances and transfers,
 batch reads (`getPostageBatch`, `getRemainingBalance`, `getPostageWriteConstraints`), receipt and
-balance waiters, the SushiSwap V3 leg, and chain-injectable settings presets
-(`gnosisMainnetSettings()` / `localAnvilSettings()`), plus local dev helpers (`src/dev.ts`).
-Selector-pinning unit tests and an anvil integration suite (fund → create → topUp → increaseDepth
-→ non-owner revert) exist in the package.
+balance waiters, the SushiSwap V3 leg, and chain-injectable settings — now a single preset,
+`gnosisMainnetSettings()`, since the local chain carries the mainnet deployments (the
+`localAnvilSettings()` this spec first proposed went with the 4020 chain). Plus local dev helpers
+(`src/dev.ts`) and the local solver (`src/local-solver.ts`, companion spec §7). Selector-pinning
+unit tests and a fork suite (`pnpm test:fork`: fund → swap → create → topUp → increaseDepth →
+non-owner revert) exist in the package.
 
 `lib/` stays as-is (its raw `eth_call` reads remain the UI's display path). `ui/`'s job is
 orchestration only. The owner key bridges from bee-js via `prefix0x(signerKey.toHex())` →
@@ -62,26 +71,38 @@ cannot sign transactions, but `toHex()` exports the raw 32 bytes).
 
 ### 3.1 `ui/src/lib/payment/postage-onchain.ts` — orchestration over `@swarm-id/multichain` (new)
 
-Constructs a `MultichainClient` from the network settings (`gnosisMainnetSettings()` when
-`gnosisRpcUrl` is remote, `localAnvilSettings({ rpcUrls: [gnosisRpcUrl] })` when local — same
-locality gate as `resolvePostageStampContractAddress`). Public API:
+Constructs a `MultichainClient` from the network settings. One preset (`gnosisMainnetSettings()`)
+now serves both mainnet and the local hybrid chain, because the local chain carries the mainnet
+deployments; what differs is the RPC list. As implemented:
 
 ```ts
-export function ownerFunds(address): Promise<{ xdai: bigint; bzz: bigint }>
-export function ensureBzzAllowance(signerKey, totalPlur): Promise<void>
+export function chainIdentity(rpcUrl?): Promise<ChainIdentity> // { chainId, isMainnet }
+export function postageChain(rpcUrl?): Promise<MultichainClient>
+export function ownerFunds(address, client?): Promise<OwnerFunds> // { xdai, bzz }
+export function fundingShortfall(address, bzzPlur, client?): Promise<OwnerFunds>
+export function ensureBzzAllowance(signerKey, totalPlur, client?): Promise<void>
 // skip when getBzzAllowance >= totalPlur; else approveBzz EXACTLY totalPlur + wait
-export function topUpOnChain(signerKey, batchId, amountPerChunk): Promise<void>
-export function increaseDepthOnChain(signerKey, batchId, newDepth): Promise<void>
-export function preflightExtend(batchId, topUpAmount): Promise<Preflight>
-export function preflightResize(batchId, ownerAddress, newDepth, plan): Promise<Preflight>
-export function reconcileStampFromChain(account, stamp): Promise<void>
-// read chain state; patch {depth, amount, batchTTL} via account.updateStamp
+export function topUpOnChain(signerKey, stamp, amountPerChunk, client?): Promise<void>
+export function increaseDepthOnChain(signerKey, stamp, newDepth, client?): Promise<void>
+export function preflightExtend(stamp, client?): Promise<PostagePreflight>
+export function preflightResize(
+  stamp,
+  signerKey,
+  newDepth,
+  client?,
+): Promise<PostagePreflight & { alreadyResized: boolean }>
+export function reconcileStampFromChain(account, stamp, client?): Promise<boolean>
+// read chain state; patch {depth, amount, batchTTL} via account.updateStamp.
+// Returns false when the chain could not answer — the record is left untouched.
 ```
 
 Rules:
 
-- Before ANY signature, assert the client's `getChainId()` is `100` or `4020` — refuse a
-  misconfigured RPC.
+- Before ANY signature, assert the chain id is `100`; `settingsFor` throws otherwise. **Chain id is
+  not enough to tell the local chain from mainnet** — it reports `100` on purpose so that an app
+  resolving addresses by chain id finds what it expects. `chainIdentity()` distinguishes them by
+  **genesis hash**, and an endpoint that is not mainnet never falls back to the public RPCs, so a
+  failed call cannot silently read or write real mainnet.
 - Every wait wraps in `withTimeout` (`lib/src/utils/promise.ts`) — surface a "still pending"
   state on timeout; `reconcileStampFromChain` on next dialog open resolves it. Never
   `Promise.race`.
@@ -92,8 +113,8 @@ Rules:
 
 ### 3.2 `ui/src/lib/payment/purchase.ts` — planner changes
 
-Replace `dilutedStamp()` (for the product path) with an **inverted-order** planner. The old
-function stays only if /dev still uses it; otherwise delete (knip will flag).
+Replace `dilutedStamp()` (for the product path) with an **inverted-order** planner. Done —
+`dilutedStamp()` is deleted; nothing referenced it once the dialogs moved over.
 
 ```ts
 export interface ResizePlan {
@@ -190,8 +211,11 @@ is still pending — retry to finish it (no additional payment)." Update the Fig
 Every record patch flows through `account.updateStamp` (LWW `updatedAt` clock; re-anchors the TTL
 measurement instant). Prefer chain truth (`reconcileStampFromChain`) after each confirmation;
 projected plan patches are the fallback so an RPC blip after a confirmed tx still lands a record.
-After a successful resize the runtime `Stamper` for the drive must be rebuilt at the new depth —
-verify `postage-stamps.svelte.ts` re-derives on `depth` change and add a test.
+
+The runtime `Stamper` needs no explicit rebuild: `postage-stamps.svelte.ts`'s `getStamper()`
+constructs one per call from the stored `stamp.depth`, so there is no cached instance to go stale.
+**Still open:** a regression test pinning that, so a future cache cannot reintroduce the bug
+silently.
 
 ## 6. Security
 
@@ -199,42 +223,44 @@ verify `postage-stamps.svelte.ts` re-derives on `depth` change and add a test.
   is passed function-scoped into `@swarm-id/multichain` calls; it is never persisted anywhere new
   and never leaves the origin.
 - Exact-amount approvals to the fixed PostageStamp address only. No unlimited allowances.
-- Assert the chain id (100/4020) before any signature; contract/token addresses come from the
-  settings preset matched to the RPC's locality (same gate as
-  `resolvePostageStampContractAddress`) so a remote RPC always targets mainnet addresses.
+- Assert the chain id is 100 before any signature. Addresses are the mainnet ones on both chains,
+  so the safety property is not "which addresses" but "which endpoint": a non-mainnet chain never
+  falls back to the public RPC list, so a failed local call cannot silently reach real mainnet.
 - A hostile user-configured `gnosisRpcUrl` can lie about state and censor txs but cannot alter
   calldata, redirect approvals, or extract the key. Same trust level as today's TTL reads.
 
 ## 7. Dev tooling & tests
 
-The chain-level helpers already exist in `@swarm-id/multichain`'s `src/dev.ts`
-(`fundLocalAccount` — queen transfers xDAI + TestToken BZZ; `createLocalBatch` — queen pays,
-derived signer owns, mirroring production where the widget's temp wallet is the creator). The ui
-work is exposing them on the /dev Stamps tab (see `dev-settings.svelte.ts` for the toggle
-pattern):
+Chain-level helpers live in `@swarm-id/multichain`'s `src/dev.ts` — `fundLocalAccount` (transfers
+xDAI/BZZ from the chain's baked faucet) and `simulateWidgetPurchase` (a throwaway payer swaps,
+approves and creates the batch owned by the derived signer, mirroring production's role split).
+`ui/src/lib/dev/chain-funding.ts` wraps them; the actions are on the /dev **Chain** tab (the Stamps
+tab this spec named no longer exists — the node-stamp workflow was dropped):
 
-- A "fund postage signer" action wired to `fundLocalAccount` with the derived owner address.
-- A "create owned batch" action wired to `createLocalBatch`.
-- A "mock funding" dev toggle: instead of the real payment flow, transfer the requested amounts
-  from the queen — so the funding phase runs for real against anvil, popup-free.
+- **Fund postage signer** → `fundPostageSigner`, and a faucet panel showing what is left to give.
+- **Create owned batch** → `createOwnedBatchOnChain`.
+- Funding during a real dialog flow no longer needs a toggle. It follows the chain and the
+  environment: see the companion spec §7 for the rail seam that decides between paying through the
+  local solver and a silent faucet transfer.
 
 Tests:
 
-- Vitest units: `resizePlan` (parity, clamps, dust), preflight classification. (The package's own
-  unit + anvil integration suites cover the chain calls: `pnpm --filter @swarm-id/multichain test`
-  / `test:integration`.)
-- Playwright e2e (gated on the bee cluster like existing drive e2e): create owned batch → extend →
-  assert on-chain `normalisedBalance` grew and the record TTL extended; resize keep-lifespan →
-  assert on-chain depth and restored balance; kill between topUp and increaseDepth (dev hook) →
-  reopen dialog → chain reconciliation resumes and completes.
+- Vitest units: `resizePlan` (parity, clamps, dust) in `purchase.test.ts`; funding maths in
+  `funding.test.ts`. The package's own unit + fork suites cover the chain calls
+  (`pnpm --filter @swarm-id/multichain test`, `pnpm test:fork`).
+- Playwright e2e, `ui/tests/drive-onchain.test.ts`, skipped automatically when no chain answers —
+  three tests: extend grows the on-chain balance and the recorded TTL; resize keeps the lifespan by
+  topping up before increasing depth; an interrupted resize resumes from chain truth without paying
+  twice.
 
 ## 8. Existing code disposition
 
-- `ui/src/lib/payment/bee.ts` `topUpStamp`/`diluteStamp`: keep for /dev node-owned batches only;
-  product dialogs stop importing them.
-- `ui/src/lib/payment/chain-price.ts`: switch source to contract `lastPrice`.
-- `bee.ts:61` still uses `Promise.race` + deprecated `rejectAfter` — migrate to `withTimeout` while
-  touching the file.
+- `ui/src/lib/payment/bee.ts` `topUpStamp`/`diluteStamp`: **deleted**, not kept. Once the product
+  dialogs stopped importing them nothing else did — the /dev node-stamp workflow they were retained
+  for was dropped in the same period. `bee.ts` now only validates a batch by uploading a probe SOC.
+- `ui/src/lib/payment/chain-price.ts`: **done** — reads the contract's `lastPrice` via
+  `getPostageWriteConstraints`, with the 60s cache kept.
+- `bee.ts`'s `Promise.race` + deprecated `rejectAfter`: **done** — migrated to `withTimeout`.
 
 ## 9. Out of scope
 
@@ -247,11 +273,23 @@ Tests:
 
 ## 10. Acceptance criteria
 
-- [ ] Extend and resize complete end-to-end on bee-compose anvil with NO Bee node involvement.
-- [ ] Resize executes top-up **before** `increaseDepth`; planner computes from live
-      `remainingBalance`; floor clamp works; known-revert cases are refused pre-send.
-- [ ] Interrupted resize resumes from chain truth after a full page reload.
-- [ ] All record updates flow through `account.updateStamp`; chain-truth reconcile lands after
-      each confirmation.
-- [ ] Immutable batches: extend allowed, resize blocked in UI.
-- [ ] Unit + e2e suites above pass; `pnpm check:all` clean.
+- [x] Extend and resize complete end-to-end on the local chain with NO Bee node involvement —
+      `drive-onchain.test.ts`, three passing tests against the hybrid chain.
+- [x] Resize executes top-up **before** `increaseDepth`; the planner computes from live
+      `remainingBalance` (`preflightExtend` reads `getRemainingBalance`, never `stamp.amount`);
+      floor clamp and known-revert refusals in `resizePlan` / `preflightResize`.
+- [x] Interrupted resize resumes from chain truth after a full page reload — `alreadyResized` off
+      `preflightResize`, covered by the third e2e test.
+- [x] All record updates flow through `account.updateStamp`; `reconcileStampFromChain` runs after
+      each confirmation and leaves the record untouched when the chain cannot answer.
+- [x] Immutable batches: extend allowed, resize blocked (`preflightResize` throws on
+      `immutableFlag`).
+- [x] Unit + e2e suites pass; `pnpm check:all` clean.
+
+Open, and deliberately not closed by this spec:
+
+- No regression test pinning that the runtime `Stamper` follows a depth change (§5).
+- The #392 partial-failure **copy** is unwritten — the resize dialog surfaces the raw error and a
+  generic retry rather than the "size increase pending, no additional payment needed" wording §4.2
+  calls for. The underlying behaviour is correct and retry is free; only the words are missing.
+  Tracked as the companion spec's §6.
