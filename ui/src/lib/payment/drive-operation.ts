@@ -206,9 +206,12 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   )
 
   const bzzNeeded = plan.topUpAmount << BigInt(preflight.batch.depth)
-  if (plan.topUpAmount > 0n) {
-    await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
-  }
+  // Unconditionally: a resize that drops the lifespan needs no BZZ, but it
+  // still needs gas, and the owner address may hold none. Guarding this on
+  // `topUpAmount > 0` meant that case sent a transaction the owner could not
+  // pay for, and never asked the user for anything. `fundingShortfall` already
+  // reports a gas-only need, and the payment screens already price one.
+  await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
 
   // Bundled, there is no seam to fail at: top-up and depth increase land
   // together or not at all, so the partial state below cannot arise.
