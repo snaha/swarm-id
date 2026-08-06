@@ -11,6 +11,8 @@
  */
 
 import { RollingValueProvider } from "cafe-utility"
+import { SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE } from "./delegate-bytecode"
+import { jsonRpc } from "./fetch"
 import { privateKeyToAccount } from "viem/accounts"
 import { createBatch, type CreateBatchResult } from "./postage-write"
 import { getNativeBalance } from "./rpc"
@@ -235,4 +237,31 @@ export async function simulateWidgetPurchase(
     depth: options.depth,
     amountPerChunk: options.amountPerChunk,
   }
+}
+
+/**
+ * Put the EIP-7702 delegate on the local chain, so bundled postage operations
+ * can be exercised there.
+ *
+ * The baked snapshot cannot carry it — a state dump only keeps storage the bake
+ * wrote, and the bake only touched the DEX — so the mainnet runtime bytecode is
+ * spliced onto the same address it occupies on Gnosis. Idempotent, and a no-op
+ * anywhere the delegate already exists, which includes mainnet itself.
+ */
+export async function ensureBundlingDelegate(
+  settings: MultichainSettings,
+): Promise<void> {
+  const rpcProvider = new RollingValueProvider(settings.rpcUrls)
+  const address = settings.addresses.eip7702Delegate
+  const existing = await jsonRpc(rpcProvider, settings, "eth_getCode", [
+    address,
+    "latest",
+  ]).catch(() => undefined)
+  if (typeof existing === "string" && existing !== "0x") {
+    return
+  }
+  await jsonRpc(rpcProvider, settings, "anvil_setCode", [
+    address,
+    SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE,
+  ])
 }

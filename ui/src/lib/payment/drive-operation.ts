@@ -19,6 +19,8 @@ import type { MultichainClient } from '@swarm-id/multichain'
 
 import {
   type OwnerFunds,
+  bundledExtend,
+  bundledResize,
   ensureBzzAllowance,
   fundingShortfall,
   increaseDepthOnChain,
@@ -121,10 +123,15 @@ export async function runExtend(options: ExtendOptions): Promise<void> {
   const bzzNeeded = topUpAmount << BigInt(drive.depth)
   await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
 
-  onStep?.('approving')
-  await ensureBzzAllowance(signerKey, bzzNeeded, client)
   onStep?.('paying')
-  await topUpOnChain(signerKey, drive, topUpAmount, client)
+  // One atomic transaction where the chain supports it; otherwise the same two
+  // operations in sequence, with an approval left standing in between.
+  if (!(await bundledExtend(signerKey, drive, topUpAmount, bzzNeeded, client))) {
+    onStep?.('approving')
+    await ensureBzzAllowance(signerKey, bzzNeeded, client)
+    onStep?.('paying')
+    await topUpOnChain(signerKey, drive, topUpAmount, client)
+  }
 
   onStep?.('recording')
   const reconciled = await reconcileStampFromChain(account, drive, client)
@@ -198,28 +205,44 @@ export async function runResize(options: ResizeOptions): Promise<void> {
     preflight.constraints.lastPrice,
   )
 
+  const bzzNeeded = plan.topUpAmount << BigInt(preflight.batch.depth)
   if (plan.topUpAmount > 0n) {
-    const bzzNeeded = plan.topUpAmount << BigInt(preflight.batch.depth)
     await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
-
-    onStep?.('approving')
-    await ensureBzzAllowance(signerKey, bzzNeeded, client)
-    onStep?.('paying')
-    await topUpOnChain(signerKey, drive, plan.topUpAmount, client)
-    // The money is on-chain: record the grown lifespan before attempting the
-    // increase, so a failure here leaves an accurate record.
-    account.updateStamp(drive.batchID, plan.afterTopUp)
   }
 
-  onStep?.('resizing')
-  try {
-    await increaseDepthOnChain(signerKey, drive, newDepth, client)
-  } catch (caught) {
-    // By here everything the user pays for has already landed — either the
-    // top-up confirmed above, or none was needed. So this failure is the
-    // benign partial state, and a retry costs nothing but gas dust. Typed so
-    // the dialog can say that instead of showing a generic failure (#392).
-    throw new SizeIncreasePendingError(caught)
+  // Bundled, there is no seam to fail at: top-up and depth increase land
+  // together or not at all, so the partial state below cannot arise.
+  onStep?.('paying')
+  const bundled = await bundledResize(
+    signerKey,
+    drive,
+    plan.topUpAmount,
+    bzzNeeded,
+    newDepth,
+    client,
+  )
+
+  if (!bundled) {
+    if (plan.topUpAmount > 0n) {
+      onStep?.('approving')
+      await ensureBzzAllowance(signerKey, bzzNeeded, client)
+      onStep?.('paying')
+      await topUpOnChain(signerKey, drive, plan.topUpAmount, client)
+      // The money is on-chain: record the grown lifespan before attempting the
+      // increase, so a failure here leaves an accurate record.
+      account.updateStamp(drive.batchID, plan.afterTopUp)
+    }
+
+    onStep?.('resizing')
+    try {
+      await increaseDepthOnChain(signerKey, drive, newDepth, client)
+    } catch (caught) {
+      // Only reachable on the unbundled path. By here everything the user pays
+      // for has already landed — either the top-up confirmed above, or none was
+      // needed — so this is the benign partial state and a retry costs nothing
+      // but gas dust. Typed so the dialog can say that (#392).
+      throw new SizeIncreasePendingError(caught)
+    }
   }
 
   onStep?.('recording')

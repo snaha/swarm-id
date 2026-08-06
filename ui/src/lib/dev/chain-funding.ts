@@ -17,6 +17,7 @@
  */
 import {
   DEV_FAUCET_ADDRESS,
+  ensureBundlingDelegate,
   fundLocalAccount,
   simulateWidgetPurchase,
 } from '@swarm-id/multichain/dev'
@@ -110,6 +111,10 @@ export async function createOwnedBatchOnChain(
 ): Promise<LocalBatch> {
   const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
+  // Any dev flow that makes a batch will go on to extend or resize it, so this
+  // is the one place that guarantees the delegate is there for the bundled
+  // path — including in e2e runs, which never start the solver.
+  await ensureBundlingDelegate(chain.settings)
   const owner = destination as `0x${string}`
   const depth = requestedDepth ?? DEV_BATCH_DEPTH
   const { minimumInitialBalancePerChunk } = await chain.getPostageWriteConstraints()

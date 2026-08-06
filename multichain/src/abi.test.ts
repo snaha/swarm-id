@@ -3,7 +3,8 @@
 
 import { describe, expect, it } from "vitest"
 import { toFunctionSelector, type AbiFunction } from "viem"
-import { ERC20_ABI, POSTAGE_STAMP_ABI } from "./abi"
+import { ACCOUNT_7702_ABI, ERC20_ABI, POSTAGE_STAMP_ABI } from "./abi"
+import { SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE } from "./delegate-bytecode"
 
 function selectorOf(abi: readonly unknown[], name: string): string {
   const fn = (abi as AbiFunction[]).find(
@@ -45,5 +46,17 @@ describe("PostageStamp ABI selectors", () => {
     expect(selectorOf(ERC20_ABI, "transfer")).toBe("0xa9059cbb")
     expect(selectorOf(ERC20_ABI, "balanceOf")).toBe("0x70a08231")
     expect(selectorOf(ERC20_ABI, "allowance")).toBe("0xdd62ed3e")
+  })
+
+  /**
+   * The delegate is the one contract here we did not write, and a wrong
+   * selector against it fails SILENTLY — an unknown selector on a 7702 account
+   * hits the fallback, the batch never runs, and the transaction still
+   * succeeds. So pin it against the deployed dispatch table itself.
+   */
+  it("matches the delegate's executeBatch, as found in its deployed bytecode", () => {
+    const selector = selectorOf(ACCOUNT_7702_ABI, "executeBatch")
+    expect(selector).toBe("0x34fcd5be")
+    expect(SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE).toContain(selector.slice(2))
   })
 })

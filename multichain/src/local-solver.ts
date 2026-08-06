@@ -24,7 +24,7 @@
  */
 
 import { RollingValueProvider } from "cafe-utility"
-import { fundLocalAccount } from "./dev"
+import { ensureBundlingDelegate, fundLocalAccount } from "./dev"
 import { getChainId } from "./rpc"
 import { type MultichainSettings, gnosisMainnetSettings } from "./settings"
 
@@ -157,6 +157,10 @@ async function main(): Promise<void> {
   console.log(
     `local solver: source ${SOURCE_RPC_URL} -> gnosis ${GNOSIS_RPC_URL} (chain ${gnosisChainId})`,
   )
+  // The chain is up and ours, so make sure the postage bundle can run on it —
+  // the baked snapshot cannot carry the 7702 delegate.
+  await ensureBundlingDelegate(settings)
+
   console.log(`local solver: watching for deposits to ${SOLVER_ADDRESS}`)
 
   // Start at the head: replaying old deposits on restart would deliver twice

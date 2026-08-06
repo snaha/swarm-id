@@ -256,6 +256,71 @@ export async function topUpOnChain(
   )
 }
 
+/**
+ * Extend as ONE transaction: approve + topUp bundled via EIP-7702.
+ * @returns false when this chain has no delegate deployed — the caller then
+ *   sends the two operations separately, which is the same work with a
+ *   recoverable seam in the middle.
+ */
+export async function bundledExtend(
+  signerKey: PrivateKey,
+  stamp: Pick<PostageStamp, 'batchID'>,
+  amountPerChunk: bigint,
+  totalPlur: bigint,
+  client?: MultichainClient,
+): Promise<boolean> {
+  const chain = client ?? (await postageChain())
+  if (!(await chain.supportsBundling())) {
+    return false
+  }
+  const hash = await chain.bundleExtend({
+    originPrivateKey: ownerHexKey(signerKey),
+    batchId: batchIdHex(stamp),
+    amountPerChunk,
+    totalPlur,
+  })
+  await withTimeout(
+    chain.waitForTransactionSuccess(hash),
+    CONFIRMATION_TIMEOUT_MS,
+    'The top-up transaction was not confirmed in time.',
+  )
+  return true
+}
+
+/**
+ * Resize as ONE transaction: approve + topUp + increaseDepth bundled via
+ * EIP-7702 — in that order, which the contract requires whether or not the
+ * calls are atomic. Removes the partial state entirely rather than recovering
+ * from it.
+ * @returns false when this chain has no delegate deployed.
+ */
+export async function bundledResize(
+  signerKey: PrivateKey,
+  stamp: Pick<PostageStamp, 'batchID'>,
+  amountPerChunk: bigint,
+  totalPlur: bigint,
+  newDepth: number,
+  client?: MultichainClient,
+): Promise<boolean> {
+  const chain = client ?? (await postageChain())
+  if (!(await chain.supportsBundling())) {
+    return false
+  }
+  const hash = await chain.bundleResize({
+    originPrivateKey: ownerHexKey(signerKey),
+    batchId: batchIdHex(stamp),
+    amountPerChunk,
+    totalPlur,
+    newDepth,
+  })
+  await withTimeout(
+    chain.waitForTransactionSuccess(hash),
+    CONFIRMATION_TIMEOUT_MS,
+    'The resize transaction was not confirmed in time.',
+  )
+  return true
+}
+
 /** Send + confirm an increaseDepth — the signer MUST be the batch owner. */
 export async function increaseDepthOnChain(
   signerKey: PrivateKey,

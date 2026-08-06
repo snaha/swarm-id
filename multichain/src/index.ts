@@ -5,6 +5,13 @@
 
 import { RollingValueProvider } from "cafe-utility"
 import {
+  type ExtendBundleOptions,
+  type ResizeBundleOptions,
+  bundleExtend,
+  bundleResize,
+  supportsBundling,
+} from "./postage-bundle"
+import {
   getBzzAllowance,
   getBzzBalance,
   approveBzz,
@@ -60,7 +67,8 @@ export type {
 } from "./postage-write"
 export type { PostageBatch, PostageWriteConstraints } from "./postage-read"
 export type { TransactionReceipt } from "./rpc"
-export { POSTAGE_STAMP_ABI, ERC20_ABI } from "./abi"
+export { POSTAGE_STAMP_ABI, ERC20_ABI, ACCOUNT_7702_ABI } from "./abi"
+export type { ExtendBundleOptions, ResizeBundleOptions } from "./postage-bundle"
 export { buildExactInputSwapData } from "./sushi"
 
 /**
@@ -75,6 +83,25 @@ export class MultichainClient {
   constructor(settings: MultichainSettings) {
     this.settings = settings
     this.rpcProvider = new RollingValueProvider(settings.rpcUrls)
+  }
+
+  /**
+   * Whether postage operations can run as one atomic EIP-7702 bundle here.
+   * False means the delegate is not deployed on this chain; the caller sends
+   * the operations one at a time instead.
+   */
+  supportsBundling(): Promise<boolean> {
+    return supportsBundling(this.settings, this.rpcProvider)
+  }
+
+  /** approve + topUp in one transaction. */
+  bundleExtend(options: ExtendBundleOptions): Promise<`0x${string}`> {
+    return bundleExtend(options, this.settings, this.rpcProvider)
+  }
+
+  /** approve + topUp + increaseDepth in one transaction, in that order. */
+  bundleResize(options: ResizeBundleOptions): Promise<`0x${string}`> {
+    return bundleResize(options, this.settings, this.rpcProvider)
   }
 
   getChainId(): Promise<number> {

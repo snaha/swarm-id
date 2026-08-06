@@ -11,6 +11,13 @@ export interface MultichainAddresses {
   postageStamp: `0x${string}`
   wxdai: `0x${string}`
   sushiV3Router: `0x${string}`
+  /**
+   * The EIP-7702 delegate an owner EOA authorises to run a postage operation as
+   * one atomic bundle. `Simple7702Account` (eth-infinitism's audited minimal
+   * 7702 account, verified on Gnosis) — it restricts execution to the account
+   * itself, so only a self-call from the EOA can drive it.
+   */
+  eip7702Delegate: `0x${string}`
   sushiV3Quoter: `0x${string}`
 }
 
@@ -46,6 +53,7 @@ const GNOSIS_MAINNET_DEFAULTS: MultichainSettings = {
     postageStamp: "0x45a1502382541Cd610CC9068e88727426b696293",
     wxdai: "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d",
     sushiV3Router: "0x4F54dd2F4f30347d841b7783aD08c050d8410a9d",
+    eip7702Delegate: "0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9",
     sushiV3Quoter: "0xb1E835Dc2785b52265711e17fCCb0fd018226a6e",
   },
   sushiV3BzzPoolFee: 3000,

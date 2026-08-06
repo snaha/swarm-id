@@ -187,7 +187,39 @@ flows begin with a funds check and end with a recorded stamp.
    covers the plan (top-up landed, increase didn't), skip to step b. Never trust a component-local
    `committedPlan` alone.
 
-**Partial-failure semantics under the new ordering (feed back to #392 / design):** the failure
+### 4.4 Atomic execution (EIP-7702)
+
+Where the chain has the delegate deployed, both flows run as **one transaction**
+instead of two or three: the owner EOA authorises `Simple7702Account`
+(`settings.addresses.eip7702Delegate`) and the transaction is sent from the EOA to
+itself, so `msg.sender` stays the owner throughout — which `topUp` (pulls from the
+sender) and `increaseDepth` (owner-only) both require.
+
+- Extend: `approve → topUp`.
+- Resize: `approve → topUp → increaseDepth`.
+
+**Ordering is unchanged and still load-bearing.** Atomicity does not relax the
+contract's floor check — `increaseDepth` still validates the post-dilution balance
+before any compensation, so a bundle that dilutes first reverts exactly as the
+sequential version did. This was verified on chain, not assumed: the wrong order
+returns `status=reverted`, the right order succeeds. The full resize bundle costs
+~420k gas — less than `increaseDepth` alone was budgeted for — so this is cheaper
+as well as atomic.
+
+Two consequences worth stating:
+
+- **The partial state below becomes unreachable.** `SizeIncreasePendingError` and
+  its dialog copy remain for the unbundled path, which is still what runs wherever
+  the delegate is absent.
+- **The approval never outlives the transaction**, which strictly improves on the
+  exact-amount approval rule in §6 — there is no window in which an allowance sits
+  unspent.
+
+Gated by `supportsBundling()` (does the delegate have code on this chain?), so an
+endpoint without it degrades to the sequential path rather than failing.
+EIP-7702 has been live on Gnosis since the Pectra fork, 30 April 2025.
+
+**Partial-failure semantics on the unbundled path (feed back to #392 / design):** the failure
 state "size grew but lifespan silently dropped" (Figma "Lifespan decreased", nodes `481:14324` /
 `481:14846`) **cannot occur** — the order is inverted precisely because the contract checks the
 floor before compensation. The reachable partial state is the benign inverse: _payment succeeded
@@ -275,6 +307,10 @@ Tests:
 
 - [x] Extend and resize complete end-to-end on the local chain with NO Bee node involvement —
       `drive-onchain.test.ts`, three passing tests against the hybrid chain.
+- [x] Resize runs as one atomic EIP-7702 transaction where the delegate exists, and
+      falls back to the sequential path where it does not — verified by three type-0x4
+      self-call transactions in the e2e run, and by the delegate being reinstalled
+      from a cleared chain.
 - [x] Resize executes top-up **before** `increaseDepth`; the planner computes from live
       `remainingBalance` (`preflightExtend` reads `getRemainingBalance`, never `stamp.amount`);
       floor clamp and known-revert refusals in `resizePlan` / `preflightResize`.

@@ -194,8 +194,13 @@ must refuse to request more BZZ than the operation's cost.
 The designed "Lifespan decreased" modal (`481:14324` / `481:14846`, from
 [#392](https://github.com/snaha/swarm-id/issues/392)) assumes the old dilute-first ordering. The
 engine inverts the order (contract floor check — engine spec §2), so that state is unreachable.
-The reachable partial state is: **payment succeeded, lifespan got longer, size increase pending,
-retry is free**. Status:
+**Since implementation this state is unreachable on the default path**: engine spec §4.4 runs the
+resize as one atomic EIP-7702 transaction, so the top-up and the depth increase land together or
+not at all. What follows still applies to the unbundled fallback, which is what runs on any chain
+without the delegate deployed.
+
+The reachable partial state there is: **payment succeeded, lifespan got longer, size increase
+pending, retry is free**. Status:
 
 1. **Done.** `runResize` throws a typed `SizeIncreasePendingError` when `increaseDepth` fails —
    which by then can only mean everything payable already landed — carrying the wording "Your

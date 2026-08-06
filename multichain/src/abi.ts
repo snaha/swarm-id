@@ -24,6 +24,15 @@ export const POSTAGE_STAMP_ABI = parseAbi([
   "function paused() view returns (bool)",
 ])
 
+/**
+ * The EIP-7702 delegate's batch entry point. `Call` mirrors
+ * `BaseAccount.Call{address target; uint256 value; bytes data;}` on the
+ * verified deployment; the selector is pinned in abi.test.ts.
+ */
+export const ACCOUNT_7702_ABI = parseAbi([
+  "function executeBatch((address target, uint256 value, bytes data)[] calls)",
+])
+
 export const ERC20_ABI = parseAbi([
   "function approve(address spender, uint256 value) returns (bool)",
   "function transfer(address to, uint256 value) returns (bool)",
