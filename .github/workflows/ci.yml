@@ -46,6 +46,20 @@ jobs:
         working-directory: ./lib
         run: pnpm test
 
+      # The package holding the PostageStamp ABI selectors, the EIP-7702 bundle
+      # and the local solver protocol — previously in no workflow at all.
+      - name: Code linting (multichain)
+        working-directory: ./multichain
+        run: pnpm lint
+
+      - name: Typecheck (multichain)
+        working-directory: ./multichain
+        run: pnpm typecheck
+
+      - name: Run multichain unit tests
+        working-directory: ./multichain
+        run: pnpm test
+
       - name: Build ui
         working-directory: ./ui
         run: pnpm build
