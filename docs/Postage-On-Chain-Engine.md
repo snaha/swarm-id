@@ -158,6 +158,11 @@ flows begin with a funds check and end with a recorded stamp.
 
 ### 4.1 Extend = approve + topUp
 
+> Both flows below describe the **sequential** path. Where the chain has the EIP-7702 delegate —
+> which includes Gnosis mainnet — they run as a single atomic transaction instead; see §4.4. The
+> steps, their order and their preconditions are identical either way, so the sections stand as
+> written; only the number of transactions differs.
+
 1. Form math unchanged: `topUpAmount = stampAmountForSeconds(price, addedSeconds)`. Price now comes
    from the contract's `lastPrice` (via `fetchPostageWriteConstraints`) instead of the Bee
    `/chainstate`; keep the 60s cache pattern of `chain-price.ts`.
@@ -190,7 +195,14 @@ flows begin with a funds check and end with a recorded stamp.
 ### 4.4 Atomic execution (EIP-7702)
 
 Where the chain has the delegate deployed, both flows run as **one transaction**
-instead of two or three: the owner EOA authorises `Simple7702Account`
+instead of two or three: the owner EOA authorises **`Simple7702Account`** — eth-infinitism's
+audited minimal 7702 account, verified on Gnosis at
+`0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9`, and chosen over MetaMask's `EIP7702StatelessDeleGator`
+(also deployed and verified there, but a far larger surface than a three-call batch needs) and over
+deploying our own (which would add Solidity, a mainnet deployment and an audit burden to a TS repo).
+What a replacement must preserve: **execution restricted to the account itself**, so only a
+self-call from the EOA can drive it, and an `executeBatch` that reverts the whole batch on any
+inner failure. The owner EOA authorises the delegate
 (`settings.addresses.eip7702Delegate`) and the transaction is sent from the EOA to
 itself, so `msg.sender` stays the owner throughout — which `topUp` (pulls from the
 sender) and `increaseDepth` (owner-only) both require.
@@ -260,6 +272,16 @@ silently.
   falls back to the public RPC list, so a failed local call cannot silently reach real mainnet.
 - A hostile user-configured `gnosisRpcUrl` can lie about state and censor txs but cannot alter
   calldata, redirect approvals, or extract the key. Same trust level as today's TTL reads.
+- **The EIP-7702 delegation is permanent.** The authorization writes `0xef0100 || delegate` into
+  the owner EOA's code field and it stays there until overwritten, or cleared by authorising the
+  zero address — it is NOT scoped to one transaction. Consequences worth knowing:
+  - Every account's derived postage signer reads as a contract (`EXTCODESIZE > 0`) after its first
+    bundled operation. Nothing on the postage path checks that, but a future counterparty doing
+    `require(sender.code.length == 0)` would reject it.
+  - The delegate therefore has standing authority over that EOA, which is why the choice is
+    `Simple7702Account` (§4.4) and not a general-purpose executor.
+  - No flow clears the delegation. Adding one would mean a transaction whose only effect is to
+    revoke — worth having if a delegate is ever found wanting, not worth pre-building.
 
 ## 7. Dev tooling & tests
 
@@ -270,7 +292,12 @@ approves and creates the batch owned by the derived signer, mirroring production
 tab this spec named no longer exists — the node-stamp workflow was dropped):
 
 - **Fund postage signer** → `fundPostageSigner`, and a faucet panel showing what is left to give.
-- **Create owned batch** → `createOwnedBatchOnChain`.
+- **Create owned batch** → `createOwnedBatchOnChain`, which also calls `ensureBundlingDelegate`.
+  The baked snapshot cannot carry the 7702 delegate — a state dump only keeps storage the bake
+  wrote — so its mainnet runtime bytecode is committed (`src/delegate-bytecode.ts`) and spliced in,
+  the same trick `finalise.ts` uses for the Sushi quoter. Creating a batch is where it happens
+  because any dev flow that makes one goes on to extend or resize it; the local solver does it too,
+  so `pnpm dev:local` is ready without creating anything.
 - Funding during a real dialog flow no longer needs a toggle. It follows the chain and the
   environment: see the companion spec §7 for the rail seam that decides between paying through the
   local solver and a silent faucet transfer.
@@ -325,7 +352,5 @@ Tests:
 Open, and deliberately not closed by this spec:
 
 - No regression test pinning that the runtime `Stamper` follows a depth change (§5).
-- The #392 partial-failure **copy** is unwritten — the resize dialog surfaces the raw error and a
-  generic retry rather than the "size increase pending, no additional payment needed" wording §4.2
-  calls for. The underlying behaviour is correct and retry is free; only the words are missing.
-  Tracked as the companion spec's §6.
+- The **delegation is permanent**, and no flow ever clears it (§6). Nothing needs it cleared today;
+  it is listed so the decision stays visible rather than becoming an accident.

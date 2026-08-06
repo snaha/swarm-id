@@ -38,6 +38,28 @@ async function anvilReachable(): Promise<boolean> {
 
 const chainUp = await anvilReachable()
 
+/** The EIP-7702 delegate, as `gnosisMainnetSettings()` addresses it. */
+const DELEGATE_ADDRESS = '0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9'
+
+async function chainRpc(method: string, params: unknown[]): Promise<string> {
+  const response = await fetch(ANVIL_RPC_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
+  })
+  return String(((await response.json()) as { result?: unknown }).result)
+}
+
+const delegateCode = () => chainRpc('eth_getCode', [DELEGATE_ADDRESS, 'latest'])
+const setDelegateCode = (code: string) => chainRpc('anvil_setCode', [DELEGATE_ADDRESS, code])
+
+/**
+ * Put the delegate back exactly as it was, so a suite ordering change cannot
+ * leave later tests silently exercising the fallback instead of the real path.
+ */
+let savedDelegateCode = ''
+const restoreDelegate = () => setDelegateCode(savedDelegateCode)
+
 /** The stored drive's on-chain-relevant fields. */
 function storedDrive(page: Page) {
   return page.evaluate(() => {
@@ -103,7 +125,13 @@ async function createAccountWithOnChainDrive(page: Page) {
 
 test.describe.configure({ mode: 'serial' })
 
-test.skip(!chainUp, 'requires a local chain (pnpm dev:chain:detach or pnpm dev:bee:detach)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local, or pnpm dev:chain:detach)')
+
+test.beforeAll(async () => {
+  if (chainUp) {
+    savedDelegateCode = await delegateCode()
+  }
+})
 
 // These used to snapshot/revert around each test to conserve the BZZ pool. They
 // must NOT: a Bee node following this chain records the block it has processed
@@ -128,6 +156,39 @@ test('extend tops the batch up on chain and records the longer lifespan', async 
   expect(BigInt(after!.amount)).toBeGreaterThan(BigInt(before!.amount))
   expect(after!.ttl).toBeGreaterThan(before!.ttl)
   // A top-up never changes capacity.
+  expect(after!.depth).toBe(before!.depth)
+})
+
+/**
+ * The sequential path is only reachable where the EIP-7702 delegate is absent —
+ * which, since every dev flow installs it, is nowhere by default. Without this
+ * test the fallback and its whole partial-failure treatment could rot unnoticed
+ * while the bundled path stayed green.
+ */
+test('extends without the 7702 delegate, one transaction at a time', async ({ page }) => {
+  test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)
+  await createAccountWithOnChainDrive(page)
+  const before = await storedDrive(page)
+
+  // After setup, so the batch creation that installs it has already run.
+  await setDelegateCode('0x')
+  try {
+    expect(await delegateCode()).toBe('0x')
+
+    await page.getByRole('button', { name: 'Extend lifespan' }).click()
+    const dialog = page.getByRole('dialog')
+    await dialog.getByRole('combobox').selectOption('days')
+    await dialog.getByRole('button', { name: 'Increase' }).click()
+    await dialog.getByRole('button', { name: 'Proceed' }).click()
+
+    await expect(page.getByText('Lifespan extended')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  } finally {
+    await restoreDelegate()
+  }
+
+  const after = await storedDrive(page)
+  expect(BigInt(after!.amount)).toBeGreaterThan(BigInt(before!.amount))
+  expect(after!.ttl).toBeGreaterThan(before!.ttl)
   expect(after!.depth).toBe(before!.depth)
 })
 

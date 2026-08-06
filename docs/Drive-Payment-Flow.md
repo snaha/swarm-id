@@ -1,6 +1,6 @@
 # Drive Payment Flow (in-app, multichain) — Spec
 
-Status: **implemented**, with the §6 copy work outstanding — see §9. The design sections are kept
+Status: **implemented** — see §9 for what is verified and what is still open. The design sections are kept
 as the record of why the flow is shaped this way; where the code has since moved on, the text has
 been corrected rather than left as the original proposal. Depends on
 [Postage-On-Chain-Engine.md](Postage-On-Chain-Engine.md) (owner-key signing, preflights,

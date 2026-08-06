@@ -9,11 +9,30 @@ paths:
 
 Docker-based local Bee cluster for development with postage stamps. Uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose).
 
+> ⚠️ **Do not run `pnpm dev:bee*` against the hybrid chain — use `pnpm dev:local`.**
+> The `dev:bee*` scripts run the **published** `@snaha/bee-compose`, which still expects the old
+> DEX-less chain: `BEE_SWAP_ENABLE=true`, a chequebook factory at `0x5FC8d326…`, and its own
+> PostageStamp address. Pointed at the hybrid chain those settings recreate the queen into a
+> crashloop —
+> `failed to build bee node error="factory fail: abi: attempting to unmarshal an empty string"` —
+> because PR #19 removed the factory. It looks like a broken cluster, not a wrong command.
+>
+> `pnpm dev:local` uses `vendor/bee-compose` (swap disabled, no factory, Gnosis mainnet addresses),
+> and also starts the payment source chain and the local solver. `pnpm dev:local:fresh` resets the
+> chain to its baked snapshot; `pnpm dev:local:stop` tears it down.
+>
+> The `dev:bee*` scripts remain because CI (`integration-tests.yml`) uses them, where the npm
+> package brings its own matching chain and is self-consistent.
+
 ```bash
-pnpm dev:bee          # Start cluster (queen + 3 full workers = 4-node net), foreground
-pnpm dev:bee:detach   # Start in background
-pnpm dev:bee:stop     # Stop cluster
-pnpm dev:bee:fresh    # Fresh start (purge data)
+pnpm dev:local        # cluster + both chains + solver + UI + demo  ← use this
+pnpm dev:local:fresh  # the same, from a clean chain and empty node state
+pnpm dev:local:stop   # tear the containers down
+
+pnpm dev:bee          # CI's path; see the warning above before running locally
+pnpm dev:bee:detach
+pnpm dev:bee:stop
+pnpm dev:bee:fresh
 ```
 
 The scripts start a 4-node full network (`--full 4` = queen + 3 full workers).
@@ -53,7 +72,9 @@ Verify after start (read-only): every node `bee_kademlia_reachability_status{...
 | Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
-Developer Tools at http://localhost:5500/dev provide stamp buying and sync testing.
+Developer Tools at http://localhost:5500/dev provide chain funding, batch creation and sync
+testing. The **Chain** tab is where the faucet and batch actions live (the old Stamps tab and its
+node-owned-batch workflow are gone).
 
 ## Known Bee Node Private Keys
 

@@ -62,6 +62,11 @@ export interface ResizeBundleOptions extends ExtendBundleOptions {
  * Whether this chain can run a bundle — i.e. whether the delegate is deployed
  * on it. False is not an error: the caller falls back to sending the operations
  * one at a time, which is the same work with recoverable seams in between.
+ *
+ * Deliberately not cached, though the answer is stable in production. One
+ * `eth_getCode` is nothing beside the transaction it precedes, and caching it
+ * would make the delegate impossible to add or remove under a running client —
+ * which is exactly what the tests covering the fallback path do.
  */
 export async function supportsBundling(
   settings: MultichainSettings,

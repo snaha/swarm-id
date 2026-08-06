@@ -110,21 +110,23 @@ pnpm dev:lib         # Library watch mode (rebuilds on changes)
 
 ### Local Bee Cluster (bee-compose)
 
-For local development with postage stamps and uploads, use [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) to run a local Bee cluster with blockchain. Requires Docker.
+For local development with postage stamps and uploads you need a Bee cluster and its chain.
+Requires Docker.
 
 ```bash
-# Start cluster (queen + 1 light worker)
-pnpm dev:bee:detach
-
-# View logs
-pnpm dev:bee:logs
-
-# Stop cluster
-pnpm dev:bee:stop
-
-# Fresh start (pull latest images, purge data)
-pnpm dev:bee:fresh
+pnpm dev:local        # cluster + both chains + solver + UI + demo
+pnpm dev:local:fresh  # the same, from a clean chain and empty node state
+pnpm dev:local:stop   # tear the containers down
+pnpm dev:bee:logs     # tail the queen
 ```
+
+> ⚠️ **Not `pnpm dev:bee`.** Those scripts run the published
+> [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose), which still expects the
+> old DEX-less chain and crashes the queen against the hybrid one
+> (`factory fail: abi: attempting to unmarshal an empty string`). They stay because CI uses them,
+> where the package brings its own matching chain. Locally, use `dev:local` — it runs
+> `vendor/bee-compose`, which matches the chain it boots. See
+> [Paying for storage locally](#paying-for-storage-locally).
 
 **Endpoints:**
 
@@ -134,15 +136,16 @@ pnpm dev:bee:fresh
 | Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
-**Buying a Postage Stamp:**
+**Getting a drive to work with:**
 
-The easiest way is to use the Developer Tools page in the Identity UI:
+The easiest way is the Developer Tools page in the Identity UI:
 
 1. Navigate to http://localhost:5500/dev
-2. Go to the **Stamps** tab
-3. Click **Buy Stamp** with the default settings
+2. Go to the **Chain** tab
+3. **Create owned batch**, then **Import batch** to attach it as a drive
 
-Or use the Bee API directly:
+That creates a real batch owned by the account's own postage signer, so it can be extended and
+resized like a bought one. To buy a node-owned stamp from the Bee API directly instead:
 
 ```bash
 # Buy stamp (amount=500000000, depth=20)
@@ -205,7 +208,8 @@ its calldata, so the solver is stateless. Stop the solver and a payment hangs an
 which is what a solver outage looks like.
 
 **What this does and does not prove.** The Gnosis side is genuine — the delivered xDAI is swapped
-for BZZ through a real SushiSwap pool and spent against the real PostageStamp contract. The rail
+for BZZ through a real SushiSwap pool and spent against the real PostageStamp contract, as a single
+atomic EIP-7702 transaction using the same delegate contract mainnet uses. The rail
 itself is not: its prices are invented, its step list is shorter than Relay's (an ERC-20 source
 would need an approval first), and its failure and refund behaviour is nothing like the real one.
 It rehearses the payment **experience** — connect, switch chain, quote, approve, progress, cancel,

@@ -31,6 +31,15 @@ Deliberate changes from upstream:
 - **New PostageStamp operations**: `topUpBatch`, `increaseDepth`, and the read
   side (`getPostageBatch`, `getRemainingBalance`,
   `getPostageWriteConstraints`). Upstream only has `createBatch`.
+- **Atomic bundles** (`postage-bundle.ts`): the same operations as ONE EIP-7702
+  transaction — `bundleExtend` (approve + topUp) and `bundleResize` (approve +
+  topUp + increaseDepth), gated on `supportsBundling()`. The owner EOA
+  authorises `Simple7702Account` and sends to itself, so `msg.sender` stays the
+  batch owner. Order is load-bearing regardless of atomicity; see
+  `docs/Postage-On-Chain-Engine.md` §4.4.
+- **A local solver** (`local-solver.ts`): the off-chain half of a cross-chain
+  payment, which is the one part a local chain can host honestly. Run by
+  `pnpm dev:local`.
 - **Selector pinning**: unit tests assert every ABI entry against selectors
   verified on the deployed contract, so an ABI typo cannot reach a wallet.
 - The duplicated FeeTooLow retry loops are extracted (`write-retry.ts`), the
@@ -99,6 +108,6 @@ trading, since only the purchase is worth spending a real pool on. Never import
 `src/dev.ts` in production code.
 
 ```bash
-pnpm dev:bee:detach                          # repo root — cluster + chain
+pnpm dev:local                               # repo root — cluster + chains + solver
 pnpm --filter @swarm-id/multichain test      # unit tests, no chain needed
 ```
