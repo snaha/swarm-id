@@ -25,6 +25,7 @@
   import {
     type FundsRow,
     createOwnedBatchOnChain,
+    createTestDrive,
     devChainFunds,
     fundPostageSigner,
   } from '$lib/dev/chain-funding'
@@ -37,6 +38,7 @@
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import type { Account } from '$lib/types'
 
   import DeviceList from './device-list.svelte'
   import StatusDot from './status-dot.svelte'
@@ -168,7 +170,10 @@
     await refreshFunds()
   }
 
-  async function runChainTool(label: string, action: (derivationKey: string) => Promise<string>) {
+  async function runChainTool(
+    label: string,
+    action: (derivationKey: string, account: Account) => Promise<string>,
+  ) {
     const account = selectedAccountId
       ? accountsStore.getAccount(new EthAddress(selectedAccountId))
       : undefined
@@ -180,7 +185,7 @@
     chainToolMessage = ''
     chainToolError = ''
     try {
-      chainToolMessage = `${label}: ${await action(account.derivationKey)}`
+      chainToolMessage = `${label}: ${await action(account.derivationKey, account)}`
     } catch (e) {
       chainToolError = e instanceof Error ? e.message : String(e)
     } finally {
@@ -1001,6 +1006,12 @@ Check console logs for details:
             )}
         >
           Create owned batch (depth 20)
+        </Button>
+        <Button
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() => runChainTool('Created drive', (_key, account) => createTestDrive(account))}
+        >
+          Create drive to test with
         </Button>
       </div>
       <p class="text-muted-foreground text-sm">

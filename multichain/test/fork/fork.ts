@@ -54,3 +54,13 @@ export async function setNativeBalance(
 ): Promise<void> {
   await rpc("anvil_setBalance", [address, `0x${wei.toString(16)}`])
 }
+
+const NONCE_BYTES = 32
+const HEX_RADIX = 16
+
+/** A fresh 32-byte batch nonce; batchId = keccak256(sender, nonce). */
+export function randomNonce(): `0x${string}` {
+  return `0x${Array.from(crypto.getRandomValues(new Uint8Array(NONCE_BYTES)))
+    .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
+    .join("")}`
+}

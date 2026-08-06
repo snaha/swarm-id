@@ -10,6 +10,8 @@
  * never breaks a run without the cluster.
  */
 import { type Page, expect, test } from '@playwright/test'
+import { gnosisMainnetSettings } from '@swarm-id/multichain'
+import { devRpc } from '@swarm-id/multichain/dev'
 
 import { completeCreateFlow } from './helpers'
 
@@ -38,20 +40,13 @@ async function anvilReachable(): Promise<boolean> {
 
 const chainUp = await anvilReachable()
 
-/** The EIP-7702 delegate, as `gnosisMainnetSettings()` addresses it. */
-const DELEGATE_ADDRESS = '0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9'
+/** The EIP-7702 delegate, from the settings the app itself resolves. */
+const DELEGATE_ADDRESS = gnosisMainnetSettings().addresses.eip7702Delegate
 
-async function chainRpc(method: string, params: unknown[]): Promise<string> {
-  const response = await fetch(ANVIL_RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  })
-  return String(((await response.json()) as { result?: unknown }).result)
-}
-
-const delegateCode = () => chainRpc('eth_getCode', [DELEGATE_ADDRESS, 'latest'])
-const setDelegateCode = (code: string) => chainRpc('anvil_setCode', [DELEGATE_ADDRESS, code])
+const delegateCode = () =>
+  devRpc(ANVIL_RPC_URL, 'eth_getCode', [DELEGATE_ADDRESS, 'latest']).then(String)
+const setDelegateCode = (code: string) =>
+  devRpc(ANVIL_RPC_URL, 'anvil_setCode', [DELEGATE_ADDRESS, code])
 
 /**
  * Put the delegate back exactly as it was, so a suite ordering change cannot
@@ -98,22 +93,13 @@ async function createAccountWithOnChainDrive(page: Page) {
 
   await page.goto('/dev')
   await page.getByRole('tab', { name: 'Chain' }).click()
-  // The chain tools act on the page-level account selection, which defaults to
-  // the only account this test creates.
-  await page.getByRole('button', { name: 'Create owned batch (depth 20)' }).click()
-  const created = page.getByText(/^Created owned batch: 0x[0-9a-f]{64}$/)
-  await expect(created).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
-  const batchId = (await created.textContent())?.replace('Created owned batch: ', '').trim() ?? ''
-
-  // Attach it as a drive by reading its parameters straight from the contract.
-  const signerKey =
-    (await page
-      .getByText(/^[0-9a-f]{64}$/)
-      .first()
-      .textContent()) ?? ''
-  await page.getByRole('textbox', { name: 'Batch ID' }).fill(batchId)
-  await page.getByRole('textbox', { name: 'Signer Key' }).fill(signerKey)
-  await page.getByRole('button', { name: 'Import batch' }).click()
+  // One action rather than create-batch → copy id → copy signer key → paste →
+  // import. It is also the path the README tells a newcomer to use, so this
+  // keeps that instruction honest.
+  await page.getByRole('button', { name: 'Create drive to test with' }).click()
+  await expect(page.getByText(/^Created drive: 0x[0-9a-f]{64}$/)).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
   await expect
     .poll(async () => (await storedDrive(page))?.depth, { timeout: ONCHAIN_TIMEOUT_MS })
     .toBe(20)

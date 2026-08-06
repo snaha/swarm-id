@@ -20,8 +20,13 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { MultichainClient, gnosisMainnetSettings } from "../../src/index"
-import { ensureBundlingDelegate, fundLocalAccount } from "../../src/dev"
-import { FORK_RPC_URL, isGnosisForkReachable, setNativeBalance } from "./fork"
+import { devRpc, ensureBundlingDelegate, fundLocalAccount } from "../../src/dev"
+import {
+  FORK_RPC_URL,
+  isGnosisForkReachable,
+  randomNonce,
+  setNativeBalance,
+} from "./fork"
 
 const forkUp = await isGnosisForkReachable()
 
@@ -33,32 +38,6 @@ const BUCKET_DEPTH = 16
 const FLOOR_MULTIPLE = 4n
 /** Covers the batch plus every top-up this suite makes, with room to spare. */
 const OWNER_BZZ = 5n * 10n ** 16n
-const NONCE_BYTES = 32
-const HEX_RADIX = 16
-
-function randomNonce(): `0x${string}` {
-  const bytes = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
-  return `0x${Array.from(bytes)
-    .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
-    .join("")}`
-}
-
-async function rpc(method: string, params: unknown[]): Promise<unknown> {
-  const response = await fetch(FORK_RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  })
-  const data = (await response.json()) as {
-    result?: unknown
-    error?: { message?: string }
-  }
-  if (data.error) {
-    throw new Error(data.error.message ?? method)
-  }
-  return data.result
-}
-
 describe.skipIf(!forkUp)("atomic postage bundle on a Gnosis fork", () => {
   const settings = gnosisMainnetSettings({ rpcUrls: [FORK_RPC_URL] })
   const client = new MultichainClient(settings)
@@ -160,7 +139,9 @@ describe.skipIf(!forkUp)("atomic postage bundle on a Gnosis fork", () => {
     })
     await client.waitForTransactionSuccess(hash)
 
-    const sent = (await rpc("eth_getTransactionByHash", [hash])) as {
+    const sent = (await devRpc(FORK_RPC_URL, "eth_getTransactionByHash", [
+      hash,
+    ])) as {
       type: string
       from: string
       to: string
@@ -173,7 +154,10 @@ describe.skipIf(!forkUp)("atomic postage bundle on a Gnosis fork", () => {
 
     // The delegation indicator EIP-7702 leaves behind: 0xef0100 || delegate.
     // It PERSISTS — the owner EOA reads as a contract from here on.
-    const code = (await rpc("eth_getCode", [owner, "latest"])) as string
+    const code = (await devRpc(FORK_RPC_URL, "eth_getCode", [
+      owner,
+      "latest",
+    ])) as string
     expect(code.toLowerCase()).toBe(
       `0xef0100${delegate.slice(2).toLowerCase()}`,
     )
@@ -182,7 +166,7 @@ describe.skipIf(!forkUp)("atomic postage bundle on a Gnosis fork", () => {
   it("reports bundling as unavailable where the delegate is absent", async () => {
     // The fallback matters: without this being honest, a chain lacking the
     // delegate would send a transaction that quietly does nothing at all.
-    await rpc("anvil_setCode", [delegate, "0x"])
+    await devRpc(FORK_RPC_URL, "anvil_setCode", [delegate, "0x"])
     try {
       expect(await client.supportsBundling()).toBe(false)
     } finally {

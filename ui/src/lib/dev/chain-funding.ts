@@ -23,8 +23,10 @@ import {
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
+import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { GAS_BUDGET_XDAI_WEI, ownerFunds, postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
+import type { Account } from '$lib/types'
 
 /** Default drive size for the dev batch actions. */
 const DEV_BATCH_DEPTH = 20
@@ -139,4 +141,25 @@ export async function createOwnedBatchOnChain(
     amountPerChunk,
     blockNumber: receipt?.blockNumber ?? '0x0',
   }
+}
+
+/**
+ * Create a batch AND attach it to the account as a drive, in one go.
+ *
+ * Hand-testing extend or resize otherwise starts with six UI steps — create the
+ * batch, copy its id, copy the signer key, paste both, import — every one of
+ * which is a chance to paste the wrong field. The drive it leaves behind is an
+ * ordinary one: a real batch the account's own signer owns.
+ *
+ * @returns the attached drive's batch id.
+ */
+export async function createTestDrive(account: Account): Promise<string> {
+  const { batchId } = await createOwnedBatchOnChain(account.derivationKey)
+  const { signerKey } = await derivePostageSigner(account.derivationKey)
+  const stamp = await fetchExistingBatchFromChain(batchId, signerKey, '')
+  if (!stamp) {
+    throw new Error('The batch was created but could not be read back from the chain.')
+  }
+  account.addStamp(stamp)
+  return batchId
 }

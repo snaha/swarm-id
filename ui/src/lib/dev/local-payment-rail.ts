@@ -34,6 +34,7 @@
  * Production code must never import this module.
  */
 import { withTimeout } from '@snaha/swarm-id'
+import { LOCAL_SOLVER_ADDRESS, devRpc, encodeDeliveryInstruction } from '@swarm-id/multichain/dev'
 import { type Chain, defineChain, formatUnits } from 'viem'
 
 import {
@@ -55,14 +56,6 @@ export const LOCAL_SOURCE_RPC_URL = 'http://localhost:8546'
  * cannot be confused with a real chain by a wallet that has both configured.
  */
 export const LOCAL_SOURCE_CHAIN_ID = 31337
-
-/**
- * Where the deposit goes — anvil's default account #9, so the funds stay
- * recoverable from the standard test mnemonic rather than being burned.
- * Nothing here ever spends from it; the solver process watches it and fills
- * from the Gnosis-side faucet. Must match its `SOLVER_ADDRESS`.
- */
-const LOCAL_SOLVER_ADDRESS = '0xa0Ee7A142d267C1f36714E4a8F75612F20a79720'
 
 /**
  * Source-token units per xDAI. Invented, and deliberately not 1: a realistic
@@ -107,8 +100,9 @@ const LOCAL_TOKENS: PaymentToken[] = [
 
 /** What `quoteLocalPayment` hands to `execute` — this rail's private payload. */
 interface LocalPaymentHandle {
-  /** The batch-owner address the xDAI must land on. */
-  recipient: string
+  /** The batch-owner address the xDAI must land on. Narrowed here, once, so
+   * the solver protocol and the chain client both get the shape they want. */
+  recipient: `0x${string}`
   /** Exact xDAI (wei) the faucet must deliver there. */
   xdaiWei: bigint
   /** Source-chain native amount (wei) the user signs away. */
@@ -148,7 +142,7 @@ function trimZeros(value: string): string {
 export function quoteLocalPayment(request: QuoteRequest): PaymentQuote {
   const amountSourceWei = request.xdaiWei / XDAI_PER_SOURCE_UNIT
   const handle: LocalPaymentHandle = {
-    recipient: request.recipient,
+    recipient: request.recipient as `0x${string}`,
     xdaiWei: request.xdaiWei,
     amountSourceWei,
   }
@@ -160,27 +154,38 @@ export function quoteLocalPayment(request: QuoteRequest): PaymentQuote {
   }
 }
 
-interface RpcResponse {
-  result?: unknown
-  error?: { message?: string }
-}
-
-/** One JSON-RPC call against the source chain, bypassing the wallet's own RPC. */
-async function sourceRpc(method: string, params: unknown[]): Promise<unknown> {
-  const response = await fetch(LOCAL_SOURCE_RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
-  })
-  const data = (await response.json()) as RpcResponse
-  if (data.error) {
-    throw new Error(data.error.message ?? `The local source chain rejected ${method}.`)
-  }
-  return data.result
-}
+const sourceRpc = (method: string, params: unknown[]): Promise<unknown> =>
+  devRpc(LOCAL_SOURCE_RPC_URL, method, params)
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
+}
+
+/**
+ * Poll `check` until it reports done, or give up with `message`.
+ *
+ * The cancellation flag is the point: `withTimeout` rejects the caller but
+ * cannot stop the loop behind it, so without this the poll would keep hitting
+ * the chain forever after a payment had already failed.
+ */
+async function pollUntil(
+  check: () => Promise<boolean>,
+  options: { intervalMs: number; timeoutMs: number; message: string },
+): Promise<void> {
+  let cancelled = false
+  const loop = async () => {
+    while (!cancelled) {
+      if (await check()) {
+        return
+      }
+      await sleep(options.intervalMs)
+    }
+  }
+  try {
+    await withTimeout(loop(), options.timeoutMs, options.message)
+  } finally {
+    cancelled = true
+  }
 }
 
 /**
@@ -191,31 +196,26 @@ function sleep(ms: number): Promise<void> {
  * papered over by a fill that happens anyway.
  */
 async function waitForDeposit(transactionHash: string): Promise<void> {
-  let cancelled = false
-  const poll = async () => {
-    while (!cancelled) {
+  await pollUntil(
+    async () => {
       const receipt = (await sourceRpc('eth_getTransactionReceipt', [transactionHash])) as
         | { status?: string }
         | undefined
         | null
-      if (receipt) {
-        if (receipt.status !== '0x1') {
-          throw new Error('The payment transaction reverted on the local source chain.')
-        }
-        return
+      if (!receipt) {
+        return false
       }
-      await sleep(RECEIPT_POLL_MS)
-    }
-  }
-  try {
-    await withTimeout(
-      poll(),
-      RECEIPT_TIMEOUT_MS,
-      `The payment was never seen on the local source chain. Check that your wallet's network is ${LOCAL_SOURCE_RPC_URL} (chain ${LOCAL_SOURCE_CHAIN_ID}).`,
-    )
-  } finally {
-    cancelled = true
-  }
+      if (receipt.status !== '0x1') {
+        throw new Error('The payment transaction reverted on the local source chain.')
+      }
+      return true
+    },
+    {
+      intervalMs: RECEIPT_POLL_MS,
+      timeoutMs: RECEIPT_TIMEOUT_MS,
+      message: `The payment was never seen on the local source chain. Check that your wallet's network is ${LOCAL_SOURCE_RPC_URL} (chain ${LOCAL_SOURCE_CHAIN_ID}).`,
+    },
+  )
 }
 
 /**
@@ -235,46 +235,18 @@ async function ensurePayerFunded(address: string, needed: bigint): Promise<void>
 }
 
 /**
- * The delivery instruction a deposit carries: 20-byte recipient, then a 32-byte
- * big-endian xDAI amount. On-chain rather than through a side channel, so the
- * deposit is self-describing and the solver can stay stateless — the way a real
- * bridge deposit carries its payload.
- */
-function encodeInstruction(handle: LocalPaymentHandle): `0x${string}` {
-  const RECIPIENT_HEX_LENGTH = 40
-  const AMOUNT_HEX_LENGTH = 64
-  const recipient = handle.recipient.replace(/^0x/, '').toLowerCase()
-  return `0x${recipient.padStart(RECIPIENT_HEX_LENGTH, '0')}${handle.xdaiWei
-    .toString(16)
-    .padStart(AMOUNT_HEX_LENGTH, '0')}`
-}
-
-/**
  * Wait for the solver to pay out, by watching the recipient's xDAI on the
  * Gnosis-side chain. This is the whole point of the rail being split: the app
  * signs, then waits on money it does not control, exactly as it waits on Relay.
  */
-async function waitForDelivery(recipient: string, before: bigint): Promise<void> {
+async function waitForDelivery(recipient: `0x${string}`, before: bigint): Promise<void> {
   const chain = await postageChain()
-  const owner = recipient as `0x${string}`
-  let cancelled = false
-  const poll = async () => {
-    while (!cancelled) {
-      if ((await chain.getNativeBalance(owner)) > before) {
-        return
-      }
-      await sleep(DELIVERY_POLL_MS)
-    }
-  }
-  try {
-    await withTimeout(
-      poll(),
-      DELIVERY_TIMEOUT_MS,
+  await pollUntil(async () => (await chain.getNativeBalance(recipient)) > before, {
+    intervalMs: DELIVERY_POLL_MS,
+    timeoutMs: DELIVERY_TIMEOUT_MS,
+    message:
       'The payment was taken but never delivered. Is the local solver running? (pnpm dev:local)',
-    )
-  } finally {
-    cancelled = true
-  }
+  })
 }
 
 /**
@@ -294,7 +266,7 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
 
   // Read before signing: delivery is judged by this balance rising.
   const chain = await postageChain()
-  const before = await chain.getNativeBalance(handle.recipient as `0x${string}`)
+  const before = await chain.getNativeBalance(handle.recipient)
 
   const transactionHash = (await options.provider.request({
     method: 'eth_sendTransaction',
@@ -303,7 +275,7 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
         from: options.address,
         to: LOCAL_SOLVER_ADDRESS,
         value: `0x${handle.amountSourceWei.toString(16)}`,
-        data: encodeInstruction(handle),
+        data: encodeDeliveryInstruction(handle),
       },
     ],
   })) as string

@@ -198,6 +198,47 @@ Then, once: open the UI → **Settings** → **Network settings** → **Use loca
 > with `factory fail: abi: attempting to unmarshal an empty string`. The vendored copy is the one
 > that matches the chain it boots.
 
+#### From a fresh clone, end to end
+
+Everything below runs offline against the committed chain snapshot. You need Docker, and a
+browser wallet (MetaMask or similar) — no funds, no testnet, no account anywhere.
+
+```bash
+pnpm install
+pnpm dev:local          # first run compiles Bee from source; later runs are seconds
+```
+
+Wait for `local solver: watching for deposits to 0x…`, then in the browser:
+
+1. **http://localhost:5500** → **Get started**, and create an identity (a password is quickest).
+   Choose **Stay local for now** when offered.
+2. **Settings** (top right) → **Network settings** → **Use local** → **Save**. It finds whichever
+   local chain is running.
+3. **http://localhost:5500/dev** → **Chain** tab → **Create drive to test with**. That buys a real
+   depth-20 batch on the local chain, owned by your account's own postage signer, and attaches it
+   as a drive. Takes ~30s. The banner above the tabs should read _Local dev chain, nothing here is
+   real_.
+4. Back to **http://localhost:5500** → **Storage** tab → expand the drive → **Extend lifespan**.
+   Pick **years** and bump it to 3 — a small extend is covered by the batch's leftover funds and
+   never asks for payment, which is the most common reason the payment screens "don't appear".
+5. **Proceed** → **Connect wallet** → pick your wallet. It will offer to add _Local source chain_
+   and switch to it: accept. Nothing to configure, and no key to import — the chain funds whatever
+   account you connect.
+6. Review the quote, **Pay with your wallet**, approve the transaction. Watch the `[solver]` lines
+   in your terminal report the delivery, then the drive's lifespan grows.
+
+What just happened: your wallet really signed a deposit on one chain; a separate solver process saw
+it and paid out on another; that xDAI was swapped for BZZ through a real SushiSwap pool; and the
+batch was topped up on the real PostageStamp contract in a single atomic EIP-7702 transaction.
+
+To check the automated suites too:
+
+```bash
+pnpm check:all                                   # lint, types, unit tests
+pnpm --filter @swarm-id/multichain test:fork     # on-chain, needs pnpm dev:chain:detach
+pnpm --filter @swarm-id/ui test:e2e              # browser, needs pnpm dev:local
+```
+
 Now extend a drive. Your wallet is prompted to add the source chain and approve one transaction —
 nothing else to configure, and no keys to import: the chain funds whatever account you connect.
 

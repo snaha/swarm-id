@@ -265,3 +265,11 @@ export async function ensureBundlingDelegate(
     SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE,
   ])
 }
+
+export { devRpc } from "./dev-rpc"
+export {
+  type DeliveryInstruction,
+  LOCAL_SOLVER_ADDRESS,
+  decodeDeliveryInstruction,
+  encodeDeliveryInstruction,
+} from "./local-solver-protocol"

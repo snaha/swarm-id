@@ -181,21 +181,24 @@ export function bundleResize(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<`0x${string}`> {
-  const calls: BundledCall[] = [
-    approveCall(settings, options.totalPlur),
-    topUpCall(settings, options.batchId, options.amountPerChunk),
-    {
-      target: settings.addresses.postageStamp,
-      value: 0n,
-      data: encodeFunctionData({
-        abi: POSTAGE_STAMP_ABI,
-        functionName: "increaseDepth",
-        args: [options.batchId, options.newDepth],
-      }),
-    },
-  ]
+  const increaseDepthCall: BundledCall = {
+    target: settings.addresses.postageStamp,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: POSTAGE_STAMP_ABI,
+      functionName: "increaseDepth",
+      args: [options.batchId, options.newDepth],
+    }),
+  }
   // A resize that keeps no lifespan needs no top-up at all; approving and
   // topping up zero would just be two wasted calls inside the bundle.
-  const needed = options.amountPerChunk > 0n ? calls : [calls[2]]
-  return sendBundle(options.originPrivateKey, needed, settings, rpcProvider)
+  const calls: BundledCall[] =
+    options.amountPerChunk > 0n
+      ? [
+          approveCall(settings, options.totalPlur),
+          topUpCall(settings, options.batchId, options.amountPerChunk),
+          increaseDepthCall,
+        ]
+      : [increaseDepthCall]
+  return sendBundle(options.originPrivateKey, calls, settings, rpcProvider)
 }

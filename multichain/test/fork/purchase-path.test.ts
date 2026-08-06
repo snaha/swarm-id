@@ -24,7 +24,12 @@
 import { beforeAll, describe, expect, it } from "vitest"
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts"
 import { MultichainClient, gnosisMainnetSettings } from "../../src/index"
-import { FORK_RPC_URL, isGnosisForkReachable, setNativeBalance } from "./fork"
+import {
+  FORK_RPC_URL,
+  isGnosisForkReachable,
+  randomNonce,
+  setNativeBalance,
+} from "./fork"
 
 const forkUp = await isGnosisForkReachable()
 
@@ -39,16 +44,6 @@ const NEW_DEPTH = 18
 const BUCKET_DEPTH = 16
 /** Headroom over the ~24h minimum so the depth increase clears its floor. */
 const FLOOR_MULTIPLE = 4n
-const NONCE_BYTES = 32
-const HEX_RADIX = 16
-
-function randomNonce(): `0x${string}` {
-  const bytes = crypto.getRandomValues(new Uint8Array(NONCE_BYTES))
-  return `0x${Array.from(bytes)
-    .map((byte) => byte.toString(HEX_RADIX).padStart(2, "0"))
-    .join("")}`
-}
-
 describe.skipIf(!forkUp)("full purchase path on a Gnosis fork", () => {
   // The production settings, pointed at the fork — the mainnet addresses are
   // exactly what we want to exercise.
