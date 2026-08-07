@@ -14,7 +14,7 @@
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write . && eslint . --fix",
     "test": "vitest run --passWithNoTests",
-    "test:live": "vitest run --config vitest.live.config.ts",
+    "test:live": "svelte-kit sync && vitest run --config vitest.live.config.ts",
     "test:e2e": "playwright test",
     "test:cluster": "playwright test --config=playwright.cluster.config.ts",
     "clean": "rm -rf build .svelte-kit"
