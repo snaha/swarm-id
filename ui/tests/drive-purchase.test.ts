@@ -135,5 +135,7 @@ test('buying a drive creates a batch the account owns on chain', async ({ page }
   await dialog.getByRole('combobox').selectOption('days')
   await dialog.getByRole('button', { name: 'Increase' }).click()
   await dialog.getByRole('button', { name: 'Proceed' }).click()
-  await expect(page.getByText('Lifespan extended')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('lifespan has been extended')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
 })

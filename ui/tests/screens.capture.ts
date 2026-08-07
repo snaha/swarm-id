@@ -255,7 +255,9 @@ test('capture: extend, resize and on-chain progress', async ({ page }) => {
   await extend.getByRole('button', { name: 'Proceed' }).click()
   await expect(page.getByText(/Approving|Extending|Checking|Waiting/)).toBeVisible()
   await shoot(page, '03-extend-progress')
-  await expect(page.getByText('Lifespan extended')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('lifespan has been extended')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
   await shoot(page, '04-extend-done')
 
   // --- Resize -------------------------------------------------------------
@@ -275,7 +277,9 @@ test('capture: extend, resize and on-chain progress', async ({ page }) => {
   await resize.getByRole('button', { name: 'Proceed' }).click()
   await expect(page.getByText(/Checking|Waiting|Approving|Paying|Increasing/)).toBeVisible()
   await shoot(page, '08-resize-progress')
-  await expect(page.getByText('Drive size increased')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('Your drive is now larger')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
   await shoot(page, '09-resize-done')
 })
 

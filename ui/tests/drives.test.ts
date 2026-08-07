@@ -32,8 +32,19 @@ test.beforeEach(({ page }) => pinNoPaymentRail(page))
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
-async function createLocalAccount(page: import('@playwright/test').Page) {
-  await seedLocalChain(page)
+/**
+ * Create an account, against whichever chain the caller seeds.
+ *
+ * The seeding is a parameter because it used to be hardcoded to
+ * `seedLocalChain`, which silently defeated the one test that seeds a dead RPC
+ * first: `addInitScript` calls stack, so the working endpoint simply overwrote
+ * the dead one and the "cannot reach the chain" case was never exercised.
+ */
+async function createLocalAccount(
+  page: import('@playwright/test').Page,
+  seedChain: (page: import('@playwright/test').Page) => Promise<void> = seedLocalChain,
+) {
+  await seedChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
@@ -120,8 +131,7 @@ test('a purchase that cannot reach the chain surfaces the error and adds nothing
 }) => {
   // Point the app at a dead RPC: a real purchase has nothing to buy against,
   // and must say so rather than inventing a drive.
-  await seedNoChain(page)
-  await createLocalAccount(page)
+  await createLocalAccount(page, seedNoChain)
 
   await addDrive(page)
 

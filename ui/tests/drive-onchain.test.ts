@@ -81,7 +81,6 @@ async function createAccountWithOnChainDrive(page: Page) {
         'swarm-id-network-settings',
         JSON.stringify({ beeNodeUrl: beeUrl, gnosisRpcUrl: rpcUrl }),
       )
-      // Mock funding: the dev chain has no Relay and no DEX, so the drive
     },
     [ANVIL_RPC_URL, BEE_NODE_URL],
   )
@@ -137,7 +136,9 @@ test('extend tops the batch up on chain and records the longer lifespan', async 
   await dialog.getByRole('button', { name: 'Increase' }).click()
   await dialog.getByRole('button', { name: 'Proceed' }).click()
 
-  await expect(page.getByText('Lifespan extended')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('lifespan has been extended')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
   const after = await storedDrive(page)
   expect(BigInt(after!.amount)).toBeGreaterThan(BigInt(before!.amount))
   expect(after!.ttl).toBeGreaterThan(before!.ttl)
@@ -167,7 +168,9 @@ test('extends without the 7702 delegate, one transaction at a time', async ({ pa
     await dialog.getByRole('button', { name: 'Increase' }).click()
     await dialog.getByRole('button', { name: 'Proceed' }).click()
 
-    await expect(page.getByText('Lifespan extended')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+    await expect(page.getByText('lifespan has been extended')).toBeVisible({
+      timeout: ONCHAIN_TIMEOUT_MS,
+    })
   } finally {
     await restoreDelegate()
   }
@@ -188,7 +191,9 @@ test('resize keeps the lifespan by topping up BEFORE increasing the depth', asyn
   await dialog.getByRole('combobox').selectOption('21')
   await dialog.getByRole('button', { name: 'Proceed' }).click()
 
-  await expect(page.getByText('Drive size increased')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('Your drive is now larger')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
   const after = await storedDrive(page)
   expect(after!.depth).toBe(21)
   // Keep-lifespan holds the remaining time across the doubling (a few seconds
@@ -205,7 +210,9 @@ test('an interrupted resize resumes from chain truth without paying twice', asyn
   const dialog = page.getByRole('dialog')
   await dialog.getByRole('combobox').selectOption('21')
   await dialog.getByRole('button', { name: 'Proceed' }).click()
-  await expect(page.getByText('Drive size increased')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('Your drive is now larger')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
 
   // Simulate a session lost between the on-chain resize and its record: roll
   // the local record back to the pre-resize state the chain has moved past.
@@ -232,7 +239,9 @@ test('an interrupted resize resumes from chain truth without paying twice', asyn
   await retry.getByRole('combobox').selectOption('21')
   await retry.getByRole('button', { name: 'Proceed' }).click()
 
-  await expect(page.getByText('Drive size increased')).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  await expect(page.getByText('Your drive is now larger')).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
   const after = await storedDrive(page)
   expect(after!.depth).toBe(21)
   // The rolled-back placeholders are gone — the record came from the chain.
