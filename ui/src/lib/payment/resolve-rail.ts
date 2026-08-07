@@ -8,7 +8,7 @@
  * no risk of an initialisation cycle. This module is where knowing about every
  * rail is allowed.
  */
-import { resolveLocalRail } from '$lib/dev/local-payment-rail'
+import { resolveLocalRail } from '$lib/payment/dev-funding'
 import type { PaymentRail } from '$lib/payment/payment-rail'
 import { chainIdentity } from '$lib/payment/postage-onchain'
 import { relayRail } from '$lib/payment/relay'
@@ -20,8 +20,10 @@ import { relayRail } from '$lib/payment/relay'
  *
  * - **A production build always pays for real.** Whatever chain it is pointed
  *   at, a shipped bundle that faked a payment when an RPC blipped would be far
- *   worse than one that fails. This check is also what keeps the dev rail out
- *   of the production bundle: the branch below it is dead code there.
+ *   worse than one that fails. What keeps the dev rail out of the shipped
+ *   bundle is not this check — a dead branch does not remove a static import —
+ *   but the build-time swap behind `$lib/payment/dev-funding`, where
+ *   `resolveLocalRail` becomes a stub that answers undefined.
  * - **Gnosis mainnet always pays for real**, judged by genesis hash, since a
  *   dev chain reports mainnet's chain id on purpose. An unreachable RPC counts
  *   as "not mainnet" — nothing can be spent against a chain that is not

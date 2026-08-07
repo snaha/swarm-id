@@ -2,8 +2,8 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Shared journey helpers for the e2e suites: the password create flow, the
- * demo's connect popup, and the mocked drive purchase (`/dev` defaults: mock
- * enabled, no widget popup).
+ * demo's connect popup, buying a drive, and the network/rail seeding that
+ * decides which chain and which payment arrangement a suite runs against.
  */
 import { type Page, expect } from '@playwright/test'
 
@@ -59,20 +59,11 @@ export async function openConnectPopup(page: Page) {
 }
 
 /**
- * Point the app at an RPC nothing answers, for suites that mock a purchase but
- * have no chain to settle against.
- *
- * A purchase only simulates off Gnosis mainnet, and the default endpoint IS
- * mainnet — so without this the flow would open the real payment widget and
- * wait forever. Unreachable counts as "not mainnet", and with no chain behind
- * it the batch is fabricated: instant, and nothing is spent anywhere.
- *
- * Must run before the first page load; the settings are read at app init.
- */
-/**
  * Point the app at the local chain. Any suite that buys a drive needs this now
  * that purchases are real — `seedNoChain` is for suites deliberately testing
  * what happens without one.
+ *
+ * Must run before the first page load; the settings are read at app init.
  */
 export function seedLocalChain(page: Page, rpcUrl: string = CHAIN_RPC_URL) {
   return page.addInitScript(
@@ -99,16 +90,13 @@ export function seedNoChain(page: Page) {
 }
 
 /**
- * Starts a mocked Add-drive purchase from the home page (Storage tab). The
- * purchase settles asynchronously — callers assert the outcome (a "Drive
- * xxxx" card, or the error phase) with `DRIVE_SETTLE_TIMEOUT_MS`.
- */
-/**
- * Buy a drive through the normal flow.
+ * Buy a drive through the normal flow, from the home page (Storage tab).
  *
- * Every suite that calls this now needs a chain: buying is a real on-chain
+ * Every suite that calls this needs a chain: buying is a real on-chain
  * purchase, with no simulated settlement to fall back on. Gate with
- * {@link chainReachable}.
+ * {@link chainReachable}. It settles asynchronously — callers assert the
+ * outcome (a "Drive xxxx" card, or the error phase) with
+ * `DRIVE_SETTLE_TIMEOUT_MS`.
  */
 export async function addDrive(page: Page) {
   await page.getByRole('tab', { name: 'Storage' }).click()

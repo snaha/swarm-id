@@ -9,7 +9,7 @@
 import Onboard from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
 
-import { LOCAL_SOURCE_CHAIN_ID, LOCAL_SOURCE_RPC_URL } from '$lib/dev/local-payment-rail'
+import { devWalletChains } from '$lib/payment/dev-funding'
 
 const injected = injectedModule()
 const wallets = [injected]
@@ -21,20 +21,13 @@ const chains = [
     // We don't need RPC — there are no blockchain transactions.
     rpcUrl: 'https://swarm-id.snaha.net',
   },
-  // The local dev rail's source chain (`pnpm dev:source-chain`). Declared so
-  // onboard recognises the wallet's network when a payment is rehearsed against
-  // it, rather than reporting an unsupported chain. Dev builds only — the
-  // production bundle never offers this rail.
-  ...(import.meta.env.DEV
-    ? [
-        {
-          id: `0x${LOCAL_SOURCE_CHAIN_ID.toString(16)}`,
-          token: 'ETH',
-          label: 'Local source chain',
-          rpcUrl: LOCAL_SOURCE_RPC_URL,
-        },
-      ]
-    : []),
+  // The local dev rail's source chain (`pnpm dev:source-chain`), so onboard
+  // recognises the wallet's network when a payment is rehearsed against it
+  // rather than reporting an unsupported chain. Empty in a production build —
+  // via the seam rather than an `import.meta.env.DEV` branch here, because a
+  // dead branch still leaves the import, and this module is loaded on every
+  // page that can connect a wallet.
+  ...devWalletChains,
 ]
 const appMetadata = {
   name: 'Swarm ID',

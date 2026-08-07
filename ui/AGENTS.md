@@ -10,16 +10,13 @@ The identity UI is a SvelteKit SPA.
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
-- **Purchases simulate themselves off mainnet, and there is no toggle for it.** The widget's
-  cross-chain payment cannot complete on a dev chain, so **Add drive** settles locally there; on
-  mainnet it always pays for real. `chainIdentity()` decides, by genesis hash — a dev chain reports
-  the same chain id as mainnet on purpose, and an unreachable probe counts as **not** mainnet, so
-  the flow stays exercisable with no chain at all (a production build never simulates, whatever the
-  chain says). The settlement is **real**: `src/lib/dev/simulate-purchase.ts` creates an actual
-  batch owned by the account's postage signer, so the drive can be extended and resized like any
-  bought one; the simulation never opens a window. The one thing still chosen by hand is `/dev` →
-  Chain tab → **Outcome** (success vs. a failed purchase, `dev-mock-stamp-result` in localStorage),
-  which `drives.test.ts` uses to exercise the error path.
+- **Buying a drive is a real on-chain purchase, and nothing simulates it.** **Add drive** runs
+  `runPurchase` (`payment/drive-operation.ts`) through the same funding seam as extend and resize,
+  so it inherits the payment screens, the rail below and the 7702 bundle rather than having a second
+  way to pay. The derived postage signer buys the batch it will own — no throwaway creator wallet,
+  no ownership handover, no dust. The consequence is that **a purchase needs a reachable chain**:
+  the old fabricated settlement let it complete without one, and the e2e suites that relied on that
+  now seed a chain and skip without one.
 - **The payment leg is a swappable rail** (`payment/payment-rail.ts`) — what carries money from
   whatever chain the user holds funds on to xDAI at the batch-owner address. Production has one,
   Relay Protocol, and it cannot run locally at all: Relay is an intent/solver network, so the quote
@@ -35,6 +32,16 @@ The identity UI is a SvelteKit SPA.
   rail rehearses the payment UX and nothing more; Relay's pricing, routing, step model and refund
   semantics stay untested by it. Everything downstream of a rail is the same production code either
   way.
+- **Everything dev-only in that arrangement sits behind one seam**, `payment/dev-funding.ts`, which
+  `vite build` swaps for `dev-funding.production.ts` (a `pre` plugin in `vite.config.ts`, not a
+  `resolve.alias` — SvelteKit's `$lib` alias resolves first). Without the swap the local rail, the
+  faucet, and the anvil cheat codes and dev private key behind `@swarm-id/multichain/dev` ship in
+  the entry bundle: `import.meta.env.DEV` kills the _branch_, but the imports are static and those
+  modules have top-level side effects, so Rollup keeps them anyway. **Production code must reach
+  dev helpers only through this seam** — importing `$lib/dev/*` directly puts them back in the
+  bundle, which is how `crypto/onboard.ts` was doing it. The `/dev` route imports them directly on
+  purpose and keeps its own lazily-loaded chunk. Verify with a build, never by reading:
+  `grep -rl anvil_setBalance ui/build` must only ever match a `nodes/*.js` route chunk.
 - **Paid drive operations are node-less**: extend and resize go straight to the PostageStamp
   contract signed by the derived postage signer (`payment/postage-onchain.ts`,
   `payment/drive-operation.ts`), with funding injected as a seam — the payment rail above, or the
