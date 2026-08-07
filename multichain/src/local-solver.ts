@@ -122,23 +122,45 @@ async function main(): Promise<void> {
   let next = (await sourceBlockNumber()) + 1
 
   for (;;) {
-    const head = await sourceBlockNumber()
-    while (next <= head) {
-      for (const deposit of await depositsIn(next)) {
-        const { recipient, xdaiWei } = deposit.instruction
+    try {
+      const head = await sourceBlockNumber()
+      // A restarted anvil begins from block 0 again, leaving the pointer above
+      // the new head — where it stays forever, because the head never climbs
+      // back to meet it. The solver then looks perfectly healthy and ignores
+      // every deposit: the same "silently strand every later payment" state the
+      // catch below exists to prevent, reached through a different door, and
+      // the one surviving a restart would otherwise land in.
+      if (head + 1 < next) {
         console.log(
-          `local solver: deposit ${deposit.hash} -> delivering ${xdaiWei} wei xDAI to ${recipient}`,
+          `local solver: source chain restarted (head ${head}, expected ${next}) — resuming from its head`,
         )
-        try {
-          await fill(deposit.instruction, settings)
-          console.log(`local solver: delivered to ${recipient}`)
-        } catch (error) {
-          // Keep watching: one failed fill must not take the solver down and
-          // silently strand every later payment.
-          console.error(`local solver: delivery failed`, error)
-        }
+        next = head + 1
       }
-      next += 1
+      while (next <= head) {
+        for (const deposit of await depositsIn(next)) {
+          const { recipient, xdaiWei } = deposit.instruction
+          console.log(
+            `local solver: deposit ${deposit.hash} -> delivering ${xdaiWei} wei xDAI to ${recipient}`,
+          )
+          try {
+            await fill(deposit.instruction, settings)
+            console.log(`local solver: delivered to ${recipient}`)
+          } catch (error) {
+            // Keep watching: one failed fill must not take the solver down and
+            // silently strand every later payment.
+            console.error(`local solver: delivery failed`, error)
+          }
+        }
+        next += 1
+      }
+    } catch (error) {
+      // Same rule, one level up. Reading the source chain is just as fallible
+      // as filling — a restarted anvil, a container that has not come back yet,
+      // a blip under load — and an exit here is worse than a failed fill,
+      // because it strands EVERY later payment behind a delivery timeout whose
+      // message points at a solver that is no longer running to be blamed.
+      // `next` is not advanced, so nothing is skipped once the chain returns.
+      console.error(`local solver: source chain read failed, retrying`, error)
     }
     await sleep(POLL_MS)
   }
