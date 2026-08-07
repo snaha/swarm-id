@@ -253,10 +253,11 @@ pending, retry is free**. Status:
     owner's residual balances, so `requestFunding` is never called and no rail is ever resolved (both
     the `dev:local` and the bare-CI arrangement pass). A future test that does need funding should
     pin the mode rather than inherit it.
-- **Open:** component tests (`*.ct.spec.ts`) for the payment screens — method → connect → configure
-  transitions, quote rendering with the breakdown rows, chain-switch waiting state, error surface.
-  A working injected-provider Playwright harness exists (it drove the manual verification of this
-  flow end to end) but is not in the suite; it needs a source-chain reachability guard first.
+- **Done, and the reason component tests are not planned.** `ui/tests/payment-rail.test.ts` drives
+  the payment screens end to end against the dev rail — method → connect → configure → pay, then a
+  real deposit on the source chain, the solver's delivery, the real Sushi swap and the real
+  `createBatch`. Isolated component tests would re-cover those same screens with nothing behind
+  them, so the tier is dropped rather than left open.
 - **Open:** e2e for resize with an injected `increaseDepth` failure → the §6 dialog → retry
   completes without new payment.
 - **Open:** one production canary before release — a real small extend on mainnet against a

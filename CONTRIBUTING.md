@@ -87,7 +87,6 @@ Keep PRs small and focused on a single concern.
 ## Testing
 
 - **Unit tests**: `*.test.ts` (Vitest)
-- **Component tests**: `*.ct.spec.ts` (Playwright)
 - **E2E tests**: `tests/*.test.ts` (Playwright)
 
 Run tests with:
