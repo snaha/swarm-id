@@ -31,7 +31,7 @@ import { type Page, expect, test } from '@playwright/test'
 import { CHAIN_RPC_URL, addDrive, chainReachable, completeCreateFlow } from './helpers'
 
 /** Where `pnpm dev:source-chain` listens, and the id it reports. */
-const SOURCE_RPC_URL = process.env.SOURCE_RPC_URL ?? 'http://localhost:8546'
+const SOURCE_RPC_URL = process.env.SOURCE_RPC_URL ?? 'http://localhost:8545'
 const SOURCE_CHAIN_ID = 31337
 const BEE_NODE_URL = 'http://localhost:1633/'
 

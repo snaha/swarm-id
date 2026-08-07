@@ -181,7 +181,11 @@ pnpm dev:local:stop    # tear the containers down
 | Demo                         | `http://localhost:3500` |
 | Queen Bee API                | `http://localhost:1633` |
 | Gnosis-side chain (100)      | `http://localhost:9545` |
-| Payment source chain (31337) | `http://localhost:8546` |
+| Payment source chain (31337) | `http://localhost:8545` |
+
+`:8545` is the source chain deliberately: it is the only one a wallet ever talks to, and the port
+people reach for when adding a local network. The Gnosis-side chain is the cluster's on `:9545`, or
+`pnpm dev:chain` standalone on `:8546`.
 
 The containers run in the background; the solver, UI and demo run in the foreground so you can
 watch each delivery land. Re-running `dev:local` is a no-op for whatever is already up.

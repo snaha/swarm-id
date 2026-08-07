@@ -13,7 +13,7 @@
 const PROBE_TIMEOUT_MILLIS = 2000
 const GNOSIS_CHAIN_ID = 100
 
-export const FORK_RPC_URL = process.env.FORK_RPC_URL ?? "http://localhost:8545"
+export const FORK_RPC_URL = process.env.FORK_RPC_URL ?? "http://localhost:8546"
 
 async function rpc(method: string, params: unknown[]): Promise<unknown> {
   const response = await fetch(FORK_RPC_URL, {

@@ -50,7 +50,7 @@ import {
 import { postageChain, probeChainId } from '$lib/payment/postage-onchain'
 
 /** Where `pnpm dev:source-chain` listens. */
-const DEFAULT_SOURCE_RPC_URL = 'http://localhost:8546'
+const DEFAULT_SOURCE_RPC_URL = 'http://localhost:8545'
 
 /**
  * Lets a test pin the source chain rather than inherit whatever happens to be

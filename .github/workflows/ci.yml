@@ -135,12 +135,12 @@ jobs:
           for _ in $(seq 1 60); do
             if curl -sf -X POST -H 'Content-Type: application/json' \
               --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
-              http://localhost:8545 > /dev/null; then
+              http://localhost:8546 > /dev/null; then
               exit 0
             fi
             sleep 2
           done
-          echo "::error::The local chain never answered on :8545 — the fork suite would have skipped silently."
+          echo "::error::The local chain never answered on :8546 — the fork suite would have skipped silently."
           docker logs gnosis-chain || true
           exit 1
 

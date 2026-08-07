@@ -34,7 +34,7 @@ import {
 import { getChainId } from "./rpc"
 import { type MultichainSettings, gnosisMainnetSettings } from "./settings"
 
-const SOURCE_RPC_URL = process.env.SOURCE_RPC_URL ?? "http://localhost:8546"
+const SOURCE_RPC_URL = process.env.SOURCE_RPC_URL ?? "http://localhost:8545"
 const GNOSIS_RPC_URL = process.env.GNOSIS_RPC_URL ?? "http://localhost:9545"
 
 const POLL_MS = 500

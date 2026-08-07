@@ -60,12 +60,12 @@ jobs:
           for _ in $(seq 1 60); do
             if curl -sf -X POST -H 'Content-Type: application/json' \
               --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
-              http://localhost:8545 > /dev/null; then
+              http://localhost:8546 > /dev/null; then
               exit 0
             fi
             sleep 2
           done
-          echo "::error::The local chain never answered on :8545 — the drive e2e suites would have skipped silently."
+          echo "::error::The local chain never answered on :8546 — the drive e2e suites would have skipped silently."
           docker logs gnosis-chain || true
           exit 1
 
@@ -77,7 +77,7 @@ jobs:
 
       - name: Start the local solver
         run: |
-          GNOSIS_RPC_URL=http://localhost:8545 nohup pnpm dev:solver > /tmp/solver.log 2>&1 &
+          GNOSIS_RPC_URL=http://localhost:8546 nohup pnpm dev:solver > /tmp/solver.log 2>&1 &
           for _ in $(seq 1 30); do
             if grep -q "watching for deposits" /tmp/solver.log; then
               exit 0
@@ -92,7 +92,7 @@ jobs:
         working-directory: ./ui
         run: pnpm test:e2e
         env:
-          CHAIN_RPC_URL: http://localhost:8545
+          CHAIN_RPC_URL: http://localhost:8546
 
       - name: Solver log
         if: failure()
