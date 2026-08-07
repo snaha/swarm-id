@@ -84,6 +84,13 @@ export function ensureBzzAllowance(signerKey, totalPlur, client?): Promise<void>
 // skip when getBzzAllowance >= totalPlur; else approveBzz EXACTLY totalPlur + wait
 export function topUpOnChain(signerKey, stamp, amountPerChunk, client?): Promise<void>
 export function increaseDepthOnChain(signerKey, stamp, newDepth, client?): Promise<void>
+export function createOnChain(signerKey, amountPerChunk, depth, client?): Promise<string>
+// The §4.4 bundles. Each returns false (or undefined) when the chain has no
+// delegate, which is the caller's signal to send the calls separately.
+export function bundledCreate(signerKey, amountPerChunk, depth, totalPlur, client?)
+export function bundledExtend(signerKey, stamp, amountPerChunk, totalPlur, client?)
+export function bundledResize(signerKey, stamp, amountPerChunk, totalPlur, newDepth, client?)
+export function probeChainId(rpcUrl): Promise<number> // one call, before any client exists
 export function preflightExtend(stamp, client?): Promise<PostagePreflight>
 export function preflightResize(
   stamp,
@@ -188,9 +195,13 @@ flows begin with a funds check and end with a recorded stamp.
    b. `increaseDepthOnChain(newDepth)` → `reconcileStampFromChain` (fallback `plan.afterDilute`).
 4. **Resume is chain-truth, not component state** (this closes #392's stuck-state class): on dialog
    open and before every retry, read the chain. If on-chain `depth` already equals the target, the
-   increase landed in a lost session — record it and finish. If the live remaining balance already
-   covers the plan (top-up landed, increase didn't), skip to step b. Never trust a component-local
-   `committedPlan` alone.
+   increase landed in a lost session — record it and finish. **Implemented** as `alreadyResized` off
+   `preflightResize`.
+   The mirror case — top-up landed, increase didn't — was specified here as "if the live remaining
+   balance already covers the plan, skip to step b" and is **NOT implemented**, because as written it
+   cannot be: a batch topped up for a pending resize looks exactly like one that always held that
+   balance, so re-planning charges again. Resuming it needs the target depth persisted on the record.
+   See the companion spec §6.6 for the consequence and why it is not urgent.
 
 ### 4.4 Atomic execution (EIP-7702)
 
@@ -308,9 +319,11 @@ Tests:
   `funding.test.ts`. The package's own unit + fork suites cover the chain calls
   (`pnpm --filter @swarm-id/multichain test`, `pnpm test:fork`).
 - Playwright e2e, `ui/tests/drive-onchain.test.ts`, skipped automatically when no chain answers —
-  three tests: extend grows the on-chain balance and the recorded TTL; resize keeps the lifespan by
-  topping up before increasing depth; an interrupted resize resumes from chain truth without paying
-  twice.
+  four tests: extend grows the on-chain balance and the recorded TTL; extend again with the delegate
+  cleared, to cover the sequential fallback; resize keeps the lifespan by topping up before
+  increasing depth; an interrupted resize resumes from chain truth without paying twice. Note what
+  the last one covers: the DEPTH landed and the record lost it. The other partial state — top-up
+  landed, depth did not — is neither covered nor resumable; see the companion spec §6.6.
 
 ## 8. Existing code disposition
 
@@ -333,7 +346,7 @@ Tests:
 ## 10. Acceptance criteria
 
 - [x] Extend and resize complete end-to-end on the local chain with NO Bee node involvement —
-      `drive-onchain.test.ts`, three passing tests against the hybrid chain.
+      `drive-onchain.test.ts`, four passing tests against the hybrid chain.
 - [x] Resize runs as one atomic EIP-7702 transaction where the delegate exists, and
       falls back to the sequential path where it does not — verified by three type-0x4
       self-call transactions in the e2e run, and by the delegate being reinstalled

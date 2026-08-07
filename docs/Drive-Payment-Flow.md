@@ -130,8 +130,11 @@ already had. `drive-operation.ts` raises a `FundingNeed` mid-operation and calls
 the payment screens and wait) or none (silent faucet transfer). `payment-dialog.svelte` owns the
 screens and is rail-agnostic: it is handed a `PaymentRail` and never knows which one.
 
-The pending request carries the need **and** its rail as one `PendingPayment` value, so the dialog
-receives a rail it can rely on rather than an optional it would have to re-check.
+The pending request carries the need, its rail **and** the Gnosis-side quote as one
+`PendingPayment` value, so the dialog receives values it can rely on rather than optionals it would
+have to re-check. The quote travels with it for a second reason: the amount the rail is asked to
+deliver has to be the same one `swapDeliveredXdai` later spends, and the dialog used to re-derive it
+independently — two quotes of the same need drift as the pool moves.
 
 Phases, as implemented:
 
@@ -182,15 +185,15 @@ BZZ/USDC). Therefore:
 
 ## 5. Failure handling
 
-| Failure point                            | State after                                                                 | Recovery                               |
-| ---------------------------------------- | --------------------------------------------------------------------------- | -------------------------------------- |
-| Quote fails / no route                   | nothing spent                                                               | retry, other token/chain               |
-| User rejects source tx                   | nothing spent                                                               | back to pay screen                     |
-| Relay leg fails                          | per Relay SDK semantics (source funds refunded or held — surface SDK error) | Retry re-quotes; "View details"        |
-| xDAI delivered, swap fails               | xDAI parked at owner                                                        | funds check consumes residual on retry |
-| Swap done, approve/topUp fails           | BZZ parked at owner                                                         | same                                   |
-| topUp done, increaseDepth fails (resize) | lifespan extended, size pending                                             | free retry — engine resume; see §6     |
-| Anything after payment + dialog closed   | funds/state on chain                                                        | next dialog open reconciles + resumes  |
+| Failure point                            | State after                                                                                                                      | Recovery                               |
+| ---------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------- |
+| Quote fails / no route                   | nothing spent                                                                                                                    | retry, other token/chain               |
+| User rejects source tx                   | nothing spent                                                                                                                    | back to pay screen                     |
+| Relay leg fails                          | per Relay SDK semantics (source funds refunded or held — surface SDK error)                                                      | Retry re-quotes; "View details"        |
+| xDAI delivered, swap fails               | xDAI parked at owner                                                                                                             | funds check consumes residual on retry |
+| Swap done, approve/topUp fails           | BZZ parked at owner                                                                                                              | same                                   |
+| topUp done, increaseDepth fails (resize) | **bundled (any chain with the delegate, incl. mainnet): cannot occur.** Unbundled fallback only: lifespan extended, size pending | **not free — see §6.6**                |
+| Anything after payment + dialog closed   | funds/state on chain                                                                                                             | next dialog open reconciles + resumes  |
 
 Never leave value parked deliberately: the quote requests exactly what the operation needs, plus
 the swap buffer — which the exact-input swap turns into a little surplus BZZ at the owner address,
@@ -219,14 +222,26 @@ pending, retry is free**. Status:
 2. **Done.** `DriveDialogStatus` gained a `tone`; this state renders as a neutral notice rather
    than a red warning, because a warning icon sends the user looking for damage that did not
    happen.
-3. **Done by construction.** Nothing shrank, so the drive row needs no warning state; re-opening
-   Increase size resumes from chain truth (`alreadyResized` / live remaining balance), skipping
-   whatever already landed and asking for no second payment.
+3. **Half done.** Nothing shrank, so the drive row needs no warning state. Re-opening Increase size
+   does resume from chain truth for the case where the DEPTH landed — `alreadyResized` off
+   `preflightResize` — and asks for nothing. It does **not** resume the case this section is about;
+   see §6.6.
 4. **Open:** no "Learn more" body describing the corrected sequence, and the Figma nodes still show
    the unreachable "Lifespan decreased" design — coordinate with design on #392.
-5. **Open:** no e2e for the injected-failure path. The resume half is covered
-   (`drive-onchain.test.ts` "an interrupted resize resumes from chain truth without paying twice");
-   what is untested is the dialog presenting this specific copy.
+5. **Open:** no e2e for the injected-failure path. `drive-onchain.test.ts`'s "an interrupted resize
+   resumes from chain truth without paying twice" covers the DEPTH-landed case — it completes a
+   resize and rolls the local record back — not this one. What is untested is both the dialog
+   presenting this copy and the retry behind it.
+6. **Open, and the copy is currently wrong.** "No additional payment is needed" is not true on the
+   unbundled path. `runResize` re-derives `resizePlan` from the LIVE remaining balance, which the
+   top-up has just increased, so a keep-lifespan retry asks for a second top-up sized against the
+   grown figure — for a depth step of one, exactly twice the first. Engine spec §4.2.4 specifies the
+   missing half ("if the live remaining balance already covers the plan, skip to step b") but nothing
+   implements it, and chain state alone cannot: a batch topped up for a pending resize is
+   indistinguishable from one that always had that balance. Resuming needs the target depth
+   persisted on the record. Not urgent — the bundled path makes this unreachable wherever the
+   delegate exists, which includes Gnosis mainnet — but the dialog should stop promising it until
+   then.
 
 ## 7. Dev/testing
 
@@ -247,12 +262,10 @@ pending, retry is free**. Status:
     step model (an ERC-20 source needs an approve before the deposit) and refund semantics stay
     untested, so a green local run must never be read as "the payment path works". See the README's
     "Paying for storage locally".
-    Note the e2e consequence: which of the two modes is live depends on whether a source chain
-    happens to be running, so a test that needs funding would behave differently on a developer's
-    machine than in CI. Today no drive e2e is affected — their operations are covered by the batch
-    owner's residual balances, so `requestFunding` is never called and no rail is ever resolved (both
-    the `dev:local` and the bare-CI arrangement pass). A future test that does need funding should
-    pin the mode rather than inherit it.
+    Which mode is live depends on whether a source chain happens to be running, so no suite is
+    allowed to inherit it. Every drive suite pins the rail OFF (`pinNoPaymentRail`), and
+    `payment-rail.test.ts` — which does need funding, and is the only suite that opens the payment
+    screens — pins it ON. Both run in CI, which starts the source chain and the solver.
 - **Done, and the reason component tests are not planned.** `ui/tests/payment-rail.test.ts` drives
   the payment screens end to end against the dev rail — method → connect → configure → pay, then a
   real deposit on the source chain, the solver's delivery, the real Sushi swap and the real
@@ -284,14 +297,17 @@ pending, retry is free**. Status:
       passed to `@swarm-id/multichain` calls bound to Gnosis settings.
 - [x] Every post-payment failure is recoverable: residual owner balances are detected and consumed
       on retry (`fundingShortfall`); interrupted flows resume after reload (engine spec §4.2.4).
-- [x] Resize partial failure shows the corrected copy (§6) and retry completes without a second
-      payment.
+- [ ] Resize partial failure shows the corrected copy (§6) and retry completes without a second
+      payment. **The copy lands; the retry does not** — see §6.6. Unreachable on the bundled path,
+      so this blocks nothing in production.
 - [x] `pnpm check:all` clean; the drive e2e suite passes against the local chain.
 
 Open:
 
-- The rail has never been exercised against **real Relay** — no production canary yet (§7's last
-  bullet). Everything proven locally is proven against the dev rail, whose prices are invented and
-  whose step list is shorter than Relay's. This is the single largest untested surface.
+- Relay's **delivery** has never been exercised — no production canary yet (§7's last bullet). Its
+  quote is now contract-tested against the live API (`relay.live.test.ts`, `pnpm test:live` in CI),
+  which is what caught the raw-precision defect the pay screen was rendering; everything downstream
+  of the quote is proven only against the dev rail, whose prices are invented and whose step list is
+  shorter than Relay's.
 - No e2e for the §6 copy, and no Figma update for it (§6.4, §6.5).
 - The size dropdown has no soft cap (§4).

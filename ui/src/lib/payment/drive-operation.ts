@@ -246,7 +246,7 @@ export interface ResizeOptions extends RunOptions {
 export class SizeIncreasePendingError extends Error {
   constructor(cause: unknown) {
     super(
-      'Your payment went through and the drive’s lifespan is longer. The size increase did not finish — try again to complete it. No additional payment is needed.',
+      'Your payment went through and the drive’s lifespan is longer, but the size increase did not finish. Trying again will re-price the change against the drive’s new, longer lifespan, so it will cost again — the drive itself is not damaged.',
       { cause },
     )
     this.name = 'SizeIncreasePendingError'
@@ -258,9 +258,17 @@ export class SizeIncreasePendingError extends Error {
  * the contract requires (it checks the post-dilution balance against its
  * minimum before any compensation).
  *
- * The reachable partial state is therefore benign: the payment landed and the
- * lifespan grew, only the (free) depth increase is pending. A retry re-reads
- * the chain, skips what already landed, and finishes without a second payment.
+ * Where the chain has the 7702 delegate — which includes Gnosis mainnet — this
+ * runs as ONE transaction and there is no partial state to reach.
+ *
+ * On the unbundled fallback there is: the payment landed and the lifespan grew,
+ * only the depth increase is pending. Nothing shrank, so nothing is damaged —
+ * but a retry is NOT free. `resizePlan` is re-derived from the LIVE remaining
+ * balance, which the top-up has just raised, so keep-lifespan asks for a second
+ * top-up sized against the grown figure. Resuming instead would need the target
+ * depth persisted on the record: chain state cannot tell a batch topped up for a
+ * pending resize from one that always held that balance. See
+ * docs/Drive-Payment-Flow.md §6.6.
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
   const { account, drive, newDepth, keepLifespan, requestFunding, onStep } = options
@@ -324,10 +332,10 @@ export async function runResize(options: ResizeOptions): Promise<void> {
     try {
       await increaseDepthOnChain(signerKey, drive, newDepth, client)
     } catch (caught) {
-      // Only reachable on the unbundled path. By here everything the user pays
-      // for has already landed — either the top-up confirmed above, or none was
-      // needed — so this is the benign partial state and a retry costs nothing
-      // but gas dust. Typed so the dialog can say that (#392).
+      // Only reachable on the unbundled path. By here the top-up has confirmed
+      // (or none was needed), so nothing shrank and the drive is intact — but
+      // retrying re-prices against the now-longer lifespan and charges again.
+      // Typed so the dialog can say precisely that (#392, §6.6).
       throw new SizeIncreasePendingError(caught)
     }
   }
