@@ -8,13 +8,20 @@ on:
 jobs:
   playwright-tests:
     timeout-minutes: 30
+    # Deliberately NOT the playwright container image: the drive suites need a
+    # chain, the chain is an anvil container, and a job running inside a
+    # container has no Docker to start one with (nor would its published port
+    # or its bind mount reach the job). Browsers are installed below instead.
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.57.0-noble
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # vendor/bee-compose carries the baked chain snapshot the step below
+          # mounts. Without this the mount is an empty directory, anvil dies on
+          # --load-state, and every drive suite skips itself.
+          submodules: true
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -30,6 +37,10 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Playwright browsers
+        working-directory: ./ui
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Build lib dependency
         working-directory: ./lib
         run: pnpm build
@@ -39,6 +50,24 @@ jobs:
       # baked snapshot is committed, so this needs no network.
       - name: Start the local chain
         run: pnpm dev:chain:detach
+
+      # `docker run -d` returns as soon as the container is created, so without
+      # this the chain may still be loading its state when the suites probe it
+      # — and an unreachable chain makes them skip rather than fail. Fail here
+      # instead, where the reason is visible.
+      - name: Wait for the local chain
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf -X POST -H 'Content-Type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              http://localhost:8545 > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The local chain never answered on :8545 — the drive e2e suites would have skipped silently."
+          docker logs gnosis-chain || true
+          exit 1
 
       - name: Run Playwright tests
         working-directory: ./ui
