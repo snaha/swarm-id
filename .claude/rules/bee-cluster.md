@@ -31,6 +31,12 @@ pnpm dev:cluster status
 
 `--full 4` is a 4-node full network (queen + 3 full workers).
 
+The submodule is a TypeScript project with its own lockfile, and the root `pnpm install` does not
+touch it (it is not a workspace package). `dev:cluster` therefore installs and builds it on first
+use — `dist/cli.js` missing is the trigger — so a fresh clone needs no extra step. Run
+`pnpm dev:cluster:build` by hand after bumping the submodule pin, or delete `vendor/bee-compose/dist`
+to force it.
+
 ## Pushsync needs `reachabilityOverridePublic=true` — built into the vendored cluster
 
 `deferred: false` writes (every epoch-feed, partition-lock/intent SOC, and any direct

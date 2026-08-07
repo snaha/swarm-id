@@ -125,6 +125,9 @@ The cluster comes from the `vendor/bee-compose` submodule, which carries the cha
 it alone, without the chains, solver or apps, which is what CI does for the library's integration
 suite.
 
+> Clone with `--recurse-submodules` (or run `git submodule update --init`) — the chain snapshot and
+> the cluster live there. The submodule builds itself on first use, so there is nothing else to run.
+
 **Endpoints:**
 
 | Service        | URL                      |
