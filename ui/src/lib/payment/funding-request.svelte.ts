@@ -77,7 +77,13 @@ export interface FundingRequester {
 }
 
 export function createFundingRequester(account: () => Account): FundingRequester {
-  let pending = $state<PendingPayment | undefined>(undefined)
+  // RAW, deliberately. Plain `$state` deep-proxies what it holds, and a
+  // `PendingPayment` holds the rail — whose chain descriptors are handed
+  // straight to the wallet. A wallet sits behind a postMessage bridge, so its
+  // arguments are structured-cloned, and a Proxy cannot be cloned: the payment
+  // died on `wallet_addEthereumChain` with "could not be cloned". Nothing here
+  // mutates the value in place, only replaces it, so raw is also what it means.
+  let pending = $state.raw<PendingPayment | undefined>(undefined)
   let settle: { resolve: () => void; reject: (error: Error) => void } | undefined
 
   const request: RequestFunding = async (need) => {

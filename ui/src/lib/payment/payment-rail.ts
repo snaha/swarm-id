@@ -146,13 +146,22 @@ export async function switchWalletChain(
     if (!chain) {
       throw error
     }
+    // Rebuilt field by field rather than passed through. A wallet's arguments
+    // cross a postMessage bridge and are structured-cloned, so handing over a
+    // reference to someone else's object means whatever it happens to be —
+    // a framework proxy, a class instance — decides whether the payment works.
+    // Copying the primitives out makes that impossible to get wrong.
     await provider.request({
       method: 'wallet_addEthereumChain',
       params: [
         {
           chainId: hexChainId,
           chainName: chain.name,
-          nativeCurrency: chain.nativeCurrency,
+          nativeCurrency: {
+            name: chain.nativeCurrency.name,
+            symbol: chain.nativeCurrency.symbol,
+            decimals: chain.nativeCurrency.decimals,
+          },
           rpcUrls: [...chain.rpcUrls.default.http],
         },
       ],

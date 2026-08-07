@@ -39,7 +39,7 @@ export const devWalletChains = [
   {
     id: `0x${LOCAL_SOURCE_CHAIN_ID.toString(16)}`,
     token: 'ETH',
-    label: 'Local source chain',
+    label: 'Ethereum Mainnet (fake)',
     rpcUrl: LOCAL_SOURCE_RPC_URL,
   },
 ]

@@ -103,7 +103,7 @@ const GAS_HEADROOM_WEI = 10n ** 16n // 0.01 ETH
 
 const localSourceChain: Chain = defineChain({
   id: LOCAL_SOURCE_CHAIN_ID,
-  name: 'Local source chain',
+  name: 'Ethereum Mainnet (fake)',
   nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: WEI_DECIMALS },
   rpcUrls: { default: { http: [LOCAL_SOURCE_RPC_URL] } },
 })

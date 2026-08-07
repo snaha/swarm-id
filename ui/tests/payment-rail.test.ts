@@ -89,6 +89,11 @@ async function injectPayingWallet(page: Page) {
     ([rpcUrl, address, sourceChainId]) => {
       const sourceHex = `0x${Number(sourceChainId).toString(16)}`
       let chainId = '0x1'
+      // A wallet that has never seen the local chain, which is every wallet the
+      // first time. Until it is added, switching to it fails with 4902 — the
+      // branch that drives `wallet_addEthereumChain`, and the one a fake that
+      // silently accepts the switch never reaches.
+      let sourceChainAdded = false
       const listeners: Array<(value: unknown) => void> = []
 
       async function rpc(method: string, params: unknown[]) {
@@ -111,6 +116,12 @@ async function injectPayingWallet(page: Page) {
           return chainId
         },
         async request({ method, params = [] }: { method: string; params?: unknown[] }) {
+          // A real injected wallet sits behind a postMessage bridge, so every
+          // parameter is structured-cloned on its way out of the page. Doing
+          // the same here is what makes this fake faithful in the one way that
+          // matters: anything non-cloneable — a Svelte `$state` proxy, a class
+          // instance, a function — fails HERE rather than only in MetaMask.
+          params = structuredClone(params)
           switch (method) {
             case 'eth_requestAccounts':
             case 'eth_accounts':
@@ -122,13 +133,24 @@ async function injectPayingWallet(page: Page) {
             case 'wallet_getPermissions':
             case 'wallet_requestPermissions':
               return [{ parentCapability: 'eth_accounts' }]
-            case 'wallet_addEthereumChain':
+            case 'wallet_addEthereumChain': {
+              const added = params[0] as { chainId?: string; rpcUrls?: string[] } | undefined
+              if (added?.chainId !== sourceHex || !added.rpcUrls?.length) {
+                throw new Error(`refusing to add a chain described as ${JSON.stringify(added)}`)
+              }
+              // MetaMask adds and switches in one prompt.
+              sourceChainAdded = true
+              chainId = sourceHex
+              for (const listener of listeners) {
+                listener(chainId)
+              }
               return null
+            }
             case 'wallet_switchEthereumChain': {
               const target = (params[0] as { chainId?: string } | undefined)?.chainId
               // Only the source chain is actually behind this provider; a
               // switch anywhere else would be a lie the deposit would expose.
-              if (target !== sourceHex) {
+              if (target !== sourceHex || !sourceChainAdded) {
                 throw Object.assign(new Error('Unrecognized chain'), { code: 4902 })
               }
               chainId = sourceHex
