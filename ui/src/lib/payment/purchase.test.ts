@@ -6,7 +6,6 @@ import { describe, expect, it } from 'vitest'
 
 import {
   extendedStamp,
-  parseBlockNumber,
   resizePlan,
   stampAmountForSeconds,
   stampTtlSeconds,
@@ -33,18 +32,6 @@ function makeStamp(overrides: Partial<PostageStamp> = {}): PostageStamp {
     ...overrides,
   }
 }
-
-describe('parseBlockNumber', () => {
-  it('parses hex and decimal forms', () => {
-    expect(parseBlockNumber('0x2a')).toBe(42)
-    expect(parseBlockNumber('42')).toBe(42)
-  })
-
-  it('falls back to 0 for garbage and non-integer input', () => {
-    expect(parseBlockNumber('nope')).toBe(0)
-    expect(parseBlockNumber('42.5')).toBe(0)
-  })
-})
 
 describe('extendedStamp', () => {
   it('adds funds and lifespan on top of the current remaining TTL', () => {

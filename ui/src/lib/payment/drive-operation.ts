@@ -14,13 +14,17 @@
  * operation interrupted by a closed tab or a failed second transaction is
  * detected and continued rather than repeated.
  */
+import type { PrivateKey } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id'
 import type { MultichainClient } from '@swarm-id/multichain'
 
+import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import {
   type OwnerFunds,
+  bundledCreate,
   bundledExtend,
   bundledResize,
+  createOnChain,
   ensureBzzAllowance,
   fundingShortfall,
   increaseDepthOnChain,
@@ -95,6 +99,85 @@ async function ensureFunded(
   if (remainingShortfall.bzz > 0n || remainingShortfall.xdai > 0n) {
     throw new Error('The payment did not deliver enough funds. You can retry to finish it.')
   }
+}
+
+export interface PurchaseOptions {
+  account: Account
+  /** Capacity, as a PostageStamp depth. */
+  depth: number
+  /** How long the drive should last, in seconds. */
+  lifespanSeconds: number
+  /** What to call the drive. */
+  name: string
+  requestFunding: RequestFunding
+  onStep?: (step: OperationStep) => void
+}
+
+/**
+ * Buy a drive: fund the signer, then create the batch it will own.
+ *
+ * The same shape as extend and resize, and deliberately so — it goes through
+ * the same funding seam, so it inherits the payment screens, the rail and the
+ * local solver rather than needing a second way to pay for things.
+ *
+ * Unlike the fund.bzz.limo widget this replaces, there is no throwaway creator
+ * wallet: the derived postage signer buys the batch and is its owner, so
+ * nothing has to be handed across afterwards and no dust is left behind.
+ *
+ * @returns the new batch id, already recorded on the account.
+ */
+export async function runPurchase(options: PurchaseOptions): Promise<string> {
+  const { account, depth, lifespanSeconds, name, requestFunding, onStep } = options
+  const client = await postageChain()
+  onStep?.('checking')
+
+  const constraints = await client.getPostageWriteConstraints()
+  if (constraints.paused) {
+    throw new Error("Swarm's payment contract is temporarily paused. Try again later.")
+  }
+  const { signerKey, destination } = await derivePostageSigner(account.derivationKey)
+
+  // The contract refuses anything under ~24h of storage, so a short lifespan
+  // must be raised rather than sent to a certain revert.
+  const requested = stampAmountForSeconds(constraints.lastPrice, lifespanSeconds)
+  const amountPerChunk =
+    requested < constraints.minimumInitialBalancePerChunk
+      ? constraints.minimumInitialBalancePerChunk
+      : requested
+  const bzzNeeded = amountPerChunk << BigInt(depth)
+
+  await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
+
+  onStep?.('paying')
+  const batchId = await bundledCreate(signerKey, amountPerChunk, depth, bzzNeeded, client)
+  if (!batchId) {
+    // No delegate on this chain: approve, then create, as two transactions.
+    onStep?.('approving')
+    await ensureBzzAllowance(signerKey, bzzNeeded, client)
+    onStep?.('paying')
+    const created = await createOnChain(signerKey, amountPerChunk, depth, client)
+    return recordPurchase(account, signerKey, created, name, onStep)
+  }
+  return recordPurchase(account, signerKey, batchId, name, onStep)
+}
+
+/** Read the new batch back from chain truth and attach it to the account. */
+async function recordPurchase(
+  account: Account,
+  signerKey: PrivateKey,
+  batchId: string,
+  name: string,
+  onStep: ((step: OperationStep) => void) | undefined,
+): Promise<string> {
+  onStep?.('recording')
+  const stamp = await fetchExistingBatchFromChain(batchId, signerKey, name)
+  if (!stamp) {
+    throw new Error(
+      'The drive was paid for but could not be read back from the chain. It will appear once the chain catches up.',
+    )
+  }
+  account.addStamp(stamp)
+  return batchId
 }
 
 export interface ExtendOptions extends RunOptions {

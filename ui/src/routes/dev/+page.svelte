@@ -35,7 +35,6 @@
   import { chainIdentity, postageChain } from '$lib/payment/postage-onchain'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
@@ -400,14 +399,6 @@
       readChecking = false
     }
   }
-
-  // Mock stamp widget settings — `devSettingsStore` is the single source of
-  // truth (durable + cross-tab); the controls bind straight to its setters via
-  // function bindings, so there is no local mirror to drift.
-  const MOCK_RESULT_OPTIONS = [
-    { value: 'success', label: 'Success (creates a drive)' },
-    { value: 'error', label: 'Error (purchase failed)' },
-  ]
 
   // Stored stamps (with signerKey) usable to pay for the retrievability check.
   const storedStampOptions = $derived(
@@ -923,23 +914,12 @@ Check console logs for details:
     <div class="flex flex-col gap-4">
       <h3 class="text-lg font-semibold">Simulated purchase</h3>
       <p class="text-muted-foreground text-sm">
-        Off mainnet, <strong>Add drive</strong> (Storage tab / Upgrade) and the paid drive operations
-        settle here instead of opening the widget or waiting on Relay — neither cross-chain leg exists
-        on a dev chain. The settlement itself is real: a batch is created on chain, owned by this account's
-        postage signer, so the new drive can be extended and resized straight away. There is no toggle
-        for it because there is no choice: on mainnet these flows always pay for real.
+        <strong>Add drive</strong> and the paid drive operations all buy for real, against whichever chain
+        this page is pointed at — there is no simulated settlement any more, and no outcome to choose.
+        What differs off mainnet is only how the money gets to the batch owner: with a local source chain
+        running, through the payment screens and the local solver; without one, straight from the faucet
+        above.
       </p>
-      <label class={`${LABEL_CLASS} w-64`}>
-        <span class={LABEL_TEXT_CLASS}>Outcome</span>
-        <Select
-          options={MOCK_RESULT_OPTIONS}
-          bind:value={
-            () => devSettingsStore.data.mockStampResult,
-            (result) =>
-              devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
-          }
-        />
-      </label>
 
       <div class="bg-border my-4 h-px"></div>
 

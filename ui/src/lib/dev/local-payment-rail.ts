@@ -48,7 +48,19 @@ import {
 import { postageChain, probeChainId } from '$lib/payment/postage-onchain'
 
 /** Where `pnpm dev:source-chain` listens. */
-export const LOCAL_SOURCE_RPC_URL = 'http://localhost:8546'
+const DEFAULT_SOURCE_RPC_URL = 'http://localhost:8546'
+
+/**
+ * Lets a test pin the source chain rather than inherit whatever happens to be
+ * running. Without it, whether the payment screens open depends on a developer
+ * having `pnpm dev:local` up — so the same suite behaves differently on a
+ * laptop and in CI, which is the worst kind of flake.
+ */
+const SOURCE_RPC_OVERRIDE_KEY = 'swarm-id-dev-source-rpc'
+
+export const LOCAL_SOURCE_RPC_URL =
+  (typeof localStorage !== 'undefined' && localStorage.getItem(SOURCE_RPC_OVERRIDE_KEY)) ||
+  DEFAULT_SOURCE_RPC_URL
 
 /**
  * Deliberately anvil's own default, not 1: with the rail mocked the source

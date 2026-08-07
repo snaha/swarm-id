@@ -32,12 +32,11 @@
     account: Account
     drive: PostageStamp
     onClose: () => void
-    onUpdated?: (message: string) => void
   }
 
-  let { account, drive, onClose, onUpdated }: Props = $props()
+  let { account, drive, onClose }: Props = $props()
 
-  type Phase = 'form' | 'pending' | 'error'
+  type Phase = 'form' | 'pending' | 'success' | 'error'
 
   // Empty until the user picks a larger size; the current size is the first
   // (default-shown) option, so "no change yet" reads as an empty selection.
@@ -45,6 +44,7 @@
   let keepLifespan = $state(true)
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
+  let errorDetail = $state('')
   let errorTone = $state<'error' | 'notice'>('error')
   let step = $state<OperationStep>('checking')
   // The plan as the CHAIN sees it (live remaining balance), which is what the
@@ -154,8 +154,7 @@
       if (!attempt.current) {
         return
       }
-      onUpdated?.('Drive size increased')
-      close()
+      phase = 'success'
     } catch (caught) {
       if (!attempt.current) {
         return
@@ -164,6 +163,7 @@
       // lifespan grew, so it gets the benign presentation and its own wording
       // rather than the generic failure surface (#392).
       errorTone = caught instanceof SizeIncreasePendingError ? 'notice' : 'error'
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not increase the size.'
       phase = 'error'
     }
@@ -183,7 +183,10 @@
     {phase}
     pendingLabel={describeStep(step, 'resize')}
     {errorMessage}
+    errorDetails={errorDetail}
     tone={errorTone}
+    successTitle="Payment completed!"
+    successBody="Your drive is now larger."
     onRetry={() => (phase = 'form')}
     onClose={close}
   />

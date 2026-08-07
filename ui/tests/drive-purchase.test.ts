@@ -1,17 +1,19 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The simulated purchase (the /dev stand-in for the multichain widget) must
- * produce a REAL batch on the local chain — otherwise a drive bought this way
- * has nothing behind it and the extend / resize flows cannot read it.
+ * Buying a drive must produce a REAL batch on chain that the account owns —
+ * otherwise the drive has nothing behind it and extend / resize cannot read it.
  *
- * Skipped automatically when the bee-compose chain is unreachable, where the
- * simulation falls back to a fabricated settlement by design.
+ * This used to assert that a *simulated* purchase did so, because buying went
+ * through an external popup that could not complete off mainnet. It no longer
+ * does: the purchase runs through the same on-chain engine as extend and
+ * resize, so there is nothing simulated left to check — only that a purchase
+ * lands where it says it does.
  */
 import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect, test } from '@playwright/test'
 
-import { addMockedDrive, completeCreateFlow } from './helpers'
+import { addDrive, completeCreateFlow, pinNoPaymentRail } from './helpers'
 
 const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 const BEE_NODE_URL = 'http://localhost:1633/'
@@ -85,9 +87,13 @@ function storedDrive(page: Page) {
   })
 }
 
+test.beforeEach(({ page }) => pinNoPaymentRail(page))
+// A real purchase spans several 5s blocks; the 30s default is not enough.
+test.setTimeout(180_000)
+
 test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:bee:detach)')
 
-test('a simulated purchase creates a batch the account owns on chain', async ({ page }) => {
+test('buying a drive creates a batch the account owns on chain', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)
   await page.addInitScript(
     ([rpcUrl, beeUrl]) => {
@@ -104,7 +110,7 @@ test('a simulated purchase creates a batch the account owns on chain', async ({ 
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
-  await addMockedDrive(page)
+  await addDrive(page)
   // Settling for real takes chain time (create + fund + receipt), unlike the
   // fabricated fallback the chainless suites see.
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({

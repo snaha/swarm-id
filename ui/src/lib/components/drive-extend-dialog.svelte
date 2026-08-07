@@ -36,17 +36,17 @@
     account: Account
     drive: PostageStamp
     onClose: () => void
-    onUpdated?: (message: string) => void
   }
 
-  let { account, drive, onClose, onUpdated }: Props = $props()
+  let { account, drive, onClose }: Props = $props()
 
-  type Phase = 'form' | 'pending' | 'error'
+  type Phase = 'form' | 'pending' | 'success' | 'error'
 
   let count = $state('0')
   let unit = $state<LifespanUnit>('months')
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
+  let errorDetail = $state('')
   let currentPrice = $state<bigint | undefined>(undefined)
   let step = $state<OperationStep>('checking')
   const attempts = createAttemptTracker()
@@ -110,12 +110,12 @@
       if (!attempt.current) {
         return
       }
-      onUpdated?.('Lifespan extended')
-      close()
+      phase = 'success'
     } catch (caught) {
       if (!attempt.current) {
         return
       }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
       phase = 'error'
     }
@@ -135,6 +135,9 @@
     {phase}
     pendingLabel={describeStep(step, 'extend')}
     {errorMessage}
+    errorDetails={errorDetail}
+    successTitle="Payment completed!"
+    successBody="Your drive's lifespan has been extended."
     onRetry={() => (phase = 'form')}
     onClose={close}
   />

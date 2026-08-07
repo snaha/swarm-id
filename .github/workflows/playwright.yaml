@@ -34,9 +34,21 @@ jobs:
         working-directory: ./lib
         run: pnpm build
 
+      # Buying a drive is a real on-chain purchase — there is no simulated
+      # settlement any more — so the suites that add one need a chain. The
+      # baked snapshot is committed, so this needs no network.
+      - name: Start the local chain
+        run: pnpm dev:chain:detach
+
       - name: Run Playwright tests
         working-directory: ./ui
         run: pnpm test:e2e
+        env:
+          CHAIN_RPC_URL: http://localhost:8545
+
+      - name: Stop the local chain
+        if: always()
+        run: pnpm dev:chain:stop
 
       - name: Upload test report
         uses: actions/upload-artifact@v4

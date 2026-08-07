@@ -13,10 +13,27 @@
  */
 import { expect, test } from '@playwright/test'
 
-import { DRIVE_SETTLE_TIMEOUT_MS, addMockedDrive, completeCreateFlow, seedNoChain } from './helpers'
+import {
+  DRIVE_SETTLE_TIMEOUT_MS,
+  addDrive,
+  chainReachable,
+  completeCreateFlow,
+  pinNoPaymentRail,
+  seedLocalChain,
+  seedNoChain,
+} from './helpers'
+
+// Buying a drive is a real on-chain purchase now — there is no simulated
+// settlement to fall back on — so this suite needs a chain.
+const chainUp = await chainReachable()
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
+
+test.beforeEach(({ page }) => pinNoPaymentRail(page))
+// A real purchase spans several 5s blocks; the 30s default is not enough.
+test.setTimeout(180_000)
 
 async function createLocalAccount(page: import('@playwright/test').Page) {
-  await seedNoChain(page)
+  await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
@@ -47,7 +64,7 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   await createLocalAccount(page)
 
   // The first drive settles and becomes the account default.
-  await addMockedDrive(page)
+  await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
@@ -68,7 +85,7 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   const expandedCard = page
     .locator('div.overflow-hidden.rounded-lg')
     .filter({ has: page.getByRole('button', { name: 'Collapse drive' }) })
-  await addMockedDrive(page)
+  await addDrive(page)
   const newCard = page.locator('div.overflow-hidden.rounded-lg', {
     hasText: /Drive [0-9a-f]{4}/,
   })
@@ -98,15 +115,17 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   expect(afterRemove.default).toBe(afterRemove.live[0].batchID)
 })
 
-test('a failed mock purchase surfaces the error and adds nothing', async ({ page }) => {
-  // The dev-settings store reads the mock outcome at app init (same-tab
-  // localStorage writes fire no storage event) — plant it before any load.
-  await page.addInitScript(() => localStorage.setItem('dev-mock-stamp-result', 'error'))
+test('a purchase that cannot reach the chain surfaces the error and adds nothing', async ({
+  page,
+}) => {
+  // Point the app at a dead RPC: a real purchase has nothing to buy against,
+  // and must say so rather than inventing a drive.
+  await seedNoChain(page)
   await createLocalAccount(page)
 
-  await addMockedDrive(page)
+  await addDrive(page)
 
-  await expect(page.getByText('Mock error: Purchase failed')).toBeVisible({
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
   const drives = await storedDrives(page)

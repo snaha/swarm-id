@@ -164,6 +164,18 @@ export function postageChain(
   return client
 }
 
+/** Bee's fixed bucket depth; a batch's depth must exceed it. */
+const BUCKET_DEPTH = 16
+const BATCH_NONCE_BYTES = 32
+const HEX_RADIX = 16
+
+/** batchId = keccak256(creator, nonce), so the nonce must never be reused. */
+function randomBatchNonce(): `0x${string}` {
+  return `0x${Array.from(crypto.getRandomValues(new Uint8Array(BATCH_NONCE_BYTES)))
+    .map((byte) => byte.toString(HEX_RADIX).padStart(2, '0'))
+    .join('')}`
+}
+
 /** The batch-owner key in the 0x-hex form the multichain package signs with. */
 function ownerHexKey(signerKey: PrivateKey): `0x${string}` {
   return prefix0x(signerKey.toHex()) as `0x${string}`
@@ -278,6 +290,68 @@ async function bundled(
     timeoutMessage,
   )
   return true
+}
+
+/**
+ * Buy a batch atomically: approve + createBatch, owned by the signer that pays.
+ * @returns the new batch id, or undefined when the chain cannot bundle.
+ */
+export async function bundledCreate(
+  signerKey: PrivateKey,
+  amountPerChunk: bigint,
+  depth: number,
+  totalPlur: bigint,
+  client?: MultichainClient,
+): Promise<string | undefined> {
+  const chain = client ?? (await postageChain())
+  if (!(await chain.supportsBundling())) {
+    return undefined
+  }
+  const created = await chain.bundleCreate({
+    originPrivateKey: ownerHexKey(signerKey),
+    amountPerChunk,
+    depth,
+    bucketDepth: BUCKET_DEPTH,
+    batchNonce: randomBatchNonce(),
+    immutable: false,
+    totalPlur,
+  })
+  await withTimeout(
+    chain.waitForTransactionSuccess(created.transactionHash),
+    CONFIRMATION_TIMEOUT_MS,
+    'The purchase transaction was not confirmed in time.',
+  )
+  return created.batchId
+}
+
+/**
+ * Create a batch as its own transaction — the fallback where the chain has no
+ * 7702 delegate. The caller must have approved the total first.
+ * @returns the new batch id.
+ */
+export async function createOnChain(
+  signerKey: PrivateKey,
+  amountPerChunk: bigint,
+  depth: number,
+  client?: MultichainClient,
+): Promise<string> {
+  const chain = client ?? (await postageChain())
+  const owner = signerKey.publicKey().address().toChecksum() as `0x${string}`
+  const created = await chain.createBatch({
+    originPrivateKey: ownerHexKey(signerKey),
+    owner,
+    amount: amountPerChunk,
+    depth,
+    bucketDepth: BUCKET_DEPTH,
+    batchNonce: randomBatchNonce(),
+    immutable: false,
+  })
+  await withTimeout(
+    chain.waitForTransactionSuccess(created.transactionHash),
+    CONFIRMATION_TIMEOUT_MS,
+    'The purchase transaction was not confirmed in time.',
+  )
+  return created.batchId
 }
 
 /** Extend atomically: approve + topUp. False if the chain cannot bundle. */

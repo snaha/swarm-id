@@ -20,12 +20,13 @@
  * exactly as the sequential version did — verified on chain, not assumed.
  */
 
-import { RollingValueProvider } from "cafe-utility"
+import { RollingValueProvider, System } from "cafe-utility"
 import { encodeFunctionData } from "viem"
 import { privateKeyToAccount } from "viem/accounts"
 import { ACCOUNT_7702_ABI, ERC20_ABI, POSTAGE_STAMP_ABI } from "./abi"
 import { jsonRpc } from "./fetch"
-import { getGasPrice, getTransactionCount } from "./rpc"
+import { getGasPrice, getTransactionCount, getTransactionReceipt } from "./rpc"
+import type { CreateBatchResult } from "./postage-write"
 import type { MultichainSettings } from "./settings"
 import { walletClientFor } from "./chain"
 import { withFeeTooLowRetry } from "./write-retry"
@@ -56,6 +57,20 @@ export interface ExtendBundleOptions {
 
 export interface ResizeBundleOptions extends ExtendBundleOptions {
   newDepth: number
+}
+
+export interface CreateBundleOptions {
+  /** The buyer's key. Creator AND owner — see `bundleCreate`. */
+  originPrivateKey: `0x${string}`
+  /** Initial balance per chunk, in PLUR. */
+  amountPerChunk: bigint
+  depth: number
+  bucketDepth: number
+  /** 32-byte hex; batchId = keccak256(creator, nonce). */
+  batchNonce: `0x${string}`
+  immutable: boolean
+  /** Total PLUR createBatch will pull — approved exactly, never unlimited. */
+  totalPlur: bigint
 }
 
 /**
@@ -122,6 +137,75 @@ async function sendBundle(
     })
     return client.sendRawTransaction({ serializedTransaction })
   })
+}
+
+/**
+ * Buy a batch as ONE atomic transaction: approve + createBatch.
+ *
+ * The buyer is creator *and* owner. The multichain widget cannot do that — it
+ * has no persistent key, so it creates from a throwaway wallet and passes
+ * ownership across, leaving dust to sweep. The derived postage signer is
+ * durable, so it simply keeps what it buys.
+ *
+ * @returns the new batch id, read from the BatchCreated event.
+ */
+export async function bundleCreate(
+  options: CreateBundleOptions,
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): Promise<CreateBatchResult> {
+  const owner = privateKeyToAccount(options.originPrivateKey).address
+  const transactionHash = await sendBundle(
+    options.originPrivateKey,
+    [
+      approveCall(settings, options.totalPlur),
+      {
+        target: settings.addresses.postageStamp,
+        value: 0n,
+        data: encodeFunctionData({
+          abi: POSTAGE_STAMP_ABI,
+          functionName: "createBatch",
+          args: [
+            owner,
+            options.amountPerChunk,
+            options.depth,
+            options.bucketDepth,
+            options.batchNonce,
+            options.immutable,
+          ],
+        }),
+      },
+    ],
+    settings,
+    rpcProvider,
+  )
+
+  for (let i = 0; i < settings.receiptPollAttempts; i++) {
+    await System.sleepMillis(settings.receiptPollMillis)
+    const receipt = await getTransactionReceipt(
+      transactionHash,
+      settings,
+      rpcProvider,
+    )
+    if (!receipt) {
+      continue
+    }
+    // The batch id is the BatchCreated event's first indexed argument. Inside a
+    // bundle the approve emits a Transfer too, so match on the emitting
+    // contract rather than taking the first log.
+    const batchId = receipt.logs.find(
+      (log) =>
+        log.address.toLowerCase() ===
+        settings.addresses.postageStamp.toLowerCase(),
+    )?.topics[1]
+    if (!batchId) {
+      throw new Error(
+        "createBatch bundle mined without a BatchCreated event (reverted?)",
+      )
+    }
+    return { transactionHash, batchId }
+  }
+  throw new Error("Timed out waiting for the createBatch bundle receipt.")
 }
 
 function approveCall(

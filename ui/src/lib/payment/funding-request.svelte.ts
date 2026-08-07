@@ -15,18 +15,24 @@ import type { Account } from '$lib/types'
 
 /**
  * Human-readable label for the pending screen. The `paying` step is worded per
- * operation: the same top-up transaction extends a drive's lifespan in one
- * flow and pays for the larger size in the other.
+ * operation: one transaction extends a drive's lifespan, pays for a larger
+ * size, or buys the drive outright, depending on which flow raised it.
  */
-export function describeStep(step: OperationStep, operation: 'extend' | 'resize'): string {
+export function describeStep(
+  step: OperationStep,
+  operation: 'extend' | 'resize' | 'purchase',
+): string {
   switch (step) {
     case 'checking':
-      return 'Checking the drive on chain…'
+      return operation === 'purchase' ? 'Checking the chain…' : 'Checking the drive on chain…'
     case 'funding':
       return 'Waiting for the payment…'
     case 'approving':
       return 'Approving the payment…'
     case 'paying':
+      if (operation === 'purchase') {
+        return 'Buying the drive…'
+      }
       return operation === 'extend' ? 'Extending the lifespan…' : 'Paying for the larger size…'
     case 'resizing':
       return 'Increasing the drive size…'

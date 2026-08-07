@@ -8,8 +8,10 @@
 import { type Page, expect } from '@playwright/test'
 
 export const PASSWORD = 'testpassword123'
-/** The mocked drive purchase settles after a simulated widget delay. */
-export const DRIVE_SETTLE_TIMEOUT_MS = 15000
+
+/** Buying a drive is a real on-chain purchase: funding, then an approve +
+ * createBatch bundle, then reading the batch back — several 5s blocks. */
+export const DRIVE_SETTLE_TIMEOUT_MS = 120_000
 
 /**
  * Drives the account-creation wizard from /account/new to completion using the
@@ -67,6 +69,22 @@ export async function openConnectPopup(page: Page) {
  *
  * Must run before the first page load; the settings are read at app init.
  */
+/**
+ * Point the app at the local chain. Any suite that buys a drive needs this now
+ * that purchases are real — `seedNoChain` is for suites deliberately testing
+ * what happens without one.
+ */
+export function seedLocalChain(page: Page, rpcUrl: string = CHAIN_RPC_URL) {
+  return page.addInitScript(
+    (url) =>
+      localStorage.setItem(
+        'swarm-id-network-settings',
+        JSON.stringify({ beeNodeUrl: 'http://localhost:1633/', gnosisRpcUrl: url }),
+      ),
+    rpcUrl,
+  )
+}
+
 export function seedNoChain(page: Page) {
   return page.addInitScript(() => {
     localStorage.setItem(
@@ -85,9 +103,48 @@ export function seedNoChain(page: Page) {
  * purchase settles asynchronously — callers assert the outcome (a "Drive
  * xxxx" card, or the error phase) with `DRIVE_SETTLE_TIMEOUT_MS`.
  */
-export async function addMockedDrive(page: Page) {
+/**
+ * Buy a drive through the normal flow.
+ *
+ * Every suite that calls this now needs a chain: buying is a real on-chain
+ * purchase, with no simulated settlement to fall back on. Gate with
+ * {@link chainReachable}.
+ */
+export async function addDrive(page: Page) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   await page.getByRole('dialog').getByRole('combobox').nth(1).selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Proceed' }).click()
+}
+
+export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
+
+/**
+ * Pin the payment rail OFF for a suite: with no source chain reachable there is
+ * no rail, so funding falls back to the faucet and no wallet is needed. Without
+ * this a developer running `pnpm dev:local` would get the payment screens and
+ * the same test would behave differently than in CI.
+ */
+export async function pinNoPaymentRail(page: Page) {
+  await page.addInitScript(() =>
+    // A port nothing listens on — the probe fails fast and the rail resolves
+    // to undefined.
+    localStorage.setItem('swarm-id-dev-source-rpc', 'http://127.0.0.1:1'),
+  )
+}
+const PROBE_TIMEOUT_MS = 2000
+
+/** Whether a local chain is answering, so a suite can skip rather than fail. */
+export async function chainReachable(rpcUrl: string = CHAIN_RPC_URL): Promise<boolean> {
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    })
+    return typeof ((await response.json()) as { result?: string }).result === 'string'
+  } catch {
+    return false
+  }
 }

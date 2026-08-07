@@ -5,8 +5,10 @@
 
 import { RollingValueProvider } from "cafe-utility"
 import {
+  type CreateBundleOptions,
   type ExtendBundleOptions,
   type ResizeBundleOptions,
+  bundleCreate,
   bundleExtend,
   bundleResize,
   supportsBundling,
@@ -68,7 +70,11 @@ export type {
 export type { PostageBatch, PostageWriteConstraints } from "./postage-read"
 export type { TransactionReceipt } from "./rpc"
 export { POSTAGE_STAMP_ABI, ERC20_ABI, ACCOUNT_7702_ABI } from "./abi"
-export type { ExtendBundleOptions, ResizeBundleOptions } from "./postage-bundle"
+export type {
+  CreateBundleOptions,
+  ExtendBundleOptions,
+  ResizeBundleOptions,
+} from "./postage-bundle"
 export { buildExactInputSwapData } from "./sushi"
 
 /**
@@ -97,6 +103,11 @@ export class MultichainClient {
   /** approve + topUp in one transaction. */
   bundleExtend(options: ExtendBundleOptions): Promise<`0x${string}`> {
     return bundleExtend(options, this.settings, this.rpcProvider)
+  }
+
+  /** approve + createBatch in one transaction; the buyer owns what it buys. */
+  bundleCreate(options: CreateBundleOptions): Promise<CreateBatchResult> {
+    return bundleCreate(options, this.settings, this.rpcProvider)
   }
 
   /** approve + topUp + increaseDepth in one transaction, in that order. */
