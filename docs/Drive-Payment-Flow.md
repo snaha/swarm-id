@@ -76,10 +76,17 @@ xDAI into the BZZ the operation needs.
 
 1. From the operation: `plurNeeded` (per-chunk amount << depth) → `bzzNeeded` (1 BZZ = 1e16 PLUR).
 2. `@swarm-id/multichain`'s `quoteXdaiInForBzzOut(bzzNeeded)` (Sushi V3 `quoteExactOutputSingle`),
-   × `SWAP_BUFFER = 1.2` (mirrors the widget's 20% buffer; leftover xDAI stays at the owner
-   address as future gas — never refunded).
+   × `SWAP_BUFFER = 1.2` (mirrors the widget's 20% buffer). The swap executes exact-INPUT, so the
+   buffer is spent buying BZZ rather than left over — the surplus lands as BZZ at the owner
+   address, never refunded, and the next operation's funds check consumes it before asking for
+   more.
 3. Add `GAS_BUDGET_XDAI = 0.005` (covers approve + topUp + increaseDepth at 1 gwei with headroom)
-   minus the owner address's existing xDAI balance (floor at 0).
+   minus the owner address's existing xDAI balance (floor at 0), **plus
+   `SWAP_GAS_XDAI = 0.002` whenever a swap will run**. The swap is signed by the owner key and pays
+   for itself out of the same balance, before any of the operations the gas budget covers — so
+   without that term the swap spends the budget back down and the funds check re-run immediately
+   afterwards (§3.4) rejects a payment that in fact succeeded. Locally invisible: the faucet path
+   never swaps, and it over-delivers.
 4. Relay quote: `{ user: paymentWallet, recipient: ownerAddress, toChainId: 100, toCurrency:
 native xDAI (zero address), tradeType: EXACT_OUTPUT, amount: totalXdai }` for the selected
    source chain/token.
@@ -185,9 +192,12 @@ BZZ/USDC). Therefore:
 | topUp done, increaseDepth fails (resize) | lifespan extended, size pending                                             | free retry — engine resume; see §6     |
 | Anything after payment + dialog closed   | funds/state on chain                                                        | next dialog open reconciles + resumes  |
 
-Never leave BZZ parked deliberately: the quote requests exactly what the operation needs (plus the
-swap buffer, which lands as xDAI, not BZZ). Enforce fund-exact-spend-immediately — the funds check
-must refuse to request more BZZ than the operation's cost.
+Never leave value parked deliberately: the quote requests exactly what the operation needs, plus
+the swap buffer — which the exact-input swap turns into a little surplus BZZ at the owner address,
+not xDAI. Both kinds of residual are consumed before the next request rather than abandoned: BZZ by
+`fundingShortfall`, xDAI above the gas budget by `quoteFunding`, which subtracts it from what the
+rail is asked to deliver. That matters most on the recovery path — a delivery whose swap never ran
+would otherwise be paid for twice.
 
 ## 6. #392 / design feedback — partial-failure copy
 
