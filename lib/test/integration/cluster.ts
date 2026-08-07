@@ -3,7 +3,7 @@
 
 /**
  * Helpers for integration tests that run against a live local Bee cluster
- * started with `@snaha/bee-compose` (see `pnpm dev:bee`).
+ * started from the vendored bee-compose (`pnpm dev:cluster start --full 4`).
  *
  * These helpers intentionally avoid the browser-only machinery used by the
  * proxy (IndexedDB-backed `UtilizationAwareStamper`, postMessage, etc.) and

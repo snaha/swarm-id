@@ -91,7 +91,7 @@ test.beforeEach(({ page }) => pinNoPaymentRail(page))
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
-test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:bee:detach)')
+test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:local)')
 
 test('buying a drive creates a batch the account owns on chain', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)

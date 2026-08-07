@@ -59,9 +59,8 @@ The identity UI is a SvelteKit SPA.
   `payment/postage-onchain.ts`): the **baked hybrid chain** (chain 100 — a real BZZ market from a
   mainnet fork with the Swarm contracts deployed on top, committed to the repo in
   `vendor/bee-compose`, no internet needed) is driven with the production addresses, which is what
-  makes it worth testing on. Run it as the Bee cluster's chain (`pnpm dev:local`, RPC `:9545` —
-  NOT `pnpm dev:bee`, which crashes the queen against this chain) or standalone (`pnpm dev:chain`,
-  `:8545`), and point the drive e2e at whichever with
+  makes it worth testing on. Run it as the Bee cluster's chain (`pnpm dev:local`, RPC `:9545`) or
+  standalone (`pnpm dev:chain`, `:8545`), and point the drive e2e at whichever with
   `CHAIN_RPC_URL`. An endpoint that is not mainnet never falls back to the public RPCs, so a failed
   call cannot silently read or write real mainnet.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`

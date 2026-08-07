@@ -117,16 +117,13 @@ Requires Docker.
 pnpm dev:local        # cluster + both chains + solver + UI + demo
 pnpm dev:local:fresh  # the same, from a clean chain and empty node state
 pnpm dev:local:stop   # tear the containers down
-pnpm dev:bee:logs     # tail the queen
+pnpm dev:cluster:logs # tail the queen
 ```
 
-> ⚠️ **Not `pnpm dev:bee`.** Those scripts run the published
-> [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose), which still expects the
-> old DEX-less chain and crashes the queen against the hybrid one
-> (`factory fail: abi: attempting to unmarshal an empty string`). They stay because CI uses them,
-> where the package brings its own matching chain. Locally, use `dev:local` — it runs
-> `vendor/bee-compose`, which matches the chain it boots. See
-> [Paying for storage locally](#paying-for-storage-locally).
+The cluster comes from the `vendor/bee-compose` submodule, which carries the chain it boots — see
+[Paying for storage locally](#paying-for-storage-locally). `pnpm dev:cluster start --full 4` runs
+it alone, without the chains, solver or apps, which is what CI does for the library's integration
+suite.
 
 **Endpoints:**
 
@@ -191,12 +188,6 @@ thin BZZ pool, and this restores the baked snapshot (it also wipes node state, s
 created earlier will point at batches that no longer exist; clear the UI's site data too).
 
 Then, once: open the UI → **Settings** → **Network settings** → **Use local** → **Save**.
-
-> **`dev:local` uses `vendor/bee-compose`, not `pnpm dev:bee`.** The published
-> `@snaha/bee-compose` package still expects the old DEX-less chain — swap enabled, a chequebook
-> factory, and its own PostageStamp address — so pointing it at the hybrid chain crashes the queen
-> with `factory fail: abi: attempting to unmarshal an empty string`. The vendored copy is the one
-> that matches the chain it boots.
 
 #### From a fresh clone, end to end
 

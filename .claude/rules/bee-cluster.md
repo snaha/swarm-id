@@ -7,37 +7,31 @@ paths:
 
 # Local Bee Development Cluster (bee-compose)
 
-Docker-based local Bee cluster for development with postage stamps. Uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose).
+Docker-based local Bee cluster for development with postage stamps. **One source: the vendored
+`vendor/bee-compose` submodule**, which carries the hybrid chain the whole repo runs on — swap
+disabled, no chequebook factory, Gnosis mainnet contract addresses.
 
-> ⚠️ **Do not run `pnpm dev:bee*` against the hybrid chain — use `pnpm dev:local`.**
-> The `dev:bee*` scripts run the **published** `@snaha/bee-compose`, which still expects the old
-> DEX-less chain: `BEE_SWAP_ENABLE=true`, a chequebook factory at `0x5FC8d326…`, and its own
-> PostageStamp address. Pointed at the hybrid chain those settings recreate the queen into a
-> crashloop —
-> `failed to build bee node error="factory fail: abi: attempting to unmarshal an empty string"` —
-> because PR #19 removed the factory. It looks like a broken cluster, not a wrong command.
->
-> `pnpm dev:local` uses `vendor/bee-compose` (swap disabled, no factory, Gnosis mainnet addresses),
-> and also starts the payment source chain and the local solver. `pnpm dev:local:fresh` resets the
-> chain to its baked snapshot; `pnpm dev:local:stop` tears it down.
->
-> The `dev:bee*` scripts remain because CI (`integration-tests.yml`) uses them, where the npm
-> package brings its own matching chain and is self-consistent.
+The published [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) package is no
+longer a dependency. It still expected the old DEX-less chain (`BEE_SWAP_ENABLE=true`, a chequebook
+factory at `0x5FC8d326…`, its own PostageStamp), so pointing it at the hybrid chain crashlooped the
+queen with `factory fail: abi: attempting to unmarshal an empty string` — a wrong command that
+looked like a broken cluster. Removing it removes the trap; there is now nothing to point the wrong
+way.
 
 ```bash
 pnpm dev:local        # cluster + both chains + solver + UI + demo  ← use this
 pnpm dev:local:fresh  # the same, from a clean chain and empty node state
 pnpm dev:local:stop   # tear the containers down
+pnpm dev:cluster:logs # tail the queen
 
-pnpm dev:bee          # CI's path; see the warning above before running locally
-pnpm dev:bee:detach
-pnpm dev:bee:stop
-pnpm dev:bee:fresh
+pnpm dev:cluster start --full 4   # the cluster alone (what CI runs)
+pnpm dev:cluster stop
+pnpm dev:cluster status
 ```
 
-The scripts start a 4-node full network (`--full 4` = queen + 3 full workers).
+`--full 4` is a 4-node full network (queen + 3 full workers).
 
-## Pushsync needs `reachabilityOverridePublic=true` — now built into bee-compose ≥ 0.1.4
+## Pushsync needs `reachabilityOverridePublic=true` — built into the vendored cluster
 
 `deferred: false` writes (every epoch-feed, partition-lock/intent SOC, and any direct
 `/bytes`/`/chunks`/`/soc` upload — note `uploadData`/`uploadChunk` are non-deferred) require Bee
@@ -51,16 +45,13 @@ SOC/non-deferred upload takes exactly ~30 s** (reads still work — the chunk is
 origin — but replication/receipts don't), and multi-device lock/intent SOCs never become
 network-readable by peers.
 
-**Fixed in bee-compose ≥ 0.1.4** ([#11](https://github.com/snaha/bee-compose/issues/11)):
+**Fixed, and no longer something to check** ([#11](https://github.com/snaha/bee-compose/issues/11)):
 `bee/Dockerfile` recompiles Bee from source at `v${BEE_VERSION}` with
 `make binary REACHABILITY_OVERRIDE_PUBLIC=true`, so non-deferred uploads replicate out of the box — no
-manual override-image build needed. Cost: the **first** `bee-compose start` compiles Bee from source (a
-few minutes; cached and shared across node images afterward).
-
-> ⚠️ swarm-id pins `@snaha/bee-compose@^0.1.3` and the lockfile may still resolve to **0.1.3 (no
-> override → the ~30 s hang)**. If non-deferred uploads stall locally, update to ≥ 0.1.4
-> (`pnpm update @snaha/bee-compose`) and rebuild (`pnpm dev:bee:fresh`; the first start recompiles Bee).
-> (On a real public gateway the override is irrelevant — reachability is genuine there.)
+manual override-image build needed. The submodule is well past the release that added it, and there is
+no version to resolve wrongly now that the npm package is gone. Cost: the **first** `dev:local` or
+`dev:cluster start` compiles Bee from source (a few minutes; cached and shared across node images
+afterward). (On a real public gateway the override is irrelevant — reachability is genuine there.)
 
 Verify after start (read-only): every node `bee_kademlia_reachability_status{...="Public"}` (NOT
 `Unknown`); queen `/topology` `connected ≥ 3`; a non-deferred upload returns in <1 s and queen

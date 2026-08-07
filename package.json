@@ -24,11 +24,7 @@
     "dev:source-chain:detach": "docker ps -q -f name=^source-chain$ | grep -q . || pnpm -s dev:source-chain:run",
     "dev:source-chain:run": "docker run -d --rm --name source-chain -p 8546:8545 --entrypoint anvil ghcr.io/foundry-rs/foundry:stable --chain-id 31337 --host 0.0.0.0 --port 8545",
     "dev:source-chain:stop": "docker rm -f source-chain >/dev/null 2>&1 || true",
-    "dev:bee": "bee-compose start --full 4 --no-detach",
-    "dev:bee:detach": "bee-compose start --full 4",
-    "dev:bee:stop": "bee-compose stop",
-    "dev:bee:logs": "bee-compose logs queen --follow",
-    "dev:bee:fresh": "bee-compose start --full 4 --fresh",
+    "dev:cluster:logs": "pnpm -s dev:cluster logs queen --follow",
     "build": "pnpm -r --workspace-concurrency=1 build",
     "build:lib": "pnpm --filter @snaha/swarm-id build",
     "build:demo": "pnpm --filter @swarm-id/demo build",
@@ -44,7 +40,6 @@
     "test:fork": "pnpm --filter @swarm-id/multichain test:fork"
   },
   "devDependencies": {
-    "@snaha/bee-compose": "^0.1.5",
     "@trivago/prettier-plugin-sort-imports": "^6.0.2",
     "concurrently": "^9.1.2",
     "prettier": "^3.8.1",

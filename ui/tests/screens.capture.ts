@@ -5,7 +5,7 @@
  * review against the Figma designs. NOT part of the test suite — the filename
  * is outside Playwright's default `*.test.ts` glob. Run explicitly:
  *
- *   pnpm dev:bee:detach   # repo root, for the anvil chain
+ *   pnpm dev:local   # repo root, for the anvil chain
  *   pnpm exec playwright test --config=playwright.capture.config.ts
  *
  * PNGs land in `screenshots/`.
@@ -233,7 +233,7 @@ async function seedDrive(page: Page) {
 }
 
 test.describe.configure({ mode: 'serial' })
-test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:bee:detach)')
+test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:local)')
 test.use({ viewport: VIEWPORT })
 
 test('capture: extend, resize and on-chain progress', async ({ page }) => {

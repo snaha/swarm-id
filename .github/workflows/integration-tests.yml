@@ -23,6 +23,9 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          # The cluster is the vendored bee-compose, not the published package.
+          submodules: true
 
       - name: Set up pnpm
         uses: pnpm/action-setup@v4
@@ -38,17 +41,22 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The submodule's own commit, which is what decides the cluster images —
+      # the lockfile no longer says anything about them.
+      - name: Resolve the cluster pin
+        id: cluster-pin
+        run: echo "sha=$(git rev-parse HEAD:vendor/bee-compose)" >> "$GITHUB_OUTPUT"
+
       # Cache the locally-built cluster images (queen, worker, blockchain) so we
       # skip rebuilding them and re-pulling the upstream bases each run. This
       # caches IMAGES ONLY via docker save/load — never volumes, so the chain
-      # state (baked into the image as state.anvil.json) is always fresh.
-      # Keyed on the lockfile so a bee-compose bump invalidates it.
+      # state (baked into the image as state.gnosis.json) is always fresh.
       - name: Cache Bee cluster images
         id: bee-images
         uses: actions/cache@v4
         with:
           path: /tmp/bee-images
-          key: bee-images-${{ hashFiles('pnpm-lock.yaml') }}-v1
+          key: bee-images-${{ steps.cluster-pin.outputs.sha }}-v1
 
       - name: Load cached cluster images
         if: steps.bee-images.outputs.cache-hit == 'true'
@@ -57,7 +65,7 @@ jobs:
           docker images --filter 'reference=bee-compose:*'
 
       - name: Start Bee cluster
-        run: pnpm dev:bee:detach
+        run: pnpm dev:cluster start --full 4
 
       - name: Save cluster images to cache
         if: steps.bee-images.outputs.cache-hit != 'true'
@@ -97,12 +105,12 @@ jobs:
         run: |
           docker ps -a || true
           echo "::group::blockchain logs"
-          pnpm exec bee-compose logs blockchain --tail 200 || true
+          pnpm dev:cluster logs blockchain --tail 200 || true
           echo "::endgroup::"
           echo "::group::queen logs"
-          pnpm exec bee-compose logs queen --tail 300 || true
+          pnpm dev:cluster logs queen --tail 300 || true
           echo "::endgroup::"
 
       - name: Stop Bee cluster
         if: always()
-        run: pnpm dev:bee:stop || true
+        run: pnpm dev:cluster stop || true

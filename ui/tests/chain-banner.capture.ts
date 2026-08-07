@@ -5,7 +5,7 @@
  * funding action, for PR review. NOT part of the test suite — the filename is
  * outside Playwright's default `*.test.ts` glob. Run explicitly:
  *
- *   pnpm dev:bee:detach   # repo root, for the chain
+ *   pnpm dev:local   # repo root, for the chain
  *   pnpm exec playwright test --config=playwright.capture.config.ts
  *
  * PNGs land in `screenshots/`.
@@ -78,7 +78,7 @@ async function stubMainnetRpc(page: Page) {
 }
 
 test.describe.configure({ mode: 'serial' })
-test.skip(!chainUp, 'requires a local chain (pnpm dev:bee:detach)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
 test('dev page banner on the local chain', async ({ page }) => {
   await page.setViewportSize(VIEWPORT)

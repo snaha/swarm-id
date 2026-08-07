@@ -3,7 +3,7 @@
 /**
  * DEV ONLY — stands in for the production payment flow on the local chain.
  *
- * That chain — bee-compose's cluster (`pnpm dev:bee`) or the same snapshot
+ * That chain — the cluster's (`pnpm dev:local`) or the same snapshot
  * standalone (`pnpm dev:chain`) — carries a real BZZ market and the
  * PostageStamp the nodes follow, so the only faked leg is the bridge: xDAI is
  * minted with anvil's setBalance and everything after it (swap, approve,
