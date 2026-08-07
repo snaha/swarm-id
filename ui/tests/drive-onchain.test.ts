@@ -15,7 +15,7 @@ import { devRpc } from '@swarm-id/multichain/dev'
 
 import { completeCreateFlow } from './helpers'
 
-// Defaults to the bee-compose cluster's chain; set CHAIN_RPC_URL=http://localhost:8546
+// Defaults to the bee-compose cluster's chain; set CHAIN_RPC_URL=http://localhost:8545
 // to run the identical suite against the same snapshot standalone
 // (`pnpm dev:chain`).
 const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'

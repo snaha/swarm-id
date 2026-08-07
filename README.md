@@ -175,17 +175,18 @@ pnpm dev:local:fresh   # the same, from a clean chain and empty node state
 pnpm dev:local:stop    # tear the containers down
 ```
 
-| What                         | Where                   |
-| ---------------------------- | ----------------------- |
-| Identity UI                  | `http://localhost:5500` |
-| Demo                         | `http://localhost:3500` |
-| Queen Bee API                | `http://localhost:1633` |
-| Gnosis-side chain (100)      | `http://localhost:9545` |
-| Payment source chain (31337) | `http://localhost:8545` |
+| What                         | Where                    |
+| ---------------------------- | ------------------------ |
+| Identity UI                  | `http://localhost:5500`  |
+| Demo                         | `http://localhost:3500`  |
+| Queen Bee API                | `http://localhost:1633`  |
+| Gnosis-side chain (100)      | `http://localhost:9545`  |
+| Payment source chain (31337) | `http://localhost:31337` |
 
-`:8545` is the source chain deliberately: it is the only one a wallet ever talks to, and the port
-people reach for when adding a local network. The Gnosis-side chain is the cluster's on `:9545`, or
-`pnpm dev:chain` standalone on `:8546`.
+**The quickest way to rehearse a payment is to pay from Gnosis**, which needs no bridge: point the
+wallet at `http://localhost:9545` (chain 100, offered as _Gnosis Chain (fake)_) and the payment is
+a plain xDAI transfer to the batch owner — no source chain and no solver involved at all. Paying
+from _Ethereum Mainnet (fake)_ on `:31337` is the bridged route, and that one does need the solver.
 
 The containers run in the background; the solver, UI and demo run in the foreground so you can
 watch each delivery land. Re-running `dev:local` is a no-op for whatever is already up.

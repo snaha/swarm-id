@@ -134,6 +134,17 @@
       }
       provider = wallet.provider as unknown as EthereumProvider
       walletAddress = address
+
+      // Offer the chain now rather than at Pay. Adding a network is what makes
+      // the wallet show a balance for it at all, so doing it at the end left
+      // people looking at an account that appeared to hold nothing. A refusal
+      // is not fatal — they may mean to pay from somewhere else, and `pay()`
+      // asks again for whichever chain they land on.
+      screen = 'switching'
+      await attempt.guard(
+        switchWalletChain(provider, Number(chainId), rail.chains).catch(() => undefined),
+      )
+
       screen = 'configure'
       void refreshQuote()
     } catch (caught) {

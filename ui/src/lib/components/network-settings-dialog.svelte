@@ -24,7 +24,7 @@
    * the environment you want.
    */
   const LOCAL_BEE_NODE_URL = 'http://localhost:1633/'
-  const LOCAL_GNOSIS_RPC_URLS = ['http://localhost:9545', 'http://localhost:8546']
+  const LOCAL_GNOSIS_RPC_URLS = ['http://localhost:9545', 'http://localhost:8545']
 
   let { onclose }: Props = $props()
 

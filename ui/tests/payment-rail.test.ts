@@ -31,8 +31,10 @@ import { type Page, expect, test } from '@playwright/test'
 import { CHAIN_RPC_URL, addDrive, chainReachable, completeCreateFlow } from './helpers'
 
 /** Where `pnpm dev:source-chain` listens, and the id it reports. */
-const SOURCE_RPC_URL = process.env.SOURCE_RPC_URL ?? 'http://localhost:8545'
+const SOURCE_RPC_URL = process.env.SOURCE_RPC_URL ?? 'http://localhost:31337'
 const SOURCE_CHAIN_ID = 31337
+/** The destination chain, which is also a source you can pay from directly. */
+const GNOSIS_CHAIN_ID = 100
 const BEE_NODE_URL = 'http://localhost:1633/'
 
 /** Deposit → solver fill → swap → createBatch spans a lot of chain time. */
@@ -86,18 +88,26 @@ test.skip(!chainUp || !sourceUp, 'requires both chains and the solver (pnpm dev:
  */
 async function injectPayingWallet(page: Page) {
   await page.addInitScript(
-    ([rpcUrl, address, sourceChainId]) => {
+    ([sourceRpc, gnosisRpc, address, sourceChainId, gnosisChainId]) => {
       const sourceHex = `0x${Number(sourceChainId).toString(16)}`
+      const gnosisHex = `0x${Number(gnosisChainId).toString(16)}`
+      // Both chains a wallet can be asked to pay from: the destination itself
+      // (no bridge) and the stand-in source (bridged). Keyed by the id the app
+      // asks to switch to, so the deposit lands on the chain it names.
+      const endpoints: Record<string, string> = {
+        [sourceHex]: sourceRpc as string,
+        [gnosisHex]: gnosisRpc as string,
+      }
       let chainId = '0x1'
-      // A wallet that has never seen the local chain, which is every wallet the
-      // first time. Until it is added, switching to it fails with 4902 — the
+      // A wallet that has never seen these chains, which is every wallet the
+      // first time. Until one is added, switching to it fails with 4902 — the
       // branch that drives `wallet_addEthereumChain`, and the one a fake that
       // silently accepts the switch never reaches.
-      let sourceChainAdded = false
+      const added = new Set<string>()
       const listeners: Array<(value: unknown) => void> = []
 
       async function rpc(method: string, params: unknown[]) {
-        const response = await fetch(rpcUrl as string, {
+        const response = await fetch(endpoints[chainId] ?? (sourceRpc as string), {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jsonrpc: '2.0', id: Date.now(), method, params }),
@@ -134,13 +144,13 @@ async function injectPayingWallet(page: Page) {
             case 'wallet_requestPermissions':
               return [{ parentCapability: 'eth_accounts' }]
             case 'wallet_addEthereumChain': {
-              const added = params[0] as { chainId?: string; rpcUrls?: string[] } | undefined
-              if (added?.chainId !== sourceHex || !added.rpcUrls?.length) {
-                throw new Error(`refusing to add a chain described as ${JSON.stringify(added)}`)
+              const chain = params[0] as { chainId?: string; rpcUrls?: string[] } | undefined
+              if (!chain?.chainId || !endpoints[chain.chainId] || !chain.rpcUrls?.length) {
+                throw new Error(`refusing to add a chain described as ${JSON.stringify(chain)}`)
               }
               // MetaMask adds and switches in one prompt.
-              sourceChainAdded = true
-              chainId = sourceHex
+              added.add(chain.chainId)
+              chainId = chain.chainId
               for (const listener of listeners) {
                 listener(chainId)
               }
@@ -148,12 +158,12 @@ async function injectPayingWallet(page: Page) {
             }
             case 'wallet_switchEthereumChain': {
               const target = (params[0] as { chainId?: string } | undefined)?.chainId
-              // Only the source chain is actually behind this provider; a
-              // switch anywhere else would be a lie the deposit would expose.
-              if (target !== sourceHex || !sourceChainAdded) {
+              // Only chains actually behind this provider; a switch anywhere
+              // else would be a lie the deposit would expose.
+              if (!target || !endpoints[target] || !added.has(target)) {
                 throw Object.assign(new Error('Unrecognized chain'), { code: 4902 })
               }
-              chainId = sourceHex
+              chainId = target
               for (const listener of listeners) {
                 listener(chainId)
               }
@@ -172,7 +182,7 @@ async function injectPayingWallet(page: Page) {
       }
       Object.defineProperty(window, 'ethereum', { value: provider, writable: true })
     },
-    [SOURCE_RPC_URL, WALLET_ADDRESS, SOURCE_CHAIN_ID] as const,
+    [SOURCE_RPC_URL, CHAIN_RPC_URL, WALLET_ADDRESS, SOURCE_CHAIN_ID, GNOSIS_CHAIN_ID] as const,
   )
 }
 
@@ -235,15 +245,16 @@ async function sourceBalance(address: string): Promise<bigint> {
   return BigInt(((await response.json()) as { result?: string }).result ?? '0x0')
 }
 
-test('buying a drive is paid for through the payment screens, and lands on chain', async ({
-  page,
-}) => {
-  test.setTimeout(PAYMENT_TIMEOUT_MS * 2)
+/**
+ * Buy a drive, paying from `chainId`, and return once the drive exists.
+ *
+ * The two chains take genuinely different routes — Gnosis is a direct transfer
+ * with no bridge, anything else goes through the rail and its solver — but the
+ * screens are identical, which is the point of the seam.
+ */
+async function buyPayingFrom(page: Page, chainId: number) {
   await injectPayingWallet(page)
   await seedPaidEnvironment(page)
-  // The chain is long-lived and other runs have paid into it, so the deposit is
-  // judged by a rise rather than by the balance being non-zero.
-  const depositedBefore = await sourceBalance(LOCAL_SOLVER_ADDRESS)
 
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
@@ -261,38 +272,63 @@ test('buying a drive is paid for through the payment screens, and lands on chain
   })
 
   // 2. Connect, through web3-onboard's own wallet chooser. This is the step
-  //    that was unreachable until the overlay z-index was fixed.
+  //    that was unreachable until the overlay z-index was fixed. Connecting
+  //    also offers the chain to the wallet, so a balance is visible before Pay.
   await page.getByRole('button', { name: 'Connect wallet' }).click()
   await page.getByRole('button', { name: 'MetaMask' }).click()
   await expect(page.getByText('Connected wallet')).toBeVisible({ timeout: PAYMENT_TIMEOUT_MS })
 
-  // 3. A quote has to arrive before Pay is live — the button is disabled until
+  // 3. Pick the chain to pay from, rather than relying on which one leads the
+  //    list — the ordering is a product decision and should not silently
+  //    decide which route this test covers.
+  const dialog = page.getByRole('dialog')
+  await dialog.getByRole('combobox').first().selectOption(String(chainId))
+
+  // 4. A quote has to arrive before Pay is live — the button is disabled until
   //    the rail prices the delivery.
   const pay = page.getByRole('button', { name: 'Pay with your wallet' })
   await expect(pay).toBeEnabled({ timeout: PAYMENT_TIMEOUT_MS })
   // The breakdown is priced in the source token, per the designs.
   await expect(page.getByText(/xBZZ/)).toBeVisible()
 
-  // 4. Pay. The wallet is on mainnet and the payment is on the source chain, so
-  //    this negotiates a network switch before it can send anything.
+  // 5. Pay. The wallet starts on Ethereum mainnet, so this negotiates a network
+  //    switch to whichever chain was chosen before it can send anything.
   await pay.click()
 
-  // 5. The drive appears only after: deposit mined, solver delivered, xDAI
-  //    swapped for BZZ on the real pool, createBatch confirmed.
+  // 6. The drive appears only once the money has become storage: delivered (or
+  //    transferred), swapped for BZZ on the real pool, createBatch confirmed.
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: PAYMENT_TIMEOUT_MS,
   })
+}
 
-  // The deposit was real: the wallet's money actually reached the solver on
-  // the source chain, rather than the flow completing on a faucet transfer.
-  expect(await sourceBalance(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(depositedBefore)
-
-  // And it became storage: the batch exists on chain, owned by this account's
-  // own signer — so the payment bought exactly what the drive claims.
+/** The batch exists on chain and this account's own signer owns it. */
+async function expectDriveOwnedBySigner(page: Page) {
   const drive = await storedDrive(page)
   expect(drive).toBeDefined()
   const owner = await onChainOwner(drive!.batchID)
   expect(owner).toBeDefined()
   const signerAddress = new PrivateKey(drive!.signerKey).publicKey().address().toHex()
   expect(owner!.toLowerCase()).toBe(`0x${signerAddress}`.toLowerCase())
+}
+
+test('paying from Gnosis needs no bridge at all', async ({ page }) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS * 2)
+  // The destination is the source, so the wallet just sends xDAI to the batch
+  // owner. No rail, no solver, no invented prices — the only route that is the
+  // same code locally as in production.
+  await buyPayingFrom(page, GNOSIS_CHAIN_ID)
+  await expectDriveOwnedBySigner(page)
+})
+
+test('paying from another chain goes through the rail and its solver', async ({ page }) => {
+  test.setTimeout(PAYMENT_TIMEOUT_MS * 2)
+  // The chain is long-lived and other runs have paid into it, so the deposit is
+  // judged by a rise rather than by the balance being non-zero.
+  const depositedBefore = await sourceBalance(LOCAL_SOLVER_ADDRESS)
+  await buyPayingFrom(page, SOURCE_CHAIN_ID)
+  // The deposit was real: the wallet's money actually reached the solver on
+  // the source chain, rather than the flow completing on a faucet transfer.
+  expect(await sourceBalance(LOCAL_SOLVER_ADDRESS)).toBeGreaterThan(depositedBefore)
+  await expectDriveOwnedBySigner(page)
 })

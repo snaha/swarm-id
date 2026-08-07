@@ -46,7 +46,7 @@ chain: the hybrid snapshot baked into `vendor/bee-compose` — mainnet's BZZ tok
 pools with the Swarm contracts deployed on top **at their mainnet addresses**, answering as chain
 `100`. So every address in the table above is the address used locally too, which is what makes the
 local runs worth anything. It is reached at `http://localhost:9545` (the Bee cluster's chain) or
-`http://localhost:8546` (the same snapshot standalone), and funded from a baked dev faucet rather
+`http://localhost:8545` (the same snapshot standalone), and funded from a baked dev faucet rather
 than a queen EOA. See `vendor/bee-compose/blockchain/HYBRID-CHAIN.md` and the README's
 "Paying for storage locally".
 

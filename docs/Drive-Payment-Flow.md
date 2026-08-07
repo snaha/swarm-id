@@ -57,8 +57,15 @@ PostageStamp ABI contains only `createBatch`). Instead:
 Source chains (mirror the widget config): Ethereum, Polygon, Optimism, Arbitrum, Base, Gnosis.
 Token lists are a static table per chain (native + the obvious stablecoin) rather than Relay's
 chain/currency metadata as first planned — the metadata call bought nothing for a six-chain,
-two-token picker. Paying from Gnosis itself still goes through the same Relay quote (Relay handles
-same-chain swaps) — one code path.
+two-token picker.
+
+**Paying from Gnosis itself does NOT go through Relay** — an early version did, which paid a
+cross-chain network to move money across zero chains. The destination is the source there, so the
+wallet simply sends xDAI to the batch-owner address and the operation continues into the same swap
+(`gnosis-direct.ts`). It is the cheapest route by a wide margin and the one with the fewest moving
+parts, so it leads the chain list; `resolve-rail.ts` composes the rails and lets it claim Gnosis
+from Relay. It is also the only route that is genuinely the same code locally, since the local
+chain answers as Gnosis — no solver, no second chain, no invented prices.
 
 **Since implementation: the rail is a seam.** Relay is one implementation of a `PaymentRail`
 interface, not the only possible one, because Relay cannot run locally at all — it is an
