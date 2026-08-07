@@ -26,6 +26,8 @@ import {
   type PaymentRail,
   type PaymentToken,
   type QuoteRequest,
+  displayAmount,
+  displayUsd,
 } from '$lib/payment/payment-rail'
 
 const GNOSIS_CHAIN_ID = 100
@@ -120,10 +122,13 @@ async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
     recipient: request.recipient,
   })
   const currencyIn = quote.details?.currencyIn
+  // Relay's own figures are raw, not display-ready: `amountFormatted` is the
+  // full wei expansion and `amountUsd` carries six decimals. Rendered as-is
+  // they sat above breakdown rows rounded to four digits.
   return {
     handle: quote,
-    amountFormatted: currencyIn?.amountFormatted ?? '',
-    amountUsd: currencyIn?.amountUsd ?? '',
+    amountFormatted: displayAmount(currencyIn?.amountFormatted ?? ''),
+    amountUsd: displayUsd(currencyIn?.amountUsd ?? ''),
   }
 }
 

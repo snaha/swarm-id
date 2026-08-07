@@ -44,6 +44,8 @@ import {
   type PaymentRail,
   type PaymentToken,
   type QuoteRequest,
+  displayAmount,
+  displayUsd,
 } from '$lib/payment/payment-rail'
 import { postageChain, probeChainId } from '$lib/payment/postage-onchain'
 
@@ -131,22 +133,6 @@ function isLocalHandle(handle: unknown): handle is LocalPaymentHandle {
 }
 
 /**
- * Significant digits in a displayed price. Relay hands back an already-short
- * figure; a raw wei division does not, and eighteen decimals in the "estimated
- * cost" line next to a four-digit breakdown row reads as a different rail.
- */
-const AMOUNT_PRECISION_DIGITS = 4
-const USD_DECIMALS = 2
-
-/**
- * Trailing zeros carry no information in a price — "0.012" beats "0.0120000".
- * Guarded on a decimal point, so a whole number keeps its magnitude.
- */
-function trimZeros(value: string): string {
-  return value.includes('.') ? value.replace(/\.?0+$/, '') : value
-}
-
-/**
  * Price a local payment. Pure and synchronous — there is no quoting service to
  * ask, only the fixed rate. xDAI is a dollar stablecoin, so the USD figure is
  * the xDAI amount itself.
@@ -158,11 +144,11 @@ export function quoteLocalPayment(request: QuoteRequest): PaymentQuote {
     xdaiWei: request.xdaiWei,
     amountSourceWei,
   }
-  const amount = Number(formatUnits(amountSourceWei, WEI_DECIMALS))
   return {
     handle,
-    amountFormatted: trimZeros(amount.toPrecision(AMOUNT_PRECISION_DIGITS)),
-    amountUsd: Number(formatUnits(request.xdaiWei, WEI_DECIMALS)).toFixed(USD_DECIMALS),
+    amountFormatted: displayAmount(formatUnits(amountSourceWei, WEI_DECIMALS)),
+    // xDAI is a dollar stablecoin, so the USD figure is the xDAI amount itself.
+    amountUsd: displayUsd(formatUnits(request.xdaiWei, WEI_DECIMALS)),
   }
 }
 

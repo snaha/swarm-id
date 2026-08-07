@@ -49,6 +49,36 @@ export interface QuoteRequest {
   xdaiWei: bigint
 }
 
+/** Significant digits in a displayed price. */
+const AMOUNT_PRECISION_DIGITS = 4
+const USD_DECIMALS = 2
+
+/**
+ * A source-token price as the screens show it: a few significant digits, no
+ * trailing zeros.
+ *
+ * Normalising here rather than trusting each rail is the point. Rails hand back
+ * wildly different precision — Relay's `amountFormatted` carries the full wei
+ * expansion (`0.000043465998997394` for a native token), the dev rail derives
+ * its own — and the pay screen puts this figure directly above breakdown rows
+ * that ARE rounded. Eighteen decimals over four reads as a different product
+ * depending on which rail happens to be behind it.
+ */
+export function displayAmount(value: string | number): string {
+  const amount = Number(value)
+  if (!Number.isFinite(amount) || amount === 0) {
+    return ''
+  }
+  const rounded = amount.toPrecision(AMOUNT_PRECISION_DIGITS)
+  return rounded.includes('.') ? rounded.replace(/\.?0+$/, '') : rounded
+}
+
+/** A USD total as the screens show it — cents, since that is what it is. */
+export function displayUsd(value: string | number): string {
+  const amount = Number(value)
+  return Number.isFinite(amount) ? amount.toFixed(USD_DECIMALS) : ''
+}
+
 export interface PaymentQuote {
   /**
    * Rail-private payload, consumed only by the rail that produced it — Relay
@@ -56,9 +86,12 @@ export interface PaymentQuote {
    * second rail can exist at all.
    */
   handle: unknown
-  /** Source-token amount the user pays, formatted (e.g. "0.00000872"). */
+  /**
+   * Source-token amount the user pays, DISPLAY-READY (e.g. "0.00000872").
+   * Produce it with {@link displayAmount} — a rail's own figure is not it.
+   */
   amountFormatted: string
-  /** USD value of the payment, formatted (e.g. "0.17"). */
+  /** USD value of the payment, display-ready (e.g. "0.17") — {@link displayUsd}. */
   amountUsd: string
 }
 
