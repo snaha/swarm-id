@@ -24,7 +24,11 @@
     previewResize,
     runResize,
   } from '$lib/payment/drive-operation'
-  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
+  import {
+    PaymentCancelledError,
+    createFundingRequester,
+    describeStep,
+  } from '$lib/payment/funding-request.svelte'
   import { type ResizePlan, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -159,6 +163,12 @@
       if (!attempt.current) {
         return
       }
+      // Backing out of the payment is a choice, not a failure — return to the
+      // form with the selection intact rather than reporting an error.
+      if (caught instanceof PaymentCancelledError) {
+        phase = 'form'
+        return
+      }
       // A pending size increase is not a loss — the payment landed and the
       // lifespan grew, so it gets the benign presentation and its own wording
       // rather than the generic failure surface (#392).
@@ -174,6 +184,7 @@
   <PaymentDialog
     need={funding.pending.need}
     rail={funding.pending.rail}
+    fundingQuote={funding.pending.quote}
     onPaid={funding.resolve}
     onCancel={funding.cancel}
   />

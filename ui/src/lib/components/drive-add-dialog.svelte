@@ -28,7 +28,11 @@
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import { runPurchase } from '$lib/payment/drive-operation'
-  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
+  import {
+    PaymentCancelledError,
+    createFundingRequester,
+    describeStep,
+  } from '$lib/payment/funding-request.svelte'
   import { derivePostageSigner, stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -177,6 +181,12 @@
       if (!attempt.current) {
         return
       }
+      // Backing out of the payment is a choice, not a failure — return to the
+      // form with the selection intact rather than reporting an error.
+      if (caught instanceof PaymentCancelledError) {
+        phase = 'form'
+        return
+      }
       errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not buy the drive.'
       phase = 'error'
@@ -240,6 +250,7 @@
   <PaymentDialog
     need={funding.pending.need}
     rail={funding.pending.rail}
+    fundingQuote={funding.pending.quote}
     onPaid={funding.resolve}
     onCancel={funding.cancel}
   />

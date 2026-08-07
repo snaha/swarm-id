@@ -6,9 +6,10 @@
  * followed by a depth increase).
  *
  * Funding is a seam, not a step: the caller supplies `requestFunding`, which
- * either opens the payment flow or — on the local dev chain — transfers from
- * the queen account. Whatever it does, it must leave the owner address holding
- * the requested funds; the runner re-checks and proceeds.
+ * either opens the payment flow or — on a dev chain with no source chain to
+ * sign on — transfers from the chain's baked faucet. Whatever it does, it must
+ * leave the owner address holding the requested funds; the runner re-checks
+ * and proceeds.
  *
  * Resume is chain truth. Both runners re-read the batch before spending, so an
  * operation interrupted by a closed tab or a failed second transaction is

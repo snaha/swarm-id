@@ -18,7 +18,7 @@
   import { Select } from '$lib/components/ui/select'
   import { onboard } from '$lib/crypto/onboard'
   import type { FundingNeed } from '$lib/payment/drive-operation'
-  import { type FundingQuote, quoteFunding } from '$lib/payment/funding'
+  import type { FundingQuote } from '$lib/payment/funding'
   import {
     type EthereumProvider,
     type PaymentQuote,
@@ -43,12 +43,19 @@
     need: FundingNeed
     /** The rail this payment is carried by — chains, tokens, quoting, execution. */
     rail: PaymentRail
+    /**
+     * The Gnosis-side quote this payment must satisfy, priced by the caller.
+     * Handed down rather than re-derived here: the amount the rail is asked to
+     * deliver has to be the same one that is later swapped, and two independent
+     * quotes of the same need drift as the pool moves.
+     */
+    fundingQuote: FundingQuote
     /** Resolves the operation's funding request once the payment lands. */
     onPaid: () => void
     onCancel: () => void
   }
 
-  let { need, rail, onPaid, onCancel }: Props = $props()
+  let { need, rail, fundingQuote, onPaid, onCancel }: Props = $props()
 
   type Screen = 'method' | 'connecting' | 'configure' | 'switching' | 'approving' | 'relaying'
 
@@ -65,7 +72,6 @@
   // user's starting selection, not tracked.
   let chainId = $state(untrack(() => String(rail.chains[0].id)))
   let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
-  let fundingQuote = $state<FundingQuote | undefined>(undefined)
   let paymentQuote = $state<PaymentQuote | undefined>(undefined)
   let quoting = $state(false)
   let relayStatus = $state('Cross-swap xDAI on Relay')
@@ -99,21 +105,20 @@
    * What one leg of the funding costs in the token the user is paying with —
    * its share of the quoted total, as the designs show each breakdown row
    * priced in the source token.
+   *
+   * Shares are taken against the sum of the legs, not the amount delivered:
+   * when xDAI stranded at the owner address covers part of the operation the
+   * two differ, and dividing by the smaller figure would make the rows add up
+   * to more than the user is actually paying.
    */
   function shareOfTotal(partWei: bigint): string {
-    const total = fundingQuote?.xdaiWei ?? 0n
+    const total = fundingQuote.xdaiForBzzWei + fundingQuote.xdaiForGasWei
     const paid = Number(paymentQuote?.amountFormatted ?? '')
     if (total === 0n || !Number.isFinite(paid) || paid === 0) {
       return ''
     }
     const share = (paid * Number(partWei)) / Number(total)
     return `${share.toPrecision(AMOUNT_DIGITS).replace(/\.?0+$/, '')} ${tokenSymbol}`
-  }
-
-  /** Price the Gnosis side once — the same xDAI target drives every quote. */
-  async function loadFundingQuote() {
-    fundingQuote ??= await quoteFunding(need)
-    return fundingQuote
   }
 
   async function connect() {
@@ -150,14 +155,13 @@
     paymentQuote = undefined
     errorMessage = ''
     try {
-      const funding = await attempt.guard(loadFundingQuote())
       const quote = await attempt.guard(
         rail.quote({
           chainId: Number(chainId),
           currency: tokenAddress,
           user: walletAddress,
           recipient: need.destination,
-          xdaiWei: funding.xdaiWei,
+          xdaiWei: fundingQuote.xdaiWei,
         }),
       )
       paymentQuote = quote
@@ -315,22 +319,20 @@
             {/if}
           </span>
         </div>
-        {#if fundingQuote}
-          <div class="text-muted-foreground mt-2 flex flex-col gap-1 text-xs">
-            {#if fundingQuote.bzzPlur > 0n}
-              <div class="flex items-center justify-between gap-2">
-                <span>{formatAmount(fundingQuote.bzzPlur, BZZ_DECIMALS)} xBZZ</span>
-                <span>{shareOfTotal(fundingQuote.xdaiForBzzWei)}</span>
-              </div>
-            {/if}
-            {#if fundingQuote.xdaiForGasWei > 0n}
-              <div class="flex items-center justify-between gap-2">
-                <span>{formatAmount(fundingQuote.xdaiForGasWei, GNOSIS_DECIMALS)} xDAI</span>
-                <span>{shareOfTotal(fundingQuote.xdaiForGasWei)}</span>
-              </div>
-            {/if}
-          </div>
-        {/if}
+        <div class="text-muted-foreground mt-2 flex flex-col gap-1 text-xs">
+          {#if fundingQuote.bzzPlur > 0n}
+            <div class="flex items-center justify-between gap-2">
+              <span>{formatAmount(fundingQuote.bzzPlur, BZZ_DECIMALS)} xBZZ</span>
+              <span>{shareOfTotal(fundingQuote.xdaiForBzzWei)}</span>
+            </div>
+          {/if}
+          {#if fundingQuote.xdaiForGasWei > 0n}
+            <div class="flex items-center justify-between gap-2">
+              <span>{formatAmount(fundingQuote.xdaiForGasWei, GNOSIS_DECIMALS)} xDAI</span>
+              <span>{shareOfTotal(fundingQuote.xdaiForGasWei)}</span>
+            </div>
+          {/if}
+        </div>
       </div>
 
       {#if paymentQuote?.amountUsd}

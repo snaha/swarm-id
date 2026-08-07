@@ -26,7 +26,11 @@
   } from '$lib/drives'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { type OperationStep, runExtend } from '$lib/payment/drive-operation'
-  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
+  import {
+    PaymentCancelledError,
+    createFundingRequester,
+    describeStep,
+  } from '$lib/payment/funding-request.svelte'
   import { stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -50,8 +54,8 @@
   let currentPrice = $state<bigint | undefined>(undefined)
   let step = $state<OperationStep>('checking')
   const attempts = createAttemptTracker()
-  // Owns the funding seam: on the dev chain it transfers from the queen, in
-  // production it surfaces the payment dialog and resolves once paid.
+  // Owns the funding seam: it surfaces the payment dialog and resolves once
+  // paid, or transfers from the chain's faucet where there is no rail at all.
   const funding = createFundingRequester(() => account)
 
   const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
@@ -115,6 +119,12 @@
       if (!attempt.current) {
         return
       }
+      // Backing out of the payment is a choice, not a failure — return to the
+      // form with the selection intact rather than reporting an error.
+      if (caught instanceof PaymentCancelledError) {
+        phase = 'form'
+        return
+      }
       errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not extend the lifespan.'
       phase = 'error'
@@ -126,6 +136,7 @@
   <PaymentDialog
     need={funding.pending.need}
     rail={funding.pending.rail}
+    fundingQuote={funding.pending.quote}
     onPaid={funding.resolve}
     onCancel={funding.cancel}
   />
