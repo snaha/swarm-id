@@ -23,7 +23,7 @@
 import { DEV_XDAI_FUNDING, fundPostageSigner } from '$lib/dev/chain-funding'
 import {
   LOCAL_SOURCE_CHAIN_ID,
-  LOCAL_SOURCE_RPC_URL,
+  localSourceRpcUrl,
   resolveLocalRail,
 } from '$lib/dev/local-payment-rail'
 import type { FundingNeed } from '$lib/payment/drive-operation'
@@ -40,7 +40,7 @@ export const devWalletChains = [
     id: `0x${LOCAL_SOURCE_CHAIN_ID.toString(16)}`,
     token: 'ETH',
     label: 'Ethereum Mainnet (fake)',
-    rpcUrl: LOCAL_SOURCE_RPC_URL,
+    rpcUrl: localSourceRpcUrl(),
   },
 ]
 

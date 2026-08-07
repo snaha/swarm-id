@@ -9,6 +9,12 @@
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
+  import {
+    DEFAULT_SOURCE_RPC_URL,
+    LOCAL_SOURCE_CHAIN_ID,
+    SOURCE_RPC_OVERRIDE_KEY,
+    localSourceRpcUrl,
+  } from '$lib/dev/local-payment-rail'
   import { chainIdentity, probeChainId } from '$lib/payment/postage-onchain'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
@@ -30,6 +36,7 @@
 
   let beeNodeUrl = $state(networkSettingsStore.beeNodeUrl)
   let gnosisRpcUrl = $state(networkSettingsStore.gnosisRpcUrl)
+  let sourceRpcUrl = $state(localSourceRpcUrl())
 
   // Same http(s)-only validator the store's schema uses, so a value that saves
   // here also survives the next load (a scheme-less `localhost:1633` fails both).
@@ -49,9 +56,29 @@
   const connected = chainIdentity(networkSettingsStore.gnosisRpcUrl).then(
     (identity) =>
       identity.isMainnet
-        ? { label: 'Gnosis mainnet', tone: 'text-muted-foreground' }
-        : { label: 'Local dev chain — funds here are not real', tone: 'font-medium' },
+        ? { label: 'Gnosis Chain', tone: 'text-muted-foreground' }
+        : { label: 'Gnosis Chain (fake) — funds here are not real', tone: 'font-medium' },
     () => ({ label: 'Not reachable', tone: 'text-destructive' }),
+  )
+
+  /**
+   * The payment source chain, checked the same way. Dev builds only: it exists
+   * so a bridged payment can be rehearsed, and a production build has Relay's
+   * real chains instead. Reported by chain id rather than genesis, since it
+   * stands in for a chain it is not pretending to be.
+   */
+  const sourceConnected = probeChainId(localSourceRpcUrl()).then(
+    (chainId) =>
+      chainId === LOCAL_SOURCE_CHAIN_ID
+        ? { label: 'Ethereum Mainnet (fake)', tone: 'font-medium' }
+        : {
+            label: `Unexpected chain ${chainId} — expected ${LOCAL_SOURCE_CHAIN_ID}`,
+            tone: 'text-destructive',
+          },
+    () => ({
+      label: 'Not reachable — bridged payments will be unavailable',
+      tone: 'text-destructive',
+    }),
   )
 
   function save() {
@@ -62,6 +89,11 @@
       beeNodeUrl: beeNodeUrl.trim(),
       gnosisRpcUrl: gnosisRpcUrl.trim(),
     })
+    if (import.meta.env.DEV) {
+      // Kept out of the shared settings record: it is dev-only and never syncs.
+      // The rail reads it per access, so this takes effect without a reload.
+      localStorage.setItem(SOURCE_RPC_OVERRIDE_KEY, sourceRpcUrl.trim())
+    }
     onclose()
   }
 
@@ -106,7 +138,7 @@
   </div>
 
   <div class="flex w-full flex-col gap-2">
-    <label for="gnosis-rpc-url" class="text-sm font-medium">RPC endpoint</label>
+    <label for="gnosis-rpc-url" class="text-sm font-medium">Gnosis Chain RPC</label>
     <Input
       id="gnosis-rpc-url"
       bind:value={gnosisRpcUrl}
@@ -122,6 +154,24 @@
       {/await}
     {/if}
   </div>
+
+  {#if import.meta.env.DEV}
+    <div class="flex w-full flex-col gap-2">
+      <label for="source-rpc-url" class="text-sm font-medium"> Ethereum Mainnet RPC (fake) </label>
+      <Input
+        id="source-rpc-url"
+        bind:value={sourceRpcUrl}
+        placeholder={DEFAULT_SOURCE_RPC_URL}
+        class="font-mono"
+      />
+      {#await sourceConnected then chain}
+        <p class="text-xs {chain.tone}">Connected to: {chain.label}</p>
+      {/await}
+      <p class="text-muted-foreground text-xs">
+        Only for rehearsing a bridged payment. Paying from Gnosis needs no source chain at all.
+      </p>
+    </div>
+  {/if}
 
   <div class="flex w-full items-center gap-2">
     <Button disabled={!canSave} onclick={save}>Save</Button>

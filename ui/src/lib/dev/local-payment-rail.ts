@@ -50,7 +50,7 @@ import {
 import { postageChain, probeChainId } from '$lib/payment/postage-onchain'
 
 /** Where `pnpm dev:source-chain` listens. */
-const DEFAULT_SOURCE_RPC_URL = 'http://localhost:31337'
+export const DEFAULT_SOURCE_RPC_URL = 'http://localhost:31337'
 
 /**
  * Lets a test pin the source chain rather than inherit whatever happens to be
@@ -58,11 +58,14 @@ const DEFAULT_SOURCE_RPC_URL = 'http://localhost:31337'
  * having `pnpm dev:local` up — so the same suite behaves differently on a
  * laptop and in CI, which is the worst kind of flake.
  */
-const SOURCE_RPC_OVERRIDE_KEY = 'swarm-id-dev-source-rpc'
+export const SOURCE_RPC_OVERRIDE_KEY = 'swarm-id-dev-source-rpc'
 
-export const LOCAL_SOURCE_RPC_URL =
-  (typeof localStorage !== 'undefined' && localStorage.getItem(SOURCE_RPC_OVERRIDE_KEY)) ||
-  DEFAULT_SOURCE_RPC_URL
+export function localSourceRpcUrl(): string {
+  return (
+    (typeof localStorage !== 'undefined' && localStorage.getItem(SOURCE_RPC_OVERRIDE_KEY)) ||
+    DEFAULT_SOURCE_RPC_URL
+  )
+}
 
 /**
  * Deliberately anvil's own default, not 1: with the rail mocked the source
@@ -101,12 +104,14 @@ const DELIVERY_TIMEOUT_MS = 120_000
 const PAYER_FUNDING_WEI = 10n ** 19n // 10 ETH
 const GAS_HEADROOM_WEI = 10n ** 16n // 0.01 ETH
 
-const localSourceChain: Chain = defineChain({
-  id: LOCAL_SOURCE_CHAIN_ID,
-  name: 'Ethereum Mainnet (fake)',
-  nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: WEI_DECIMALS },
-  rpcUrls: { default: { http: [LOCAL_SOURCE_RPC_URL] } },
-})
+function localSourceChain(): Chain {
+  return defineChain({
+    id: LOCAL_SOURCE_CHAIN_ID,
+    name: 'Ethereum Mainnet (fake)',
+    nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: WEI_DECIMALS },
+    rpcUrls: { default: { http: [localSourceRpcUrl()] } },
+  })
+}
 
 const LOCAL_TOKENS: PaymentToken[] = [
   { address: NATIVE_CURRENCY, symbol: 'ETH', name: 'Ether', decimals: WEI_DECIMALS },
@@ -153,7 +158,7 @@ export function quoteLocalPayment(request: QuoteRequest): PaymentQuote {
 }
 
 const sourceRpc = (method: string, params: unknown[]): Promise<unknown> =>
-  devRpc(LOCAL_SOURCE_RPC_URL, method, params)
+  devRpc(localSourceRpcUrl(), method, params)
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms))
@@ -211,7 +216,7 @@ async function waitForDeposit(transactionHash: string): Promise<void> {
     {
       intervalMs: RECEIPT_POLL_MS,
       timeoutMs: RECEIPT_TIMEOUT_MS,
-      message: `The payment was never seen on the local source chain. Check that your wallet's network is ${LOCAL_SOURCE_RPC_URL} (chain ${LOCAL_SOURCE_CHAIN_ID}).`,
+      message: `The payment was never seen on the local source chain. Check that your wallet's network is ${localSourceRpcUrl()} (chain ${LOCAL_SOURCE_CHAIN_ID}).`,
     },
   )
 }
@@ -286,7 +291,11 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
 }
 
 const localPaymentRail: PaymentRail = {
-  chains: [localSourceChain],
+  get chains() {
+    // Read per access, so editing the endpoint in Network settings takes effect
+    // without a reload — and so this module has no top-level side effect.
+    return [localSourceChain()]
+  },
   tokens: (chainId) => (chainId === LOCAL_SOURCE_CHAIN_ID ? LOCAL_TOKENS : []),
   quote: (request) => Promise.resolve(quoteLocalPayment(request)),
   execute: executeLocalPayment,
@@ -301,6 +310,6 @@ const localPaymentRail: PaymentRail = {
  * an unrelated service on the port is not mistaken for the source chain.
  */
 export async function resolveLocalRail(): Promise<PaymentRail | undefined> {
-  const chainId = await probeChainId(LOCAL_SOURCE_RPC_URL).catch(() => undefined)
+  const chainId = await probeChainId(localSourceRpcUrl()).catch(() => undefined)
   return chainId === LOCAL_SOURCE_CHAIN_ID ? localPaymentRail : undefined
 }

@@ -13,7 +13,7 @@
     uploadSOC,
   } from '@snaha/swarm-id'
   import { gnosisMainnetSettings } from '@swarm-id/multichain'
-  import { formatUnits, parseUnits } from 'viem'
+  import { type Chain, formatUnits, parseUnits } from 'viem'
 
   import { resolve } from '$app/paths'
 
@@ -29,10 +29,13 @@
     devChainFunds,
     fundPostageSigner,
   } from '$lib/dev/chain-funding'
+  import { localSourceRpcUrl } from '$lib/dev/local-payment-rail'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import { type EthereumProvider, switchWalletChain } from '$lib/payment/payment-rail'
   import { chainIdentity, postageChain } from '$lib/payment/postage-onchain'
+  import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
@@ -157,6 +160,46 @@
       void refreshFunds()
     }
   })
+
+  // RAW: these descriptors are handed to a wallet, which structured-clones its
+  // arguments, and a `$state` proxy cannot be cloned.
+  let walletChains = $state.raw<Chain[]>([])
+  let walletMessage = $state('')
+
+  // Read from the resolved rails rather than listed here, so this offers
+  // exactly the chains the payment screens will ask the wallet for.
+  $effect(() => {
+    if (activeTab === 'chain') {
+      void resolvePaymentRail().then((rail) => {
+        walletChains = rail ? [...rail.chains] : []
+      })
+    }
+  })
+
+  /**
+   * Add a chain to the injected wallet, and switch to it.
+   *
+   * Adding is what makes a wallet show a balance for a network at all, so doing
+   * it here means the payment screens are reached with something already
+   * visible rather than an account that looks empty.
+   */
+  async function addChainToWallet(chain: Chain) {
+    walletMessage = ''
+    const injected = (window as { ethereum?: EthereumProvider }).ethereum
+    if (!injected) {
+      walletMessage = '❌ No injected wallet found — is MetaMask installed and enabled here?'
+      return
+    }
+    try {
+      // MetaMask ignores chain requests from a site it has never been connected
+      // to, so ask for accounts first even though nothing here needs one.
+      await injected.request({ method: 'eth_requestAccounts' })
+      await switchWalletChain(injected, chain.id, walletChains)
+      walletMessage = `✅ ${chain.name} added — the wallet is on it now.`
+    } catch (e) {
+      walletMessage = `❌ ${e instanceof Error ? e.message : String(e)}`
+    }
+  }
 
   async function sendFromFaucet() {
     await runChainTool('Sent from faucet', async (key) => {
@@ -717,7 +760,7 @@ Check console logs for details:
         </div>
         <div class="flex items-center gap-2">
           <StatusDot endpoint={networkSettingsStore.gnosisRpcUrl} method="json-rpc" />
-          <span class="font-mono text-sm">Chain RPC:</span>
+          <span class="font-mono text-sm">Gnosis Chain RPC (fake):</span>
           <a
             href={networkSettingsStore.gnosisRpcUrl}
             target="_blank"
@@ -725,6 +768,17 @@ Check console logs for details:
             class="text-primary font-mono text-sm">{networkSettingsStore.gnosisRpcUrl}</a
           >
           <CopyButton text={networkSettingsStore.gnosisRpcUrl} />
+        </div>
+        <div class="flex items-center gap-2">
+          <StatusDot endpoint={localSourceRpcUrl()} method="json-rpc" />
+          <span class="font-mono text-sm">Ethereum Mainnet RPC (fake):</span>
+          <a
+            href={localSourceRpcUrl()}
+            target="_blank"
+            rel="noopener"
+            class="text-primary font-mono text-sm">{localSourceRpcUrl()}</a
+          >
+          <CopyButton text={localSourceRpcUrl()} />
         </div>
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </div>
@@ -963,6 +1017,32 @@ Check console logs for details:
           Refresh
         </Button>
       </div>
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Wallet networks</h3>
+      <p class="text-muted-foreground text-sm">
+        Adds these chains to MetaMask, so a balance shows before you reach the payment screens.
+        <strong>Gnosis Chain (fake)</strong> is the one to add first — paying from it is a plain transfer
+        to the batch owner, with no bridge and no solver in the way. The other is only needed to rehearse
+        a bridged payment.
+      </p>
+      {#if walletChains.length === 0}
+        <p class="text-muted-foreground text-sm">
+          No payment chains resolved — is the Gnosis RPC in Network settings reachable?
+        </p>
+      {:else}
+        <div class="flex flex-wrap items-center gap-2">
+          {#each walletChains as chain (chain.id)}
+            <Button variant="secondary" onclick={() => addChainToWallet(chain)}>
+              Add {chain.name}
+            </Button>
+          {/each}
+        </div>
+      {/if}
+      {#if walletMessage}
+        <p class="font-mono text-sm">{walletMessage}</p>
+      {/if}
 
       <div class="bg-border my-4 h-px"></div>
 
