@@ -379,6 +379,7 @@ Synchronous accessor for the current connection state. Populated by the proxy as
 | `identity.name`      | `string`                                        | Display name of the identity                                                                                |
 | `identity.address`   | `string`                                        | Ethereum address associated with the identity                                                               |
 | `identity.publicKey` | `string \| undefined`                           | Public key of the identity                                                                                  |
+| `identity.avatar`    | `Avatar`                                        | Ready-to-render account avatar. See [Avatars](#avatars)                                                     |
 | `appKey`             | `object \| undefined`                           | The app-specific key details                                                                                |
 | `appKey.address`     | `string`                                        | Ethereum address of the app key                                                                             |
 | `appKey.publicKey`   | `string`                                        | Public key of the app key                                                                                   |
@@ -1474,6 +1475,8 @@ import type {
   ClientOptions,
   AuthStatus,
   ConnectionInfo,
+  Avatar,
+  AvatarSource,
   PostageBatch,
   NodeInfo,
   AppMetadata,
@@ -1509,6 +1512,70 @@ import type {
   RestoreAccountResult,
 } from '@snaha/swarm-id'
 ```
+
+---
+
+## Avatars
+
+Every account has an avatar, generated from its identity id — the same image Swarm ID shows for that account, so the user recognises it in both places. It is handed to you as an image at a URL rather than as markup, so the shape still holds if an avatar ever comes from somewhere other than the generator.
+
+It arrives already resolved on every connection snapshot — there is nothing to call:
+
+```typescript
+const identity = client.connectionInfo.identity
+if (identity) {
+  img.src = identity.avatar.url
+}
+```
+
+**`Avatar`:**
+
+| Property | Type          | Description                                                                             |
+| -------- | ------------- | --------------------------------------------------------------------------------------- |
+| `source` | `"generated"` | Where the image came from. Only `generated`, derived from the identity id, exists today |
+| `url`    | `string`      | Renderable as an `<img>` source; a `data:` URL for generated avatars                    |
+
+Branch on `source` rather than assuming the URL always wraps an inline SVG — that keeps your code correct if another kind of image is ever added.
+
+### `getAvatar(options?)`
+
+The avatar at a specific size. Most apps do not need this — `identity.avatar` is already resolved and, being vector today, scales to any size with CSS. Reach for it when you need the image rendered at a particular pixel size. It is async so that honouring a size may involve fetching, which anything but the generated avatar would.
+
+**Parameters:**
+
+| Parameter      | Type     | Description                               |
+| -------------- | -------- | ----------------------------------------- |
+| `options.size` | `number` | Width and height in pixels (default `40`) |
+
+**Returns:** `Promise<Avatar | undefined>` — `undefined` when no identity is connected
+
+```typescript
+const avatar = await client.getAvatar({ size: 128 })
+```
+
+### `generatedAvatarSvg(seed, size?)`
+
+The generated avatar as a standalone SVG string, for callers that want to inline the markup instead of pointing an `<img>` at a URL. Derived from the seed alone: no network access, no other dependency.
+
+**Parameters:**
+
+| Parameter | Type     | Description                                          |
+| --------- | -------- | ---------------------------------------------------- |
+| `seed`    | `string` | Value the avatar is derived from — use `identity.id` |
+| `size`    | `number` | Width and height in pixels (default `40`)            |
+
+**Returns:** `string` — a complete `<svg>` element
+
+```typescript
+import { generatedAvatarSvg } from '@snaha/swarm-id'
+
+const identity = client.connectionInfo.identity
+if (identity) {
+  document.getElementById('avatar').innerHTML = generatedAvatarSvg(identity.id, 48)
+}
+```
+
+The same seed always produces the same image, so it is safe to render on every `onConnectionChange` without caching. `generatedAvatar(seed, size?)` is also exported, returning the same image as an `Avatar` with a `data:` URL.
 
 ---
 

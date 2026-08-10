@@ -5,6 +5,7 @@ import type {
   ClientOptions,
   ConnectOptions,
   AuthStatus,
+  Avatar,
   ConnectionInfo,
   UploadResult,
   FileData,
@@ -82,6 +83,7 @@ import {
   AppMetadataSchema,
 } from "./types"
 import { EthAddress, Identifier, PrivateKey, Topic } from "@ethersphere/bee-js"
+import { generatedAvatar } from "./utils/avatar"
 import { uint8ArrayToHex } from "./utils/hex"
 import { buildAuthUrl } from "./utils/url"
 import { isWebKit } from "./utils/browser"
@@ -917,6 +919,31 @@ export class SwarmIdClient {
       throw new Error("SwarmIdClient connectionInfo not yet available.")
     }
     return this.lastConnectionInfo
+  }
+
+  /**
+   * Avatar of the connected identity at a specific size.
+   *
+   * Most callers want `connectionInfo.identity.avatar` instead — it is already
+   * resolved on every snapshot and needs no call. Reach for this only to
+   * render at a size the default does not suit. Async so that honouring a size
+   * may involve fetching, which anything but the generated avatar would.
+   *
+   * @param options.size - Width and height in pixels
+   * @returns The avatar, or `undefined` when no identity is connected
+   */
+  async getAvatar(
+    options: { size?: number } = {},
+  ): Promise<Avatar | undefined> {
+    const { identity } = this.connectionInfo
+    if (!identity) {
+      return undefined
+    }
+    // Only a generated avatar can be re-rendered from the id; any other kind
+    // is served as-is.
+    return options.size !== undefined && identity.avatar.source === "generated"
+      ? generatedAvatar(identity.id, options.size)
+      : identity.avatar
   }
 
   // ============================================================================

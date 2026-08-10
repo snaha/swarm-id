@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect } from "vitest"
+import { generatedAvatar } from "./avatar"
 import { connectionInfoEqual } from "./connection-info"
 import type { ConnectionInfo } from "../types"
 
@@ -10,6 +11,7 @@ const IDENTITY = {
   name: "alice",
   address: "0x1111111111111111111111111111111111111111",
   publicKey: "0x02" + "ab".repeat(32),
+  avatar: generatedAvatar("0x1111111111111111111111111111111111111111"),
 }
 
 const APP_KEY = {

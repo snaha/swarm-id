@@ -3,7 +3,11 @@
 
 import { describe, it, expect } from "vitest"
 
-import { DownloadOptionsSchema, ParentToIframeMessageSchema } from "./types"
+import {
+  DownloadOptionsSchema,
+  IframeToParentMessageSchema,
+  ParentToIframeMessageSchema,
+} from "./types"
 
 const REFERENCE = "a".repeat(64)
 
@@ -57,5 +61,39 @@ describe("download messages with plain options (#420)", () => {
       type: message.type,
       options: { timeoutMs: 5000 },
     })
+  })
+})
+
+describe("connectionInfoChanged identity (#230)", () => {
+  // Wire-valid shapes: bare hex, no 0x prefix.
+  const IDENTITY = {
+    id: "4".repeat(40),
+    name: "carol",
+    address: "4".repeat(40),
+    publicKey: "02" + "ef".repeat(32),
+  }
+  const MESSAGE = {
+    type: "connectionInfoChanged" as const,
+    canUpload: true,
+    uploadMode: "user-stamp" as const,
+    identity: IDENTITY,
+  }
+
+  it("accepts an identity carrying an avatar", () => {
+    expect(() =>
+      IframeToParentMessageSchema.parse({
+        ...MESSAGE,
+        identity: {
+          ...IDENTITY,
+          avatar: { source: "generated", url: "data:image/svg+xml,%3Csvg%3E" },
+        },
+      }),
+    ).not.toThrow()
+  })
+
+  it("rejects an identity with no avatar", () => {
+    // Every identity has an avatar; the proxy is the only writer and always
+    // sends one, so a message without it is malformed rather than legacy.
+    expect(() => IframeToParentMessageSchema.parse(MESSAGE)).toThrow()
   })
 })

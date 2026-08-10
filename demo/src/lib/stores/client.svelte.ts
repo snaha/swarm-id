@@ -5,6 +5,7 @@ import {
   SwarmIdClient,
   formatTTL,
   DEFAULT_BEE_NODE_URL,
+  type Avatar,
   type ConnectionInfo,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
@@ -26,6 +27,7 @@ interface IdentityInfo {
   name: string
   address: string
   publicKey?: string
+  avatar: Avatar
 }
 
 interface AppKeyInfo {
@@ -146,9 +148,11 @@ async function onConnectionChange(info: ConnectionInfo) {
   storagePartitioned = info.storagePartitioned ?? false
   uploadMode = info.uploadMode ?? 'unavailable'
 
-  logStore.log(
-    `Connection info: canUpload=${info.canUpload}, identity=${JSON.stringify(info.identity)}`,
-  )
+  // The avatar is logged by source only — its data URL would swamp the line.
+  const loggableIdentity = info.identity
+    ? JSON.stringify({ ...info.identity, avatar: info.identity.avatar.source })
+    : undefined
+  logStore.log(`Connection info: canUpload=${info.canUpload}, identity=${loggableIdentity}`)
   partition = info.partition
 
   if (info.storagePartitioned) {
@@ -161,13 +165,13 @@ async function onConnectionChange(info: ConnectionInfo) {
   }
 
   if (info.identity) {
-    const { id, name, address, publicKey } = info.identity
+    const { id, name, address, publicKey, avatar } = info.identity
     if (currentIdentityId && currentIdentityId !== id) {
       logStore.log(`Identity switched from "${currentIdentityName}" to "${name}"`)
     }
     currentIdentityId = id
     currentIdentityName = name
-    identity = { id, name, address, publicKey }
+    identity = { id, name, address, publicKey, avatar }
   } else {
     if (currentIdentityId) {
       logStore.log(`Disconnected from identity "${currentIdentityName}"`)

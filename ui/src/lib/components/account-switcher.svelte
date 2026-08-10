@@ -6,9 +6,9 @@
 <script lang="ts">
   import { resolve } from '$app/paths'
 
+  import AccountAvatar from '$lib/components/account-avatar.svelte'
   import UserAddFill from '$lib/components/icons/user-add-fill.svelte'
   import UserUnfollowLine from '$lib/components/icons/user-unfollow-line.svelte'
-  import Polycon from '$lib/components/polycon.svelte'
   import SignBackInDialog from '$lib/components/sign-back-in-dialog.svelte'
   import SignOutDialog from '$lib/components/sign-out-dialog.svelte'
   import { Badge } from '$lib/components/ui/badge'
@@ -27,6 +27,9 @@
   }
 
   let { account, onmanage }: Props = $props()
+
+  const AVATAR_SIZE = 36
+  const PANEL_AVATAR_SIZE = 48
 
   let open = $state(false)
   /** Replaces the panel actions with the create/import choice. */
@@ -69,20 +72,37 @@
 
 <DropdownMenu bind:open class="top-0 right-0 flex w-80 flex-col gap-4 p-2.5">
   {#snippet trigger(props)}
-    <Button variant="ghost" class="h-10 gap-2 px-2" aria-label="Switch account" {...props}>
-      <span class="flex flex-col items-end">
+    <!-- Frame 159-14402: the avatar leads, 36px square, 8px before the name. -->
+    <!-- align-middle: the avatar fills the trigger's height, so without it the
+         inline-flex button sits on the text baseline and its wrapper keeps a
+         descender gap below. -->
+    <Button
+      variant="ghost"
+      class="h-9 gap-2 px-2 align-middle"
+      aria-label="Switch account"
+      {...props}
+    >
+      <AccountAvatar
+        value={account.id.toHex()}
+        size={AVATAR_SIZE}
+        class="shrink-0 overflow-hidden rounded-lg"
+      />
+      <span class="flex flex-col items-start">
         <span class="text-sm font-medium">{account.name}</span>
         <span class="text-muted-foreground text-xs font-normal">
           {truncateAddress(account.id.toChecksum())}
         </span>
       </span>
-      <Polycon value={account.id.toHex()} size={32} class="shrink-0 overflow-hidden rounded-lg" />
     </Button>
   {/snippet}
 
   <div class="flex flex-col gap-2">
     <div class="flex flex-col items-center gap-2 pt-0.5">
-      <Polycon value={account.id.toHex()} size={48} class="overflow-hidden rounded-lg" />
+      <AccountAvatar
+        value={account.id.toHex()}
+        size={PANEL_AVATAR_SIZE}
+        class="overflow-hidden rounded-lg"
+      />
       <div class="flex flex-col items-center">
         <p class="text-sm font-medium">{account.name}</p>
         <p class="text-muted-foreground text-xs">{truncateAddress(account.id.toChecksum())}</p>
@@ -111,7 +131,7 @@
       <div class="flex flex-col">
         {#each others as candidate (candidate.id.toHex())}
           <DropdownMenuItem class="h-auto gap-2 p-1" onclick={() => select(candidate)}>
-            <Polycon
+            <AccountAvatar
               value={candidate.id.toHex()}
               size={36}
               class="shrink-0 overflow-hidden rounded-md"

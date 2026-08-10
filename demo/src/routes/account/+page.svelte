@@ -36,11 +36,19 @@
         </CardDescription>
       </CardHeader>
       <div class="px-6 pb-6 space-y-3 p-6">
-        <div>
-          <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
-            Name
+        <div class="flex items-center gap-3">
+          <img
+            src={clientStore.identity.avatar.url}
+            alt=""
+            class="size-12 shrink-0 rounded-lg"
+            data-avatar-source={clientStore.identity.avatar.source}
+          />
+          <div>
+            <div class="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-1">
+              Name
+            </div>
+            <div class="text-sm text-foreground">{clientStore.identity.name}</div>
           </div>
-          <div class="text-sm text-foreground">{clientStore.identity.name}</div>
         </div>
 
         <div>

@@ -569,6 +569,39 @@ export const UploadModeSchema = z.enum([
 
 export type UploadMode = z.infer<typeof UploadModeSchema>
 
+/**
+ * Where an avatar image came from. Only `generated` — derived from the
+ * identity id — exists today; a union so another kind of image could be
+ * added without reshaping the value.
+ */
+export const AvatarSourceSchema = z.enum(["generated"])
+
+export type AvatarSource = z.infer<typeof AvatarSourceSchema>
+
+export const AvatarSchema = z.object({
+  source: AvatarSourceSchema,
+  /**
+   * Renderable as an `<img>` source; a `data:` URL for generated avatars. A
+   * URL rather than markup, so the shape does not assume the image is an SVG
+   * the caller could regenerate.
+   */
+  url: z.string(),
+})
+
+export type Avatar = z.infer<typeof AvatarSchema>
+
+/** The dApp-visible identity, shared by the snapshot and the wire message. */
+export const ConnectionIdentitySchema = z.object({
+  id: z.string(),
+  name: z.string(),
+  address: AddressSchema,
+  publicKey: CompressedPublicKeySchema.optional(),
+  /** Ready-to-render account avatar — every identity has one. */
+  avatar: AvatarSchema,
+})
+
+export type ConnectionIdentity = z.infer<typeof ConnectionIdentitySchema>
+
 export const ConnectionInfoSchema = z.object({
   /** Whether uploads are available (has postage stamp + signer key + not storage-partitioned, or subsidised gateway configured) */
   canUpload: z.boolean(),
@@ -582,14 +615,7 @@ export const ConnectionInfoSchema = z.object({
    * pre-first-upload) or for legacy single-device accounts.
    */
   partition: z.number().int().min(0).optional(),
-  identity: z
-    .object({
-      id: z.string(),
-      name: z.string(),
-      address: AddressSchema,
-      publicKey: CompressedPublicKeySchema.optional(),
-    })
-    .optional(),
+  identity: ConnectionIdentitySchema.optional(),
   /** App-specific key derived from identity + app origin (use publicKey for ACT grantee operations) */
   appKey: z
     .object({
@@ -1199,14 +1225,7 @@ export const ConnectionInfoChangedMessageSchema = z.object({
   canUpload: z.boolean(),
   storagePartitioned: z.boolean().optional(),
   uploadMode: UploadModeSchema.optional(),
-  identity: z
-    .object({
-      id: z.string(),
-      name: z.string(),
-      address: AddressSchema,
-      publicKey: CompressedPublicKeySchema.optional(),
-    })
-    .optional(),
+  identity: ConnectionIdentitySchema.optional(),
   appKey: z
     .object({
       address: AddressSchema,

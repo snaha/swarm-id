@@ -10,8 +10,8 @@
   import { goto } from '$app/navigation'
   import { resolve } from '$app/paths'
 
+  import AccountAvatar from '$lib/components/account-avatar.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
-  import Polycon from '$lib/components/polycon.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Input } from '$lib/components/ui/input'
   import { generatePhrase, walletFromPhrase } from '$lib/crypto/mnemonic'
@@ -19,9 +19,9 @@
   import routes from '$lib/routes'
   import { sessionStore } from '$lib/stores/session.svelte'
 
-  const IDENTICON_SIZE = 32
+  const AVATAR_SIZE = 32
 
-  // Generate the recovery phrase up front so the default name and identicon can
+  // Generate the recovery phrase up front so the default name and avatar can
   // derive deterministically from the resulting account id (the address) — the
   // same id/name every device sees for this phrase. Reuse the draft phrase so
   // navigating back does not regenerate it.
@@ -62,9 +62,9 @@
         <label for="name" class="text-sm font-medium">Name</label>
         <div class="flex w-full items-center gap-2">
           <Input id="name" bind:value={name} placeholder={defaultName} />
-          <Polycon
+          <AccountAvatar
             value={accountId}
-            size={IDENTICON_SIZE}
+            size={AVATAR_SIZE}
             class="shrink-0 overflow-hidden rounded-lg"
           />
         </div>

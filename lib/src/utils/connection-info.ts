@@ -25,6 +25,10 @@ export function connectionInfoEqual(
     a.identity?.name === b.identity?.name &&
     a.identity?.address === b.identity?.address &&
     a.identity?.publicKey === b.identity?.publicKey &&
+    // Compared explicitly rather than assumed to follow the id: an avatar not
+    // derived from the id could change while the id stays put.
+    a.identity?.avatar.source === b.identity?.avatar.source &&
+    a.identity?.avatar.url === b.identity?.avatar.url &&
     a.appKey?.address === b.appKey?.address &&
     a.appKey?.publicKey === b.appKey?.publicKey &&
     a.partition === b.partition
