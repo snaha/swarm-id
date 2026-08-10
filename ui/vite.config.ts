@@ -18,8 +18,10 @@ import { stampWorkerDev } from '../lib/dev/vite-stamp-worker.js'
  * plugin re-resolves what it rewrote with `skipSelf`, so a `pre` plugin does
  * get the absolute path — which is what this matches.
  *
- * Verify with a build, not by reading: `grep -rl anvil_setBalance ui/build`
- * must come back empty.
+ * Verify with a build, not by reading: `grep -rl anvil_setBalance ui/build` must
+ * match nothing outside `_app/immutable/nodes/`, the `/dev` route's own chunk.
+ * CI runs exactly that after `pnpm build` — the seam is unenforceable by
+ * inspection, and it has been silently broken by a single stray import before.
  */
 function stubDevFunding(): Plugin {
   const stub = fileURLToPath(

@@ -5,7 +5,10 @@
  * demo's connect popup, buying a drive, and the network/rail seeding that
  * decides which chain and which payment arrangement a suite runs against.
  */
+import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect } from '@playwright/test'
+import { gnosisMainnetSettings } from '@swarm-id/multichain'
+import { fundLocalAccount } from '@swarm-id/multichain/dev'
 
 export const PASSWORD = 'testpassword123'
 
@@ -108,18 +111,85 @@ export async function addDrive(page: Page) {
 export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 
 /**
- * Pin the payment rail OFF for a suite: with no source chain reachable there is
- * no rail, so funding falls back to the faucet and no wallet is needed. Without
- * this a developer running `pnpm dev:local` would get the payment screens and
- * the same test would behave differently than in CI.
+ * One depth-17 drive at the default one-year lifespan costs ~2 BZZ, measured
+ * against the baked chain; three is headroom for price drift. The xDAI is ten
+ * times the operation's fixed gas budget, which is what `fundingShortfall`
+ * compares against — under it, a need is raised however much BZZ is there.
  */
-export async function pinNoPaymentRail(page: Page) {
-  await page.addInitScript(() =>
-    // A port nothing listens on — the probe fails fast and the rail resolves
-    // to undefined.
-    localStorage.setItem('swarm-id-dev-source-rpc', 'http://127.0.0.1:1'),
+const DRIVE_FUNDING = {
+  xdai: 5n * 10n ** 16n, // 0.05 xDAI
+  bzzPlur: 3n * 10n ** 16n, // 3 BZZ (16 decimals)
+}
+
+/**
+ * Put money in the account's postage signer, out of band, before it buys.
+ *
+ * This replaces pinning the payment rail off, which used to make the app fall
+ * back to a silent faucet transfer — a settlement no production build can
+ * perform, quietly covering every purchase in these suites. Nothing in the app
+ * does that any more, so the money has to be real and has to arrive from
+ * somewhere: here, from the same chain faucet a developer uses by hand on
+ * `/dev`. The purchase then finds the funds already at the owner address,
+ * `ensureFunded` short-circuits, and no payment screen opens — for the honest
+ * reason that nothing needs paying for, not because a rail was suppressed.
+ *
+ * Must run after the account exists (its derivation key is read from storage)
+ * and before the operation that spends. Suites that assert a FAILED purchase
+ * deliberately skip it.
+ */
+export async function fundPostageSigner(page: Page) {
+  const to = await postageSignerAddress(page)
+  await fundLocalAccount(
+    { to, ...DRIVE_FUNDING },
+    gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] }),
   )
 }
+
+/**
+ * Where that money has to land: the account's postage signer, derived the way
+ * the app derives it — HMAC-SHA256 over the label `postage-signer`, keyed by
+ * the account's derivation key (`lib/src/utils/key-derivation.ts`).
+ *
+ * Derived inside the page rather than here because the lib ships one bundle and
+ * it is the browser one: importing `derivePostageSignerKey` into the Node test
+ * process pulls a browser build of bee-js and dies on `window is not defined`.
+ * The page has both WebCrypto and the account, so it is also where the question
+ * belongs. If the derivation ever changes, every funded purchase fails loudly —
+ * the money lands at an address the operation is not looking at, so it raises a
+ * funding need and the payment screen opens over the test.
+ */
+async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
+  const signerKey = await page.evaluate(async () => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { derivationKey?: string }[]
+    }
+    const derivationKey = doc.data?.[0]?.derivationKey
+    if (!derivationKey) {
+      return undefined
+    }
+    const keyBytes = Uint8Array.from(
+      (derivationKey.match(/../g) ?? []).map((byte) => parseInt(byte, 16)),
+    )
+    const key = await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    )
+    const signature = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode('postage-signer'),
+    )
+    return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  })
+  if (!signerKey) {
+    throw new Error('No account in storage — create one before funding its signer.')
+  }
+  return new PrivateKey(signerKey).publicKey().address().toChecksum() as `0x${string}`
+}
+
 const PROBE_TIMEOUT_MS = 2000
 
 /** Whether a local chain is answering, so a suite can skip rather than fail. */

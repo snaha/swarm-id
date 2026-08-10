@@ -8,8 +8,8 @@ import {
   addDrive,
   chainReachable,
   completeCreateFlow,
+  fundPostageSigner,
   openConnectPopup,
-  pinNoPaymentRail,
   seedLocalChain,
 } from './helpers'
 
@@ -18,7 +18,6 @@ import {
 const chainUp = await chainReachable()
 test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
-test.beforeEach(({ page }) => pinNoPaymentRail(page))
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
@@ -70,6 +69,7 @@ test('first connect with a single drive confirms without picker or pitch', async
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
+  await fundPostageSigner(page)
   await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
@@ -113,6 +113,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
   // mock enabled, no widget popup).
   await seedLocalChain(page)
   await page.goto('/')
+  await fundPostageSigner(page)
   await addDrive(page)
   // Drive cards are labelled "Drive <4 hex chars>" (batch-ID-derived name).
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
@@ -152,6 +153,7 @@ test('connect flow shows the done screen variants and closes the popup', async (
 
   // A second drive, so the NEXT (first-again) connect must ask which drive
   // the app should use.
+  await fundPostageSigner(page)
   await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
     timeout: DRIVE_SETTLE_TIMEOUT_MS,

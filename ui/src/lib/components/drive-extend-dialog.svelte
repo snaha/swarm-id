@@ -25,13 +25,14 @@
     remainingLifespanSeconds,
   } from '$lib/drives'
   import { currentChainPrice } from '$lib/payment/chain-price'
+  import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import { type OperationStep, runExtend } from '$lib/payment/drive-operation'
   import {
     PaymentCancelledError,
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
+  import { stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   const MS_PER_SECOND = 1000
@@ -55,7 +56,7 @@
   let step = $state<OperationStep>('checking')
   const attempts = createAttemptTracker()
   // Owns the funding seam: it surfaces the payment dialog and resolves once
-  // paid, or transfers from the chain's faucet where there is no rail at all.
+  // paid. No rail is an error — nothing here settles an operation for free.
   const funding = createFundingRequester(() => account)
 
   const addedSeconds = $derived(lifespanToSeconds(Number(count), unit))
@@ -68,12 +69,17 @@
     ),
   )
 
-  const estimateBzz = $derived.by(() => {
-    if (!changed || currentPrice === undefined) {
-      return undefined
-    }
-    return stampCostBzz(drive.depth, stampAmountForSeconds(currentPrice, addedSeconds))
-  })
+  /** Per-chunk PLUR the top-up would cost at the current price. */
+  const topUpPerChunk = $derived(
+    changed && currentPrice !== undefined
+      ? stampAmountForSeconds(currentPrice, addedSeconds)
+      : undefined,
+  )
+
+  // The top-up is spread over the drive's CURRENT depth — nothing dilutes here.
+  const estimate = createCostEstimate(() =>
+    topUpPerChunk === undefined ? undefined : { depth: drive.depth, amountPerChunk: topUpPerChunk },
+  )
 
   // Best-effort prefetch for the live estimate; the run fetches for real, so a
   // miss here only hides the estimate.
@@ -177,8 +183,8 @@
 
     {#if !changed}
       <DriveInfoStrip label="No changes made yet" />
-    {:else if estimateBzz}
-      <DriveInfoStrip label="Estimated cost" value={`~${estimateBzz} BZZ`} />
+    {:else if estimate.value}
+      <DriveInfoStrip label="Estimated cost" value={`~${estimate.value}`} />
     {:else}
       <DriveInfoStrip label="Final cost is shown at payment" />
     {/if}

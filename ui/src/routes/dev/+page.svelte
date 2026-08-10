@@ -23,13 +23,14 @@
   import { Select } from '$lib/components/ui/select'
   import { Tabs } from '$lib/components/ui/tabs'
   import {
+    ANVIL_ACCOUNT,
     type FundsRow,
     createOwnedBatchOnChain,
     createTestDrive,
     devChainFunds,
-    fundPostageSigner,
+    sendFromFaucet,
   } from '$lib/dev/chain-funding'
-  import { localSourceRpcUrl } from '$lib/dev/local-payment-rail'
+  import { localSourceRpcUrl, sourceEthBalance } from '$lib/dev/local-payment-rail'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
@@ -122,13 +123,71 @@
 
   // Faucet panel. Amounts are what you type — no hidden multiplier, since the
   // point of the panel is to hand over an exact amount and watch it land.
+  const ETH_DECIMALS = 18
   const XDAI_DECIMALS = 18
   const BZZ_DECIMALS = 16
   const AMOUNT_PRECISION = 4
+  /** Stands in where a chain has no figure to give, rather than a lying zero. */
+  const NO_FIGURE = '—'
+  let faucetTo = $state('')
+  let faucetEth = $state('1')
   let faucetXdai = $state('0.05')
   let faucetBzz = $state('1')
-  let funds = $state<{ faucet: FundsRow; signer: FundsRow } | undefined>(undefined)
+  let faucetBusy = $state(false)
+  let faucetMessage = $state('')
+  let faucetError = $state('')
+  let funds = $state<{ faucet: FundsRow; recipient: FundsRow } | undefined>(undefined)
+  /** Undefined means the source chain never answered — NOT a zero balance. */
+  let sourceEth = $state<bigint | undefined>(undefined)
   let fundsError = $state('')
+
+  // The typed recipient, normalized. Undefined while it is not an address,
+  // which is also what disables Send.
+  const faucetRecipient = $derived.by(() => {
+    try {
+      return new EthAddress(faucetTo.trim()).toChecksum()
+    } catch {
+      return undefined
+    }
+  })
+
+  /**
+   * Read one amount box. Anything that is not a positive number means "skip
+   * this leg" rather than an error — a half-typed figure in one box must not
+   * take down the send, or the panel, with it.
+   */
+  function faucetAmount(typed: string, decimals: number): bigint {
+    const value = typed.trim()
+    if (!(Number(value) > 0)) return 0n
+    try {
+      return parseUnits(value, decimals)
+    } catch {
+      return 0n
+    }
+  }
+
+  // What a send actually delivers, so the confirmation never claims a leg that
+  // did not happen — and so Send is disabled when every box is empty.
+  const faucetLegs = $derived(
+    [
+      { typed: faucetEth, symbol: 'ETH', value: faucetAmount(faucetEth, ETH_DECIMALS) },
+      { typed: faucetXdai, symbol: 'xDAI', value: faucetAmount(faucetXdai, XDAI_DECIMALS) },
+      { typed: faucetBzz, symbol: 'BZZ', value: faucetAmount(faucetBzz, BZZ_DECIMALS) },
+    ].filter((leg) => leg.value > 0n),
+  )
+
+  // Point the faucet at the selected account's signer, and re-point it when the
+  // account changes — reaching for Send with the previous account's address
+  // still in the box is the trap this panel would otherwise set. Only the value
+  // we filled in is ever replaced; anything typed or pasted is left alone.
+  let prefilledSigner = ''
+  $effect(() => {
+    if (!accountSigner) return
+    const owner = new EthAddress(accountSigner.owner).toChecksum()
+    if (owner === prefilledSigner) return
+    if (faucetTo === '' || faucetTo === prefilledSigner) faucetTo = owner
+    prefilledSigner = owner
+  })
 
   function formatAmount(value: bigint, decimals: number): string {
     return Number(formatUnits(value, decimals)).toLocaleString(undefined, {
@@ -137,29 +196,115 @@
   }
 
   async function refreshFunds() {
-    const account = selectedAccountId
-      ? accountsStore.getAccount(new EthAddress(selectedAccountId))
-      : undefined
-    if (!account) {
+    const requested = faucetRecipient
+    if (!requested) {
       funds = undefined
+      sourceEth = undefined
+      fundsError = ''
       return
     }
-    try {
-      funds = await devChainFunds(account.derivationKey)
+    const [gnosis, eth] = await Promise.allSettled([
+      devChainFunds(requested),
+      sourceEthBalance(requested),
+    ])
+    // Typing an address fires this per keystroke and two reads can land out of
+    // order — never show one address's balances under another.
+    if (faucetRecipient !== requested) return
+    if (gnosis.status === 'fulfilled') {
+      funds = gnosis.value
       fundsError = ''
-    } catch (e) {
+    } else {
       funds = undefined
-      fundsError = e instanceof Error ? e.message : String(e)
+      fundsError = gnosis.reason instanceof Error ? gnosis.reason.message : String(gnosis.reason)
     }
+    // A missing source chain is the ordinary case here — most sessions never
+    // start one — so it reads as a dash in the table, not an error over the
+    // Gnosis figures that did arrive.
+    sourceEth = eth.status === 'fulfilled' ? eth.value : undefined
   }
 
-  // Re-read whenever the account changes; the Chain tab is the only consumer,
-  // so this costs two eth_calls on a tab most sessions never open.
+  // Re-read whenever the recipient changes; the Chain tab is the only consumer,
+  // so this costs nothing on a tab most sessions never open.
   $effect(() => {
-    if (activeTab === 'chain' && selectedAccountId) {
+    if (activeTab === 'chain' && faucetRecipient) {
       void refreshFunds()
     }
   })
+
+  /** The rows of the balances table, formatted. */
+  const balanceRows = $derived.by(() => {
+    const rows: { label: string; address: string; eth: string; xdai: string; bzz: string }[] = []
+    if (faucetRecipient) {
+      rows.push({
+        label: 'Recipient',
+        address: faucetRecipient,
+        eth: sourceEth === undefined ? NO_FIGURE : formatAmount(sourceEth, ETH_DECIMALS),
+        xdai: funds ? formatAmount(funds.recipient.xdai, XDAI_DECIMALS) : NO_FIGURE,
+        bzz: funds ? formatAmount(funds.recipient.bzz, BZZ_DECIMALS) : NO_FIGURE,
+      })
+    }
+    if (funds) {
+      rows.push({
+        label: 'Faucet',
+        address: funds.faucet.address,
+        // The faucet holds nothing on the source chain and never will: there is
+        // no account to stock there, since anvil mints on request.
+        eth: NO_FIGURE,
+        xdai: formatAmount(funds.faucet.xdai, XDAI_DECIMALS),
+        bzz: formatAmount(funds.faucet.bzz, BZZ_DECIMALS),
+      })
+    }
+    return rows
+  })
+
+  function fillFromSigner() {
+    if (accountSigner) faucetTo = new EthAddress(accountSigner.owner).toChecksum()
+  }
+
+  /**
+   * Fill the recipient from the injected wallet — the account a rehearsed
+   * payment is signed with, and so the one that needs source-chain ETH.
+   */
+  async function fillFromWallet() {
+    faucetError = ''
+    const injected = (window as { ethereum?: EthereumProvider }).ethereum
+    if (!injected) {
+      faucetError = 'No injected wallet found — is MetaMask installed and enabled here?'
+      return
+    }
+    try {
+      const [account] = (await injected.request({ method: 'eth_requestAccounts' })) as string[]
+      if (!account) {
+        faucetError = 'The wallet returned no account.'
+        return
+      }
+      faucetTo = new EthAddress(account).toChecksum()
+    } catch (error) {
+      faucetError = error instanceof Error ? error.message : String(error)
+    }
+  }
+
+  async function sendFaucetFunds() {
+    const to = faucetRecipient
+    if (!to) return
+    faucetBusy = true
+    faucetMessage = ''
+    faucetError = ''
+    const delivered = faucetLegs.map((leg) => `${leg.typed.trim()} ${leg.symbol}`).join(' + ')
+    try {
+      await sendFromFaucet(to, {
+        eth: faucetAmount(faucetEth, ETH_DECIMALS),
+        xdai: faucetAmount(faucetXdai, XDAI_DECIMALS),
+        bzzPlur: faucetAmount(faucetBzz, BZZ_DECIMALS),
+      })
+      faucetMessage = `✅ Sent ${delivered} to ${to}`
+    } catch (error) {
+      faucetError = error instanceof Error ? error.message : String(error)
+    } finally {
+      faucetBusy = false
+    }
+    await refreshFunds()
+  }
 
   // RAW: these descriptors are handed to a wallet, which structured-clones its
   // arguments, and a `$state` proxy cannot be cloned.
@@ -199,17 +344,6 @@
     } catch (e) {
       walletMessage = `❌ ${e instanceof Error ? e.message : String(e)}`
     }
-  }
-
-  async function sendFromFaucet() {
-    await runChainTool('Sent from faucet', async (key) => {
-      await fundPostageSigner(key, {
-        xdai: parseUnits(faucetXdai || '0', XDAI_DECIMALS),
-        bzzPlur: parseUnits(faucetBzz || '0', BZZ_DECIMALS),
-      })
-      return `${faucetXdai || '0'} xDAI + ${faucetBzz || '0'} BZZ`
-    })
-    await refreshFunds()
   }
 
   async function runChainTool(
@@ -970,53 +1104,120 @@ Check console logs for details:
       <p class="text-muted-foreground text-sm">
         <strong>Add drive</strong> and the paid drive operations all buy for real, against whichever chain
         this page is pointed at — there is no simulated settlement any more, and no outcome to choose.
-        What differs off mainnet is only how the money gets to the batch owner: with a local source chain
-        running, through the payment screens and the local solver; without one, straight from the faucet
-        above.
+        Money always reaches the batch owner through a payment the user makes: from Gnosis directly, or
+        — with a local source chain running — through the payment screens and the local solver. Nothing
+        in the app settles an operation out of the faucet below; that is yours to do here, before an operation
+        needs it.
       </p>
 
       <div class="bg-border my-4 h-px"></div>
 
       <h3 class="text-lg font-semibold">Faucet</h3>
       <p class="text-muted-foreground text-sm">
-        The chain's dev faucet, stocked by the bake. Sending is a plain transfer: the BZZ pool here
-        is real and thin, and only a purchase is worth spending it on.
+        Hands <em>any</em> address money on either dev chain. On Gnosis that is a plain transfer from
+        the faucet the bake stocked — the BZZ pool here is real and thin, and only a purchase is worth
+        spending it on. The fake mainnet has no faucet to transfer from, so ETH is minted there instead;
+        that is the chain a rehearsed payment is signed on, so it is the wallet account you connect with
+        that needs it.
       </p>
+
+      <div class="flex flex-col gap-2">
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Recipient</span>
+          <Input bind:value={faucetTo} placeholder="0x… any address" />
+        </label>
+        <div class="flex flex-wrap items-center gap-2">
+          <Button variant="secondary" size="sm" disabled={!accountSigner} onclick={fillFromSigner}>
+            Use account signer
+          </Button>
+          <Button variant="secondary" size="sm" onclick={fillFromWallet}>
+            Use connected wallet
+          </Button>
+          <Button variant="secondary" size="sm" onclick={() => (faucetTo = ANVIL_ACCOUNT.address)}>
+            Use anvil account 0
+          </Button>
+          {#if faucetTo.trim() && !faucetRecipient}
+            <span class="text-destructive text-sm">Not an address.</span>
+          {/if}
+        </div>
+      </div>
+
+      <div class={CARD_CLASS}>
+        <p class="text-muted-foreground text-sm">
+          <strong>Anvil account 0</strong> starts with 10 000 native on each chain — 10 000 ETH on the
+          fake mainnet, 10 000 xDAI on Gnosis — and no BZZ, which is the bake faucet's to give. Pick it
+          above to see that in the table. Importing its key into MetaMask is the shortcut to a wallet
+          that already holds both.
+        </p>
+        <p class="text-muted-foreground text-sm">
+          <strong>Nothing tops a wallet up during a payment.</strong> The bridged rail used to mint the
+          payer 10 ETH on its way past; it no longer does, because no production rail can hand the payer
+          money — and while one did, a wallet that could not afford the payment was the one state this
+          could never reach. Fund the wallet you connect with here, out of band, the way a testnet faucet
+          works. An empty one now fails on send, where it would live.
+        </p>
+        {@render copyRow('Address', ANVIL_ACCOUNT.address)}
+        {@render copyRow('Private key', ANVIL_ACCOUNT.privateKey)}
+      </div>
 
       {#if fundsError}
         <p class="text-destructive text-sm">{fundsError}</p>
-      {:else if funds}
-        <div class="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-4 gap-y-1 text-sm">
-          {#each [{ label: 'Faucet', row: funds.faucet }, { label: 'Signer', row: funds.signer }] as entry (entry.label)}
-            <span class="text-muted-foreground">{entry.label}</span>
-            <span class="font-mono text-xs break-all">{entry.row.address}</span>
-            <span class="text-right font-mono"
-              >{formatAmount(entry.row.xdai, XDAI_DECIMALS)} xDAI</span
-            >
-            <span class="text-right font-mono">{formatAmount(entry.row.bzz, BZZ_DECIMALS)} BZZ</span
-            >
+      {/if}
+      {#if balanceRows.length}
+        <div class="grid grid-cols-[auto_1fr_auto_auto_auto] items-center gap-x-4 gap-y-1 text-sm">
+          <span></span>
+          <span></span>
+          <span class="text-muted-foreground text-right text-xs">ETH</span>
+          <span class="text-muted-foreground text-right text-xs">xDAI</span>
+          <span class="text-muted-foreground text-right text-xs">BZZ</span>
+          {#each balanceRows as row (row.label)}
+            <span class="text-muted-foreground">{row.label}</span>
+            <span class="font-mono text-xs break-all">{row.address}</span>
+            <span class="text-right font-mono">{row.eth}</span>
+            <span class="text-right font-mono">{row.xdai}</span>
+            <span class="text-right font-mono">{row.bzz}</span>
           {/each}
         </div>
       {:else}
-        <p class="text-muted-foreground text-sm">Select an account to see balances.</p>
+        <p class="text-muted-foreground text-sm">Enter a recipient to see balances.</p>
+      {/if}
+      {#if faucetRecipient && sourceEth === undefined}
+        <p class="text-muted-foreground text-xs">
+          No ETH figure — nothing is answering at
+          <span class="font-mono">{localSourceRpcUrl()}</span>. Start it with
+          <span class="font-mono">pnpm dev:source-chain</span>.
+        </p>
       {/if}
 
       <div class="flex flex-wrap items-end gap-2">
         <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>xDAI</span>
+          <span class={LABEL_TEXT_CLASS}>ETH (fake mainnet)</span>
+          <Input bind:value={faucetEth} class="w-32" />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>xDAI (Gnosis)</span>
           <Input bind:value={faucetXdai} class="w-32" />
         </label>
         <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>BZZ</span>
+          <span class={LABEL_TEXT_CLASS}>BZZ (Gnosis)</span>
           <Input bind:value={faucetBzz} class="w-32" />
         </label>
-        <Button disabled={chainToolBusy || !selectedAccountId} onclick={sendFromFaucet}>
-          Send to signer
+        <Button
+          disabled={faucetBusy || !faucetRecipient || faucetLegs.length === 0}
+          onclick={sendFaucetFunds}
+        >
+          {faucetBusy ? 'Sending…' : 'Send'}
         </Button>
-        <Button variant="secondary" disabled={!selectedAccountId} onclick={refreshFunds}>
+        <Button variant="secondary" disabled={!faucetRecipient} onclick={refreshFunds}>
           Refresh
         </Button>
       </div>
+      {#if faucetMessage}
+        <p class="text-sm break-all">{faucetMessage}</p>
+      {/if}
+      {#if faucetError}
+        <p class="text-destructive text-sm">{faucetError}</p>
+      {/if}
 
       <div class="bg-border my-4 h-px"></div>
 

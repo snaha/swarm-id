@@ -3,13 +3,12 @@
 /**
  * What `dev-funding.ts` becomes in a production build — see that file for why.
  *
- * Nothing here imports anything: being importless is the whole point, since it
- * is what lets Rollup leave the dev tree out of the shipped bundle. Both
- * answers are "there is no dev arrangement here", which is also true: a
- * production build resolves the Relay rail whatever chain it is pointed at, so
- * neither of these is ever reached.
+ * Nothing here imports anything at runtime: being importless is the whole
+ * point, since it is what lets Rollup leave the dev tree out of the shipped
+ * bundle. Both answers are "there is no dev arrangement here", which is also
+ * true: a production build resolves the Relay rail whatever chain it is pointed
+ * at, so neither of these is ever reached.
  */
-import type { FundingNeed } from '$lib/payment/drive-operation'
 import type { PaymentRail } from '$lib/payment/payment-rail'
 
 /** No local source chain exists in a shipped build. */
@@ -25,12 +24,17 @@ export const devWalletChains: Array<{
   rpcUrl: string
 }> = []
 
-/**
- * Unreachable — `resolvePaymentRail` never returns undefined in a production
- * build, so nothing calls this. It fails loudly rather than silently doing
- * nothing, because a funding request that resolves without delivering funds
- * would look to the caller like a payment that succeeded.
- */
-export function fundFromFaucet(_derivationKey: string, _need: FundingNeed): Promise<void> {
-  return Promise.reject(new Error('No payment route is available for this operation.'))
+/** Mirrors `dev-funding.ts` — see there for why it is declared twice. */
+export interface DevSourceChain {
+  chainId: number
+  defaultRpcUrl: string
+  rpcUrl(): string
+  saveRpcUrl(url: string): void
 }
+
+/**
+ * No source chain in a shipped build, so no field for it and — the reason this
+ * is a value and not a `import.meta.env.DEV` branch at the call site — no probe
+ * of the developer-machine endpoint it would have lived at.
+ */
+export const devSourceChain: DevSourceChain | undefined = undefined

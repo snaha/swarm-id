@@ -64,6 +64,21 @@ jobs:
         working-directory: ./ui
         run: pnpm build
 
+      # The dev funding seam is only worth anything if the swap actually holds,
+      # and reading the source cannot tell you: a static import survives a dead
+      # `import.meta.env.DEV` branch. Only the built assets know. `/dev` keeps
+      # its own copy on purpose, so its route chunk is the one allowed match.
+      - name: Check the dev tree stayed out of the bundle (ui)
+        working-directory: ./ui
+        run: |
+          leaked=$(grep -rl anvil_setBalance build | grep -v '/_app/immutable/nodes/' || true)
+          if [ -n "$leaked" ]; then
+            echo "::error::Dev-only code reached the shipped bundle:"
+            echo "$leaked"
+            echo "Production code must reach dev helpers only through \$lib/payment/dev-funding."
+            exit 1
+          fi
+
       - name: Check the build (ui)
         working-directory: ./ui
         run: pnpm run check

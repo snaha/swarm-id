@@ -10,40 +10,62 @@
  */
 import { resolveLocalRail } from '$lib/payment/dev-funding'
 import { resolveGnosisDirectRail } from '$lib/payment/gnosis-direct'
-import type { PaymentRail } from '$lib/payment/payment-rail'
+import type { PaymentRail, PaymentToken } from '$lib/payment/payment-rail'
 import { chainIdentity } from '$lib/payment/postage-onchain'
 import { relayRail } from '$lib/payment/relay'
 
 /**
- * Present several rails as one, dispatching on the chain the user picked.
+ * Present several rails as one, dispatching on the chain AND token the user
+ * picked.
  *
  * The dialog stays rail-agnostic this way: it renders a chain list and asks for
- * a quote, without knowing that Gnosis is answered by a direct transfer and
- * everything else by a bridge. Earlier rails win a chain the later ones also
- * claim — which is how the direct path takes Gnosis off Relay, rather than
- * Relay being asked to move money across zero chains.
+ * a quote, without knowing that native xDAI on Gnosis is answered by a direct
+ * transfer and everything else by a bridge.
+ *
+ * Dispatch is per TOKEN, not per chain, because two rails can each serve part
+ * of the same chain. The direct rail moves native xDAI only — it is a plain
+ * transfer — so a chain-level claim on Gnosis silently removed Gnosis USDC from
+ * the picker, stranding anyone holding it there. Now the direct rail takes the
+ * native token, Relay keeps the rest, and the earlier rail wins only the tokens
+ * it actually offers.
+ *
+ * Exported for its test: the composition rule is the subtle part of this
+ * module, and `resolvePaymentRail` cannot be asked about it without a chain.
  */
-function combineRails(rails: PaymentRail[]): PaymentRail {
-  const railFor = (chainId: number) =>
-    rails.find((rail) => rail.chains.some((chain) => chain.id === chainId))
+export function combineRails(rails: PaymentRail[]): PaymentRail {
   const seen = new Set<number>()
   const chains = rails
     .flatMap((rail) => rail.chains)
     .filter((chain) => !seen.has(chain.id) && seen.add(chain.id))
 
-  function require(chainId: number): PaymentRail {
-    const rail = railFor(chainId)
+  /** Every token any rail serves on `chainId`, the earliest rail's copy winning. */
+  function tokens(chainId: number): PaymentToken[] {
+    const byAddress = new Map<string, PaymentToken>()
+    for (const rail of rails) {
+      for (const token of rail.tokens(chainId)) {
+        if (!byAddress.has(token.address)) {
+          byAddress.set(token.address, token)
+        }
+      }
+    }
+    return [...byAddress.values()]
+  }
+
+  function railFor(chainId: number, currency: string): PaymentRail {
+    const rail = rails.find((candidate) =>
+      candidate.tokens(chainId).some((token) => token.address === currency),
+    )
     if (!rail) {
-      throw new Error(`No payment route available for chain ${chainId}.`)
+      throw new Error(`No payment route available for that token on chain ${chainId}.`)
     }
     return rail
   }
 
   return {
     chains,
-    tokens: (chainId) => railFor(chainId)?.tokens(chainId) ?? [],
-    quote: (request) => require(request.chainId).quote(request),
-    execute: (options) => require(options.chainId).execute(options),
+    tokens,
+    quote: (request) => railFor(request.chainId, request.currency).quote(request),
+    execute: (options) => railFor(options.chainId, options.currency).execute(options),
   }
 }
 
@@ -53,8 +75,9 @@ function combineRails(rails: PaymentRail[]): PaymentRail {
  * **Gnosis first, always, when the endpoint is Gnosis.** Paying from the
  * destination chain needs no bridge at all: the wallet sends xDAI to the batch
  * owner and the swap takes it from there. It is cheaper and has fewer moving
- * parts than any bridged route, so it leads the list and takes Gnosis away from
- * whatever else would have claimed it.
+ * parts than any bridged route, so it leads the list and takes Gnosis xDAI away
+ * from whatever else would have claimed it. Only xDAI: it is a plain transfer,
+ * so Gnosis's other tokens stay with the bridged rail.
  *
  * Then, for the other chains:
  *
@@ -69,7 +92,8 @@ function combineRails(rails: PaymentRail[]): PaymentRail {
  *   Without one there is still the direct path, which needs nothing but the
  *   chain the app is already talking to.
  *
- * @returns the rail to pay through, or undefined to fund from the faucet.
+ * @returns the rail to pay through, or undefined when there is none — which is
+ *   an error at the funding seam, not a licence to conjure the money.
  */
 export async function resolvePaymentRail(): Promise<PaymentRail | undefined> {
   const direct = await resolveGnosisDirectRail()

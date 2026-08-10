@@ -3,8 +3,10 @@
 /**
  * Extend and resize executed as REAL transactions against the bee-compose
  * anvil chain, signed by the account's derived postage signer — no Bee node
- * involved. Funding is mocked at its seam (the queen faucet stands in for
- * Relay + the DEX, neither of which exists locally).
+ * involved. Nothing about the funding is mocked either: the drive is made with
+ * `/dev`'s Create-drive action, whose simulated purchase leaves its leftover
+ * BZZ and xDAI with the owner, so the signer is already funded when it extends
+ * and no payment is owed.
  *
  * Skipped automatically when the local chain is unreachable, so the suite
  * never breaks a run without the cluster.

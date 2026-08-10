@@ -7,11 +7,16 @@ import { RollingValueProvider } from "cafe-utility"
 import { privateKeyToAccount } from "viem/accounts"
 import { ERC20_ABI } from "./abi"
 import { chainFromSettings, publicClientFor, walletClientFor } from "./chain"
-import { getGasPrice, getTransactionCount } from "./rpc"
+import { estimateTransferGas, getGasPrice, getTransactionCount } from "./rpc"
 import type { MultichainSettings } from "./settings"
 import { withFeeTooLowRetry } from "./write-retry"
 
-const NATIVE_TRANSFER_GAS = 21_000n
+/**
+ * Headroom on the estimate for a native transfer. An estimate is exact for the
+ * block it was made against, and a delegated recipient's fallback is executed
+ * code — cheap here, but not a constant we should bet the delivery on.
+ */
+const NATIVE_TRANSFER_GAS_MARGIN = 2n
 const ERC20_GAS = 100_000n
 
 /** BZZ token balance in PLUR (the token's base unit; 1 BZZ = 1e16 PLUR). */
@@ -58,10 +63,17 @@ export async function transferNative(
 ): Promise<`0x${string}`> {
   const account = privateKeyToAccount(options.originPrivateKey)
   const client = walletClientFor(settings, rpcProvider)
+  const gas = await estimateTransferGas(
+    account.address,
+    options.to,
+    options.amount,
+    settings,
+    rpcProvider,
+  )
   return withFeeTooLowRetry(async () => {
     const serializedTransaction = await account.signTransaction({
       chainId: settings.chainId,
-      gas: NATIVE_TRANSFER_GAS,
+      gas: gas * NATIVE_TRANSFER_GAS_MARGIN,
       gasPrice: await getGasPrice(settings, rpcProvider),
       type: "legacy",
       to: options.to,

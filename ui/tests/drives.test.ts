@@ -5,11 +5,11 @@
  * purchase flow: add, rename, set default, remove, and the failed-purchase
  * outcome.
  *
- * Purchases only simulate off Gnosis mainnet, so these point at an RPC nothing
- * answers: not mainnet, so the purchase simulates, and with no chain to settle
- * against the batch is fabricated — instant, and this suite is about drive
- * bookkeeping rather than what lands on chain. drive-simulated-purchase.test.ts
- * is where a real settlement is exercised.
+ * Every purchase here is a real one against the local chain — nothing about it
+ * is fabricated any more. What keeps this suite about drive bookkeeping rather
+ * than about paying is that the postage signer is funded out of band first
+ * (`fundPostageSigner`), so the operation is never short and the payment
+ * screens never open. `payment-rail.test.ts` is where paying is the subject.
  */
 import { expect, test } from '@playwright/test'
 
@@ -18,7 +18,7 @@ import {
   addDrive,
   chainReachable,
   completeCreateFlow,
-  pinNoPaymentRail,
+  fundPostageSigner,
   seedLocalChain,
   seedNoChain,
 } from './helpers'
@@ -28,7 +28,6 @@ import {
 const chainUp = await chainReachable()
 test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
-test.beforeEach(({ page }) => pinNoPaymentRail(page))
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
@@ -75,6 +74,7 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   await createLocalAccount(page)
 
   // The first drive settles and becomes the account default.
+  await fundPostageSigner(page)
   await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
@@ -96,6 +96,7 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   const expandedCard = page
     .locator('div.overflow-hidden.rounded-lg')
     .filter({ has: page.getByRole('button', { name: 'Collapse drive' }) })
+  await fundPostageSigner(page)
   await addDrive(page)
   const newCard = page.locator('div.overflow-hidden.rounded-lg', {
     hasText: /Drive [0-9a-f]{4}/,

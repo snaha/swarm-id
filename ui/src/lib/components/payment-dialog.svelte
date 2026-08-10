@@ -23,6 +23,7 @@
     type EthereumProvider,
     type PaymentQuote,
     type PaymentRail,
+    displayAmount,
     switchWalletChain,
   } from '$lib/payment/payment-rail'
 
@@ -61,7 +62,6 @@
 
   const GNOSIS_DECIMALS = 18
   const BZZ_DECIMALS = 16
-  const AMOUNT_DIGITS = 4
 
   let screen = $state<Screen>('method')
   let errorMessage = $state('')
@@ -96,9 +96,13 @@
     walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
   )
 
+  /**
+   * Through `displayAmount`, not a local copy of it. The copy this replaces had
+   * lost the "only trim after a decimal point" guard, so a four-significant-
+   * digit integer lost its real zeros: 1230 rendered as 123.
+   */
   function formatAmount(value: bigint, decimals: number): string {
-    const asNumber = Number(formatUnits(value, decimals))
-    return asNumber.toPrecision(AMOUNT_DIGITS).replace(/\.?0+$/, '')
+    return displayAmount(formatUnits(value, decimals))
   }
 
   /**
@@ -117,8 +121,8 @@
     if (total === 0n || !Number.isFinite(paid) || paid === 0) {
       return ''
     }
-    const share = (paid * Number(partWei)) / Number(total)
-    return `${share.toPrecision(AMOUNT_DIGITS).replace(/\.?0+$/, '')} ${tokenSymbol}`
+    const share = displayAmount((paid * Number(partWei)) / Number(total))
+    return share ? `${share} ${tokenSymbol}` : ''
   }
 
   async function connect() {
@@ -206,6 +210,7 @@
         quote,
         provider,
         chainId: Number(chainId),
+        currency: tokenAddress,
         address: walletAddress,
         onStatus: (status) => {
           if (attempt.current) {

@@ -18,6 +18,7 @@
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { formatBytes, formatRemaining } from '$lib/drives'
+  import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import {
     type OperationStep,
     SizeIncreasePendingError,
@@ -29,7 +30,7 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { type ResizePlan, stampCostBzz } from '$lib/payment/purchase'
+  import type { ResizePlan } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   interface Props {
@@ -94,11 +95,13 @@
 
   // Keep-lifespan cost: the top-up is paid at the CURRENT depth (it runs before
   // the depth increase), so that is the depth the cost is spread over.
-  const estimateBzz = $derived(
+  const estimate = createCostEstimate(() =>
     preview && preview.topUpAmount > 0n
-      ? stampCostBzz(drive.depth, preview.topUpAmount)
+      ? { depth: drive.depth, amountPerChunk: preview.topUpAmount }
       : undefined,
   )
+  /** The estimate as the strip shows it. */
+  const estimateLabel = $derived(estimate.value ? `~${estimate.value}` : undefined)
 
   const reducedLifespan = $derived.by(() => {
     if (!preview || keepLifespan || preview.afterDilute.batchTTL === undefined) {
@@ -114,13 +117,13 @@
       return { label: 'No changes made yet' }
     }
     if (preview?.clampedToFloor) {
-      return estimateBzz
-        ? { label: 'Includes the ~1 day minimum', value: `~${estimateBzz} BZZ` }
+      return estimateLabel
+        ? { label: 'Includes the ~1 day minimum', value: estimateLabel }
         : { label: 'Resizing needs at least ~1 day of lifespan' }
     }
     if (keepLifespan) {
-      return estimateBzz
-        ? { label: 'Estimated cost', value: `~${estimateBzz} BZZ` }
+      return estimateLabel
+        ? { label: 'Estimated cost', value: estimateLabel }
         : { label: 'Keeps your current lifespan — you pay to top up the larger size' }
     }
     return reducedLifespan

@@ -27,13 +27,14 @@
   import { verifyBatchStampable } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import { runPurchase } from '$lib/payment/drive-operation'
   import {
     PaymentCancelledError,
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { derivePostageSigner, stampAmountForSeconds, stampCostBzz } from '$lib/payment/purchase'
+  import { derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   const STORAGE_OPTIONS = [
@@ -81,7 +82,8 @@
 
   const lifespanSeconds = $derived(lifespanToSeconds(Number(lifespanValue), lifespanUnit))
 
-  const estimateBzz = $derived.by(() => {
+  /** Per-chunk PLUR the batch would be funded with at the current price. */
+  const amountPerChunk = $derived.by(() => {
     if (
       storage !== 'new' ||
       depthValue === '' ||
@@ -90,8 +92,12 @@
     ) {
       return undefined
     }
-    return stampCostBzz(Number(depthValue), stampAmountForSeconds(currentPrice, lifespanSeconds))
+    return stampAmountForSeconds(currentPrice, lifespanSeconds)
   })
+
+  const estimate = createCostEstimate(() =>
+    amountPerChunk === undefined ? undefined : { depth: Number(depthValue), amountPerChunk },
+  )
 
   // Validate through the lib's canonical schemas (bare 64-hex), tolerating a
   // `0x` prefix by stripping first.
@@ -121,7 +127,7 @@
     if (!canProceed) {
       return 'Set storage options to proceed.'
     }
-    return estimateBzz ? `Estimated cost ≈ ${estimateBzz} BZZ` : 'Final cost is shown at payment.'
+    return estimate.value ? `Estimated cost ≈ ${estimate.value}` : 'Final cost is shown at payment.'
   })
 
   // Best-effort: the price only feeds the cost estimate here (and the TTL guess

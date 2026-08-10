@@ -15,6 +15,7 @@
  *
  * Production code must never import this module.
  */
+import { EthAddress } from '@ethersphere/bee-js'
 import {
   DEV_FAUCET_ADDRESS,
   ensureBundlingDelegate,
@@ -23,17 +24,35 @@ import {
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
+import { mintSourceEth } from '$lib/dev/local-payment-rail'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
-import { GAS_BUDGET_XDAI_WEI, ownerFunds, postageChain } from '$lib/payment/postage-onchain'
+import { ownerFunds, postageChain } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 import type { Account } from '$lib/types'
+
+/**
+ * Anvil's first default account — the key every anvil prints on startup, so
+ * publicly known and worth nothing off a dev chain.
+ *
+ * Both dev chains are anvil, and anvil funds its ten default accounts at
+ * genesis whether it is bare (the source chain) or loading a state dump (the
+ * Gnosis one), so this address starts with 10 000 native on EACH: 10 000 ETH on
+ * the fake mainnet, 10 000 xDAI on Gnosis. It holds no BZZ — that float is the
+ * bake's, and sits with `DEV_FAUCET_ADDRESS`.
+ *
+ * Importing it is never required: the dev rail tops up whatever account
+ * connects. It is only the shortcut to a wallet showing a balance from the
+ * start, instead of one that looks empty until the first payment funds it.
+ */
+export const ANVIL_ACCOUNT = {
+  address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
+  privateKey: '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80',
+}
 
 /** Default drive size for the dev batch actions. */
 const DEV_BATCH_DEPTH = 20
 /** Funds a dev batch well above the contract's ~24h floor. */
 const DEV_BATCH_FLOOR_MULTIPLE = 3n
-/** Generous gas dust so a dev address can run many operations. */
-export const DEV_XDAI_FUNDING = GAS_BUDGET_XDAI_WEI * 10n
 /** Bankrolls the simulated purchase's throwaway payer: swap, batch and gas. */
 const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 /**
@@ -45,23 +64,48 @@ const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 const PURCHASE_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
 
 /**
- * Deliver xDAI and BZZ to the account's postage signer — the stand-in for a
- * completed payment.
- *
- * A transfer from the chain's faucet, not a swap: every swap moves a real and
- * thin BZZ pool, and topping a signer up is not the thing worth simulating
- * faithfully. The purchase path still trades — see `createOwnedBatchOnChain`.
+ * What one faucet send delivers, across both dev chains. A zero leg is skipped
+ * entirely — which is what lets an ETH-only send work with no Gnosis chain
+ * running, and an xDAI/BZZ one with no source chain.
  */
-export async function fundPostageSigner(
-  derivationKey: string,
-  amounts: { xdai: bigint; bzzPlur: bigint },
-): Promise<void> {
-  const { destination } = await derivePostageSigner(derivationKey)
-  const chain = await postageChain()
-  await fundLocalAccount({ to: destination as `0x${string}`, ...amounts }, chain.settings)
+export interface FaucetAmounts {
+  /** Source-chain ETH, in wei — the fake mainnet the payment rail signs on. */
+  eth: bigint
+  /** Gnosis-side native xDAI, in wei. */
+  xdai: bigint
+  /** Gnosis-side BZZ, in PLUR. */
+  bzzPlur: bigint
 }
 
-/** An address and what it currently holds, for the faucet panel. */
+/**
+ * Hand any address money on either dev chain, or both.
+ *
+ * The two legs come from different places because the chains do: on Gnosis this
+ * is a transfer from the baked faucet (every swap moves a real and thin BZZ
+ * pool, and topping an address up is not the thing worth simulating
+ * faithfully), while the source chain has no faucet to transfer from and mints
+ * instead. The purchase path still trades — see `createOwnedBatchOnChain`.
+ *
+ * Any address, not just a derived signer: rehearsing a payment needs ETH in
+ * whatever wallet account is connected, and reproducing a bug usually means
+ * funding the one address that is stuck.
+ *
+ * The source-chain leg goes first so that a chain that is not running aborts
+ * the send before anything has moved. There is no partial delivery to explain,
+ * and the fix — start it and press Send again — costs nothing.
+ */
+export async function sendFromFaucet(address: string, amounts: FaucetAmounts): Promise<void> {
+  const to = new EthAddress(address).toChecksum() as `0x${string}`
+  if (amounts.eth > 0n) {
+    await mintSourceEth(to, amounts.eth)
+  }
+  if (amounts.xdai > 0n || amounts.bzzPlur > 0n) {
+    const chain = await postageChain()
+    await fundLocalAccount({ to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur }, chain.settings)
+  }
+}
+
+/** An address and what it holds on the Gnosis-side chain, for the faucet panel. */
 export interface FundsRow {
   address: `0x${string}`
   xdai: bigint
@@ -69,23 +113,24 @@ export interface FundsRow {
 }
 
 /**
- * What the faucet has left to give, and what the selected account's signer
- * holds — the two numbers that decide whether a dev action can run at all.
+ * What the faucet has left to give, and what `address` holds.
+ *
+ * Gnosis-side only. Source-chain ETH is read separately (`sourceEthBalance`)
+ * because the faucet has no counterpart there — anvil mints — and because that
+ * chain is often not running, which must not cost the balances that are.
  */
 export async function devChainFunds(
-  derivationKey: string,
-): Promise<{ faucet: FundsRow; signer: FundsRow }> {
+  address: string,
+): Promise<{ faucet: FundsRow; recipient: FundsRow }> {
   const chain = await postageChain()
-  const { destination } = await derivePostageSigner(derivationKey)
-  const faucet = DEV_FAUCET_ADDRESS
-  const signer = destination as `0x${string}`
-  const [faucetFunds, signerFunds] = await Promise.all([
-    ownerFunds(faucet, chain),
-    ownerFunds(signer, chain),
+  const recipient = new EthAddress(address).toChecksum() as `0x${string}`
+  const [faucetFunds, recipientFunds] = await Promise.all([
+    ownerFunds(DEV_FAUCET_ADDRESS, chain),
+    ownerFunds(recipient, chain),
   ])
   return {
-    faucet: { address: faucet, ...faucetFunds },
-    signer: { address: signer, ...signerFunds },
+    faucet: { address: DEV_FAUCET_ADDRESS, ...faucetFunds },
+    recipient: { address: recipient, ...recipientFunds },
   }
 }
 

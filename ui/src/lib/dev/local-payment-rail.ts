@@ -26,6 +26,13 @@
  * From there nothing is faked: the delivered xDAI is swapped to BZZ through the
  * real Sushi pool and spent by the postage engine, exactly as in production.
  *
+ * **The payer is not funded here, deliberately.** This used to mint the wallet
+ * 10 ETH on its way past, to save importing a key — but no production rail can
+ * give the payer money, so a wallet that could not afford the payment was the
+ * one state the rehearsal could never reach. Fund the wallet out of band (the
+ * faucet on `/dev`, which is what a testnet faucet is for) and an empty one now
+ * fails where it would in production: in the wallet, on send.
+ *
  * What it does NOT cover, and must not be read as covering: Relay's pricing,
  * routing and error surface (the numbers here are invented); its real step
  * model (an ERC-20 source needs an approve before the deposit — one native
@@ -95,14 +102,6 @@ const RECEIPT_TIMEOUT_MS = 60_000
  */
 const DELIVERY_POLL_MS = 1_000
 const DELIVERY_TIMEOUT_MS = 120_000
-
-/**
- * What a payer is topped up to when it cannot cover the deposit, and the gas
- * headroom that decides "cannot". Generous on purpose — this is play money on a
- * throwaway chain, and a second top-up mid-rehearsal would be pure friction.
- */
-const PAYER_FUNDING_WEI = 10n ** 19n // 10 ETH
-const GAS_HEADROOM_WEI = 10n ** 16n // 0.01 ETH
 
 function localSourceChain(): Chain {
   return defineChain({
@@ -221,20 +220,26 @@ async function waitForDeposit(transactionHash: string): Promise<void> {
   )
 }
 
+/** Native balance on the local source chain, in wei. */
+export async function sourceEthBalance(address: string): Promise<bigint> {
+  return BigInt((await sourceRpc('eth_getBalance', [address, 'latest'])) as string)
+}
+
 /**
- * Give the connected wallet enough to pay with, whatever account it is.
+ * Hand an address source-chain ETH.
  *
- * Without this, rehearsing a payment would start with importing one of anvil's
- * prefunded private keys into your wallet by hand — the most tedious step in
- * the whole setup, and one that teaches nothing about the flow being
- * rehearsed. Anvil mints on request, so any account the user already has works.
+ * Minted rather than transferred: the source chain is a bare anvil with no bake
+ * behind it, so there is no faucet account to send from — the cheat code is the
+ * only source of funds here. Added to the balance rather than assigned, so two
+ * sends accumulate the way a faucet's would.
  */
-async function ensurePayerFunded(address: string, needed: bigint): Promise<void> {
-  const balance = BigInt((await sourceRpc('eth_getBalance', [address, 'latest'])) as string)
-  if (balance >= needed + GAS_HEADROOM_WEI) {
-    return
-  }
-  await sourceRpc('anvil_setBalance', [address, `0x${PAYER_FUNDING_WEI.toString(16)}`])
+export async function mintSourceEth(address: string, wei: bigint): Promise<void> {
+  const balance = await sourceEthBalance(address).catch(() => {
+    throw new Error(
+      `No source chain answering at ${localSourceRpcUrl()} — start it with \`pnpm dev:source-chain\` (or the whole stack with \`pnpm dev:local\`).`,
+    )
+  })
+  await sourceRpc('anvil_setBalance', [address, `0x${(balance + wei).toString(16)}`])
 }
 
 /**
@@ -264,8 +269,6 @@ async function executeLocalPayment(options: ExecutePaymentOptions): Promise<void
   if (!isLocalHandle(handle)) {
     throw new Error('This payment was quoted by a different rail.')
   }
-
-  await ensurePayerFunded(options.address, handle.amountSourceWei)
 
   // Read before signing: delivery is judged by this balance rising.
   const chain = await postageChain()

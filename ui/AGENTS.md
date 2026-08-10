@@ -25,10 +25,19 @@ The identity UI is a SvelteKit SPA.
   rails can import from it without an initialisation cycle. Off mainnet it returns the **dev rail**
   (`dev/local-payment-rail.ts`) when the local source chain is up (`pnpm dev:local`, chain 31337):
   the wallet signs a genuine deposit there and the baked faucet plays solver, delivering the xDAI.
-  The wallet needs no setup — the chain reaches it through the flow's own `wallet_addEthereumChain`
-  path, and the rail tops up whatever account connects, so no key is imported. With no source chain
-  there is no rail — funding falls back to a silent faucet transfer
-  and the payment screens never open, which is what keeps the drive e2e suites chain-only. The dev
+  The chain reaches the wallet through the flow's own `wallet_addEthereumChain` path, but **the
+  money does not**: no rail funds the payer, here or in production, so the connected wallet must
+  already hold what it pays with. Fund it out of band from the `/dev` faucet, which sends any asset
+  to any address on either chain — the rail minting the payer 10 ETH mid-flow is exactly what made
+  "wallet cannot afford it" unreachable. **A missing source
+  chain is NOT the same as no rail**, and assuming it was is what silently reopened the payment
+  screens over six e2e tests: paying from Gnosis needs no source chain by design, so that rail
+  resolves for any endpoint answering as chain 100 — which every drive suite deliberately provides.
+  **No rail is an error, never a free top-up**: the silent faucet settlement that used to answer a
+  `FundingNeed` when none resolved is gone, and with it the `pinNoPaymentRail` switch that selected
+  it. A suite needing a purchase to succeed funds the postage signer out of band first
+  (`fundPostageSigner` in `tests/helpers.ts`), so `ensureFunded` short-circuits and no screen opens
+  — because nothing is owed, not because a rail was suppressed. The dev
   rail rehearses the payment UX and nothing more; Relay's pricing, routing, step model and refund
   semantics stay untested by it. Everything downstream of a rail is the same production code either
   way.
@@ -39,13 +48,18 @@ The identity UI is a SvelteKit SPA.
   the entry bundle: `import.meta.env.DEV` kills the _branch_, but the imports are static and those
   modules have top-level side effects, so Rollup keeps them anyway. **Production code must reach
   dev helpers only through this seam** — importing `$lib/dev/*` directly puts them back in the
-  bundle, which is how `crypto/onboard.ts` was doing it. The `/dev` route imports them directly on
-  purpose and keeps its own lazily-loaded chunk. Verify with a build, never by reading:
-  `grep -rl anvil_setBalance ui/build` must only ever match a `nodes/*.js` route chunk.
+  bundle, which is how `crypto/onboard.ts` and then `network-settings-dialog.svelte` were doing it —
+  the second one shipped the whole dev tree in a chunk five ordinary routes import. The `/dev` route
+  imports them directly on purpose and keeps its own lazily-loaded chunk. Verify with a build, never
+  by reading: `grep -rl anvil_setBalance ui/build` must only ever match `_app/immutable/nodes/`, and
+  CI now runs that grep after every `pnpm build`. Reaching a dev-only value through the seam also
+  keeps the _behaviour_ out: `devSourceChain` is `undefined` in a shipped build, so the settings
+  dialog has nothing to probe, where an `import.meta.env.DEV` branch would still have hit
+  `localhost` on open.
 - **Paid drive operations are node-less**: extend and resize go straight to the PostageStamp
   contract signed by the derived postage signer (`payment/postage-onchain.ts`,
-  `payment/drive-operation.ts`), with funding injected as a seam — the payment rail above, or the
-  local faucet when there is none. See `docs/Postage-On-Chain-Engine.md` and
+  `payment/drive-operation.ts`), with funding injected as a seam — always the payment rail above,
+  never a faucet standing in for it. See `docs/Postage-On-Chain-Engine.md` and
   `docs/Drive-Payment-Flow.md`.
 - **…and atomic**: where the chain has the EIP-7702 delegate — which includes Gnosis mainnet —
   extend runs as one transaction (approve + topUp) and resize as one (approve + topUp +

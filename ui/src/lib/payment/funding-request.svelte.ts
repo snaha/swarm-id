@@ -1,12 +1,16 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The dialogs' funding seam: turns a `FundingNeed` raised mid-operation into
- * either a pending payment the UI surfaces — resolving once the money has
- * landed — or, when there is no rail to pay through at all, a silent transfer
- * from the local faucet.
+ * The dialogs' funding seam: turns a `FundingNeed` raised mid-operation into a
+ * pending payment the UI surfaces, resolving once the money has landed.
+ *
+ * There is ONE way to fund an operation and it is the same everywhere: a rail.
+ * This used to fall back to a silent faucet transfer when no rail resolved,
+ * which made a dev chain settle operations a production build would refuse —
+ * money appearing with no screen, no signature and no record of who paid. A
+ * missing rail is now the error it is in production, and a local run funds the
+ * signer out of band instead (the `/dev` faucet), where it is a visible act.
  */
-import { fundFromFaucet } from '$lib/payment/dev-funding'
 import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
 import { type FundingQuote, quoteFunding, swapDeliveredXdai } from '$lib/payment/funding'
 import type { PaymentRail } from '$lib/payment/payment-rail'
@@ -89,12 +93,7 @@ export function createFundingRequester(account: () => Account): FundingRequester
   const request: RequestFunding = async (need) => {
     const rail = await resolvePaymentRail()
     if (!rail) {
-      // Nothing to pay through — a dev chain with no local source chain up. The
-      // faucet stands in for the whole payment leg and the screens never open.
-      // In a production build this is the stub, which throws: no rail there
-      // means no route, not a free top-up.
-      await fundFromFaucet(account().derivationKey, need)
-      return
+      throw new Error('No payment route is available for this operation.')
     }
     const quote = await quoteFunding(need)
     // Nothing left to collect: xDAI already at the owner address covers the

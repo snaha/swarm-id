@@ -13,7 +13,7 @@
 import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect, test } from '@playwright/test'
 
-import { addDrive, completeCreateFlow, pinNoPaymentRail } from './helpers'
+import { addDrive, completeCreateFlow, fundPostageSigner } from './helpers'
 
 const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 const BEE_NODE_URL = 'http://localhost:1633/'
@@ -87,7 +87,6 @@ function storedDrive(page: Page) {
   })
 }
 
-test.beforeEach(({ page }) => pinNoPaymentRail(page))
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
@@ -110,9 +109,10 @@ test('buying a drive creates a batch the account owns on chain', async ({ page }
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
+  await fundPostageSigner(page)
   await addDrive(page)
-  // Settling for real takes chain time (create + fund + receipt), unlike the
-  // fabricated fallback the chainless suites see.
+  // Settling for real takes chain time: approve + createBatch, then reading the
+  // batch back.
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: ONCHAIN_TIMEOUT_MS,
   })

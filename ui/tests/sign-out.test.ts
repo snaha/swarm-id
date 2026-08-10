@@ -15,7 +15,7 @@ import {
   addDrive,
   chainReachable,
   completeCreateFlow,
-  pinNoPaymentRail,
+  fundPostageSigner,
   seedLocalChain,
 } from './helpers'
 
@@ -24,7 +24,6 @@ import {
 const chainUp = await chainReachable()
 test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
 
-test.beforeEach(({ page }) => pinNoPaymentRail(page))
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
@@ -36,6 +35,7 @@ async function createAccountWithDrive(page: Page) {
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
   // A drive makes the account non-local — sign-out is only offered then.
+  await fundPostageSigner(page)
   await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,

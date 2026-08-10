@@ -309,9 +309,9 @@ tab this spec named no longer exists — the node-stamp workflow was dropped):
   the same trick `finalise.ts` uses for the Sushi quoter. Creating a batch is where it happens
   because any dev flow that makes one goes on to extend or resize it; the local solver does it too,
   so `pnpm dev:local` is ready without creating anything.
-- Funding during a real dialog flow no longer needs a toggle. It follows the chain and the
-  environment: see the companion spec §7 for the rail seam that decides between paying through the
-  local solver and a silent faucet transfer.
+- Funding during a real dialog flow no longer needs a toggle, and has only one shape: a rail. See
+  the companion spec §7 — paying from Gnosis directly, or through the local solver. There is no
+  faucet path inside the app; a signer is funded out of band, before it spends.
 
 Tests:
 

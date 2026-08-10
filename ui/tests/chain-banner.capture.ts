@@ -16,6 +16,7 @@
  * mainnet — and a capture run should not depend on the internet.
  */
 import { type Page, expect, test } from '@playwright/test'
+import { DEV_FAUCET_ADDRESS } from '@swarm-id/multichain/dev'
 
 import { completeCreateFlow } from './helpers'
 
@@ -112,13 +113,18 @@ test('sending xDAI and BZZ from the chain faucet', async ({ page }) => {
 
   const heading = page.getByRole('heading', { name: 'Faucet' })
   await heading.scrollIntoViewIfNeeded()
-  // Balances land before the send, so the shot shows both rows populated.
-  await expect(page.getByText(/^Faucet 0x/)).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
-  await page.getByRole('button', { name: 'Send to signer' }).click()
-  await expect(page.getByText(/^Sent from faucet:/)).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
+  // Balances land before the send, so the shot shows both rows populated. The
+  // faucet's own row is the one that proves the chain answered — the recipient
+  // row renders from the typed address alone.
+  await expect(page.getByText(DEV_FAUCET_ADDRESS, { exact: true })).toBeVisible({
+    timeout: ONCHAIN_TIMEOUT_MS,
+  })
+  const send = page.getByRole('button', { name: 'Send', exact: true })
+  await send.click()
+  await expect(page.getByText(/^✅ Sent /)).toBeVisible({ timeout: ONCHAIN_TIMEOUT_MS })
 
   const top = await heading.boundingBox()
-  const send = await page.getByRole('button', { name: 'Send to signer' }).boundingBox()
+  const sendBox = await send.boundingBox()
   const PAD = 16
   await page.screenshot({
     path: `${OUT_DIR}/dev-faucet-funding.png`,
@@ -126,7 +132,7 @@ test('sending xDAI and BZZ from the chain faucet', async ({ page }) => {
       x: top!.x - PAD,
       y: top!.y - PAD,
       width: VIEWPORT.width - top!.x,
-      height: send!.y + send!.height - top!.y + PAD * 2,
+      height: sendBox!.y + sendBox!.height - top!.y + PAD * 2,
     },
   })
 })

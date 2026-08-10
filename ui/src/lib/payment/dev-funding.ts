@@ -20,15 +20,45 @@
  * Keep the two files' exports identical. They are typechecked independently,
  * so a drift shows up as a build failure rather than a runtime surprise.
  */
-import { DEV_XDAI_FUNDING, fundPostageSigner } from '$lib/dev/chain-funding'
 import {
+  DEFAULT_SOURCE_RPC_URL,
   LOCAL_SOURCE_CHAIN_ID,
+  SOURCE_RPC_OVERRIDE_KEY,
   localSourceRpcUrl,
   resolveLocalRail,
 } from '$lib/dev/local-payment-rail'
-import type { FundingNeed } from '$lib/payment/drive-operation'
 
 export { resolveLocalRail }
+
+/**
+ * The dev payment source chain, as the network settings panel needs it.
+ *
+ * Declared in both halves of the seam rather than shared from one, which is
+ * what the seam is: the production half must import nothing.
+ */
+export interface DevSourceChain {
+  chainId: number
+  defaultRpcUrl: string
+  /** The endpoint in force, override included — read per access, not cached. */
+  rpcUrl(): string
+  /** Persist an override for it. */
+  saveRpcUrl(url: string): void
+}
+
+/**
+ * One value rather than four constants, because `undefined` is then the whole
+ * answer for a production build: the settings dialog branches on its presence
+ * instead of on `import.meta.env.DEV`. That is what stops a shipped page
+ * probing `localhost` for a chain that only ever exists on a developer's
+ * machine — a dead `import.meta.env.DEV` branch still runs the probe if the
+ * value it needs was imported unconditionally.
+ */
+export const devSourceChain: DevSourceChain | undefined = {
+  chainId: LOCAL_SOURCE_CHAIN_ID,
+  defaultRpcUrl: DEFAULT_SOURCE_RPC_URL,
+  rpcUrl: localSourceRpcUrl,
+  saveRpcUrl: (url) => localStorage.setItem(SOURCE_RPC_OVERRIDE_KEY, url),
+}
 
 /**
  * Extra chains to declare to web3-onboard, so it recognises the wallet's
@@ -44,21 +74,14 @@ export const devWalletChains = [
   },
 ]
 
-/** Headroom on a computed need; out of a faucet the margin is free. */
-const FUNDING_MARGIN = 2n
-
 /**
- * Stand in for the whole payment leg with a faucet transfer — what happens on
- * a dev chain with no local source chain running, where there is nothing to
- * take a signature on.
+ * There is deliberately no `fundFromFaucet` here any more.
  *
- * Over-delivers on purpose: the need was computed from a chain read that is a
- * block or two old by the time the operation spends it, and a real payment
- * over-delivers too (a swap of a quoted amount, with slippage).
+ * It used to stand in for the whole payment leg when no rail resolved: the
+ * faucet transferred the need to the batch owner and the operation carried on,
+ * so a drive was bought with money that appeared from nowhere, with no screen,
+ * no signature and nothing a production build would ever do. A dev chain has a
+ * faucet, but reaching it from inside the payment path is what made it magic.
+ * Fund the signer out of band on `/dev` instead — then the operation finds the
+ * funds already there and never raises a need at all.
  */
-export async function fundFromFaucet(derivationKey: string, need: FundingNeed): Promise<void> {
-  await fundPostageSigner(derivationKey, {
-    xdai: DEV_XDAI_FUNDING,
-    bzzPlur: need.bzz * FUNDING_MARGIN,
-  })
-}

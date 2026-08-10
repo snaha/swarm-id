@@ -15,7 +15,7 @@
  * inventory on real Gnosis. See `payment-rail.ts` for what stands in locally.
  */
 import { type Execute, MAINNET_RELAY_API, createClient, getClient } from '@relayprotocol/relay-sdk'
-import { type Chain, createWalletClient, custom, defineChain } from 'viem'
+import { createWalletClient, custom, defineChain } from 'viem'
 import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
 import {
@@ -26,14 +26,17 @@ import {
   type PaymentRail,
   type PaymentToken,
   type QuoteRequest,
+  WALLET_CHAINS,
   displayAmount,
   displayUsd,
 } from '$lib/payment/payment-rail'
 
 const GNOSIS_CHAIN_ID = 100
 
-/** Source chains offered in the payment screen (mirrors the widget's set). */
-const PAYMENT_CHAINS: Chain[] = [mainnet, base, arbitrum, optimism, polygon, gnosis]
+/** Source chains offered in the payment screen (mirrors the widget's set).
+ * The same list `onboard.ts` declares to the wallet — one list, so a chain
+ * cannot be offered here and be unknown there. */
+const PAYMENT_CHAINS = WALLET_CHAINS
 
 let initialized = false
 

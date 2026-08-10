@@ -59,6 +59,29 @@ export async function getGasPrice(
   return BigInt(Types.asString(result))
 }
 
+/**
+ * Gas for a plain native transfer to `to`.
+ *
+ * NOT the 21 000 a transfer to an EOA costs: once an address has authorised an
+ * EIP-7702 delegate — which every postage signer does the first time it runs a
+ * bundled operation — a transfer to it EXECUTES that delegate's fallback, and
+ * 21 000 runs out of gas. The transaction then reverts, which reads as "the
+ * money never arrived" wherever it lands: a faucet top-up, or the local
+ * solver's delivery to a batch owner that has already bought once.
+ */
+export async function estimateTransferGas(
+  from: `0x${string}`,
+  to: `0x${string}`,
+  value: bigint,
+  settings: MultichainSettings,
+  rpcProvider: RollingValueProvider<string>,
+): Promise<bigint> {
+  const result = await jsonRpc(rpcProvider, settings, "eth_estimateGas", [
+    { from, to, value: `0x${value.toString(16)}` },
+  ])
+  return BigInt(Types.asString(result))
+}
+
 export async function getChainId(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,

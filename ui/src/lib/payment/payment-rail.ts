@@ -21,9 +21,22 @@
  * genuine initialisation cycle, and the type checker cannot see one.
  */
 import type { Chain } from 'viem'
+import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
 /** Native-token sentinel for "the chain's own currency". */
 export const NATIVE_CURRENCY = '0x0000000000000000000000000000000000000000'
+
+/**
+ * Every chain a rail may ask the wallet to sign on, in the order the picker
+ * shows them.
+ *
+ * Lives here, in the leaf, because two unrelated modules need the same list and
+ * neither may import the other: the Relay rail offers them, and `onboard.ts`
+ * has to DECLARE them or web3-onboard reports the user's network as
+ * unsupported the moment they switch to one. That list used to be a single
+ * fake-RPC entry for Ethereum, from when this app signed nothing at all.
+ */
+export const WALLET_CHAINS: Chain[] = [mainnet, base, arbitrum, optimism, polygon, gnosis]
 
 /** A token the user can pay with on a given source chain. */
 export interface PaymentToken {
@@ -52,6 +65,18 @@ export interface QuoteRequest {
 /** Significant digits in a displayed price. */
 const AMOUNT_PRECISION_DIGITS = 4
 const USD_DECIMALS = 2
+/** The dollar figure below which cents are all zeros. */
+const CENT = 0.01
+/** Significant digits for a sub-cent dollar figure. */
+const SUB_CENT_DIGITS = 2
+
+/**
+ * Drop the zeros `toPrecision` pads back on ("0.00050"). They are padding, not
+ * precision, and they read as a different figure beside a rounded one.
+ */
+function trimTrailingZeros(rounded: string): string {
+  return rounded.includes('.') ? rounded.replace(/\.?0+$/, '') : rounded
+}
 
 /**
  * A source-token price as the screens show it: a few significant digits, no
@@ -66,17 +91,36 @@ const USD_DECIMALS = 2
  */
 export function displayAmount(value: string | number): string {
   const amount = Number(value)
-  if (!Number.isFinite(amount) || amount === 0) {
+  if (!Number.isFinite(amount) || amount <= 0) {
     return ''
   }
-  const rounded = amount.toPrecision(AMOUNT_PRECISION_DIGITS)
-  return rounded.includes('.') ? rounded.replace(/\.?0+$/, '') : rounded
+  return trimTrailingZeros(amount.toPrecision(AMOUNT_PRECISION_DIGITS))
 }
 
-/** A USD total as the screens show it — cents, since that is what it is. */
+/**
+ * A dollar figure as the screens show it: cents normally, significant digits
+ * below a cent. The one USD formatter in the app — the pay screen's total and
+ * the drive dialogs' cost estimate both come through here, so the two cannot
+ * drift into rendering the same money differently.
+ *
+ * Empty for anything that is not a positive number, INCLUDING zero: every
+ * caller renders this behind a truthiness check, and a figure that could not be
+ * priced must read as absent, not as free. Returning `'0.00'` for a quote
+ * missing its `currencyIn` is what used to put "~0.00 USD total" under a blank
+ * cost line.
+ *
+ * Sub-cent is not a rounding artefact either — extending a small drive genuinely
+ * costs a fraction of a cent, and "0.00 USD" would read as free rather than as
+ * cheap.
+ */
 export function displayUsd(value: string | number): string {
   const amount = Number(value)
-  return Number.isFinite(amount) ? amount.toFixed(USD_DECIMALS) : ''
+  if (!Number.isFinite(amount) || amount <= 0) {
+    return ''
+  }
+  return amount < CENT
+    ? trimTrailingZeros(amount.toPrecision(SUB_CENT_DIGITS))
+    : amount.toFixed(USD_DECIMALS)
 }
 
 export interface PaymentQuote {
@@ -99,6 +143,12 @@ export interface ExecutePaymentOptions {
   quote: PaymentQuote
   provider: EthereumProvider
   chainId: number
+  /**
+   * The token being paid with, as its {@link PaymentToken} address. Carried
+   * even though no rail reads it, because the combined rail dispatches on it:
+   * one chain can be served by two rails, split by token.
+   */
+  currency: string
   /** The payer's address (their connected wallet). */
   address: string
   /**

@@ -124,7 +124,13 @@ describe('Relay quote contract', () => {
     // pins the reason `relay.ts` calls `displayAmount` rather than trusting it.
     const raw = quoted.details?.currencyIn?.amountFormatted ?? ''
     expect(displayAmount(raw).length).toBeLessThanOrEqual(raw.length)
-    expect(displayUsd(quoted.details?.currencyIn?.amountUsd ?? '')).toMatch(/^\d+\.\d{2}$/)
+    // Cents at or above a cent, significant digits below one — either way not
+    // the six decimals Relay sends. The second form is not hypothetical: a
+    // small top-up really can cost a fraction of a cent, and pinning cents
+    // alone would fail this suite on a cheap quote rather than on a defect.
+    expect(displayUsd(quoted.details?.currencyIn?.amountUsd ?? '')).toMatch(
+      /^(\d+\.\d{2}|0\.0\d+)$/,
+    )
   })
 
   it('returns a deposit step for the wallet to sign', () => {
