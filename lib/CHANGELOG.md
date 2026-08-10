@@ -1,5 +1,43 @@
 # Changelog
 
+## [0.3.0](https://github.com/snaha/swarm-id/compare/v0.2.0...v0.3.0) (2026-08-10)
+
+
+### ⚠ BREAKING CHANGES
+
+* **lib:** `ConnectionInfo.identity` gains a required `avatar`, and the `connectionInfoChanged` message carries it. A client on this version rejects that message from a proxy predating it — and `initialize()` awaits the first one — so the dApp-side library and the Swarm ID deployment must be upgraded together. The library is unreleased, so no published consumer is affected.
+* **lib:** UploadOptions no longer accepts redundancyLevel (it was validated but never forwarded), and ButtonStyles/ButtonStylesSchema are no longer exported from @snaha/swarm-id. Both were no-ops; remove them from call sites.
+* **ui:** renames AccountSchemaV1 -> LocalAccountSchemaV1, AccountDataSchemaV1 -> SyncedAccountSchemaV1, AccountData -> SyncedAccount, serializeAccountData -> serializeSyncedAccount, foldedToAccountData -> foldedToSyncedAccount; adds LocalVaultSchemaV1, SignedInAccount/SignedOutAccount/LocalVault types; AccountsStoreInterface.getAccount now returns the SyncedAccount projection (the sync seam never sees the vault).
+* **lib:** evictOldEntries and CacheEvictionPolicy are no longer exported from @snaha/swarm-id.
+
+### Features
+
+* **lib:** cut cold partition-acquire latency ~5x ([#451](https://github.com/snaha/swarm-id/issues/451)) ([ba23224](https://github.com/snaha/swarm-id/commit/ba23224e061ce103358921df7cc1ae23db6bcdcc))
+* **lib:** expose account avatars through the client API (breaking wire change) ([#509](https://github.com/snaha/swarm-id/issues/509)) ([63c56c4](https://github.com/snaha/swarm-id/commit/63c56c4d82a566151b71c156640f1f0fb2b0f13a))
+* sign back in to a signed-out account with the security method ([#498](https://github.com/snaha/swarm-id/issues/498)) ([6498d35](https://github.com/snaha/swarm-id/commit/6498d3500b81cc315e1d560b5143b9aef10afe4d))
+* **ui:** section the connect chooser and skip the done page with a drive ([#500](https://github.com/snaha/swarm-id/issues/500)) ([af702c1](https://github.com/snaha/swarm-id/commit/af702c156a775e0aac26dfc214ed1f97d74e86c2))
+* **ui:** sign-out flow for synced accounts ([#442](https://github.com/snaha/swarm-id/issues/442)) ([bba1988](https://github.com/snaha/swarm-id/commit/bba19882cd9f9f1e1ae3a7d507d497d049c3ffea))
+
+
+### Bug Fixes
+
+* converge dApp-only devices on peer account changes ([#456](https://github.com/snaha/swarm-id/issues/456)) ([cf7f564](https://github.com/snaha/swarm-id/commit/cf7f564e54d9270bc4a368e841fe673c99eed61b))
+* **lib:** accept non-ACT download options; remove dead protocol paths ([#489](https://github.com/snaha/swarm-id/issues/489)) ([095d278](https://github.com/snaha/swarm-id/commit/095d27841faccc6cae35f4f078640baf8212fb7c)), closes [#420](https://github.com/snaha/swarm-id/issues/420)
+* **lib:** confirm absent roster slots via GET /soc when /chunks 500s ([#458](https://github.com/snaha/swarm-id/issues/458)) ([1403cf2](https://github.com/snaha/swarm-id/commit/1403cf2958f00b13adc144e9793b829b5ae04ad5)), closes [#457](https://github.com/snaha/swarm-id/issues/457)
+* **lib:** don't re-encrypt the content reference on ACT revocation ([#497](https://github.com/snaha/swarm-id/issues/497)) ([e53ffd4](https://github.com/snaha/swarm-id/commit/e53ffd4a6d950734f504f5217201a36cf3af6595)), closes [#496](https://github.com/snaha/swarm-id/issues/496)
+* **lib:** remove unsafe utilization-cache LRU eviction ([#452](https://github.com/snaha/swarm-id/issues/452)) ([3a13df1](https://github.com/snaha/swarm-id/commit/3a13df1bf2001de61246e1d5a217684a326cac50))
+* **lib:** stop logging the decryption key of encrypted references ([#480](https://github.com/snaha/swarm-id/issues/480)) ([0aa3590](https://github.com/snaha/swarm-id/commit/0aa359078b1567be1a8a84fbd3a12e115a046218))
+* **lib:** upload zero-byte data and reject multi-chunk explicit encryption key ([#486](https://github.com/snaha/swarm-id/issues/486)) ([976f295](https://github.com/snaha/swarm-id/commit/976f29521e9eb6399bfb9423aeef39361723e626)), closes [#418](https://github.com/snaha/swarm-id/issues/418)
+* **lib:** use 128-ref fanout for plain Merkle trees ([#488](https://github.com/snaha/swarm-id/issues/488)) ([5ea9f6a](https://github.com/snaha/swarm-id/commit/5ea9f6a1abc9b0d45b126f9d84bc695dfdf54959)), closes [#417](https://github.com/snaha/swarm-id/issues/417)
+* **lib:** use random chunk-encryption padding like Bee ([#468](https://github.com/snaha/swarm-id/issues/468)) ([ead2e11](https://github.com/snaha/swarm-id/commit/ead2e11bf4da8af58dc60b756d527e6ada95b9f0)), closes [#409](https://github.com/snaha/swarm-id/issues/409)
+* **lib:** validate ECDH public keys and replace hand-rolled secp256k1 ([#464](https://github.com/snaha/swarm-id/issues/464)) ([a211a3a](https://github.com/snaha/swarm-id/commit/a211a3a010cf00181c2578daaea1c1c2c92a1a4e)), closes [#407](https://github.com/snaha/swarm-id/issues/407)
+* **lib:** validate parentIdentify and require it to come from the parent window ([#477](https://github.com/snaha/swarm-id/issues/477)) ([0f78d93](https://github.com/snaha/swarm-id/commit/0f78d9362338dbafaf3d10610a477c2cc8c2fa58)), closes [#410](https://github.com/snaha/swarm-id/issues/410)
+
+
+### Performance Improvements
+
+* **lib:** cut fold-from-Swarm over-reads on roster scan and epoch probes ([#454](https://github.com/snaha/swarm-id/issues/454)) ([9b02815](https://github.com/snaha/swarm-id/commit/9b028153494c585777704d33683b9e419bf5a851)), closes [#400](https://github.com/snaha/swarm-id/issues/400)
+
 ## [0.2.0](https://github.com/snaha/swarm-id/compare/v0.1.3...v0.2.0) (2026-07-07)
 
 
