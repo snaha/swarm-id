@@ -6,8 +6,24 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
+// Wrap the Bee constructor so tests can observe which node URL the proxy points
+// its client at, without touching any other bee-js export the proxy relies on.
+vi.mock("@ethersphere/bee-js", async (importActual) => {
+  const actual = await importActual<typeof import("@ethersphere/bee-js")>()
+  return {
+    ...actual,
+    Bee: vi.fn(function (url: string) {
+      return new actual.Bee(url)
+    }),
+  }
+})
+
+import { Bee } from "@ethersphere/bee-js"
+
+import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { SwarmIdProxy } from "./swarm-id-proxy"
 import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
+import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ATTACKER_ORIGIN = "https://evil.example.com"
@@ -232,5 +248,68 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
   it("errors when not authenticated instead of leaking a secret", async () => {
     await derive("topic-seed")
     expect(lastMessage()).toMatchObject({ type: "error", requestId: "r1" })
+  })
+})
+
+describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
+  const NEW_BEE_URL = "https://custom-node.example.com/"
+  let storageListeners: Array<(event: StorageEvent) => void>
+  let store: Map<string, string>
+
+  const BeeMock = vi.mocked(Bee)
+
+  const setNetworkSettings = (beeNodeUrl: string) =>
+    store.set(
+      STORAGE_KEY_NETWORK_SETTINGS,
+      JSON.stringify({ beeNodeUrl, gnosisRpcUrl: "https://rpc.example.com/" }),
+    )
+
+  const fireStorage = (key: string | undefined) =>
+    storageListeners.forEach((listener) => listener({ key } as StorageEvent))
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    BeeMock.mockClear()
+
+    store = new Map()
+    vi.stubGlobal("localStorage", {
+      getItem: (key: string) => store.get(key) ?? null,
+      setItem: (key: string, value: string) => store.set(key, value),
+      removeItem: (key: string) => store.delete(key),
+    })
+
+    storageListeners = []
+    vi.stubGlobal("window", {
+      addEventListener: (
+        type: string,
+        listener: (event: StorageEvent) => void,
+      ) => {
+        if (type === "storage") storageListeners.push(listener)
+      },
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://id.example.com" },
+    })
+
+    new SwarmIdProxy()
+  })
+
+  it("rebuilds the Bee client at the newly configured node", () => {
+    expect(BeeMock).toHaveBeenLastCalledWith(DEFAULT_BEE_NODE_URL)
+
+    setNetworkSettings(NEW_BEE_URL)
+    fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+
+    expect(BeeMock).toHaveBeenLastCalledWith(NEW_BEE_URL)
+  })
+
+  it("ignores storage events for other keys and unchanged URLs", () => {
+    const callsAfterConstruction = BeeMock.mock.calls.length
+
+    fireStorage("some-other-key")
+    setNetworkSettings(DEFAULT_BEE_NODE_URL)
+    fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+
+    expect(BeeMock.mock.calls.length).toBe(callsAfterConstruction)
   })
 })
