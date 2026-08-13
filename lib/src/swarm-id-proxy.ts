@@ -8,6 +8,7 @@ import type {
   ButtonConfig,
   UploadDataMessage,
   DownloadDataMessage,
+  DeriveAppSecretMessage,
   UploadFileMessage,
   DownloadFileMessage,
   UploadChunkMessage,
@@ -1036,6 +1037,10 @@ export class SwarmIdProxy {
 
       case "downloadData":
         await this.handleDownloadData(message, event)
+        break
+
+      case "deriveAppSecret":
+        await this.handleDeriveAppSecret(message, event)
         break
 
       case "uploadFile":
@@ -2698,6 +2703,39 @@ export class SwarmIdProxy {
         event,
         requestId,
         error instanceof Error ? error.message : "SOC get owner failed",
+      )
+    }
+  }
+
+  /**
+   * Derive a stable, app-scoped secret HMAC(appSecret, label) for the connected
+   * app. `appSecret` is genuinely secret (unlike the recoverable appKey public
+   * key) and never leaves the iframe — only the derived bytes are returned, so
+   * the app can seed an unguessable feed topic without exposing metadata (#520).
+   */
+  private async handleDeriveAppSecret(
+    message: DeriveAppSecretMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const { requestId, label } = message
+
+    try {
+      if (!this.authenticated || !this.appSecret) {
+        throw new Error("Not authenticated. Please login first.")
+      }
+
+      const secretHex = await deriveSecret(this.appSecret, label)
+
+      this.postMessage(event, {
+        type: "deriveAppSecretResponse",
+        requestId,
+        secret: hexToUint8Array(secretHex),
+      })
+    } catch (error) {
+      this.sendErrorToParent(
+        event,
+        requestId,
+        error instanceof Error ? error.message : "deriveAppSecret failed",
       )
     }
   }

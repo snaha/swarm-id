@@ -308,6 +308,8 @@ export type {
   ActRevokeGranteesResponseMessage,
   ActGetGranteesResponseMessage,
   ConnectionInfoChangedMessage,
+  DeriveAppSecretMessage,
+  DeriveAppSecretResponseMessage,
   SocUploadMessage,
   SocRawUploadMessage,
   SocDownloadMessage,

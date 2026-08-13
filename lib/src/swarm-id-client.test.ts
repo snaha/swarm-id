@@ -292,6 +292,34 @@ describe("SwarmIdClient request seam", () => {
     })
     await expect(promise).rejects.toThrow("Bee node unreachable")
   })
+
+  it("deriveAppSecret round-trips the label and returns the secret (#520)", async () => {
+    const secret = new Uint8Array([9, 8, 7, 6])
+
+    const promise = client.deriveAppSecret("topic-seed")
+
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "deriveAppSecret", label: "topic-seed" })
+
+    deliver({
+      type: "deriveAppSecretResponse",
+      requestId: sent.requestId,
+      secret,
+    })
+    await expect(promise).resolves.toEqual(secret)
+  })
+
+  it("deriveAppSecret rejects when the proxy is not authenticated (#520)", async () => {
+    const promise = client.deriveAppSecret("topic-seed")
+
+    const sent = lastPostedMessage()
+    deliver({
+      type: "error",
+      requestId: sent.requestId,
+      error: "Not authenticated. Please login first.",
+    })
+    await expect(promise).rejects.toThrow("Not authenticated")
+  })
 })
 
 describe("SwarmIdClient init-timeout timers (#421)", () => {

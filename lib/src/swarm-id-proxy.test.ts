@@ -7,6 +7,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest"
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
 import { SwarmIdProxy } from "./swarm-id-proxy"
+import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ATTACKER_ORIGIN = "https://evil.example.com"
@@ -166,5 +167,70 @@ describe("SwarmIdProxy initialization failure (#420)", () => {
       type: "initError",
       error: "storage exploded",
     })
+  })
+})
+
+describe("SwarmIdProxy deriveAppSecret (#520)", () => {
+  // 32-byte hex key — appSecret is raw private-key material in hex.
+  const APP_SECRET_HEX = "11".repeat(32)
+  let proxy: SwarmIdProxy
+  let source: { postMessage: ReturnType<typeof vi.fn> }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+
+    const listeners: Record<string, unknown> = {}
+    vi.stubGlobal("window", {
+      addEventListener: vi.fn((type: string, listener: unknown) => {
+        listeners[type] = listener
+      }),
+      removeEventListener: vi.fn(),
+      parent: { postMessage: vi.fn() },
+      location: { origin: "https://id.example.com" },
+    })
+
+    proxy = new SwarmIdProxy()
+    source = { postMessage: vi.fn() }
+  })
+
+  const derive = (label: string) =>
+    (proxy as never)["handleDeriveAppSecret"](
+      { type: "deriveAppSecret", requestId: "r1", label },
+      { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
+    )
+
+  const lastMessage = () =>
+    source.postMessage.mock.calls[source.postMessage.mock.calls.length - 1][0]
+
+  it("returns HMAC(appSecret, label) as bytes, stable and label-scoped", async () => {
+    ;(proxy as never)["authenticated"] = true
+    ;(proxy as never)["appSecret"] = APP_SECRET_HEX
+
+    await derive("topic-seed")
+    const first = lastMessage()
+    expect(first).toMatchObject({
+      type: "deriveAppSecretResponse",
+      requestId: "r1",
+    })
+    expect(uint8ArrayToHex(first.secret)).toBe(
+      await deriveSecret(APP_SECRET_HEX, "topic-seed"),
+    )
+
+    // Stable across calls (i.e. across sessions/devices for the same appSecret).
+    await derive("topic-seed")
+    expect(uint8ArrayToHex(lastMessage().secret)).toBe(
+      uint8ArrayToHex(first.secret),
+    )
+
+    // A different label yields a different secret.
+    await derive("other-label")
+    expect(uint8ArrayToHex(lastMessage().secret)).not.toBe(
+      uint8ArrayToHex(first.secret),
+    )
+  })
+
+  it("errors when not authenticated instead of leaking a secret", async () => {
+    await derive("topic-seed")
+    expect(lastMessage()).toMatchObject({ type: "error", requestId: "r1" })
   })
 })

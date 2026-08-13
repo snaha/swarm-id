@@ -725,6 +725,14 @@ export const DownloadDataMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
+// Derive a stable, app-scoped secret HMAC(appSecret, label) inside the iframe.
+// The raw appSecret never crosses to the parent; only the derived bytes do (#520).
+export const DeriveAppSecretMessageSchema = z.object({
+  type: z.literal("deriveAppSecret"),
+  requestId: z.string(),
+  label: z.string(),
+})
+
 export const UploadFileMessageSchema = z.object({
   type: z.literal("uploadFile"),
   requestId: z.string(),
@@ -1037,6 +1045,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   DisconnectMessageSchema,
   UploadDataMessageSchema,
   DownloadDataMessageSchema,
+  DeriveAppSecretMessageSchema,
   UploadFileMessageSchema,
   DownloadFileMessageSchema,
   UploadChunkMessageSchema,
@@ -1075,6 +1084,9 @@ export type CheckAuthMessage = z.infer<typeof CheckAuthMessageSchema>
 export type DisconnectMessage = z.infer<typeof DisconnectMessageSchema>
 export type UploadDataMessage = z.infer<typeof UploadDataMessageSchema>
 export type DownloadDataMessage = z.infer<typeof DownloadDataMessageSchema>
+export type DeriveAppSecretMessage = z.infer<
+  typeof DeriveAppSecretMessageSchema
+>
 export type UploadFileMessage = z.infer<typeof UploadFileMessageSchema>
 export type DownloadFileMessage = z.infer<typeof DownloadFileMessageSchema>
 export type UploadChunkMessage = z.infer<typeof UploadChunkMessageSchema>
@@ -1179,6 +1191,12 @@ export const DownloadDataResponseMessageSchema = z.object({
   type: z.literal("downloadDataResponse"),
   requestId: z.string(),
   data: z.instanceof(Uint8Array),
+})
+
+export const DeriveAppSecretResponseMessageSchema = z.object({
+  type: z.literal("deriveAppSecretResponse"),
+  requestId: z.string(),
+  secret: z.instanceof(Uint8Array),
 })
 
 export const UploadFileResponseMessageSchema = z.object({
@@ -1465,6 +1483,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   AuthSuccessMessageSchema,
   UploadDataResponseMessageSchema,
   DownloadDataResponseMessageSchema,
+  DeriveAppSecretResponseMessageSchema,
   UploadFileResponseMessageSchema,
   DownloadFileResponseMessageSchema,
   UploadChunkResponseMessageSchema,
@@ -1515,6 +1534,9 @@ export type UploadDataResponseMessage = z.infer<
 >
 export type DownloadDataResponseMessage = z.infer<
   typeof DownloadDataResponseMessageSchema
+>
+export type DeriveAppSecretResponseMessage = z.infer<
+  typeof DeriveAppSecretResponseMessageSchema
 >
 export type UploadFileResponseMessage = z.infer<
   typeof UploadFileResponseMessageSchema
