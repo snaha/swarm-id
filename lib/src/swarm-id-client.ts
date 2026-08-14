@@ -1197,6 +1197,43 @@ export class SwarmIdClient {
     return response.data
   }
 
+  /**
+   * Derive a stable, app-scoped secret for this identity + app origin.
+   *
+   * Computes `HMAC(appSecret, label)` inside the iframe, where `appSecret` is the
+   * app-specific secret that never leaves the trusted context. The result is
+   * deterministic — the same identity, app origin, and label always yield the
+   * same bytes across sessions and devices — yet unguessable to anyone without
+   * the identity. Use it to seed feed topics or other app material without
+   * exposing the recoverable app public key (#520).
+   *
+   * @param label - Application-chosen domain separator (e.g. `"state-feed"`)
+   * @returns A promise resolving to the 32-byte derived secret
+   * @throws {Error} If the client is not initialized or not authenticated
+   *
+   * @example
+   * ```typescript
+   * const seed = await client.deriveAppSecret('state-feed')
+   * const topic = keccak256(seed) // an unguessable, stable feed topic
+   * ```
+   */
+  async deriveAppSecret(label: string): Promise<Uint8Array> {
+    this.ensureReady()
+    const requestId = this.generateRequestId()
+
+    const response = await this.sendRequest<{
+      type: "deriveAppSecretResponse"
+      requestId: string
+      secret: Uint8Array
+    }>({
+      type: "deriveAppSecret",
+      requestId,
+      label,
+    })
+
+    return response.secret
+  }
+
   // ============================================================================
   // File Upload/Download Methods
   // ============================================================================
