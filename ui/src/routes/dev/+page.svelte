@@ -29,10 +29,7 @@
   import { Tabs } from '$lib/components/ui/tabs'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
-  import {
-    LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS,
-    fetchExistingBatchFromChain,
-  } from '$lib/payment/contract'
+  import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
@@ -601,11 +598,10 @@ Check console logs for details:
   let importError = $state('')
 
   // Contract address the read will use: the override if set, else auto-detected
-  // from the RPC — local RPC → local anvil deployment, any remote RPC → Gnosis
-  // mainnet (resolvePostageStampContractAddress encodes that rule).
-  const resolvedContract = $derived(
-    resolvePostageStampContractAddress(importRpcUrl.trim(), LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS),
-  )
+  // from the RPC. There is no local-only deployment any more: the cluster's
+  // chain carries the Swarm contracts at their MAINNET addresses, so local and
+  // remote resolve to the same one.
+  const resolvedContract = $derived(resolvePostageStampContractAddress(importRpcUrl.trim()))
   const effectiveContract = $derived(importContractOverride.trim() || resolvedContract)
 
   async function importBatchById() {

@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@snaha/bee-compose':
-        specifier: ^0.1.5
-        version: 0.1.5
+        specifier: ^0.2.0
+        version: 0.2.0
       '@trivago/prettier-plugin-sort-imports':
         specifier: ^6.0.2
         version: 6.0.2(prettier-plugin-svelte@3.4.0(prettier@3.8.1)(svelte@5.48.2))(prettier@3.8.1)(svelte@5.48.2)
@@ -1771,8 +1771,8 @@ packages:
   '@sideway/pinpoint@2.0.0':
     resolution: {integrity: sha512-RNiOoTPkptFtSVzQevY/yWtZwf/RxyVnPy/OcA9HBM3MlGDnBEYL5B41H0MTn0Uec8Hi+2qUtTfG2WWZBmMejQ==}
 
-  '@snaha/bee-compose@0.1.5':
-    resolution: {integrity: sha512-m5A+eqD5rRDaF2RaRWJ0eHOcOsYhXLRbZN25/ydhyGEDB2wy0tNYeMVq5cBXlvWRbuHy1IsDa9MfGMCO6whrFQ==}
+  '@snaha/bee-compose@0.2.0':
+    resolution: {integrity: sha512-6svciJ8QVmiy6ncJWXtfDTFQVc2MRGTJJu+rhguaZVkO1iIyNvisMCDJFwgPNF2quPE2Xi62V/dcKNINvDNtGw==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -6096,7 +6096,7 @@ snapshots:
 
   '@sideway/pinpoint@2.0.0': {}
 
-  '@snaha/bee-compose@0.1.5':
+  '@snaha/bee-compose@0.2.0':
     dependencies:
       commander: 12.1.0
 

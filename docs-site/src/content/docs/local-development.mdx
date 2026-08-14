@@ -13,7 +13,7 @@ The project uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-c
 
 ```bash
 # Start Bee cluster in background
-pnpm dev:bee:detach
+pnpm dev:cluster:start
 
 # Start the development servers
 pnpm dev
@@ -21,13 +21,18 @@ pnpm dev
 
 ### All Cluster Commands
 
-| Command               | Description                              |
-| --------------------- | ---------------------------------------- |
-| `pnpm dev:bee`        | Start cluster interactively (shows logs) |
-| `pnpm dev:bee:detach` | Start cluster in background              |
-| `pnpm dev:bee:stop`   | Stop the cluster                         |
-| `pnpm dev:bee:logs`   | View queen node logs                     |
-| `pnpm dev:bee:fresh`  | Clean start with latest images           |
+| Command                          | Description                             |
+| -------------------------------- | --------------------------------------- |
+| `pnpm dev:cluster:start`         | Start cluster in background (queen + 3) |
+| `pnpm dev:cluster:start --fresh` | Clean start (destroys node state)       |
+| `pnpm dev:cluster stop`          | Stop the cluster                        |
+| `pnpm dev:cluster status`        | Show what is running                    |
+| `pnpm dev:cluster:logs`          | Follow queen node logs                  |
+
+`pnpm dev:cluster` passes anything through to the `bee-compose` CLI, so
+`pnpm dev:cluster start --help` lists the rest.
+
+The first start compiles Bee from source (a few minutes); later starts are seconds.
 
 ### Local Endpoints
 
@@ -140,7 +145,8 @@ On Chrome/Firefox localhost, storage should work immediately. If issues occur, t
 
 - Ensure Docker is running
 - Check if ports 1633, 16331, or 9545 are already in use
-- Try `pnpm dev:bee:fresh` for a clean start
+- Try `pnpm dev:cluster:start --fresh` for a clean start
+- After a `@snaha/bee-compose` upgrade, add `--pull` so the chain image is rebuilt rather than reused
 
 ### Library Changes Not Reflected
 

@@ -14,3 +14,11 @@ allowBuilds:
   sharp: true
   # es5-ext has a noisy postinstall (sponsorship message); not required to build.
   es5-ext: false
+
+# pnpm holds new releases back for a cooling-off period as a supply-chain
+# guard. 0.2.0 is the release that carries the hybrid chain and was published
+# the same day this landed, so it needs an explicit exemption to install at
+# all. It is OURS (snaha/bee-compose), a devDependency, and never ships.
+# Delete this once the release has aged past the window.
+minimumReleaseAgeExclude:
+  - '@snaha/bee-compose@0.2.0'

@@ -11,11 +11,6 @@ import { strip0x } from '$lib/crypto/hex'
 import type { NewStamp } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
-// bee-compose anvil deploy of the PostageStamp contract; only used when the RPC
-// URL is local (resolvePostageStampContractAddress gates it — a remote RPC
-// resolves to Gnosis mainnet). Inert in production.
-export const LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
-
 /**
  * Read a batch's parameters straight from the PostageStamp contract ON-CHAIN
  * (not from a Bee node), so any batch id works even when the configured node
@@ -34,9 +29,9 @@ export async function fetchExistingBatchFromChain(
   opts?: { rpcUrl?: string; contractAddress?: string },
 ): Promise<NewStamp | undefined> {
   const rpcUrl = opts?.rpcUrl ?? networkSettingsStore.gnosisRpcUrl
-  const contractAddress =
-    opts?.contractAddress ??
-    resolvePostageStampContractAddress(rpcUrl, LOCAL_POSTAGE_STAMP_CONTRACT_ADDRESS)
+  // No local-only deployment any more: the cluster's chain carries the Swarm
+  // contracts at their MAINNET addresses, so local and remote resolve alike.
+  const contractAddress = opts?.contractAddress ?? resolvePostageStampContractAddress(rpcUrl)
 
   const state = await fetchOnChainBatchState(rpcUrl, strip0x(batchId), contractAddress)
   if (!state) {
