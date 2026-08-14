@@ -9,16 +9,34 @@
  */
 import { type Page, expect, test } from '@playwright/test'
 
-import { DRIVE_SETTLE_TIMEOUT_MS, PASSWORD, addMockedDrive, completeCreateFlow } from './helpers'
+import {
+  DRIVE_SETTLE_TIMEOUT_MS,
+  PASSWORD,
+  addDrive,
+  chainReachable,
+  completeCreateFlow,
+  fundPostageSigner,
+  seedLocalChain,
+} from './helpers'
+
+// Buying a drive is a real on-chain purchase now — there is no simulated
+// settlement to fall back on — so this suite needs a chain.
+const chainUp = await chainReachable()
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
+
+// A real purchase spans several 5s blocks; the 30s default is not enough.
+test.setTimeout(180_000)
 
 async function createAccountWithDrive(page: Page) {
+  await seedLocalChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
   await page.getByRole('button', { name: 'Stay local for now' }).click()
   await expect(page).toHaveURL(/\/$/)
   // A drive makes the account non-local — sign-out is only offered then.
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })

@@ -8,9 +8,11 @@ on:
 jobs:
   playwright-tests:
     timeout-minutes: 30
+    # Deliberately NOT the playwright container image: the drive suites need a
+    # chain, the chain is an anvil container, and a job running inside a
+    # container has no Docker to start one with (nor would its published port
+    # or its bind mount reach the job). Browsers are installed below instead.
     runs-on: ubuntu-latest
-    container:
-      image: mcr.microsoft.com/playwright:v1.57.0-noble
 
     steps:
       - name: Checkout repository
@@ -30,13 +32,47 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      - name: Install Playwright browsers
+        working-directory: ./ui
+        run: pnpm exec playwright install --with-deps chromium
+
       - name: Build lib dependency
         working-directory: ./lib
         run: pnpm build
 
+      # Buying a drive is a real on-chain purchase — there is no simulated
+      # settlement any more — so the suites that add one need a chain. The
+      # baked snapshot is committed, so this needs no network.
+      - name: Start the local chain
+        run: pnpm dev:chain:detach
+
+      # `docker run -d` returns as soon as the container is created, so without
+      # this the chain may still be loading its state when the suites probe it
+      # — and an unreachable chain makes them skip rather than fail. Fail here
+      # instead, where the reason is visible.
+      - name: Wait for the local chain
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf -X POST -H 'Content-Type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              http://localhost:9545 > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The local chain never answered on :9545 — the drive e2e suites would have skipped silently."
+          pnpm -s dev:cluster logs blockchain --tail 100 || true
+          exit 1
+
       - name: Run Playwright tests
         working-directory: ./ui
         run: pnpm test:e2e
+        env:
+          CHAIN_RPC_URL: http://localhost:9545
+
+      - name: Stop the local chain
+        if: always()
+        run: pnpm dev:chain:stop
 
       - name: Upload test report
         uses: actions/upload-artifact@v4

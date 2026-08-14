@@ -1,15 +1,49 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Drive (postage stamp) management on the Storage tab, against the mocked
- * purchase flow (/dev defaults: mock enabled, no widget popup): add, rename,
- * set default, remove, and the failed-purchase outcome.
+ * Drive (postage stamp) management on the Storage tab, against the simulated
+ * purchase flow: add, rename, set default, remove, and the failed-purchase
+ * outcome.
+ *
+ * Every purchase here is a real one against the local chain — nothing about it
+ * is fabricated any more. What keeps this suite about drive bookkeeping rather
+ * than about paying is that the postage signer is funded out of band first
+ * (`fundPostageSigner`), so the operation is never short and the payment
+ * screens never open. `payment-rail.test.ts` is where paying is the subject.
  */
 import { expect, test } from '@playwright/test'
 
-import { DRIVE_SETTLE_TIMEOUT_MS, addMockedDrive, completeCreateFlow } from './helpers'
+import {
+  DRIVE_SETTLE_TIMEOUT_MS,
+  addDrive,
+  chainReachable,
+  completeCreateFlow,
+  fundPostageSigner,
+  seedLocalChain,
+  seedNoChain,
+} from './helpers'
 
-async function createLocalAccount(page: import('@playwright/test').Page) {
+// Buying a drive is a real on-chain purchase now — there is no simulated
+// settlement to fall back on — so this suite needs a chain.
+const chainUp = await chainReachable()
+test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
+
+// A real purchase spans several 5s blocks; the 30s default is not enough.
+test.setTimeout(180_000)
+
+/**
+ * Create an account, against whichever chain the caller seeds.
+ *
+ * The seeding is a parameter rather than a fixed `seedLocalChain` because
+ * `addInitScript` calls stack: a hardcoded working endpoint would overwrite the
+ * dead one seeded by the test that checks the "cannot reach the chain" case, so
+ * that case would never be exercised.
+ */
+async function createLocalAccount(
+  page: import('@playwright/test').Page,
+  seedChain: (page: import('@playwright/test').Page) => Promise<void> = seedLocalChain,
+) {
+  await seedChain(page)
   await page.goto('/')
   await page.getByRole('link', { name: 'Get started' }).first().click()
   await completeCreateFlow(page)
@@ -40,7 +74,8 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   await createLocalAccount(page)
 
   // The first drive settles and becomes the account default.
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
@@ -61,7 +96,8 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   const expandedCard = page
     .locator('div.overflow-hidden.rounded-lg')
     .filter({ has: page.getByRole('button', { name: 'Collapse drive' }) })
-  await addMockedDrive(page)
+  await fundPostageSigner(page)
+  await addDrive(page)
   const newCard = page.locator('div.overflow-hidden.rounded-lg', {
     hasText: /Drive [0-9a-f]{4}/,
   })
@@ -91,15 +127,16 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   expect(afterRemove.default).toBe(afterRemove.live[0].batchID)
 })
 
-test('a failed mock purchase surfaces the error and adds nothing', async ({ page }) => {
-  // The dev-settings store reads the mock outcome at app init (same-tab
-  // localStorage writes fire no storage event) — plant it before any load.
-  await page.addInitScript(() => localStorage.setItem('dev-mock-stamp-result', 'error'))
-  await createLocalAccount(page)
+test('a purchase that cannot reach the chain surfaces the error and adds nothing', async ({
+  page,
+}) => {
+  // Point the app at a dead RPC: a real purchase has nothing to buy against,
+  // and must say so rather than inventing a drive.
+  await createLocalAccount(page, seedNoChain)
 
-  await addMockedDrive(page)
+  await addDrive(page)
 
-  await expect(page.getByText('Mock error: Purchase failed')).toBeVisible({
+  await expect(page.getByRole('button', { name: 'Try again' })).toBeVisible({
     timeout: DRIVE_SETTLE_TIMEOUT_MS,
   })
   const drives = await storedDrives(page)

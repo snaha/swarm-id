@@ -2,14 +2,19 @@
 // SPDX-License-Identifier: Apache-2.0
 /**
  * Shared journey helpers for the e2e suites: the password create flow, the
- * demo's connect popup, and the mocked drive purchase (`/dev` defaults: mock
- * enabled, no widget popup).
+ * demo's connect popup, buying a drive, and the network/rail seeding that
+ * decides which chain and which payment arrangement a suite runs against.
  */
+import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect } from '@playwright/test'
+import { gnosisMainnetSettings } from '@swarm-id/multichain'
+import { fundLocalAccount } from '@swarm-id/multichain/dev'
 
 export const PASSWORD = 'testpassword123'
-/** The mocked drive purchase settles after a simulated widget delay. */
-export const DRIVE_SETTLE_TIMEOUT_MS = 15000
+
+/** Buying a drive is a real on-chain purchase: funding, then an approve +
+ * createBatch bundle, then reading the batch back — several 5s blocks. */
+export const DRIVE_SETTLE_TIMEOUT_MS = 120_000
 
 /**
  * Drives the account-creation wizard from /account/new to completion using the
@@ -57,13 +62,139 @@ export async function openConnectPopup(page: Page) {
 }
 
 /**
- * Starts a mocked Add-drive purchase from the home page (Storage tab). The
- * purchase settles asynchronously — callers assert the outcome (a "Drive
- * xxxx" card, or the error phase) with `DRIVE_SETTLE_TIMEOUT_MS`.
+ * Point the app at the local chain. Any suite that buys a drive needs this now
+ * that purchases are real — `seedNoChain` is for suites deliberately testing
+ * what happens without one.
+ *
+ * Must run before the first page load; the settings are read at app init.
  */
-export async function addMockedDrive(page: Page) {
+export function seedLocalChain(page: Page, rpcUrl: string = CHAIN_RPC_URL) {
+  return page.addInitScript(
+    (url) =>
+      localStorage.setItem(
+        'swarm-id-network-settings',
+        JSON.stringify({ beeNodeUrl: 'http://localhost:1633/', gnosisRpcUrl: url }),
+      ),
+    rpcUrl,
+  )
+}
+
+export function seedNoChain(page: Page) {
+  return page.addInitScript(() => {
+    localStorage.setItem(
+      'swarm-id-network-settings',
+      JSON.stringify({
+        beeNodeUrl: 'http://localhost:1633/',
+        // Connection refused immediately, rather than a slow DNS failure.
+        gnosisRpcUrl: 'http://127.0.0.1:1',
+      }),
+    )
+  })
+}
+
+/**
+ * Buy a drive through the normal flow, from the home page (Storage tab).
+ *
+ * Every suite that calls this needs a chain: buying is a real on-chain
+ * purchase, with no simulated settlement to fall back on. Gate with
+ * {@link chainReachable}. It settles asynchronously — callers assert the
+ * outcome (a "Drive xxxx" card, or the error phase) with
+ * `DRIVE_SETTLE_TIMEOUT_MS`.
+ */
+export async function addDrive(page: Page) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   await page.getByRole('dialog').getByRole('combobox').nth(1).selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Proceed' }).click()
+}
+
+export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
+
+/**
+ * One depth-17 drive at the default one-year lifespan costs ~2 BZZ, measured
+ * against the baked chain; three is headroom for price drift. The xDAI is ten
+ * times the operation's fixed gas budget, which is what `fundingShortfall`
+ * compares against — under it, a need is raised however much BZZ is there.
+ */
+const DRIVE_FUNDING = {
+  xdai: 5n * 10n ** 16n, // 0.05 xDAI
+  bzzPlur: 3n * 10n ** 16n, // 3 BZZ (16 decimals)
+}
+
+/**
+ * Put money in the account's postage signer, from the chain faucet, so the
+ * purchase ahead finds it already there and opens no payment screen.
+ *
+ * Must run after the account exists (its derivation key is read from storage)
+ * and before the operation that spends. Suites that assert a FAILED purchase
+ * deliberately skip it.
+ */
+export async function fundPostageSigner(page: Page) {
+  const to = await postageSignerAddress(page)
+  await fundLocalAccount(
+    { to, ...DRIVE_FUNDING },
+    gnosisMainnetSettings({ rpcUrls: [CHAIN_RPC_URL] }),
+  )
+}
+
+/**
+ * Where that money has to land: the account's postage signer, derived the way
+ * the app derives it — HMAC-SHA256 over the label `postage-signer`, keyed by
+ * the account's derivation key (`lib/src/utils/key-derivation.ts`).
+ *
+ * Derived inside the page rather than here because the lib ships one bundle and
+ * it is the browser one: importing `derivePostageSignerKey` into the Node test
+ * process pulls a browser build of bee-js and dies on `window is not defined`.
+ * The page has both WebCrypto and the account, so it is also where the question
+ * belongs. If the derivation ever changes, every funded purchase fails loudly —
+ * the money lands at an address the operation is not looking at, so it raises a
+ * funding need and the payment screen opens over the test.
+ */
+async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
+  const signerKey = await page.evaluate(async () => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { derivationKey?: string }[]
+    }
+    const derivationKey = doc.data?.[0]?.derivationKey
+    if (!derivationKey) {
+      return undefined
+    }
+    const keyBytes = Uint8Array.from(
+      (derivationKey.match(/../g) ?? []).map((byte) => parseInt(byte, 16)),
+    )
+    const key = await crypto.subtle.importKey(
+      'raw',
+      keyBytes,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    )
+    const signature = await crypto.subtle.sign(
+      'HMAC',
+      key,
+      new TextEncoder().encode('postage-signer'),
+    )
+    return [...new Uint8Array(signature)].map((byte) => byte.toString(16).padStart(2, '0')).join('')
+  })
+  if (!signerKey) {
+    throw new Error('No account in storage — create one before funding its signer.')
+  }
+  return new PrivateKey(signerKey).publicKey().address().toChecksum() as `0x${string}`
+}
+
+const PROBE_TIMEOUT_MS = 2000
+
+/** Whether a local chain is answering, so a suite can skip rather than fail. */
+export async function chainReachable(rpcUrl: string = CHAIN_RPC_URL): Promise<boolean> {
+  try {
+    const response = await fetch(rpcUrl, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    })
+    return typeof ((await response.json()) as { result?: string }).result === 'string'
+  } catch {
+    return false
+  }
 }

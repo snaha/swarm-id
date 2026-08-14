@@ -20,7 +20,7 @@
     uploadSOC,
   } from '@snaha/swarm-id'
   import { gnosisMainnetSettings } from '@swarm-id/multichain'
-  import { formatUnits, parseUnits } from 'viem'
+  import { type Chain, formatUnits, parseUnits } from 'viem'
 
   import { resolve } from '$app/paths'
 
@@ -34,7 +34,6 @@
   } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
-  import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
   import {
     ANVIL_ACCOUNT,
@@ -49,9 +48,10 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import { type EthereumProvider, switchWalletChain } from '$lib/payment/payment-rail'
+  import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
-  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
@@ -421,6 +421,46 @@
       faucetBusy = false
     }
     await refreshFunds()
+  }
+
+  // RAW: these descriptors are handed to a wallet, which structured-clones its
+  // arguments, and a `$state` proxy cannot be cloned.
+  let walletChains = $state.raw<Chain[]>([])
+  let walletMessage = $state('')
+
+  // Read from the resolved rails rather than listed here, so this offers
+  // exactly the chains the payment screens will ask the wallet for.
+  $effect(() => {
+    if (activeTab === 'chain') {
+      void resolvePaymentRail().then((rail) => {
+        walletChains = rail ? [...rail.chains] : []
+      })
+    }
+  })
+
+  /**
+   * Add a chain to the injected wallet, and switch to it.
+   *
+   * Adding is what makes a wallet show a balance for a network at all, so doing
+   * it here means the payment screens are reached with something already
+   * visible rather than an account that looks empty.
+   */
+  async function addChainToWallet(chain: Chain) {
+    walletMessage = ''
+    const injected = (window as { ethereum?: EthereumProvider }).ethereum
+    if (!injected) {
+      walletMessage = '❌ No injected wallet found — is MetaMask installed and enabled here?'
+      return
+    }
+    try {
+      // MetaMask ignores chain requests from a site it has never been connected
+      // to, so ask for accounts first even though nothing here needs one.
+      await injected.request({ method: 'eth_requestAccounts' })
+      await switchWalletChain(injected, chain.id, walletChains)
+      walletMessage = `✅ ${chain.name} added — the wallet is on it now.`
+    } catch (e) {
+      walletMessage = `❌ ${e instanceof Error ? e.message : String(e)}`
+    }
   }
 
   async function runChainTool(label: string, action: (account: Account) => Promise<string>) {
@@ -846,14 +886,6 @@ Check console logs for details:
   const LABEL_CLASS = 'flex flex-col gap-1.5 text-sm'
   const LABEL_TEXT_CLASS = 'text-muted-foreground'
   const CARD_CLASS = 'flex flex-col gap-2 rounded-lg border bg-card p-4'
-
-  // Mock stamp widget settings — `devSettingsStore` is the single source of
-  // truth (durable + cross-tab); the controls bind straight to its setters via
-  // function bindings, so there is no local mirror to drift.
-  const MOCK_RESULT_OPTIONS = [
-    { value: 'success', label: 'Success (creates a drive)' },
-    { value: 'error', label: 'Error (purchase failed)' },
-  ]
 </script>
 
 {#snippet chainBanner(
@@ -1252,47 +1284,11 @@ Check console logs for details:
     <div class="flex flex-col gap-4">
       <h3 class="text-lg font-semibold">Simulated purchase</h3>
       <p class="text-muted-foreground text-sm">
-        Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real
-        cross-chain payment — the purchase widget only settles on mainnet, so this is what makes
-        that flow reachable at all here. The batch it leaves behind is fabricated, which is why
-        extend and resize cannot act on it; for a drive backed by a real batch, use
-        <strong>Create drive to test with</strong> below.
+        <strong>Add drive</strong> and the paid drive operations all buy for real, against whichever chain
+        this page is pointed at — there is no simulated settlement any more, and no outcome to choose.
+        Money always reaches the batch owner through a payment the user makes. Nothing in the app settles
+        an operation out of the faucet below; that is yours to do here, before an operation needs it.
       </p>
-      <label class="flex items-center gap-2">
-        <Switch
-          bind:checked={
-            () => devSettingsStore.data.mockStampEnabled,
-            (enabled) => devSettingsStore.setMockStampEnabled(enabled)
-          }
-          aria-label="Enable mock stamp purchase"
-        />
-        <span class="text-sm">Enable mock purchases</span>
-      </label>
-      {#if devSettingsStore.data.mockStampEnabled}
-        <label class="flex items-center gap-2">
-          <Switch
-            bind:checked={
-              () => devSettingsStore.data.mockStampPopup,
-              (popup) => devSettingsStore.setMockStampPopup(popup)
-            }
-            aria-label="Open widget popup while mocking"
-          />
-          <span class="text-sm"
-            >Open widget popup (off = local, works where popups are blocked)</span
-          >
-        </label>
-        <label class={`${LABEL_CLASS} w-64`}>
-          <span class={LABEL_TEXT_CLASS}>Outcome</span>
-          <Select
-            options={MOCK_RESULT_OPTIONS}
-            bind:value={
-              () => devSettingsStore.data.mockStampResult,
-              (result) =>
-                devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
-            }
-          />
-        </label>
-      {/if}
 
       <div class="bg-border my-4 h-px"></div>
 
@@ -1393,6 +1389,31 @@ Check console logs for details:
       {/if}
       {#if faucetError}
         <p class="text-destructive text-sm">{faucetError}</p>
+      {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Wallet networks</h3>
+      <p class="text-muted-foreground text-sm">
+        Adds these chains to MetaMask, so a balance shows before you reach the payment screens.
+        <strong>Gnosis Chain (fake)</strong> is the one to add first — paying from it is a plain transfer
+        to the batch owner, with no bridge and no solver in the way.
+      </p>
+      {#if walletChains.length === 0}
+        <p class="text-muted-foreground text-sm">
+          No payment chains resolved — is the Gnosis RPC in Network settings reachable?
+        </p>
+      {:else}
+        <div class="flex flex-wrap items-center gap-2">
+          {#each walletChains as chain (chain.id)}
+            <Button variant="secondary" onclick={() => addChainToWallet(chain)}>
+              Add {chain.name}
+            </Button>
+          {/each}
+        </div>
+      {/if}
+      {#if walletMessage}
+        <p class="font-mono text-sm">{walletMessage}</p>
       {/if}
 
       <div class="bg-border my-4 h-px"></div>

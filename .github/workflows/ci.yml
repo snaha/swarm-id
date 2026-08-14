@@ -147,3 +147,33 @@ jobs:
       - name: Stop the local chain
         if: always()
         run: pnpm dev:chain:stop
+
+  # Talks to Relay's real quote API — the only thing that can catch our request
+  # or response mapping drifting from theirs. A read, no wallet, no money. It
+  # skips itself if Relay cannot be reached, so an outage is not a red build.
+  live-tests:
+    name: Live service contracts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Run the live contract suite
+        working-directory: ./ui
+        run: pnpm test:live

@@ -9,12 +9,15 @@
     "build": "vite build",
     "preview": "vite preview --port 5501",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
-    "check:all": "pnpm lint && pnpm check && pnpm knip",
+    "check:all": "pnpm lint && pnpm check && pnpm knip && pnpm test",
     "check:watch": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json --watch",
     "lint": "prettier --check . && eslint .",
     "format": "prettier --write . && eslint . --fix",
     "test": "vitest run --passWithNoTests",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:live": "svelte-kit sync && vitest run --config vitest.live.config.ts",
+    "clean": "rm -rf build .svelte-kit",
+    "test:cluster": "playwright test --config=playwright.cluster.config.ts"
   },
   "devDependencies": {
     "@eslint/js": "9.39.1",
@@ -52,6 +55,7 @@
   },
   "dependencies": {
     "@ethersphere/bee-js": "^11.1.1",
+    "@relayprotocol/relay-sdk": "^7.0.0",
     "@scure/bip39": "1.6.0",
     "@snaha/swarm-id": "workspace:*",
     "@swarm-id/multichain": "workspace:*",

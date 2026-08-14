@@ -92,6 +92,16 @@ jobs:
       - name: Run integration tests
         run: pnpm --filter @snaha/swarm-id test:integration
 
+      # The proof that the hybrid chain's whole premise holds: a batch bought
+      # through the multichain path is one the nodes ingest, and a chunk stamped
+      # client-side by its owner round-trips. It takes no `page`, so it needs
+      # neither a browser nor the dev servers — only the cluster already up
+      # here, which is why it belongs in this job rather than the browser one.
+      - name: Run the cluster e2e
+        run: pnpm --filter @swarm-id/ui test:cluster
+        env:
+          CHAIN_RPC_URL: http://localhost:9545
+
       - name: Dump cluster logs on failure
         if: failure()
         run: |

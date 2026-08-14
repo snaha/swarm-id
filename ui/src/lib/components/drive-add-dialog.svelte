@@ -8,11 +8,11 @@
 
   import { PrivateKey, Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
-  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
 
   import { createAttemptTracker } from '$lib/attempt'
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
+  import PaymentDialog from '$lib/components/payment-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
@@ -27,15 +27,14 @@
   import { verifyBatchStampable } from '$lib/payment/bee'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
-  import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
+  import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
+  import { runPurchase } from '$lib/payment/drive-operation'
   import {
-    derivePostageSigner,
-    stampAmountForSeconds,
-    stampCostBzz,
-    stampFromBatch,
-    stampTtlSeconds,
-  } from '$lib/payment/purchase'
-  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
+    PaymentCancelledError,
+    createFundingRequester,
+    describeStep,
+  } from '$lib/payment/funding-request.svelte'
+  import { derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   const STORAGE_OPTIONS = [
@@ -52,7 +51,7 @@
   let { account, onClose, onAdded }: Props = $props()
 
   type Storage = 'new' | 'existing'
-  type Phase = 'form' | 'pending' | 'error' | 'unconfirmed'
+  type Phase = 'form' | 'pending' | 'success' | 'error'
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -65,13 +64,14 @@
   let phase = $state<Phase>('form')
   let pendingLabel = $state('')
   let errorMessage = $state('')
+  let errorDetail = $state('')
 
   let currentPrice = $state<bigint | undefined>(undefined)
   // Superseded on cancel/close so a late ceremony or widget callback can't complete.
   const attempts = createAttemptTracker()
+  const funding = createFundingRequester(() => account)
   // In-flight widget purchase; cancelled on close so the popup can't settle a
   // payment we would silently drop.
-  let purchase: StampPurchaseHandle | undefined
 
   const sizeOptions = [
     { value: '', label: 'Please select' },
@@ -82,7 +82,8 @@
 
   const lifespanSeconds = $derived(lifespanToSeconds(Number(lifespanValue), lifespanUnit))
 
-  const estimateBzz = $derived.by(() => {
+  /** Per-chunk PLUR the batch would be funded with at the current price. */
+  const amountPerChunk = $derived.by(() => {
     if (
       storage !== 'new' ||
       depthValue === '' ||
@@ -91,8 +92,12 @@
     ) {
       return undefined
     }
-    return stampCostBzz(Number(depthValue), stampAmountForSeconds(currentPrice, lifespanSeconds))
+    return stampAmountForSeconds(currentPrice, lifespanSeconds)
   })
+
+  const estimate = createCostEstimate(() =>
+    amountPerChunk === undefined ? undefined : { depth: Number(depthValue), amountPerChunk },
+  )
 
   // Validate through the lib's canonical schemas (bare 64-hex), tolerating a
   // `0x` prefix by stripping first.
@@ -122,7 +127,7 @@
     if (!canProceed) {
       return 'Set storage options to proceed.'
     }
-    return estimateBzz ? `Estimated cost ≈ ${estimateBzz} BZZ` : 'Final cost is shown at payment.'
+    return estimate.value ? `Estimated cost ≈ ${estimate.value}` : 'Final cost is shown at payment.'
   })
 
   // Best-effort: the price only feeds the cost estimate here (and the TTL guess
@@ -135,20 +140,20 @@
 
   function close() {
     attempts.supersede()
-    purchase?.cancel()
-    purchase = undefined
+    funding.cancel()
     onClose()
   }
 
-  // The dialog can unmount without close() (tab switch, navigation) — treat
-  // that as a cancel so the popup poll and message listener don't outlive us.
-  onDestroy(() => purchase?.cancel())
+  // The dialog can unmount without close() (tab switch, navigation) — abandon
+  // any pending payment request so nothing is left waiting on a dialog that no
+  // longer exists.
+  onDestroy(() => funding.cancel())
 
   function proceed() {
     errorMessage = ''
     // The batch owner is a deterministic function of the account's (plaintext)
-    // derivation key, so no unlock is needed — buying spends real money in the
-    // widget, which is confirmation enough.
+    // derivation key, so no unlock is needed — buying spends real money, and
+    // the payment screens are confirmation enough.
     if (storage === 'existing') {
       void attachExisting()
     } else {
@@ -159,68 +164,37 @@
   async function purchaseNew() {
     const attempt = attempts.begin()
     phase = 'pending'
-    // The popup-less /dev mock settles locally — telling the user to look for a
-    // popup window there is wrong.
-    pendingLabel =
-      devSettingsStore.data.mockStampEnabled && !devSettingsStore.data.mockStampPopup
-        ? 'Simulating the purchase…'
-        : 'Complete the purchase in the popup window.'
-    // Left blank, the drive stays unnamed and the UI falls back to its stable
-    // batch-ID-derived label.
-    const driveName = name.trim() || undefined
+    pendingLabel = 'Checking the chain…'
     try {
-      // The user may have cancelled during the derivation — bail before the
-      // popup opens, or a payment window would appear after they backed out.
-      const { signerKey, destination } = await attempt.guard(
-        derivePostageSigner(account.derivationKey),
-      )
-      purchase = openStampPurchaseWidget({
-        destination,
-        // /dev mock (see dev-settings): simulate the purchase without a real
-        // cross-chain payment. No-op in production, where the toggle is off.
-        mocked: devSettingsStore.data.mockStampEnabled,
-        mockPopup: devSettingsStore.data.mockStampPopup,
-        mockError: devSettingsStore.data.mockStampResult === 'error',
-        // Only the mock can honour this — the real widget picks the size itself.
-        mockDepth: depthValue === '' ? undefined : Number(depthValue),
-        onSuccess: (batch) => {
-          if (!attempt.current) {
-            return
-          }
-          // The size/lifespan actually bought are chosen INSIDE the widget —
-          // the form's selection is only a pre-payment estimate. Derive the
-          // lifespan from what settled (funded blocks × block time); when the
-          // chain price never loaded it stays unknown rather than wrong.
-          const ttl =
-            currentPrice === undefined
-              ? undefined
-              : stampTtlSeconds(BigInt(batch.amount), currentPrice)
-          account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
-          succeed()
-        },
-        onError: (error) => {
-          if (!attempt.current) {
-            return
-          }
-          errorMessage = error.message
-          phase = 'error'
-        },
-        onCancel: () => {
-          if (attempt.current) {
-            phase = 'form'
-          }
-        },
-        onUnconfirmedClose: () => {
-          if (attempt.current) {
-            phase = 'unconfirmed'
-          }
-        },
+      // Deliberately unguarded from here: this is an on-chain spend whose
+      // record must land even if the dialog closed. Only the UI epilogue is
+      // gated on `attempt.current`.
+      await runPurchase({
+        account,
+        depth: Number(depthValue),
+        lifespanSeconds,
+        // Left blank, the drive stays unnamed and the UI falls back to its
+        // stable batch-ID-derived label.
+        name: name.trim(),
+        requestFunding: funding.request,
+        onStep: (step) => (pendingLabel = describeStep(step, 'purchase')),
       })
+      if (!attempt.current) {
+        return
+      }
+      succeed()
     } catch (caught) {
       if (!attempt.current) {
         return
       }
-      errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
+      // Backing out of the payment is a choice, not a failure — return to the
+      // form with the selection intact rather than reporting an error.
+      if (caught instanceof PaymentCancelledError) {
+        phase = 'form'
+        return
+      }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
+      errorMessage = caught instanceof Error ? caught.message : 'Could not buy the drive.'
       phase = 'error'
     }
   }
@@ -266,6 +240,7 @@
       if (!attempt.current) {
         return
       }
+      errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not add the drive.'
       phase = 'error'
     }
@@ -277,27 +252,27 @@
   }
 </script>
 
-{#if phase === 'pending' || phase === 'error'}
+{#if funding.pending}
+  <PaymentDialog
+    need={funding.pending.need}
+    rail={funding.pending.rail}
+    fundingQuote={funding.pending.quote}
+    onPaid={funding.resolve}
+    onCancel={funding.cancel}
+  />
+{:else if phase === 'pending' || phase === 'error'}
   <DriveDialogStatus
     title="Add drive"
     {phase}
     {pendingLabel}
     {errorMessage}
+    errorDetails={errorDetail}
+    successTitle="Purchase completed!"
+    successBody="Your drive is ready to use."
     cancellable
     onRetry={() => ((phase = 'form'), (errorMessage = ''))}
     onClose={close}
   />
-{:else if phase === 'unconfirmed'}
-  <Dialog onclose={close} title="Purchase not confirmed">
-    <div class="flex items-start gap-2">
-      <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-      <p class="text-sm">
-        The payment window closed before we could confirm the purchase. If you completed payment,
-        your drive may still appear shortly — don't pay again without checking.
-      </p>
-    </div>
-    <Button variant="outline" class="w-full" onclick={close}>Close</Button>
-  </Dialog>
 {:else}
   <Dialog onclose={close} title="Add drive">
     <div class="flex w-full flex-col gap-2">
