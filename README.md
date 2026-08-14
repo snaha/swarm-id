@@ -110,22 +110,21 @@ pnpm dev:lib         # Library watch mode (rebuilds on changes)
 
 ### Local Bee Cluster (bee-compose)
 
-For local development with postage stamps and uploads you need a Bee cluster and its chain. Both
-come from [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose), which ships the
-chain snapshot the cluster boots. Requires Docker.
+For local development with postage stamps and uploads, use [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) to run a local Bee cluster with blockchain. Requires Docker.
 
 ```bash
-pnpm dev:cluster:start           # start the cluster (queen + 3 full workers)
-pnpm dev:cluster:start --fresh   # the same, from a clean chain and empty node state
+# Start cluster (queen + 3 full workers)
+pnpm dev:cluster:start
+
+# View logs
+pnpm dev:cluster:logs
+
+# Stop cluster
 pnpm dev:cluster stop
-pnpm dev:cluster:logs                     # tail the queen
 
-pnpm dev:chain:detach                     # the cluster's chain alone, on :8545
-pnpm dev:chain:stop
+# Fresh start (purge data; add --pull after a bee-compose bump)
+pnpm dev:cluster:start --fresh
 ```
-
-> `pnpm install` is all the setup there is — the chain snapshot ships inside the package. The first
-> start compiles Bee from source (a few minutes, cached afterwards); later runs are seconds.
 
 **Endpoints:**
 

@@ -22,7 +22,7 @@ replacing manual testing with automated round-trips against a real node.
 From the repo root, start the cluster, then run the suite:
 
 ```bash
-pnpm dev:cluster:start                            # start queen + 1 worker (Docker)
+pnpm dev:cluster:start   # start queen + 3 full workers (Docker)
 pnpm --filter @snaha/swarm-id test:integration
 ```
 

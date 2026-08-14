@@ -597,10 +597,9 @@ Check console logs for details:
   let importMessage = $state('')
   let importError = $state('')
 
-  // Contract address the read will use: the override if set, else auto-detected
-  // from the RPC. There is no local-only deployment any more: the cluster's
-  // chain carries the Swarm contracts at their MAINNET addresses, so local and
-  // remote resolve to the same one.
+  // Contract address the read will use: the override if set, else the mainnet
+  // deployment — the cluster's chain carries the Swarm contracts at their
+  // mainnet addresses, so local and remote resolve to the same one.
   const resolvedContract = $derived(resolvePostageStampContractAddress(importRpcUrl.trim()))
   const effectiveContract = $derived(importContractOverride.trim() || resolvedContract)
 
