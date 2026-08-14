@@ -229,6 +229,9 @@ importers:
       '@snaha/swarm-id':
         specifier: workspace:*
         version: link:../lib
+      '@swarm-id/multichain':
+        specifier: workspace:*
+        version: link:../multichain
       '@web3-onboard/core':
         specifier: ^2.24.1
         version: 2.24.1(typescript@5.8.3)
@@ -238,6 +241,9 @@ importers:
       ethers:
         specifier: 6.15.0
         version: 6.15.0
+      viem:
+        specifier: ^2.55.10
+        version: 2.55.13(typescript@5.8.3)(zod@4.4.3)
     devDependencies:
       '@eslint/js':
         specifier: 9.39.1

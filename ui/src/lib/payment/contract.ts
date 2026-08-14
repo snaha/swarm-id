@@ -1,13 +1,10 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { BatchId, PrivateKey } from '@ethersphere/bee-js'
-import {
-  calculateContractTTLSeconds,
-  fetchOnChainBatchState,
-  resolvePostageStampContractAddress,
-} from '@snaha/swarm-id'
+import { calculateContractTTLSeconds, fetchOnChainBatchState } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
+import { postageChain } from '$lib/payment/chain'
 import type { NewStamp } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
@@ -29,9 +26,10 @@ export async function fetchExistingBatchFromChain(
   opts?: { rpcUrl?: string; contractAddress?: string },
 ): Promise<NewStamp | undefined> {
   const rpcUrl = opts?.rpcUrl ?? networkSettingsStore.gnosisRpcUrl
-  // No local-only deployment any more: the cluster's chain carries the Swarm
-  // contracts at their MAINNET addresses, so local and remote resolve alike.
-  const contractAddress = opts?.contractAddress ?? resolvePostageStampContractAddress(rpcUrl)
+  // The contract address follows the chain the endpoint actually serves, not
+  // its hostname — a localhost fork of Gnosis carries the MAINNET deployment.
+  const contractAddress =
+    opts?.contractAddress ?? (await postageChain(rpcUrl)).settings.addresses.postageStamp
 
   const state = await fetchOnChainBatchState(rpcUrl, strip0x(batchId), contractAddress)
   if (!state) {
