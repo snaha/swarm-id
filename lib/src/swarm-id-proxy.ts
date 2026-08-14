@@ -51,6 +51,7 @@ import {
   ParentIdentifyMessageSchema,
   PopupToIframeMessageSchema,
   STORAGE_CHALLENGE_KEY,
+  STORAGE_KEY_NETWORK_SETTINGS,
   leaseCacheStorageKey,
 } from "./types"
 import type { PopupToIframeMessage } from "./types"
@@ -341,6 +342,55 @@ export class SwarmIdProxy {
           this.handleAccountStorageChange(),
         )
       }),
+    )
+
+    // The user can change the Bee node URL at runtime via the trusted UI's
+    // network-settings dialog. That localStorage write fires a `storage` event
+    // in this same-origin dApp iframe — repoint the Bee client so the newly
+    // configured node is in effect before the next write (#515). The
+    // network-settings manager has no `subscribe`, so listen for the raw event.
+    if (typeof window !== "undefined") {
+      const onNetworkSettingsChange = (event: StorageEvent): void => {
+        if (event.key !== STORAGE_KEY_NETWORK_SETTINGS) {
+          return
+        }
+        this.applyNetworkSettings()
+      }
+      window.addEventListener("storage", onNetworkSettingsChange)
+      this.unsubscribeStorageListeners.push(() =>
+        window.removeEventListener("storage", onNetworkSettingsChange),
+      )
+    }
+  }
+
+  /**
+   * Re-read network settings and repoint the Bee client at the configured node.
+   * `beeApiUrl` / `gnosisRpcUrl` are read fresh per call by the TTL/contract
+   * helpers, so only the cached `this.bee` needs rebuilding. No-op when the Bee
+   * URL is unchanged, so an RPC-only change doesn't churn the client mid-op.
+   */
+  private applyNetworkSettings(): void {
+    const settings = createNetworkSettingsStorageManager().load()
+    this.gnosisRpcUrl = settings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
+
+    const beeNodeUrl = settings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
+    if (beeNodeUrl === this.beeApiUrl) {
+      return
+    }
+    this.beeApiUrl = beeNodeUrl
+
+    // A custom node disables the dApp-provided subsidised gateway (mirrors the
+    // parentIdentify override). ponytail: reverting to the default URL won't
+    // re-enable a dropped subsidised gateway — that needs a fresh parentIdentify
+    // (dApp reload); rare enough to not build for.
+    if (this.beeApiUrl !== DEFAULT_BEE_NODE_URL) {
+      this.subsidisedGatewayUrl = undefined
+    }
+
+    this.bee = new Bee(
+      this.isSubsidisedModeActive()
+        ? this.subsidisedGatewayUrl!
+        : this.beeApiUrl,
     )
   }
 
