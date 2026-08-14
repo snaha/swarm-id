@@ -66,7 +66,7 @@ let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
 let currentSubsidisedGatewayUrl: string | undefined = undefined
 
 // Monotonic generation counter for connection-change handler runs. Used to
-// drop stale results from in-flight `getPostageBatch()` calls when the user
+// drop stale results from in-flight `getPostageBatches()` calls when the user
 // switches identity or disconnects while a fetch is pending.
 let connectionGeneration = 0
 
@@ -86,8 +86,10 @@ async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
   try {
-    const batch = await client.getPostageBatch()
+    const batches = await client.getPostageBatches()
     if (generation !== connectionGeneration) return
+    // The demo shows one stamp; an account may own several ("drives").
+    const batch = batches[0]
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
@@ -137,7 +139,7 @@ async function updatePostageStampInfo(generation: number) {
 }
 
 async function onConnectionChange(info: ConnectionInfo) {
-  // Bump the generation so any in-flight `getPostageBatch` from the previous
+  // Bump the generation so any in-flight `getPostageBatches` from the previous
   // snapshot (e.g. a different identity or pre-disconnect state) is dropped
   // when it resolves instead of overwriting current state.
   const generation = ++connectionGeneration
@@ -330,7 +332,7 @@ export const clientStore = {
   },
 
   destroy() {
-    // Bump the generation so an in-flight `getPostageBatch` resolving after
+    // Bump the generation so an in-flight `getPostageBatches` resolving after
     // destroy can't write `stamp` back, and stop any pending re-poll.
     connectionGeneration++
     clearStampPollTimer()

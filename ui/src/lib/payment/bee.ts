@@ -40,7 +40,7 @@ const STAMP_REJECTED_STATUS = 400
 
 /**
  * Prove a (batchID, signerKey) pair can actually stamp uploads by writing one
- * tiny stamped SOC. `getPostageBatch` only proves the batch exists; this proves
+ * tiny stamped SOC. Checking the batch exists only proves that; this proves
  * the signer owns/can-stamp it. Returns false ONLY on a definitive stamp
  * rejection (HTTP 400); a 404/422/timeout/other error is inconclusive and
  * returns true so a freshly-bought or not-yet-synced batch isn't turned away.

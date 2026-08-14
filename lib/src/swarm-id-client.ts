@@ -752,42 +752,39 @@ export class SwarmIdClient {
   }
 
   /**
-   * Gets the current postage batch for the authenticated identity.
+   * Lists every postage batch the authenticated account owns.
    *
-   * Returns information about the postage stamp associated with the
-   * connected identity, including batch ID, utilization, depth, and TTL.
+   * The account can hold several stamps (each shown as a "drive" in the
+   * identity UI), so this returns all of them — letting an app reach a
+   * specific stamp (e.g. to upload with {@link UploadOptions.batchID}). With no
+   * `batchID`, uploads use the account's resolved default stamp.
    *
-   * @returns A promise resolving to the PostageBatch or undefined if none is configured
+   * @returns A promise resolving to the account's postage batches (empty if none)
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
    *
    * @example
    * ```typescript
-   * const batch = await client.getPostageBatch()
-   * if (batch) {
-   *   console.log('Batch ID:', batch.batchID)
-   *   console.log('Utilization:', batch.utilization)
-   *   console.log('Depth:', batch.depth)
-   *   console.log('TTL:', batch.batchTTL)
-   * } else {
-   *   console.log('No postage batch configured')
+   * const batches = await client.getPostageBatches()
+   * for (const batch of batches) {
+   *   console.log(batch.batchID, batch.utilization, batch.batchTTL)
    * }
    * ```
    */
-  async getPostageBatch(): Promise<PostageBatch | undefined> {
+  async getPostageBatches(): Promise<PostageBatch[]> {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "getPostageBatchResponse"
+      type: "getPostageBatchesResponse"
       requestId: string
-      postageBatch?: PostageBatch
+      postageBatches: PostageBatch[]
     }>({
-      type: "getPostageBatch",
+      type: "getPostageBatches",
       requestId,
     })
 
-    return response.postageBatch
+    return response.postageBatches
   }
 
   /**

@@ -37,7 +37,7 @@ import type {
   ActAddGranteesMessage,
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
-  GetPostageBatchMessage,
+  GetPostageBatchesMessage,
   CreateFeedManifestMessage,
   AppMetadata,
   PostageStamp,
@@ -1190,8 +1190,8 @@ export class SwarmIdProxy {
         await this.handleActGetGrantees(message, event)
         break
 
-      case "getPostageBatch":
-        await this.handleGetPostageBatch(message, event)
+      case "getPostageBatches":
+        await this.handleGetPostageBatches(message, event)
         break
 
       case "createFeedManifest":
@@ -1229,9 +1229,7 @@ export class SwarmIdProxy {
       // Look up postage stamp from shared storage based on connected identity
       const stamp = this.lookupPostageStampForApp()
       if (stamp) {
-        this.postageBatchId = stamp.batchID.toHex()
-        this.signerKey = stamp.signerKey.toHex()
-        await this.initializeStamper(stamp.depth)
+        await this.bindStamp(stamp)
       } else {
         this.postageBatchId = undefined
         this.signerKey = undefined
@@ -1266,6 +1264,44 @@ export class SwarmIdProxy {
       console.error("[Proxy] Error looking up postage stamp:", error)
       return undefined
     }
+  }
+
+  /**
+   * Bind the proxy's active batch/signer to a stamp and (re)build its stamper +
+   * write coordinator.
+   */
+  private async bindStamp(stamp: PostageStamp): Promise<void> {
+    this.postageBatchId = stamp.batchID.toHex()
+    this.signerKey = stamp.signerKey.toHex()
+    await this.initializeStamper(stamp.depth)
+  }
+
+  /**
+   * Ensure the proxy is bound to the stamp an upload targets. With no `batchID`
+   * (or the already-bound one) this is a no-op; otherwise it re-binds to the
+   * named stamp — which must be one the account owns.
+   *
+   * ponytail: on-demand re-bind serializes/thrashes the coordinator when the
+   * target batch changes, and mutates the session's active default batch. Fine
+   * for per-drive sequential writes; upgrade to a batchId→{stamper,coordinator}
+   * map only if concurrent multi-batch writes in one tab matter.
+   */
+  private async ensureStampForUpload(batchID?: string): Promise<void> {
+    if (!batchID) {
+      return
+    }
+    const targetHex = batchID.toLowerCase()
+    if (targetHex === this.postageBatchId) {
+      return
+    }
+    const connection = this.findConnectionForParent()
+    const stamp = connection?.account.postageStamps.find(
+      (s) => !s.deletedAt && s.batchID.toHex() === targetHex,
+    )
+    if (!stamp) {
+      throw new Error("Batch not owned by account")
+    }
+    await this.bindStamp(stamp)
   }
 
   /**
@@ -2177,6 +2213,7 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
+      await this.ensureStampForUpload(options?.batchID)
 
       // Create progress callback if enabled (works in both modes)
       const onProgress = this.createProgressCallback(
@@ -2269,6 +2306,7 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
+      await this.ensureStampForUpload(options?.batchID)
 
       // Create progress callback if enabled
       const onProgress = this.createProgressCallback(
@@ -2424,6 +2462,7 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
+      await this.ensureStampForUpload(options?.batchID)
 
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
@@ -3710,6 +3749,7 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
+      await this.ensureStampForUpload(options?.batchID)
 
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
@@ -4036,21 +4076,33 @@ export class SwarmIdProxy {
     }
   }
 
-  private async handleGetPostageBatch(
-    message: GetPostageBatchMessage,
+  private async handleGetPostageBatches(
+    message: GetPostageBatchesMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const stamp = this.lookupPostageStampForApp()
+    // Expose every stamp (a "drive") the account owns, not just the resolved
+    // default — tombstoned stamps excluded.
+    const connection = this.findConnectionForParent()
+    const stamps =
+      connection?.account.postageStamps.filter((s) => !s.deletedAt) ?? []
+    const postageBatches = await Promise.all(
+      stamps.map((stamp) => this.stampToPostageBatch(stamp)),
+    )
 
-    if (!stamp) {
-      this.postMessage(event, {
-        type: "getPostageBatchResponse",
-        requestId: message.requestId,
-        postageBatch: undefined,
-      })
-      return
-    }
+    this.postMessage(event, {
+      type: "getPostageBatchesResponse",
+      requestId: message.requestId,
+      postageBatches,
+    })
+  }
 
+  /**
+   * Map a stored PostageStamp to the public PostageBatch, enriching the stale
+   * stored snapshot with live `usable`/`exists`/`batchTTL`. Excludes signerKey.
+   */
+  private async stampToPostageBatch(
+    stamp: PostageStamp,
+  ): Promise<PostageBatch> {
     // The stored stamp's `usable`/`exists` are a snapshot from assignment time
     // and can be stale (e.g. a batch assigned during its ~30s warm-up stays
     // `usable: false` in storage forever), so read live batch details from the
@@ -4080,8 +4132,7 @@ export class SwarmIdProxy {
       }
     }
 
-    // Map PostageStamp to public PostageBatch (exclude signerKey)
-    const postageBatch: PostageBatch = {
+    return {
       batchID: stamp.batchID.toHex(),
       utilization: stamp.utilization,
       usable: details?.usable ?? stamp.usable,
@@ -4094,12 +4145,6 @@ export class SwarmIdProxy {
       exists: details?.exists ?? stamp.exists,
       batchTTL,
     }
-
-    this.postMessage(event, {
-      type: "getPostageBatchResponse",
-      requestId: message.requestId,
-      postageBatch,
-    })
   }
 
   /**

@@ -279,11 +279,11 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(data)
   })
 
-  it("getPostageBatch rejects on a proxy error message", async () => {
-    const promise = client.getPostageBatch()
+  it("getPostageBatches rejects on a proxy error message", async () => {
+    const promise = client.getPostageBatches()
 
     const sent = lastPostedMessage()
-    expect(sent).toMatchObject({ type: "getPostageBatch" })
+    expect(sent).toMatchObject({ type: "getPostageBatches" })
 
     deliver({
       type: "error",
@@ -291,6 +291,24 @@ describe("SwarmIdClient request seam", () => {
       error: "Bee node unreachable",
     })
     await expect(promise).rejects.toThrow("Bee node unreachable")
+  })
+
+  it("getPostageBatches returns the account's full batch list (doc §2)", async () => {
+    const promise = client.getPostageBatches()
+
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "getPostageBatches" })
+
+    const postageBatches = [
+      { batchID: "aa".repeat(32) },
+      { batchID: "bb".repeat(32) },
+    ]
+    deliver({
+      type: "getPostageBatchesResponse",
+      requestId: sent.requestId,
+      postageBatches,
+    })
+    await expect(promise).resolves.toEqual(postageBatches)
   })
 
   it("deriveAppSecret round-trips the label and returns the secret (#520)", async () => {

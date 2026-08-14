@@ -403,13 +403,15 @@ if (info.canUpload) {
 
 ---
 
-### `getPostageBatch()`
+### `getPostageBatches()`
 
-Gets the current postage batch for the authenticated identity.
+Lists every postage batch the authenticated account owns.
 
-Returns information about the postage stamp associated with the connected identity, including batch ID, utilization, depth, and TTL.
+An account can hold several stamps (each shown as a "drive" in the identity UI), so this returns all of them — letting an app reach a specific stamp (e.g. to upload with `UploadOptions.batchID`). With no `batchID`, uploads use the account's resolved default stamp.
 
-**Returns:** `Promise<PostageBatch | undefined>` - The postage batch info, or `undefined` if none is configured
+**Returns:** `Promise<PostageBatch[]>` - The account's postage batches (empty if none)
+
+Each `PostageBatch` has:
 
 | Property        | Type                  | Description                      |
 | --------------- | --------------------- | -------------------------------- |
@@ -433,14 +435,11 @@ Returns information about the postage stamp associated with the connected identi
 **Example:**
 
 ```typescript
-const batch = await client.getPostageBatch()
-if (batch) {
+const batches = await client.getPostageBatches()
+for (const batch of batches) {
   console.log('Batch ID:', batch.batchID)
   console.log('Utilization:', batch.utilization)
-  console.log('Depth:', batch.depth)
   console.log('TTL:', batch.batchTTL)
-} else {
-  console.log('No postage batch configured')
 }
 ```
 

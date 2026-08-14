@@ -313,3 +313,116 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
     expect(BeeMock.mock.calls.length).toBe(callsAfterConstruction)
   })
 })
+
+const B1 = "aa".repeat(32)
+const B2 = "bb".repeat(32)
+const B3 = "cc".repeat(32)
+
+const stampStub = (hex: string, deletedAt?: number) => ({
+  batchID: { toHex: () => hex },
+  deletedAt,
+})
+
+const makeProxy = () => {
+  const listeners: Record<string, unknown> = {}
+  vi.stubGlobal("window", {
+    addEventListener: vi.fn((type: string, listener: unknown) => {
+      listeners[type] = listener
+    }),
+    removeEventListener: vi.fn(),
+    parent: { postMessage: vi.fn() },
+    location: { origin: "https://id.example.com" },
+  })
+  return new SwarmIdProxy()
+}
+
+describe("SwarmIdProxy getPostageBatches (multi-stamp, doc §2)", () => {
+  let proxy: SwarmIdProxy
+  let source: { postMessage: ReturnType<typeof vi.fn> }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    proxy = makeProxy()
+    source = { postMessage: vi.fn() }
+  })
+
+  const getBatches = () =>
+    (proxy as never)["handleGetPostageBatches"](
+      { type: "getPostageBatches", requestId: "r1" },
+      { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
+    )
+
+  const lastMessage = () =>
+    source.postMessage.mock.calls[source.postMessage.mock.calls.length - 1][0]
+
+  it("projects every non-deleted stamp and skips tombstones", async () => {
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      account: {
+        postageStamps: [stampStub(B1), stampStub(B3, 123), stampStub(B2)],
+      },
+    })
+    // Avoid the live Bee/RPC lookups — assert the fan-out, not the enrichment.
+    ;(proxy as never)["stampToPostageBatch"] = (stamp: {
+      batchID: { toHex: () => string }
+    }) => Promise.resolve({ batchID: stamp.batchID.toHex() })
+
+    await getBatches()
+
+    expect(lastMessage()).toMatchObject({
+      type: "getPostageBatchesResponse",
+      requestId: "r1",
+      postageBatches: [{ batchID: B1 }, { batchID: B2 }],
+    })
+  })
+
+  it("returns an empty list when there is no connection", async () => {
+    ;(proxy as never)["findConnectionForParent"] = () => undefined
+
+    await getBatches()
+
+    expect(lastMessage()).toMatchObject({
+      type: "getPostageBatchesResponse",
+      postageBatches: [],
+    })
+  })
+})
+
+describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
+  let proxy: SwarmIdProxy
+  let bindStamp: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    proxy = makeProxy()
+    bindStamp = vi.fn(() => Promise.resolve())
+    ;(proxy as never)["bindStamp"] = bindStamp
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      account: { postageStamps: [stampStub(B1), stampStub(B2)] },
+    })
+  })
+
+  const ensure = (batchID?: string) =>
+    (proxy as never)["ensureStampForUpload"](batchID)
+
+  it("no-ops without a batchID", async () => {
+    await ensure(undefined)
+    expect(bindStamp).not.toHaveBeenCalled()
+  })
+
+  it("no-ops when the target is already bound", async () => {
+    await ensure(B1)
+    expect(bindStamp).not.toHaveBeenCalled()
+  })
+
+  it("re-binds to a different owned stamp", async () => {
+    await ensure(B2)
+    expect(bindStamp).toHaveBeenCalledTimes(1)
+    expect(bindStamp.mock.calls[0][0].batchID.toHex()).toBe(B2)
+  })
+
+  it("rejects a batch the account does not own", async () => {
+    await expect(ensure(B3)).rejects.toThrow("Batch not owned by account")
+    expect(bindStamp).not.toHaveBeenCalled()
+  })
+})

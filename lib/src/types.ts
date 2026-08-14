@@ -21,6 +21,7 @@ import {
 } from "./schemas"
 import type {
   Reference,
+  BatchId,
   Address,
   Identifier,
   Signature,
@@ -72,6 +73,9 @@ const UploadOptionsObjectSchema = z.object({
   encryptManifest: z.boolean().optional(),
   tag: z.number().optional(),
   deferred: z.boolean().optional(),
+  // Target a specific stamp the account owns (a "drive") instead of the
+  // resolved default.
+  batchID: BatchIdSchema.optional(),
 })
 
 export const UploadOptionsSchema = UploadOptionsObjectSchema.optional()
@@ -123,6 +127,11 @@ export interface UploadOptions {
   workerCount?: number
   /** Upload concurrency (parallel in-flight chunks). HTTP default: 8, WebSocket default: 32. */
   concurrency?: number
+  /**
+   * Hex id of a stamp the account owns (a "drive") to upload under, instead of
+   * the resolved default. Rejects if the account does not own it.
+   */
+  batchID?: BatchId
 }
 
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>
@@ -1028,8 +1037,8 @@ export const ActGetGranteesMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
-export const GetPostageBatchMessageSchema = z.object({
-  type: z.literal("getPostageBatch"),
+export const GetPostageBatchesMessageSchema = z.object({
+  type: z.literal("getPostageBatches"),
   requestId: z.string(),
 })
 
@@ -1075,7 +1084,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesMessageSchema,
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
-  GetPostageBatchMessageSchema,
+  GetPostageBatchesMessageSchema,
   ConnectMessageSchema,
 ])
 
@@ -1140,8 +1149,8 @@ export type ActRevokeGranteesMessage = z.infer<
   typeof ActRevokeGranteesMessageSchema
 >
 export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
-export type GetPostageBatchMessage = z.infer<
-  typeof GetPostageBatchMessageSchema
+export type GetPostageBatchesMessage = z.infer<
+  typeof GetPostageBatchesMessageSchema
 >
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
@@ -1469,10 +1478,10 @@ export const ActGetGranteesResponseMessageSchema = z.object({
   grantees: z.array(z.string()),
 })
 
-export const GetPostageBatchResponseMessageSchema = z.object({
-  type: z.literal("getPostageBatchResponse"),
+export const GetPostageBatchesResponseMessageSchema = z.object({
+  type: z.literal("getPostageBatchesResponse"),
   requestId: z.string(),
-  postageBatch: PostageBatchSchema.optional(),
+  postageBatches: z.array(PostageBatchSchema),
 })
 
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
@@ -1517,7 +1526,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesResponseMessageSchema,
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
-  GetPostageBatchResponseMessageSchema,
+  GetPostageBatchesResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -1633,8 +1642,8 @@ export type ActRevokeGranteesResponseMessage = z.infer<
 export type ActGetGranteesResponseMessage = z.infer<
   typeof ActGetGranteesResponseMessageSchema
 >
-export type GetPostageBatchResponseMessage = z.infer<
-  typeof GetPostageBatchResponseMessageSchema
+export type GetPostageBatchesResponseMessage = z.infer<
+  typeof GetPostageBatchesResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 
