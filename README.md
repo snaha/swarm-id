@@ -113,18 +113,18 @@ pnpm dev:lib         # Library watch mode (rebuilds on changes)
 For local development with postage stamps and uploads, use [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) to run a local Bee cluster with blockchain. Requires Docker.
 
 ```bash
-# Start cluster (queen + 3 full workers)
-pnpm dev:cluster:start
-
-# View logs
-pnpm dev:cluster:logs
-
-# Stop cluster
-pnpm dev:cluster stop
-
-# Fresh start (purge data; add --pull after a bee-compose bump)
-pnpm dev:cluster:start --fresh
+pnpm dev:local        # cluster + both chains + solver + UI + demo
+pnpm dev:local:fresh  # the same, from a clean chain and empty node state
+pnpm dev:local:stop   # tear the containers down
+pnpm dev:cluster:logs # tail the queen
 ```
+
+`pnpm dev:cluster:start` runs the cluster alone, without the chains, solver or apps,
+which is what CI does for the library's integration suite — see
+[Paying for storage locally](#paying-for-storage-locally) for the rest.
+
+> `pnpm install` is all the setup there is — the chain snapshot ships inside the package. The first
+> start compiles Bee from source (a few minutes, cached afterwards); later runs are seconds.
 
 **Endpoints:**
 
@@ -136,14 +136,15 @@ pnpm dev:cluster:start --fresh
 
 **Getting a Postage Batch:**
 
-The easiest way is to use the Developer Tools page in the Identity UI:
+The easiest way is the Developer Tools page in the Identity UI:
 
 1. Navigate to http://localhost:5500/dev
 2. Go to the **Chain** tab and select an account
 3. Click **Create drive to test with** — it buys a real batch on the local chain, owned by that
    account's own postage signer, and attaches it as a drive
 
-Or use the Bee API directly:
+That creates a real batch owned by the account's own postage signer, so it can be extended and
+resized like a bought one. To buy a node-owned stamp from the Bee API directly instead:
 
 ```bash
 # Buy stamp (amount=500000000, depth=20)
@@ -226,6 +227,50 @@ and add it back when you are done. The fake mainnet has no such trap — 31337 c
 
 Then, once: open the UI → **Settings** → **Network settings** → **Use local** → **Save**.
 
+#### From a fresh clone, end to end
+
+Everything below runs offline against the committed chain snapshot. You need Docker, and a
+browser wallet (MetaMask or similar) — no funds, no testnet, no account anywhere.
+
+```bash
+pnpm install
+pnpm dev:local          # first run compiles Bee from source; later runs are seconds
+```
+
+Wait for `local solver: watching for deposits to 0x…`, then in the browser:
+
+1. **http://localhost:5500** → **Get started**, and create an identity (a password is quickest).
+   Choose **Stay local for now** when offered.
+2. **Settings** (top right) → **Network settings** → **Use local** → **Save**. It finds whichever
+   local chain is running.
+3. **http://localhost:5500/dev** → **Chain** tab → **Create drive to test with**. That buys a real
+   depth-20 batch on the local chain, owned by your account's own postage signer, and attaches it
+   as a drive. Takes ~30s. The banner above the tabs should read _Local dev chain, nothing here is
+   real_.
+4. Back to **http://localhost:5500** → **Storage** tab → expand the drive → **Extend lifespan**.
+   Pick **years** and bump it to 3 — a small extend is covered by the batch's leftover funds and
+   never asks for payment, which is the most common reason the payment screens "don't appear".
+5. **Proceed** → **Connect wallet** → pick your wallet. It will offer to add _Local source chain_
+   and switch to it: accept. Nothing to configure, and no key to import — the chain funds whatever
+   account you connect.
+6. Review the quote, **Pay with your wallet**, approve the transaction. Watch the `[solver]` lines
+   in your terminal report the delivery, then the drive's lifespan grows.
+
+What just happened: your wallet really signed a deposit on one chain; a separate solver process saw
+it and paid out on another; that xDAI was swapped for BZZ through a real SushiSwap pool; and the
+batch was topped up on the real PostageStamp contract in a single atomic EIP-7702 transaction.
+
+To check the automated suites too:
+
+```bash
+pnpm check:all                                   # lint, types, unit tests
+pnpm --filter @swarm-id/multichain test:fork     # on-chain, needs pnpm dev:chain:detach
+pnpm --filter @swarm-id/ui test:e2e              # browser, needs pnpm dev:local
+```
+
+Now extend a drive. Your wallet is prompted to add the source chain and approve one transaction —
+nothing else to configure, and no keys to import: the chain funds whatever account you connect.
+
 **Where the solver fits.** The browser signs the deposit and then waits for money it does not
 control, exactly as it waits on Relay; `multichain/src/local-solver.ts` is what watches the source
 chain and pays out from the Gnosis-side faucet. The deposit carries its own delivery instruction in
@@ -241,8 +286,8 @@ approve-then-deposit with the solver pulling the token, as on Relay. It rehearse
 **experience** — connect, switch chain, quote, approve, progress, cancel, resume — which is
 otherwise untestable outside production.
 
-With no source chain running the bridged route simply is not offered; paying from Gnosis
-still is, and it needs no solver. Funding never falls back to a free transfer. See
+With no source chain running there is no rail at all: funding falls back to a direct faucet
+transfer, the payment screens never open, and the drive test suites run unchanged. See
 [docs/Drive-Payment-Flow.md](docs/Drive-Payment-Flow.md).
 
 ### Developer Tools (/dev route)
