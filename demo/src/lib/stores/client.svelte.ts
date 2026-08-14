@@ -88,8 +88,9 @@ async function updatePostageStampInfo(generation: number) {
   try {
     const batches = await client.getPostageBatches()
     if (generation !== connectionGeneration) return
-    // The demo shows one stamp; an account may own several ("drives").
-    const batch = batches[0]
+    // The demo shows one stamp; an account may own several ("drives") —
+    // show the one untargeted uploads actually consume.
+    const batch = batches.find((b) => b.isDefault) ?? batches[0]
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp

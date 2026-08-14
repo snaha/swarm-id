@@ -757,7 +757,8 @@ export class SwarmIdClient {
    * The account can hold several stamps (each shown as a "drive" in the
    * identity UI), so this returns all of them — letting an app reach a
    * specific stamp (e.g. to upload with {@link UploadOptions.batchID}). With no
-   * `batchID`, uploads use the account's resolved default stamp.
+   * `batchID`, uploads use the account's resolved default stamp — the batch
+   * flagged `isDefault: true` in this list.
    *
    * @returns A promise resolving to the account's postage batches (empty if none)
    * @throws {Error} If the client is not initialized

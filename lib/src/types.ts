@@ -176,6 +176,11 @@ export const PostageBatchSchema = z.object({
   immutableFlag: z.boolean(),
   exists: z.boolean(),
   batchTTL: z.number().optional(),
+  /**
+   * Whether this is the stamp uploads without an explicit `batchID` resolve to
+   * (the app's per-app override if set, else the account default).
+   */
+  isDefault: z.boolean(),
 })
 
 export type UploadResult = z.infer<typeof UploadResultSchema>

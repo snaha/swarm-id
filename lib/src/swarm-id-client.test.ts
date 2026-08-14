@@ -300,8 +300,8 @@ describe("SwarmIdClient request seam", () => {
     expect(sent).toMatchObject({ type: "getPostageBatches" })
 
     const postageBatches = [
-      { batchID: "aa".repeat(32) },
-      { batchID: "bb".repeat(32) },
+      { batchID: "aa".repeat(32), isDefault: false },
+      { batchID: "bb".repeat(32), isDefault: true },
     ]
     deliver({
       type: "getPostageBatchesResponse",

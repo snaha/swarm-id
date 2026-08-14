@@ -127,11 +127,14 @@ import {
   calculateTTLSeconds,
   fetchBatchDetails,
   fetchSwarmPrice,
+  type BatchDetails,
 } from "./utils/ttl"
 import {
-  fetchAuthoritativeBatchTTL,
+  fetchBatchTTLFromContract,
+  resolvePostageStampContractAddress,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
 } from "./utils/postage-contract"
+import { withTimeout } from "./utils/promise"
 import { tryCreateTag } from "./utils/tag"
 import {
   DEFAULT_BEE_NODE_URL,
@@ -166,6 +169,13 @@ const DEVICE_REGISTRY_REFRESH_THROTTLE_MS = 8_000
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
+
+/**
+ * Cap on the per-stamp live enrichment (Bee /stamps + chain TTL + price) in
+ * `getPostageBatches`. Well under the client's request timeout, so a hung RPC
+ * degrades to the stored snapshot instead of failing the whole call.
+ */
+const STAMP_ENRICH_TIMEOUT_MS = 10_000
 
 /**
  * localStorage key holding optional partition-coordination timing overrides
@@ -325,11 +335,9 @@ export class SwarmIdProxy {
     // state and races would produce inconsistent ConnectionInfo emissions.
     // Rejections are caught and logged so one failure doesn't break the chain.
     const enqueue = (where: string, work: () => Promise<void>): void => {
-      this.storageWorkQueue = this.storageWorkQueue.then(() =>
-        work().catch((error: unknown) => {
-          console.error(`[Proxy] ${where} failed:`, error)
-        }),
-      )
+      this.enqueueWork(work).catch((error: unknown) => {
+        console.error(`[Proxy] ${where} failed:`, error)
+      })
     }
 
     // The account is the single nested document of record (it owns its
@@ -364,6 +372,23 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Serialize `work` on the shared queue that guards all mutations of the
+   * stamper/coordinator binding: storage-event handlers, network-settings
+   * rebuilds, and stamped writes all run here one at a time, so none of them
+   * can swap the binding under another. The returned promise settles with the
+   * work's result; a rejection propagates to the caller but never wedges the
+   * queue.
+   */
+  private enqueueWork<T>(work: () => Promise<T>): Promise<T> {
+    const result = this.storageWorkQueue.then(work)
+    this.storageWorkQueue = result.then(
+      () => undefined,
+      () => undefined,
+    )
+    return result
+  }
+
+  /**
    * Re-read network settings and repoint the Bee client at the configured node.
    * `beeApiUrl` / `gnosisRpcUrl` are read fresh per call by the TTL/contract
    * helpers, so only the cached `this.bee` needs rebuilding. No-op when the Bee
@@ -392,6 +417,19 @@ export class SwarmIdProxy {
         ? this.subsidisedGatewayUrl!
         : this.beeApiUrl,
     )
+
+    // The write coordinator captured a Bee client when it was built, so
+    // repointing `this.bee` alone would leave stamped uploads and lease SOCs
+    // on the old node. Rebuild the stamper/coordinator on the shared queue
+    // (so it can't swap under an in-flight write), then re-emit
+    // ConnectionInfo — dropping the subsidised gateway above may have flipped
+    // `uploadMode`/`canUpload` for the dApp.
+    this.enqueueWork(async () => {
+      await this.rebindActiveStamp()
+      this.emitConnectionInfoIfChanged()
+    }).catch((error: unknown) => {
+      console.error("[Proxy] Rebind after network change failed:", error)
+    })
   }
 
   /**
@@ -468,13 +506,13 @@ export class SwarmIdProxy {
       return
     }
 
-    this.postageBatchId = nextBatchId
-    this.signerKey = nextSignerKey
-    this.stamper = undefined
-    this.stamperAccountFingerprint = undefined
-
     if (stamp) {
-      await this.initializeStamper(stamp.depth)
+      await this.bindStamp(stamp)
+    } else {
+      this.postageBatchId = undefined
+      this.signerKey = undefined
+      this.stamper = undefined
+      this.stamperAccountFingerprint = undefined
     }
   }
 
@@ -501,9 +539,7 @@ export class SwarmIdProxy {
     // identity's stamp.
     const stamp = this.lookupPostageStampForApp()
     if (stamp) {
-      this.postageBatchId = stamp.batchID.toHex()
-      this.signerKey = stamp.signerKey.toHex()
-      await this.initializeStamper(stamp.depth)
+      await this.bindStamp(stamp)
     } else {
       this.postageBatchId = undefined
       this.signerKey = undefined
@@ -737,7 +773,9 @@ export class SwarmIdProxy {
     )
     const tuning = readPartitionTuningOverride()
     this.coordinator = new BatchWriteCoordinator({
-      bee: this.bee,
+      // Never `this.bee`: in subsidised mode that points at the gateway, and
+      // stamped writes + lease SOCs must always target the configured node.
+      bee: new Bee(this.beeApiUrl),
       batchId: this.postageBatchId,
       stamper: this.stamper,
       deviceId: this.requireDeviceId(),
@@ -879,24 +917,41 @@ export class SwarmIdProxy {
    * Execute an upload operation against the right target for the current mode.
    * In subsidised mode (no usable user stamp) the gateway handles stamping, so
    * there is no local stamp state to protect and we run unlocked. In user-stamp
-   * mode the write goes through the {@link BatchWriteCoordinator}, which takes
-   * the cross-tab write lock, ensures a held partition, and flushes stamper
-   * state — the proxy no longer owns any of that.
+   * mode the stamp binding is first resolved (`batchID` target, else the app's
+   * default stamp) and the write then goes through the
+   * {@link BatchWriteCoordinator} — bind + write run as one unit on the shared
+   * work queue, so storage-event rebinds and other writes can't swap the
+   * stamper/coordinator mid-write. (Cross-tab writes were already serialized by
+   * the coordinator's write lock, so the queue costs no real concurrency.)
    */
   private async withModeAwareWriteLock<T>(
     targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
     operation: (target: UploadTarget) => Promise<T>,
+    batchID?: string,
   ): Promise<T> {
-    if (this.isSubsidisedModeActive()) {
+    // No stamp binding can be involved — run unlocked and unqueued so
+    // subsidised uploads stay concurrent.
+    if (!batchID && this.isSubsidisedModeActive()) {
       return operation({
         mode: "subsidised",
         gatewayUrl: this.subsidisedGatewayUrl!,
       })
     }
-    if (!this.coordinator) {
-      throw new Error("Stamper not initialized. Please login first.")
-    }
-    return this.coordinator.withWrite(operation, targetOptions)
+    return this.enqueueWork(async () => {
+      await this.ensureStampForUpload(batchID)
+      // Re-resolving the default may have cleared the binding (e.g. the
+      // default stamp was deleted) — fall back to the gateway if configured.
+      if (this.isSubsidisedModeActive()) {
+        return operation({
+          mode: "subsidised",
+          gatewayUrl: this.subsidisedGatewayUrl!,
+        })
+      }
+      if (!this.coordinator) {
+        throw new Error("Stamper not initialized. Please login first.")
+      }
+      return this.coordinator.withWrite(operation, targetOptions)
+    })
   }
 
   /**
@@ -1268,40 +1323,92 @@ export class SwarmIdProxy {
 
   /**
    * Bind the proxy's active batch/signer to a stamp and (re)build its stamper +
-   * write coordinator.
+   * write coordinator. Lenient like `initializeStamper`: on failure the stamper
+   * ends up `undefined` (auth paths tolerate that and fall back to subsidised
+   * mode); callers that must not proceed without a stamper check it afterwards.
    */
   private async bindStamp(stamp: PostageStamp): Promise<void> {
     this.postageBatchId = stamp.batchID.toHex()
     this.signerKey = stamp.signerKey.toHex()
+    // Clear first so a swallowed `initializeStamper` failure can't leave the
+    // previous batch's stamper paired with the new batch id.
+    this.stamper = undefined
+    this.stamperAccountFingerprint = undefined
     await this.initializeStamper(stamp.depth)
   }
 
   /**
+   * A non-tombstoned stamp the connected account owns, by hex batch id.
+   */
+  private findOwnedStamp(batchIdHex: string): PostageStamp | undefined {
+    const connection = this.findConnectionForParent()
+    return connection?.account.postageStamps.find(
+      (s) => !s.deletedAt && s.batchID.toHex() === batchIdHex,
+    )
+  }
+
+  /**
+   * Re-run stamper/coordinator construction for the currently bound stamp so
+   * they capture the current Bee node URL. No-op when no stamp is bound or the
+   * bound stamp is no longer in storage.
+   */
+  private async rebindActiveStamp(): Promise<void> {
+    if (!this.postageBatchId) {
+      return
+    }
+    const stamp = this.findOwnedStamp(this.postageBatchId)
+    if (!stamp) {
+      return
+    }
+    await this.bindStamp(stamp)
+  }
+
+  /**
    * Ensure the proxy is bound to the stamp an upload targets. With no `batchID`
-   * (or the already-bound one) this is a no-op; otherwise it re-binds to the
-   * named stamp — which must be one the account owns.
+   * the binding is re-resolved to the app's default stamp (so a prior targeted
+   * upload can't leak its batch into untargeted writes); with the already-bound
+   * `batchID` this is a no-op; otherwise it re-binds to the named stamp — which
+   * must be one the account owns — and fails loudly (restoring the previous
+   * binding) if the stamper can't be built for it.
+   *
+   * Must run on the shared work queue (`withModeAwareWriteLock` does) so the
+   * re-bind can't swap the coordinator under an in-flight write.
    *
    * ponytail: on-demand re-bind serializes/thrashes the coordinator when the
-   * target batch changes, and mutates the session's active default batch. Fine
-   * for per-drive sequential writes; upgrade to a batchId→{stamper,coordinator}
-   * map only if concurrent multi-batch writes in one tab matter.
+   * target batch changes. Fine for per-drive sequential writes; upgrade to a
+   * batchId→{stamper,coordinator} map only if concurrent multi-batch writes in
+   * one tab matter.
    */
   private async ensureStampForUpload(batchID?: string): Promise<void> {
     if (!batchID) {
+      await this.refreshStampFromStorage()
       return
     }
     const targetHex = batchID.toLowerCase()
     if (targetHex === this.postageBatchId) {
       return
     }
-    const connection = this.findConnectionForParent()
-    const stamp = connection?.account.postageStamps.find(
-      (s) => !s.deletedAt && s.batchID.toHex() === targetHex,
-    )
+    const stamp = this.findOwnedStamp(targetHex)
     if (!stamp) {
       throw new Error("Batch not owned by account")
     }
+    const previous = {
+      postageBatchId: this.postageBatchId,
+      signerKey: this.signerKey,
+      stamper: this.stamper,
+      stamperAccountFingerprint: this.stamperAccountFingerprint,
+    }
     await this.bindStamp(stamp)
+    if (!this.stamper) {
+      // `initializeStamper` swallowed a failure; both swallow paths leave the
+      // previous coordinator installed, so restoring the captured fields puts
+      // the session back into its consistent pre-bind state.
+      this.postageBatchId = previous.postageBatchId
+      this.signerKey = previous.signerKey
+      this.stamper = previous.stamper
+      this.stamperAccountFingerprint = previous.stamperAccountFingerprint
+      throw new Error(`Failed to bind stamp ${targetHex}`)
+    }
   }
 
   /**
@@ -2213,7 +2320,6 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
-      await this.ensureStampForUpload(options?.batchID)
 
       // Create progress callback if enabled (works in both modes)
       const onProgress = this.createProgressCallback(
@@ -2238,6 +2344,7 @@ export class SwarmIdProxy {
           })
           return result
         },
+        options?.batchID,
       )
 
       // Send response
@@ -2306,7 +2413,6 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
-      await this.ensureStampForUpload(options?.batchID)
 
       // Create progress callback if enabled
       const onProgress = this.createProgressCallback(
@@ -2366,6 +2472,7 @@ export class SwarmIdProxy {
 
           return result
         },
+        options?.batchID,
       )
 
       // Send response
@@ -2462,7 +2569,6 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
-      await this.ensureStampForUpload(options?.batchID)
 
       // Validate chunk size (must be between 1 and 4096 bytes)
       if (data.length < 1 || data.length > 4096) {
@@ -2475,14 +2581,18 @@ export class SwarmIdProxy {
       const chunk = makeContentAddressedChunk(data)
 
       // Execute upload with mode-aware locking
-      await this.withModeAwareWriteLock(undefined, async (target) => {
-        await uploadChunk(target, chunk.data, {
-          pin: options?.pin,
-          deferred: options?.deferred ?? false,
-          tag: options?.tag,
-          requestOptions,
-        })
-      })
+      await this.withModeAwareWriteLock(
+        undefined,
+        async (target) => {
+          await uploadChunk(target, chunk.data, {
+            pin: options?.pin,
+            deferred: options?.deferred ?? false,
+            tag: options?.tag,
+            requestOptions,
+          })
+        },
+        options?.batchID,
+      )
 
       this.postMessage(event, {
         type: "uploadChunkResponse",
@@ -2567,6 +2677,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        options?.batchID,
       )
 
       this.postMessage(event, {
@@ -2611,6 +2722,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        options?.batchID,
       )
 
       this.postMessage(event, {
@@ -2654,6 +2766,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        options?.batchID,
       )
 
       this.postMessage(event, {
@@ -3516,6 +3629,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        options?.batchID,
       )
 
       this.postMessage(event, {
@@ -3611,6 +3725,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        options?.batchID,
       )
 
       this.postMessage(event, {
@@ -3706,6 +3821,7 @@ export class SwarmIdProxy {
             tag: options?.tag,
           })
         },
+        options?.batchID,
       )
 
       this.postMessage(event, {
@@ -3749,7 +3865,6 @@ export class SwarmIdProxy {
 
     try {
       this.ensureCanUpload()
-      await this.ensureStampForUpload(options?.batchID)
 
       // Parse grantee public keys from compressed hex
       const granteePublicKeys = grantees.map((hex) =>
@@ -3828,6 +3943,7 @@ export class SwarmIdProxy {
             contentUpload: contentUploadResult,
           }
         },
+        options?.batchID,
       )
 
       // Send final response
@@ -4081,12 +4197,25 @@ export class SwarmIdProxy {
     event: MessageEvent,
   ): Promise<void> {
     // Expose every stamp (a "drive") the account owns, not just the resolved
-    // default — tombstoned stamps excluded.
+    // default — tombstoned stamps excluded. The resolved default is flagged so
+    // clients can tell which stamp untargeted uploads actually consume.
     const connection = this.findConnectionForParent()
     const stamps =
       connection?.account.postageStamps.filter((s) => !s.deletedAt) ?? []
+    const defaultStamp = connection
+      ? resolveStampForApp(connection.app, connection.account, stamps)
+      : undefined
+
+    // The Swarmscan price is batch-independent — fetch it at most once per
+    // request, shared across all stamps' fallback paths.
+    let price: Promise<number> | undefined
+    const getPrice = () => (price ??= fetchSwarmPrice())
+
     const postageBatches = await Promise.all(
-      stamps.map((stamp) => this.stampToPostageBatch(stamp)),
+      stamps.map(async (stamp) => ({
+        ...(await this.stampToPostageBatch(stamp, getPrice)),
+        isDefault: stamp === defaultStamp,
+      })),
     )
 
     this.postMessage(event, {
@@ -4097,43 +4226,67 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Map a stored PostageStamp to the public PostageBatch, enriching the stale
+   * Map a stored PostageStamp to the public PostageBatch (minus `isDefault`,
+   * which only the request-level caller can resolve), enriching the stale
    * stored snapshot with live `usable`/`exists`/`batchTTL`. Excludes signerKey.
+   * The live lookups are bounded by {@link STAMP_ENRICH_TIMEOUT_MS}; on timeout
+   * or failure the stored snapshot is served instead, so one hung RPC can't
+   * time out the whole client request.
    */
   private async stampToPostageBatch(
     stamp: PostageStamp,
-  ): Promise<PostageBatch> {
-    // The stored stamp's `usable`/`exists` are a snapshot from assignment time
-    // and can be stale (e.g. a batch assigned during its ~30s warm-up stays
-    // `usable: false` in storage forever), so read live batch details from the
-    // Bee node for those fields.
-    const details = await fetchBatchDetails(
-      this.beeApiUrl,
-      stamp.batchID.toHex(),
-    )
+    getPrice: () => Promise<number>,
+  ): Promise<Omit<PostageBatch, "isDefault">> {
+    const batchIdHex = stamp.batchID.toHex()
 
-    // Resolve TTL from live chain state: the PostageStamp contract first
-    // (ground truth for any batch, even one this Bee node has never seen), then
-    // the Bee node's batchTTL. Fall back to the Swarmscan-price approximation
-    // only when neither authoritative source can answer (e.g. RPC unreachable
-    // and a public gateway that does not track the batch).
-    let batchTTL: number | undefined = await fetchAuthoritativeBatchTTL(
-      this.gnosisRpcUrl,
-      this.beeApiUrl,
-      stamp.batchID.toHex(),
-      this.postageStampContractAddress,
-    )
-    if (batchTTL === undefined) {
-      try {
-        const pricePerGBPerMonth = await fetchSwarmPrice()
-        batchTTL = calculateTTLSeconds(stamp.amount, pricePerGBPerMonth)
-      } catch (error) {
-        console.warn("[Proxy] Failed to calculate TTL:", error)
+    const enrich = async (): Promise<{
+      details: BatchDetails | undefined
+      batchTTL: number | undefined
+    }> => {
+      // The stored stamp's `usable`/`exists` are a snapshot from assignment
+      // time and can be stale (e.g. a batch assigned during its ~30s warm-up
+      // stays `usable: false` in storage forever), so read live batch details
+      // from the Bee node for those fields.
+      const details = await fetchBatchDetails(this.beeApiUrl, batchIdHex)
+
+      // Resolve TTL from live chain state: the PostageStamp contract first
+      // (ground truth for any batch, even one this Bee node has never seen),
+      // then the Bee node's batchTTL — already in `details`, no second
+      // /stamps round-trip. Fall back to the Swarmscan-price approximation
+      // only when neither authoritative source can answer.
+      let batchTTL =
+        (await fetchBatchTTLFromContract(
+          this.gnosisRpcUrl,
+          batchIdHex,
+          resolvePostageStampContractAddress(
+            this.gnosisRpcUrl,
+            this.postageStampContractAddress,
+          ),
+        )) ?? details?.batchTTL
+      if (batchTTL === undefined) {
+        try {
+          batchTTL = calculateTTLSeconds(stamp.amount, await getPrice())
+        } catch (error) {
+          console.warn("[Proxy] Failed to calculate TTL:", error)
+        }
       }
+      return { details, batchTTL }
+    }
+
+    let details: BatchDetails | undefined
+    let batchTTL: number | undefined
+    try {
+      ;({ details, batchTTL } = await withTimeout(
+        enrich(),
+        STAMP_ENRICH_TIMEOUT_MS,
+        `Stamp enrichment for ${batchIdHex} timed out`,
+      ))
+    } catch (error) {
+      console.warn("[Proxy] Stamp enrichment failed; serving snapshot:", error)
     }
 
     return {
-      batchID: stamp.batchID.toHex(),
+      batchID: batchIdHex,
       utilization: stamp.utilization,
       usable: details?.usable ?? stamp.usable,
       label: "", // PostageStamp doesn't store label
@@ -4190,6 +4343,7 @@ export class SwarmIdProxy {
             uploadOptions,
           )
         },
+        uploadOptions?.batchID,
       )
 
       this.postMessage(event, {

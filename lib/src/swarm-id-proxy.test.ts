@@ -18,9 +18,39 @@ vi.mock("@ethersphere/bee-js", async (importActual) => {
   }
 })
 
+// Stub the stamper/store/coordinator machinery so `initializeStamper` can run
+// without IndexedDB or network access; the coordinator mock records its deps.
+vi.mock("./utils/batch-utilization", async (importActual) => {
+  const actual =
+    await importActual<typeof import("./utils/batch-utilization")>()
+  return {
+    ...actual,
+    UtilizationAwareStamper: {
+      create: vi.fn(() => Promise.resolve({ mock: "stamper" })),
+    },
+  }
+})
+vi.mock("./storage/utilization-store", () => ({
+  UtilizationStoreDB: vi.fn(function () {
+    return {}
+  }),
+}))
+vi.mock("./sync/batch-write-coordinator", () => ({
+  BatchWriteCoordinator: vi.fn(function (deps: unknown) {
+    return {
+      deps,
+      startLease: vi.fn(),
+      teardown: vi.fn(),
+      withWrite: vi.fn(),
+      currentPartition: undefined,
+    }
+  }),
+}))
+
 import { Bee } from "@ethersphere/bee-js"
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
+import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { SwarmIdProxy } from "./swarm-id-proxy"
 import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
@@ -253,6 +283,7 @@ describe("SwarmIdProxy deriveAppSecret (#520)", () => {
 
 describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
   const NEW_BEE_URL = "https://custom-node.example.com/"
+  let proxy: SwarmIdProxy
   let storageListeners: Array<(event: StorageEvent) => void>
   let store: Map<string, string>
 
@@ -291,7 +322,7 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
       location: { origin: "https://id.example.com" },
     })
 
-    new SwarmIdProxy()
+    proxy = new SwarmIdProxy()
   })
 
   it("rebuilds the Bee client at the newly configured node", () => {
@@ -312,6 +343,20 @@ describe("SwarmIdProxy honours a Bee URL change mid-session (#515)", () => {
 
     expect(BeeMock.mock.calls.length).toBe(callsAfterConstruction)
   })
+
+  it("rebuilds the stamper/coordinator and re-emits ConnectionInfo", async () => {
+    const rebind = vi.fn(() => Promise.resolve())
+    const emit = vi.fn()
+    ;(proxy as never)["rebindActiveStamp"] = rebind
+    ;(proxy as never)["emitConnectionInfoIfChanged"] = emit
+
+    setNetworkSettings(NEW_BEE_URL)
+    fireStorage(STORAGE_KEY_NETWORK_SETTINGS)
+    await new Promise((resolve) => setTimeout(resolve, 0))
+
+    expect(rebind).toHaveBeenCalledTimes(1)
+    expect(emit).toHaveBeenCalledTimes(1)
+  })
 })
 
 const B1 = "aa".repeat(32)
@@ -319,7 +364,10 @@ const B2 = "bb".repeat(32)
 const B3 = "cc".repeat(32)
 
 const stampStub = (hex: string, deletedAt?: number) => ({
-  batchID: { toHex: () => hex },
+  batchID: {
+    toHex: () => hex,
+    equals: (other: { toHex?: () => string }) => other?.toHex?.() === hex,
+  },
   deletedAt,
 })
 
@@ -357,6 +405,7 @@ describe("SwarmIdProxy getPostageBatches (multi-stamp, doc §2)", () => {
 
   it("projects every non-deleted stamp and skips tombstones", async () => {
     ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
       account: {
         postageStamps: [stampStub(B1), stampStub(B3, 123), stampStub(B2)],
       },
@@ -375,6 +424,28 @@ describe("SwarmIdProxy getPostageBatches (multi-stamp, doc §2)", () => {
     })
   })
 
+  it("marks the app's resolved default stamp with isDefault", async () => {
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: {
+        defaultPostageStampBatchID: { toHex: () => B2 },
+        postageStamps: [stampStub(B1), stampStub(B2)],
+      },
+    })
+    ;(proxy as never)["stampToPostageBatch"] = (stamp: {
+      batchID: { toHex: () => string }
+    }) => Promise.resolve({ batchID: stamp.batchID.toHex() })
+
+    await getBatches()
+
+    expect(lastMessage()).toMatchObject({
+      postageBatches: [
+        { batchID: B1, isDefault: false },
+        { batchID: B2, isDefault: true },
+      ],
+    })
+  })
+
   it("returns an empty list when there is no connection", async () => {
     ;(proxy as never)["findConnectionForParent"] = () => undefined
 
@@ -387,16 +458,115 @@ describe("SwarmIdProxy getPostageBatches (multi-stamp, doc §2)", () => {
   })
 })
 
-describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
+describe("SwarmIdProxy stamp enrichment (getPostageBatches efficiency)", () => {
   let proxy: SwarmIdProxy
-  let bindStamp: ReturnType<typeof vi.fn>
+  let source: { postMessage: ReturnType<typeof vi.fn> }
+
+  const fullStamp = (hex: string) => ({
+    ...stampStub(hex),
+    utilization: 0.5,
+    usable: true,
+    depth: 20,
+    amount: "10000000000",
+    bucketDepth: 16,
+    blockNumber: 1,
+    immutableFlag: false,
+    exists: true,
+  })
+
+  const getBatches = () =>
+    (proxy as never)["handleGetPostageBatches"](
+      { type: "getPostageBatches", requestId: "r1" },
+      { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
+    )
+
+  const lastMessage = () =>
+    source.postMessage.mock.calls[source.postMessage.mock.calls.length - 1][0]
 
   beforeEach(() => {
     vi.restoreAllMocks()
     proxy = makeProxy()
-    bindStamp = vi.fn(() => Promise.resolve())
+    source = { postMessage: vi.fn() }
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [fullStamp(B1), fullStamp(B2)] },
+    })
+  })
+
+  it("fetches the Swarmscan price once for the whole request", async () => {
+    let swarmscanCalls = 0
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown) => {
+        if (String(url).includes("swarmscan")) {
+          swarmscanCalls++
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ pricePerGBPerMonth: 1 }),
+          })
+        }
+        // Bee /stamps and the RPC are unreachable → price-fallback path.
+        return Promise.resolve({ ok: false, status: 500 })
+      }),
+    )
+
+    await getBatches()
+
+    const { postageBatches } = lastMessage()
+    expect(postageBatches).toHaveLength(2)
+    expect(swarmscanCalls).toBe(1)
+    for (const batch of postageBatches) {
+      expect(batch.batchTTL).toBeGreaterThan(0)
+    }
+  })
+
+  it("falls back to the stored snapshot when enrichment hangs", async () => {
+    vi.useFakeTimers()
+    try {
+      // Every network source black-holes: the per-stamp timeout must fire and
+      // the stored snapshot must be served instead of timing out the client.
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(() => new Promise(() => {})),
+      )
+
+      const pending = getBatches()
+      await vi.advanceTimersByTimeAsync(15_000)
+      await pending
+
+      const { postageBatches } = lastMessage()
+      expect(postageBatches).toHaveLength(2)
+      expect(postageBatches[0]).toMatchObject({
+        batchID: B1,
+        usable: true,
+        exists: true,
+      })
+      expect(postageBatches[0].batchTTL).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+})
+
+describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
+  let proxy: SwarmIdProxy
+  let bindStamp: ReturnType<typeof vi.fn>
+  let refreshStampFromStorage: ReturnType<typeof vi.fn>
+  const prevStamper = { tag: "stamper-b1" }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    proxy = makeProxy()
+    bindStamp = vi.fn((stamp: { batchID: { toHex: () => string } }) => {
+      ;(proxy as never)["postageBatchId"] = stamp.batchID.toHex()
+      ;(proxy as never)["stamper"] = { tag: stamp.batchID.toHex() }
+      return Promise.resolve()
+    })
+    refreshStampFromStorage = vi.fn(() => Promise.resolve())
     ;(proxy as never)["bindStamp"] = bindStamp
+    ;(proxy as never)["refreshStampFromStorage"] = refreshStampFromStorage
     ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["stamper"] = prevStamper
     ;(proxy as never)["findConnectionForParent"] = () => ({
       account: { postageStamps: [stampStub(B1), stampStub(B2)] },
     })
@@ -405,14 +575,16 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
   const ensure = (batchID?: string) =>
     (proxy as never)["ensureStampForUpload"](batchID)
 
-  it("no-ops without a batchID", async () => {
+  it("re-resolves the default binding when no batchID is given", async () => {
     await ensure(undefined)
+    expect(refreshStampFromStorage).toHaveBeenCalledTimes(1)
     expect(bindStamp).not.toHaveBeenCalled()
   })
 
   it("no-ops when the target is already bound", async () => {
     await ensure(B1)
     expect(bindStamp).not.toHaveBeenCalled()
+    expect(refreshStampFromStorage).not.toHaveBeenCalled()
   })
 
   it("re-binds to a different owned stamp", async () => {
@@ -424,5 +596,157 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
   it("rejects a batch the account does not own", async () => {
     await expect(ensure(B3)).rejects.toThrow("Batch not owned by account")
     expect(bindStamp).not.toHaveBeenCalled()
+  })
+
+  it("restores the previous binding and rejects when the re-bind fails", async () => {
+    // Simulate `initializeStamper`'s swallow paths: fields repointed to the
+    // new batch, but no stamper was constructed.
+    bindStamp.mockImplementation(() => {
+      ;(proxy as never)["postageBatchId"] = B2
+      ;(proxy as never)["stamper"] = undefined
+      return Promise.resolve()
+    })
+
+    await expect(ensure(B2)).rejects.toThrow(`Failed to bind stamp ${B2}`)
+    expect((proxy as never)["postageBatchId"]).toBe(B1)
+    expect((proxy as never)["stamper"]).toBe(prevStamper)
+  })
+
+  it("rebindActiveStamp re-binds the currently bound stamp", async () => {
+    await (proxy as never)["rebindActiveStamp"]()
+    expect(bindStamp).toHaveBeenCalledTimes(1)
+    expect(bindStamp.mock.calls[0][0].batchID.toHex()).toBe(B1)
+  })
+
+  it("rebindActiveStamp no-ops when nothing is bound", async () => {
+    ;(proxy as never)["postageBatchId"] = undefined
+    await (proxy as never)["rebindActiveStamp"]()
+    expect(bindStamp).not.toHaveBeenCalled()
+  })
+})
+
+describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
+  let proxy: SwarmIdProxy
+  let withWrite: ReturnType<typeof vi.fn>
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    proxy = makeProxy()
+    withWrite = vi.fn((operation: (t: unknown) => Promise<unknown>) =>
+      operation({ mode: "stamper" }),
+    )
+    ;(proxy as never)["coordinator"] = { withWrite }
+    ;(proxy as never)["ensureStampForUpload"] = vi.fn(() => Promise.resolve())
+  })
+
+  const write = <T>(
+    operation: (target: unknown) => Promise<T>,
+    batchID?: string,
+  ) =>
+    (proxy as never)["withModeAwareWriteLock"](
+      undefined,
+      operation,
+      batchID,
+    ) as Promise<T>
+
+  const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
+
+  it("runs stamped writes strictly one after another", async () => {
+    const events: string[] = []
+    let releaseA!: () => void
+    const gateA = new Promise<void>((resolve) => (releaseA = resolve))
+
+    const a = write(async () => {
+      events.push("a-start")
+      await gateA
+      events.push("a-end")
+    })
+    const b = write(async () => {
+      events.push("b-start")
+    })
+
+    await flush()
+    expect(events).toEqual(["a-start"])
+
+    releaseA()
+    await Promise.all([a, b])
+    expect(events).toEqual(["a-start", "a-end", "b-start"])
+  })
+
+  it("a failed write does not wedge the queue", async () => {
+    await expect(
+      write(async () => {
+        throw new Error("boom")
+      }),
+    ).rejects.toThrow("boom")
+    await expect(write(async () => "ok")).resolves.toBe("ok")
+  })
+
+  it("subsidised writes without a batchID stay on the unqueued fast path", async () => {
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    ;(proxy as never)["postageBatchId"] = undefined
+    ;(proxy as never)["signerKey"] = undefined
+
+    const target = await write(async (t) => t)
+
+    expect(target).toMatchObject({
+      mode: "subsidised",
+      gatewayUrl: "https://gateway.example/",
+    })
+    expect(withWrite).not.toHaveBeenCalled()
+  })
+
+  it("a targeted write while subsidised mode is active takes the stamped path", async () => {
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    const ensure = vi.fn(() => {
+      ;(proxy as never)["postageBatchId"] = B2
+      ;(proxy as never)["signerKey"] = "11".repeat(32)
+      ;(proxy as never)["stamper"] = { tag: B2 }
+      return Promise.resolve()
+    })
+    ;(proxy as never)["ensureStampForUpload"] = ensure
+
+    const target = await write(async (t) => t, B2)
+
+    expect(ensure).toHaveBeenCalledWith(B2)
+    expect(withWrite).toHaveBeenCalledTimes(1)
+    expect(target).toMatchObject({ mode: "stamper" })
+  })
+})
+
+describe("SwarmIdProxy coordinator targets the configured Bee node", () => {
+  const CoordinatorMock = vi.mocked(BatchWriteCoordinator)
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    CoordinatorMock.mockClear()
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    })
+  })
+
+  it("builds the coordinator against beeApiUrl even when the subsidised gateway is active", async () => {
+    const proxy = makeProxy()
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    ;(proxy as never)["bee"] = { url: "https://gateway.example/" }
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["deviceId"] = "device-1"
+    ;(proxy as never)["lookupAccountForApp"] = () =>
+      Promise.resolve({
+        owner: { toHex: () => "ab".repeat(20) },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 1,
+      })
+
+    await (proxy as never)["initializeStamper"](17)
+
+    expect(CoordinatorMock).toHaveBeenCalledTimes(1)
+    const deps = CoordinatorMock.mock.calls[0][0] as unknown as { bee: Bee }
+    expect(String(deps.bee.url)).toContain(new URL(DEFAULT_BEE_NODE_URL).host)
+    expect(String(deps.bee.url)).not.toContain("gateway.example")
   })
 })
