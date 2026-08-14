@@ -74,8 +74,8 @@
 <div class="sl-heading-wrapper level-h2"><h2 id="starting-the-local-bee-cluster">Starting the Local Bee Cluster</h2><a class="sl-anchor-link" href="#starting-the-local-bee-cluster"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Starting the Local Bee Cluster”</span></a></div>
 <p>The project uses <a href="https://www.npmjs.com/package/@snaha/bee-compose">@snaha/bee-compose</a> to run a local Bee cluster with blockchain support.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="quick-start">Quick Start</h3><a class="sl-anchor-link" href="#quick-start"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Quick Start”</span></a></div>
-<div class="expressive-code"><link rel="stylesheet" href="/docs/pr-531/_astro/ec.v4551.css"><script type="module" src="/docs/pr-531/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># Start Bee cluster in background</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">pnpm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">dev:bee:detach</span></div></div><div class="ec-line"><div class="code">
-</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># Start the development servers</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">pnpm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">dev</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="pnpm dev:bee:detachpnpm dev"><div></div></button></div></figure></div>
+<div class="expressive-code"><link rel="stylesheet" href="/docs/pr-531/_astro/ec.v4551.css"><script type="module" src="/docs/pr-531/_astro/ec.0vx5m.js"></script><figure class="frame is-terminal not-content"><figcaption class="header"><span class="title"></span><span class="sr-only">Terminal window</span></figcaption><pre data-language="bash"><code><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># Start Bee cluster in background</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">pnpm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">dev:cluster:start</span></div></div><div class="ec-line"><div class="code">
+</div></div><div class="ec-line"><div class="code"><span style="--0:#919F9F;--1:#5F636F"># Start the development servers</span></div></div><div class="ec-line"><div class="code"><span style="--0:#82AAFF;--1:#3B61B0">pnpm</span><span style="--0:#D6DEEB;--1:#403F53"> </span><span style="--0:#ECC48D;--1:#3B61B0">dev</span></div></div></code></pre><div class="copy"><div aria-live="polite"></div><button title="Copy to clipboard" data-copied="Copied!" data-code="pnpm dev:cluster:startpnpm dev"><div></div></button></div></figure></div>
 <div class="sl-heading-wrapper level-h3"><h3 id="all-cluster-commands">All Cluster Commands</h3><a class="sl-anchor-link" href="#all-cluster-commands"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “All Cluster Commands”</span></a></div>
 <table>
 <thead>
@@ -86,27 +86,30 @@
 </thead>
 <tbody>
 <tr>
-<td><code dir="auto">pnpm dev:bee</code></td>
-<td>Start cluster interactively (shows logs)</td>
+<td><code dir="auto">pnpm dev:cluster:start</code></td>
+<td>Start cluster in background (queen + 3)</td>
 </tr>
 <tr>
-<td><code dir="auto">pnpm dev:bee:detach</code></td>
-<td>Start cluster in background</td>
+<td><code dir="auto">pnpm dev:cluster:start --fresh</code></td>
+<td>Clean start (destroys node state)</td>
 </tr>
 <tr>
-<td><code dir="auto">pnpm dev:bee:stop</code></td>
+<td><code dir="auto">pnpm dev:cluster stop</code></td>
 <td>Stop the cluster</td>
 </tr>
 <tr>
-<td><code dir="auto">pnpm dev:bee:logs</code></td>
-<td>View queen node logs</td>
+<td><code dir="auto">pnpm dev:cluster status</code></td>
+<td>Show what is running</td>
 </tr>
 <tr>
-<td><code dir="auto">pnpm dev:bee:fresh</code></td>
-<td>Clean start with latest images</td>
+<td><code dir="auto">pnpm dev:cluster:logs</code></td>
+<td>Follow queen node logs</td>
 </tr>
 </tbody>
 </table>
+<p><code dir="auto">pnpm dev:cluster</code> passes anything through to the <code dir="auto">bee-compose</code> CLI, so
+<code dir="auto">pnpm dev:cluster start --help</code> lists the rest.</p>
+<p>The first start compiles Bee from source (a few minutes); later starts are seconds.</p>
 <div class="sl-heading-wrapper level-h3"><h3 id="local-endpoints">Local Endpoints</h3><a class="sl-anchor-link" href="#local-endpoints"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Local Endpoints”</span></a></div>
 <p>Once the cluster is running, these endpoints are available:</p>
 <table>
@@ -220,7 +223,8 @@
 <ul>
 <li>Ensure Docker is running</li>
 <li>Check if ports 1633, 16331, or 9545 are already in use</li>
-<li>Try <code dir="auto">pnpm dev:bee:fresh</code> for a clean start</li>
+<li>Try <code dir="auto">pnpm dev:cluster:start --fresh</code> for a clean start</li>
+<li>After a <code dir="auto">@snaha/bee-compose</code> upgrade, add <code dir="auto">--pull</code> so the chain image is rebuilt rather than reused</li>
 </ul>
 <div class="sl-heading-wrapper level-h3"><h3 id="library-changes-not-reflected">Library Changes Not Reflected</h3><a class="sl-anchor-link" href="#library-changes-not-reflected"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “Library Changes Not Reflected”</span></a></div>
 <p>If you modify code in <code dir="auto">lib/</code>, you need to rebuild:</p>
