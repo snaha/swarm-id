@@ -12,6 +12,9 @@
     "dev:docs": "pnpm --filter @swarm-id/docs dev",
     "dev:cluster": "bee-compose",
     "dev:cluster:start": "bee-compose start --full 4",
+    "dev:chain": "bee-compose start --without-bees --no-detach",
+    "dev:chain:detach": "bee-compose start --without-bees",
+    "dev:chain:stop": "bee-compose stop",
     "dev:cluster:logs": "bee-compose logs queen --follow",
     "build": "pnpm -r --workspace-concurrency=1 build",
     "build:lib": "pnpm --filter @snaha/swarm-id build",
@@ -23,8 +26,9 @@
     "clean": "pnpm -r clean && rm -rf demo/build",
     "install:all": "pnpm install",
     "test:live": "pnpm --filter @snaha/swarm-id test:live",
-    "check:all": "pnpm --filter @snaha/swarm-id check:all && pnpm --filter @swarm-id/ui check:all && pnpm --filter @swarm-id/demo check:all",
-    "format:all": "pnpm --filter @snaha/swarm-id format && pnpm --filter @swarm-id/ui format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format && prettier --write .",
+    "test:fork": "pnpm --filter @swarm-id/multichain test:fork",
+    "check:all": "pnpm --filter @snaha/swarm-id check:all && pnpm --filter @swarm-id/multichain check:all && pnpm --filter @swarm-id/ui check:all && pnpm --filter @swarm-id/demo check:all",
+    "format:all": "pnpm --filter @snaha/swarm-id format && pnpm --filter @swarm-id/multichain format && pnpm --filter @swarm-id/ui format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format && prettier --write .",
     "format:lib": "pnpm --filter @snaha/swarm-id format"
   },
   "devDependencies": {

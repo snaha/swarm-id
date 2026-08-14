@@ -46,6 +46,20 @@ jobs:
         working-directory: ./lib
         run: pnpm test
 
+      # The package holding the PostageStamp ABI selectors, the EIP-7702 bundle
+      # and the local solver protocol — previously in no workflow at all.
+      - name: Code linting (multichain)
+        working-directory: ./multichain
+        run: pnpm lint
+
+      - name: Typecheck (multichain)
+        working-directory: ./multichain
+        run: pnpm typecheck
+
+      - name: Run multichain unit tests
+        working-directory: ./multichain
+        run: pnpm test
+
       - name: Build ui
         working-directory: ./ui
         run: pnpm build
@@ -81,3 +95,55 @@ jobs:
       - name: Check dependencies and unused files (demo)
         working-directory: ./demo
         run: pnpm knip
+
+  # On-chain tests against the baked snapshot. Its own job so it can start a
+  # chain without slowing the checks above, and because a failure here means
+  # something different: the contract calls, not the code around them.
+  fork-tests:
+    name: On-chain (fork) tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Start the local chain
+        run: pnpm dev:chain:detach
+
+      # The suite skips itself when no chain answers, so without this a slow
+      # start would look like a pass.
+      - name: Wait for the local chain
+        run: |
+          for _ in $(seq 1 60); do
+            if curl -sf -X POST -H 'Content-Type: application/json' \
+              --data '{"jsonrpc":"2.0","id":1,"method":"eth_chainId","params":[]}' \
+              http://localhost:9545 > /dev/null; then
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::The local chain never answered on :9545 — the fork suite would have skipped silently."
+          pnpm -s dev:cluster logs blockchain --tail 100 || true
+          exit 1
+
+      - name: Run the fork suite
+        run: pnpm test:fork
+
+      - name: Stop the local chain
+        if: always()
+        run: pnpm dev:chain:stop
