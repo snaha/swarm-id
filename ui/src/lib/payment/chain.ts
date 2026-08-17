@@ -60,36 +60,63 @@ export interface ChainIdentity {
   isMainnet: boolean
 }
 
-/** One JSON-RPC call without a client — none can be built until we know the chain. */
-export async function probeChainId(rpcUrl: string): Promise<number> {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-    signal: AbortSignal.timeout(CHAIN_ID_PROBE_TIMEOUT_MS),
-  })
-  const data = (await response.json()) as { result?: string }
-  if (typeof data.result !== 'string') {
-    throw new Error('The configured Gnosis RPC did not report a chain id.')
-  }
-  return Number(BigInt(data.result))
+interface JsonRpcResponse<T> {
+  result?: T
+  error?: { code?: number; message?: string }
 }
 
-/** The hash of block 0, or undefined when the endpoint keeps no genesis. */
-async function probeGenesisHash(rpcUrl: string): Promise<string | undefined> {
+/**
+ * One JSON-RPC call, checked. An endpoint that answers 429, or 200 carrying a
+ * JSON-RPC error, must not be read as an answer: every caller of this module
+ * decides from it whether money is real.
+ */
+async function jsonRpc<T>(rpcUrl: string, method: string, params: unknown[]): Promise<T> {
   const response = await fetch(rpcUrl, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      jsonrpc: '2.0',
-      id: 1,
-      method: 'eth_getBlockByNumber',
-      params: ['0x0', false],
-    }),
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }),
     signal: AbortSignal.timeout(CHAIN_ID_PROBE_TIMEOUT_MS),
   })
-  const data = (await response.json()) as { result?: { hash?: string } }
-  return data.result?.hash
+  if (!response.ok) {
+    throw new Error(`The configured Gnosis RPC answered ${response.status} to ${method}.`)
+  }
+  const data = (await response.json()) as JsonRpcResponse<T>
+  if (data.error) {
+    throw new Error(
+      `The configured Gnosis RPC refused ${method}: ${data.error.message ?? 'unknown error'}`,
+    )
+  }
+  if (data.result === undefined) {
+    throw new Error(`The configured Gnosis RPC returned no result for ${method}.`)
+  }
+  return data.result
+}
+
+/** One JSON-RPC call without a client — none can be built until we know the chain. */
+export async function probeChainId(rpcUrl: string): Promise<number> {
+  const result = await jsonRpc<string>(rpcUrl, 'eth_chainId', [])
+  if (typeof result !== 'string') {
+    throw new Error('The configured Gnosis RPC did not report a chain id.')
+  }
+  return Number(BigInt(result))
+}
+
+/**
+ * The hash of block 0.
+ *
+ * @throws when the endpoint will not serve it. Deliberately: an unproven
+ *   genesis must never resolve to "not mainnet", because that is the answer
+ *   that tells the page spending is free. A rate-limited or pruned Gnosis node
+ *   would otherwise be dressed up as a dev chain, under a banner saying nothing
+ *   here is real, while the faucet spent actual funds. Unreachable is loud; a
+ *   false all-clear is not.
+ */
+async function probeGenesisHash(rpcUrl: string): Promise<string> {
+  const block = await jsonRpc<{ hash?: string }>(rpcUrl, 'eth_getBlockByNumber', ['0x0', false])
+  if (typeof block.hash !== 'string') {
+    throw new Error('The configured Gnosis RPC did not report a genesis block.')
+  }
+  return block.hash
 }
 
 // One identity per RPC URL: the chain a URL serves does not change under us,
@@ -112,13 +139,20 @@ export function chainIdentity(
   if (existing) {
     return existing
   }
-  const identity = Promise.all([probeChainId(rpcUrl), probeGenesisHash(rpcUrl)])
+  const identity: Promise<ChainIdentity> = Promise.all([
+    probeChainId(rpcUrl),
+    probeGenesisHash(rpcUrl),
+  ])
     .then(([chainId, genesisHash]) => ({
       chainId,
       isMainnet: chainId === GNOSIS_CHAIN_ID && genesisHash === GNOSIS_GENESIS_HASH,
     }))
     .catch((error: unknown) => {
-      identities.delete(rpcUrl)
+      // Only evict OUR entry: a retry may already have stored a healthy probe
+      // under this url, and dropping that one would re-probe for nothing.
+      if (identities.get(rpcUrl) === identity) {
+        identities.delete(rpcUrl)
+      }
       throw error
     })
   identities.set(rpcUrl, identity)
