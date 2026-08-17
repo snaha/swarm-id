@@ -181,6 +181,8 @@
         mocked: devSettingsStore.data.mockStampEnabled,
         mockPopup: devSettingsStore.data.mockStampPopup,
         mockError: devSettingsStore.data.mockStampResult === 'error',
+        // Only the mock can honour this — the real widget picks the size itself.
+        mockDepth: depthValue === '' ? undefined : Number(depthValue),
         onSuccess: (batch) => {
           if (!attempt.current) {
             return

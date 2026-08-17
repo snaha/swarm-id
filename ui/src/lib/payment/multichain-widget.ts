@@ -40,6 +40,11 @@ export interface PurchaseStampOptions {
   mocked?: boolean // For testing - simulate the settlement instead of paying
   mockPopup?: boolean // For testing - also open the widget's `?mocked=true` popup
   mockError?: boolean // For testing - simulate error instead of success
+  // For testing - the depth to fabricate. The real widget picks the depth
+  // itself, which is why there is no plain `depth` option; the mock takes the
+  // size the user asked for so the drive it leaves behind is the one they
+  // chose, rather than always a 600 MB one.
+  mockDepth?: number
 }
 
 /** How long to keep listening for a trailing `batch` message after the popup
@@ -214,6 +219,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
     mocked,
     mockPopup,
     mockError,
+    mockDepth,
   } = options
 
   // Mocked mode (the /dev toggle): settle locally without a real cross-chain
@@ -239,7 +245,7 @@ export function openStampPurchaseWidget(options: PurchaseStampOptions): StampPur
       settle(onSuccess, onError, {
         event: 'batch',
         batchId,
-        depth: MOCK_BATCH_DEPTH,
+        depth: mockDepth ?? MOCK_BATCH_DEPTH,
         amount: MOCK_BATCH_AMOUNT,
         blockNumber: '0x' + Math.floor(Date.now() / MS_PER_SECOND).toString(HEX_RADIX),
       })
