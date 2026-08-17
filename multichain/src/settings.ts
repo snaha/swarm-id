@@ -1,0 +1,69 @@
+// Copyright 2026 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+// Adapted from @upcoming/multichain-library (ISC)
+// https://github.com/ethersphere/multichain-library
+
+import { Objects } from "cafe-utility"
+
+/** Contract addresses the machinery talks to. */
+export interface MultichainAddresses {
+  bzz: `0x${string}`
+  postageStamp: `0x${string}`
+  wxdai: `0x${string}`
+  sushiV3Router: `0x${string}`
+  /**
+   * The EIP-7702 delegate an owner EOA authorises to run a postage operation as
+   * one atomic bundle. `Simple7702Account` (eth-infinitism's audited minimal
+   * 7702 account, verified on Gnosis) — it restricts execution to the account
+   * itself, so only a self-call from the EOA can drive it.
+   */
+  eip7702Delegate: `0x${string}`
+  sushiV3Quoter: `0x${string}`
+}
+
+export interface MultichainSettings {
+  /** EIP-155 chain id baked into every signature. */
+  chainId: number
+  chainName: string
+  /** Rotated on transport failures (RollingValueProvider). */
+  rpcUrls: string[]
+  fetchTimeoutMillis: number
+  receiptPollMillis: number
+  receiptPollAttempts: number
+  balancePollMillis: number
+  balancePollAttempts: number
+  addresses: MultichainAddresses
+  sushiV3BzzPoolFee: number
+}
+
+export const GNOSIS_CHAIN_ID = 100
+
+const GNOSIS_MAINNET_DEFAULTS: MultichainSettings = {
+  chainId: GNOSIS_CHAIN_ID,
+  chainName: "Gnosis",
+  rpcUrls: ["https://rpc.gnosischain.com", "https://xdai.fairdatasociety.org"],
+  fetchTimeoutMillis: 15_000,
+  // Gnosis blocks every ~5s; a receipt normally lands within one or two.
+  receiptPollMillis: 5_000,
+  receiptPollAttempts: 12,
+  balancePollMillis: 15_000,
+  balancePollAttempts: 20,
+  addresses: {
+    bzz: "0xdbf3ea6f5bee45c02255b2c26a16f300502f68da",
+    postageStamp: "0x45a1502382541Cd610CC9068e88727426b696293",
+    wxdai: "0xe91D153E0b41518A2Ce8Dd3D7944Fa863463a97d",
+    sushiV3Router: "0x4F54dd2F4f30347d841b7783aD08c050d8410a9d",
+    eip7702Delegate: "0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9",
+    sushiV3Quoter: "0xb1E835Dc2785b52265711e17fCCb0fd018226a6e",
+  },
+  sushiV3BzzPoolFee: 3000,
+}
+
+export function gnosisMainnetSettings(
+  overrides?: Partial<MultichainSettings>,
+): MultichainSettings {
+  return Objects.deepMerge2(
+    GNOSIS_MAINNET_DEFAULTS,
+    overrides ?? {},
+  ) as MultichainSettings
+}
