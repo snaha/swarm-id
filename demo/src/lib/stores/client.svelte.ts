@@ -7,6 +7,7 @@ import {
   DEFAULT_BEE_NODE_URL,
   type Avatar,
   type ConnectionInfo,
+  type PostageBatch,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
@@ -55,6 +56,12 @@ let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailabl
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
+// Every batch the account owns (a "drive" each) — drives the upload batch
+// selector when there is more than one.
+let batches = $state<PostageBatch[]>([])
+// Batch id targeted by uploads; undefined = "Default" (the proxy resolves the
+// per-app override / account default).
+let selectedBatchId = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
@@ -86,11 +93,20 @@ async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
   try {
-    const batches = await client.getPostageBatches()
+    const fetched = await client.getPostageBatches()
     if (generation !== connectionGeneration) return
+    batches = fetched
+    // A selected batch that no longer exists (identity switch, deleted drive)
+    // falls back to Default rather than silently failing every upload.
+    if (
+      selectedBatchId !== undefined &&
+      !fetched.some((b) => String(b.batchID) === selectedBatchId)
+    ) {
+      selectedBatchId = undefined
+    }
     // The demo shows one stamp; an account may own several ("drives") —
     // show the one untargeted uploads actually consume.
-    const batch = batches.find((b) => b.isDefault) ?? batches[0]
+    const batch = fetched.find((b) => b.isDefault) ?? fetched[0]
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
@@ -126,6 +142,7 @@ async function updatePostageStampInfo(generation: number) {
       }
     } else {
       stamp = undefined
+      selectedBatchId = undefined
       stampPollAttempts = 0
       logStore.log('No postage stamp configured')
     }
@@ -190,6 +207,8 @@ async function onConnectionChange(info: ConnectionInfo) {
     await updatePostageStampInfo(generation)
   } else {
     stamp = undefined
+    batches = []
+    selectedBatchId = undefined
   }
 }
 
@@ -217,6 +236,20 @@ export const clientStore = {
   },
   get stamp() {
     return stamp
+  },
+  get batches() {
+    return batches
+  },
+  get selectedBatchId() {
+    return selectedBatchId
+  },
+  set selectedBatchId(value: string | undefined) {
+    selectedBatchId = value
+  },
+  /** `UploadOptions.batchID` for upload calls: the selected batch, or
+   *  undefined so the proxy resolves the default. */
+  get uploadBatchID() {
+    return selectedBatchId
   },
   get partition() {
     return partition
@@ -346,6 +379,8 @@ export const clientStore = {
     identity = undefined
     appKey = undefined
     stamp = undefined
+    batches = []
+    selectedBatchId = undefined
     partition = undefined
     socWriterInstance = undefined
   },

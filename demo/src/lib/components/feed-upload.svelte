@@ -68,6 +68,11 @@
     const opts: Record<string, string> = {}
     if (feedIndex) opts.index = feedIndex
     if (feedAt) opts.at = feedAt
+    // Target the sidebar-selected batch (Default → omitted, the proxy
+    // resolves). Only sequential feed writers honour batchID — the epoch
+    // feed wire format carries no upload options (lib follow-up), so the
+    // epoch writer calls below don't pass it.
+    if (clientStore.uploadBatchID) opts.batchID = clientStore.uploadBatchID
     return opts
   }
 
@@ -105,6 +110,7 @@
         const uploadResult = await clientStore.client!.uploadData(uint8Data, {
           encrypt: false,
           deferred,
+          batchID: clientStore.uploadBatchID,
         })
         const contentReference = uploadResult.reference
         logStore.log(`Content uploaded: ${contentReference}`)
@@ -120,6 +126,7 @@
             const uploadResult = await clientStore.client!.uploadData(data, {
               encrypt: false,
               deferred,
+              batchID: clientStore.uploadBatchID,
             })
             return { reference: uploadResult.reference }
           },

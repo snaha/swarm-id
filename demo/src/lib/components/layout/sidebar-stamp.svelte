@@ -4,10 +4,17 @@
 -->
 
 <script lang="ts">
+  import type { PostageBatch } from '@snaha/swarm-id'
   import { Badge } from '$lib/components/ui/badge'
+  import { Select } from '$lib/components/ui/select'
   import { clientStore } from '$lib/stores/client.svelte'
 
   let expanded = $state(false)
+
+  const shortId = (id: string) => `${id.slice(0, 16)}…`
+  const batchLabel = (batch: PostageBatch) =>
+    batch.label ? batch.label : shortId(String(batch.batchID))
+  const defaultBatch = $derived(clientStore.batches.find((b) => b.isDefault))
 </script>
 
 <div class="space-y-2">
@@ -54,6 +61,25 @@
     <div class="text-xs text-muted-foreground pl-6">TTL: {clientStore.stamp.ttl}</div>
     <div class="text-xs text-muted-foreground pl-6">
       Partition: {clientStore.partition === undefined ? 'Inactive' : clientStore.partition}
+    </div>
+  {/if}
+
+  {#if clientStore.batches.length > 1}
+    <div class="space-y-1 pl-6 pr-2">
+      <label for="upload-batch" class="text-xs text-muted-foreground">Upload batch</label>
+      <Select
+        id="upload-batch"
+        class="h-8 text-xs"
+        value={clientStore.selectedBatchId ?? ''}
+        onchange={(e) => (clientStore.selectedBatchId = e.currentTarget.value || undefined)}
+      >
+        <option value=""
+          >Default{defaultBatch ? ` (${shortId(String(defaultBatch.batchID))})` : ''}</option
+        >
+        {#each clientStore.batches as batch (String(batch.batchID))}
+          <option value={String(batch.batchID)}>{batchLabel(batch)}</option>
+        {/each}
+      </Select>
     </div>
   {/if}
 

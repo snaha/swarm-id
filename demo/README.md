@@ -101,7 +101,10 @@ The identity management (authentication, key derivation, storage) is handled by 
 
 ```javascript
 const data = new TextEncoder().encode('Hello, Swarm!')
-const result = await client.uploadData('your-postage-batch-id', data)
+// Uploads use the account's default postage batch; pass `batchID` in the
+// options to target another batch the account owns (see the sidebar's
+// "Upload batch" selector in this demo).
+const result = await client.uploadData(data, { batchID: someOwnedBatchId })
 console.log('Reference:', result.reference)
 ```
 
