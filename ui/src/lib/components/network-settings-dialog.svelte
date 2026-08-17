@@ -9,22 +9,12 @@
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
-  import { chainIdentity, probeChainId } from '$lib/payment/chain'
+  import { chainIdentity } from '$lib/payment/chain'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   interface Props {
     onclose: () => void
   }
-
-  /**
-   * The local endpoints "Use local" fills in. Two chains can be serving Gnosis
-   * locally — bee-compose's cluster and the standalone snapshot — so the button
-   * asks which is actually answering rather than making the user remember. The
-   * cluster comes first: it also serves the Bee node, so if it is up that is
-   * the environment you want.
-   */
-  const LOCAL_BEE_NODE_URL = 'http://localhost:1633/'
-  const LOCAL_GNOSIS_RPC_URLS = ['http://localhost:9545', 'http://localhost:8545']
 
   let { onclose }: Props = $props()
 
@@ -70,24 +60,6 @@
     beeNodeUrl = DEFAULT_BEE_NODE_URL
     gnosisRpcUrl = DEFAULT_GNOSIS_RPC_URL
   }
-
-  /**
-   * Point at whichever local chain is running. Dev builds only — the button is
-   * not rendered otherwise, and typing two localhost URLs by hand is the step
-   * that most often goes wrong when setting the environment up.
-   */
-  async function useLocal() {
-    beeNodeUrl = LOCAL_BEE_NODE_URL
-    const reachable = await Promise.all(
-      LOCAL_GNOSIS_RPC_URLS.map((url) =>
-        probeChainId(url).then(
-          () => url,
-          () => undefined,
-        ),
-      ),
-    )
-    gnosisRpcUrl = reachable.find((url) => url !== undefined) ?? LOCAL_GNOSIS_RPC_URLS[0]
-  }
 </script>
 
 <Dialog title="Network settings" {onclose}>
@@ -126,11 +98,6 @@
   <div class="flex w-full items-center gap-2">
     <Button disabled={!canSave} onclick={save}>Save</Button>
     <Button variant="outline" onclick={onclose}>Cancel</Button>
-    {#if import.meta.env.DEV}
-      <Button variant="ghost" class="ml-auto" onclick={useLocal}>Use local</Button>
-      <Button variant="ghost" onclick={resetToDefaults}>Reset</Button>
-    {:else}
-      <Button variant="ghost" class="ml-auto" onclick={resetToDefaults}>Reset</Button>
-    {/if}
+    <Button variant="ghost" class="ml-auto" onclick={resetToDefaults}>Reset</Button>
   </div>
 </Dialog>
