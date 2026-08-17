@@ -7,16 +7,23 @@ paths:
 
 # Local Bee Development Cluster (bee-compose)
 
-Docker-based local Bee cluster for development with postage stamps. Uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose).
+Docker-based local Bee cluster for development with postage stamps. Uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) **≥ 0.2.0** — the release carrying the hybrid Gnosis chain. Against it, 0.1.x's queen crashloops with `factory fail: abi: attempting to unmarshal an empty string`, which reads as a broken cluster rather than a stale dependency.
 
 ```bash
-pnpm dev:bee          # Start cluster (queen + 3 full workers = 4-node net), foreground
-pnpm dev:bee:detach   # Start in background
-pnpm dev:bee:stop     # Stop cluster
-pnpm dev:bee:fresh    # Fresh start (purge data)
+pnpm dev:cluster:start          # Start in background
+pnpm dev:cluster:start --fresh  # Fresh start (purge data)
+pnpm dev:cluster stop           # Stop cluster
+pnpm dev:cluster:logs           # Tail the queen
 ```
 
-The scripts start a 4-node full network (`--full 4` = queen + 3 full workers).
+The scripts start a 4-node full network (`--full 4` = queen + 3 full workers). `pnpm dev:cluster`
+passes anything else through to the CLI (`status`, `--without-bees`, …).
+
+**Bumping bee-compose needs `--pull`, not just `--fresh`.** The chain snapshot is baked into the
+`bee-compose:blockchain-*` image at build time, and `--fresh` only tears down volumes — it reuses
+the image it already has, so the cluster keeps serving the OLD chain. The only symptom is that
+nodes never ingest a batch you can plainly see on-chain (`/chainstate` looks healthy). Use
+`pnpm dev:cluster:start --fresh --pull`. CI is immune: its image cache is keyed on the lockfile.
 
 ## Pushsync needs `reachabilityOverridePublic=true` — now built into bee-compose ≥ 0.1.4
 
@@ -36,12 +43,8 @@ network-readable by peers.
 `bee/Dockerfile` recompiles Bee from source at `v${BEE_VERSION}` with
 `make binary REACHABILITY_OVERRIDE_PUBLIC=true`, so non-deferred uploads replicate out of the box — no
 manual override-image build needed. Cost: the **first** `bee-compose start` compiles Bee from source (a
-few minutes; cached and shared across node images afterward).
-
-> ⚠️ swarm-id pins `@snaha/bee-compose@^0.1.3` and the lockfile may still resolve to **0.1.3 (no
-> override → the ~30 s hang)**. If non-deferred uploads stall locally, update to ≥ 0.1.4
-> (`pnpm update @snaha/bee-compose`) and rebuild (`pnpm dev:bee:fresh`; the first start recompiles Bee).
-> (On a real public gateway the override is irrelevant — reachability is genuine there.)
+few minutes; cached and shared across node images afterward). (On a real public gateway the override
+is irrelevant — reachability is genuine there.)
 
 Verify after start (read-only): every node `bee_kademlia_reachability_status{...="Public"}` (NOT
 `Unknown`); queen `/topology` `connected ≥ 3`; a non-deferred upload returns in <1 s and queen

@@ -6,7 +6,7 @@
  * against a live local Bee node started with `@snaha/bee-compose`.
  *
  * Run with:
- *   pnpm dev:bee:detach   # from the repo root, starts the cluster
+ *   pnpm dev:cluster:start   # from the repo root, starts the cluster
  *   pnpm --filter @snaha/swarm-id test:integration
  *
  * The whole suite is skipped automatically when no cluster is reachable, so it

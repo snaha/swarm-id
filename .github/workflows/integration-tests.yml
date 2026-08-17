@@ -41,7 +41,7 @@ jobs:
       # Cache the locally-built cluster images (queen, worker, blockchain) so we
       # skip rebuilding them and re-pulling the upstream bases each run. This
       # caches IMAGES ONLY via docker save/load — never volumes, so the chain
-      # state (baked into the image as state.anvil.json) is always fresh.
+      # state (baked into the image as state.gnosis.json) is always fresh.
       # Keyed on the lockfile so a bee-compose bump invalidates it.
       - name: Cache Bee cluster images
         id: bee-images
@@ -57,7 +57,7 @@ jobs:
           docker images --filter 'reference=bee-compose:*'
 
       - name: Start Bee cluster
-        run: pnpm dev:bee:detach
+        run: pnpm dev:cluster:start
 
       - name: Save cluster images to cache
         if: steps.bee-images.outputs.cache-hit != 'true'
@@ -97,12 +97,12 @@ jobs:
         run: |
           docker ps -a || true
           echo "::group::blockchain logs"
-          pnpm exec bee-compose logs blockchain --tail 200 || true
+          pnpm dev:cluster logs blockchain --tail 200 || true
           echo "::endgroup::"
           echo "::group::queen logs"
-          pnpm exec bee-compose logs queen --tail 300 || true
+          pnpm dev:cluster logs queen --tail 300 || true
           echo "::endgroup::"
 
       - name: Stop Bee cluster
         if: always()
-        run: pnpm dev:bee:stop || true
+        run: pnpm dev:cluster stop || true
