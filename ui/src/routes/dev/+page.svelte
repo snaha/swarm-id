@@ -5,8 +5,12 @@
 
 <script lang="ts">
   import { BatchId, Bee, EthAddress, Identifier, PrivateKey } from '@ethersphere/bee-js'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import Info from '@lucide/svelte/icons/info'
+  import Settings from '@lucide/svelte/icons/settings'
   import {
+    DEFAULT_BEE_NODE_URL,
+    DEFAULT_GNOSIS_RPC_URL,
     derivePostageSignerKey,
     downloadEncryptedSOC,
     rejectAfter,
@@ -19,7 +23,13 @@
   import { resolve } from '$app/paths'
 
   import CopyButton from '$lib/components/copy-button.svelte'
+  import NetworkSettingsDialog from '$lib/components/network-settings-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
+  import {
+    DropdownMenu,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+  } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
@@ -27,6 +37,7 @@
   import {
     ANVIL_ACCOUNT,
     type FundsRow,
+    createExpiringTestDrive,
     createOwnedBatchOnChain,
     createTestDrive,
     devChainFunds,
@@ -34,7 +45,7 @@
   } from '$lib/dev/chain-funding'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
-  import { chainIdentity, postageChain } from '$lib/payment/chain'
+  import { chainIdentity, postageChain, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -86,6 +97,60 @@
 
   // Demo app URL for connect flow testing (the new UI's demo runs on :3500).
   const demoAppOrigin = 'http://localhost:3500'
+
+  /**
+   * The local endpoints "Use local" points the app at. Two chains can be
+   * serving Gnosis locally — bee-compose's cluster and the standalone snapshot
+   * — so it asks which is actually answering rather than making the user
+   * remember. The cluster comes first: it also serves the Bee node, so if it
+   * is up that is the environment you want. This lives here rather than in
+   * Network settings, which ships to production.
+   */
+  const LOCAL_BEE_NODE_URL = 'http://localhost:1633/'
+  const LOCAL_GNOSIS_RPC_URLS = ['http://localhost:9545', 'http://localhost:8545']
+  /** Worker 1 of the same cluster; only meaningful while the queen is in use. */
+  const LOCAL_CLUSTER_WORKER_URL = 'http://localhost:16331'
+
+  /**
+   * Which environment the saved endpoints amount to — the one word the menu
+   * needs. Anything else, a gateway or a colleague's node, is `Custom`: the
+   * pair is what makes an environment, so one preset URL beside a hand-typed
+   * one is not that preset.
+   */
+  const endpointMode = $derived.by(() => {
+    const { beeNodeUrl, gnosisRpcUrl } = networkSettingsStore
+    if (beeNodeUrl === LOCAL_BEE_NODE_URL && LOCAL_GNOSIS_RPC_URLS.includes(gnosisRpcUrl)) {
+      return 'Local'
+    }
+    if (beeNodeUrl === DEFAULT_BEE_NODE_URL && gnosisRpcUrl === DEFAULT_GNOSIS_RPC_URL) {
+      return 'Production'
+    }
+    return 'Custom'
+  })
+
+  let networkDialogOpen = $state(false)
+
+  // Both presets apply straight away; anything else goes through the product's
+  // own Network settings dialog rather than a second copy of its fields.
+  async function useLocalEndpoints() {
+    const reachable = await Promise.all(
+      LOCAL_GNOSIS_RPC_URLS.map((url) =>
+        probeChainId(url).then(
+          () => url,
+          () => undefined,
+        ),
+      ),
+    )
+    const gnosisRpcUrl = reachable.find((url) => url !== undefined) ?? LOCAL_GNOSIS_RPC_URLS[0]
+    networkSettingsStore.updateSettings({ beeNodeUrl: LOCAL_BEE_NODE_URL, gnosisRpcUrl })
+  }
+
+  function useProductionEndpoints() {
+    networkSettingsStore.updateSettings({
+      beeNodeUrl: DEFAULT_BEE_NODE_URL,
+      gnosisRpcUrl: DEFAULT_GNOSIS_RPC_URL,
+    })
+  }
 
   // Sync state
   let syncMessage = $state('')
@@ -742,33 +807,75 @@ Check console logs for details:
 {/snippet}
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 p-8">
-  <h2 class="text-xl font-bold">Developer Tools</h2>
+  <div class="flex items-center justify-between gap-2">
+    <h2 class="text-xl font-bold">Developer Tools</h2>
+
+    <!--
+      Switching environments is a rare act, so it sits in a menu rather than
+      occupying the page: the trigger carries the one word worth seeing at a
+      glance, and anything that is neither preset is edited through the
+      product's own Network settings dialog.
+    -->
+    <DropdownMenu class="top-full right-0 mt-2 min-w-44 p-1">
+      {#snippet trigger(props)}
+        <Button variant="outline" {...props}>
+          Connected to: {endpointMode}
+          <ChevronDown class="size-4 shrink-0" />
+        </Button>
+      {/snippet}
+
+      <DropdownMenuItem onclick={useLocalEndpoints}>
+        <span class="flex-1 whitespace-nowrap">Use local</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem onclick={useProductionEndpoints}>
+        <span class="flex-1 whitespace-nowrap">Use production</span>
+      </DropdownMenuItem>
+
+      <DropdownMenuSeparator />
+
+      <DropdownMenuItem onclick={() => (networkDialogOpen = true)}>
+        <Settings class="size-4 shrink-0" />
+        <span class="flex-1 whitespace-nowrap">Network settings</span>
+      </DropdownMenuItem>
+    </DropdownMenu>
+  </div>
 
   <!--
     Which chain these tools are pointed at. Every action on this page spends,
     and a dev chain reports the same chain id as mainnet on purpose — so the
     only honest answer comes from the genesis hash. Red is for MAINNET: on this
     page that is the state nobody intends to be in.
+
+    Keyed on the endpoint: without it a switch away from an unreachable RPC
+    keeps rendering the failed branch — with the NEW url interpolated into it,
+    since the message reads that from the store — so a healthy endpoint is
+    reported dead the instant it is selected.
   -->
-  {#await chainIdentity(networkSettingsStore.gnosisRpcUrl)}
-    {@render chainBanner('Checking the chain at ', networkSettingsStore.gnosisRpcUrl, false)}
-  {:then identity}
-    {#if identity.isMainnet}
-      {@render chainBanner(
-        'GNOSIS MAINNET — these tools spend real funds. ',
-        networkSettingsStore.gnosisRpcUrl,
-        true,
-      )}
-    {:else}
-      {@render chainBanner(
-        'Local dev chain, nothing here is real. ',
-        networkSettingsStore.gnosisRpcUrl,
-        false,
-      )}
-    {/if}
-  {:catch}
-    {@render chainBanner('No chain reachable at ', networkSettingsStore.gnosisRpcUrl, true)}
-  {/await}
+  {#key networkSettingsStore.gnosisRpcUrl}
+    {#await chainIdentity(networkSettingsStore.gnosisRpcUrl)}
+      {@render chainBanner('Checking the chain at ', networkSettingsStore.gnosisRpcUrl, false)}
+    {:then identity}
+      {#if identity.isMainnet}
+        {@render chainBanner(
+          'GNOSIS MAINNET — these tools spend real funds. ',
+          networkSettingsStore.gnosisRpcUrl,
+          true,
+        )}
+      {:else}
+        {@render chainBanner(
+          'Local dev chain, nothing here is real. ',
+          networkSettingsStore.gnosisRpcUrl,
+          false,
+        )}
+      {/if}
+    {:catch}
+      {@render chainBanner('No chain reachable at ', networkSettingsStore.gnosisRpcUrl, true)}
+    {/await}
+  {/key}
+
+  {#if networkDialogOpen}
+    <NetworkSettingsDialog onclose={() => (networkDialogOpen = false)} />
+  {/if}
 
   <Tabs {tabs} bind:value={activeTab} />
 
@@ -797,7 +904,7 @@ Check console logs for details:
     {@const connectUrl = `${resolve(routes.CONNECT)}?origin=${encodeURIComponent(demoAppOrigin)}`}
     <div class="flex flex-col gap-4">
       <div class="flex flex-col gap-2">
-        <h4 class="text-sm font-semibold">Local Bee Endpoints</h4>
+        <h4 class="text-sm font-semibold">Endpoints these tools use</h4>
         <!--
           These hrefs are absolute http(s) endpoints read from network settings —
           never app routes — which a dynamic href cannot prove to the rule.
@@ -814,17 +921,25 @@ Check console logs for details:
           >
           <CopyButton text={networkSettingsStore.beeNodeUrl} />
         </div>
-        <div class="flex items-center gap-2">
-          <StatusDot endpoint="http://localhost:16331" />
-          <span class="font-mono text-sm">Cluster worker:</span>
-          <a
-            href="http://localhost:16331"
-            target="_blank"
-            rel="noopener"
-            class="text-primary font-mono text-sm">http://localhost:16331</a
-          >
-          <CopyButton text="http://localhost:16331" />
-        </div>
+        <!--
+          A second node of the bee-compose cluster, useful for checking that a
+          chunk replicated off the node that took it. It only exists while the
+          Bee node IS that cluster — against a gateway there is no such peer to
+          link to, and a dead localhost row reads as something being broken.
+        -->
+        {#if networkSettingsStore.beeNodeUrl === LOCAL_BEE_NODE_URL}
+          <div class="flex items-center gap-2">
+            <StatusDot endpoint={LOCAL_CLUSTER_WORKER_URL} />
+            <span class="font-mono text-sm">Cluster worker:</span>
+            <a
+              href={LOCAL_CLUSTER_WORKER_URL}
+              target="_blank"
+              rel="noopener"
+              class="text-primary font-mono text-sm">{LOCAL_CLUSTER_WORKER_URL}</a
+            >
+            <CopyButton text={LOCAL_CLUSTER_WORKER_URL} />
+          </div>
+        {/if}
         <div class="flex items-center gap-2">
           <StatusDot endpoint={networkSettingsStore.gnosisRpcUrl} method="json-rpc" />
           <!--
@@ -845,7 +960,7 @@ Check console logs for details:
       </div>
 
       <div class="flex flex-col gap-2">
-        <h4 class="text-sm font-semibold">Test Connect Flow</h4>
+        <h4 class="text-sm font-semibold">Test connect flow</h4>
         <p class="text-sm">Test the connect flow with the demo app:</p>
         <div class="flex items-center gap-2">
           <StatusDot endpoint={demoAppOrigin} />
@@ -856,7 +971,7 @@ Check console logs for details:
       </div>
 
       <div class="flex flex-col items-start gap-2">
-        <h4 class="text-sm font-semibold">Local Data</h4>
+        <h4 class="text-sm font-semibold">Local data</h4>
         <p class="text-sm">
           {accountCount} accounts, {connectionCount} connections, {stampCount} stamps
         </p>
@@ -876,7 +991,7 @@ Check console logs for details:
   <!-- Node Tab: everything that talks to the Bee node -->
   {#if activeTab === 'node'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Stored Stamps (local)</h3>
+      <h3 class="text-lg font-semibold">Stored stamps (local)</h3>
       <p class="text-muted-foreground text-sm">
         The postage batches saved in this browser. Copy these fields before clearing storage — paste
         them into the "Use existing one" screen to re-adopt the same batch on a fresh account (the
@@ -968,7 +1083,7 @@ Check console logs for details:
 
       <div class="bg-border my-4 h-px"></div>
 
-      <h3 class="text-lg font-semibold">Manual Sync Testing</h3>
+      <h3 class="text-lg font-semibold">Manual sync testing</h3>
       <p class="text-sm">
         Trigger a manual sync for ALL accounts to test postage stamp utilization tracking.
       </p>
@@ -1193,6 +1308,16 @@ Check console logs for details:
         >
           Create drive to test with
         </Button>
+        <Button
+          variant="secondary"
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() =>
+            runChainTool('Created expiring drive', (_key, account) =>
+              createExpiringTestDrive(account),
+            )}
+        >
+          Create expiring drive
+        </Button>
       </div>
       <p class="text-muted-foreground text-sm">
         Acts on the account selected at the top of the page. For the normal path just use
@@ -1275,7 +1400,7 @@ Check console logs for details:
   <!-- Devices Tab -->
   {#if activeTab === 'devices'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Account Devices</h3>
+      <h3 class="text-lg font-semibold">Account devices</h3>
       <p class="text-sm">
         Inspect the devices registered to an account and which partitions they currently hold.
       </p>
