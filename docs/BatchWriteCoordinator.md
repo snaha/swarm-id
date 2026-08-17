@@ -1,4 +1,4 @@
-# `BatchWriteCoordinator` — the shared write path for a partitioned postage batch
+# `BatchWriteCoordinator` — the shared write path for an account's partitioned postage batches
 
 Status: **implemented** (GitHub issue [#336](https://github.com/snaha/swarm-id/issues/336)).
 The partitioning scheme itself — and the chunks, lock SOCs, and feeds written to Swarm, which are
@@ -10,13 +10,24 @@ describes the internal component that coordinates writes against that scheme.
 ## What it is
 
 `BatchWriteCoordinator` (`lib/src/sync/batch-write-coordinator.ts`) is the write path for one
-account+batch. It owns everything needed to **write to a shared postage batch as a partition
+ACCOUNT. It owns everything needed to **write to the account's postage batches as a partition
 holder**, and nothing about client communication:
 
-- the cross-tab Web Lock (`withBatchWriteLock`, `lib/src/utils/batch-write-lock.ts`) that
-  serializes all writers on a batch within a browser,
+- the cross-tab Web Lock (`withAccountWriteLock`, `lib/src/utils/account-write-lock.ts`,
+  key `swarm-write-account-<accountId>`) that serializes all of an account's stamped writers
+  within a browser,
 - the partition-lease lifecycle — acquire, refresh, idle-yield, demote-on-displacement, teardown,
 - stamper-state flush after every write, under the lock.
+
+The partition claim on Swarm (lock/intent/occupancy SOCs) is **account-scoped** — one lease covers
+every batch the account owns; only the partition-STATE layer (counter publish, resume pointer) is
+per batch. Each write therefore supplies its own batch context: `withWrite(stamper, op)` takes the
+target batch's `UtilizationAwareStamper`. The lease itself is stamped under `deps.leaseStamper`
+(the resolved default batch); any other batch **joins** the held partition lazily on its first
+write (`PartitionLease.joinBatch` — counter seeding only, no lock activity), so alternating writes
+across batches never release/re-acquire the partition. Lease-loss paths (displacement, demote,
+idle-yield, teardown) fan invalidate/unbind out over every joined stamper, and teardown/idle-yield
+publish each joined batch's final counter before the release sentinel.
 
 It deliberately does **not** own auth/identity, the postMessage protocol, ConnectionInfo emission,
 or subsidised-gateway mode — those stay in the proxy. The coordinator is the single shared
@@ -49,26 +60,29 @@ Dependencies are injected — no global storage-manager reach-in:
 
 | Dep                                  | Role                                                                                                                                  |
 | ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `bee`, `batchId`                     | Bee client; the batch id (hex) is also the `withBatchWriteLock` key                                                                   |
-| `stamper`                            | `UtilizationAwareStamper`, already created + account-bound by the caller; the coordinator only binds/unbinds the held partition on it |
+| `bee`                                | Bee client for lock/lease/state reads and writes                                                                                       |
+| `leaseStamper`                       | The resolved-default batch's `UtilizationAwareStamper` — stamps the lease SOCs and names the lease batch; already created + account-bound by the caller; the coordinator binds/unbinds the held partition on it and on every joined per-write stamper |
 | `deviceId`, `accountId`              | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                        |
 | `backupSigner`, `swarmEncryptionKey` | Own/read the per-partition lock SOCs                                                                                                  |
 | `partitionCount`                     | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                     |
 | `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                      |
 | `readLeaseCache` / `writeLeaseCache` | Optional local lease-cache hint (persistent mode)                                                                                     |
-| `flushStamperState`                  | Flush stamper bucket state after a write (proxy: `saveStamperStateIfNeeded`)                                                          |
-| `getWorkerPool`                      | Build/reuse a parallel-signing worker pool for `useWorkers` uploads                                                                   |
+| `flushStamperState(stamper)`         | Flush the GIVEN stamper's bucket state after a write — called for the write's stamper and, when different, the lease stamper          |
+| `getWorkerPool(stamper, count?)`     | Build/reuse a parallel-signing worker pool for the GIVEN stamper (pools are per batch, never shared)                                  |
 | `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                               |
 | `onLeaseAcquired`                    | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                    |
 
 Methods and getters:
 
-- **`withWrite(op, opts?)`** — the single write entry point. Takes the cross-tab Web Lock, ensures
-  a held partition (acquire / slot-wait, or skip-with-throw), builds a stamper `UploadTarget`
-  (optionally with a worker pool), brackets the in-flight upload count so the refresh tick's
-  idle-yield can't release the partition underneath it, runs `op(target)`, and flushes stamper
-  state in the lock's `finally`. `opts`: `useWorkers` / `workerCount` / `wait: "block" | "skip"`
-  (default follows the mode).
+- **`withWrite(stamper, op, opts?)`** — the single write entry point. `stamper` is the target
+  batch's `UtilizationAwareStamper` (pass `stamperRef` for the default batch). Takes the cross-tab
+  Web Lock, ensures a held partition (acquire / slot-wait, or skip-with-throw), joins the
+  stamper's batch to the lease session when it isn't the lease batch, builds a stamper
+  `UploadTarget` (optionally with a per-batch worker pool), brackets the in-flight upload count so
+  the refresh tick's idle-yield can't release the partition underneath it, runs `op(target)`,
+  publishes the write's counter under ITS batch's partition state, and flushes stamper state in
+  the lock's `finally`. `opts`: `useWorkers` / `workerCount` / `wait: "block" | "skip"` (default
+  follows the mode).
 - **`startLease()`** — persistent mode only: eagerly acquire a partition + start the refresh timer
   in the background so the first upload doesn't pay the acquire latency. No-op in oneshot mode.
 - **`teardown()`** — stop all background work, best-effort release of the held partition so peers
@@ -166,11 +180,13 @@ legacy "any"-slot picking).
 
 ### Proxy (`lib/src/swarm-id-proxy.ts`) — persistent
 
-After auth resolves the stamp context, the proxy builds the stamper, then one coordinator per
-account+batch and calls `startLease()` (multi-device accounts pre-acquire in the background;
-single-partition accounts get a lock-only coordinator). Every upload handler goes through
-`withModeAwareWriteLock`: subsidised mode (gateway stamping, no local stamp state) short-circuits
-to an unlocked gateway target; everything else delegates to `coordinator.withWrite`.
+After auth resolves the stamp context, the proxy builds the default binding's stamper, then one
+coordinator per account and calls `startLease()` (multi-device accounts pre-acquire in the
+background; single-partition accounts get a lock-only coordinator). Every upload handler goes
+through `withModeAwareWriteLock`: subsidised mode (gateway stamping, no local stamp state)
+short-circuits to an unlocked gateway target; everything else resolves the write's stamper — the
+default binding's, or a `UploadOptions.batchID` target from the proxy's per-batch stamper cache —
+and delegates to `coordinator.withWrite(stamper, …)`.
 `buildConnectionInfo` reads `currentPartition` / `stamperRef`; `onLeaseChange` →
 `emitConnectionInfoIfChanged`; sign-out / disconnect / re-auth → `teardown()`.
 
@@ -198,9 +214,9 @@ the coordinator was torn down or replaced while the (async) snapshot assembly ra
 The SwarmID UI's sync builds a oneshot coordinator per sync (stamper from
 `postageStampsStore.getStamper`; for a shared, partitioned batch this is always a
 `UtilizationAwareStamper`) and publishes via
-`coordinator.withWrite(target => publishDeviceState(...), { wait: "skip" })` — the **same** Web
-Lock and the same partition acquire the proxy uses, so a UI-driven change is published under the
-identical safety guarantees. Outcomes are split:
+`coordinator.withWrite(stamper, target => publishDeviceState(...), { wait: "skip" })` — the
+**same** account-scoped Web Lock and the same partition acquire the proxy uses, so a UI-driven
+change is published under the identical safety guarantees. Outcomes are split:
 
 - **Genuine contention** → `PartitionContendedError` → a "Skipping sync …: all partitions are held
   by other devices." warn and `undefined` (a peer — or the proxy — publishes instead).
@@ -239,7 +255,7 @@ the other — they cooperate on the same partition rather than contend.
 | `lib/src/sync/batch-write-coordinator.ts`              | The coordinator                                                                               |
 | `lib/src/sync/device-state.ts`                         | `publishDeviceState` — the per-device write the coordinator brackets (see `Account-State.md`) |
 | `lib/src/sync/partition-lease.ts`, `partition-lock.ts` | The layers below (claim + lock SOCs)                                                          |
-| `lib/src/utils/batch-write-lock.ts`                    | `withBatchWriteLock` (Web Lock + no-`navigator.locks` fallback)                               |
+| `lib/src/utils/account-write-lock.ts`                  | `withAccountWriteLock` (Web Lock + no-`navigator.locks` fallback)                             |
 | `lib/src/swarm-id-proxy.ts`                            | Persistent consumer + publish triggers                                                        |
 | `lib/src/sync/sync-account.ts`                         | Oneshot consumer                                                                              |
 

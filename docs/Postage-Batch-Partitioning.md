@@ -155,6 +155,19 @@ lease (`LEASE_TTL_MS`) refreshed every 10 s (`LEASE_REFRESH_MS`). `PartitionLeas
 (`partition-lease.ts`) is the in-code state machine; `BatchWriteCoordinator`
 (`batch-write-coordinator.ts`) drives it from the write path.
 
+**Scope: the claim is account-wide; the state is per batch.** The lock, intent, and
+occupancy SOC addresses derive from the account backup signer and the partition index
+alone — no batch id — so holding partition `p` entitles a device to slice **every** batch
+the account owns at index `p`. Only the partition-state layer (§4–§6: counters, resume
+pointers, publish baselines) is batch-scoped (`statePointerAddress(batchId, …)`). One
+account-scoped coordinator therefore holds one lease and writes any batch: the lease SOCs
+are stamped under the resolved default batch (`leaseStamper`), and a targeted batch
+**joins** the held partition on its first write (`PartitionLease.joinBatch` — the same
+counter seeding a claim performs, with no lock activity), keeping its own per-batch publish
+state. Lease loss fences every joined batch's stamper; teardown/idle-yield flush every
+joined batch's final counter before the release sentinel; the refresh tick heartbeats every
+joined batch's resume pointer.
+
 - **Acquire.** Read every partition's lock SOC (`refreshFromSwarm`), union in holders
   detected via the per-device **intent/presence beacons** and the deviceId-independent
   **occupancy beacon** (fresh per-epoch addresses that stay retrievable on a gateway whose
@@ -250,8 +263,8 @@ is minted at `stamp()` time (Bee resolves same-address SOC conflicts by newer st
 naïve detached release could land its sentinel **after** a same-device re-acquire and
 clobber the successor's claim → two writers on one partition. Four layers fence this:
 
-- **L0 — lock-serialized teardown release.** The detached release runs under the batch write
-  lock (`withBatchWriteLock`), which the successor's acquire also queues on. The release
+- **L0 — lock-serialized teardown release.** The detached release runs under the account write
+  lock (`withAccountWriteLock`), which the successor's acquire also queues on. The release
   completes (sentinel minted) strictly before the successor reads/writes the lock SOC, so
   last-writer-wins keeps the successor's claim. (Same-origin case — which #349 is.)
 - **L1 — released-claim generation.** The sentinel carries the **released claim's**
