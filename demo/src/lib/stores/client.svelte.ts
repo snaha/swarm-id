@@ -89,6 +89,20 @@ function clearStampPollTimer() {
   stampPollAttempts = 0
 }
 
+function toStampInfo(batch: PostageBatch): StampInfo {
+  return {
+    batchID: String(batch.batchID),
+    utilization: batch.utilization.toFixed(2),
+    usable: batch.usable,
+    depth: batch.depth,
+    bucketDepth: batch.bucketDepth,
+    amount: batch.amount,
+    blockNumber: batch.blockNumber,
+    immutableFlag: batch.immutableFlag,
+    ttl: formatTTL(batch.batchTTL),
+  }
+}
+
 async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
@@ -105,22 +119,13 @@ async function updatePostageStampInfo(generation: number) {
       selectedBatchId = undefined
     }
     // The demo shows one stamp; an account may own several ("drives") —
-    // show the one untargeted uploads actually consume.
+    // track the one untargeted uploads consume (the sidebar getter overlays
+    // the upload-batch selection on top of this).
     const batch = fetched.find((b) => b.isDefault) ?? fetched[0]
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
-      stamp = {
-        batchID: batchIdStr,
-        utilization: batch.utilization.toFixed(2),
-        usable: batch.usable,
-        depth: batch.depth,
-        bucketDepth: batch.bucketDepth,
-        amount: batch.amount,
-        blockNumber: batch.blockNumber,
-        immutableFlag: batch.immutableFlag,
-        ttl: formatTTL(batch.batchTTL),
-      }
+      stamp = toStampInfo(batch)
       // Poll re-runs only log when something the user can see changed.
       if (previous === undefined || previous.batchID !== batchIdStr) {
         logStore.log(`Postage stamp loaded: ${batchIdStr.slice(0, 16)}...`)
@@ -235,7 +240,13 @@ export const clientStore = {
     return appKey
   },
   get stamp() {
-    return stamp
+    // The sidebar follows the upload-batch selection: a selected batch shows
+    // ITS properties; "Default" shows the resolved default stamp.
+    const selected =
+      selectedBatchId !== undefined
+        ? batches.find((b) => String(b.batchID) === selectedBatchId)
+        : undefined
+    return selected ? toStampInfo(selected) : stamp
   },
   get batches() {
     return batches
