@@ -27,6 +27,7 @@ import { generatePrivateKey } from 'viem/accounts'
 import { ownerFunds, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { derivePostageSigner } from '$lib/payment/purchase'
+import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
 
 /**
@@ -48,8 +49,18 @@ export const ANVIL_ACCOUNT = {
 
 /** Default drive size for the dev batch actions. */
 const DEV_BATCH_DEPTH = 20
-/** Funds a dev batch well above the contract's ~24h floor. */
-const DEV_BATCH_FLOOR_MULTIPLE = 3n
+/**
+ * How long a dev batch is funded for, as a multiple of the contract's ~24h
+ * minimum — so the number reads as days.
+ *
+ * The default clears the product's 7-day "Expires soon" threshold with room to
+ * spare: a test drive that lands already flagged, under a "1 drive needs
+ * attention" banner, trains everyone to read that warning as noise. The short
+ * one is for deliberately producing that state.
+ */
+const DEV_BATCH_DAYS = 15n
+/** A batch that is flagged the moment it exists, for testing the warning. */
+const DEV_BATCH_EXPIRING_DAYS = 1n
 /** Bankrolls the simulated purchase's throwaway payer: swap, batch and gas. */
 const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 /**
@@ -81,10 +92,13 @@ export interface FaucetAmounts {
  */
 export async function sendFromFaucet(address: string, amounts: FaucetAmounts): Promise<void> {
   const to = new EthAddress(address).toChecksum() as `0x${string}`
-  if (amounts.xdai > 0n || amounts.bzzPlur > 0n) {
-    const chain = await postageChain()
-    await fundLocalAccount({ to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur }, chain.settings)
+  // Nothing to send is a mistyped amount, not a send: reporting "✅ Sent 0" for
+  // it reads as a transfer that happened.
+  if (amounts.xdai <= 0n && amounts.bzzPlur <= 0n) {
+    throw new Error('Enter an amount above zero.')
   }
+  const chain = await postageChain()
+  await fundLocalAccount({ to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur }, chain.settings)
 }
 
 /** An address and what it holds on the Gnosis-side chain, for the faucet panel. */
@@ -120,6 +134,13 @@ export interface LocalBatch {
   blockNumber: string
 }
 
+/** How long a created batch should last, and how big it should be. */
+export interface BatchShape {
+  depth?: number
+  /** Days of lifespan to fund, as a multiple of the contract's ~24h floor. */
+  days?: bigint
+}
+
 /**
  * Create a batch the account's postage signer OWNS, paid for by someone else —
  * the production role split, where the payment machinery creates the batch and
@@ -130,7 +151,7 @@ export interface LocalBatch {
  */
 export async function createOwnedBatchOnChain(
   derivationKey: string,
-  requestedDepth?: number,
+  { depth: requestedDepth, days = DEV_BATCH_DAYS }: BatchShape = {},
 ): Promise<LocalBatch> {
   const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
@@ -141,7 +162,7 @@ export async function createOwnedBatchOnChain(
   const owner = destination as `0x${string}`
   const depth = requestedDepth ?? DEV_BATCH_DEPTH
   const { minimumInitialBalancePerChunk } = await chain.getPostageWriteConstraints()
-  const amountPerChunk = minimumInitialBalancePerChunk * DEV_BATCH_FLOOR_MULTIPLE
+  const amountPerChunk = minimumInitialBalancePerChunk * days
 
   const created = await simulateWidgetPurchase(
     {
@@ -164,6 +185,49 @@ export async function createOwnedBatchOnChain(
   }
 }
 
+/** How long to wait for the Bee node to catch up to the batch's block. */
+const BATCH_VISIBLE_TIMEOUT_MS = 30_000
+const BATCH_VISIBLE_POLL_MS = 500
+
+/**
+ * Wait until the Bee node has synced past the block the batch landed in.
+ *
+ * A batch bought straight from the contract exists on chain before the node
+ * knows it: until Bee's chain sync reaches that block, stamping with it is
+ * rejected with `400 invalid batch id`, so attaching the drive immediately
+ * makes the very next account sync fail for no reason a reader can see.
+ *
+ * Best effort — a node that does not serve `/status` (a gateway) or one that
+ * never catches up leaves the drive attached anyway, since the batch is real
+ * either way and the next sync will retry.
+ */
+async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): Promise<void> {
+  const target = Number(BigInt(blockNumber))
+  if (!Number.isFinite(target) || target === 0) {
+    return
+  }
+  const deadline = Date.now() + BATCH_VISIBLE_TIMEOUT_MS
+  const statusUrl = new URL('status', beeNodeUrl.endsWith('/') ? beeNodeUrl : `${beeNodeUrl}/`)
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(statusUrl)
+      if (!response.ok) {
+        return
+      }
+      const { lastSyncedBlock } = (await response.json()) as { lastSyncedBlock?: number }
+      if (lastSyncedBlock === undefined) {
+        return
+      }
+      if (lastSyncedBlock >= target) {
+        return
+      }
+    } catch {
+      return
+    }
+    await new Promise((resolve) => setTimeout(resolve, BATCH_VISIBLE_POLL_MS))
+  }
+}
+
 /**
  * Create a batch AND attach it to the account as a drive, in one go.
  *
@@ -172,15 +236,23 @@ export async function createOwnedBatchOnChain(
  * which is a chance to paste the wrong field. The drive it leaves behind is an
  * ordinary one: a real batch the account's own signer owns.
  *
+ * @param shape — defaults to a drive that outlives the "Expires soon"
+ *   threshold; pass `days: DEV_BATCH_EXPIRING_DAYS` to make one that does not.
  * @returns the attached drive's batch id.
  */
-export async function createTestDrive(account: Account): Promise<string> {
-  const { batchId } = await createOwnedBatchOnChain(account.derivationKey)
+export async function createTestDrive(account: Account, shape?: BatchShape): Promise<string> {
+  const { batchId, blockNumber } = await createOwnedBatchOnChain(account.derivationKey, shape)
   const { signerKey } = await derivePostageSigner(account.derivationKey)
   const stamp = await fetchExistingBatchFromChain(batchId, signerKey, '')
   if (!stamp) {
     throw new Error('The batch was created but could not be read back from the chain.')
   }
+  await waitForNodeToSeeBatch(networkSettingsStore.beeNodeUrl, blockNumber)
   account.addStamp(stamp)
   return batchId
+}
+
+/** A drive that is already inside the "Expires soon" window, for testing it. */
+export async function createExpiringTestDrive(account: Account): Promise<string> {
+  return createTestDrive(account, { days: DEV_BATCH_EXPIRING_DAYS })
 }
