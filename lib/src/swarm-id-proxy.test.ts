@@ -26,7 +26,11 @@ vi.mock("./utils/batch-utilization", async (importActual) => {
   return {
     ...actual,
     UtilizationAwareStamper: {
-      create: vi.fn(() => Promise.resolve({ mock: "stamper" })),
+      // Carries the batchId it was created for — the proxy's per-batch stamp
+      // entries and the coordinator's per-write context key off it.
+      create: vi.fn((_signerKey: string, batchId: unknown) =>
+        Promise.resolve({ mock: "stamper", batchId }),
+      ),
     },
   }
 })
@@ -51,6 +55,7 @@ import { Bee } from "@ethersphere/bee-js"
 
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
+import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { SwarmIdProxy } from "./swarm-id-proxy"
 import { deriveSecret, uint8ArrayToHex } from "./utils/key-derivation"
 import { STORAGE_KEY_NETWORK_SETTINGS } from "./types"
@@ -368,6 +373,8 @@ const stampStub = (hex: string, deletedAt?: number) => ({
     toHex: () => hex,
     equals: (other: { toHex?: () => string }) => other?.toHex?.() === hex,
   },
+  signerKey: { toHex: () => "11".repeat(32) },
+  depth: 20,
   deletedAt,
 })
 
@@ -567,49 +574,83 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     ;(proxy as never)["refreshStampFromStorage"] = refreshStampFromStorage
     ;(proxy as never)["postageBatchId"] = B1
     ;(proxy as never)["stamper"] = prevStamper
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn() }
+    ;(proxy as never)["utilizationStore"] = {}
+    ;(proxy as never)["lookupAccountForApp"] = () =>
+      Promise.resolve({
+        owner: { toHex: () => "ab".repeat(20) },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 2,
+      })
     ;(proxy as never)["findConnectionForParent"] = () => ({
       account: { postageStamps: [stampStub(B1), stampStub(B2)] },
     })
   })
 
-  const ensure = (batchID?: string) =>
-    (proxy as never)["ensureStampForUpload"](batchID)
+  const resolve = (batchID?: string) =>
+    (proxy as never)["resolveUploadStamper"](batchID) as Promise<
+      { tag?: string; batchId?: { toHex: () => string } } | undefined
+    >
 
   it("re-resolves the default binding when no batchID is given", async () => {
-    await ensure(undefined)
+    const stamper = await resolve(undefined)
     expect(refreshStampFromStorage).toHaveBeenCalledTimes(1)
+    expect(stamper).toBe(prevStamper)
     expect(bindStamp).not.toHaveBeenCalled()
   })
 
-  it("no-ops when the target is already bound", async () => {
-    await ensure(B1)
+  it("returns the default stamper for the default batch id", async () => {
+    const stamper = await resolve(B1)
+    expect(stamper).toBe(prevStamper)
     expect(bindStamp).not.toHaveBeenCalled()
     expect(refreshStampFromStorage).not.toHaveBeenCalled()
   })
 
-  it("re-binds to a different owned stamp", async () => {
-    await ensure(B2)
-    expect(bindStamp).toHaveBeenCalledTimes(1)
-    expect(bindStamp.mock.calls[0][0].batchID.toHex()).toBe(B2)
+  it("builds and caches a targeted stamper with ONE coordinator, zero rebinds of the default", async () => {
+    const stamper = await resolve(B2)
+    expect(stamper?.batchId?.toHex()).toBe(B2)
+    // The default binding is untouched — no bindStamp, no coordinator churn.
+    expect(bindStamp).not.toHaveBeenCalled()
+    expect((proxy as never)["postageBatchId"]).toBe(B1)
+    expect((proxy as never)["stamper"]).toBe(prevStamper)
+
+    // Alternating B2 → B1 → B2 serves cached instances: the stamper is built
+    // exactly once (the thrash the account-scoped lease removed).
+    const again = await resolve(B1)
+    expect(again).toBe(prevStamper)
+    const cached = await resolve(B2)
+    expect(cached).toBe(stamper)
+    expect(vi.mocked(UtilizationAwareStamper.create)).toHaveBeenCalledTimes(1)
   })
 
   it("rejects a batch the account does not own", async () => {
-    await expect(ensure(B3)).rejects.toThrow("Batch not owned by account")
+    await expect(resolve(B3)).rejects.toThrow("Batch not owned by account")
     expect(bindStamp).not.toHaveBeenCalled()
   })
 
-  it("restores the previous binding and rejects when the re-bind fails", async () => {
-    // Simulate `initializeStamper`'s swallow paths: fields repointed to the
-    // new batch, but no stamper was constructed.
-    bindStamp.mockImplementation(() => {
-      ;(proxy as never)["postageBatchId"] = B2
-      ;(proxy as never)["stamper"] = undefined
-      return Promise.resolve()
-    })
-
-    await expect(ensure(B2)).rejects.toThrow(`Failed to bind stamp ${B2}`)
+  it("a failed target build rejects the write and leaves the default binding untouched", async () => {
+    vi.mocked(UtilizationAwareStamper.create).mockRejectedValueOnce(
+      new Error("indexeddb exploded"),
+    )
+    await expect(resolve(B2)).rejects.toThrow(
+      `Failed to build stamper for batch ${B2}`,
+    )
     expect((proxy as never)["postageBatchId"]).toBe(B1)
     expect((proxy as never)["stamper"]).toBe(prevStamper)
+  })
+
+  it("promotes a targeted stamp to the default binding when none is bound", async () => {
+    // No resolvable default (no coordinator): a targeted owned stamp must
+    // still work — it becomes the lease binding, as the targeting PR did.
+    ;(proxy as never)["coordinator"] = undefined
+    ;(proxy as never)["postageBatchId"] = undefined
+    ;(proxy as never)["stamper"] = undefined
+
+    const stamper = await resolve(B2)
+    expect(bindStamp).toHaveBeenCalledTimes(1)
+    expect(bindStamp.mock.calls[0][0].batchID.toHex()).toBe(B2)
+    expect(stamper).toEqual({ tag: B2 })
   })
 
   it("rebindActiveStamp re-binds the currently bound stamp", async () => {
@@ -632,11 +673,14 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
   beforeEach(() => {
     vi.restoreAllMocks()
     proxy = makeProxy()
-    withWrite = vi.fn((operation: (t: unknown) => Promise<unknown>) =>
-      operation({ mode: "stamper" }),
+    withWrite = vi.fn(
+      (_stamper: unknown, operation: (t: unknown) => Promise<unknown>) =>
+        operation({ mode: "stamper" }),
     )
     ;(proxy as never)["coordinator"] = { withWrite }
-    ;(proxy as never)["ensureStampForUpload"] = vi.fn(() => Promise.resolve())
+    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() =>
+      Promise.resolve({ tag: "stamper" }),
+    )
   })
 
   const write = <T>(
@@ -696,21 +740,35 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
     expect(withWrite).not.toHaveBeenCalled()
   })
 
-  it("a targeted write while subsidised mode is active takes the stamped path", async () => {
+  it("a targeted write while subsidised mode is active takes the stamped path with the target's stamper", async () => {
     ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
-    const ensure = vi.fn(() => {
-      ;(proxy as never)["postageBatchId"] = B2
-      ;(proxy as never)["signerKey"] = "11".repeat(32)
-      ;(proxy as never)["stamper"] = { tag: B2 }
-      return Promise.resolve()
-    })
-    ;(proxy as never)["ensureStampForUpload"] = ensure
+    const targetStamper = { tag: B2 }
+    const resolveUploadStamper = vi.fn(() => Promise.resolve(targetStamper))
+    ;(proxy as never)["resolveUploadStamper"] = resolveUploadStamper
 
     const target = await write(async (t) => t, B2)
 
-    expect(ensure).toHaveBeenCalledWith(B2)
+    expect(resolveUploadStamper).toHaveBeenCalledWith(B2)
     expect(withWrite).toHaveBeenCalledTimes(1)
+    // The write ran under the coordinator with the TARGET batch's stamper.
+    expect(withWrite.mock.calls[0][0]).toBe(targetStamper)
     expect(target).toMatchObject({ mode: "stamper" })
+  })
+
+  it("falls back to the gateway when the default binding resolves to nothing", async () => {
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    ;(proxy as never)["postageBatchId"] = undefined
+    ;(proxy as never)["signerKey"] = undefined
+    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() =>
+      Promise.resolve(undefined),
+    )
+
+    // A targeted id forces the queued path; the resolve returning nothing with
+    // subsidised mode active degrades to the gateway instead of failing.
+    const target = await write(async (t) => t)
+
+    expect(target).toMatchObject({ mode: "subsidised" })
+    expect(withWrite).not.toHaveBeenCalled()
   })
 })
 

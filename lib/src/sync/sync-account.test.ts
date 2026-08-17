@@ -187,7 +187,7 @@ const coordinatorController = vi.hoisted(() => ({
 }))
 vi.mock("./batch-write-coordinator", () => ({
   BatchWriteCoordinator: class MockBatchWriteCoordinator {
-    withWrite(op: (target: unknown) => Promise<unknown>) {
+    withWrite(_stamper: unknown, op: (target: unknown) => Promise<unknown>) {
       return coordinatorController.withWrite
         ? coordinatorController.withWrite(op)
         : op({ mode: "stamper" })

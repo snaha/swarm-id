@@ -2,13 +2,22 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * `BatchWriteCoordinator` — the write path for one account+batch.
+ * `BatchWriteCoordinator` — the write path for one ACCOUNT.
  *
- * Owns everything needed to **write to a shared postage batch as a partition
- * holder**, and nothing about client communication:
- *   - the cross-tab Web Lock (`withBatchWriteLock`),
+ * Owns everything needed to **write to the account's postage batches as a
+ * partition holder**, and nothing about client communication:
+ *   - the cross-tab Web Lock (`withAccountWriteLock`),
  *   - the partition-lease lifecycle (acquire / refresh / yield / demote),
  *   - stamper-state flush under the lock.
+ *
+ * The partition claim (lock/intent/occupancy SOCs) is account-scoped — one
+ * lease covers every batch the account owns — while each write supplies its
+ * own batch context: `withWrite(stamper, …)` takes the target batch's
+ * `UtilizationAwareStamper` (which carries its batch id + depth). The lease
+ * itself is stamped under `deps.leaseStamper` (the resolved default batch);
+ * other batches are joined lazily on their first write (`ensureBatchJoined` →
+ * `PartitionLease.joinBatch`) with NO lock activity, so alternating writes
+ * across batches never release/re-acquire the partition.
  *
  * Two consumers share it:
  *   - the proxy iframe — long-lived (`mode: "persistent"`): eager
@@ -37,7 +46,7 @@
  * corrupted the peer's slot space.
  */
 
-import { Bee, BatchId, PrivateKey } from "@ethersphere/bee-js"
+import { Bee, PrivateKey } from "@ethersphere/bee-js"
 import {
   LEASE_TTL_MS,
   LEASE_REFRESH_MS,
@@ -45,7 +54,7 @@ import {
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
-import { withBatchWriteLock } from "../utils/batch-write-lock"
+import { withAccountWriteLock } from "../utils/account-write-lock"
 import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
 import type {
@@ -118,11 +127,14 @@ export interface WithWriteOptions {
 
 export interface BatchWriteCoordinatorDeps {
   bee: Bee
-  /** Postage batch id (hex) — the `withBatchWriteLock` key. */
-  batchId: string
-  /** Already created + account-bound by the caller; the coordinator only
-   *  binds/unbinds the held partition on it. */
-  stamper: UtilizationAwareStamper
+  /**
+   * The resolved-default batch's stamper: stamps the lease's lock/intent/
+   * occupancy SOCs and is the write context when no per-write stamper says
+   * otherwise. Already created + account-bound by the caller; the coordinator
+   * only binds/unbinds the held partition on it (and on any stamper joined
+   * via `withWrite`). Its `batchId`/`depth` also serve as the lease batch.
+   */
+  leaseStamper: UtilizationAwareStamper
   /** This device's identity, captured once by the caller. */
   deviceId: string
   /**
@@ -157,10 +169,17 @@ export interface BatchWriteCoordinatorDeps {
   /** Persistent mode only: read/write the local lease-cache hint. */
   readLeaseCache?: () => PartitionLeaseStateSnapshot | undefined
   writeLeaseCache?: (snap: PartitionLeaseStateSnapshot | undefined) => void
-  /** Flush stamper bucket state after a write (proxy: `saveStamperState`). */
-  flushStamperState?: () => Promise<void>
-  /** Build/reuse a parallel-signing worker pool (proxy: `getOrCreateWorkerPool`). */
-  getWorkerPool?: (count?: number) => Promise<StampWorkerPool | undefined>
+  /** Flush the GIVEN stamper's bucket state after a write (proxy:
+   *  `saveStamperState`). Called for the write's stamper and, when different,
+   *  the lease stamper — lease SOC writes dirty the latter's buckets. */
+  flushStamperState?: (stamper: UtilizationAwareStamper) => Promise<void>
+  /** Build/reuse a parallel-signing worker pool for the GIVEN stamper (proxy:
+   *  `getOrCreateWorkerPool`). Pools capture a stamper's batch/buckets, so
+   *  they must never be shared across batches. */
+  getWorkerPool?: (
+    stamper: UtilizationAwareStamper,
+    count?: number,
+  ) => Promise<StampWorkerPool | undefined>
   /** Fired on every partition / read-only transition. */
   onLeaseChange?: (info: LeaseChangeInfo) => void
   /** Fired when a partition is (re)acquired (phase-5 publish trigger). */
@@ -206,6 +225,19 @@ export class BatchWriteCoordinator {
    *  continuation would otherwise resurrect a lease the coordinator already
    *  cleared. */
   private leaseEpoch: number = 0
+  /**
+   * Stampers of batches OTHER than the lease batch that are partition-bound to
+   * the current lease session (joined via `ensureBatchJoined` on their first
+   * write), keyed by batch id hex. Every lease-loss path (displacement, demote,
+   * idle-yield, teardown, pause) fans invalidate/unbind out over these too, so
+   * an in-flight targeted stamp aborts exactly like a lease-batch one — and
+   * clears the map, because a NEW lease session may hold a different partition
+   * (the next targeted write re-joins against it).
+   */
+  private readonly joinedSecondaries = new Map<
+    string,
+    UtilizationAwareStamper
+  >()
 
   constructor(deps: BatchWriteCoordinatorDeps) {
     this.deps = deps
@@ -221,10 +253,11 @@ export class BatchWriteCoordinator {
     return this.readOnly
   }
 
-  /** The bound stamper — exposed for the proxy's `buildConnectionInfo`
-   *  (appKey / uploadMode). */
+  /** The lease (resolved-default) batch's stamper — exposed for the proxy's
+   *  `buildConnectionInfo` (appKey / uploadMode) and its account-state
+   *  publish. */
   get stamperRef(): UtilizationAwareStamper {
-    return this.deps.stamper
+    return this.deps.leaseStamper
   }
 
   /** The account this coordinator (and its batch/lease) was built for —
@@ -238,11 +271,18 @@ export class BatchWriteCoordinator {
 
   /**
    * The single write entry point. Takes the cross-tab Web Lock, ensures a held
-   * partition (acquire / slot-wait, or skip-with-throw), runs `op` against a
-   * stamper upload target, and flushes stamper state. Subsidised mode is NOT a
-   * coordinator concern — the proxy only calls this in stamper mode.
+   * partition (acquire / slot-wait, or skip-with-throw), joins `stamper`'s
+   * batch to the lease session when it isn't the lease batch, runs `op`
+   * against a stamper upload target, and flushes stamper state. Subsidised
+   * mode is NOT a coordinator concern — the proxy only calls this in stamper
+   * mode.
+   *
+   * @param stamper the target batch's stamper — the write's batch context
+   *   (its `batchId`/`depth` name the batch). Pass `stamperRef` to write the
+   *   resolved default batch.
    */
   async withWrite<T>(
+    stamper: UtilizationAwareStamper,
     op: (target: UploadTarget) => Promise<T>,
     opts?: WithWriteOptions,
   ): Promise<T> {
@@ -251,7 +291,8 @@ export class BatchWriteCoordinator {
     return this.lockAndFlush(async () => {
       await this.ensureLease(wait)
       this.ensureHeldForUpload()
-      const target = await this.buildStamperTarget(opts)
+      await this.ensureBatchJoined(stamper)
+      const target = await this.buildStamperTarget(stamper, opts)
       // Bracket the in-flight upload so the refresh tick's idle-yield can't
       // release the partition (and unbind the stamper) underneath us.
       this.lastLeaseActivityAt = Date.now()
@@ -275,9 +316,9 @@ export class BatchWriteCoordinator {
         //     resolve. A guard/publish throw propagates → upload reported
         //     failed, never acked (chunks are content-addressed → safe retry).
         await this.ensureLeaseStillValid()
-        const localCounter = this.deps.stamper.getLocalCounter()
+        const localCounter = stamper.getLocalCounter()
         if (localCounter !== undefined) {
-          await this.partitionLease?.publishState(localCounter)
+          await this.partitionLease?.publishState(localCounter, stamper)
           // The publish durably re-wrote the state pointer to the current
           // bucket (same effect as a successful heartbeat), so an idle-blip
           // failure streak is stale — clear it. Otherwise the refresh tick keeps
@@ -302,7 +343,40 @@ export class BatchWriteCoordinator {
         this.activeUploadCount--
         this.lastLeaseActivityAt = Date.now()
       }
+    }, stamper)
+  }
+
+  /**
+   * Bind a targeted batch's stamper to the held partition: seed its counter
+   * from that batch's published partition state (`PartitionLease.joinBatch` —
+   * no lock activity, the claim is account-scoped) and register it for the
+   * lease-loss fan-out. No-op for the lease batch (bound at acquire), an
+   * already-joined instance, and single-partition legacy accounts (nothing is
+   * sliced). A REPLACED stamper instance for an already-joined batch (the
+   * proxy rebuilt it) re-joins and supersedes the old entry. MUST run under
+   * the write lock, after `ensureHeldForUpload`.
+   */
+  private async ensureBatchJoined(
+    stamper: UtilizationAwareStamper,
+  ): Promise<void> {
+    if (this.deps.partitionCount <= 1) return
+    const key = stamper.batchId.toHex()
+    if (key === this.deps.leaseStamper.batchId.toHex()) return
+    if (this.joinedSecondaries.get(key) === stamper) return
+    const lease = this.partitionLease
+    const partition = lease?.currentPartition
+    if (!lease || partition === undefined) {
+      // `ensureHeldForUpload` ran before us, so this is unreachable in practice.
+      throw new Error("Cannot join a batch without a held partition lease.")
+    }
+    const localCounter = await lease.joinBatch(stamper)
+    stamper.bindPartition({
+      partition,
+      partitionCount: this.deps.partitionCount,
+      localCounter,
     })
+    stamper.setLeaseValidUntil(lease.leasedUntil)
+    this.joinedSecondaries.set(key, stamper)
   }
 
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
@@ -336,13 +410,15 @@ export class BatchWriteCoordinator {
       this.partitionRefreshTimer = undefined
     }
     const lease = this.partitionLease
-    const stamper = this.deps.stamper
     if (lease) {
-      const localCounter = stamper.getLocalCounter()
+      const localCounter = this.deps.leaseStamper.getLocalCounter()
+      // Captured before the clear below so the detached release can still
+      // publish the joined batches' final counters.
+      const secondaries = [...this.joinedSecondaries.values()]
       if (localCounter !== undefined) {
-        // Serialize the detached release under the batch write lock (#349):
+        // Serialize the detached release under the account write lock (#349):
         // a successor coordinator's acquire (`startLease`/`withWrite` →
-        // `lockAndFlush`) queues on the same origin-wide Web Lock, so the
+        // `lockAndFlush`) queues on the same account-wide Web Lock, so the
         // release's publish + sentinel fully complete BEFORE the successor
         // can read or write the lock SOC — the sentinel's postage stamp is
         // minted strictly before the successor's claim stamp, and Bee's
@@ -355,7 +431,25 @@ export class BatchWriteCoordinator {
         // goes through an unbound stamper, which is safe because
         // `writePartitionState` marks its chunks with the explicit partition
         // slot.
-        void this.lock(() => lease.release(localCounter)).catch((err) =>
+        void this.lock(async () => {
+          // Flush every joined batch's final counter first (best-effort,
+          // per batch) — the release sentinel below frees the partition for
+          // peers, whose takeover must resume each batch at its acked
+          // counter, not just the lease batch's.
+          for (const s of secondaries) {
+            const counter = s.getLocalCounter()
+            if (counter === undefined) continue
+            try {
+              await lease.publishState(counter, s)
+            } catch (err) {
+              console.warn(
+                "[BatchWriteCoordinator] Teardown state publish failed for a joined batch:",
+                err,
+              )
+            }
+          }
+          await lease.release(localCounter)
+        }).catch((err) =>
           console.warn(
             "[BatchWriteCoordinator] Partition lease release failed:",
             err,
@@ -368,9 +462,11 @@ export class BatchWriteCoordinator {
       // resets `leaseStale=false`, letting that stamp silently fall back to
       // legacy "any"-pool slot-picking and corrupt a peer's slots; invalidating
       // first arms the breaker so the in-flight stamp aborts with
-      // `PartitionLeaseLostError` instead.
-      stamper.invalidateLease()
-      stamper.unbindPartition()
+      // `PartitionLeaseLostError` instead. Fanned out over every bound
+      // stamper — a targeted in-flight stamp must abort the same way.
+      this.forEachBoundStamper((s) => s.invalidateLease())
+      this.forEachBoundStamper((s) => s.unbindPartition())
+      this.joinedSecondaries.clear()
     }
     this.partitionLease = undefined
     this.readOnly = false
@@ -451,7 +547,11 @@ export class BatchWriteCoordinator {
    * reconciles against the lock SOCs before binding.
    */
   private async acquire(): Promise<void> {
-    const { stamper, partitionCount, swarmEncryptionKey } = this.deps
+    const {
+      leaseStamper: stamper,
+      partitionCount,
+      swarmEncryptionKey,
+    } = this.deps
     if (partitionCount <= 1) {
       this.readOnly = false
       return
@@ -488,7 +588,7 @@ export class BatchWriteCoordinator {
       const lease = await PartitionLease.fromSwarmEncryptionKey({
         bee: this.deps.bee,
         deviceId: this.deps.deviceId,
-        batchId: new BatchId(this.deps.batchId),
+        batchId: stamper.batchId,
         batchDepth: stamper.depth,
         swarmEncryptionKey,
         stamper,
@@ -650,7 +750,16 @@ export class BatchWriteCoordinator {
    * hold: bind and every renewal. `undefined` (no lease) disables the fence.
    */
   private syncStamperLeaseDeadline(): void {
-    this.deps.stamper.setLeaseValidUntil(this.partitionLease?.leasedUntil)
+    this.forEachBoundStamper((s) =>
+      s.setLeaseValidUntil(this.partitionLease?.leasedUntil),
+    )
+  }
+
+  /** The lease stamper plus every joined secondary — the set a lease-state
+   *  transition must fan out to. */
+  private forEachBoundStamper(fn: (s: UtilizationAwareStamper) => void): void {
+    fn(this.deps.leaseStamper)
+    for (const s of this.joinedSecondaries.values()) fn(s)
   }
 
   /**
@@ -778,7 +887,7 @@ export class BatchWriteCoordinator {
    * breaker can fire); the unbind happens in `finalizeDemote` under the lock.
    */
   private signalLeaseLost(): void {
-    this.deps.stamper.invalidateLease()
+    this.forEachBoundStamper((s) => s.invalidateLease())
   }
 
   /**
@@ -788,7 +897,8 @@ export class BatchWriteCoordinator {
    */
   private finalizeDemote(): void {
     this.leaseEpoch++
-    this.deps.stamper.unbindPartition()
+    this.forEachBoundStamper((s) => s.unbindPartition())
+    this.joinedSecondaries.clear()
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
       this.partitionRefreshTimer = undefined
@@ -1002,8 +1112,15 @@ export class BatchWriteCoordinator {
           // Pass the live counter so the heartbeat can RELOCATE a retained state
           // chunk that this epoch's rotating pointer/beacon bucket would otherwise
           // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
-          // partition mode → the heartbeat stays a bare pointer write.
-          await lease.heartbeatStatePointer(this.deps.stamper.getLocalCounter())
+          // partition mode → the heartbeat stays a bare pointer write. Every
+          // joined batch's pointer is kept fresh, not just the lease batch's —
+          // a takeover must find each batch's resume point.
+          await lease.heartbeatStatePointer(
+            this.deps.leaseStamper.getLocalCounter(),
+          )
+          for (const s of this.joinedSecondaries.values()) {
+            await lease.heartbeatStatePointer(s.getLocalCounter(), s)
+          }
         })
         this.pointerHeartbeatFailingSince = undefined
       } catch (err) {
@@ -1050,11 +1167,17 @@ export class BatchWriteCoordinator {
       clearInterval(this.partitionRefreshTimer)
       this.partitionRefreshTimer = undefined
     }
-    const localCounter = this.deps.stamper.getLocalCounter()
+    const localCounter = this.deps.leaseStamper.getLocalCounter()
     if (localCounter !== undefined) {
       try {
         // Best-effort: on a Swarm-write failure the slot still lapses via the
-        // TTL within LEASE_TTL_MS, so peers recover either way.
+        // TTL within LEASE_TTL_MS, so peers recover either way. Joined
+        // batches' final counters flush first — a peer's takeover must resume
+        // each batch at its acked counter.
+        for (const s of this.joinedSecondaries.values()) {
+          const counter = s.getLocalCounter()
+          if (counter !== undefined) await lease.publishState(counter, s)
+        }
         await lease.release(localCounter)
       } catch (err) {
         console.warn(
@@ -1063,7 +1186,8 @@ export class BatchWriteCoordinator {
         )
       }
     }
-    this.deps.stamper.unbindPartition()
+    this.forEachBoundStamper((s) => s.unbindPartition())
+    this.joinedSecondaries.clear()
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
@@ -1087,39 +1211,52 @@ export class BatchWriteCoordinator {
     }
     this.partitionLease = undefined
     this.readOnly = false
+    this.joinedSecondaries.clear()
     this.deps.writeLeaseCache?.(undefined)
   }
 
   // ---- helpers ------------------------------------------------------------
 
   private async buildStamperTarget(
+    stamper: UtilizationAwareStamper,
     opts?: WithWriteOptions,
   ): Promise<UploadTarget> {
     const workerPool = opts?.useWorkers
-      ? await this.deps.getWorkerPool?.(opts.workerCount)
+      ? await this.deps.getWorkerPool?.(stamper, opts.workerCount)
       : undefined
     return {
       mode: "stamper",
       bee: this.deps.bee,
-      stamper: this.deps.stamper,
+      stamper,
       workerPool,
     }
   }
 
-  /** Take the cross-tab Web Lock, run `op`, then flush stamper state. */
-  private async lockAndFlush<T>(op: () => Promise<T>): Promise<T> {
-    return withBatchWriteLock(this.deps.batchId, async () => {
+  /**
+   * Take the cross-tab Web Lock, run `op`, then flush stamper state — the
+   * write's stamper AND the lease stamper (lease SOC writes dirty the
+   * latter's buckets even when the data write targeted another batch),
+   * deduped when they are the same.
+   */
+  private async lockAndFlush<T>(
+    op: () => Promise<T>,
+    writeStamper?: UtilizationAwareStamper,
+  ): Promise<T> {
+    return withAccountWriteLock(this.deps.accountId, async () => {
       try {
         return await op()
       } finally {
-        await this.deps.flushStamperState?.()
+        await this.deps.flushStamperState?.(this.deps.leaseStamper)
+        if (writeStamper && writeStamper !== this.deps.leaseStamper) {
+          await this.deps.flushStamperState?.(writeStamper)
+        }
       }
     })
   }
 
   /** Take the cross-tab Web Lock without the stamper flush (lease mutations). */
   private lock<T>(op: () => Promise<T>): Promise<T> {
-    return withBatchWriteLock(this.deps.batchId, op)
+    return withAccountWriteLock(this.deps.accountId, op)
   }
 
   /** Post-acquisition guard: a multi-device account must hold a partition. */
