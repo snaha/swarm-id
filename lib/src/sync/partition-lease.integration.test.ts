@@ -2073,6 +2073,36 @@ describe("PartitionLease.joinBatch — per-batch state under one lease", () => {
     expect(lockAfter?.generation).toEqual(lockBefore?.generation)
   })
 
+  it("serialize carries the joined batches so a re-adopt can restore them", async () => {
+    const NOW = 1_000_000
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await seedBatchState(BATCH_2, published, NOW)
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    // Before any join: nothing to restore, and the snapshot stays byte-identical
+    // to a single-batch account's.
+    expect(lease.serialize().joinedBatchIds).toBeUndefined()
+
+    await lease.joinBatch(makeBatchStamper(BATCH_2))
+
+    // The LEASE batch is excluded — the adopt path binds it directly. Only the
+    // secondaries need re-establishing, and without them their state pointers
+    // stop being heartbeated after a reload and age out of the takeover span.
+    expect(lease.serialize().joinedBatchIds).toEqual([BATCH_2.toHex()])
+
+    // A new session resumes from the partition's published counters, so the
+    // joined set is per-session and must not leak across an acquire.
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(lease.serialize().joinedBatchIds).toBeUndefined()
+  })
+
   it("joinBatch after a cached-lease re-adopt scans the prior holder's lease span (no zero-seed)", async () => {
     // The coordinator's re-adopt fast path (hydrate + adoptIfLive) runs no
     // Swarm scan, so the acquire-time knowledge of the prior holder's

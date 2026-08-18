@@ -171,6 +171,17 @@ export interface PartitionLeaseStateSnapshot {
    * published. Absent when the partition had no prior holder.
    */
   priorHolderLeasedUntil?: number
+  /**
+   * Batches `joinBatch`ed into this lease session, EXCLUDING the lease batch
+   * (the adopt path binds that one directly). The coordinator keeps its joined
+   * stampers in memory only, so after a reload a re-adopted session would stop
+   * heartbeating these batches' state pointers — and a pointer that goes
+   * unrefreshed for ~90s drops out of `readStatePointer`'s lookup span, leaving
+   * a later cross-device takeover to resume that batch from a ZERO counter and
+   * re-issue acked slots. Persisting the ids lets the coordinator re-bind them
+   * after an adopt. Absent when no secondary batch was joined.
+   */
+  joinedBatchIds?: string[]
 }
 
 /**
@@ -1705,6 +1716,15 @@ export class PartitionLease {
    * (`refresh()` / `acquire()`) before trusting it.
    */
   serialize(): PartitionLeaseStateSnapshot {
+    // Derived from `stateByBatch` rather than passed in: that map already IS
+    // "batches seeded into this session" (written only by `seedBatchState`, on
+    // the `claimPartition`/`joinBatch` paths, and cleared by `acquire`), so it
+    // cannot drift from reality. Omitted when empty so a single-batch account's
+    // snapshot stays byte-identical to before this field existed.
+    const leaseBatchHex = this.opts.batchId?.toHex()
+    const joinedBatchIds = [...this.stateByBatch.keys()].filter(
+      (hex) => hex !== leaseBatchHex,
+    )
     return {
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId?.toHex() ?? "",
@@ -1712,6 +1732,7 @@ export class PartitionLease {
       priorHolderLeasedUntil: this.self
         ? this.lastSeenLeasedUntil.get(this.self.partition)
         : undefined,
+      joinedBatchIds: joinedBatchIds.length ? joinedBatchIds : undefined,
     }
   }
 

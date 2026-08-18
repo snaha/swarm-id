@@ -181,6 +181,17 @@ export interface BatchWriteCoordinatorDeps {
     stamper: UtilizationAwareStamper,
     count?: number,
   ) => Promise<StampWorkerPool | undefined>
+  /**
+   * Resolve an owned batch's stamper by hex batch id (proxy: the per-batch
+   * stamp-entry cache, building on a miss). Used only by the re-adopt path to
+   * re-bind batches this device had joined before a reload, so their state
+   * pointers keep being heartbeated. Returns `undefined` — never throws — when
+   * the account no longer owns the batch. Absent for callers with no batch
+   * cache (`sync-account`), which simply skip the restore.
+   */
+  resolveStamperForBatch?: (
+    batchIdHex: string,
+  ) => Promise<UtilizationAwareStamper | undefined>
   /** Fired on every partition / read-only transition. */
   onLeaseChange?: (info: LeaseChangeInfo) => void
   /** Fired when a partition is (re)acquired (phase-5 publish trigger). */
@@ -251,6 +262,12 @@ export class BatchWriteCoordinator {
    * the identity check covers stragglers.
    */
   private lostLease: PartitionLease | undefined
+  /**
+   * The in-flight background restore kicked off by the re-adopt fast path.
+   * Never awaited in production — the refresh tick picks the batches up once
+   * they land. See {@link joinedRestoreSettled}.
+   */
+  private joinedRestore: Promise<void> | undefined
 
   constructor(deps: BatchWriteCoordinatorDeps) {
     this.deps = deps
@@ -264,6 +281,15 @@ export class BatchWriteCoordinator {
   /** True when every partition is held by a live peer and this device cannot write. */
   get isReadOnly(): boolean {
     return this.readOnly
+  }
+
+  /**
+   * Resolves when the re-adopt path's background joined-batch restore has
+   * settled (immediately when none ran). Never rejects. Exposed so tests have
+   * a deterministic sync point, mirroring `PartitionLease.beaconPublishSettled`.
+   */
+  get joinedRestoreSettled(): Promise<void> {
+    return this.joinedRestore ?? Promise.resolve()
   }
 
   /** The lease (resolved-default) batch's stamper — exposed for the proxy's
@@ -405,6 +431,82 @@ export class BatchWriteCoordinator {
     })
     stamper.setLeaseValidUntil(lease.leasedUntil)
     this.joinedSecondaries.set(key, stamper)
+    // Persist the join immediately rather than waiting for the next refresh
+    // tick: a reload inside that window would lose this batch from the cached
+    // snapshot, and its state pointer would stop being heartbeated.
+    this.deps.writeLeaseCache?.(lease.serialize())
+  }
+
+  /**
+   * Re-bind the batches a PREVIOUS session of this device had joined, after the
+   * re-adopt fast path re-established the lease from the local cache.
+   *
+   * `joinedSecondaries` lives only in memory, so without this a reload leaves
+   * every secondary batch unheartbeated: `heartbeatStatePointer` no-ops for a
+   * batch whose `lastReferenceHex` is unset, the pointer ages out of
+   * `readStatePointer`'s ~90s lookup span, and a later cross-device takeover
+   * resumes that batch from a ZERO counter — re-issuing acked slots and
+   * evicting their chunks. This device's own writes are safe either way (they
+   * resume off the persisted synced reference); the exposure is to peers.
+   *
+   * Mirrors the adopt path's lease-batch sequence per batch, and like it seeds
+   * from local state only — no Swarm read, no lock activity on the claim.
+   * Best-effort per batch: a failure leaves that batch exactly as badly off as
+   * before this existed.
+   */
+  private async restoreJoinedSecondaries(
+    lease: PartitionLease,
+    epoch: number,
+    partition: number,
+    batchIds: string[] | undefined,
+  ): Promise<void> {
+    const resolve = this.deps.resolveStamperForBatch
+    if (!resolve || !batchIds?.length || this.deps.partitionCount <= 1) return
+    const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
+    for (const key of batchIds) {
+      // After a default-stamp change the lease is rebuilt under a different
+      // batch (`hydrate` deliberately does not match on batchId), so a
+      // persisted id can now BE the lease batch — already bound by adopt.
+      if (key === leaseBatchHex) continue
+      if (this.joinedSecondaries.has(key)) continue
+      try {
+        // Resolved OFF the write lock: the proxy's resolver takes the account
+        // Web Lock internally and Web Locks are not reentrant.
+        const stamper = await resolve(key)
+        if (!stamper) continue
+        const referenceHex = await stamper
+          .getSyncedReference(partition)
+          .catch(() => undefined)
+        // Commit under the lock so it cannot interleave with a demote or an
+        // idle-yield, with no await between the guard and the map insert.
+        await this.lock(async () => {
+          // `bindPartition` clears `leaseStale`, so a restore that straggles
+          // past a lease loss would re-arm a stamper on a partition a peer now
+          // owns. Same triple check `ensureBatchJoined` makes, plus the epoch.
+          if (
+            this.disposed ||
+            this.leaseEpoch !== epoch ||
+            this.partitionLease !== lease ||
+            this.lostLease === lease
+          ) {
+            return
+          }
+          stamper.bindPartition({
+            partition,
+            partitionCount: this.deps.partitionCount,
+            localCounter: stamper.buildLeaseLocalCounter(),
+          })
+          stamper.setLeaseValidUntil(lease.leasedUntil)
+          lease.seedReferenceHex(referenceHex, stamper)
+          this.joinedSecondaries.set(key, stamper)
+        })
+      } catch (error) {
+        console.warn(
+          `[BatchWriteCoordinator] Could not restore joined batch ${key}:`,
+          error,
+        )
+      }
+    }
   }
 
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
@@ -675,6 +777,22 @@ export class BatchWriteCoordinator {
         this.lastLeaseActivityAt = Date.now()
         this.pointerHeartbeatFailingSince = undefined // fresh lease session
         this.deps.onLeaseAcquired?.(adopted)
+        // Re-establish the batches this device had joined before the reload,
+        // in the BACKGROUND: each one needs its stamper resolved (a lock
+        // acquisition inside the proxy) and adopt must not pay for that. The
+        // pointer only has to be refreshed before it ages out of the ~90s
+        // takeover lookup span, and the refresh tick runs far more often.
+        this.joinedRestore = this.restoreJoinedSecondaries(
+          lease,
+          epoch,
+          adopted,
+          cached?.joinedBatchIds,
+        ).catch((error: unknown) =>
+          console.warn(
+            "[BatchWriteCoordinator] Joined-batch restore failed:",
+            error,
+          ),
+        )
         return
       }
 

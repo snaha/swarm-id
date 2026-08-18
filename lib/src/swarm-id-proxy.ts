@@ -911,6 +911,8 @@ export class SwarmIdProxy {
       flushStamperState: (stamper) => this.saveStamperState(stamper),
       getWorkerPool: (stamper, count) =>
         this.getOrCreateWorkerPool(stamper, count),
+      resolveStamperForBatch: (batchIdHex) =>
+        this.resolveStamperForBatch(batchIdHex),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
       // On first acquiring a partition, announce this device by publishing the
       // account snapshot (which includes ourselves in metadata.devices) to the
@@ -1617,6 +1619,42 @@ export class SwarmIdProxy {
     } catch (error) {
       console.error("[Proxy] Failed to create target stamper:", error)
       throw new Error(`Failed to build stamper for batch ${targetHex}`)
+    }
+  }
+
+  /**
+   * Resolve an owned batch's stamper for the coordinator's re-adopt restore:
+   * the cached instance, or a freshly built one. Unlike `resolveUploadStamper`
+   * this NEVER throws and never promotes anything to the default binding — a
+   * batch the account no longer owns, or one whose stamper cannot be built,
+   * simply isn't restored (that batch keeps today's behaviour).
+   */
+  private async resolveStamperForBatch(
+    batchIdHex: string,
+  ): Promise<UtilizationAwareStamper | undefined> {
+    const stamp = this.findOwnedStamp(batchIdHex)
+    if (!stamp) return undefined
+    const signerKey = stamp.signerKey.toHex()
+    const cached = this.stampEntries.get(batchIdHex)
+    if (cached && cached.signerKey === signerKey) return cached.stamper
+    const accountInfo = await this.lookupAccountForApp()
+    if (!accountInfo || !this.utilizationStore) return undefined
+    try {
+      const stamper = await this.createStamperUnderAccountLock(
+        accountInfo,
+        signerKey,
+        stamp.batchID,
+        stamp.depth,
+        this.utilizationStore,
+      )
+      this.setStampEntry(stamper, signerKey)
+      return stamper
+    } catch (error) {
+      console.warn(
+        `[Proxy] Could not build stamper for joined batch ${batchIdHex}:`,
+        error,
+      )
+      return undefined
     }
   }
 
