@@ -463,6 +463,76 @@ describe("SwarmIdProxy getPostageBatches (multi-stamp, doc §2)", () => {
       postageBatches: [],
     })
   })
+
+  it("flags a PROMOTED binding as the default when no default pointer resolves", async () => {
+    // The account's default pointer is gone, so `resolveStampForApp` finds
+    // nothing — but a targeted write promoted B2 to the binding, and untargeted
+    // uploads consume it. Reporting isDefault:false for every batch would make
+    // the documented `find((b) => b.isDefault)` recipe come up empty while
+    // uploads keep landing on B2.
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [stampStub(B1), stampStub(B2)] },
+    })
+    ;(proxy as never)["postageBatchId"] = B2
+    ;(proxy as never)["stampToPostageBatch"] = (stamp: {
+      batchID: { toHex: () => string }
+    }) => Promise.resolve({ batchID: stamp.batchID.toHex() })
+
+    await getBatches()
+
+    expect(lastMessage()).toMatchObject({
+      postageBatches: [
+        { batchID: B1, isDefault: false },
+        { batchID: B2, isDefault: true },
+      ],
+    })
+  })
+})
+
+describe("SwarmIdProxy pruneStampEntries", () => {
+  beforeEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("leaves cached stampers alone when the connection can't be read", () => {
+    const proxy = makeProxy()
+    const terminate = vi.fn()
+    const entries = new Map([
+      [
+        B1,
+        { stamper: { tag: B1 }, signerKey: "k1", workerPool: { terminate } },
+      ],
+    ])
+    ;(proxy as never)["stampEntries"] = entries
+    // Transiently unreadable (mid-rewrite storage, expired session) — NOT
+    // proof that the account owns nothing.
+    ;(proxy as never)["findConnectionForParent"] = () => undefined
+    ;(proxy as never)["pruneStampEntries"]()
+
+    expect(entries.size).toBe(1)
+    expect(terminate).not.toHaveBeenCalled()
+  })
+
+  it("still evicts a tombstoned batch when the connection reads fine", () => {
+    const proxy = makeProxy()
+    const terminate = vi.fn()
+    const entries = new Map([
+      [
+        B1,
+        { stamper: { tag: B1 }, signerKey: "k1", workerPool: { terminate } },
+      ],
+    ])
+    ;(proxy as never)["stampEntries"] = entries
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [stampStub(B1, 123)] },
+    })
+    ;(proxy as never)["pruneStampEntries"]()
+
+    expect(entries.size).toBe(0)
+    expect(terminate).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("SwarmIdProxy stamp enrichment (getPostageBatches efficiency)", () => {

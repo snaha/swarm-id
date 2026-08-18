@@ -984,11 +984,18 @@ export class SwarmIdProxy {
   /**
    * Evict cached stampers whose batch the account no longer owns (tombstoned
    * or removed) so a stale instance can't serve a later targeted write.
+   *
+   * No connection means "we can't tell what's owned", which is NOT the same as
+   * "nothing is owned" — pruning against an empty set would drop every cached
+   * stamper and terminate its worker pool, including, mid-flight, the pool a
+   * long worker-backed upload is running on (writes run off the work queue, so
+   * a storage event can land during one).
    */
   private pruneStampEntries(): void {
     const connection = this.findConnectionForParent()
+    if (!connection) return
     const owned = new Set(
-      (connection?.account.postageStamps ?? [])
+      connection.account.postageStamps
         .filter((s) => !s.deletedAt)
         .map((s) => s.batchID.toHex()),
     )
@@ -4412,9 +4419,17 @@ export class SwarmIdProxy {
     const connection = this.findConnectionForParent()
     const stamps =
       connection?.account.postageStamps.filter((s) => !s.deletedAt) ?? []
-    const defaultStamp = connection
-      ? resolveStampForApp(connection.app, connection.account, stamps)
-      : undefined
+    // Falls back to the LIVE binding when no default resolves: a targeted write
+    // may have promoted an owned stamp to the binding on an account whose
+    // default pointer is gone (see `resolveUploadStamper`), and untargeted
+    // uploads then consume it. Without this, `isDefault` is false for every
+    // batch while uploads keep succeeding on one, and the documented
+    // `find((b) => b.isDefault)` migration recipe reports nothing.
+    const defaultStamp =
+      (connection
+        ? resolveStampForApp(connection.app, connection.account, stamps)
+        : undefined) ??
+      stamps.find((s) => s.batchID.toHex() === this.postageBatchId)
 
     // The Swarmscan price is batch-independent — fetch it at most once per
     // request, shared across all stamps' fallback paths.
