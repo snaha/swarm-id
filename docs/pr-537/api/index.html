@@ -487,6 +487,7 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="getpostagebatches"><code dir="auto">getPostageBatches()</code></h3><a class="sl-anchor-link" href="#getpostagebatches"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “getPostageBatches()”</span></a></div>
 <p>Lists every postage batch the authenticated account owns.</p>
 <p>An account can hold several stamps (each shown as a “drive” in the identity UI), so this returns all of them — letting an app reach a specific stamp (e.g. to upload with <code dir="auto">UploadOptions.batchID</code>). With no <code dir="auto">batchID</code>, uploads use the account’s resolved default stamp — the batch flagged <code dir="auto">isDefault: true</code> in this list.</p>
+<aside aria-label="Caution" class="starlight-aside starlight-aside--caution"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path d="M12 16a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10.67 1.47-8.05-14a3 3 0 0 0-5.24 0l-8 14A3 3 0 0 0 3.94 22h16.12a3 3 0 0 0 2.61-4.53Zm-1.73 2a1 1 0 0 1-.88.51H3.94a1 1 0 0 1-.88-.51 1 1 0 0 1 0-1l8-14a1 1 0 0 1 1.78 0l8.05 14a1 1 0 0 1 .05 1.02v-.02ZM12 8a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V9a1 1 0 0 0-1-1Z"/></svg>Caution</p><div class="starlight-aside__content"><p>Every connected app sees this full list <strong>and can upload to any batch in it</strong> via <code dir="auto">batchID</code> — access is origin-scoped, with no per-app permission model. Assigning an app its own stamp only picks that app’s default; it does not fence the account’s other drives off from it.</p></div></aside>
 <p><strong>Returns:</strong> <code dir="auto">Promise&lt;PostageBatch[]&gt;</code> - The account’s postage batches (empty if none)</p>
 <p>Each <code dir="auto">PostageBatch</code> has:</p>
 <table>
@@ -641,6 +642,12 @@
 <td><code dir="auto">UploadOptions</code></td>
 <td>No</td>
 <td>Upload configuration</td>
+</tr>
+<tr>
+<td><code dir="auto">options.batchID</code></td>
+<td><code dir="auto">string</code></td>
+<td>No</td>
+<td>Hex id of an owned batch (a “drive”) to upload under, instead of the resolved default. Rejects if the account does not own it.</td>
 </tr>
 <tr>
 <td><code dir="auto">options.pin</code></td>
@@ -2387,6 +2394,7 @@
 <div class="sl-heading-wrapper level-h3"><h3 id="actaddgranteeshistoryreference-grantees-requestoptions"><code dir="auto">actAddGrantees(historyReference, grantees, requestOptions?)</code></h3><a class="sl-anchor-link" href="#actaddgranteeshistoryreference-grantees-requestoptions"><span aria-hidden="true" class="sl-anchor-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="m12.11 15.39-3.88 3.88a2.52 2.52 0 0 1-3.5 0 2.47 2.47 0 0 1 0-3.5l3.88-3.88a1 1 0 1 0-1.42-1.42l-3.88 3.89a4.48 4.48 0 0 0 6.33 6.33l3.89-3.88a1 1 0 0 0-1.42-1.42m8.58-12.08a4.49 4.49 0 0 0-6.33 0l-3.89 3.88a1 1 0 1 0 1.42 1.42l3.88-3.88a2.52 2.52 0 0 1 3.5 0 2.47 2.47 0 0 1 0 3.5l-3.88 3.88a1 1 0 0 0 0 1.42 1 1 0 0 0 1.42 0l3.88-3.89a4.49 4.49 0 0 0 0-6.33M8.83 15.17a1 1 0 0 0 .71.29 1 1 0 0 0 .71-.29l4.92-4.92a1 1 0 1 0-1.42-1.42l-4.92 4.92a1 1 0 0 0 0 1.42"></path></svg></span><span class="sr-only" data-pagefind-ignore>Section titled “actAddGrantees(historyReference, grantees, requestOptions?)”</span></a></div>
 <p>Adds new grantees to an existing ACT.</p>
 <p>This method adds new public keys to the ACT’s access list. The encrypted reference remains the same, but a new history reference is returned that should be used for future operations.</p>
+<aside aria-label="Caution" class="starlight-aside starlight-aside--caution"><p class="starlight-aside__title" aria-hidden="true"><svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" class="starlight-aside__icon"><path d="M12 16a1 1 0 1 0 0 2 1 1 0 0 0 0-2Zm10.67 1.47-8.05-14a3 3 0 0 0-5.24 0l-8 14A3 3 0 0 0 3.94 22h16.12a3 3 0 0 0 2.61-4.53Zm-1.73 2a1 1 0 0 1-.88.51H3.94a1 1 0 0 1-.88-.51 1 1 0 0 1 0-1l8-14a1 1 0 0 1 1.78 0l8.05 14a1 1 0 0 1 .05 1.02v-.02ZM12 8a1 1 0 0 0-1 1v4a1 1 0 0 0 2 0V9a1 1 0 0 0-1-1Z"/></svg>Caution</p><div class="starlight-aside__content"><p>Grantee and history chunks always stamp under the account’s resolved <strong>default</strong> batch — <code dir="auto">actAddGrantees</code>/<code dir="auto">actRevokeGrantees</code> take no <code dir="auto">batchID</code>. If the ACT content was uploaded to a different batch, the dataset straddles two batches with independent TTLs, and the access structure dies with the default batch even while the content lives. Keep ACT datasets on the default batch until grantee operations support <code dir="auto">batchID</code>.</p></div></aside>
 <p><strong>Parameters:</strong></p>
 <table>
 <thead>
