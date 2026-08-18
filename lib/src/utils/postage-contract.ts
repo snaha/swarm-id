@@ -374,6 +374,13 @@ export async function fetchBatchTTLFromContract(
  *          honoured when `gnosisRpcUrl` targets a local node; against any remote
  *          RPC the Gnosis mainnet deployment is used regardless (see
  *          {@link resolvePostageStampContractAddress}).
+ * @param prefetchedBeeTTL - For a caller that already asks the Bee node for this
+ *          batch (e.g. reads `/stamps` for `usable`/`exists` anyway): supply its
+ *          `batchTTL` and the internal `fetchBatchTTL` call is skipped, so the
+ *          node is not asked twice. Pass the in-flight PROMISE rather than an
+ *          awaited value to also overlap that request with the contract read —
+ *          it is only awaited if the contract cannot answer. Precedence is
+ *          unchanged either way.
  * @returns Remaining TTL in seconds, or `undefined` if neither source can answer.
  */
 export async function fetchAuthoritativeBatchTTL(
@@ -381,15 +388,20 @@ export async function fetchAuthoritativeBatchTTL(
   beeUrl: string,
   batchId: string,
   localContractAddress?: string,
+  prefetchedBeeTTL?: number | Promise<number | undefined>,
 ): Promise<number | undefined> {
   const contractAddress = resolvePostageStampContractAddress(
     gnosisRpcUrl,
     localContractAddress,
   )
-  return (
-    (await fetchBatchTTLFromContract(gnosisRpcUrl, batchId, contractAddress)) ??
-    (await fetchBatchTTL(beeUrl, batchId))
+  const fromContract = await fetchBatchTTLFromContract(
+    gnosisRpcUrl,
+    batchId,
+    contractAddress,
   )
+  if (fromContract !== undefined) return fromContract
+  if (prefetchedBeeTTL !== undefined) return await prefetchedBeeTTL
+  return fetchBatchTTL(beeUrl, batchId)
 }
 
 /**

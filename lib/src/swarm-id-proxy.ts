@@ -130,8 +130,7 @@ import {
   type BatchDetails,
 } from "./utils/ttl"
 import {
-  fetchBatchTTLFromContract,
-  resolvePostageStampContractAddress,
+  fetchAuthoritativeBatchTTL,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
 } from "./utils/postage-contract"
 import { withTimeout } from "./utils/promise"
@@ -4483,22 +4482,25 @@ export class SwarmIdProxy {
       // time and can be stale (e.g. a batch assigned during its ~30s warm-up
       // stays `usable: false` in storage forever), so read live batch details
       // from the Bee node for those fields.
-      const details = await fetchBatchDetails(this.beeApiUrl, batchIdHex)
+      //
+      // Started but NOT awaited here: the contract read below is independent,
+      // and both together must fit inside STAMP_ENRICH_TIMEOUT_MS — in series
+      // their sum can trip a timeout that their max would not.
+      const detailsPromise = fetchBatchDetails(this.beeApiUrl, batchIdHex)
 
-      // Resolve TTL from live chain state: the PostageStamp contract first
-      // (ground truth for any batch, even one this Bee node has never seen),
-      // then the Bee node's batchTTL — already in `details`, no second
-      // /stamps round-trip. Fall back to the Swarmscan-price approximation
-      // only when neither authoritative source can answer.
-      let batchTTL =
-        (await fetchBatchTTLFromContract(
-          this.gnosisRpcUrl,
-          batchIdHex,
-          resolvePostageStampContractAddress(
-            this.gnosisRpcUrl,
-            this.postageStampContractAddress,
-          ),
-        )) ?? details?.batchTTL
+      // TTL from live chain state via the canonical lookup: the PostageStamp
+      // contract first (ground truth for any batch, even one this Bee node has
+      // never seen), then the node's `batchTTL` — handed over from the details
+      // request already in flight, so the node is never asked twice. Fall back
+      // to the Swarmscan-price approximation only when neither can answer.
+      let batchTTL = await fetchAuthoritativeBatchTTL(
+        this.gnosisRpcUrl,
+        this.beeApiUrl,
+        batchIdHex,
+        this.postageStampContractAddress,
+        detailsPromise.then((d) => d?.batchTTL),
+      )
+      const details = await detailsPromise
       if (batchTTL === undefined) {
         try {
           batchTTL = calculateTTLSeconds(stamp.amount, await getPrice())
