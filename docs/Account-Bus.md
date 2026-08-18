@@ -178,9 +178,25 @@ Each phase is an independent PR chain:
   re-handshake, unless the signaling-mailbox option is enabled.
 - Without TURN, WebRTC will not connect across restrictive NATs; those pairs fall back to the
   signaling-server relay.
-- Safari evicts partitioned (and even first-party) script-writable storage after 7 days
-  without site interaction; re-handshakes re-seed the partition, as they already do for the
-  `appSecret` today.
+- Safari (ITP) deletes script-writable storage for sites without first-party user
+  interaction. The window is **30 operational days** by default since a Feb 2024 WebKit
+  change ([`DataRemovalFrequency`](https://github.com/WebKit/WebKit/commit/45061230013728ec9c4900b01b12af26dc592b4b));
+  the widely-cited 7 days now applies only to sites reached cross-site with unfiltered
+  link decoration from a classified domain (webkit.org's docs predate the change).
+  Impact here: partitioned iframe storage is re-seeded per popup handshake (harmless),
+  and every Safari connect is a first-party click in the popup that resets the trusted
+  domain's clock. The residual risk is a **dormant local account's vault**
+  (`encryptedSeed`, the only copy of the seed) after >30 operational days with no
+  connect; synced accounts restore from Swarm.
+  **`navigator.storage.persist()` is NOT a mitigation** (checked against WebKit source,
+  2026-08): WebKit grants it only to origins _already exempt_ from ITP deletion
+  (home-screen/Dock web apps, app-bound/MDM domains — exemption is the grant's
+  precondition, not its effect;
+  [`fb634d8`](https://github.com/WebKit/WebKit/commit/fb634d8ebf1e903515286602488a23367c6a1e61)),
+  it returns `false` unconditionally in cross-origin (partitioned) iframes, and the ITP
+  deletion path never consults the persisted marker (it only shields quota-pressure
+  eviction). The only real escape hatches: recent first-party interaction, or installing
+  the trusted domain as a home-screen/Dock web app.
 
 ## Appendix — alternatives considered
 
