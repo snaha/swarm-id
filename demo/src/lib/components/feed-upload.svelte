@@ -69,9 +69,7 @@
     if (feedIndex) opts.index = feedIndex
     if (feedAt) opts.at = feedAt
     // Target the sidebar-selected batch (Default → omitted, the proxy
-    // resolves). Only sequential feed writers honour batchID — the epoch
-    // feed wire format carries no upload options (lib follow-up), so the
-    // epoch writer calls below don't pass it.
+    // resolves). Sequential and epoch feed writers both honour batchID.
     if (clientStore.uploadBatchID) opts.batchID = clientStore.uploadBatchID
     return opts
   }
@@ -207,6 +205,7 @@
           const uploadResult = await writer.uploadPayload(payload, {
             at: atRaw,
             encryptionKey: epochEncKey,
+            uploadOptions: { batchID: clientStore.uploadBatchID },
           })
           logStore.log(
             `Epoch upload key: ${epochEncKey.slice(0, 8)}... (allZero=${/^0+$/.test(epochEncKey)})`,
@@ -307,6 +306,7 @@
         const uploadResult = await writer.uploadReference(ref, {
           at: atRaw,
           encryptionKey: epochEncKey,
+          uploadOptions: { batchID: clientStore.uploadBatchID },
         })
         logStore.log(
           `Epoch upload key: ${epochEncKey.slice(0, 8)}... (allZero=${/^0+$/.test(epochEncKey)})`,

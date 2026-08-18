@@ -2061,6 +2061,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2108,6 +2109,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2194,6 +2196,7 @@ export class SwarmIdClient {
         reference: normalizedRef,
         encryptionKey: undefined, // No encryption for raw upload
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2233,6 +2236,7 @@ export class SwarmIdClient {
         reference: uploadResult.reference,
         encryptionKey: undefined, // No encryption for raw upload
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress

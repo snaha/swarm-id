@@ -896,6 +896,10 @@ export const EpochFeedUploadReferenceMessageSchema = z.object({
   reference: ReferenceSchema,
   encryptionKey: EncryptionKeySchema.optional(),
   hints: EpochHintsSchema,
+  // The feed SOC's target batch, mirroring `UploadOptions.batchID`. Without it
+  // an epoch write with a targeted payload straddles two batches: the payload
+  // on the target, the SOC on the resolved default, with independent TTLs.
+  batchID: BatchIdSchema.optional(),
   requestOptions: RequestOptionsSchema,
 })
 

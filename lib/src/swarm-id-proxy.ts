@@ -3309,8 +3309,16 @@ export class SwarmIdProxy {
     message: EpochFeedUploadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const { requestId, topic, signer, at, reference, encryptionKey, hints } =
-      message
+    const {
+      requestId,
+      topic,
+      signer,
+      at,
+      reference,
+      encryptionKey,
+      hints,
+      batchID,
+    } = message
 
     try {
       this.ensureCanUpload()
@@ -3353,7 +3361,9 @@ export class SwarmIdProxy {
         signer: signerKeyObj,
       })
 
-      // Use mode-aware write lock for the upload operation
+      // Use mode-aware write lock for the upload operation. `batchID` targets
+      // the feed SOC at the same batch the caller's payload went to — without
+      // it an epoch write straddles two batches with independent TTLs.
       const updateResult = await this.withModeAwareWriteLock(
         undefined,
         async (target) => {
@@ -3367,6 +3377,7 @@ export class SwarmIdProxy {
 
           return result
         },
+        batchID,
       )
 
       // Verify upload with read-back
