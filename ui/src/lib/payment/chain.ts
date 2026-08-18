@@ -172,10 +172,14 @@ export function postageChain(
   if (existing) {
     return existing
   }
-  const client = chainIdentity(rpcUrl)
+  const client: Promise<MultichainClient> = chainIdentity(rpcUrl)
     .then((identity) => new MultichainClient(settingsFor(identity, rpcUrl)))
     .catch((error: unknown) => {
-      clients.delete(rpcUrl)
+      // Only evict OUR entry, as above: a retry may already have stored a
+      // working client under this url.
+      if (clients.get(rpcUrl) === client) {
+        clients.delete(rpcUrl)
+      }
       throw error
     })
   clients.set(rpcUrl, client)
