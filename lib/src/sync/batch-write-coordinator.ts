@@ -53,6 +53,7 @@ import {
   LEASE_SKEW_MARGIN_MS,
   IDLE_YIELD_MS,
   UtilizationAwareStamper,
+  PartitionLeaseLostError,
 } from "../utils/batch-utilization"
 import { withAccountWriteLock } from "../utils/account-write-lock"
 import { withTimeout } from "../utils/promise"
@@ -238,6 +239,18 @@ export class BatchWriteCoordinator {
     string,
     UtilizationAwareStamper
   >()
+  /**
+   * The lease session `signalLeaseLost` last fired for. The breaker fan-out
+   * only reaches stampers ALREADY in `joinedSecondaries`; a batch whose
+   * `joinBatch` is in flight when the signal lands (the refresh tick signals
+   * OFF the write lock, while a targeted write holds it) would miss it and
+   * `bindPartition` would re-arm (`leaseStale = false`) on a lost partition.
+   * `ensureBatchJoined` re-checks this marker after the join resolves and
+   * aborts the write instead of binding. Cleared by `finalizeDemote` — once
+   * the demote lands, `partitionLease` no longer names the lost session and
+   * the identity check covers stragglers.
+   */
+  private lostLease: PartitionLease | undefined
 
   constructor(deps: BatchWriteCoordinatorDeps) {
     this.deps = deps
@@ -370,6 +383,17 @@ export class BatchWriteCoordinator {
       throw new Error("Cannot join a batch without a held partition lease.")
     }
     const localCounter = await lease.joinBatch(stamper)
+    // The join awaited off the breaker's reach (this stamper is not in
+    // `joinedSecondaries` yet): a displacement signalled meanwhile must abort
+    // the write here — `bindPartition` below would reset `leaseStale` and let
+    // the upload stamp a partition a peer now owns.
+    if (
+      this.disposed ||
+      this.partitionLease !== lease ||
+      this.lostLease === lease
+    ) {
+      throw new PartitionLeaseLostError()
+    }
     stamper.bindPartition({
       partition,
       partitionCount: this.deps.partitionCount,
@@ -412,9 +436,13 @@ export class BatchWriteCoordinator {
     const lease = this.partitionLease
     if (lease) {
       const localCounter = this.deps.leaseStamper.getLocalCounter()
-      // Captured before the clear below so the detached release can still
-      // publish the joined batches' final counters.
-      const secondaries = [...this.joinedSecondaries.values()]
+      // Stampers AND counters captured before the synchronous unbind below:
+      // the deferred lock callback runs after it (Web Locks callbacks are
+      // always async), when `getLocalCounter()` is already `undefined`.
+      const secondaries = [...this.joinedSecondaries.values()].map((s) => ({
+        stamper: s,
+        counter: s.getLocalCounter(),
+      }))
       if (localCounter !== undefined) {
         // Serialize the detached release under the account write lock (#349):
         // a successor coordinator's acquire (`startLease`/`withWrite` →
@@ -436,11 +464,10 @@ export class BatchWriteCoordinator {
           // per batch) — the release sentinel below frees the partition for
           // peers, whose takeover must resume each batch at its acked
           // counter, not just the lease batch's.
-          for (const s of secondaries) {
-            const counter = s.getLocalCounter()
+          for (const { stamper, counter } of secondaries) {
             if (counter === undefined) continue
             try {
-              await lease.publishState(counter, s)
+              await lease.publishState(counter, stamper)
             } catch (err) {
               console.warn(
                 "[BatchWriteCoordinator] Teardown state publish failed for a joined batch:",
@@ -887,6 +914,7 @@ export class BatchWriteCoordinator {
    * breaker can fire); the unbind happens in `finalizeDemote` under the lock.
    */
   private signalLeaseLost(): void {
+    this.lostLease = this.partitionLease
     this.forEachBoundStamper((s) => s.invalidateLease())
   }
 
@@ -897,6 +925,7 @@ export class BatchWriteCoordinator {
    */
   private finalizeDemote(): void {
     this.leaseEpoch++
+    this.lostLease = undefined
     this.forEachBoundStamper((s) => s.unbindPartition())
     this.joinedSecondaries.clear()
     if (this.partitionRefreshTimer !== undefined) {

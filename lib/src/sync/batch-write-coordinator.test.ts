@@ -32,6 +32,11 @@ vi.mock("../utils/account-write-lock", () => ({
     async (key: string, op: () => Promise<unknown>) => {
       writeLockController.lastKey = key
       writeLockController.onGrant?.()
+      // The real Web Locks API always invokes the callback asynchronously —
+      // code scheduled synchronously after `lock(...)` runs BEFORE the locked
+      // section. Mirror that, or ordering bugs (e.g. reading stamper state a
+      // synchronous teardown already cleared) stay invisible to these tests.
+      await Promise.resolve()
       return op()
     },
   ),
@@ -46,7 +51,11 @@ import {
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
 import type { LeaseRefreshOutcome } from "./partition-lease"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
-import { LEASE_REFRESH_MS, LEASE_TTL_MS } from "../utils/batch-utilization"
+import {
+  LEASE_REFRESH_MS,
+  LEASE_TTL_MS,
+  PartitionLeaseLostError,
+} from "../utils/batch-utilization"
 
 const SELF = "self-device"
 const PEER = "peer-device"
@@ -62,15 +71,24 @@ const BATCH_ID_2 = "cd".repeat(32)
  *  apart; `batchIdHex` names the stamper's batch (default: the lease batch). */
 function makeStamper(calls: string[], label = "", batchIdHex = BATCH_ID) {
   const tag = (name: string) => (label ? `${label}:${name}` : name)
+  // Mirrors the real stamper: `getLocalCounter()` returns a counter only
+  // while a partition is bound (`undefined` after `unbindPartition`).
+  let bound = false
   return {
     batchId: { toHex: () => batchIdHex },
     depth: 20,
     invalidateLease: vi.fn(() => calls.push(tag("invalidate"))),
-    unbindPartition: vi.fn(() => calls.push(tag("unbind"))),
-    bindPartition: vi.fn(() => calls.push(tag("bind"))),
+    unbindPartition: vi.fn(() => {
+      bound = false
+      calls.push(tag("unbind"))
+    }),
+    bindPartition: vi.fn(() => {
+      bound = true
+      calls.push(tag("bind"))
+    }),
     setLeaseValidUntil: vi.fn(),
     buildLeaseLocalCounter: () => new Uint32Array(8),
-    getLocalCounter: () => new Uint32Array(8),
+    getLocalCounter: vi.fn(() => (bound ? new Uint32Array(8) : undefined)),
     // Persisted per-partition synced reference; the adopt fast path reads it to
     // seed the lease's heartbeat pointer. Default: none (fresh partition).
     getSyncedReference: vi.fn(async (_partition: number) => undefined),
@@ -688,6 +706,7 @@ describe("BatchWriteCoordinator — teardown safety", () => {
   it("runs the teardown release under the batch write lock (#349)", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
+    stamper.bindPartition() // held lease ⇒ bound stamper (counter available)
     const lease = makeLease({ partition: 1 })
     lease.release.mockImplementation(async () => {
       calls.push("release")
@@ -811,6 +830,7 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
   it("yields an idle lease: releases, unbinds, and emits the transition", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
+    stamper.bindPartition() // held lease ⇒ bound stamper (counter available)
     const onLeaseChange = vi.fn()
     const coordinator = new BatchWriteCoordinator(
       makeDeps({
@@ -1594,6 +1614,45 @@ describe("BatchWriteCoordinator — per-write batch targeting (account-scoped le
       wait: "block",
     })
     expect(lease.joinBatch).toHaveBeenCalledTimes(2)
+  })
+
+  it("aborts a targeted write when the lease is signalled lost mid-join", async () => {
+    // `refreshTick` signals lease-lost OFF the write lock; a write for a
+    // not-yet-joined batch already holds the lock, so its stamper misses the
+    // invalidate fan-out and `bindPartition` would reset the breaker
+    // (`leaseStale = false`) on a partition a peer now owns. The join must
+    // abort instead of binding.
+    const calls: string[] = []
+    const lease = heldLease()
+    leaseController.lease = lease
+    const leaseStamper = makeStamper(calls, "lease")
+    const target2 = makeStamper(calls, "b2", BATCH_ID_2)
+    let releaseJoin!: (counter: Uint32Array) => void
+    lease.joinBatch = vi.fn(
+      () =>
+        new Promise<Uint32Array>((resolve) => {
+          releaseJoin = resolve
+        }),
+    ) as typeof lease.joinBatch
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(leaseStamper), mode: "oneshot" }),
+    )
+    const op = vi.fn(async () => "ok")
+    const inFlight = coordinator.withWrite(asStamper(target2), op, {
+      wait: "block",
+    })
+    await vi.waitFor(() => expect(lease.joinBatch).toHaveBeenCalledTimes(1))
+
+    // Displacement confirmed while the join is in flight (fanned out over the
+    // lease stamper only — target2 is not in `joinedSecondaries` yet).
+    ;(
+      coordinator as unknown as { signalLeaseLost: () => void }
+    ).signalLeaseLost()
+    releaseJoin(new Uint32Array(8))
+
+    await expect(inFlight).rejects.toThrow(PartitionLeaseLostError)
+    expect(target2.bindPartition).not.toHaveBeenCalled()
+    expect(op).not.toHaveBeenCalled()
   })
 
   it("teardown publishes each joined batch's final counter before the release sentinel", async () => {
