@@ -162,6 +162,15 @@ export interface PartitionLeaseStateSnapshot {
   deviceId: string
   batchId: string
   self?: SelfLease
+  /**
+   * The `leasedUntil` of the held partition's PRIOR holder, as seen by the
+   * acquire-time lock scan. `joinBatch` bounds its state-pointer lookup with
+   * it; the re-adopt fast path (hydrate + adoptIfLive) runs no scan of its
+   * own, so without persisting this a post-reload join would probe only the
+   * `now`/`now-1` pointer buckets and zero-seed a batch the prior holder had
+   * published. Absent when the partition had no prior holder.
+   */
+  priorHolderLeasedUntil?: number
 }
 
 /**
@@ -1697,6 +1706,9 @@ export class PartitionLease {
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId?.toHex() ?? "",
       self: this.self,
+      priorHolderLeasedUntil: this.self
+        ? this.lastSeenLeasedUntil.get(this.self.partition)
+        : undefined,
     }
   }
 
@@ -1714,6 +1726,15 @@ export class PartitionLease {
     if (snapshot.deviceId !== this.opts.deviceId) return
     if (!this.opts.batchId) return
     this.self = snapshot.self
+    // Restore the acquire-time prior-holder span so a re-adopted session's
+    // `joinBatch` scans it (see the snapshot field's doc). The next
+    // `refreshFromSwarm()` clears and re-learns it from the live locks.
+    if (snapshot.self && snapshot.priorHolderLeasedUntil !== undefined) {
+      this.lastSeenLeasedUntil.set(
+        snapshot.self.partition,
+        snapshot.priorHolderLeasedUntil,
+      )
+    }
   }
 
   /**

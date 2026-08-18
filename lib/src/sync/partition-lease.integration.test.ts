@@ -2073,6 +2073,65 @@ describe("PartitionLease.joinBatch — per-batch state under one lease", () => {
     expect(lockAfter?.generation).toEqual(lockBefore?.generation)
   })
 
+  it("joinBatch after a cached-lease re-adopt scans the prior holder's lease span (no zero-seed)", async () => {
+    // The coordinator's re-adopt fast path (hydrate + adoptIfLive) runs no
+    // Swarm scan, so the acquire-time knowledge of the prior holder's
+    // `leasedUntil` must survive serialize/hydrate — without it, joinBatch
+    // probes only the `now`/`now-1` pointer buckets, treats the miss as
+    // conclusive, and zero-seeds a batch the prior holder had published,
+    // re-issuing every slot it acked.
+    const STATE_EPOCH_MS = 30_000
+    const PAST = 1_000_000
+    // >2 pointer epochs later: the pointer is reachable ONLY via the prior
+    // holder's lease span, never via the `now` window.
+    const NOW = PAST + LEASE_TTL_MS + 3 * STATE_EPOCH_MS
+
+    // DEVICE_B published BATCH_2 state on p0 at PAST, then departed without
+    // releasing (its lock is expired at NOW).
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await seedBatchState(BATCH_2, published, PAST)
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      payload: {
+        holderDeviceId: DEVICE_B,
+        generation: {
+          timestampMs: PAST,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+        },
+        acquiredAt: PAST,
+        leasedUntil: PAST + LEASE_TTL_MS, // < NOW → expired
+      },
+    })
+
+    // Session 1: cold acquire (scans the locks, learns B's leasedUntil).
+    const session1 = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    const acquired = await session1.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    const snap = session1.serialize()
+
+    // Session 2 (reload within the TTL): re-adopt from the cache — no scan.
+    const session2 = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    session2.hydrate(snap)
+    expect(session2.adoptIfLive()).toBe(0)
+
+    // The join must resume B's exact published counter, not a zero seed.
+    const counter = await session2.joinBatch(makeBatchStamper(BATCH_2))
+    expect(counter).toEqual(published)
+  })
+
   it("throws on an unreadable second-batch state and keeps the lease", async () => {
     const NOW = 1_000_000
     // BATCH_2's partition-0 pointer names an unreadable reference — the
