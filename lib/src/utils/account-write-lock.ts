@@ -13,16 +13,49 @@
  * mutate the same lease and must exclude each other. This is the single
  * definition of the `swarm-write-account-<accountId>` convention.
  *
+ * `legacyBatchIdsHex` — TRANSITION GUARD. Pre-account-scoped versions keyed
+ * this lock `swarm-write-<batchId>` (the old `withBatchWriteLock`), so during
+ * a deploy rollover an old tab still writes under that key and the account
+ * lock alone would not exclude it. Callers pass the batch ids this locked
+ * section may stamp under and the legacy per-batch locks are acquired NESTED
+ * inside the account lock. Deadlock-free by construction: every new-version
+ * writer serializes on the account lock BEFORE requesting any legacy lock,
+ * and old-version writers only ever hold a single legacy lock. Remove once no
+ * pre-account-scoped clients remain in the wild.
+ *
  * Falls back to running `op` directly when the Web Locks API is unavailable
  * (Node / test environments).
  */
 export function withAccountWriteLock<T>(
-  accountId: string | undefined,
+  accountId: string,
   op: () => Promise<T>,
+  legacyBatchIdsHex: string[] = [],
 ): Promise<T> {
-  const lockName = `swarm-write-account-${accountId?.toLowerCase()}`
-  if (typeof navigator !== "undefined" && navigator.locks) {
-    return navigator.locks.request(lockName, { mode: "exclusive" }, op)
+  if (!accountId) {
+    // Interpolating a missing id would silently share one global
+    // "swarm-write-account-undefined" lock across every account.
+    return Promise.reject(
+      new Error("withAccountWriteLock: accountId is required"),
+    )
   }
-  return op()
+  if (typeof navigator === "undefined" || !navigator.locks) {
+    return op()
+  }
+  // Sorted + deduped so concurrent callers nest the legacy locks in one
+  // deterministic order.
+  const legacy = [...new Set(legacyBatchIdsHex)].sort()
+  const nested = legacy.reduceRight<() => Promise<T>>(
+    (inner, batchIdHex) => () =>
+      navigator.locks.request(
+        `swarm-write-${batchIdHex}`,
+        { mode: "exclusive" },
+        inner,
+      ),
+    op,
+  )
+  return navigator.locks.request(
+    `swarm-write-account-${accountId.toLowerCase()}`,
+    { mode: "exclusive" },
+    nested,
+  )
 }

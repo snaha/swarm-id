@@ -1143,13 +1143,18 @@ export class BatchWriteCoordinator {
           // evict (idle-holder-crosses-an-epoch). Undefined in legacy single-
           // partition mode → the heartbeat stays a bare pointer write. Every
           // joined batch's pointer is kept fresh, not just the lease batch's —
-          // a takeover must find each batch's resume point.
-          await lease.heartbeatStatePointer(
-            this.deps.leaseStamper.getLocalCounter(),
-          )
-          for (const s of this.joinedSecondaries.values()) {
-            await lease.heartbeatStatePointer(s.getLocalCounter(), s)
-          }
+          // a takeover must find each batch's resume point. Concurrent across
+          // batches: each batch's pointer rides its OWN stamper's reserved
+          // intent slot and its own state feed, so only same-batch overlap is
+          // dangerous — and that stays serialized by this lock.
+          await Promise.all([
+            lease.heartbeatStatePointer(
+              this.deps.leaseStamper.getLocalCounter(),
+            ),
+            ...[...this.joinedSecondaries.values()].map((s) =>
+              lease.heartbeatStatePointer(s.getLocalCounter(), s),
+            ),
+          ])
         })
         this.pointerHeartbeatFailingSince = undefined
       } catch (err) {
@@ -1198,15 +1203,26 @@ export class BatchWriteCoordinator {
     }
     const localCounter = this.deps.leaseStamper.getLocalCounter()
     if (localCounter !== undefined) {
+      // Joined batches' final counters flush first — a peer's takeover must
+      // resume each batch at its acked counter. Best-effort PER BATCH (like
+      // teardown): one failed flush must not abort the remaining flushes or
+      // the release below — an unreleased slot costs every peer the full
+      // LEASE_TTL_MS wait.
+      for (const s of this.joinedSecondaries.values()) {
+        const counter = s.getLocalCounter()
+        if (counter === undefined) continue
+        try {
+          await lease.publishState(counter, s)
+        } catch (err) {
+          console.warn(
+            "[BatchWriteCoordinator] Idle-yield state publish failed for a joined batch:",
+            err,
+          )
+        }
+      }
       try {
         // Best-effort: on a Swarm-write failure the slot still lapses via the
-        // TTL within LEASE_TTL_MS, so peers recover either way. Joined
-        // batches' final counters flush first — a peer's takeover must resume
-        // each batch at its acked counter.
-        for (const s of this.joinedSecondaries.values()) {
-          const counter = s.getLocalCounter()
-          if (counter !== undefined) await lease.publishState(counter, s)
-        }
+        // TTL within LEASE_TTL_MS, so peers recover either way.
         await lease.release(localCounter)
       } catch (err) {
         console.warn(
@@ -1271,21 +1287,39 @@ export class BatchWriteCoordinator {
     op: () => Promise<T>,
     writeStamper?: UtilizationAwareStamper,
   ): Promise<T> {
-    return withAccountWriteLock(this.deps.accountId, async () => {
-      try {
-        return await op()
-      } finally {
-        await this.deps.flushStamperState?.(this.deps.leaseStamper)
-        if (writeStamper && writeStamper !== this.deps.leaseStamper) {
-          await this.deps.flushStamperState?.(writeStamper)
+    return withAccountWriteLock(
+      this.deps.accountId,
+      async () => {
+        try {
+          return await op()
+        } finally {
+          await this.deps.flushStamperState?.(this.deps.leaseStamper)
+          if (writeStamper && writeStamper !== this.deps.leaseStamper) {
+            await this.deps.flushStamperState?.(writeStamper)
+          }
         }
-      }
-    })
+      },
+      this.legacyLockIds(writeStamper),
+    )
   }
 
   /** Take the cross-tab Web Lock without the stamper flush (lease mutations). */
   private lock<T>(op: () => Promise<T>): Promise<T> {
-    return withAccountWriteLock(this.deps.accountId, op)
+    return withAccountWriteLock(this.deps.accountId, op, this.legacyLockIds())
+  }
+
+  /**
+   * Legacy per-batch lock keys for this locked section (rollover transition
+   * guard — see `withAccountWriteLock`): every batch it may stamp under — the
+   * lease batch, every joined secondary, and the write's target batch.
+   * Captured at lock-request time; `withWrite`'s not-yet-joined target rides
+   * in via `writeStamper`.
+   */
+  private legacyLockIds(writeStamper?: UtilizationAwareStamper): string[] {
+    const ids = [this.deps.leaseStamper.batchId.toHex()]
+    for (const key of this.joinedSecondaries.keys()) ids.push(key)
+    if (writeStamper) ids.push(writeStamper.batchId.toHex())
+    return ids
   }
 
   /** Post-acquisition guard: a multi-device account must hold a partition. */

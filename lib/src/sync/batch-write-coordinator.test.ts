@@ -26,11 +26,16 @@ vi.mock("./partition-lock", async (importOriginal) => {
 // before the locked section runs) to simulate work that slipped in while the
 // caller queued on the lock. Default is straight pass-through. `lastKey`
 // records the lock key so the account-scoping can be asserted.
-const writeLockController: { onGrant?: () => void; lastKey?: string } = {}
+const writeLockController: {
+  onGrant?: () => void
+  lastKey?: string
+  lastLegacyIds?: string[]
+} = {}
 vi.mock("../utils/account-write-lock", () => ({
   withAccountWriteLock: vi.fn(
-    async (key: string, op: () => Promise<unknown>) => {
+    async (key: string, op: () => Promise<unknown>, legacyIds?: string[]) => {
       writeLockController.lastKey = key
+      writeLockController.lastLegacyIds = legacyIds
       writeLockController.onGrant?.()
       // The real Web Locks API always invokes the callback asynchronously —
       // code scheduled synchronously after `lock(...)` runs BEFORE the locked
@@ -856,6 +861,40 @@ describe("BatchWriteCoordinator — idle-yield under the write lock", () => {
     })
   })
 
+  it("a failed joined-batch flush does not abort the release (sentinel still lands)", async () => {
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    stamper.bindPartition()
+    const secondary = makeStamper(calls, "b2", BATCH_ID_2)
+    secondary.bindPartition()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(stamper), ...RIVAL_DEPS }),
+    )
+    const internals = coordinator as unknown as Internals & {
+      joinedSecondaries: Map<string, unknown>
+    }
+    const lease = makeLease({ partition: 0 })
+    // The joined batch's final flush fails (only secondary publishes carry a
+    // stamper arg); without per-batch isolation this would skip the release
+    // and peers would wait out the full lease TTL for the slot.
+    lease.publishState = vi.fn(async (_counter: Uint32Array, s?: unknown) => {
+      if (s) throw new Error("swarm write failed")
+    }) as typeof lease.publishState
+    internals.partitionLease = lease
+    internals.joinedSecondaries.set(BATCH_ID_2, secondary)
+    internals.activeUploadCount = 0
+    internals.lastLeaseActivityAt = 0 // idle for longer than IDLE_YIELD_MS
+
+    await internals.refreshTick(lease)
+
+    expect(lease.publishState).toHaveBeenCalledWith(
+      expect.any(Uint32Array),
+      secondary,
+    )
+    expect(lease.release).toHaveBeenCalledTimes(1)
+    expect(coordinator.currentPartition).toBeUndefined()
+  })
+
   it("keeps an idle lease when no rival is known (solo device)", async () => {
     const calls: string[] = []
     const stamper = makeStamper(calls)
@@ -1563,9 +1602,15 @@ describe("BatchWriteCoordinator — per-write batch targeting (account-scoped le
     expect(lease.release).not.toHaveBeenCalled()
   })
 
-  it("takes the write lock under the ACCOUNT key", async () => {
+  it("takes the write lock under the ACCOUNT key, nesting the legacy per-batch keys", async () => {
     await setupJoined()
     expect(writeLockController.lastKey).toBe("acct-1")
+    // Rollover transition guard: the legacy `swarm-write-<batchId>` locks for
+    // every batch this write may stamp under — the lease batch AND the
+    // targeted batch — so a pre-account-scoped tab is still excluded.
+    expect(writeLockController.lastLegacyIds).toEqual(
+      expect.arrayContaining([BATCH_ID, BATCH_ID_2]),
+    )
   })
 
   it("flushes BOTH the write's stamper and the lease stamper after a targeted write", async () => {
