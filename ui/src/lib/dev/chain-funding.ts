@@ -24,7 +24,7 @@ import {
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
-import { ownerFunds, postageChain } from '$lib/payment/chain'
+import { chainIdentity, ownerFunds, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { derivePostageSigner } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
@@ -71,6 +71,21 @@ const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
  */
 const PURCHASE_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
 
+/**
+ * Refuse to run against Gnosis mainnet.
+ *
+ * Nothing here can currently do damage there — the faucet key is public and
+ * holds nothing, and no real node serves `anvil_setBalance` — but both of
+ * those facts live two packages away, and neither was chosen as a safeguard.
+ * The red banner warns the person; this stops the code. The identity is
+ * already cached by the time any of these run, so it costs a map lookup.
+ */
+async function assertDevChain(tool: string): Promise<void> {
+  if ((await chainIdentity()).isMainnet) {
+    throw new Error(`${tool} only runs on a dev chain — the configured Gnosis RPC is mainnet.`)
+  }
+}
+
 /** What one faucet send delivers. A zero leg is skipped entirely. */
 export interface FaucetAmounts {
   /** Gnosis-side native xDAI, in wei. */
@@ -97,6 +112,7 @@ export async function sendFromFaucet(address: string, amounts: FaucetAmounts): P
   if (amounts.xdai <= 0n && amounts.bzzPlur <= 0n) {
     throw new Error('Enter an amount above zero.')
   }
+  await assertDevChain('The faucet')
   const chain = await postageChain()
   await fundLocalAccount({ to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur }, chain.settings)
 }
@@ -153,6 +169,7 @@ export async function createOwnedBatchOnChain(
   derivationKey: string,
   { depth: requestedDepth, days = DEV_BATCH_DAYS }: BatchShape = {},
 ): Promise<LocalBatch> {
+  await assertDevChain('Creating a batch here')
   const { destination } = await derivePostageSigner(derivationKey)
   const chain = await postageChain()
   // Any dev flow that makes a batch will go on to extend or resize it, so this
