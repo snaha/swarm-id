@@ -66,6 +66,11 @@ import {
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "./chunk"
+import {
+  AccountBus,
+  BroadcastChannelTransport,
+  ORIGIN_TOPIC,
+} from "./bus/account-bus"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -136,7 +141,6 @@ import { tryCreateTag } from "./utils/tag"
 import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
-  UtilizationUpdateMessageSchema,
   isSignedOutAccount,
   type AccountStateSnapshot,
   type SignedInAccount,
@@ -242,7 +246,7 @@ export class SwarmIdProxy {
   private lastConnectionInfo: ConnectionInfo | undefined
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
-  private utilizationChannel: BroadcastChannel
+  private bus: AccountBus
   private subsidisedGatewayUrl: string | undefined
   /**
    * The write path (lock + partition lease + stamp flush) for the current
@@ -288,8 +292,8 @@ export class SwarmIdProxy {
     this.setupMessageListener()
     this.setupStorageListeners()
 
-    // Initialize multi-tab coordination via BroadcastChannel
-    this.utilizationChannel = new BroadcastChannel("swarm-id-utilization")
+    // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
+    this.bus = new AccountBus([new BroadcastChannelTransport(ORIGIN_TOPIC)])
     this.setupUtilizationListener()
 
     // Announce readiness to parent window immediately
@@ -606,8 +610,7 @@ export class SwarmIdProxy {
       this.publishTimer = undefined
     }
 
-    // Clean up utilization channel
-    this.utilizationChannel.close()
+    this.bus.close()
   }
 
   /**
@@ -616,21 +619,13 @@ export class SwarmIdProxy {
    * This tab applies the delta update directly from the message.
    */
   private setupUtilizationListener(): void {
-    this.utilizationChannel.onmessage = (event) => {
-      try {
-        const result = UtilizationUpdateMessageSchema.safeParse(event.data)
-        if (
-          result.success &&
-          result.data.batchId === this.postageBatchId &&
-          this.stamper
-        ) {
-          // Apply delta update directly - no IndexedDB read needed
-          this.stamper.applyUtilizationUpdate(result.data.buckets)
-        }
-      } catch (error) {
-        console.error("[Proxy] Failed to apply utilization update:", error)
+    this.bus.subscribe((message) => {
+      if (message.type !== "utilization-updated") return
+      if (message.batchId === this.postageBatchId && this.stamper) {
+        // Apply delta update directly - no IndexedDB read needed
+        this.stamper.applyUtilizationUpdate(message.buckets)
       }
-    }
+    })
   }
 
   /**
@@ -864,7 +859,7 @@ export class SwarmIdProxy {
 
       // Broadcast utilization update to other tabs with pre-captured buckets
       if (this.postageBatchId && buckets.length > 0) {
-        this.utilizationChannel.postMessage({
+        this.bus.publish({
           type: "utilization-updated",
           batchId: this.postageBatchId,
           buckets,
