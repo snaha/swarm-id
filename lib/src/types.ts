@@ -130,6 +130,11 @@ export interface UploadOptions {
   /**
    * Hex id of a stamp the account owns (a "drive") to upload under, instead of
    * the resolved default. Rejects if the account does not own it.
+   *
+   * AUTHORIZATION: any connected app can target ANY batch the account owns —
+   * per-app stamp assignment only scopes which batch untargeted uploads
+   * resolve to, it is not an isolation boundary. Accepted trade-off of the
+   * origin-only permission model (see `getPostageBatches`).
    */
   batchID?: BatchId
 }

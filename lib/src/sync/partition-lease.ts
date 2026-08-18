@@ -1103,6 +1103,9 @@ export class PartitionLease {
       throw new Error("PartitionLease: joinBatch requires a held lease")
     }
     const partition = this.self.partition
+    // NB: nominally always true for the declared type, but callers/tests may
+    // hand in structurally-compatible doubles without the persistence layer —
+    // treat those as having no synced reference, like `claimPartition` does.
     const knownReference =
       stamper instanceof UtilizationAwareStamper
         ? await stamper.getSyncedReference(partition)

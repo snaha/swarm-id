@@ -760,6 +760,12 @@ export class SwarmIdClient {
    * `batchID`, uploads use the account's resolved default stamp — the batch
    * flagged `isDefault: true` in this list.
    *
+   * PRIVACY/AUTHORIZATION: every connected app sees this full list AND can
+   * upload to any batch in it via `batchID` — access is origin-scoped, there
+   * is no per-app permission model. Per-app stamp assignment only picks an
+   * app's default, it does not fence the other drives off from it. Accepted
+   * trade-off.
+   *
    * @returns A promise resolving to the account's postage batches (empty if none)
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
@@ -3041,6 +3047,14 @@ export class SwarmIdClient {
    * Only the publisher (original uploader) can add grantees.
    * Returns new references since Swarm content is immutable.
    *
+   * NOTE: grantee/history chunks always stamp under the account's resolved
+   * DEFAULT batch — this call takes no `batchID`. If the ACT content was
+   * uploaded to a different batch ({@link ActUploadOptions.batchID}), the
+   * dataset straddles two batches with independent TTLs, and the access
+   * structure dies with the default batch even while the content lives. Keep
+   * ACT datasets on the default batch until grantee operations support
+   * `batchID`.
+   *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
@@ -3105,6 +3119,10 @@ export class SwarmIdClient {
    * revocation. Revocation only stops access to content published afterwards.
    * The returned `encryptedReference` is unchanged — it is NOT re-encrypted, as
    * that would leak the keystream to former grantees (#496).
+   *
+   * NOTE: like `actAddGrantees`, the new grantee/history chunks stamp under
+   * the account's resolved DEFAULT batch (no `batchID` support) — see the
+   * batch-straddling caveat there.
    *
    * @param historyReference - The current history reference
    * @param encryptedReference - The current encrypted reference
