@@ -548,12 +548,25 @@ export class SwarmIdProxy {
     }
   }
 
-  /** Clear the default stamp binding (all four fields — always together). */
+  /**
+   * Clear the default stamp binding (all four fields — always together) and
+   * tear down the write coordinator with it.
+   *
+   * The coordinator's lease stamper IS the binding's stamper, so a coordinator
+   * that outlives the binding keeps heartbeating lock/intent/occupancy SOCs
+   * under a batch this proxy no longer serves (e.g. the default drive was
+   * deleted in the trusted UI). It also strands `resolveUploadStamper`, whose
+   * promotion path is gated on `!this.coordinator`: a later targeted write
+   * would join that stale lease rather than rebind. Only the genuine
+   * "no usable stamp" paths reach here — `bindStamp` sets its fields directly.
+   */
   private clearDefaultBinding(): void {
     this.postageBatchId = undefined
     this.signerKey = undefined
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
+    this.coordinator?.teardown()
+    this.coordinator = undefined
   }
 
   /**
@@ -833,6 +846,14 @@ export class SwarmIdProxy {
       console.error("[Proxy] Failed to create stamper:", error)
       this.stamper = undefined
       this.stamperAccountFingerprint = undefined
+      // Tear the previous coordinator down too: it still holds a lease stamper
+      // for the batch we just rebound AWAY from, so leaving it alive keeps it
+      // heartbeating lock/intent/occupancy SOCs under a batch this proxy no
+      // longer serves — and `resolveUploadStamper` gates its promotion path on
+      // `!this.coordinator`, so a later targeted write would join that stale
+      // lease instead of rebinding.
+      this.coordinator?.teardown()
+      this.coordinator = undefined
       return
     }
 
@@ -879,7 +900,16 @@ export class SwarmIdProxy {
       readLeaseCache: () => this.readLeaseCache(accountInfo.accountId),
       writeLeaseCache: (snap) =>
         this.writeLeaseCache(accountInfo.accountId, snap ?? null),
-      flushStamperState: (stamper) => this.saveStamperStateIfNeeded(stamper),
+      // Unconditional: this only fires from the coordinator's `lockAndFlush`,
+      // i.e. a stamped write whose stamper really did stamp. It used to be
+      // gated on `!isSubsidisedModeActive()`, which is ALSO true whenever the
+      // default binding is cleared while a gateway is configured — and a
+      // targeted write still takes the stamped path there — so the flush was
+      // skipped while `publishState` → `setSyncedReference` kept persisting,
+      // leaving the next session with a local counter BELOW its synced
+      // reference (the one direction `claimPartition`'s SAFETY INVARIANT rules
+      // out, and one `writePartitionState`'s tripwire cannot catch).
+      flushStamperState: (stamper) => this.saveStamperState(stamper),
       getWorkerPool: (stamper, count) =>
         this.getOrCreateWorkerPool(stamper, count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
@@ -1111,18 +1141,6 @@ export class SwarmIdProxy {
       operation,
       targetOptions,
     )
-  }
-
-  /**
-   * Save the given stamper's state only in stamper mode.
-   * In subsidised mode, there's no local stamp state to persist.
-   */
-  private async saveStamperStateIfNeeded(
-    stamper: UtilizationAwareStamper,
-  ): Promise<void> {
-    if (!this.isSubsidisedModeActive()) {
-      await this.saveStamperState(stamper)
-    }
   }
 
   /**

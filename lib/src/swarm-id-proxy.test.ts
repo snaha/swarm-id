@@ -926,3 +926,68 @@ describe("SwarmIdProxy coordinator targets the configured Bee node", () => {
     expect(String(deps.bee.url)).not.toContain("gateway.example")
   })
 })
+
+describe("SwarmIdProxy coordinator lifetime + flush (PR #537 review)", () => {
+  const CoordinatorMock = vi.mocked(BatchWriteCoordinator)
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    CoordinatorMock.mockClear()
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    })
+  })
+
+  it("tears the write coordinator down when the default binding is cleared", () => {
+    const proxy = makeProxy()
+    const teardown = vi.fn()
+    ;(proxy as never)["coordinator"] = { teardown }
+    ;(proxy as never)["postageBatchId"] = B1
+
+    // e.g. the default drive was deleted in the trusted UI. A coordinator that
+    // outlives the binding keeps heartbeating lease SOCs under the tombstoned
+    // batch, and strands `resolveUploadStamper`'s promotion path.
+    ;(proxy as never)["clearDefaultBinding"]()
+
+    expect(teardown).toHaveBeenCalledTimes(1)
+    expect((proxy as never)["coordinator"]).toBeUndefined()
+  })
+
+  it("flushes a stamped write's stamper even while subsidised mode reads active", async () => {
+    const proxy = makeProxy()
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["deviceId"] = "device-1"
+    ;(proxy as never)["lookupAccountForApp"] = () =>
+      Promise.resolve({
+        owner: { toHex: () => "ab".repeat(20) },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 1,
+      })
+
+    await (proxy as never)["initializeStamper"](17)
+    const deps = CoordinatorMock.mock.calls[0][0] as unknown as {
+      flushStamperState: (s: unknown) => Promise<void>
+    }
+
+    // Default binding gone (deleted drive) + a configured gateway makes
+    // `isSubsidisedModeActive()` true — but a targeted write still takes the
+    // stamped path, so its bucket state MUST be persisted. Skipping it while
+    // `setSyncedReference` keeps persisting leaves the next session with a
+    // local counter below its synced reference.
+    ;(proxy as never)["postageBatchId"] = undefined
+    const stamper = {
+      batchId: { toHex: () => B2 },
+      getBucketUpdatesForBroadcast: vi.fn(() => []),
+      flush: vi.fn(async () => {}),
+    }
+
+    await deps.flushStamperState(stamper)
+
+    expect(stamper.flush).toHaveBeenCalledTimes(1)
+  })
+})
