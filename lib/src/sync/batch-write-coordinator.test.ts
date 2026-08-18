@@ -1602,6 +1602,31 @@ describe("BatchWriteCoordinator — per-write batch targeting (account-scoped le
     expect(lease.release).not.toHaveBeenCalled()
   })
 
+  it("joins a REBUILT lease-batch stamper instead of stamping it unbound", async () => {
+    const calls: string[] = []
+    const lease = heldLease()
+    leaseController.lease = lease
+    const leaseStamper = makeStamper(calls, "lease")
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(leaseStamper), mode: "oneshot" }),
+    )
+    // The proxy rebuilt the DEFAULT batch's stamper (a failed create left the
+    // old coordinator alive, so `resolveUploadStamper` built a fresh instance
+    // for the same batch id). Matching on batch id alone would skip the join
+    // and hand an UNBOUND stamper to the write, whose `stamp()` falls back to
+    // partition 0's slot lane and corrupts a peer's slots.
+    const rebuilt = makeStamper(calls, "rebuilt", BATCH_ID)
+    await coordinator.withWrite(asStamper(rebuilt), async () => "ok", {
+      wait: "block",
+    })
+
+    expect(lease.joinBatch).toHaveBeenCalledWith(asStamper(rebuilt))
+    expect(rebuilt.bindPartition).toHaveBeenCalledWith(
+      expect.objectContaining({ partition: 1, partitionCount: 4 }),
+    )
+    expect(calls).toContain("rebuilt:bind")
+  })
+
   it("takes the write lock under the ACCOUNT key, nesting the legacy per-batch keys", async () => {
     await setupJoined()
     expect(writeLockController.lastKey).toBe("acct-1")

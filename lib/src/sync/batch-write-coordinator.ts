@@ -363,18 +363,22 @@ export class BatchWriteCoordinator {
    * Bind a targeted batch's stamper to the held partition: seed its counter
    * from that batch's published partition state (`PartitionLease.joinBatch` —
    * no lock activity, the claim is account-scoped) and register it for the
-   * lease-loss fan-out. No-op for the lease batch (bound at acquire), an
-   * already-joined instance, and single-partition legacy accounts (nothing is
-   * sliced). A REPLACED stamper instance for an already-joined batch (the
-   * proxy rebuilt it) re-joins and supersedes the old entry. MUST run under
-   * the write lock, after `ensureHeldForUpload`.
+   * lease-loss fan-out. No-op for the lease stamper ITSELF (bound at acquire),
+   * an already-joined instance, and single-partition legacy accounts (nothing
+   * is sliced). A REPLACED stamper instance (the proxy rebuilt it) re-joins and
+   * supersedes the old entry — including a rebuild of the LEASE batch, which
+   * must be matched by instance and not by batch id: a fresh instance for the
+   * lease batch is unbound, and letting it through would stamp it into
+   * partition 0's slot lane (`stamp()` falls back to `dataSlot(0, …)` when no
+   * partition is bound) before the post-op counter guard fails the upload.
+   * MUST run under the write lock, after `ensureHeldForUpload`.
    */
   private async ensureBatchJoined(
     stamper: UtilizationAwareStamper,
   ): Promise<void> {
     if (this.deps.partitionCount <= 1) return
     const key = stamper.batchId.toHex()
-    if (key === this.deps.leaseStamper.batchId.toHex()) return
+    if (stamper === this.deps.leaseStamper) return
     if (this.joinedSecondaries.get(key) === stamper) return
     const lease = this.partitionLease
     const partition = lease?.currentPartition
