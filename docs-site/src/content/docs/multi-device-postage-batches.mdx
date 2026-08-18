@@ -440,7 +440,9 @@ snapshot. Publishing therefore:
 
 The merge always folds the _original_ local state onto the freshest remote, so retries
 converge. Publishing is serialized within an origin by a cross-tab Web Lock
-(`swarm-write-<batchId>`) so a proxy iframe and the UI never collide locally.
+(`withAccountWriteLock`, key `swarm-write-account-<accountId>`) so a proxy iframe and
+the UI never collide locally — the lock is account-scoped, so writers targeting
+_different_ batches of one account also exclude each other locally.
 
 ### Merge rules
 
