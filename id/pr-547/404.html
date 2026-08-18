@@ -13,12 +13,12 @@
     <link rel="icon" href="/id/pr-547/favicon.png" type="image/png" />
     <link rel="manifest" href="/id/pr-547/manifest.json" />
     
-		<link rel="modulepreload" href="/id/pr-547/_app/immutable/entry/start.BqhaKzbV.js">
-		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/D9LJo32W.js">
+		<link rel="modulepreload" href="/id/pr-547/_app/immutable/entry/start.CPEeeATT.js">
+		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/CoifgpXZ.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/DGiDEN-y.js">
-		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/WnOmgnp3.js">
+		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/BdQaoIeM.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/BuFeEejO.js">
-		<link rel="modulepreload" href="/id/pr-547/_app/immutable/entry/app.C76XQ7Lq.js">
+		<link rel="modulepreload" href="/id/pr-547/_app/immutable/entry/app.DBx4zuNp.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/PPVm8Dsz.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/CZl0UB58.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/b68sboaJ.js">
@@ -26,23 +26,29 @@
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/DRJ9iMgz.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/Cm5BoI18.js">
 		<link rel="modulepreload" href="/id/pr-547/_app/immutable/chunks/D83BA6AT.js">
+		<link rel="modulepreload" href="/id/pr-547/_app/env.js">
   </head>
   <body data-sveltekit-preload-data="hover">
     <div style="display: contents">
 			<script>
 				{
-					__sveltekit_1mt646o = {
+					__sveltekit_6crx9b = {
 						base: "/id/pr-547",
-						assets: "/id/pr-547"
+						assets: "/id/pr-547",
+						env: null
 					};
 
 					const element = document.currentScript.parentElement;
 
-					Promise.all([
-						import("/id/pr-547/_app/immutable/entry/start.BqhaKzbV.js"),
-						import("/id/pr-547/_app/immutable/entry/app.C76XQ7Lq.js")
-					]).then(([kit, app]) => {
-						kit.start(app, element);
+					import("/id/pr-547/_app/env.js").then(({ env }) => {
+						__sveltekit_6crx9b.env = env;
+
+						Promise.all([
+							import("/id/pr-547/_app/immutable/entry/start.CPEeeATT.js"),
+							import("/id/pr-547/_app/immutable/entry/app.DBx4zuNp.js")
+						]).then(([kit, app]) => {
+							kit.start(app, element);
+						});
 					});
 				}
 			</script>
