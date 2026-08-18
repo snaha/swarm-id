@@ -41,6 +41,28 @@ static_sites:
       allow_credentials: true
       max_age: '600s'
 
+# Account-bus signaling and relay service (docs/Account-Bus.md, signaling/).
+# Reached at wss://swarm-id.snaha.net/bus; E2E-encrypted payloads only.
+services:
+  - name: bus-signaling
+    github:
+      repo: snaha/swarm-id
+      branch: main
+      deploy_on_push: false
+    source_dir: /
+    build_command: corepack enable && pnpm install --frozen-lockfile
+    run_command: corepack enable && pnpm --filter @swarm-id/signaling start
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    routes:
+      - path: /bus
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: ALLOWED_ORIGINS
+        value: 'https://swarm-id.snaha.net'
+
 # Environment variables
 envs:
   - key: NODE_VERSION

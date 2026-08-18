@@ -143,9 +143,11 @@ Each phase is an independent PR chain:
    storage-event plumbing (`handleAccountStorageChange`, `swarm-id-storage-write`). Zero new
    infrastructure.
 2. **Signaling service + WebRTC transport**: minimal self-hosted WebSocket signaling
-   (evaluate Trystero's self-hosted `ws-relay` strategy against a ~100-line bespoke server;
-   pick the smaller maintenance surface), the DataChannel mesh transport, and the
-   signaling-WS blob-relay fallback. New deploy unit in `deploy-do.yml`.
+   (a bespoke ~180-line `ws` server was chosen over Trystero's `ws-relay` — the relay
+   fallback and per-peer targeting are not in Trystero's protocol, and the bespoke server
+   stays dependency-light), the DataChannel mesh transport, and the signaling-WS
+   blob-relay fallback. Deployed as a `services:` entry in `.do/swarm-id-app.yaml`
+   (`wss://swarm-id.snaha.net/bus`).
 3. **Safari write enablement**: widen `AuthData` and `sendSecretToOpener`, hydration in
    `handlePopupMessage`, roster naming/expiry for partition devices, flip the upload gate.
 4. **Bus-accelerated leases**: fast-path handover and live utilization deltas through

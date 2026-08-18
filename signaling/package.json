@@ -1,0 +1,42 @@
+{
+  "name": "@swarm-id/signaling",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Account-bus signaling and relay server (WebRTC signaling + encrypted-blob relay fallback, docs/Account-Bus.md)",
+  "main": "src/server.ts",
+  "exports": {
+    ".": {
+      "import": "./src/server.ts",
+      "types": "./src/server.ts"
+    }
+  },
+  "scripts": {
+    "start": "tsx src/main.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src/**/*.ts test/**/*.ts",
+    "lint:fix": "eslint src/**/*.ts test/**/*.ts --fix",
+    "format": "prettier --write \"src/**/*.ts\" \"test/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.ts\" \"test/**/*.ts\"",
+    "typecheck": "tsc --noEmit",
+    "check:all": "pnpm format:check && pnpm lint && pnpm typecheck && pnpm test"
+  },
+  "license": "Apache-2.0",
+  "dependencies": {
+    "tsx": "^4.19.2",
+    "ws": "^8.18.0",
+    "zod": "4.1.13"
+  },
+  "devDependencies": {
+    "@types/node": "24.10.1",
+    "@types/ws": "^8.18.1",
+    "@typescript-eslint/eslint-plugin": "8.48.1",
+    "@typescript-eslint/parser": "8.48.1",
+    "eslint": "9.39.1",
+    "eslint-plugin-notice": "^1.0.0",
+    "prettier": "3.7.3",
+    "typescript": "5.8.3",
+    "vitest": "4.0.14"
+  }
+}
