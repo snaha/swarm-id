@@ -45,7 +45,7 @@
   } from '$lib/dev/chain-funding'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
-  import { chainIdentity, postageChain, probeChainId } from '$lib/payment/chain'
+  import { chainIdentity, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -684,17 +684,12 @@ Check console logs for details:
   let importMessage = $state('')
   let importError = $state('')
 
-  // Contract address the read will use: the override if set, else whatever the
-  // endpoint's chain reports. Every chain the app supports carries PostageStamp
-  // at the Gnosis address, so that is also the fallback when the probe fails.
-  const DEFAULT_POSTAGE_STAMP = gnosisMainnetSettings().addresses.postageStamp
-  let resolvedContract = $state<string>(DEFAULT_POSTAGE_STAMP)
-  $effect(() => {
-    const url = importRpcUrl.trim()
-    void postageChain(url)
-      .then((chain) => (resolvedContract = chain.settings.addresses.postageStamp))
-      .catch(() => (resolvedContract = DEFAULT_POSTAGE_STAMP))
-  })
+  // Contract address the read will use unless the override is filled in. Every
+  // chain the app supports is Gnosis or a fork of it carrying the deployment at
+  // the same address, so this is one constant rather than something to resolve
+  // — asking the endpoint would spend two probes per keystroke to be told what
+  // is already known.
+  const resolvedContract = gnosisMainnetSettings().addresses.postageStamp
 
   async function importBatchById() {
     importError = ''
@@ -1357,8 +1352,8 @@ Check console logs for details:
           <span class={LABEL_TEXT_CLASS}>PostageStamp contract</span>
           <Input bind:value={importContractOverride} placeholder={resolvedContract} />
           <span class="text-muted-foreground text-xs">
-            Auto from RPC: <span class="font-mono">{resolvedContract}</span> — leave blank to use it (local
-            RPC → local deployment, else Gnosis mainnet).
+            The Gnosis deployment, <span class="font-mono">{resolvedContract}</span> — which the local
+            chain carries at the same address. Leave blank to use it.
           </span>
         </label>
         <label class="flex cursor-pointer items-center gap-2 text-sm">

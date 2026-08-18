@@ -26,8 +26,11 @@ export async function fetchExistingBatchFromChain(
   opts?: { rpcUrl?: string; contractAddress?: string },
 ): Promise<NewStamp | undefined> {
   const rpcUrl = opts?.rpcUrl ?? networkSettingsStore.gnosisRpcUrl
-  // The contract address follows the chain the endpoint actually serves, not
-  // its hostname — a localhost fork of Gnosis carries the MAINNET deployment.
+  // Every chain this app talks to is Gnosis or a fork of it carrying the
+  // deployment at the same address, so the address itself is a constant. Going
+  // through the chain for it is what makes the endpoint prove that first: an
+  // RPC that is unreachable or serving something other than Gnosis throws here,
+  // rather than returning "no such batch" from a read against the wrong chain.
   const contractAddress =
     opts?.contractAddress ?? (await postageChain(rpcUrl)).settings.addresses.postageStamp
 
