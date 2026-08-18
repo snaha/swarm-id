@@ -527,6 +527,30 @@ describe("SwarmIdProxy stamp enrichment (getPostageBatches efficiency)", () => {
     }
   })
 
+  it("passes the stamp's drive name through as the batch label", async () => {
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: {
+        postageStamps: [
+          { ...fullStamp(B1), name: "Family photos" },
+          fullStamp(B2),
+        ],
+      },
+    })
+    // All network sources down — the label comes from the stored stamp alone.
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(() => Promise.resolve({ ok: false, status: 500 })),
+    )
+
+    await getBatches()
+
+    const { postageBatches } = lastMessage()
+    expect(postageBatches[0].label).toBe("Family photos")
+    // Unnamed stamps keep the documented "" fallback.
+    expect(postageBatches[1].label).toBe("")
+  })
+
   it("falls back to the stored snapshot when enrichment hangs", async () => {
     vi.useFakeTimers()
     try {
@@ -627,6 +651,20 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
   it("rejects a batch the account does not own", async () => {
     await expect(resolve(B3)).rejects.toThrow("Batch not owned by account")
     expect(bindStamp).not.toHaveBeenCalled()
+  })
+
+  it("builds a working stamper when the bound default batch's stamper failed to build", async () => {
+    // Lenient `initializeStamper` can leave the batch id bound with NO
+    // stamper. An upload explicitly targeting that batch must not resolve to
+    // `undefined` (the caller would misroute it); the targeted build path
+    // serves it instead, without touching the broken default binding.
+    ;(proxy as never)["stamper"] = undefined
+
+    const stamper = await resolve(B1)
+
+    expect(stamper?.batchId?.toHex()).toBe(B1)
+    expect(bindStamp).not.toHaveBeenCalled()
+    expect((proxy as never)["stamper"]).toBeUndefined()
   })
 
   it("a failed target build rejects the write and leaves the default binding untouched", async () => {
@@ -753,6 +791,20 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
     // The write ran under the coordinator with the TARGET batch's stamper.
     expect(withWrite.mock.calls[0][0]).toBe(targetStamper)
     expect(target).toMatchObject({ mode: "stamper" })
+  })
+
+  it("an explicitly targeted write never falls back to the subsidised gateway", async () => {
+    // Silently landing a `batchID`-targeted upload on the gateway would stamp
+    // it under the GATEWAY's batch — betraying the requested target. Fail it.
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() =>
+      Promise.resolve(undefined),
+    )
+
+    await expect(write(async (t) => t, B2)).rejects.toThrow(
+      "Stamper not initialized",
+    )
+    expect(withWrite).not.toHaveBeenCalled()
   })
 
   it("falls back to the gateway when the default binding resolves to nothing", async () => {

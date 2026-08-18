@@ -972,6 +972,17 @@ export class SwarmIdProxy {
         stamper,
         desiredCount,
       )
+      // Cap live pools at two — the default binding's and this write's batch.
+      // Each pool holds up to 8 workers and entries are cached for the whole
+      // session, so keeping one pool per batch ever targeted would let worker
+      // count grow with every drive touched. An evicted batch just re-creates
+      // its pool on its next worker-backed write.
+      const keep = new Set([stamper.batchId.toHex(), this.postageBatchId])
+      for (const [key, other] of this.stampEntries) {
+        if (keep.has(key) || !other.workerPool) continue
+        other.workerPool.terminate()
+        other.workerPool = undefined
+      }
       return entry.workerPool
     } catch (error) {
       console.warn("[Proxy] Failed to create StampWorkerPool:", error)
@@ -1035,7 +1046,9 @@ export class SwarmIdProxy {
       const stamper = await this.resolveUploadStamper(batchID)
       // Re-resolving the default may have cleared the binding (e.g. the
       // default stamp was deleted) — fall back to the gateway if configured.
-      if (!stamper && this.isSubsidisedModeActive()) {
+      // NEVER for an explicit `batchID`: silently landing a targeted upload
+      // on the gateway's batch would betray the requested target — fail it.
+      if (!stamper && !batchID && this.isSubsidisedModeActive()) {
         return operation({
           mode: "subsidised",
           gatewayUrl: this.subsidisedGatewayUrl!,
@@ -1480,9 +1493,14 @@ export class SwarmIdProxy {
       return this.stamper
     }
     const targetHex = batchID.toLowerCase()
-    if (targetHex === this.postageBatchId) {
+    if (targetHex === this.postageBatchId && this.stamper) {
       return this.stamper
     }
+    // NB: when the target IS the bound default batch but its stamper failed to
+    // build (lenient `initializeStamper`), fall through — the targeted build
+    // path below constructs a working stamper for it without touching the
+    // (broken) default binding, instead of returning `undefined` and letting
+    // the caller misroute an explicitly targeted upload.
     const stamp = this.findOwnedStamp(targetHex)
     if (!stamp) {
       const stale = this.stampEntries.get(targetHex)
@@ -4410,7 +4428,10 @@ export class SwarmIdProxy {
       batchID: batchIdHex,
       utilization: stamp.utilization,
       usable: details?.usable ?? stamp.usable,
-      label: "", // PostageStamp doesn't store label
+      // The user-given drive name; "" for stamps named before naming existed
+      // or bought outside the app (clients fall back to a batch-ID-derived
+      // label, like the identity UI does).
+      label: stamp.name ?? "",
       depth: stamp.depth,
       amount: stamp.amount.toString(),
       bucketDepth: stamp.bucketDepth,
