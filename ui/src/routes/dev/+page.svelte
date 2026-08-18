@@ -117,12 +117,36 @@
    * pair is what makes an environment, so one preset URL beside a hand-typed
    * one is not that preset.
    */
+  /**
+   * Endpoints compared as URLs rather than as strings: the settings dialog
+   * saves whatever was typed, and `http://localhost:1633` is the same node as
+   * the `http://localhost:1633/` written here. Anything unparseable can only be
+   * `Custom`, so it compares as itself.
+   */
+  function sameEndpoint(a: string, b: string): boolean {
+    return normalizeEndpoint(a) === normalizeEndpoint(b)
+  }
+
+  function normalizeEndpoint(url: string): string {
+    try {
+      return new URL(url.trim()).href
+    } catch {
+      return url.trim()
+    }
+  }
+
   const endpointMode = $derived.by(() => {
     const { beeNodeUrl, gnosisRpcUrl } = networkSettingsStore
-    if (beeNodeUrl === LOCAL_BEE_NODE_URL && LOCAL_GNOSIS_RPC_URLS.includes(gnosisRpcUrl)) {
+    if (
+      sameEndpoint(beeNodeUrl, LOCAL_BEE_NODE_URL) &&
+      LOCAL_GNOSIS_RPC_URLS.some((url) => sameEndpoint(url, gnosisRpcUrl))
+    ) {
       return 'Local'
     }
-    if (beeNodeUrl === DEFAULT_BEE_NODE_URL && gnosisRpcUrl === DEFAULT_GNOSIS_RPC_URL) {
+    if (
+      sameEndpoint(beeNodeUrl, DEFAULT_BEE_NODE_URL) &&
+      sameEndpoint(gnosisRpcUrl, DEFAULT_GNOSIS_RPC_URL)
+    ) {
       return 'Production'
     }
     return 'Custom'
@@ -945,7 +969,7 @@ Check console logs for details:
           Bee node IS that cluster — against a gateway there is no such peer to
           link to, and a dead localhost row reads as something being broken.
         -->
-        {#if networkSettingsStore.beeNodeUrl === LOCAL_BEE_NODE_URL}
+        {#if sameEndpoint(networkSettingsStore.beeNodeUrl, LOCAL_BEE_NODE_URL)}
           <div class="flex items-center gap-2">
             <StatusDot endpoint={LOCAL_CLUSTER_WORKER_URL} />
             <span class="font-mono text-sm">Cluster worker:</span>
