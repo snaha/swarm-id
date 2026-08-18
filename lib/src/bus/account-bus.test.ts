@@ -181,6 +181,31 @@ describe("AccountBus over BroadcastChannelTransport", () => {
     }
   })
 
+  it("delivers via a transport added after construction, until removed", async () => {
+    const sender = makeBus("late-topic")
+    const receiver = new AccountBus([])
+    try {
+      const received = collect(receiver)
+      const remove = receiver.addTransport(
+        new BroadcastChannelTransport("late-topic"),
+      )
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(received, 1)
+
+      remove()
+      sender.publish(UTILIZATION_MESSAGE)
+      const settle = makeBus("late-topic")
+      const settleReceived = collect(settle)
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(settleReceived, 1)
+      settle.close()
+      expect(received).toHaveLength(1)
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
   it("delivers an account delta whose snapshot merges exactly like a device-state feed payload", async () => {
     const sender = makeBus()
     const receiver = makeBus()

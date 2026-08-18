@@ -99,6 +99,27 @@ export class AccountBus {
     }
   }
 
+  /**
+   * Attach a transport after construction (e.g. the signaling transport once
+   * the account's derivation key is known). Returns a remover that detaches
+   * and closes it. Duplicate delivery across transports is tolerated by
+   * design: every current message kind applies idempotently (absolute bucket
+   * values; LWW snapshot merges).
+   */
+  addTransport(transport: BusTransport): () => void {
+    this.transports.push(transport)
+    const unsubscribe = transport.subscribe((raw) => this.dispatch(raw))
+    this.transportUnsubscribers.push(unsubscribe)
+    return () => {
+      unsubscribe()
+      transport.close()
+      this.transports = this.transports.filter((t) => t !== transport)
+      this.transportUnsubscribers = this.transportUnsubscribers.filter(
+        (u) => u !== unsubscribe,
+      )
+    }
+  }
+
   subscribe(handler: (message: BusMessage) => void): () => void {
     this.handlers.add(handler)
     return () => this.handlers.delete(handler)

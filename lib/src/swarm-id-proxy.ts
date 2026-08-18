@@ -71,6 +71,8 @@ import {
   BroadcastChannelTransport,
   ORIGIN_TOPIC,
 } from "./bus/account-bus"
+import { SignalingTransport } from "./bus/signaling-transport"
+import { deriveBusContext } from "./bus/bus-context"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -144,7 +146,10 @@ import {
   isSignedOutAccount,
   type AccountStateSnapshot,
   type SignedInAccount,
+  type SyncedAccount,
+  type NetworkSettings,
 } from "./schemas"
+import { DEFAULT_SESSION_DURATION } from "./utils/constants"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -232,10 +237,22 @@ export class SwarmIdProxy {
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   private storagePartitionedIdentity: ConnectionIdentity | undefined
+  /**
+   * Hydrated account view for the storage-partitioning fallback: the synced
+   * projection handed over by the connect popup (`AuthData.account`), held in
+   * memory only — the stored-account schema requires a vault, and partitioned
+   * sessions already re-handshake per iframe load. When set, the proxy is a
+   * first-class writer despite the partition (docs/Account-Bus.md, phase 3).
+   */
+  private partitionAccount: SignedInAccount | undefined
+  /** Topic of the currently attached bus signaling transport (dedup guard). */
+  private busSignalingTopic: string | undefined
+  private removeBusSignalingTransport: (() => void) | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private gnosisRpcUrl: string
   private postageStampContractAddress: string
+  private signalingUrl: string | undefined
   private authButtonContainer: HTMLElement | undefined
   private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
@@ -288,6 +305,7 @@ export class SwarmIdProxy {
     // bee-compose anvil deployment; defaults to the Gnosis mainnet contract.
     this.postageStampContractAddress =
       config?.postageStampContractAddress || POSTAGE_STAMP_CONTRACT_ADDRESS
+    this.signalingUrl = config?.signalingUrl
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
@@ -452,8 +470,15 @@ export class SwarmIdProxy {
    * postage stamp is unchanged but the underlying account isn't.
    */
   private async refreshStampFromStorage(): Promise<void> {
-    if (this.storagePartitioned) {
+    if (this.isDownloadOnlyPartition) {
       return
+    }
+
+    // Any resolved connection joins the account bus (idempotent per account);
+    // one code path on every browser, partitioned or not.
+    const busConnection = this.findConnectionForParent()
+    if (busConnection) {
+      void this.ensureBusSignalingTransport(busConnection.account.derivationKey)
     }
 
     const stamp = this.lookupPostageStampForApp()
@@ -492,6 +517,7 @@ export class SwarmIdProxy {
     this.authenticated = true
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
+    this.partitionAccount = undefined
     this.authLoading = false
     this.isConnecting = false
     // Capture the device identity once, now, while we can read first-party
@@ -578,9 +604,19 @@ export class SwarmIdProxy {
         }
       }
 
-      // No stamp lookup — localStorage is partitioned, stamps not accessible
-      this.postageBatchId = undefined
-      this.signerKey = undefined
+      if (message.data.account) {
+        // Full synced projection received — hydrate a first-class writer view
+        // (stamps incl. signer keys, derivationKey) instead of download-only.
+        await this.hydratePartitionAccount(
+          message.data.account,
+          message.data.secret,
+          message.data.networkSettings,
+        )
+      } else {
+        // Legacy secret-only payload — download-only mode, no stamp lookup.
+        this.postageBatchId = undefined
+        this.signerKey = undefined
+      }
 
       this.showAuthButton()
       this.sendToParent({
@@ -588,6 +624,88 @@ export class SwarmIdProxy {
         origin: this.parentOrigin!,
       })
       this.emitConnectionInfoIfChanged()
+    }
+  }
+
+  /**
+   * Build the in-memory account view for a partitioned session and initialize
+   * the write path from it. The vault fields are inert placeholders — the
+   * record never touches storage and the seed never leaves first-party
+   * context; `SignedInAccount` merely requires their presence.
+   */
+  private async hydratePartitionAccount(
+    account: SyncedAccount,
+    appSecret: string,
+    networkSettings: NetworkSettings | undefined,
+  ): Promise<void> {
+    const now = Date.now()
+    const connection: ConnectedApp = {
+      ...(account.connectedApps.find(
+        (app) => app.appUrl === this.parentOrigin,
+      ) ?? {
+        appUrl: this.parentOrigin!,
+        appName: this.appMetadata?.name ?? this.parentOrigin!,
+        lastConnectedAt: now,
+      }),
+      appSecret,
+      lastConnectedAt: now,
+      connectedUntil:
+        now +
+        (account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION),
+    }
+    this.partitionAccount = {
+      ...account,
+      connectedApps: [
+        connection,
+        ...account.connectedApps.filter(
+          (app) => app.appUrl !== this.parentOrigin,
+        ),
+      ],
+      access: { type: "password", kdfSalt: "", kdfIterations: 0 },
+      encryptedSeed: "",
+    }
+
+    if (
+      networkSettings?.beeNodeUrl &&
+      networkSettings.beeNodeUrl !== this.beeApiUrl
+    ) {
+      this.beeApiUrl = networkSettings.beeNodeUrl
+      this.gnosisRpcUrl = networkSettings.gnosisRpcUrl || this.gnosisRpcUrl
+      this.bee = new Bee(this.beeApiUrl)
+    }
+
+    await this.refreshStampFromStorage()
+    void this.ensureBusSignalingTransport(account.derivationKey)
+  }
+
+  /**
+   * Attach the cross-partition/cross-device bus transport for the account
+   * (docs/Account-Bus.md). Idempotent per account; no-op without a configured
+   * signaling URL. Same code path on every browser — Safari is not special.
+   */
+  private async ensureBusSignalingTransport(
+    derivationKey: string,
+  ): Promise<void> {
+    const url = this.signalingUrl
+    if (!url) return
+    try {
+      const context = await deriveBusContext(derivationKey)
+      if (this.busSignalingTopic === context.topic) return
+      this.removeBusSignalingTransport?.()
+      this.busSignalingTopic = context.topic
+      this.removeBusSignalingTransport = this.bus.addTransport(
+        new SignalingTransport({
+          url,
+          topic: context.topic,
+          encryptionKey: context.encryptionKey,
+          createPeerConnection:
+            typeof RTCPeerConnection !== "undefined"
+              ? () => new RTCPeerConnection()
+              : undefined,
+        }),
+      )
+    } catch (error) {
+      console.error("[Proxy] Failed to attach bus signaling transport:", error)
     }
   }
 
@@ -1314,8 +1432,12 @@ export class SwarmIdProxy {
    */
   private knownDeviceIdsForAccount(accountId: string): string[] {
     try {
-      const accounts = createAccountsStorageManager().load()
-      const account = accounts.find((a) => a.id.toHex() === accountId)
+      const account =
+        this.partitionAccount?.id.toHex() === accountId
+          ? this.partitionAccount
+          : createAccountsStorageManager()
+              .load()
+              .find((a) => a.id.toHex() === accountId)
       if (!account || isSignedOutAccount(account)) return []
       // Bound the partition rival set to recently-active devices: removed
       // (tombstoned) devices won't write, and long-dead ghosts from old sessions
@@ -1412,7 +1534,7 @@ export class SwarmIdProxy {
       }
     | undefined
   > {
-    if (!this.parentOrigin || this.storagePartitioned) {
+    if (!this.parentOrigin || this.isDownloadOnlyPartition) {
       return undefined
     }
     try {
@@ -1589,11 +1711,29 @@ export class SwarmIdProxy {
    * under multiple accounts) by sorting valid entries by `lastConnectedAt`
    * descending and returning the most recent.
    */
+  /**
+   * True while the session is partitioned WITHOUT a hydrated account view —
+   * the legacy download-only mode. A hydrated partition is a full writer.
+   */
+  private get isDownloadOnlyPartition(): boolean {
+    return this.storagePartitioned && !this.partitionAccount
+  }
+
   private findConnectionForParent():
     | { account: SignedInAccount; app: ConnectedApp }
     | undefined {
     if (!this.parentOrigin) {
       return undefined
+    }
+    // Partitioned session: shared storage is invisible; the popup-handed
+    // account view is the (only) source.
+    if (this.partitionAccount) {
+      const app = this.partitionAccount.connectedApps.find(
+        (candidate) =>
+          candidate.appUrl === this.parentOrigin &&
+          this.isConnectionValid(candidate),
+      )
+      return app ? { account: this.partitionAccount, app } : undefined
     }
     const accounts = createAccountsStorageManager().load()
     const matches: { account: SignedInAccount; app: ConnectedApp }[] = []
@@ -1691,6 +1831,10 @@ export class SwarmIdProxy {
     this.stamperAccountFingerprint = undefined
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
+    this.partitionAccount = undefined
+    this.removeBusSignalingTransport?.()
+    this.removeBusSignalingTransport = undefined
+    this.busSignalingTopic = undefined
     this.pendingChallenge = undefined
 
     this.emitConnectionInfoIfChanged()
@@ -1724,7 +1868,7 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return
     }
-    if (this.storagePartitioned) {
+    if (this.isDownloadOnlyPartition) {
       throw new Error(
         "Uploads are unavailable in download-only mode due to browser storage partitioning.",
       )
@@ -1745,7 +1889,9 @@ export class SwarmIdProxy {
    */
   private isSubsidisedModeActive(): boolean {
     return (
-      (!this.postageBatchId || !this.signerKey || this.storagePartitioned) &&
+      (!this.postageBatchId ||
+        !this.signerKey ||
+        this.isDownloadOnlyPartition) &&
       !!this.subsidisedGatewayUrl
     )
   }
@@ -1805,7 +1951,7 @@ export class SwarmIdProxy {
     let identity: ConnectionInfo["identity"] = undefined
 
     if (this.authenticated && this.parentOrigin) {
-      if (this.storagePartitioned && this.storagePartitionedIdentity) {
+      if (this.isDownloadOnlyPartition && this.storagePartitionedIdentity) {
         identity = this.storagePartitionedIdentity
       } else {
         try {
@@ -1852,7 +1998,7 @@ export class SwarmIdProxy {
         this.postageBatchId &&
         this.signerKey &&
         this.stamper &&
-        !this.storagePartitioned
+        !this.isDownloadOnlyPartition
       ) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
@@ -4167,6 +4313,12 @@ export interface ProxyConfig {
    * bee-compose anvil address when developing against a local chain.
    */
   postageStampContractAddress?: string
+  /**
+   * Account-bus signaling server URL (e.g. `wss://swarm-id.snaha.net/bus`,
+   * `ws://localhost:5520` in dev). Unset disables the cross-partition/
+   * cross-device bus transport (docs/Account-Bus.md).
+   */
+  signalingUrl?: string
 }
 
 /**

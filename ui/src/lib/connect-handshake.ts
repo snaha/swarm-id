@@ -13,11 +13,17 @@
  * Key model (master key = the account wallet's private key): the per-app secret
  * derives straight from the master key (`deriveSecret(master, appOrigin)`).
  */
-import { type ConnectedApp, DEFAULT_SESSION_DURATION, deriveSecret } from '@snaha/swarm-id'
+import {
+  type ConnectedApp,
+  DEFAULT_SESSION_DURATION,
+  deriveSecret,
+  serializeSyncedAccount,
+} from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
 import { privateKeyFromEntropy } from '$lib/crypto/mnemonic'
 import type { ConnectRequest } from '$lib/stores/connect.svelte'
+import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
 
 function connectionDuration(account: Account): number {
@@ -46,7 +52,10 @@ function saveConnection(account: Account, request: ConnectRequest, appSecret: st
 /**
  * Storage-partitioning fallback: hand the secret straight to the proxy iframe
  * (our window.opener) since it can't see our localStorage. The `identity*`
- * fields carry the account's info (single-level model).
+ * fields carry the account's info (single-level model), and `account` carries
+ * the full synced projection (stamps incl. signer keys, `derivationKey` — no
+ * vault, no app secrets) so the partitioned iframe becomes a first-class
+ * writer instead of download-only (docs/Account-Bus.md, phase 3).
  */
 function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret: string): void {
   if (!request.partitionChallenge || !window.opener) {
@@ -64,6 +73,8 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
         identityName: account.name,
         identityAddress: idHex,
         identityPublicKey: account.publicKey,
+        account: serializeSyncedAccount(account.toSyncedRecord()),
+        networkSettings: networkSettingsStore.settings,
       },
     },
     window.location.origin,

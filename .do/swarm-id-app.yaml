@@ -68,6 +68,11 @@ envs:
   - key: NODE_VERSION
     value: '24'
 
+  # Baked into the UI build: points the proxy iframe at the bus-signaling
+  # service above (docs/Account-Bus.md).
+  - key: PUBLIC_BUS_SIGNALING_URL
+    value: 'wss://swarm-id.snaha.net/bus'
+
   - key: NODE_ENV
     value: production
 

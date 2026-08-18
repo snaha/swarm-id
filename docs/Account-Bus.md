@@ -111,15 +111,18 @@ account. Same service, no extra infrastructure; the default posture stays signal
 
 With the bus in place the partitioned iframe becomes a first-class writer:
 
-- The connect popup sends the full `AuthData` — the **root `derivationKey`** plus the already
-  existing `postageBatchId` / `signerKey` / `networkSettings` slots. (Sending only derived
-  keys was considered and rejected: the encrypted on-Swarm account state contains the
+- The connect popup sends the full `AuthData` — an `account` field carrying the
+  **synced-account projection** (`serializeSyncedAccount`: `derivationKey`, stamps incl.
+  signer keys; no vault, no app secrets) plus `networkSettings`. (Sending only derived keys
+  was considered and rejected: the encrypted on-Swarm account state contains the
   `derivationKey` anyway, so holding the derived keys is equivalent — derived-only would be
   defense-in-depth theater.)
-- `handlePopupMessage` hydrates a partition-local account record; for synced accounts it also
-  folds current state from Swarm (`foldAccountFromSwarm`). The iframe keeps its own
-  `swarm-id-device-id` and lease cache — it _is_ a device, with a deterministic name and an
-  expiry policy so the roster does not accumulate stale per-dApp entries.
+- `handlePopupMessage` hydrates the projection into an **in-memory** account view
+  (`partitionAccount`): the stored-account schema deliberately quarantines vault-less
+  records, and partitioned sessions already re-handshake per iframe load, so nothing is
+  persisted. The popup hands over a freshly-loaded view, so no extra on-hydrate fold is
+  needed; the iframe keeps its own `swarm-id-device-id` and lease cache — it _is_ a device.
+  (Roster naming/expiry policy for per-dApp partition devices: follow-up.)
 - On successful hydration `uploadMode` flips to `user-stamp` and `ensureCanUpload` passes;
   `storagePartitioned` stays surfaced in `ConnectionInfo` for UI messaging.
 

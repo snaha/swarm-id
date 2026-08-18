@@ -8,6 +8,7 @@ import type {
 } from "@ethersphere/bee-js"
 import {
   NetworkSettingsSchemaV1,
+  SyncedAccountSchemaV1,
   ReferenceSchema,
   BatchIdSchema,
   AddressSchema,
@@ -1647,6 +1648,14 @@ export const AuthDataSchema = z.object({
   postageBatchId: BatchIdSchema.optional(),
   signerKey: PrivateKeySchema.optional(),
   networkSettings: NetworkSettingsSchemaV1.optional(),
+  /**
+   * Full synced-account projection (the `serializeSyncedAccount` wire shape:
+   * no vault, no app secrets) for the storage-partitioning fallback. With it
+   * the partitioned iframe hydrates a full account view — stamps incl. signer
+   * keys and the `derivationKey` — and becomes a first-class writer instead
+   * of download-only (docs/Account-Bus.md, phase 3).
+   */
+  account: SyncedAccountSchemaV1.optional(),
   identityId: z.string().optional(),
   identityName: z.string().optional(),
   identityAddress: AddressSchema.optional(),
