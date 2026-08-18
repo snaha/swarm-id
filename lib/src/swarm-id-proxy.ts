@@ -251,6 +251,15 @@ export class SwarmIdProxy {
       workerPool?: StampWorkerPool
     }
   >()
+  /**
+   * In-flight `createStamperUnderAccountLock` calls, keyed `<batchId>:<signer>`,
+   * so concurrent callers share one build instead of racing to create two live
+   * stampers for one batch. Entries are removed as soon as the build settles.
+   */
+  private readonly stamperBuilds = new Map<
+    string,
+    Promise<UtilizationAwareStamper>
+  >()
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   private storagePartitionedIdentity: ConnectionIdentity | undefined
@@ -780,10 +789,20 @@ export class SwarmIdProxy {
    * stamped-but-unflushed buckets exist only during an in-flight write, whose
    * flush runs inside this same lock (the coordinator's `lockAndFlush`
    * finally) — so the lock guarantees a same-batch rebuild never seeds from
-   * state a concurrent write is about to overwrite. Deadlock-free: queued
-   * work may wait on this lock, but lock holders (writes) never wait on the
-   * queue. No legacy batch lock ids: this acquisition performs no Swarm
-   * writes.
+   * state a concurrent write is about to overwrite. No legacy batch lock ids:
+   * this acquisition performs no Swarm writes.
+   *
+   * Concurrent requests for the same batch+signer share one in-flight build.
+   * The serialized work queue used to provide that by construction; now that
+   * builds also run off it, two callers could otherwise race to create two live
+   * stampers for one batch — each with its own bucket state — which is exactly
+   * the divergence the lock exists to prevent.
+   *
+   * WAITS: this can block for the length of an in-flight write to the SAME
+   * account (the lock is account-scoped, not per batch). Callers must not hold
+   * the work queue across it — `initializeStamper` avoids the build entirely
+   * when the batch is already cached, and `withModeAwareWriteLock` builds off
+   * the queue. Deadlock-free: lock holders (writes) never wait on the queue.
    */
   private createStamperUnderAccountLock(
     accountInfo: {
@@ -796,7 +815,10 @@ export class SwarmIdProxy {
     depth: number,
     store: UtilizationStoreDB,
   ): Promise<UtilizationAwareStamper> {
-    return withAccountWriteLock(accountInfo.accountId, () =>
+    const key = `${batchId.toHex()}:${signerKey}`
+    const inFlight = this.stamperBuilds.get(key)
+    if (inFlight) return inFlight
+    const build = withAccountWriteLock(accountInfo.accountId, () =>
       UtilizationAwareStamper.create(
         signerKey,
         batchId,
@@ -805,7 +827,9 @@ export class SwarmIdProxy {
         accountInfo.owner,
         accountInfo.encryptionKey,
       ),
-    )
+    ).finally(() => this.stamperBuilds.delete(key))
+    this.stamperBuilds.set(key, build)
+    return build
   }
 
   private async initializeStamper(stampDepth: number): Promise<void> {
@@ -830,13 +854,25 @@ export class SwarmIdProxy {
 
     // Create utilization-aware stamper with owner and encryption key
     try {
-      this.stamper = await this.createStamperUnderAccountLock(
-        accountInfo,
-        this.signerKey,
-        new BatchId(this.postageBatchId),
-        stampDepth,
-        this.utilizationStore,
-      )
+      // Reuse the cached instance for this batch when one exists. A stamper
+      // captures no node URL (only the coordinator does), so a re-init driven
+      // by a Bee-node change has nothing to rebuild — and rebuilding is not
+      // free: it waits on the account write lock, which a long upload holds for
+      // its whole duration, and `setStampEntry` would terminate the batch's
+      // worker pool for nothing. Any surviving entry is same-account by
+      // invariant: an account-fingerprint change clears the whole cache
+      // (`refreshStampFromStorage`), as do the auth transitions.
+      const cached = this.stampEntries.get(this.postageBatchId)
+      this.stamper =
+        cached && cached.signerKey === this.signerKey
+          ? cached.stamper
+          : await this.createStamperUnderAccountLock(
+              accountInfo,
+              this.signerKey,
+              new BatchId(this.postageBatchId),
+              stampDepth,
+              this.utilizationStore,
+            )
       this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
       // The default binding's stamper is also the cache entry for its batch —
       // one instance per batch, shared by targeted and untargeted writes.
@@ -1125,12 +1161,45 @@ export class SwarmIdProxy {
         gatewayUrl: this.subsidisedGatewayUrl!,
       })
     }
-    const resolved = await this.enqueueWork(async () => {
-      const stamper = await this.resolveUploadStamper(batchID)
+    let resolved = await this.enqueueWork(async () => {
+      const picked = await this.resolveUploadStamper(batchID, {
+        deferBuild: true,
+      })
       // `coordinator` captured atomically with the stamper: the pair the
       // off-queue write below runs against, immune to later rebinds.
-      return { stamper, coordinator: this.coordinator }
+      return { ...picked, coordinator: this.coordinator }
     })
+    if (resolved.pendingBuild) {
+      // Built OFF the queue: the build waits on the account write lock, which
+      // an in-flight write to this account holds for its whole duration, and
+      // holding the queue through that would stall sign-out propagation, stamp
+      // changes and node rebinds behind an upload. Concurrent writes to the
+      // same new batch share one build (`stamperBuilds`).
+      const { stamp, signerKey, accountInfo, store } = resolved.pendingBuild
+      const stamper = await this.createStamperUnderAccountLock(
+        accountInfo,
+        signerKey,
+        stamp.batchID,
+        stamp.depth,
+        store,
+      ).catch((error: unknown) => {
+        console.error("[Proxy] Failed to create target stamper:", error)
+        throw new Error(
+          `Failed to build stamper for batch ${stamp.batchID.toHex()}`,
+        )
+      })
+      // Back on the queue to install and re-capture atomically. The stamp may
+      // have been tombstoned or its signer rotated while we were building, in
+      // which case the freshly built stamper must NOT be installed or used.
+      resolved = await this.enqueueWork(async () => {
+        const still = this.findOwnedStamp(stamp.batchID.toHex())
+        if (!still || still.signerKey.toHex() !== signerKey) {
+          throw new Error("Batch not owned by account")
+        }
+        this.setStampEntry(stamper, signerKey)
+        return { stamper, coordinator: this.coordinator }
+      })
+    }
     // Re-resolving the default may have cleared the binding (e.g. the
     // default stamp was deleted) — fall back to the gateway if configured.
     // NEVER for an explicit `batchID`: silently landing a targeted upload
@@ -1564,17 +1633,36 @@ export class SwarmIdProxy {
    * storage-event rebind can't swap the binding while a write's stamper and
    * coordinator are being picked. (The write itself then runs off the queue —
    * see `withModeAwareWriteLock`.)
+   *
+   * With `deferBuild`, a target that needs a NEW stamper is returned as a
+   * `pendingBuild` descriptor instead of being built here: the build waits on
+   * the account write lock, and the caller must not hold the work queue across
+   * that wait. The caller builds it off-queue and re-enters the queue to
+   * install it.
    */
   private async resolveUploadStamper(
     batchID?: string,
-  ): Promise<UtilizationAwareStamper | undefined> {
+    opts?: { deferBuild?: boolean },
+  ): Promise<{
+    stamper?: UtilizationAwareStamper
+    pendingBuild?: {
+      stamp: PostageStamp
+      signerKey: string
+      accountInfo: {
+        accountId: string
+        owner: EthAddress
+        encryptionKey: Uint8Array
+      }
+      store: UtilizationStoreDB
+    }
+  }> {
     if (!batchID) {
       await this.refreshStampFromStorage()
-      return this.stamper
+      return { stamper: this.stamper }
     }
     const targetHex = batchID.toLowerCase()
     if (targetHex === this.postageBatchId && this.stamper) {
-      return this.stamper
+      return { stamper: this.stamper }
     }
     // NB: when the target IS the bound default batch but its stamper failed to
     // build (lenient `initializeStamper`), fall through — the targeted build
@@ -1591,21 +1679,30 @@ export class SwarmIdProxy {
       throw new Error("Batch not owned by account")
     }
     if (!this.coordinator) {
+      // Cold start with no default at all: promote this stamp to the binding.
+      // There is no in-flight write to block on here, so the build stays inline.
       await this.bindStamp(stamp)
       if (!this.stamper) {
         throw new Error(`Failed to bind stamp ${targetHex}`)
       }
-      return this.stamper
+      return { stamper: this.stamper }
     }
     const signerKey = stamp.signerKey.toHex()
     const cached = this.stampEntries.get(targetHex)
     if (cached && cached.signerKey === signerKey) {
-      return cached.stamper
+      return { stamper: cached.stamper }
     }
     const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo || !this.utilizationStore) {
       throw new Error(`Failed to build stamper for batch ${targetHex}`)
     }
+    const pendingBuild = {
+      stamp,
+      signerKey,
+      accountInfo,
+      store: this.utilizationStore,
+    }
+    if (opts?.deferBuild) return { pendingBuild }
     try {
       const stamper = await this.createStamperUnderAccountLock(
         accountInfo,
@@ -1615,7 +1712,7 @@ export class SwarmIdProxy {
         this.utilizationStore,
       )
       this.setStampEntry(stamper, signerKey)
-      return stamper
+      return { stamper }
     } catch (error) {
       console.error("[Proxy] Failed to create target stamper:", error)
       throw new Error(`Failed to build stamper for batch ${targetHex}`)

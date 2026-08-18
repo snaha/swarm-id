@@ -682,10 +682,15 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     })
   })
 
-  const resolve = (batchID?: string) =>
-    (proxy as never)["resolveUploadStamper"](batchID) as Promise<
-      { tag?: string; batchId?: { toHex: () => string } } | undefined
-    >
+  // `resolveUploadStamper` returns `{ stamper }` (plus, with `deferBuild`, a
+  // `pendingBuild` descriptor the caller builds off the work queue). These
+  // cases assert the resolution itself, so unwrap to the stamper.
+  const resolve = async (batchID?: string) =>
+    (
+      (await (proxy as never)["resolveUploadStamper"](batchID)) as {
+        stamper?: { tag?: string; batchId?: { toHex: () => string } }
+      }
+    ).stamper
 
   it("re-resolves the default binding when no batchID is given", async () => {
     const stamper = await resolve(undefined)
@@ -795,6 +800,19 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     }
   })
 
+  it("shares one build between concurrent resolves of the same batch", async () => {
+    // Builds now run off the serialized work queue, which used to guarantee
+    // one at a time. Two live stampers for one batch would each carry their own
+    // bucket state — exactly the divergence the account lock exists to prevent.
+    const create = vi.mocked(UtilizationAwareStamper.create)
+    const callsBefore = create.mock.calls.length
+
+    const [a, b] = await Promise.all([resolve(B2), resolve(B2)])
+
+    expect(a).toBe(b)
+    expect(create.mock.calls.length).toBe(callsBefore + 1)
+  })
+
   it("rebindActiveStamp re-binds the currently bound stamp", async () => {
     await (proxy as never)["rebindActiveStamp"]()
     expect(bindStamp).toHaveBeenCalledTimes(1)
@@ -821,7 +839,7 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
     )
     ;(proxy as never)["coordinator"] = { withWrite }
     ;(proxy as never)["resolveUploadStamper"] = vi.fn(() =>
-      Promise.resolve({ tag: "stamper" }),
+      Promise.resolve({ stamper: { tag: "stamper" } }),
     )
   })
 
@@ -917,12 +935,16 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
   it("a targeted write while subsidised mode is active takes the stamped path with the target's stamper", async () => {
     ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
     const targetStamper = { tag: B2 }
-    const resolveUploadStamper = vi.fn(() => Promise.resolve(targetStamper))
+    const resolveUploadStamper = vi.fn(() =>
+      Promise.resolve({ stamper: targetStamper }),
+    )
     ;(proxy as never)["resolveUploadStamper"] = resolveUploadStamper
 
     const target = await write(async (t) => t, B2)
 
-    expect(resolveUploadStamper).toHaveBeenCalledWith(B2)
+    // `deferBuild`: a target needing a NEW stamper comes back as a descriptor
+    // so the build happens off the work queue, not while holding it.
+    expect(resolveUploadStamper).toHaveBeenCalledWith(B2, { deferBuild: true })
     expect(withWrite).toHaveBeenCalledTimes(1)
     // The write ran under the coordinator with the TARGET batch's stamper.
     expect(withWrite.mock.calls[0][0]).toBe(targetStamper)
@@ -933,9 +955,7 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
     // Silently landing a `batchID`-targeted upload on the gateway would stamp
     // it under the GATEWAY's batch — betraying the requested target. Fail it.
     ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
-    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() =>
-      Promise.resolve(undefined),
-    )
+    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() => Promise.resolve({}))
 
     await expect(write(async (t) => t, B2)).rejects.toThrow(
       "Stamper not initialized",
@@ -947,9 +967,7 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
     ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
     ;(proxy as never)["postageBatchId"] = undefined
     ;(proxy as never)["signerKey"] = undefined
-    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() =>
-      Promise.resolve(undefined),
-    )
+    ;(proxy as never)["resolveUploadStamper"] = vi.fn(() => Promise.resolve({}))
 
     // A targeted id forces the queued path; the resolve returning nothing with
     // subsidised mode active degrades to the gateway instead of failing.
@@ -994,6 +1012,45 @@ describe("SwarmIdProxy coordinator targets the configured Bee node", () => {
     const deps = CoordinatorMock.mock.calls[0][0] as unknown as { bee: Bee }
     expect(String(deps.bee.url)).toContain(new URL(DEFAULT_BEE_NODE_URL).host)
     expect(String(deps.bee.url)).not.toContain("gateway.example")
+  })
+
+  it("reuses the cached stamper on re-init, so a node change never waits on the lock", async () => {
+    // A stamper captures no node URL — only the coordinator does — so a
+    // Bee-node change has nothing to rebuild. Rebuilding is not free: it parks
+    // on the account write lock, which a long upload holds for its whole
+    // duration, and it would terminate the batch's worker pool for nothing.
+    const proxy = makeProxy()
+    const create = vi.mocked(UtilizationAwareStamper.create)
+    const signerKey = "11".repeat(32)
+    const cachedStamper = { mock: "cached", batchId: { toHex: () => B1 } }
+    ;(proxy as never)["signerKey"] = signerKey
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["deviceId"] = "device-1"
+    ;(proxy as never)["stampEntries"] = new Map([
+      [B1, { stamper: cachedStamper, signerKey }],
+    ])
+    ;(proxy as never)["lookupAccountForApp"] = () =>
+      Promise.resolve({
+        owner: { toHex: () => "ab".repeat(20) },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 1,
+      })
+    // Any lock request would hang, proving the path never reaches one.
+    vi.stubGlobal("navigator", {
+      locks: { request: () => new Promise(() => {}) },
+    })
+    const callsBefore = create.mock.calls.length
+
+    try {
+      await (proxy as never)["initializeStamper"](20)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+
+    expect(create.mock.calls.length).toBe(callsBefore)
+    expect((proxy as never)["stamper"]).toBe(cachedStamper)
+    expect(CoordinatorMock).toHaveBeenCalledTimes(1)
   })
 })
 
