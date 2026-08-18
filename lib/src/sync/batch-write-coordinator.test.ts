@@ -38,6 +38,7 @@ vi.mock("../utils/batch-write-lock", () => ({
 import {
   BatchWriteCoordinator,
   PartitionContendedError,
+  PEER_YIELD_MIN_IDLE_MS,
   isDisplaced,
   type BatchWriteCoordinatorDeps,
 } from "./batch-write-coordinator"
@@ -1445,5 +1446,144 @@ describe("BatchWriteCoordinator — slot-wait epoch exit", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)", () => {
+  it("slot-wait fires onSlotWait and wakes early on notifySlotMaybeFree", async () => {
+    // First acquire: all partitions held → slot-wait. After the wake, the
+    // second acquire wins a freed slot.
+    const leaseOpts: Parameters<typeof makeLease>[0] = {
+      acquireResult: {
+        partition: undefined,
+        partitionCount: 4,
+        isReadOnly: true,
+      },
+    }
+    leaseController.lease = makeLease(leaseOpts)
+    const calls: string[] = []
+    const stamper = makeStamper(calls)
+    const onSlotWait = vi.fn()
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+        mode: "oneshot",
+        onSlotWait,
+      }),
+    )
+
+    const started = Date.now()
+    const op = vi.fn(async () => "ok")
+    const write = coordinator.withWrite(op, { wait: "block" })
+
+    // The loop is asleep for LEASE_REFRESH_MS once onSlotWait has fired.
+    await vi.waitFor(() => expect(onSlotWait).toHaveBeenCalled())
+    // A peer released its partition: free the slot and wake the waiter.
+    leaseOpts.acquireResult = {
+      partition: 2,
+      partitionCount: 4,
+      localCounter: new Uint32Array(8),
+      isReadOnly: false,
+    }
+    coordinator.notifySlotMaybeFree()
+
+    await expect(write).resolves.toBe("ok")
+    expect(coordinator.currentPartition).toBe(2)
+    // Woken by the bus, not by sleeping out the 10s poll interval.
+    expect(Date.now() - started).toBeLessThan(LEASE_REFRESH_MS)
+  })
+
+  it("notifySlotMaybeFree outside slot-wait is a no-op", () => {
+    const coordinator = new BatchWriteCoordinator(makeDeps())
+    expect(() => coordinator.notifySlotMaybeFree()).not.toThrow()
+  })
+
+  it("yieldForPeer releases a held idle lease and reports the partition", async () => {
+    vi.useFakeTimers()
+    try {
+      const lease = makeLease({
+        acquireResult: {
+          partition: 1,
+          partitionCount: 4,
+          localCounter: new Uint32Array(8),
+          isReadOnly: false,
+        },
+      })
+      leaseController.lease = lease
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      const onLeaseChange = vi.fn()
+      const writeLeaseCache = vi.fn()
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+          onLeaseChange,
+          writeLeaseCache,
+        }),
+      )
+      const op = vi.fn(async () => "ok")
+      await coordinator.withWrite(op, { wait: "block" })
+      expect(coordinator.currentPartition).toBe(1)
+
+      // Within the grace window right after the write: refuse to yield.
+      await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
+      expect(lease.release).not.toHaveBeenCalled()
+
+      // Once idle past the grace window: yield through the normal release path.
+      await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
+      await expect(coordinator.yieldForPeer()).resolves.toBe(1)
+      expect(lease.release).toHaveBeenCalledTimes(1)
+      expect(coordinator.currentPartition).toBeUndefined()
+      expect(writeLeaseCache).toHaveBeenLastCalledWith(undefined)
+      expect(onLeaseChange).toHaveBeenCalled()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("yieldForPeer refuses while an upload is in flight", async () => {
+    vi.useFakeTimers()
+    try {
+      const lease = makeLease({
+        acquireResult: {
+          partition: 3,
+          partitionCount: 4,
+          localCounter: new Uint32Array(8),
+          isReadOnly: false,
+        },
+      })
+      leaseController.lease = lease
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      let finishOp: (() => void) | undefined
+      const op = vi.fn(
+        () =>
+          new Promise<string>((resolve) => (finishOp = () => resolve("ok"))),
+      )
+      const write = coordinator.withWrite(op, { wait: "block" })
+      await vi.waitFor(() => expect(op).toHaveBeenCalled())
+      await vi.advanceTimersByTimeAsync(PEER_YIELD_MIN_IDLE_MS)
+
+      await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
+      expect(lease.release).not.toHaveBeenCalled()
+
+      finishOp!()
+      await expect(write).resolves.toBe("ok")
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("yieldForPeer refuses after teardown", async () => {
+    const coordinator = new BatchWriteCoordinator(makeDeps())
+    coordinator.teardown()
+    await expect(coordinator.yieldForPeer()).resolves.toBeUndefined()
   })
 })

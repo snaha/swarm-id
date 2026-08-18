@@ -153,9 +153,13 @@ Each phase is an independent PR chain:
    (`wss://swarm-id.snaha.net/bus`).
 3. **Safari write enablement**: widen `AuthData` and `sendSecretToOpener`, hydration in
    `handlePopupMessage`, roster naming/expiry for partition devices, flip the upload gate.
-4. **Bus-accelerated leases**: fast-path handover and live utilization deltas through
-   `BatchWriteCoordinator`'s existing dependency-injection seams (`readLeaseCache` /
-   `writeLeaseCache` / `onLeaseChange`); the Swarm SOC protocol is untouched as fallback.
+4. **Bus-accelerated leases**: a slot-waiting acquire broadcasts `lease-request` each poll
+   round (`onSlotWait` dep); an idle live holder yields immediately via the normal
+   idle-yield release path (`yieldForPeer`, guarded by `PEER_YIELD_MIN_IDLE_MS` and the
+   in-flight upload count, under the write lock) and answers `lease-released`, which wakes
+   the waiter's poll sleep (`notifySlotMaybeFree`) — handover in ~one bus round-trip
+   instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol is untouched
+   as the authority and offline fallback.
 5. **SWIP-60 transport adapter** once bee/bee-js release it.
 
 ## Verification

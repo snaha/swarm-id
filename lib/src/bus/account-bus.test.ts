@@ -5,7 +5,7 @@ import { describe, it, expect, vi } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 
 import { AccountBus, BroadcastChannelTransport } from "./account-bus"
-import type { BusMessage } from "./messages"
+import type { BusMessage, BusMessageInput } from "./messages"
 import { serializeAccountStateSnapshot } from "../utils/account-state-snapshot"
 import { mergeSnapshotWithRemote } from "../sync/merge-snapshot"
 import type { AccountStateSnapshot } from "../schemas"
@@ -29,11 +29,11 @@ async function waitForMessages(
   await vi.waitFor(() => expect(received.length).toBeGreaterThanOrEqual(count))
 }
 
-const UTILIZATION_MESSAGE = {
+const UTILIZATION_MESSAGE: BusMessageInput = {
   type: "utilization-updated",
   batchId: "ab".repeat(32),
   buckets: [{ index: 3, value: 7 }],
-} as const
+}
 
 function makeSnapshot(): AccountStateSnapshot {
   return {
@@ -214,6 +214,8 @@ describe("AccountBus over BroadcastChannelTransport", () => {
       const remote = makeSnapshot()
       sender.publish({
         type: "account-delta",
+        // The serializer returns an untyped record; the wire shape is the
+        // schema input, which the receiving bus validates.
         snapshot: serializeAccountStateSnapshot({
           accountId: remote.accountId,
           metadata: remote.metadata,
@@ -221,7 +223,7 @@ describe("AccountBus over BroadcastChannelTransport", () => {
           postageStamps: remote.postageStamps,
           timestamp: remote.timestamp,
         }),
-      })
+      } as BusMessageInput)
       await waitForMessages(received, 1)
 
       const message = received[0]

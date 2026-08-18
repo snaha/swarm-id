@@ -248,6 +248,8 @@ export class SwarmIdProxy {
   /** Topic of the currently attached bus signaling transport (dedup guard). */
   private busSignalingTopic: string | undefined
   private removeBusSignalingTransport: (() => void) | undefined
+  /** Account the live coordinator serves — routes bus lease messages. */
+  private coordinatorAccountId: string | undefined
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private gnosisRpcUrl: string
@@ -312,7 +314,7 @@ export class SwarmIdProxy {
 
     // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
     this.bus = new AccountBus([new BroadcastChannelTransport(ORIGIN_TOPIC)])
-    this.setupUtilizationListener()
+    this.setupBusListeners()
 
     // Announce readiness to parent window immediately
     // This signals that our message listener is ready to receive parentIdentify
@@ -723,6 +725,7 @@ export class SwarmIdProxy {
     // vacate its partition promptly.
     this.coordinator?.teardown()
     this.coordinator = undefined
+    this.coordinatorAccountId = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
@@ -732,16 +735,61 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Setup listener for utilization updates from other tabs.
-   * When another tab completes a write, it broadcasts an update.
-   * This tab applies the delta update directly from the message.
+   * Account-bus subscription: utilization deltas from other contexts, and the
+   * lease fast path (docs/Account-Bus.md, bus-accelerated leases). The Swarm
+   * lock-SOC protocol stays authoritative — these messages only shortcut its
+   * timers.
    */
-  private setupUtilizationListener(): void {
+  private setupBusListeners(): void {
     this.bus.subscribe((message) => {
-      if (message.type !== "utilization-updated") return
-      if (message.batchId === this.postageBatchId && this.stamper) {
-        // Apply delta update directly - no IndexedDB read needed
-        this.stamper.applyUtilizationUpdate(message.buckets)
+      switch (message.type) {
+        case "utilization-updated": {
+          if (message.batchId === this.postageBatchId && this.stamper) {
+            // Apply delta update directly - no IndexedDB read needed
+            this.stamper.applyUtilizationUpdate(message.buckets)
+          }
+          return
+        }
+        case "lease-request": {
+          const coordinator = this.coordinator
+          if (
+            !coordinator ||
+            message.accountId !== this.coordinatorAccountId ||
+            message.fromDeviceId === this.deviceId
+          ) {
+            return
+          }
+          coordinator
+            .yieldForPeer()
+            .then((partition) => {
+              if (partition !== undefined) {
+                this.bus.publish({
+                  type: "lease-released",
+                  accountId: message.accountId,
+                  partition,
+                  fromDeviceId: this.requireDeviceId(),
+                })
+              }
+            })
+            .catch((error) => {
+              console.error("[Proxy] Peer lease yield failed:", error)
+            })
+          return
+        }
+        case "lease-released": {
+          if (
+            message.fromDeviceId === this.deviceId ||
+            message.accountId !== this.coordinatorAccountId
+          ) {
+            return
+          }
+          this.coordinator?.notifySlotMaybeFree()
+          return
+        }
+        default:
+          // account-delta: no proxy-side consumer yet (durable truth arrives
+          // via storage events / the popup handshake).
+          return
       }
     })
   }
@@ -878,12 +926,21 @@ export class SwarmIdProxy {
       flushStamperState: () => this.saveStamperStateIfNeeded(),
       getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
+      // Each slot-wait poll round, ask live holders over the account bus to
+      // yield their partition (docs/Account-Bus.md, bus-accelerated leases).
+      onSlotWait: () =>
+        this.bus.publish({
+          type: "lease-request",
+          accountId: accountInfo.accountId,
+          fromDeviceId: this.requireDeviceId(),
+        }),
       // On first acquiring a partition, announce this device by publishing the
       // account snapshot (which includes ourselves in metadata.devices) to the
       // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
       // lock (the publish re-enters the lock via the coordinator).
       onLeaseAcquired: () => this.schedulePublish("acquired"),
     })
+    this.coordinatorAccountId = accountInfo.accountId
     this.coordinator.startLease()
   }
 
@@ -1823,6 +1880,7 @@ export class SwarmIdProxy {
     this.deviceId = undefined
     this.coordinator?.teardown()
     this.coordinator = undefined
+    this.coordinatorAccountId = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined

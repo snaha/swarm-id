@@ -8,7 +8,7 @@
  * download-only.
  */
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
@@ -39,6 +39,8 @@ vi.mock("./sync/batch-write-coordinator", () => ({
       startLease: vi.fn(),
       teardown: vi.fn(),
       withWrite: vi.fn(),
+      yieldForPeer: vi.fn(async () => 1),
+      notifySlotMaybeFree: vi.fn(),
       currentPartition: undefined,
     }
   }),
@@ -47,6 +49,7 @@ vi.mock("./sync/batch-write-coordinator", () => ({
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
 import { SwarmIdProxy } from "./swarm-id-proxy"
+import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { serializeSyncedAccount } from "./utils/storage-managers"
 import { STORAGE_CHALLENGE_KEY } from "./types"
@@ -107,6 +110,7 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   let parentWindow: { postMessage: ReturnType<typeof vi.fn> }
   let messageListener: MessageListener
   let localStorageFake: Storage
+  let proxy: SwarmIdProxy
 
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -130,8 +134,14 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     vi.stubGlobal("window", mockWindow)
     vi.stubGlobal("localStorage", localStorageFake)
 
-    new SwarmIdProxy()
+    proxy = new SwarmIdProxy()
     messageListener = listeners["message"] as MessageListener
+  })
+
+  // Each proxy subscribes the shared BroadcastChannel bus; without a destroy a
+  // previous test's proxy keeps answering this test's bus traffic.
+  afterEach(() => {
+    proxy.destroy()
   })
 
   const dispatch = (data: unknown, origin: string, source: unknown = {}) =>
@@ -210,6 +220,101 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const createCalls = vi.mocked(UtilizationAwareStamper.create).mock.calls
     expect(createCalls.length).toBeGreaterThanOrEqual(1)
     expect(String(createCalls[0][1])).toBe(BATCH_ID_HEX)
+  })
+
+  it("answers a bus lease-request by yielding and announcing the release", async () => {
+    const account = makeSyncedAccount()
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
+
+    const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as {
+      yieldForPeer: ReturnType<typeof vi.fn>
+      notifySlotMaybeFree: ReturnType<typeof vi.fn>
+    }
+    const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+    const published: Record<string, unknown>[] = []
+    busChannel.onmessage = (event) =>
+      published.push(event.data as Record<string, unknown>)
+    try {
+      busChannel.postMessage({
+        type: "lease-request",
+        accountId: "aa".repeat(20),
+        fromDeviceId: "peer-device",
+      })
+      await vi.waitFor(() =>
+        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
+      )
+      // The yielded partition (1, from the mock) is announced to peers.
+      await vi.waitFor(() =>
+        expect(
+          published.filter((m) => m.type === "lease-released"),
+        ).toHaveLength(1),
+      )
+      const released = published.find((m) => m.type === "lease-released")!
+      expect(released.partition).toBe(1)
+      expect(released.accountId).toBe("aa".repeat(20))
+
+      // A released announcement from a peer wakes the slot wait.
+      busChannel.postMessage({
+        type: "lease-released",
+        accountId: "aa".repeat(20),
+        partition: 0,
+        fromDeviceId: "peer-device",
+      })
+      await vi.waitFor(() =>
+        expect(coordinator.notifySlotMaybeFree).toHaveBeenCalledTimes(1),
+      )
+    } finally {
+      busChannel.close()
+    }
+  })
+
+  it("ignores its own lease messages and other accounts' messages", async () => {
+    const account = makeSyncedAccount()
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
+
+    const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as {
+      yieldForPeer: ReturnType<typeof vi.fn>
+      notifySlotMaybeFree: ReturnType<typeof vi.fn>
+    }
+    const ownDeviceId = localStorageFake.getItem("swarm-id-device-id")
+    expect(ownDeviceId).toBeTruthy()
+    const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+    try {
+      // Own echo (same deviceId) and a foreign account: both ignored.
+      busChannel.postMessage({
+        type: "lease-request",
+        accountId: "aa".repeat(20),
+        fromDeviceId: ownDeviceId,
+      })
+      busChannel.postMessage({
+        type: "lease-request",
+        accountId: "bb".repeat(20),
+        fromDeviceId: "peer-device",
+      })
+      busChannel.postMessage({
+        type: "lease-released",
+        accountId: "bb".repeat(20),
+        partition: 0,
+        fromDeviceId: "peer-device",
+      })
+      // A matching request afterwards proves the earlier ones were dropped
+      // (not merely still in flight).
+      busChannel.postMessage({
+        type: "lease-request",
+        accountId: "aa".repeat(20),
+        fromDeviceId: "peer-device",
+      })
+      await vi.waitFor(() =>
+        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
+      )
+      expect(coordinator.notifySlotMaybeFree).not.toHaveBeenCalled()
+    } finally {
+      busChannel.close()
+    }
   })
 
   it("rejects a hydration payload with a wrong challenge", async () => {

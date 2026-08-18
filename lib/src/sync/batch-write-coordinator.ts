@@ -46,7 +46,7 @@ import {
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
-import { sleep, withTimeout } from "../utils/promise"
+import { withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
 import type {
   LeaseRefreshOutcome,
@@ -165,7 +165,22 @@ export interface BatchWriteCoordinatorDeps {
   onLeaseChange?: (info: LeaseChangeInfo) => void
   /** Fired when a partition is (re)acquired (phase-5 publish trigger). */
   onLeaseAcquired?: (partition: number) => void
+  /**
+   * Fired each slot-wait poll round while a blocking acquire finds every
+   * partition held by live peers. The proxy broadcasts a `lease-request` on
+   * the account bus so an idle live holder yields immediately instead of
+   * after `IDLE_YIELD_MS` (docs/Account-Bus.md, bus-accelerated leases).
+   */
+  onSlotWait?: () => void
 }
+
+/**
+ * Minimum idle time before a peer's `lease-request` makes this holder yield.
+ * Much shorter than `IDLE_YIELD_MS` (the unprompted timer yield) — the request
+ * proves a peer is actively waiting — but non-zero so a holder mid-burst
+ * (between two uploads) doesn't ping-pong its partition away.
+ */
+export const PEER_YIELD_MIN_IDLE_MS = 3000
 
 export class BatchWriteCoordinator {
   private readonly deps: BatchWriteCoordinatorDeps
@@ -193,6 +208,9 @@ export class BatchWriteCoordinator {
    *  exceeds one pointer epoch, `refreshTick` demotes. Reset on a successful
    *  heartbeat and whenever the lease binding changes. */
   private pointerHeartbeatFailingSince: number | undefined = undefined
+  /** Resolver that wakes the current slot-wait poll sleep early (a peer
+   *  announced a release over the bus); undefined outside slot-wait. */
+  private slotWaitWake: (() => void) | undefined
   /** Set by `teardown()`. Once disposed the coordinator must never re-acquire a
    *  partition or arm a refresh timer: an in-flight `withWrite` (e.g. a deferred
    *  publish, or a normal upload) can outlive a disconnect/sign-out, and without
@@ -633,7 +651,18 @@ export class BatchWriteCoordinator {
           this.deps.accountId,
         )
       }
-      await sleep(LEASE_REFRESH_MS)
+      // Ask live holders to yield (re-broadcast every round — idempotent),
+      // then sleep the poll interval, waking early on `notifySlotMaybeFree`.
+      this.deps.onSlotWait?.()
+      await new Promise<void>((resolve) => {
+        const wake = () => {
+          clearTimeout(timer)
+          if (this.slotWaitWake === wake) this.slotWaitWake = undefined
+          resolve()
+        }
+        const timer = setTimeout(wake, LEASE_REFRESH_MS)
+        this.slotWaitWake = wake
+      })
       // Checked between the sleep and the next acquire: a fresh `acquire()`
       // call would capture the bumped epoch as its own baseline and commit.
       if (this.leaseEpoch !== epoch) return
@@ -1070,6 +1099,44 @@ export class BatchWriteCoordinator {
     console.info(
       `[BatchWriteCoordinator] Released idle partition ${yieldedPartition ?? "?"}; will re-acquire on next write.`,
     )
+  }
+
+  /**
+   * Wake a slot-waiting acquire immediately (a peer announced a release over
+   * the account bus). No-op outside slot-wait; the woken loop still claims
+   * through the lock SOCs, so a spurious wake costs one extra read round.
+   */
+  notifySlotMaybeFree(): void {
+    this.slotWaitWake?.()
+  }
+
+  /**
+   * A waiting peer asked for a slot (bus `lease-request`): release the held
+   * partition NOW if it is safe — nothing in flight and no write within
+   * `PEER_YIELD_MIN_IDLE_MS`. Runs the exact idle-yield path (under the write
+   * lock, with the same re-checks), so the Swarm release protocol and counter
+   * flushes are identical to a timer yield. Returns the released partition,
+   * or undefined when nothing was (or could safely be) yielded.
+   */
+  async yieldForPeer(): Promise<number | undefined> {
+    const lease = this.partitionLease
+    const partition = lease?.currentPartition
+    if (this.disposed || !lease || partition === undefined) return undefined
+    if (this.activeUploadCount !== 0) return undefined
+    if (Date.now() - this.lastLeaseActivityAt < PEER_YIELD_MIN_IDLE_MS) {
+      return undefined
+    }
+    let released: number | undefined
+    await this.lock(async () => {
+      if (this.disposed || this.partitionLease !== lease) return
+      if (this.activeUploadCount !== 0) return
+      if (Date.now() - this.lastLeaseActivityAt < PEER_YIELD_MIN_IDLE_MS) {
+        return
+      }
+      await this.yieldIdleLease(lease)
+      released = partition
+    })
+    return released
   }
 
   /**
