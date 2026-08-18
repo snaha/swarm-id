@@ -28,13 +28,18 @@
   const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid)
   const beeNodeUrlError = $derived(beeNodeUrl.trim().length > 0 && !beeNodeUrlValid)
   const gnosisRpcUrlError = $derived(gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid)
+  /** Whether the field has been edited away from what `connected` describes. */
+  const gnosisRpcUrlEdited = $derived(gnosisRpcUrl.trim() !== networkSettingsStore.gnosisRpcUrl)
 
   /**
    * What is actually answering at the SAVED endpoint. Worth showing, because a
    * dev chain reports the same chain id as mainnet on purpose — so the URL is
    * otherwise the only clue, and a stale `localhost` looks exactly like the
    * real thing. Probed for the saved value rather than the field being edited,
-   * so typing a URL does not fire a request per keystroke.
+   * so typing a URL does not fire a request per keystroke — and hidden as soon
+   * as the two differ, since otherwise typing the real mainnet RPC over a stale
+   * `localhost` leaves "funds here are not real" sitting under the mainnet URL
+   * that was just entered.
    */
   const connected = chainIdentity(networkSettingsStore.gnosisRpcUrl).then(
     (identity) =>
@@ -88,7 +93,7 @@
     />
     {#if gnosisRpcUrlError}
       <p class="text-destructive text-xs">Please enter a valid URL</p>
-    {:else}
+    {:else if !gnosisRpcUrlEdited}
       {#await connected then chain}
         <p class="text-xs {chain.tone}">Connected to: {chain.label}</p>
       {/await}
