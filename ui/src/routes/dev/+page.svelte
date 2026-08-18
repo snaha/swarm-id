@@ -130,6 +130,14 @@
 
   let networkDialogOpen = $state(false)
 
+  /**
+   * Bumped to re-ask which chain is there. A failed probe is never cached, so a
+   * retry really re-probes — but only the endpoint changing re-runs the await,
+   * so a page opened before the local chain was up would otherwise read "No
+   * chain reachable" until it is reloaded.
+   */
+  let chainProbeAttempt = $state(0)
+
   // Both presets apply straight away; anything else goes through the product's
   // own Network settings dialog rather than a second copy of its fields.
   async function useLocalEndpoints() {
@@ -772,7 +780,12 @@ Check console logs for details:
   ]
 </script>
 
-{#snippet chainBanner(label: string, detail: string, alarming: boolean)}
+{#snippet chainBanner(
+  label: string,
+  detail: string,
+  alarming: boolean,
+  onretry?: () => void,
+)}
   <div
     class="rounded-md border px-4 py-3 text-sm {alarming
       ? 'border-destructive bg-destructive/10 text-destructive font-medium'
@@ -780,6 +793,9 @@ Check console logs for details:
   >
     <span>{label}</span>
     <span class="font-mono">{detail}</span>
+    {#if onretry}
+      <Button variant="outline" size="sm" class="ml-2 align-middle" onclick={onretry}>Retry</Button>
+    {/if}
   </div>
 {/snippet}
 
@@ -844,9 +860,11 @@ Check console logs for details:
     Keyed on the endpoint: without it a switch away from an unreachable RPC
     keeps rendering the failed branch — with the NEW url interpolated into it,
     since the message reads that from the store — so a healthy endpoint is
-    reported dead the instant it is selected.
+    reported dead the instant it is selected. The attempt counter is the other
+    half: a chain that comes up after the page did needs something to re-ask,
+    and nothing else here would.
   -->
-  {#key networkSettingsStore.gnosisRpcUrl}
+  {#key `${networkSettingsStore.gnosisRpcUrl}#${chainProbeAttempt}`}
     {#await chainIdentity(networkSettingsStore.gnosisRpcUrl)}
       {@render chainBanner('Checking the chain at ', networkSettingsStore.gnosisRpcUrl, false)}
     {:then identity}
@@ -864,7 +882,12 @@ Check console logs for details:
         )}
       {/if}
     {:catch}
-      {@render chainBanner('No chain reachable at ', networkSettingsStore.gnosisRpcUrl, true)}
+      {@render chainBanner(
+        'No chain reachable at ',
+        networkSettingsStore.gnosisRpcUrl,
+        true,
+        () => chainProbeAttempt++,
+      )}
     {/await}
   {/key}
 
