@@ -62,23 +62,24 @@ function sendSecretToOpener(account: Account, request: ConnectRequest, appSecret
     return
   }
   const idHex = account.id.toHex()
-  window.opener.postMessage(
-    {
-      type: 'setSecret',
-      appOrigin: request.appOrigin,
-      challenge: request.partitionChallenge,
-      data: {
-        secret: appSecret,
-        identityId: idHex,
-        identityName: account.name,
-        identityAddress: idHex,
-        identityPublicKey: account.publicKey,
-        account: serializeSyncedAccount(account.toSyncedRecord()),
-        networkSettings: networkSettingsStore.settings,
-      },
+  const message = {
+    type: 'setSecret',
+    appOrigin: request.appOrigin,
+    challenge: request.partitionChallenge,
+    data: {
+      secret: appSecret,
+      identityId: idHex,
+      identityName: account.name,
+      identityAddress: idHex,
+      identityPublicKey: account.publicKey,
+      account: serializeSyncedAccount(account.toSyncedRecord()),
+      networkSettings: networkSettingsStore.settings,
     },
-    window.location.origin,
-  )
+  }
+  // The account collections and network settings are Svelte $state proxies,
+  // which structured clone rejects (DataCloneError). The payload is already
+  // the JSON wire shape, so a JSON round-trip strips the reactivity.
+  window.opener.postMessage(JSON.parse(JSON.stringify(message)), window.location.origin)
 }
 
 /**
