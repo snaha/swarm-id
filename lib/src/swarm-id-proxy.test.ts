@@ -691,6 +691,40 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     expect(stamper).toEqual({ tag: B2 })
   })
 
+  it("builds the stamper under the account write lock", async () => {
+    // `UtilizationAwareStamper.create` seeds bucket state from IndexedDB;
+    // running it under the account Web Lock orders that read after any
+    // in-flight write's flush (which happens inside the same lock), so a
+    // same-batch rebuild can never seed from about-to-be-overwritten state.
+    const create = vi.mocked(UtilizationAwareStamper.create)
+    const callsBefore = create.mock.calls.length
+    let grantLock!: () => void
+    const requested: string[] = []
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: (name: string, _opts: unknown, cb: () => Promise<unknown>) => {
+          requested.push(name)
+          return new Promise((resolveLock) => {
+            grantLock = () => resolveLock(cb())
+          })
+        },
+      },
+    })
+    try {
+      const pending = resolve(B2)
+      await new Promise((r) => setTimeout(r, 0))
+      expect(requested).toEqual(["swarm-write-account-acct-1"])
+      expect(create.mock.calls.length).toBe(callsBefore)
+
+      grantLock()
+      const stamper = await pending
+      expect(stamper?.batchId?.toHex()).toBe(B2)
+      expect(create.mock.calls.length).toBe(callsBefore + 1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("rebindActiveStamp re-binds the currently bound stamp", async () => {
     await (proxy as never)["rebindActiveStamp"]()
     expect(bindStamp).toHaveBeenCalledTimes(1)
@@ -733,7 +767,11 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
 
   const flush = () => new Promise((resolve) => setTimeout(resolve, 0))
 
-  it("runs stamped writes strictly one after another", async () => {
+  it("the work queue drains while a stamped write is in flight", async () => {
+    // Only the RESOLUTION holds the queue; the (possibly minutes-long)
+    // network op runs off it, so storage-event work — sign-out propagation,
+    // stamp changes, node rebinds — is never head-of-line blocked behind an
+    // upload.
     const events: string[] = []
     let releaseA!: () => void
     const gateA = new Promise<void>((resolve) => (releaseA = resolve))
@@ -743,16 +781,44 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
       await gateA
       events.push("a-end")
     })
-    const b = write(async () => {
-      events.push("b-start")
-    })
-
     await flush()
     expect(events).toEqual(["a-start"])
 
+    // Queued while the write is still pending — must complete anyway.
+    await (proxy as never)["enqueueWork"](async () => {
+      events.push("queued-work")
+    })
+    expect(events).toEqual(["a-start", "queued-work"])
+
     releaseA()
-    await Promise.all([a, b])
-    expect(events).toEqual(["a-start", "a-end", "b-start"])
+    await a
+    expect(events).toEqual(["a-start", "queued-work", "a-end"])
+  })
+
+  it("resolution stays serialized with queued rebinds", async () => {
+    // A rebind already on the queue must finish BEFORE a later write picks
+    // its stamper/coordinator — the atomic-with-rebinds half that stays.
+    const events: string[] = []
+    let releaseRebind!: () => void
+    const gate = new Promise<void>((resolve) => (releaseRebind = resolve))
+    void (proxy as never)["enqueueWork"](async () => {
+      events.push("rebind-start")
+      await gate
+      events.push("rebind-end")
+    })
+    const resolveUploadStamper = (proxy as never)[
+      "resolveUploadStamper"
+    ] as ReturnType<typeof vi.fn>
+
+    const a = write(async () => {
+      events.push("op")
+    })
+    await flush()
+    expect(resolveUploadStamper).not.toHaveBeenCalled()
+
+    releaseRebind()
+    await a
+    expect(events).toEqual(["rebind-start", "rebind-end", "op"])
   })
 
   it("a failed write does not wedge the queue", async () => {

@@ -136,6 +136,7 @@ import {
 } from "./utils/postage-contract"
 import { withTimeout } from "./utils/promise"
 import { tryCreateTag } from "./utils/tag"
+import { withAccountWriteLock } from "./utils/account-write-lock"
 import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
@@ -761,6 +762,40 @@ export class SwarmIdProxy {
    * Initialize the Stamper for client-side signing
    * Uses UtilizationAwareStamper to track bucket usage
    */
+  /**
+   * Build a `UtilizationAwareStamper` with its persisted-state read ordered
+   * UNDER the account Web Lock. `create` seeds bucket state from IndexedDB;
+   * stamped-but-unflushed buckets exist only during an in-flight write, whose
+   * flush runs inside this same lock (the coordinator's `lockAndFlush`
+   * finally) — so the lock guarantees a same-batch rebuild never seeds from
+   * state a concurrent write is about to overwrite. Deadlock-free: queued
+   * work may wait on this lock, but lock holders (writes) never wait on the
+   * queue. No legacy batch lock ids: this acquisition performs no Swarm
+   * writes.
+   */
+  private createStamperUnderAccountLock(
+    accountInfo: {
+      accountId: string
+      owner: EthAddress
+      encryptionKey: Uint8Array
+    },
+    signerKey: string,
+    batchId: BatchId,
+    depth: number,
+    store: UtilizationStoreDB,
+  ): Promise<UtilizationAwareStamper> {
+    return withAccountWriteLock(accountInfo.accountId, () =>
+      UtilizationAwareStamper.create(
+        signerKey,
+        batchId,
+        depth,
+        store,
+        accountInfo.owner,
+        accountInfo.encryptionKey,
+      ),
+    )
+  }
+
   private async initializeStamper(stampDepth: number): Promise<void> {
     if (!this.signerKey || !this.postageBatchId) {
       console.warn(
@@ -783,13 +818,12 @@ export class SwarmIdProxy {
 
     // Create utilization-aware stamper with owner and encryption key
     try {
-      this.stamper = await UtilizationAwareStamper.create(
+      this.stamper = await this.createStamperUnderAccountLock(
+        accountInfo,
         this.signerKey,
         new BatchId(this.postageBatchId),
         stampDepth,
         this.utilizationStore,
-        accountInfo.owner,
-        accountInfo.encryptionKey,
       )
       this.stamperAccountFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
       // The default binding's stamper is also the cache entry for its batch —
@@ -1024,10 +1058,21 @@ export class SwarmIdProxy {
    * mode the write's stamper is first resolved (`batchID` target from the
    * per-batch cache, else the app's default binding) and the write then goes
    * through the {@link BatchWriteCoordinator} with that stamper as its batch
-   * context — resolve + write run as one unit on the shared work queue, so
-   * storage-event rebinds can't swap the binding mid-write. A targeted batch
-   * never mutates the default binding: the account-scoped coordinator joins it
-   * to the held partition lease with no release/re-acquire.
+   * context.
+   *
+   * Only the RESOLUTION runs on the shared work queue (atomic with
+   * storage-event rebinds — the queue can't swap the binding while a write's
+   * stamper/coordinator are being picked). The write itself runs OFF the
+   * queue: it can take minutes (large upload) or park on the cross-tab
+   * account Web Lock, and holding the queue through that would stall sign-out
+   * propagation, stamp changes, and node rebinds behind it. A rebind landing
+   * mid-write tears down the captured coordinator, whose breaker aborts the
+   * in-flight stamp with `PartitionLeaseLostError` — a loud failure, never a
+   * write under a swapped binding.
+   *
+   * A targeted batch never mutates the default binding: the account-scoped
+   * coordinator joins it to the held partition lease with no
+   * release/re-acquire.
    */
   private async withModeAwareWriteLock<T>(
     targetOptions: { useWorkers?: boolean; workerCount?: number } | undefined,
@@ -1042,23 +1087,30 @@ export class SwarmIdProxy {
         gatewayUrl: this.subsidisedGatewayUrl!,
       })
     }
-    return this.enqueueWork(async () => {
+    const resolved = await this.enqueueWork(async () => {
       const stamper = await this.resolveUploadStamper(batchID)
-      // Re-resolving the default may have cleared the binding (e.g. the
-      // default stamp was deleted) — fall back to the gateway if configured.
-      // NEVER for an explicit `batchID`: silently landing a targeted upload
-      // on the gateway's batch would betray the requested target — fail it.
-      if (!stamper && !batchID && this.isSubsidisedModeActive()) {
-        return operation({
-          mode: "subsidised",
-          gatewayUrl: this.subsidisedGatewayUrl!,
-        })
-      }
-      if (!stamper || !this.coordinator) {
-        throw new Error("Stamper not initialized. Please login first.")
-      }
-      return this.coordinator.withWrite(stamper, operation, targetOptions)
+      // `coordinator` captured atomically with the stamper: the pair the
+      // off-queue write below runs against, immune to later rebinds.
+      return { stamper, coordinator: this.coordinator }
     })
+    // Re-resolving the default may have cleared the binding (e.g. the
+    // default stamp was deleted) — fall back to the gateway if configured.
+    // NEVER for an explicit `batchID`: silently landing a targeted upload
+    // on the gateway's batch would betray the requested target — fail it.
+    if (!resolved.stamper && !batchID && this.isSubsidisedModeActive()) {
+      return operation({
+        mode: "subsidised",
+        gatewayUrl: this.subsidisedGatewayUrl!,
+      })
+    }
+    if (!resolved.stamper || !resolved.coordinator) {
+      throw new Error("Stamper not initialized. Please login first.")
+    }
+    return resolved.coordinator.withWrite(
+      resolved.stamper,
+      operation,
+      targetOptions,
+    )
   }
 
   /**
@@ -1483,7 +1535,9 @@ export class SwarmIdProxy {
    * on accounts whose default pointer is gone.
    *
    * Must run on the shared work queue (`withModeAwareWriteLock` does) so a
-   * storage-event rebind can't swap the binding under an in-flight write.
+   * storage-event rebind can't swap the binding while a write's stamper and
+   * coordinator are being picked. (The write itself then runs off the queue —
+   * see `withModeAwareWriteLock`.)
    */
   private async resolveUploadStamper(
     batchID?: string,
@@ -1527,13 +1581,12 @@ export class SwarmIdProxy {
       throw new Error(`Failed to build stamper for batch ${targetHex}`)
     }
     try {
-      const stamper = await UtilizationAwareStamper.create(
+      const stamper = await this.createStamperUnderAccountLock(
+        accountInfo,
         signerKey,
         stamp.batchID,
         stamp.depth,
         this.utilizationStore,
-        accountInfo.owner,
-        accountInfo.encryptionKey,
       )
       this.setStampEntry(stamper, signerKey)
       return stamper
