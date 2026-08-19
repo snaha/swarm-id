@@ -11,8 +11,11 @@
  * Pure, and kept out of `eth-wallet.ts` so the format can be pinned by tests
  * without dragging in the wallet-connection machinery.
  */
-import { Signature } from 'ethers'
+import { type Hex, parseSignature, serializeSignature } from 'viem'
 
-export function canonicalSignature(signature: string): string {
-  return Signature.from(signature).serialized
+export function canonicalSignature(signature: string): Hex {
+  if (!/^0x[0-9a-fA-F]+$/.test(signature)) {
+    throw new Error('The wallet returned a signature that is not hex.')
+  }
+  return serializeSignature(parseSignature(signature as Hex))
 }

@@ -8,7 +8,7 @@ const HEX_PATTERN = /^[0-9a-fA-F]*$/
 
 /**
  * Strip a leading `0x` from a hex string (returns it unchanged if there is
- * none): ethers returns keys `0x`-prefixed, but the lib and the shared records
+ * none): the derivation returns keys `0x`-prefixed, but the lib and the shared records
  * store bare hex. Use this for the public/private-key strings. For addresses
  * prefer `new EthAddress(value)`, which also normalizes EIP-55 case.
  */
