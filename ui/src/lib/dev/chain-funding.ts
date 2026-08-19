@@ -72,17 +72,22 @@ const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 const PURCHASE_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
 
 /**
- * Refuse to run against Gnosis mainnet.
+ * Refuse to run anywhere but a chain that is provably a dev one.
  *
- * Nothing here can currently do damage there — the faucet key is public and
- * holds nothing, and no real node serves `anvil_setBalance` — but both of
+ * Nothing here can currently do damage on mainnet — the faucet key is public
+ * and holds nothing, and no real node serves `anvil_setBalance` — but both of
  * those facts live two packages away, and neither was chosen as a safeguard.
  * The red banner warns the person; this stops the code. The identity is
  * already cached by the time any of these run, so it costs a map lookup.
+ *
+ * Asked positively on purpose: "not mainnet" waves through every other
+ * reachable chain, and an unproven all-clear is exactly what spends real money.
  */
 async function assertDevChain(tool: string): Promise<void> {
-  if ((await chainIdentity()).isMainnet) {
-    throw new Error(`${tool} only runs on a dev chain — the configured Gnosis RPC is mainnet.`)
+  const { kind } = await chainIdentity()
+  if (kind !== 'dev') {
+    const what = kind === 'mainnet' ? 'Gnosis mainnet' : 'a chain that is not Gnosis'
+    throw new Error(`${tool} only runs on a dev chain — the configured Gnosis RPC serves ${what}.`)
   }
 }
 

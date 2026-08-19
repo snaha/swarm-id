@@ -70,16 +70,28 @@ describe('probeChainId', () => {
 describe('chainIdentity', () => {
   it('calls the real genesis mainnet', async () => {
     stubRpc(mainnetAnswers)
-    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 100, isMainnet: true })
+    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 100, kind: 'mainnet' })
   })
 
   it('calls a chain wearing id 100 with another genesis a dev chain', async () => {
     stubRpc(devChainAnswers)
-    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 100, isMainnet: false })
+    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 100, kind: 'dev' })
+  })
+
+  // The same invariant from the other side: a reachable chain that is not
+  // Gnosis at all is neither of the two known answers, and must not be handed
+  // the dev one — pointed at Ethereum, "not mainnet" would invite the faucet
+  // to spend there.
+  it.each([
+    ['its own genesis', { hash: '0x' + '22'.repeat(32) }],
+    ['a genesis that matches Gnosis', { hash: GNOSIS_GENESIS }],
+  ])('calls a chain that is not Gnosis unsupported, whatever %s says', async (_label, block) => {
+    stubRpc({ eth_chainId: { result: '0x1' }, eth_getBlockByNumber: { result: block } })
+    await expect(chainIdentity(freshUrl())).resolves.toEqual({ chainId: 1, kind: 'unsupported' })
   })
 
   // The invariant the whole module exists for: "we could not prove it" must
-  // never come out as isMainnet false, which is the answer that tells the page
+  // never come out as a dev chain, which is the answer that tells the page
   // spending is free.
   it.each([
     ['a JSON-RPC error', { error: { message: 'pruned' } }],
@@ -102,7 +114,7 @@ describe('chainIdentity', () => {
     await expect(chainIdentity(url)).rejects.toThrow()
 
     stubRpc(mainnetAnswers)
-    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, isMainnet: true })
+    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'mainnet' })
   })
 })
 

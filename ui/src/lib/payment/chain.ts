@@ -26,7 +26,7 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
  * driven with the production ones — which is what makes it worth testing on.
  */
 function settingsFor(identity: ChainIdentity, rpcUrl: string): MultichainSettings {
-  if (identity.chainId !== GNOSIS_CHAIN_ID) {
+  if (identity.kind === 'unsupported') {
     throw new Error(
       `The configured Gnosis RPC reports chain id ${identity.chainId}, not Gnosis (${GNOSIS_CHAIN_ID}). Check the network settings.`,
     )
@@ -35,9 +35,10 @@ function settingsFor(identity: ChainIdentity, rpcUrl: string): MultichainSetting
   // a failed call would silently read REAL mainnet state.
   const mainnet = gnosisMainnetSettings()
   return gnosisMainnetSettings({
-    rpcUrls: identity.isMainnet
-      ? [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)]
-      : [rpcUrl],
+    rpcUrls:
+      identity.kind === 'mainnet'
+        ? [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)]
+        : [rpcUrl],
   })
 }
 
@@ -51,13 +52,25 @@ const CHAIN_ID_PROBE_TIMEOUT_MS = 5000
  */
 const GNOSIS_GENESIS_HASH = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
 
+/**
+ * Three answers, not two. `dev` is the one that tells a page spending is free,
+ * so it has to be *proven* — chain id 100 with a genesis that is not mainnet's
+ * — rather than inferred from "not mainnet". A reachable chain that is neither
+ * is `unsupported`: pointed at Ethereum, a boolean would have called it a dev
+ * chain and invited the faucet to spend there.
+ */
+export type ChainKind = 'mainnet' | 'dev' | 'unsupported'
+
 export interface ChainIdentity {
   chainId: number
-  /**
-   * True only for Gnosis mainnet itself. Anything else answering as chain 100
-   * is a dev chain, and spending on it is free.
-   */
-  isMainnet: boolean
+  kind: ChainKind
+}
+
+function kindOf(chainId: number, genesisHash: string): ChainKind {
+  if (chainId !== GNOSIS_CHAIN_ID) {
+    return 'unsupported'
+  }
+  return genesisHash === GNOSIS_GENESIS_HASH ? 'mainnet' : 'dev'
 }
 
 interface JsonRpcResponse<T> {
@@ -145,7 +158,7 @@ export function chainIdentity(
   ])
     .then(([chainId, genesisHash]) => ({
       chainId,
-      isMainnet: chainId === GNOSIS_CHAIN_ID && genesisHash === GNOSIS_GENESIS_HASH,
+      kind: kindOf(chainId, genesisHash),
     }))
     .catch((error: unknown) => {
       // Only evict OUR entry: a retry may already have stored a healthy probe

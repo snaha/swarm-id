@@ -40,12 +40,25 @@
    * as the two differ, since otherwise typing the real mainnet RPC over a stale
    * `localhost` leaves "funds here are not real" sitting under the mainnet URL
    * that was just entered.
+   *
+   * A chain that is neither says so rather than borrowing either line: nothing
+   * in the app works there, and calling it fake would be an all-clear about
+   * somebody's real funds.
    */
   const connected = chainIdentity(networkSettingsStore.gnosisRpcUrl).then(
-    (identity) =>
-      identity.isMainnet
-        ? { label: 'Gnosis Chain', tone: 'text-muted-foreground' }
-        : { label: 'Gnosis Chain (fake) — funds here are not real', tone: 'font-medium' },
+    (identity) => {
+      switch (identity.kind) {
+        case 'mainnet':
+          return { label: 'Gnosis Chain', tone: 'text-muted-foreground' }
+        case 'dev':
+          return { label: 'Gnosis Chain (fake) — funds here are not real', tone: 'font-medium' }
+        case 'unsupported':
+          return {
+            label: `Not Gnosis Chain — this endpoint serves chain ${identity.chainId}`,
+            tone: 'text-destructive',
+          }
+      }
+    },
     () => ({ label: 'Not reachable', tone: 'text-destructive' }),
   )
 

@@ -892,17 +892,28 @@ Check console logs for details:
     {#await chainIdentity(networkSettingsStore.gnosisRpcUrl)}
       {@render chainBanner('Checking the chain at ', networkSettingsStore.gnosisRpcUrl, false)}
     {:then identity}
-      {#if identity.isMainnet}
+      {#if identity.kind === 'mainnet'}
         {@render chainBanner(
           'GNOSIS MAINNET — these tools spend real funds. ',
           networkSettingsStore.gnosisRpcUrl,
           true,
         )}
-      {:else}
+      {:else if identity.kind === 'dev'}
         {@render chainBanner(
           'Local dev chain, nothing here is real. ',
           networkSettingsStore.gnosisRpcUrl,
           false,
+        )}
+      {:else}
+        <!--
+          Alarming, and not the "nothing here is real" line: an endpoint that is
+          reachable but not Gnosis may well be somebody's real chain, and the
+          tools below refuse to run there rather than guess.
+        -->
+        {@render chainBanner(
+          `Chain ${identity.chainId} is not Gnosis — these tools will not run against `,
+          networkSettingsStore.gnosisRpcUrl,
+          true,
         )}
       {/if}
     {:catch}
