@@ -706,9 +706,12 @@ Check console logs for details:
 
   let importBatchId = $state('')
   let importSignerKey = $state('')
-  // Defaults to the shared network setting, like every other dev tool here —
-  // reading a batch from one chain while the app talks to another is a trap.
-  let importRpcUrl = $state(networkSettingsStore.gnosisRpcUrl)
+  // Follows the shared network setting, like every other dev tool here —
+  // reading a batch from one chain while the app talks to another is a trap,
+  // and this page switches endpoints in one click. Deliberately overwrites a
+  // hand-typed value when that happens: after switching chains the old one is
+  // the trap, not a preference worth keeping.
+  let importRpcUrl = $derived(networkSettingsStore.gnosisRpcUrl)
   // Blank → resolve from the chain the RPC serves; a value overrides.
   let importContractOverride = $state('')
   let importSetDefault = $state(true)
