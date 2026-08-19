@@ -38,6 +38,7 @@ import type {
   ActRevokeGranteesMessage,
   ActGetGranteesMessage,
   GetPostageBatchesMessage,
+  GetPostageBatchMessage,
   CreateFeedManifestMessage,
   AppMetadata,
   PostageStamp,
@@ -1379,6 +1380,7 @@ export class SwarmIdProxy {
       type: "proxyReady",
       authenticated: this.authenticated,
       parentOrigin: this.parentOrigin,
+      supportsBatchTargeting: true,
     })
 
     // Send the initial ConnectionInfo snapshot. The client awaits this before
@@ -1517,6 +1519,10 @@ export class SwarmIdProxy {
 
       case "getPostageBatches":
         await this.handleGetPostageBatches(message, event)
+        break
+
+      case "getPostageBatch":
+        await this.handleLegacyGetPostageBatch(message, event)
         break
 
       case "createFeedManifest":
@@ -4566,6 +4572,34 @@ export class SwarmIdProxy {
         error instanceof Error ? error.message : "ACT get grantees failed",
       )
     }
+  }
+
+  /**
+   * @deprecated Compat shim for already-deployed pre-multi-batch clients (see
+   * `GetPostageBatchMessageSchema`): answers the removed `getPostageBatch`
+   * request with the resolved default stamp, enriched exactly like the list
+   * endpoint. Without this the message is silently dropped and the old dApp's
+   * request hangs to its timeout on every stamp display.
+   */
+  private async handleLegacyGetPostageBatch(
+    message: GetPostageBatchMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    const stamp = this.lookupPostageStampForApp()
+    let postageBatch: PostageBatch | undefined
+    if (stamp) {
+      let price: Promise<number> | undefined
+      const getPrice = () => (price ??= fetchSwarmPrice())
+      postageBatch = {
+        ...(await this.stampToPostageBatch(stamp, getPrice)),
+        isDefault: true,
+      }
+    }
+    this.postMessage(event, {
+      type: "getPostageBatchResponse",
+      requestId: message.requestId,
+      postageBatch,
+    })
   }
 
   private async handleGetPostageBatches(

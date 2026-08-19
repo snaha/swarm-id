@@ -139,6 +139,9 @@ export class SwarmIdClient {
   private containerId?: string
   private subsidisedGatewayUrl?: string
   private ready: boolean = false
+  /** Set from `proxyReady.supportsBatchTargeting` — see
+   *  {@link assertBatchTargetingSupported}. */
+  private proxySupportsBatchTargeting: boolean = false
   private readyPromise: Promise<void> | undefined
   private readyResolve?: () => void
   private readyReject?: (error: Error) => void
@@ -427,6 +430,8 @@ export class SwarmIdClient {
   private handleIframeMessage(message: IframeToParentMessage): void {
     switch (message.type) {
       case "proxyReady":
+        this.proxySupportsBatchTargeting =
+          message.supportsBatchTargeting === true
         this.ready = true
         if (this.readyResolve) {
           this.readyResolve()
@@ -559,6 +564,7 @@ export class SwarmIdClient {
         requestId: string
       },
   >(message: TRequest): Promise<TResponse> {
+    this.assertBatchTargetingSupported(message)
     return new Promise((resolve, reject) => {
       const timeoutId = setTimeout(() => {
         this.pendingRequests.delete(message.requestId)
@@ -573,6 +579,32 @@ export class SwarmIdClient {
 
       this.sendMessage(message)
     })
+  }
+
+  /**
+   * Refuse to send a batch-targeted request to a proxy that never advertised
+   * `supportsBatchTargeting`. A pre-multi-batch proxy's Zod parse silently
+   * STRIPS the unknown `batchID`, so the upload would land on the resolved
+   * default batch and report success — the exact misroute an explicit target
+   * exists to prevent. One choke point for every message shape that can carry
+   * a target: `options.batchID` (data/file/chunk/SOC/GSOC/sequential-feed
+   * uploads), `uploadOptions.batchID` (feed manifests, ACT), and the top-level
+   * `batchID` (epoch feed writes).
+   */
+  private assertBatchTargetingSupported(message: ParentToIframeMessage): void {
+    const m = message as {
+      batchID?: unknown
+      options?: { batchID?: unknown }
+      uploadOptions?: { batchID?: unknown }
+    }
+    const target = m.batchID ?? m.options?.batchID ?? m.uploadOptions?.batchID
+    if (target !== undefined && !this.proxySupportsBatchTargeting) {
+      throw new Error(
+        "The connected identity provider does not support batchID upload " +
+          "targeting (it would silently upload to the default batch). " +
+          "Omit batchID, or wait for the trusted domain to update.",
+      )
+    }
   }
 
   /**
