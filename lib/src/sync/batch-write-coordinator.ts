@@ -268,6 +268,26 @@ export class BatchWriteCoordinator {
    * they land. See {@link joinedRestoreSettled}.
    */
   private joinedRestore: Promise<void> | undefined
+  /** True while a `restoreJoinedSecondaries` run is in flight, so the refresh
+   *  tick's retry never overlaps one (see {@link kickJoinedRestore}). */
+  private joinedRestoreActive = false
+  /**
+   * Batch ids from the persisted snapshot still awaiting a successful re-join,
+   * each with the seed mode its acquire path mandates ("local" only after an
+   * adopt — the lease never lapsed, so this device's persisted state is
+   * current; "network" after a cold acquire). `serialize()` only knows
+   * successfully seeded batches, so every snapshot persist merges these ids
+   * into `joinedBatchIds` ({@link persistLeaseSnapshot}) and the refresh tick
+   * retries them — otherwise a transient resolver failure, or a reload landing
+   * before the restore finishes, would permanently drop a batch from the
+   * restore list and let its state pointer age out of the takeover lookup
+   * span. A batch the account no longer owns never resolves and just stays
+   * pending: one cheap local lookup per tick.
+   */
+  private readonly pendingJoinedRestores = new Map<
+    string,
+    "local" | "network"
+  >()
   /**
    * Per-SECONDARY state-pointer heartbeat failure streaks, keyed by batch id
    * hex. The lease batch's streak is `pointerHeartbeatFailingSince` (it demotes
@@ -442,12 +462,15 @@ export class BatchWriteCoordinator {
     // Persist the join immediately rather than waiting for the next refresh
     // tick: a reload inside that window would lose this batch from the cached
     // snapshot, and its state pointer would stop being heartbeated.
-    this.deps.writeLeaseCache?.(lease.serialize())
+    this.pendingJoinedRestores.delete(key)
+    this.persistLeaseSnapshot(lease)
   }
 
   /**
-   * Re-bind the batches a PREVIOUS session of this device had joined, after the
-   * re-adopt fast path re-established the lease from the local cache.
+   * Re-bind the batches a PREVIOUS session of this device had joined — the
+   * still-pending entries of {@link pendingJoinedRestores} — after an
+   * acquisition (adopt or cold) re-established the lease, and again from the
+   * refresh tick until the pending set drains.
    *
    * `joinedSecondaries` lives only in memory, so without this a reload leaves
    * every secondary batch unheartbeated: `heartbeatStatePointer` no-ops for a
@@ -457,31 +480,39 @@ export class BatchWriteCoordinator {
    * evicting their chunks. This device's own writes are safe either way (they
    * resume off the persisted synced reference); the exposure is to peers.
    *
-   * Mirrors the adopt path's lease-batch sequence per batch, and like it seeds
-   * from local state only — no Swarm read, no lock activity on the claim.
-   * Best-effort per batch: a failure leaves that batch exactly as badly off as
-   * before this existed.
+   * Mirrors the adopt path's lease-batch sequence per batch. Best-effort per
+   * batch: a failed batch stays in {@link pendingJoinedRestores} and the
+   * refresh tick retries it.
    */
   private async restoreJoinedSecondaries(
     lease: PartitionLease,
     epoch: number,
-    partition: number,
-    batchIds: string[] | undefined,
-    seed: "local" | "network",
   ): Promise<void> {
     const resolve = this.deps.resolveStamperForBatch
-    if (!resolve || !batchIds?.length || this.deps.partitionCount <= 1) return
-    const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
+    if (!resolve || this.deps.partitionCount <= 1) return
     let restored = 0
-    for (const key of batchIds) {
-      // The persisted list includes the writing session's lease batch, which
-      // after a default-stamp change is a restorable secondary here — but the
-      // CURRENT lease batch is already bound by the acquire/adopt itself.
-      if (key === leaseBatchHex) continue
-      if (this.joinedSecondaries.has(key)) continue
+    for (const [key, seed] of [...this.pendingJoinedRestores]) {
+      if (
+        this.disposed ||
+        this.leaseEpoch !== epoch ||
+        this.partitionLease !== lease
+      ) {
+        return
+      }
+      const partition = lease.currentPartition
+      if (partition === undefined) return
+      if (this.joinedSecondaries.has(key)) {
+        // A targeted write joined it properly meanwhile — nothing to restore.
+        this.pendingJoinedRestores.delete(key)
+        continue
+      }
       try {
         // Resolved OFF the write lock: the proxy's resolver takes the batch's
-        // state Web Lock internally and Web Locks are not reentrant.
+        // state Web Lock internally and Web Locks are not reentrant. Returns
+        // `undefined` for a batch the account no longer owns OR one whose
+        // stamper transiently cannot be built — either way the id stays
+        // pending and the refresh tick retries (an unowned batch's retry is a
+        // cheap local lookup).
         const stamper = await resolve(key)
         if (!stamper) continue
         // Where the batch's resume state comes from decides safety:
@@ -495,44 +526,91 @@ export class BatchWriteCoordinator {
         //    a LOWER counter over the peer's resume point (slot reuse).
         //    `joinBatch` reads the partition state exactly like a targeted
         //    write's join would, and throws on an inconclusive read.
-        const localCounter =
-          seed === "network"
-            ? await lease.joinBatch(stamper)
-            : stamper.buildLeaseLocalCounter()
-        const referenceHex =
-          seed === "network"
-            ? undefined // joinBatch already seeded the lease's pointer state
-            : await stamper.getSyncedReference(partition).catch(() => undefined)
-        // Commit under the lock so it cannot interleave with a demote or an
-        // idle-yield, with no await between the guard and the map insert.
-        await this.lock(async () => {
-          // `bindPartition` clears `leaseStale`, so a restore that straggles
-          // past a lease loss would re-arm a stamper on a partition a peer now
-          // owns. Same triple check `ensureBatchJoined` makes, plus the epoch.
-          if (
-            this.disposed ||
-            this.leaseEpoch !== epoch ||
-            this.partitionLease !== lease ||
-            this.lostLease === lease
-          ) {
-            return
-          }
-          // Re-checked HERE, not only before the awaits above: a targeted
-          // write can join this batch properly (network read + publish) while
-          // we were resolving. Its state is fresher — committing ours would
-          // regress the heartbeat pointer to our pre-publish read, and a
-          // takeover following the stale pointer resumes below acked.
-          if (this.joinedSecondaries.has(key)) return
-          stamper.bindPartition({
-            partition,
-            partitionCount: this.deps.partitionCount,
-            localCounter,
+        if (seed === "network") {
+          // The join is BOTH the read and the seed: `joinBatch` writes the
+          // batch's publish baseline + heartbeat pointer into the lease (and
+          // persists the synced reference) the moment its read resolves. It
+          // must run UNDER the write lock, gated by the same re-checks as the
+          // commit — off-lock, a targeted write could join + publish this
+          // batch while our read was in flight, and the late seed would
+          // regress the heartbeat pointer below what that write acked (a
+          // takeover following the stale pointer resumes below acked slots).
+          await this.lock(async () => {
+            // `bindPartition` clears `leaseStale`, so a restore that
+            // straggles past a lease loss would re-arm a stamper on a
+            // partition a peer now owns. Same triple check
+            // `ensureBatchJoined` makes, plus the epoch.
+            if (
+              this.disposed ||
+              this.leaseEpoch !== epoch ||
+              this.partitionLease !== lease ||
+              this.lostLease === lease
+            ) {
+              return
+            }
+            if (this.joinedSecondaries.has(key)) {
+              this.pendingJoinedRestores.delete(key)
+              return
+            }
+            const localCounter = await lease.joinBatch(stamper)
+            // Same post-join re-check as `ensureBatchJoined`: a displacement
+            // signalled during the read (`signalLeaseLost` fires off-lock)
+            // must not bind.
+            if (
+              this.disposed ||
+              this.leaseEpoch !== epoch ||
+              this.partitionLease !== lease ||
+              this.lostLease === lease
+            ) {
+              return
+            }
+            stamper.bindPartition({
+              partition,
+              partitionCount: this.deps.partitionCount,
+              localCounter,
+            })
+            stamper.setLeaseValidUntil(lease.leasedUntil)
+            this.joinedSecondaries.set(key, stamper)
+            this.pendingJoinedRestores.delete(key)
+            restored++
           })
-          stamper.setLeaseValidUntil(lease.leasedUntil)
-          if (seed === "local") lease.seedReferenceHex(referenceHex, stamper)
-          this.joinedSecondaries.set(key, stamper)
-          restored++
-        })
+        } else {
+          const localCounter = stamper.buildLeaseLocalCounter()
+          const referenceHex = await stamper
+            .getSyncedReference(partition)
+            .catch(() => undefined)
+          // Commit under the lock so it cannot interleave with a demote or an
+          // idle-yield, with no await between the guard and the map insert.
+          await this.lock(async () => {
+            if (
+              this.disposed ||
+              this.leaseEpoch !== epoch ||
+              this.partitionLease !== lease ||
+              this.lostLease === lease
+            ) {
+              return
+            }
+            // Re-checked HERE, not only before the awaits above: a targeted
+            // write can join this batch properly (network read + publish)
+            // while we were resolving. Its state is fresher — committing ours
+            // would regress the heartbeat pointer to our pre-publish read,
+            // and a takeover following the stale pointer resumes below acked.
+            if (this.joinedSecondaries.has(key)) {
+              this.pendingJoinedRestores.delete(key)
+              return
+            }
+            stamper.bindPartition({
+              partition,
+              partitionCount: this.deps.partitionCount,
+              localCounter,
+            })
+            stamper.setLeaseValidUntil(lease.leasedUntil)
+            lease.seedReferenceHex(referenceHex, stamper)
+            this.joinedSecondaries.set(key, stamper)
+            this.pendingJoinedRestores.delete(key)
+            restored++
+          })
+        }
       } catch (error) {
         console.warn(
           `[BatchWriteCoordinator] Could not restore joined batch ${key}:`,
@@ -540,16 +618,73 @@ export class BatchWriteCoordinator {
         )
       }
     }
-    // Persist the restored set: the acquire wrote its snapshot BEFORE this ran
-    // (empty stateByBatch → no joinedBatchIds), so without this a SECOND reload
-    // inside the next refresh tick's window (~LEASE_REFRESH_MS) would lose the
-    // list again.
+    // Persist the restored set: the acquire wrote its snapshot BEFORE this ran,
+    // so without this a SECOND reload inside the next refresh tick's window
+    // (~LEASE_REFRESH_MS) would need the pending-id merge to find the list.
     if (restored > 0) {
       await this.lock(async () => {
         if (this.disposed || this.partitionLease !== lease) return
-        this.deps.writeLeaseCache?.(lease.serialize())
+        this.persistLeaseSnapshot(lease)
       })
     }
+  }
+
+  /**
+   * Start a background `restoreJoinedSecondaries` run for whatever is still
+   * pending, unless one is already in flight. Called by the acquire paths and
+   * retried by every refresh tick until the pending set drains.
+   */
+  private kickJoinedRestore(lease: PartitionLease): void {
+    if (this.pendingJoinedRestores.size === 0) return
+    if (this.joinedRestoreActive) return
+    this.joinedRestoreActive = true
+    this.joinedRestore = this.restoreJoinedSecondaries(lease, this.leaseEpoch)
+      .catch((error: unknown) =>
+        console.warn(
+          "[BatchWriteCoordinator] Joined-batch restore failed:",
+          error,
+        ),
+      )
+      .finally(() => {
+        this.joinedRestoreActive = false
+      })
+  }
+
+  /**
+   * Reset the pending-restore ledger for a new lease session from the cached
+   * snapshot's batch list. The CURRENT lease batch is excluded — it is bound
+   * by the acquire/adopt itself (after a default-stamp change the snapshot's
+   * old lease batch is just another restorable secondary here).
+   */
+  private seedPendingRestores(
+    batchIds: string[] | undefined,
+    seed: "local" | "network",
+  ): void {
+    this.pendingJoinedRestores.clear()
+    const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
+    for (const id of batchIds ?? []) {
+      if (id !== leaseBatchHex) this.pendingJoinedRestores.set(id, seed)
+    }
+  }
+
+  /**
+   * Persist the lease snapshot, merging batches still awaiting restore into
+   * `joinedBatchIds`: `serialize()` only knows successfully seeded batches, so
+   * without the merge any persist that lands before the restore finishes — or
+   * after one transient restore failure — would drop those batches from every
+   * future session's restore list.
+   */
+  private persistLeaseSnapshot(lease: PartitionLease): void {
+    const snap = lease.serialize()
+    if (this.pendingJoinedRestores.size > 0) {
+      snap.joinedBatchIds = [
+        ...new Set([
+          ...(snap.joinedBatchIds ?? []),
+          ...this.pendingJoinedRestores.keys(),
+        ]),
+      ]
+    }
+    this.deps.writeLeaseCache?.(snap)
   }
 
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
@@ -847,7 +982,11 @@ export class BatchWriteCoordinator {
         // Seed before `onLeaseAcquired` (which may publish): a publish's
         // `flushState` then overwrites this with the fresh reference.
         if (!crossBatchAdopt) lease.seedReferenceHex(seededReferenceHex)
-        this.deps.writeLeaseCache?.(lease.serialize())
+        // Local seeding is sound here and only here: `adoptIfLive` proved the
+        // cached lease is still unexpired, so no peer can have held this
+        // partition since our last write — local state is the newest there is.
+        this.seedPendingRestores(cached?.joinedBatchIds, "local")
+        this.persistLeaseSnapshot(lease)
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()
         this.lastLeaseActivityAt = Date.now()
@@ -858,21 +997,7 @@ export class BatchWriteCoordinator {
         // acquisition inside the proxy) and adopt must not pay for that. The
         // pointer only has to be refreshed before it ages out of the ~90s
         // takeover lookup span, and the refresh tick runs far more often.
-        this.joinedRestore = this.restoreJoinedSecondaries(
-          lease,
-          epoch,
-          adopted,
-          cached?.joinedBatchIds,
-          // Local seeding is sound here and only here: `adoptIfLive` proved the
-          // cached lease is still unexpired, so no peer can have held this
-          // partition since our last write — local state is the newest there is.
-          "local",
-        ).catch((error: unknown) =>
-          console.warn(
-            "[BatchWriteCoordinator] Joined-batch restore failed:",
-            error,
-          ),
-        )
+        this.kickJoinedRestore(lease)
         return
       }
 
@@ -880,6 +1005,13 @@ export class BatchWriteCoordinator {
       if (this.leaseEpoch !== epoch) return
       this.partitionLease = lease
       this.readOnly = result.isReadOnly
+      // Seeding each from the NETWORK (`joinBatch`): a cold acquire means the
+      // cached lease was not adoptable — it lapsed, or the lease batch changed
+      // — so a peer may have held this partition meanwhile and advanced those
+      // batches past our local state. Local seeding here could full-publish a
+      // LOWER counter over the peer's resume point (slot reuse); `joinBatch`'s
+      // read is the same one a targeted write would pay.
+      this.seedPendingRestores(cached?.joinedBatchIds, "network")
 
       if (result.partition === undefined) {
         if (result.isReadOnly) {
@@ -887,7 +1019,7 @@ export class BatchWriteCoordinator {
             "[BatchWriteCoordinator] All partitions held; entering read-only mode until a peer releases.",
           )
         }
-        this.deps.writeLeaseCache?.(lease.serialize())
+        this.persistLeaseSnapshot(lease)
         return
       }
 
@@ -898,31 +1030,15 @@ export class BatchWriteCoordinator {
       })
       // Fence in-flight stamps to the lease's local expiry (bind clears it).
       this.syncStamperLeaseDeadline()
-      this.deps.writeLeaseCache?.(lease.serialize())
+      this.persistLeaseSnapshot(lease)
       this.startRefreshTimer(lease)
       this.lastLeaseValidatedAt = Date.now()
       this.lastLeaseActivityAt = Date.now()
       this.pointerHeartbeatFailingSince = undefined // fresh lease session
       this.deps.onLeaseAcquired?.(result.partition)
-      // Re-join the batches the previous session had written, seeding each from
-      // the NETWORK (`joinBatch`): a cold acquire means the cached lease was
-      // not adoptable — it lapsed, or the lease batch changed — so a peer may
-      // have held this partition meanwhile and advanced those batches past our
-      // local state. Local seeding here could full-publish a LOWER counter over
-      // the peer's resume point (slot reuse); `joinBatch`'s read is the same
-      // one a targeted write would pay.
-      this.joinedRestore = this.restoreJoinedSecondaries(
-        lease,
-        epoch,
-        result.partition,
-        cached?.joinedBatchIds,
-        "network",
-      ).catch((error: unknown) =>
-        console.warn(
-          "[BatchWriteCoordinator] Joined-batch restore failed:",
-          error,
-        ),
-      )
+      // Re-join the batches the previous session had written, in the
+      // background (see the adopt path above).
+      this.kickJoinedRestore(lease)
     } catch (error) {
       console.error(
         "[BatchWriteCoordinator] Failed to acquire partition lease:",
@@ -1106,7 +1222,7 @@ export class BatchWriteCoordinator {
       // Re-asserted: refresh() rewrote the claim and bumped the lease.
       this.syncStamperLeaseDeadline()
       this.lastLeaseValidatedAt = Date.now()
-      this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+      this.persistLeaseSnapshot(this.partitionLease)
       return
     }
 
@@ -1125,7 +1241,7 @@ export class BatchWriteCoordinator {
     this.partitionLease.bumpLocalLease(LEASE_TTL_MS)
     this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
-    this.deps.writeLeaseCache?.(this.partitionLease.serialize())
+    this.persistLeaseSnapshot(this.partitionLease)
   }
 
   /**
@@ -1342,7 +1458,11 @@ export class BatchWriteCoordinator {
     lease.bumpLocalLease(LEASE_TTL_MS)
     this.syncStamperLeaseDeadline()
     this.lastLeaseValidatedAt = Date.now()
-    this.deps.writeLeaseCache?.(lease.serialize())
+    this.persistLeaseSnapshot(lease)
+    // Retry any batches whose restore hasn't succeeded yet (transient resolver
+    // failure, or a restore interrupted by a reload) — no-op when none are
+    // pending or a restore is already in flight.
+    this.kickJoinedRestore(lease)
     // Heartbeat the state pointer to the current rotating bucket (best-effort,
     // off the critical path) so an idle-but-alive holder keeps a fresh resume
     // pointer the next reader can find without a feed walk. `withWrite`'s publish

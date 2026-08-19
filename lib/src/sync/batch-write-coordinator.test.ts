@@ -1357,6 +1357,132 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
       asStamper(writeStamper),
     )
   })
+
+  it("does not re-join a batch a targeted write joined while a NETWORK restore was resolving", async () => {
+    // The network-path twin of the test above. `joinBatch` is not just a read:
+    // it seeds the lease's per-batch publish baseline and heartbeat pointer
+    // from ITS read the moment it resolves. A restore whose read lands after a
+    // targeted write's join + publish would overwrite that batch's state with
+    // pre-publish values — every later heartbeat then republishes the STALE
+    // pointer, and a takeover following it resumes below the acked counter.
+    // So once the batch is joined, the restore must not call `joinBatch` at
+    // all — not merely skip the bind afterwards.
+    const lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    leaseController.lease = lease
+    const calls: string[] = []
+    const leaseStamper = makeStamper(calls, "lease")
+    const writeStamper = makeStamper(calls, "write", BATCH_ID_2)
+    const restoreStamper = makeStamper(calls, "restore", BATCH_ID_2)
+    let releaseResolve: (() => void) | undefined
+    const gate = new Promise<void>((r) => (releaseResolve = r))
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          self: undefined, // not adoptable → cold acquire → NETWORK restore
+          joinedBatchIds: [BATCH_ID_2],
+        }),
+        resolveStamperForBatch: async () => {
+          await gate
+          return asStamper(restoreStamper)
+        },
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    // First write kicks off the cold acquire (and the gated restore)…
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    // …then a targeted write joins BATCH_ID_2 properly (fresh read + publish).
+    await coordinator.withWrite(asStamper(writeStamper), async () => "ok", {
+      wait: "block",
+    })
+    expect(lease.joinBatch).toHaveBeenCalledTimes(1) // the write's join
+
+    releaseResolve!()
+    await coordinator.joinedRestoreSettled
+
+    expect(lease.joinBatch).toHaveBeenCalledTimes(1) // no straggler re-join
+    expect(restoreStamper.bindPartition).not.toHaveBeenCalled()
+    expect(internals.joinedSecondaries.get(BATCH_ID_2)).toBe(
+      asStamper(writeStamper),
+    )
+  })
+
+  it("keeps a batch whose restore failed in the snapshot and retries it on the refresh tick", async () => {
+    // `serialize()` only knows successfully seeded batches, so a transient
+    // resolver failure (e.g. the account store momentarily unreadable) must
+    // not let the next persisted snapshot drop the batch id — a second reload
+    // would then never attempt it again and its state pointer would age out
+    // of the takeover lookup span (resume-from-zero for peers). The id stays
+    // in every persisted snapshot and the refresh tick retries the restore.
+    const networkCounter = new Uint32Array(8)
+    networkCounter[3] = 7
+    const lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    lease.joinBatch = vi.fn(async () => networkCounter)
+    leaseController.lease = lease
+    const calls: string[] = []
+    const leaseStamper = makeStamper(calls, "lease")
+    const secondary = makeStamper(calls, "b2", BATCH_ID_2)
+    const writes: unknown[] = []
+    let resolverHealthy = false
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          self: undefined, // not adoptable → cold acquire
+          joinedBatchIds: [BATCH_ID_2],
+        }),
+        writeLeaseCache: (snap) => writes.push(snap),
+        resolveStamperForBatch: async () =>
+          resolverHealthy ? asStamper(secondary) : undefined,
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    // Transient failure: nothing joined, but the id survives in the snapshot.
+    expect(internals.joinedSecondaries.size).toBe(0)
+    const last = writes.at(-1) as { joinedBatchIds?: string[] } | undefined
+    expect(last?.joinedBatchIds).toContain(BATCH_ID_2)
+
+    // The refresh tick retries once the resolver recovers.
+    resolverHealthy = true
+    await internals.refreshTick(lease)
+    await coordinator.joinedRestoreSettled
+
+    expect(lease.joinBatch).toHaveBeenCalledWith(asStamper(secondary))
+    expect(internals.joinedSecondaries.get(BATCH_ID_2)).toBe(
+      asStamper(secondary),
+    )
+  })
 })
 
 describe("BatchWriteCoordinator — state-pointer heartbeat vs in-flight upload", () => {
