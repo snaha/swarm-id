@@ -172,14 +172,17 @@ export interface PartitionLeaseStateSnapshot {
    */
   priorHolderLeasedUntil?: number
   /**
-   * Batches `joinBatch`ed into this lease session, EXCLUDING the lease batch
-   * (the adopt path binds that one directly). The coordinator keeps its joined
-   * stampers in memory only, so after a reload a re-adopted session would stop
-   * heartbeating these batches' state pointers — and a pointer that goes
-   * unrefreshed for ~90s drops out of `readStatePointer`'s lookup span, leaving
-   * a later cross-device takeover to resume that batch from a ZERO counter and
-   * re-issue acked slots. Persisting the ids lets the coordinator re-bind them
-   * after an adopt. Absent when no secondary batch was joined.
+   * Every batch this lease session seeded state for — the lease batch plus all
+   * `joinBatch`ed ones. The coordinator keeps its joined stampers in memory
+   * only, so after a reload a re-established session would stop heartbeating
+   * these batches' state pointers — and a pointer that goes unrefreshed for
+   * ~90s drops out of `readStatePointer`'s lookup span, leaving a later
+   * cross-device takeover to resume that batch from a ZERO counter and
+   * re-issue acked slots. Persisting the ids lets the coordinator re-join them
+   * after any acquisition (the restore skips the id that is the CURRENT lease
+   * batch — after a default-stamp change that is a different one, and the old
+   * default must be restorable like any secondary). Absent on snapshots from
+   * builds predating the field.
    */
   joinedBatchIds?: string[]
 }
@@ -1719,12 +1722,12 @@ export class PartitionLease {
     // Derived from `stateByBatch` rather than passed in: that map already IS
     // "batches seeded into this session" (written only by `seedBatchState`, on
     // the `claimPartition`/`joinBatch` paths, and cleared by `acquire`), so it
-    // cannot drift from reality. Omitted when empty so a single-batch account's
-    // snapshot stays byte-identical to before this field existed.
-    const leaseBatchHex = this.opts.batchId?.toHex()
-    const joinedBatchIds = [...this.stateByBatch.keys()].filter(
-      (hex) => hex !== leaseBatchHex,
-    )
+    // cannot drift from reality. The lease batch is INCLUDED: after a
+    // default-stamp change the next session's lease batch differs, and the old
+    // default — then just another written batch — must be restorable like any
+    // secondary or its pointer ages out of the takeover span. The restore
+    // skips whichever id is the current session's lease batch.
+    const joinedBatchIds = [...this.stateByBatch.keys()]
     return {
       deviceId: this.opts.deviceId,
       batchId: this.opts.batchId?.toHex() ?? "",
@@ -1739,16 +1742,25 @@ export class PartitionLease {
   /**
    * Seed `self` from a persisted cache snapshot. No Swarm activity — the
    * next `refresh()`/`acquire()` re-validates against the lock SOC. Ignores
-   * snapshots for a different device, and read-only instances (no batch).
-   * The snapshot's `batchId` is NOT matched: the on-network partition claim
-   * is account-scoped, so a lease rebuilt under a different batch (e.g. after
-   * a default-stamp change) still adopts the cached claim instead of paying a
-   * cold re-acquire. (`serialize` keeps writing the lease batch's hex so
-   * old-version readers see a well-formed payload.)
+   * snapshots for a different device or a different LEASE BATCH, and read-only
+   * instances (no batch).
+   *
+   * The batch match is load-bearing even though the on-network claim is
+   * account-scoped: the adopt fast path binds the lease batch from LOCAL state
+   * only (`buildLeaseLocalCounter` + the persisted synced reference), which is
+   * sound for the batch the snapshot was written under and meaningless for any
+   * other. Adopting across a default-stamp change would bind the NEW batch at
+   * this device's local counter for a batch it may never have written —
+   * full-publishing (near) zero over a prior holder's resume point and
+   * re-issuing acked slots. A rebuilt lease instead pays one cold acquire,
+   * whose `claimPartition` reads the new batch's partition state from the
+   * network; the OLD batch rides `joinedBatchIds` and is re-joined afterwards.
    */
   hydrate(snapshot: PartitionLeaseStateSnapshot): void {
     if (snapshot.deviceId !== this.opts.deviceId) return
-    if (!this.opts.batchId) return
+    if (!this.opts.batchId || snapshot.batchId !== this.opts.batchId.toHex()) {
+      return
+    }
     this.self = snapshot.self
     // Restore the acquire-time prior-holder span so a re-adopted session's
     // `joinBatch` scans it (see the snapshot field's doc). The next

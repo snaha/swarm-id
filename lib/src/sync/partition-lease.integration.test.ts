@@ -2086,21 +2086,24 @@ describe("PartitionLease.joinBatch — per-batch state under one lease", () => {
     })
     await lease.acquire({ partitionCount: PARTITION_COUNT })
 
-    // Before any join: nothing to restore, and the snapshot stays byte-identical
-    // to a single-batch account's.
-    expect(lease.serialize().joinedBatchIds).toBeUndefined()
+    // The lease batch itself is INCLUDED: after a default-stamp change the
+    // next session's lease batch is a different one, and the old default —
+    // then just another written batch — must be restorable like any secondary,
+    // or its pointer ages out of the takeover span. The restore skips whichever
+    // id is the CURRENT session's lease batch.
+    expect(lease.serialize().joinedBatchIds).toEqual([TEST_BATCH_ID.toHex()])
 
     await lease.joinBatch(makeBatchStamper(BATCH_2))
 
-    // The LEASE batch is excluded — the adopt path binds it directly. Only the
-    // secondaries need re-establishing, and without them their state pointers
-    // stop being heartbeated after a reload and age out of the takeover span.
-    expect(lease.serialize().joinedBatchIds).toEqual([BATCH_2.toHex()])
+    expect(lease.serialize().joinedBatchIds).toEqual([
+      TEST_BATCH_ID.toHex(),
+      BATCH_2.toHex(),
+    ])
 
     // A new session resumes from the partition's published counters, so the
     // joined set is per-session and must not leak across an acquire.
     await lease.acquire({ partitionCount: PARTITION_COUNT })
-    expect(lease.serialize().joinedBatchIds).toBeUndefined()
+    expect(lease.serialize().joinedBatchIds).toEqual([TEST_BATCH_ID.toHex()])
   })
 
   it("joinBatch after a cached-lease re-adopt scans the prior holder's lease span (no zero-seed)", async () => {
@@ -2538,15 +2541,20 @@ describe("PartitionLease.serialize / hydrate", () => {
     expect(other.currentPartition).toBeUndefined()
   })
 
-  it("adopts a snapshot serialized under a different lease batch (the claim is account-scoped)", async () => {
+  it("ignores a snapshot serialized under a different lease batch (adopt seeds LOCAL state)", async () => {
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
     await lease.acquire({ partitionCount: PARTITION_COUNT })
     const snap = lease.serialize()
 
-    // The on-network partition claim (lock SOC) is account-scoped, so a lease
-    // rebuilt under a different batch — e.g. after the user changed the
-    // account's default stamp — still adopts the cached claim instead of
-    // paying a cold re-acquire.
+    // The on-network claim IS account-scoped, but the adopt fast path binds the
+    // lease batch from LOCAL state only (buildLeaseLocalCounter + the persisted
+    // synced reference) — sound for the batch the snapshot was written under,
+    // meaningless for a different one: after a default-stamp change, adopting
+    // would bind the NEW batch at this device's local counter for a batch it
+    // may never have written, full-publishing (near) zero over a prior holder's
+    // resume point and re-issuing acked slots. A rebuilt lease must instead pay
+    // one cold acquire, whose claimPartition reads the new batch's partition
+    // state from the network.
     const rebuilt = new PartitionLease({
       bee: bee as unknown as Bee,
       deviceId: DEVICE_A,
@@ -2557,7 +2565,7 @@ describe("PartitionLease.serialize / hydrate", () => {
       stamper: createMockStamper() as unknown as Stamper,
     })
     rebuilt.hydrate(snap)
-    expect(rebuilt.currentPartition).toBe(0)
+    expect(rebuilt.currentPartition).toBeUndefined()
   })
 })
 
