@@ -21,7 +21,7 @@
 
   let { tabs, value = $bindable(), class: className }: Props = $props()
 
-  const buttons: (HTMLButtonElement | undefined)[] = []
+  const buttons = $state<(HTMLButtonElement | undefined)[]>([])
 
   // Roving tabindex: the selected tab is the tablist's only Tab stop (falling
   // back to the first tab should `value` match none).
