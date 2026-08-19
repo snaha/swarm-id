@@ -833,10 +833,21 @@ export class SwarmIdProxy {
   }
 
   private async initializeStamper(stampDepth: number): Promise<void> {
+    // Any bail-out below leaves NO coordinator behind, not just the
+    // create-failure catch: `bindStamp` already switched postageBatchId/
+    // signerKey and cleared the stamper, so a surviving coordinator would
+    // belong to the PREVIOUS batch — heartbeating lease SOCs under a batch
+    // this proxy no longer serves, and stranding `resolveUploadStamper`'s
+    // promotion path, which is gated on `!this.coordinator`.
+    const bailOut = (): void => {
+      this.coordinator?.teardown()
+      this.coordinator = undefined
+    }
     if (!this.signerKey || !this.postageBatchId) {
       console.warn(
         "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
       )
+      bailOut()
       return
     }
 
@@ -844,6 +855,7 @@ export class SwarmIdProxy {
     const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo) {
       console.warn("[Proxy] Cannot initialize stamper: account not found")
+      bailOut()
       return
     }
 
@@ -881,14 +893,7 @@ export class SwarmIdProxy {
       console.error("[Proxy] Failed to create stamper:", error)
       this.stamper = undefined
       this.stamperAccountFingerprint = undefined
-      // Tear the previous coordinator down too: it still holds a lease stamper
-      // for the batch we just rebound AWAY from, so leaving it alive keeps it
-      // heartbeating lock/intent/occupancy SOCs under a batch this proxy no
-      // longer serves — and `resolveUploadStamper` gates its promotion path on
-      // `!this.coordinator`, so a later targeted write would join that stale
-      // lease instead of rebinding.
-      this.coordinator?.teardown()
-      this.coordinator = undefined
+      bailOut()
       return
     }
 

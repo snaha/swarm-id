@@ -1082,6 +1082,26 @@ describe("SwarmIdProxy coordinator lifetime + flush (PR #537 review)", () => {
     expect((proxy as never)["coordinator"]).toBeUndefined()
   })
 
+  it("tears the stale coordinator down when initializeStamper bails early", async () => {
+    // bindStamp switches postageBatchId/signerKey and clears the stamper
+    // BEFORE initializeStamper runs. Its early returns (no account readable)
+    // must not leave the PREVIOUS batch's coordinator alive: it would keep
+    // heartbeating lease SOCs under a batch this proxy no longer serves, and
+    // `resolveUploadStamper`'s promotion path — gated on `!this.coordinator` —
+    // would join that stale lease instead of rebinding.
+    const proxy = makeProxy()
+    const teardown = vi.fn()
+    ;(proxy as never)["coordinator"] = { teardown }
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["postageBatchId"] = B2
+    ;(proxy as never)["lookupAccountForApp"] = () => Promise.resolve(undefined)
+
+    await (proxy as never)["initializeStamper"](20)
+
+    expect(teardown).toHaveBeenCalledTimes(1)
+    expect((proxy as never)["coordinator"]).toBeUndefined()
+  })
+
   it("flushes a stamped write's stamper even while subsidised mode reads active", async () => {
     const proxy = makeProxy()
     ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
