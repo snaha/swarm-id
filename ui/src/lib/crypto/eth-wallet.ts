@@ -14,10 +14,11 @@
  * rejected up front.
  */
 import { hexToUint8Array } from '@snaha/swarm-id'
-import { Signature, getAddress, verifyMessage } from 'ethers'
+import { getAddress, verifyMessage } from 'ethers'
 
 import { deriveKeyFromSignature } from '$lib/crypto/encryption'
 import { onboard } from '$lib/crypto/onboard'
+import { canonicalSignature } from '$lib/crypto/signature'
 
 interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>
@@ -68,7 +69,7 @@ export async function requestWalletKeySource(): Promise<WalletKeySource> {
   }
   return {
     walletAddress: getAddress(walletAddress),
-    signature: Signature.from(signature).serialized,
+    signature: canonicalSignature(signature),
   }
 }
 
