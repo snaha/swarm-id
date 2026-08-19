@@ -1193,19 +1193,17 @@ export class SwarmIdProxy {
       })
     }
     let resolved = await this.enqueueWork(async () => {
-      const picked = await this.resolveUploadStamper(batchID, {
-        deferBuild: true,
-      })
+      const picked = await this.resolveUploadStamper(batchID)
       // `coordinator` captured atomically with the stamper: the pair the
       // off-queue write below runs against, immune to later rebinds.
       return { ...picked, coordinator: this.coordinator }
     })
     if (resolved.pendingBuild) {
-      // Built OFF the queue: the build waits on the account write lock, which
-      // an in-flight write to this account holds for its whole duration, and
-      // holding the queue through that would stall sign-out propagation, stamp
-      // changes and node rebinds behind an upload. Concurrent writes to the
-      // same new batch share one build (`stamperBuilds`).
+      // Built OFF the queue: the build waits on the batch's state lock (an
+      // in-flight same-batch write holds it across write+flush), and holding
+      // the queue through that would stall sign-out propagation, stamp changes
+      // and node rebinds behind that upload. Concurrent writes to the same new
+      // batch share one build (`stamperBuilds`).
       const { stamp, signerKey, accountInfo, store } = resolved.pendingBuild
       const stamper = await this.createStamperUnderBatchLock(
         accountInfo,
@@ -1670,16 +1668,13 @@ export class SwarmIdProxy {
    * coordinator are being picked. (The write itself then runs off the queue —
    * see `withModeAwareWriteLock`.)
    *
-   * With `deferBuild`, a target that needs a NEW stamper is returned as a
-   * `pendingBuild` descriptor instead of being built here: the build waits on
-   * the account write lock, and the caller must not hold the work queue across
-   * that wait. The caller builds it off-queue and re-enters the queue to
-   * install it.
+   * A target that needs a NEW stamper is returned as a `pendingBuild`
+   * descriptor instead of being built here: the build waits on the batch's
+   * state lock (an in-flight same-batch write), and this method runs ON the
+   * serialized work queue, which must not be held across that wait. The caller
+   * builds it off-queue and re-enters the queue to install it.
    */
-  private async resolveUploadStamper(
-    batchID?: string,
-    opts?: { deferBuild?: boolean },
-  ): Promise<{
+  private async resolveUploadStamper(batchID?: string): Promise<{
     stamper?: UtilizationAwareStamper
     pendingBuild?: {
       stamp: PostageStamp
@@ -1732,26 +1727,13 @@ export class SwarmIdProxy {
     if (!accountInfo || !this.utilizationStore) {
       throw new Error(`Failed to build stamper for batch ${targetHex}`)
     }
-    const pendingBuild = {
-      stamp,
-      signerKey,
-      accountInfo,
-      store: this.utilizationStore,
-    }
-    if (opts?.deferBuild) return { pendingBuild }
-    try {
-      const stamper = await this.createStamperUnderBatchLock(
-        accountInfo,
+    return {
+      pendingBuild: {
+        stamp,
         signerKey,
-        stamp.batchID,
-        stamp.depth,
-        this.utilizationStore,
-      )
-      this.setStampEntry(stamper, signerKey)
-      return { stamper }
-    } catch (error) {
-      console.error("[Proxy] Failed to create target stamper:", error)
-      throw new Error(`Failed to build stamper for batch ${targetHex}`)
+        accountInfo,
+        store: this.utilizationStore,
+      },
     }
   }
 
@@ -1773,15 +1755,11 @@ export class SwarmIdProxy {
     const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo || !this.utilizationStore) return undefined
     try {
-      const stamper = await this.createStamperUnderBatchLock(
+      return await this.buildAndCacheStamper(
+        stamp,
         accountInfo,
-        signerKey,
-        stamp.batchID,
-        stamp.depth,
         this.utilizationStore,
       )
-      this.setStampEntry(stamper, signerKey)
-      return stamper
     } catch (error) {
       console.warn(
         `[Proxy] Could not build stamper for joined batch ${batchIdHex}:`,
@@ -1789,6 +1767,30 @@ export class SwarmIdProxy {
       )
       return undefined
     }
+  }
+
+  /** Build a batch's stamper under its state lock and cache it as THE instance
+   *  for that batch. The single build+install path — `withModeAwareWriteLock`'s
+   *  deferred install re-checks ownership on the queue before calling this. */
+  private async buildAndCacheStamper(
+    stamp: PostageStamp,
+    accountInfo: {
+      accountId: string
+      owner: EthAddress
+      encryptionKey: Uint8Array
+    },
+    store: UtilizationStoreDB,
+  ): Promise<UtilizationAwareStamper> {
+    const signerKey = stamp.signerKey.toHex()
+    const stamper = await this.createStamperUnderBatchLock(
+      accountInfo,
+      signerKey,
+      stamp.batchID,
+      stamp.depth,
+      store,
+    )
+    this.setStampEntry(stamper, signerKey)
+    return stamper
   }
 
   /**

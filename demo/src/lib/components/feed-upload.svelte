@@ -139,6 +139,9 @@
           const writer = clientStore.client!.makeEpochFeedWriter({ topic })
           const feedResult = await writer.uploadRawReference(manifestReference, {
             at: atRaw,
+            // Same drive as the content + manifest chunks above — a feed SOC on
+            // the default batch would split the dataset across two TTLs.
+            uploadOptions: { batchID: clientStore.uploadBatchID },
           })
 
           onDownloadAtUpdate?.(atRaw)

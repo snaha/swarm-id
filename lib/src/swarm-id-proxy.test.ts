@@ -747,15 +747,34 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     })
   })
 
-  // `resolveUploadStamper` returns `{ stamper }` (plus, with `deferBuild`, a
-  // `pendingBuild` descriptor the caller builds off the work queue). These
-  // cases assert the resolution itself, so unwrap to the stamper.
+  // `resolveUploadStamper` returns `{ stamper }` for a cached/default target
+  // and a `pendingBuild` descriptor for one that needs building — the caller
+  // (`withModeAwareWriteLock`) builds it off the work queue. `resolve` unwraps
+  // the resolution alone; `resolveAndBuild` follows the descriptor through the
+  // shared `buildAndCacheStamper`, mirroring the production caller.
+  type Resolved = {
+    stamper?: { tag?: string; batchId?: { toHex: () => string } }
+    pendingBuild?: {
+      stamp: unknown
+      accountInfo: unknown
+      store: unknown
+    }
+  }
   const resolve = async (batchID?: string) =>
-    (
-      (await (proxy as never)["resolveUploadStamper"](batchID)) as {
-        stamper?: { tag?: string; batchId?: { toHex: () => string } }
-      }
-    ).stamper
+    ((await (proxy as never)["resolveUploadStamper"](batchID)) as Resolved)
+      .stamper
+  const resolveAndBuild = async (batchID?: string) => {
+    const picked = (await (proxy as never)["resolveUploadStamper"](
+      batchID,
+    )) as Resolved
+    if (!picked.pendingBuild) return picked.stamper
+    const { stamp, accountInfo, store } = picked.pendingBuild
+    return (proxy as never)["buildAndCacheStamper"](
+      stamp,
+      accountInfo,
+      store,
+    ) as Promise<Resolved["stamper"]>
+  }
 
   it("re-resolves the default binding when no batchID is given", async () => {
     const stamper = await resolve(undefined)
@@ -772,7 +791,7 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
   })
 
   it("builds and caches a targeted stamper with ONE coordinator, zero rebinds of the default", async () => {
-    const stamper = await resolve(B2)
+    const stamper = await resolveAndBuild(B2)
     expect(stamper?.batchId?.toHex()).toBe(B2)
     // The default binding is untouched — no bindStamp, no coordinator churn.
     expect(bindStamp).not.toHaveBeenCalled()
@@ -800,7 +819,7 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     // serves it instead, without touching the broken default binding.
     ;(proxy as never)["stamper"] = undefined
 
-    const stamper = await resolve(B1)
+    const stamper = await resolveAndBuild(B1)
 
     expect(stamper?.batchId?.toHex()).toBe(B1)
     expect(bindStamp).not.toHaveBeenCalled()
@@ -811,9 +830,11 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     vi.mocked(UtilizationAwareStamper.create).mockRejectedValueOnce(
       new Error("indexeddb exploded"),
     )
-    await expect(resolve(B2)).rejects.toThrow(
-      `Failed to build stamper for batch ${B2}`,
-    )
+    await expect(
+      (proxy as never as { withModeAwareWriteLock: Function })[
+        "withModeAwareWriteLock"
+      ](undefined, async (t: unknown) => t, B2),
+    ).rejects.toThrow(`Failed to build stamper for batch ${B2}`)
     expect((proxy as never)["postageBatchId"]).toBe(B1)
     expect((proxy as never)["stamper"]).toBe(prevStamper)
   })
@@ -854,7 +875,7 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
       },
     })
     try {
-      const pending = resolve(B2)
+      const pending = resolveAndBuild(B2)
       await new Promise((r) => setTimeout(r, 0))
       expect(requested).toEqual([`swarm-write-${B2}`])
       expect(create.mock.calls.length).toBe(callsBefore)
@@ -915,7 +936,7 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     const create = vi.mocked(UtilizationAwareStamper.create)
     const callsBefore = create.mock.calls.length
 
-    const [a, b] = await Promise.all([resolve(B2), resolve(B2)])
+    const [a, b] = await Promise.all([resolveAndBuild(B2), resolveAndBuild(B2)])
 
     expect(a).toBe(b)
     expect(create.mock.calls.length).toBe(callsBefore + 1)
@@ -1052,7 +1073,7 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
 
     // `deferBuild`: a target needing a NEW stamper comes back as a descriptor
     // so the build happens off the work queue, not while holding it.
-    expect(resolveUploadStamper).toHaveBeenCalledWith(B2, { deferBuild: true })
+    expect(resolveUploadStamper).toHaveBeenCalledWith(B2)
     expect(withWrite).toHaveBeenCalledTimes(1)
     // The write ran under the coordinator with the TARGET batch's stamper.
     expect(withWrite.mock.calls[0][0]).toBe(targetStamper)
