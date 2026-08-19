@@ -14,7 +14,7 @@
  * rejected up front.
  */
 import { hexToUint8Array } from '@snaha/swarm-id'
-import { getAddress, verifyMessage } from 'ethers'
+import { getAddress, recoverMessageAddress } from 'viem'
 
 import { deriveKeyFromSignature } from '$lib/crypto/encryption'
 import { onboard } from '$lib/crypto/onboard'
@@ -61,15 +61,17 @@ export async function requestWalletKeySource(): Promise<WalletKeySource> {
     params: [SIGNING_MESSAGE, walletAddress],
   })) as string
 
-  // Reject non-ECDSA signatures (smart-contract wallets) — they can't be
-  // reproduced for key derivation — and normalize the representation so
-  // unlock derives the same bytes as creation.
-  if (getAddress(verifyMessage(SIGNING_MESSAGE, signature)) !== getAddress(walletAddress)) {
+  // Normalize the representation first, so unlock derives the same bytes as
+  // creation, then reject non-ECDSA signatures (smart-contract wallets) — they
+  // can't be reproduced for key derivation.
+  const canonical = canonicalSignature(signature)
+  const signer = await recoverMessageAddress({ message: SIGNING_MESSAGE, signature: canonical })
+  if (getAddress(signer) !== getAddress(walletAddress)) {
     throw new Error('This wallet type is not supported for securing an account.')
   }
   return {
     walletAddress: getAddress(walletAddress),
-    signature: canonicalSignature(signature),
+    signature: canonical,
   }
 }
 
