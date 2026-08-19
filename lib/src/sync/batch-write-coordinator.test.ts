@@ -1146,6 +1146,99 @@ describe("BatchWriteCoordinator — adopt fast path seeds the heartbeat pointer"
     expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
   })
 
+  it("adopts across a default-stamp change, seeding the NEW lease batch from the network", async () => {
+    // The claim adoption is free (account-scoped SOCs) — but local state
+    // describes the OLD batch, so the new lease batch's counter must come from
+    // `joinBatch`'s network read (bounded by the restored prior-holder span),
+    // never `buildLeaseLocalCounter`. Binding local here could full-publish
+    // (near) zero over a prior holder's resume point.
+    const networkCounter = new Uint32Array(8)
+    networkCounter[5] = 9
+    const lease = makeLease({ partition: 2 })
+    lease.adoptIfLive = vi.fn(() => 2)
+    lease.joinBatch = vi.fn(async () => networkCounter)
+    leaseController.lease = lease
+    const calls: string[] = []
+    // The coordinator was rebuilt under batch 2; the snapshot was written
+    // under batch 1 (the previous default).
+    const leaseStamper = makeStamper(calls, "lease", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          self: {
+            partition: 2,
+            generation: { timestampMs: NOW, tiebreaker: SELF },
+            acquiredAt: NOW,
+            leasedUntil: Date.now() + LEASE_TTL_MS,
+          },
+        }),
+      }),
+    )
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+
+    // Adopted (no cold acquire) — and seeded from the network.
+    expect(lease.acquire).not.toHaveBeenCalled()
+    expect(lease.joinBatch).toHaveBeenCalledWith(asStamper(leaseStamper))
+    expect(leaseStamper.bindPartition).toHaveBeenCalledWith(
+      expect.objectContaining({ partition: 2, localCounter: networkCounter }),
+    )
+    // joinBatch seeded the pointer state itself — no local override.
+    expect(lease.seedReferenceHex).not.toHaveBeenCalled()
+  })
+
+  it("falls back to a COLD acquire when the cross-batch adopt's state read fails", async () => {
+    // An inconclusive read must never degrade to a zero-seed bind; the cold
+    // acquire's claimPartition re-reads (with its own retry/read-only
+    // handling) instead.
+    const lease = makeLease({
+      partition: 2,
+      acquireResult: {
+        partition: 2,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    lease.adoptIfLive = vi.fn(() => 2)
+    lease.joinBatch = vi.fn(async () => {
+      throw new Error("partition state read failed")
+    })
+    leaseController.lease = lease
+    const calls: string[] = []
+    const leaseStamper = makeStamper(calls, "lease", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          self: {
+            partition: 2,
+            generation: { timestampMs: NOW, tiebreaker: SELF },
+            acquiredAt: NOW,
+            leasedUntil: Date.now() + LEASE_TTL_MS,
+          },
+        }),
+      }),
+    )
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+
+    expect(lease.acquire).toHaveBeenCalledTimes(1)
+    expect(coordinator.currentPartition).toBe(2)
+  })
+
   it("re-joins persisted batches after a COLD acquire, seeding from the NETWORK", async () => {
     // The cached lease was not adoptable (lapsed, or the lease batch changed),
     // so a peer may have held the partition meanwhile and advanced these

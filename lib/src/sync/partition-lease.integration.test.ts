@@ -2541,20 +2541,20 @@ describe("PartitionLease.serialize / hydrate", () => {
     expect(other.currentPartition).toBeUndefined()
   })
 
-  it("ignores a snapshot serialized under a different lease batch (adopt seeds LOCAL state)", async () => {
+  it("adopts a snapshot serialized under a different lease batch — the CLAIM transfers, the counter must not", async () => {
     const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
     await lease.acquire({ partitionCount: PARTITION_COUNT })
     const snap = lease.serialize()
 
-    // The on-network claim IS account-scoped, but the adopt fast path binds the
-    // lease batch from LOCAL state only (buildLeaseLocalCounter + the persisted
-    // synced reference) — sound for the batch the snapshot was written under,
-    // meaningless for a different one: after a default-stamp change, adopting
-    // would bind the NEW batch at this device's local counter for a batch it
-    // may never have written, full-publishing (near) zero over a prior holder's
-    // resume point and re-issuing acked slots. A rebuilt lease must instead pay
-    // one cold acquire, whose claimPartition reads the new batch's partition
-    // state from the network.
+    // The on-network claim (lock/intent/occupancy SOCs) is account-scoped, so
+    // a lease rebuilt under a different batch — a default-stamp change — still
+    // adopts the cached claim instead of paying a cold re-acquire. CONTRACT:
+    // only the claim transfers; the adopter must seed the new lease batch's
+    // counter from the NETWORK (`joinBatch`, bounded by the restored
+    // prior-holder span) — local state describes the OLD batch, and binding it
+    // could full-publish (near) zero over a prior holder's resume point. The
+    // coordinator's cross-batch adopt branch enforces that (see its unit
+    // tests); joinBatch works against the adopted claim:
     const rebuilt = new PartitionLease({
       bee: bee as unknown as Bee,
       deviceId: DEVICE_A,
@@ -2565,7 +2565,10 @@ describe("PartitionLease.serialize / hydrate", () => {
       stamper: createMockStamper() as unknown as Stamper,
     })
     rebuilt.hydrate(snap)
-    expect(rebuilt.currentPartition).toBeUndefined()
+    expect(rebuilt.currentPartition).toBe(0)
+    await expect(
+      rebuilt.joinBatch(makeBatchStamper(new BatchId("cd".repeat(32)))),
+    ).resolves.toBeDefined()
   })
 })
 

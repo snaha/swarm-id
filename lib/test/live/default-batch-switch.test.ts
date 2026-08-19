@@ -3,13 +3,14 @@
 
 /**
  * Live regression for the default-stamp-change + reload hazard: after the
- * account's default batch switches A→B, the rebuilt coordinator must NOT adopt
- * the cached lease (its local-state seeding is only valid for the batch the
- * snapshot was written under) — it must cold-acquire under B and re-join A as a
- * secondary via a NETWORK read, so A's state pointer keeps being heartbeated.
- * Without that, A's pointer ages out of `readStatePointer`'s ~90s lookup span
- * and a later cross-device takeover resumes A from a ZERO counter, re-issuing
- * acked slots.
+ * account's default batch switches A→B, the rebuilt coordinator ADOPTS the
+ * cached claim (free — the on-network claim is account-scoped) while seeding
+ * B's counter from the NETWORK (local state describes A, not B; see
+ * cross-batch-adopt.test.ts for the prior-holder edge that makes local
+ * seeding dangerous) — and it must re-join A as a secondary, so A's state
+ * pointer keeps being heartbeated. Without that, A's pointer ages out of
+ * `readStatePointer`'s ~90s lookup span and a later cross-device takeover
+ * resumes A from a ZERO counter, re-issuing acked slots.
  *
  * Needs TWO usable batches owned by SIGNER_KEY: the suite's BATCH_ID (A) plus
  * BATCH_ID_2 (B). Skips when either is absent. Reads the takeover through
@@ -158,8 +159,9 @@ describe.skipIf(!liveEnv.configured || !BATCH_B_HEX)(
         )
         await session2.joinedRestoreSettled
 
-        // The old default was re-joined (network-seeded), so the refresh tick
-        // heartbeats its pointer from here on.
+        // The old default was re-joined (locally seeded — the adopt proves the
+        // lease never lapsed, so X's own state for A is the newest), and the
+        // refresh tick heartbeats its pointer from here on.
         expect(internals(session2).joinedSecondaries.has(batchA.toHex())).toBe(
           true,
         )

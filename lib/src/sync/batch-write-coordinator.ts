@@ -782,7 +782,39 @@ export class BatchWriteCoordinator {
       // scan/write, so it survives transient Bee 500s. The refresh tick then
       // reconciles with Swarm and demotes only on a confirmed foreign holder.
       const adopted = lease.adoptIfLive()
-      if (adopted !== undefined) {
+      // The CLAIM adoption is free either way — the on-network lock/intent/
+      // occupancy SOCs are account-scoped. What the lease batch's COUNTER may
+      // be seeded from depends on whether the snapshot was written under this
+      // lease batch:
+      //  - same batch: local state (`buildLeaseLocalCounter` + the persisted
+      //    synced reference) is the newest there is — no peer can have written
+      //    the partition while our unexpired claim stood. Fully offline.
+      //  - different batch (a default-stamp change): local state for the NEW
+      //    batch is meaningless — a prior holder of this partition may have
+      //    published it. Seed from the network via `joinBatch`, whose read is
+      //    bounded by the prior-holder span `hydrate` restored; on an
+      //    inconclusive read fall back to a cold acquire (never a zero-seed —
+      //    binding local here could full-publish a lower counter over the
+      //    prior holder's resume point and re-issue acked slots).
+      const crossBatchAdopt =
+        adopted !== undefined &&
+        cached !== undefined &&
+        cached.batchId !== stamper.batchId.toHex()
+      let adoptCounter: Uint32Array | undefined
+      let adoptSeedFailed = false
+      if (adopted !== undefined && crossBatchAdopt) {
+        try {
+          adoptCounter = await lease.joinBatch(stamper)
+        } catch (error) {
+          adoptSeedFailed = true
+          console.warn(
+            "[BatchWriteCoordinator] Cross-batch adopt: lease-batch state read failed; falling back to a cold acquire:",
+            error,
+          )
+        }
+        if (this.leaseEpoch !== epoch || this.disposed) return
+      }
+      if (adopted !== undefined && !adoptSeedFailed) {
         // Seed the heartbeat's resume-pointer target from the persisted synced
         // reference. The cold `claimPartition` path seeds this from the state it
         // reads on acquire; the adopt fast path skips `claimPartition`, so
@@ -792,28 +824,29 @@ export class BatchWriteCoordinator {
         // BEFORE the synchronous commit below so no await splits the bind, then
         // re-check the epoch the same way the cold path does. Best-effort
         // (undefined on a genuinely fresh partition → heartbeat stays a no-op).
-        const seededReferenceHex = await stamper
-          .getSyncedReference(adopted)
-          .catch(() => undefined)
+        // Cross-batch: `joinBatch` above already seeded the pointer state.
+        const seededReferenceHex = crossBatchAdopt
+          ? undefined
+          : await stamper.getSyncedReference(adopted).catch(() => undefined)
         if (this.leaseEpoch !== epoch || this.disposed) return
         // Diagnostic: this re-binds a CACHED lease with no Swarm scan and no
         // intent round. If two devices both adopt partition 0 from stale
         // caches, that's a dual-hold the intent round never gets to arbitrate.
         console.debug(
-          `[BatchWriteCoordinator] Adopted cached lease p=${adopted} (no acquire/intent round) for device=${this.deps.deviceId}`,
+          `[BatchWriteCoordinator] Adopted cached lease p=${adopted} (no acquire/intent round${crossBatchAdopt ? ", cross-batch state read" : ""}) for device=${this.deps.deviceId}`,
         )
         this.partitionLease = lease
         this.readOnly = false
         stamper.bindPartition({
           partition: adopted,
           partitionCount,
-          localCounter: stamper.buildLeaseLocalCounter(),
+          localCounter: adoptCounter ?? stamper.buildLeaseLocalCounter(),
         })
         // Fence in-flight stamps to the lease's local expiry (bind clears it).
         this.syncStamperLeaseDeadline()
         // Seed before `onLeaseAcquired` (which may publish): a publish's
         // `flushState` then overwrites this with the fresh reference.
-        lease.seedReferenceHex(seededReferenceHex)
+        if (!crossBatchAdopt) lease.seedReferenceHex(seededReferenceHex)
         this.deps.writeLeaseCache?.(lease.serialize())
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()

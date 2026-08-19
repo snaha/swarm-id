@@ -1742,25 +1742,24 @@ export class PartitionLease {
   /**
    * Seed `self` from a persisted cache snapshot. No Swarm activity — the
    * next `refresh()`/`acquire()` re-validates against the lock SOC. Ignores
-   * snapshots for a different device or a different LEASE BATCH, and read-only
-   * instances (no batch).
+   * snapshots for a different device, and read-only instances (no batch).
    *
-   * The batch match is load-bearing even though the on-network claim is
-   * account-scoped: the adopt fast path binds the lease batch from LOCAL state
-   * only (`buildLeaseLocalCounter` + the persisted synced reference), which is
-   * sound for the batch the snapshot was written under and meaningless for any
-   * other. Adopting across a default-stamp change would bind the NEW batch at
-   * this device's local counter for a batch it may never have written —
-   * full-publishing (near) zero over a prior holder's resume point and
-   * re-issuing acked slots. A rebuilt lease instead pays one cold acquire,
-   * whose `claimPartition` reads the new batch's partition state from the
-   * network; the OLD batch rides `joinedBatchIds` and is re-joined afterwards.
+   * The snapshot's `batchId` is deliberately NOT matched: the on-network claim
+   * (lock/intent/occupancy SOCs) is account-scoped, so a lease rebuilt under a
+   * different batch — a default-stamp change — still adopts the cached claim
+   * instead of paying a cold re-acquire. CONTRACT for the adopter: the claim
+   * transfers across batches, the COUNTER does not. Local state
+   * (`buildLeaseLocalCounter` + the persisted synced reference) is only sound
+   * for the batch the snapshot was written under; for any other batch the
+   * adopter must seed from the network (`joinBatch`, bounded by the
+   * prior-holder span restored below) or fall back to a cold acquire — binding
+   * local state there could full-publish (near) zero over a prior holder's
+   * resume point and re-issue acked slots. `BatchWriteCoordinator.acquire`'s
+   * cross-batch adopt branch implements exactly that.
    */
   hydrate(snapshot: PartitionLeaseStateSnapshot): void {
     if (snapshot.deviceId !== this.opts.deviceId) return
-    if (!this.opts.batchId || snapshot.batchId !== this.opts.batchId.toHex()) {
-      return
-    }
+    if (!this.opts.batchId) return
     this.self = snapshot.self
     // Restore the acquire-time prior-holder span so a re-adopted session's
     // `joinBatch` scans it (see the snapshot field's doc). The next
