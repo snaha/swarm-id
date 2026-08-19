@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { withAccountWriteLock } from "./account-write-lock"
+import { withAccountWriteLock, withBatchStateLock } from "./account-write-lock"
 
 const ACCOUNT = "acct-1"
 const BATCH_A = "ab".repeat(32)
@@ -77,5 +77,49 @@ describe("withAccountWriteLock", () => {
       BATCH_A,
     ])
     expect(result).toBe(42)
+  })
+})
+
+describe("withBatchStateLock", () => {
+  let acquired: string[]
+
+  beforeEach(() => {
+    acquired = []
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: (
+          name: string,
+          _opts: { mode: string },
+          cb: () => Promise<unknown>,
+        ) => {
+          acquired.push(name)
+          return cb()
+        },
+      },
+    })
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
+  })
+
+  it("takes ONLY the batch's state lock — never the account lock", async () => {
+    // Stamper builds must not park behind the account lock, which an unrelated
+    // batch's minutes-long upload holds; the batch lock alone orders the build
+    // against same-batch flushes (writes nest it inside the account lock).
+    await withBatchStateLock(BATCH_A, async () => "ok")
+
+    expect(acquired).toEqual([`swarm-write-${BATCH_A}`])
+  })
+
+  it("rejects an empty batch id instead of sharing a global lock", async () => {
+    await expect(withBatchStateLock("", async () => "ok")).rejects.toThrow(
+      "batchId is required",
+    )
+  })
+
+  it("runs the op directly when Web Locks are unavailable", async () => {
+    vi.stubGlobal("navigator", {})
+    await expect(withBatchStateLock(BATCH_A, async () => 42)).resolves.toBe(42)
   })
 })

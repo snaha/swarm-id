@@ -766,11 +766,14 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     expect(stamper).toEqual({ tag: B2 })
   })
 
-  it("builds the stamper under the account write lock", async () => {
+  it("builds the stamper under the BATCH state lock, never the account lock", async () => {
     // `UtilizationAwareStamper.create` seeds bucket state from IndexedDB;
-    // running it under the account Web Lock orders that read after any
-    // in-flight write's flush (which happens inside the same lock), so a
-    // same-batch rebuild can never seed from about-to-be-overwritten state.
+    // running it under the batch's `swarm-write-<batchId>` lock orders that
+    // read after any SAME-BATCH write's flush (writes hold the batch lock
+    // nested inside the account lock, across write + flush). Deliberately not
+    // the account lock: that is held for the full duration of writes to
+    // UNRELATED batches, so a build would park a rebind or a default-stamp
+    // change behind a minutes-long upload to some other drive.
     const create = vi.mocked(UtilizationAwareStamper.create)
     const callsBefore = create.mock.calls.length
     let grantLock!: () => void
@@ -788,7 +791,7 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     try {
       const pending = resolve(B2)
       await new Promise((r) => setTimeout(r, 0))
-      expect(requested).toEqual(["swarm-write-account-acct-1"])
+      expect(requested).toEqual([`swarm-write-${B2}`])
       expect(create.mock.calls.length).toBe(callsBefore)
 
       grantLock()
@@ -798,6 +801,46 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     } finally {
       vi.unstubAllGlobals()
     }
+  })
+
+  it("never shares an in-flight build across different account inputs", async () => {
+    // The built stamper bakes in the account's owner + encryption key. A
+    // local→synced migration keeps the same batch and signer while changing
+    // both, so an in-flight pre-migration build must not be handed to a
+    // post-migration caller — that stamper would carry the OLD account's
+    // encryption inputs.
+    const create = vi.mocked(UtilizationAwareStamper.create)
+    const callsBefore = create.mock.calls.length
+    const build = (owner: string) =>
+      (
+        proxy as never as {
+          createStamperUnderBatchLock: (
+            accountInfo: unknown,
+            signerKey: string,
+            batchId: unknown,
+            depth: number,
+            store: unknown,
+          ) => Promise<unknown>
+        }
+      )["createStamperUnderBatchLock"](
+        {
+          accountId: "acct-1",
+          owner: { toHex: () => owner },
+          encryptionKey: new Uint8Array(32),
+        },
+        "sig",
+        { toHex: () => B2 },
+        20,
+        {},
+      )
+
+    const [a, b] = await Promise.all([
+      build("aa".repeat(20)),
+      build("bb".repeat(20)),
+    ])
+
+    expect(create.mock.calls.length).toBe(callsBefore + 2)
+    expect(a).not.toBe(b)
   })
 
   it("shares one build between concurrent resolves of the same batch", async () => {

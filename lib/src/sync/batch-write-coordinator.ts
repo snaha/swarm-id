@@ -480,8 +480,8 @@ export class BatchWriteCoordinator {
       if (key === leaseBatchHex) continue
       if (this.joinedSecondaries.has(key)) continue
       try {
-        // Resolved OFF the write lock: the proxy's resolver takes a Web Lock
-        // internally and Web Locks are not reentrant.
+        // Resolved OFF the write lock: the proxy's resolver takes the batch's
+        // state Web Lock internally and Web Locks are not reentrant.
         const stamper = await resolve(key)
         if (!stamper) continue
         // Where the batch's resume state comes from decides safety:
@@ -1524,23 +1524,29 @@ export class BatchWriteCoordinator {
           }
         }
       },
-      this.legacyLockIds(writeStamper),
+      this.batchStateLockIds(writeStamper),
     )
   }
 
   /** Take the cross-tab Web Lock without the stamper flush (lease mutations). */
   private lock<T>(op: () => Promise<T>): Promise<T> {
-    return withAccountWriteLock(this.deps.accountId, op, this.legacyLockIds())
+    return withAccountWriteLock(
+      this.deps.accountId,
+      op,
+      this.batchStateLockIds(),
+    )
   }
 
   /**
-   * Legacy per-batch lock keys for this locked section (rollover transition
-   * guard — see `withAccountWriteLock`): every batch it may stamp under — the
-   * lease batch, every joined secondary, and the write's target batch.
-   * Captured at lock-request time; `withWrite`'s not-yet-joined target rides
-   * in via `writeStamper`.
+   * Per-batch state-lock keys for this locked section: every batch it may
+   * stamp under — the lease batch, every joined secondary, and the write's
+   * target batch. Nested inside the account lock and held across the write AND
+   * its flush; a PERMANENT invariant (see `withAccountWriteLock`), since
+   * `withBatchStateLock`-guarded stamper builds rely on it to order their
+   * IndexedDB seed reads after a same-batch flush. Captured at lock-request
+   * time; `withWrite`'s not-yet-joined target rides in via `writeStamper`.
    */
-  private legacyLockIds(writeStamper?: UtilizationAwareStamper): string[] {
+  private batchStateLockIds(writeStamper?: UtilizationAwareStamper): string[] {
     const ids = [this.deps.leaseStamper.batchId.toHex()]
     for (const key of this.joinedSecondaries.keys()) ids.push(key)
     if (writeStamper) ids.push(writeStamper.batchId.toHex())

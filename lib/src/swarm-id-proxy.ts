@@ -135,7 +135,7 @@ import {
 } from "./utils/postage-contract"
 import { withTimeout } from "./utils/promise"
 import { tryCreateTag } from "./utils/tag"
-import { withAccountWriteLock } from "./utils/account-write-lock"
+import { withBatchStateLock } from "./utils/account-write-lock"
 import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
@@ -252,7 +252,7 @@ export class SwarmIdProxy {
     }
   >()
   /**
-   * In-flight `createStamperUnderAccountLock` calls, keyed `<batchId>:<signer>`,
+   * In-flight `createStamperUnderBatchLock` calls, keyed `<batchId>:<signer>`,
    * so concurrent callers share one build instead of racing to create two live
    * stampers for one batch. Entries are removed as soon as the build settles.
    */
@@ -785,26 +785,30 @@ export class SwarmIdProxy {
    */
   /**
    * Build a `UtilizationAwareStamper` with its persisted-state read ordered
-   * UNDER the account Web Lock. `create` seeds bucket state from IndexedDB;
-   * stamped-but-unflushed buckets exist only during an in-flight write, whose
-   * flush runs inside this same lock (the coordinator's `lockAndFlush`
-   * finally) — so the lock guarantees a same-batch rebuild never seeds from
-   * state a concurrent write is about to overwrite. No legacy batch lock ids:
-   * this acquisition performs no Swarm writes.
+   * UNDER the batch's `swarm-write-<batchId>` Web Lock. `create` seeds bucket
+   * state from IndexedDB; stamped-but-unflushed buckets exist only during an
+   * in-flight write to the SAME batch, and every write holds that batch's lock
+   * (nested inside the account lock) across the write and its flush — so the
+   * batch lock alone orders the seed read after any such flush. Deliberately
+   * NOT the account lock: that one is held for the full duration of writes to
+   * UNRELATED batches, so building here would park a node rebind or a
+   * default-stamp change behind a minutes-long upload to some other drive.
    *
-   * Concurrent requests for the same batch+signer share one in-flight build.
-   * The serialized work queue used to provide that by construction; now that
-   * builds also run off it, two callers could otherwise race to create two live
-   * stampers for one batch — each with its own bucket state — which is exactly
-   * the divergence the lock exists to prevent.
+   * Concurrent requests for the same build share one in-flight promise. The
+   * serialized work queue used to provide that by construction; now that
+   * builds also run off it, two callers could otherwise race to create two
+   * live stampers for one batch — each with its own bucket state — which is
+   * exactly the divergence the lock exists to prevent. The key includes the
+   * ACCOUNT inputs baked into the built instance (owner + encryption key), so
+   * a build in flight across a local→synced migration — same batch, same
+   * signer, different account inputs — is never shared with the
+   * post-migration caller.
    *
-   * WAITS: this can block for the length of an in-flight write to the SAME
-   * account (the lock is account-scoped, not per batch). Callers must not hold
-   * the work queue across it — `initializeStamper` avoids the build entirely
-   * when the batch is already cached, and `withModeAwareWriteLock` builds off
-   * the queue. Deadlock-free: lock holders (writes) never wait on the queue.
+   * WAITS: only for an in-flight write to the SAME batch, which is required
+   * for correctness. Deadlock-free: writers acquire account → batch in one
+   * fixed order; this acquires a single batch lock and never the account lock.
    */
-  private createStamperUnderAccountLock(
+  private createStamperUnderBatchLock(
     accountInfo: {
       accountId: string
       owner: EthAddress
@@ -815,10 +819,15 @@ export class SwarmIdProxy {
     depth: number,
     store: UtilizationStoreDB,
   ): Promise<UtilizationAwareStamper> {
-    const key = `${batchId.toHex()}:${signerKey}`
+    const key = [
+      batchId.toHex(),
+      signerKey,
+      accountInfo.owner.toHex(),
+      uint8ArrayToHex(accountInfo.encryptionKey),
+    ].join(":")
     const inFlight = this.stamperBuilds.get(key)
     if (inFlight) return inFlight
-    const build = withAccountWriteLock(accountInfo.accountId, () =>
+    const build = withBatchStateLock(batchId.toHex(), () =>
       UtilizationAwareStamper.create(
         signerKey,
         batchId,
@@ -878,7 +887,7 @@ export class SwarmIdProxy {
       this.stamper =
         cached && cached.signerKey === this.signerKey
           ? cached.stamper
-          : await this.createStamperUnderAccountLock(
+          : await this.createStamperUnderBatchLock(
               accountInfo,
               this.signerKey,
               new BatchId(this.postageBatchId),
@@ -1181,7 +1190,7 @@ export class SwarmIdProxy {
       // changes and node rebinds behind an upload. Concurrent writes to the
       // same new batch share one build (`stamperBuilds`).
       const { stamp, signerKey, accountInfo, store } = resolved.pendingBuild
-      const stamper = await this.createStamperUnderAccountLock(
+      const stamper = await this.createStamperUnderBatchLock(
         accountInfo,
         signerKey,
         stamp.batchID,
@@ -1709,7 +1718,7 @@ export class SwarmIdProxy {
     }
     if (opts?.deferBuild) return { pendingBuild }
     try {
-      const stamper = await this.createStamperUnderAccountLock(
+      const stamper = await this.createStamperUnderBatchLock(
         accountInfo,
         signerKey,
         stamp.batchID,
@@ -1742,7 +1751,7 @@ export class SwarmIdProxy {
     const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo || !this.utilizationStore) return undefined
     try {
-      const stamper = await this.createStamperUnderAccountLock(
+      const stamper = await this.createStamperUnderBatchLock(
         accountInfo,
         signerKey,
         stamp.batchID,
