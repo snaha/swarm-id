@@ -1,0 +1,15 @@
+{
+  // Typechecks the opt-in live suite (excluded from the build tsconfig), so an
+  // API change in src/ that breaks test/live/ fails `pnpm typecheck` instead of
+  // failing at runtime on the next `pnpm test:live` — which is how the
+  // coordinator's batchId->leaseStamper migration silently missed it.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    "declaration": false,
+    "declarationMap": false
+  },
+  "include": ["src/**/*.ts", "test/live/**/*.ts"],
+  "exclude": ["node_modules", "dist", "src/**/*.test.ts"]
+}

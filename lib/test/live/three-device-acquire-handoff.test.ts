@@ -66,6 +66,8 @@ function deviceIdForHome(prefix: string, target: number): string {
 interface DeviceHarness {
   id: string
   coordinator: BatchWriteCoordinator
+  /** The lease batch's stamper — `withWrite`'s per-write batch context. */
+  stamper: UtilizationAwareStamper
   /**
    * `acquiredAt` — wall time `onLeaseAcquired` fired (times a fresh acquire).
    * `resumedCounterSum` — Σ of the counter the lease resumed from, snapshotted
@@ -126,8 +128,7 @@ describe.skipIf(!liveEnv.configured)(
       const state = { acquiredAt: 0, resumedCounterSum: 0 }
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
-        batchId: ctx.batchID.toHex(),
-        stamper,
+        leaseStamper: stamper,
         deviceId: id,
         accountId: keys.accountId,
         // All three are known rivals → a fresh claim runs the intent round
@@ -142,7 +143,7 @@ describe.skipIf(!liveEnv.configured)(
         // device's on-gateway lease still expires after 30s and a peer takes over.
         mode,
         intentGuardWindowMs: liveEnv.intentWindowMs,
-        flushStamperState: () => stamper.flush(),
+        flushStamperState: (s) => s.flush(),
         onLeaseAcquired: () => {
           state.acquiredAt = Date.now()
           // Snapshot the resume point: `bindPartition` ran just before this
@@ -151,7 +152,7 @@ describe.skipIf(!liveEnv.configured)(
           state.resumedCounterSum = counterSum(stamper.getLocalCounter())
         },
       })
-      return { id, coordinator, state }
+      return { id, coordinator, stamper, state }
     }
 
     // One SOC upload of a random chunk through the real write path, timed.
@@ -164,6 +165,7 @@ describe.skipIf(!liveEnv.configured)(
       let uploadMs = 0
       const t0 = Date.now()
       const result = await h.coordinator.withWrite(
+        h.stamper,
         async (target: UploadTarget) => {
           const u0 = Date.now()
           const r = await uploadSOC(

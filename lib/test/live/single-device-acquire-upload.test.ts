@@ -102,8 +102,7 @@ describe.skipIf(!liveEnv.configured)(
 
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
-        batchId: ctx.batchID.toHex(),
-        stamper,
+        leaseStamper: stamper,
         deviceId: D,
         accountId: keys.accountId,
         knownDeviceIds: () => [D],
@@ -127,7 +126,7 @@ describe.skipIf(!liveEnv.configured)(
         swarmEncryptionKey: encryptionKey,
         partitionCount: PARTITION_COUNT,
         mode: "oneshot",
-        flushStamperState: () => stamper.flush(),
+        flushStamperState: (s) => s.flush(),
         onLeaseAcquired: () => {
           acquiredAt = Date.now()
         },
@@ -141,6 +140,7 @@ describe.skipIf(!liveEnv.configured)(
 
       const t0 = Date.now()
       const result = await coordinator.withWrite(
+        stamper,
         async (target: UploadTarget) => {
           const u0 = Date.now()
           const r = await uploadSOC(target, socSigner, identifier, payload, {})

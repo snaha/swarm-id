@@ -74,8 +74,7 @@ describe.skipIf(!liveEnv.configured)(
       )
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
-        batchId: ctx.batchID.toHex(),
-        stamper,
+        leaseStamper: stamper,
         deviceId: D,
         accountId: keys.accountId,
         knownDeviceIds: () => [D],
@@ -91,7 +90,7 @@ describe.skipIf(!liveEnv.configured)(
         swarmEncryptionKey: encryptionKey,
         partitionCount: PARTITION_COUNT,
         mode: "oneshot", // no refresh tick → lastLeaseValidatedAt fixed at acquire
-        flushStamperState: () => stamper.flush(),
+        flushStamperState: (s) => s.flush(),
       })
 
       // One upload of a random SOC through the real write path; returns the
@@ -100,6 +99,7 @@ describe.skipIf(!liveEnv.configured)(
         const callTime = Date.now()
         let opStart = 0
         const result = await coordinator.withWrite(
+          stamper,
           async (target: UploadTarget) => {
             opStart = Date.now()
             return uploadSOC(
