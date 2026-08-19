@@ -1053,7 +1053,23 @@ export class SwarmIdProxy {
     )
     for (const [key, entry] of this.stampEntries) {
       if (!owned.has(key)) {
-        entry.workerPool?.terminate()
+        const pool = entry.workerPool
+        if (pool) {
+          // Writes run OFF the work queue holding this batch's
+          // `swarm-write-<batchId>` lock across write+flush. Terminating the
+          // pool NOW would kill a worker-backed upload mid-signing (opaque
+          // worker errors instead of a clean rejection) — evict the entry
+          // immediately so no later write can pick it up, but terminate only
+          // once the batch's state lock frees, i.e. after any in-flight
+          // same-batch write has finished.
+          void withBatchStateLock(key, async () => pool.terminate()).catch(
+            (error: unknown) =>
+              console.warn(
+                `[Proxy] Deferred worker-pool termination failed for ${key}:`,
+                error,
+              ),
+          )
+        }
         this.stampEntries.delete(key)
       }
     }

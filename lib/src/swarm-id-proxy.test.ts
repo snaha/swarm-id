@@ -535,6 +535,50 @@ describe("SwarmIdProxy pruneStampEntries", () => {
     expect(terminate).not.toHaveBeenCalled()
   })
 
+  it("defers a tombstoned batch's pool termination until its write lock frees", async () => {
+    // Writes run OFF the work queue holding the batch's swarm-write-<id> lock
+    // across write+flush; a storage event (drive deleted mid-upload) must not
+    // terminate the pool under the in-flight signing — evict the entry now (no
+    // future use) but terminate only once the batch lock frees.
+    const proxy = makeProxy()
+    const terminate = vi.fn()
+    const entries = new Map([
+      [
+        B1,
+        { stamper: { tag: B1 }, signerKey: "k1", workerPool: { terminate } },
+      ],
+    ])
+    ;(proxy as never)["stampEntries"] = entries
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [stampStub(B1, 123)] },
+    })
+    let grantLock!: () => void
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: (_n: string, _o: unknown, cb: () => Promise<unknown>) =>
+          new Promise((res) => {
+            grantLock = () => res(cb())
+          }),
+      },
+    })
+
+    try {
+      ;(proxy as never)["pruneStampEntries"]()
+
+      // Entry gone immediately — no later targeted write can pick it up…
+      expect(entries.size).toBe(0)
+      // …but the pool survives while the (simulated) write holds the lock.
+      expect(terminate).not.toHaveBeenCalled()
+
+      grantLock()
+      await new Promise((r) => setTimeout(r, 0))
+      expect(terminate).toHaveBeenCalledTimes(1)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
   it("still evicts a tombstoned batch when the connection reads fine", () => {
     const proxy = makeProxy()
     const terminate = vi.fn()
