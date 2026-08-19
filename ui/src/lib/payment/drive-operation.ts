@@ -15,12 +15,13 @@
  * operation interrupted by a closed tab or a failed second transaction is
  * detected and continued rather than repeated.
  */
-import type { PrivateKey } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id'
 import type { MultichainClient } from '@swarm-id/multichain'
 
 import { type OwnerFunds, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+import { faultPoint } from '$lib/payment/fault-injection'
+import type { OperationJournal, PendingOperation } from '$lib/payment/operation-journal.svelte'
 import {
   bundledCreate,
   bundledExtend,
@@ -74,6 +75,12 @@ export interface RunOptions {
   account: Account
   drive: PostageStamp
   requestFunding: RequestFunding
+  /**
+   * Where this device records what it is part-way through paying for, so a
+   * failure between two spends can be resumed rather than repeated. Pass
+   * `nullJournal()` when there is nothing to resume into.
+   */
+  journal: OperationJournal
   onStep?: (step: OperationStep) => void
 }
 
@@ -110,6 +117,8 @@ export interface PurchaseOptions {
   /** What to call the drive. */
   name: string
   requestFunding: RequestFunding
+  /** See {@link RunOptions.journal}. */
+  journal: OperationJournal
   onStep?: (step: OperationStep) => void
 }
 
@@ -127,9 +136,16 @@ export interface PurchaseOptions {
  * @returns the new batch id, already recorded on the account.
  */
 export async function runPurchase(options: PurchaseOptions): Promise<string> {
-  const { account, depth, lifespanSeconds, name, requestFunding, onStep } = options
+  const { account, depth, lifespanSeconds, name, requestFunding, journal, onStep } = options
   const client = await postageChain()
   onStep?.('checking')
+
+  // A batch this device paid for but never managed to record. Nothing looks
+  // batches up by owner, so buying again would abandon it — and its money.
+  const orphan = journal.entries().find((entry) => entry.accountId === account.id.toString())
+  if (orphan) {
+    return recordPurchase(account, orphan.batchId, orphan.name, journal, onStep)
+  }
 
   const constraints = await client.getPostageWriteConstraints()
   if (constraints.paused) {
@@ -147,36 +163,66 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
   const bzzNeeded = amountPerChunk << BigInt(depth)
 
   await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
+  faultPoint('after-funding')
 
   onStep?.('paying')
   const batchId = await bundledCreate(signerKey, amountPerChunk, depth, bzzNeeded, client)
-  if (!batchId) {
-    // No delegate on this chain: approve, then create, as two transactions.
-    onStep?.('approving')
-    await ensureBzzAllowance(signerKey, bzzNeeded, client)
-    onStep?.('paying')
-    const created = await createOnChain(signerKey, amountPerChunk, depth, client)
-    return recordPurchase(account, signerKey, created, name, onStep)
+  if (batchId) {
+    return journalThenRecord(account, batchId, name, journal, onStep)
   }
-  return recordPurchase(account, signerKey, batchId, name, onStep)
+  // No delegate on this chain: approve, then create, as two transactions.
+  onStep?.('approving')
+  await ensureBzzAllowance(signerKey, bzzNeeded, client)
+  onStep?.('paying')
+  const created = await createOnChain(signerKey, amountPerChunk, depth, client)
+  return journalThenRecord(account, created, name, journal, onStep)
+}
+
+/**
+ * Write the batch id down BEFORE reading it back.
+ *
+ * The read-back can fail — a node behind the chain, a closed tab — and the id
+ * exists nowhere else: not in the account, and not in any index the app can
+ * search. Journalling first turns that from a lost drive into a resume.
+ */
+async function journalThenRecord(
+  account: Account,
+  batchId: string,
+  name: string,
+  journal: OperationJournal,
+  onStep: ((step: OperationStep) => void) | undefined,
+): Promise<string> {
+  journal.record({
+    kind: 'purchase',
+    accountId: account.id.toString(),
+    batchId,
+    name,
+    startedAt: Date.now(),
+  })
+  faultPoint('after-create')
+  return recordPurchase(account, batchId, name, journal, onStep)
 }
 
 /** Read the new batch back from chain truth and attach it to the account. */
 async function recordPurchase(
   account: Account,
-  signerKey: PrivateKey,
   batchId: string,
   name: string,
+  journal: OperationJournal,
   onStep: ((step: OperationStep) => void) | undefined,
 ): Promise<string> {
   onStep?.('recording')
+  const { signerKey } = await derivePostageSigner(account.derivationKey)
   const stamp = await fetchExistingBatchFromChain(batchId, signerKey, name)
   if (!stamp) {
+    // The journal entry stays: the drive is bought and findable, and the
+    // Storage tab offers to finish it. Retrying costs nothing.
     throw new Error(
-      'The drive was paid for but could not be read back from the chain. It will appear once the chain catches up.',
+      'The drive was paid for but could not be read back from the chain yet. Nothing is lost — finish it from Storage once the chain catches up.',
     )
   }
   account.addStamp(stamp)
+  journal.clear(account.id.toString(), batchId)
   return batchId
 }
 
@@ -240,12 +286,17 @@ export interface ResizeOptions extends RunOptions {
  * and it is a benign one: the drive is bigger-lifespan, not smaller-anything.
  * The design this replaced ("Lifespan decreased", #392) was drawn for the
  * opposite outcome, which the engine's ordering makes unreachable — so the
- * dialog must not present this as a loss, and must say the retry is free.
+ * dialog must not present this as a loss.
+ *
+ * The retry really is free now: the journal remembers that the compensating
+ * top-up was paid and which depth it was paid for, so resuming submits the
+ * depth increase alone. Without that record the plan would be re-derived from
+ * the grown balance and would charge for the compensation twice (§6.6).
  */
 export class SizeIncreasePendingError extends Error {
   constructor(cause: unknown) {
     super(
-      'Your payment went through and the drive’s lifespan is longer, but the size increase did not finish. Trying again will re-price the change against the drive’s new, longer lifespan, so it will cost again — the drive itself is not damaged.',
+      'Your payment went through and the drive’s lifespan is longer, but the size increase did not finish. Trying again finishes it — the payment already made covers it, so there is nothing more to pay.',
       { cause },
     )
     this.name = 'SizeIncreasePendingError'
@@ -261,13 +312,12 @@ export class SizeIncreasePendingError extends Error {
  * runs as ONE transaction and there is no partial state to reach.
  *
  * On the unbundled fallback there is: the payment landed and the lifespan grew,
- * only the depth increase is pending. Nothing shrank, so nothing is damaged —
- * but a retry is NOT free. `resizePlan` is re-derived from the LIVE remaining
- * balance, which the top-up has just raised, so keep-lifespan asks for a second
- * top-up sized against the grown figure. Resuming instead would need the target
- * depth persisted on the record: chain state cannot tell a batch topped up for a
- * pending resize from one that always held that balance. See
- * docs/Drive-Payment-Flow.md §6.6.
+ * only the depth increase is pending. Nothing shrank, so nothing is damaged,
+ * and the retry is free — the journal holds the target depth and the fact the
+ * compensating top-up was paid, which is exactly what chain state cannot say
+ * (a batch topped up for a pending resize looks like one that always held that
+ * balance). Re-planning without it would charge for the compensation twice.
+ * See docs/Drive-Payment-Flow.md §6.6.
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
   const { account, drive, newDepth, keepLifespan, requestFunding, onStep } = options
@@ -303,6 +353,7 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   // pay for, and never asked the user for anything. `fundingShortfall` already
   // reports a gas-only need, and the payment screens already price one.
   await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
+  faultPoint('after-funding')
 
   // Bundled, there is no seam to fail at: top-up and depth increase land
   // together or not at all, so the partial state below cannot arise.
@@ -373,4 +424,23 @@ export async function previewResize(
   } catch {
     return undefined
   }
+}
+
+export interface ResumeOptions {
+  account: Account
+  entry: PendingOperation
+  journal: OperationJournal
+  onStep?: (step: OperationStep) => void
+}
+
+/**
+ * Finish a purchase a previous session paid for.
+ *
+ * Free, which is why it can be offered as a plain button: the batch exists and
+ * is owned by the account's signer, so all that is left is reading it back and
+ * recording it.
+ */
+export async function resumePending(options: ResumeOptions): Promise<void> {
+  const { account, entry, journal, onStep } = options
+  await recordPurchase(account, entry.batchId, entry.name, journal, onStep)
 }

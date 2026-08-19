@@ -34,6 +34,7 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
+  import { operationJournal } from '$lib/payment/operation-journal.svelte'
   import { derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -63,6 +64,8 @@
 
   let phase = $state<Phase>('form')
   let pendingLabel = $state('')
+  // The steps already finished this attempt, so a failure says what was paid for.
+  let history = $state<string[]>([])
   let errorMessage = $state('')
   let errorDetail = $state('')
 
@@ -165,11 +168,13 @@
     const attempt = attempts.begin()
     phase = 'pending'
     pendingLabel = 'Checking the chain…'
+    history = []
     try {
       // Deliberately unguarded from here: this is an on-chain spend whose
       // record must land even if the dialog closed. Only the UI epilogue is
       // gated on `attempt.current`.
       await runPurchase({
+        journal: operationJournal,
         account,
         depth: Number(depthValue),
         lifespanSeconds,
@@ -177,7 +182,15 @@
         // stable batch-ID-derived label.
         name: name.trim(),
         requestFunding: funding.request,
-        onStep: (step) => (pendingLabel = describeStep(step, 'purchase')),
+        onStep: (step) => {
+          const next = describeStep(step, 'purchase')
+          // The seeded label and the first step say the same thing; listing
+          // both would tick a step off that never happened separately.
+          if (pendingLabel && pendingLabel !== next) {
+            history = [...history, pendingLabel]
+          }
+          pendingLabel = next
+        },
       })
       if (!attempt.current) {
         return
@@ -203,6 +216,7 @@
     const attempt = attempts.begin()
     phase = 'pending'
     pendingLabel = 'Looking up the batch…'
+    history = []
     const driveName = name.trim() || undefined
     try {
       // A pasted signer key attaches an externally-owned batch; otherwise derive
@@ -265,6 +279,7 @@
     title="Add drive"
     {phase}
     {pendingLabel}
+    {history}
     {errorMessage}
     errorDetails={errorDetail}
     successTitle="Purchase completed!"

@@ -17,6 +17,7 @@
   import DriveExtendDialog from '$lib/components/drive-extend-dialog.svelte'
   import DriveRemoveDialog from '$lib/components/drive-remove-dialog.svelte'
   import DriveResizeDialog from '$lib/components/drive-resize-dialog.svelte'
+  import DriveUnfinishedBanner from '$lib/components/drive-unfinished-banner.svelte'
   import { Badge } from '$lib/components/ui/badge'
   import { Button } from '$lib/components/ui/button'
   import { DropdownMenu, DropdownMenuItem } from '$lib/components/ui/dropdown-menu'
@@ -86,6 +87,9 @@
 </script>
 
 <div class="flex w-full flex-col gap-4">
+  <!-- Above everything: it names drives that are missing from the list below. -->
+  <DriveUnfinishedBanner {account} />
+
   <div class="flex flex-col gap-1">
     <p class="text-sm">Drives are prepaid storage spaces on the Swarm network.</p>
     <p class="text-muted-foreground text-sm">

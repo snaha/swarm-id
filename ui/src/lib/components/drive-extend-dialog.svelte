@@ -32,6 +32,7 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
+  import { operationJournal } from '$lib/payment/operation-journal.svelte'
   import { stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -54,6 +55,8 @@
   let errorDetail = $state('')
   let currentPrice = $state<bigint | undefined>(undefined)
   let step = $state<OperationStep>('checking')
+  // The steps already finished this attempt, so a failure says what was paid for.
+  let history = $state<string[]>([])
   const attempts = createAttemptTracker()
   // Owns the funding seam: it surfaces the payment dialog and resolves once paid.
   const funding = createFundingRequester(() => account)
@@ -105,16 +108,27 @@
     const attempt = attempts.begin()
     phase = 'pending'
     errorMessage = ''
+    step = 'checking'
+    history = []
     try {
       // Deliberately unguarded: once a transaction is sent the money is spent,
       // so the record update must land even if the dialog was closed — only
       // the UI epilogue below is skipped for a superseded attempt.
       await runExtend({
+        journal: operationJournal,
         account,
         drive,
         addedSeconds,
         requestFunding: funding.request,
-        onStep: (next) => (step = next),
+        onStep: (next) => {
+          const finished = describeStep(step, 'extend')
+          // The initial state and the first reported step describe the same
+          // moment; ticking both off would claim a step that never ran.
+          if (describeStep(next, 'extend') !== finished) {
+            history = [...history, finished]
+          }
+          step = next
+        },
       })
       if (!attempt.current) {
         return
@@ -150,6 +164,7 @@
     title={drive.name || 'Drive'}
     {phase}
     pendingLabel={describeStep(step, 'extend')}
+    {history}
     {errorMessage}
     errorDetails={errorDetail}
     successTitle="Payment completed!"

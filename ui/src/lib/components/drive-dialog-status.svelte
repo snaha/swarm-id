@@ -23,6 +23,13 @@
     phase: 'pending' | 'success' | 'error'
     pendingLabel: string
     /**
+     * The steps already finished, oldest first, shown ticked above the current
+     * one. Not decoration: when an operation fails part-way, what has already
+     * been paid for is the thing the user most needs to know, and a spinner
+     * that only ever names the current step erases it.
+     */
+    history?: string[]
+    /**
      * Shown on `success`. Worded per operation on purpose — the designed
      * "Your drive is ready to use" is a purchase ending, and would be wrong
      * after an extend.
@@ -51,6 +58,7 @@
     title,
     phase,
     pendingLabel,
+    history = [],
     errorMessage,
     onRetry,
     onClose,
@@ -71,6 +79,18 @@
     <div class="flex flex-col items-center gap-2 py-2 text-center">
       <LoaderCircle class="size-5 animate-spin" />
       <p class="text-sm">{pendingLabel}</p>
+      <!-- Under the active step, not above it: what is happening now is the
+           headline, and what is already done is the reassurance beneath. -->
+      {#if history.length > 0}
+        <ul class="text-muted-foreground mt-1 flex w-full flex-col gap-1 text-left text-xs">
+          {#each history as done, index (`${index}-${done}`)}
+            <li class="flex items-center gap-2">
+              <CircleCheck class="size-3.5 shrink-0 text-green-600" />
+              <span>{done}</span>
+            </li>
+          {/each}
+        </ul>
+      {/if}
     </div>
     {#if cancellable}
       <Button variant="outline" class="w-full" onclick={onClose}>Cancel</Button>

@@ -30,6 +30,7 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
+  import { operationJournal } from '$lib/payment/operation-journal.svelte'
   import type { ResizePlan } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -52,6 +53,8 @@
   let errorDetail = $state('')
   let errorTone = $state<'error' | 'notice'>('error')
   let step = $state<OperationStep>('checking')
+  // The steps already finished this attempt, so a failure says what was paid for.
+  let history = $state<string[]>([])
   // The plan as the CHAIN sees it (live remaining balance), which is what the
   // operation will actually execute — the stored record can be stale.
   let preview = $state<ResizePlan | undefined>(undefined)
@@ -144,6 +147,8 @@
     const attempt = attempts.begin()
     phase = 'pending'
     errorMessage = ''
+    step = 'checking'
+    history = []
     errorTone = 'error'
     try {
       // Deliberately unguarded: the top-up and the depth increase are on-chain
@@ -151,12 +156,21 @@
       // only the UI epilogue is skipped when superseded. Resume is decided
       // from chain state inside runResize, not from component-local memory.
       await runResize({
+        journal: operationJournal,
         account,
         drive,
         newDepth: Number(newDepth),
         keepLifespan,
         requestFunding: funding.request,
-        onStep: (next) => (step = next),
+        onStep: (next) => {
+          const finished = describeStep(step, 'resize')
+          // The initial state and the first reported step describe the same
+          // moment; ticking both off would claim a step that never ran.
+          if (describeStep(next, 'resize') !== finished) {
+            history = [...history, finished]
+          }
+          step = next
+        },
       })
       if (!attempt.current) {
         return
@@ -196,6 +210,7 @@
     title={drive.name || 'Drive'}
     {phase}
     pendingLabel={describeStep(step, 'resize')}
+    {history}
     {errorMessage}
     errorDetails={errorDetail}
     tone={errorTone}

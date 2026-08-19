@@ -48,6 +48,13 @@
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
+  import {
+    FAULT_POINTS,
+    type FaultPoint,
+    armFaultPoint,
+    armedFaultPoint,
+    describeFaultPoint,
+  } from '$lib/payment/fault-injection'
   import { type EthereumProvider, switchWalletChain } from '$lib/payment/payment-rail'
   import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
@@ -239,6 +246,21 @@
       accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
     })()
   })
+  /**
+   * Where the next paid operation should fail on purpose.
+   *
+   * The failures worth testing are the expensive ones — a resize whose depth
+   * increase dies after the top-up confirmed, a purchase whose read-back dies
+   * after the batch exists — and they are exactly the ones that never happen
+   * while you are watching. Arming one fires it once, so the attempt after it
+   * exercises the resume path rather than the same failure again.
+   */
+  let faultPoint = $state<FaultPoint>(armedFaultPoint())
+  const faultOptions = FAULT_POINTS.map((point) => ({
+    value: point,
+    label: describeFaultPoint(point),
+  }))
+
   // On-chain drive tooling: fund the account's postage signer and create a
   // batch it OWNS, so extend/resize can run for real against the local chain.
   let chainToolBusy = $state(false)
@@ -1416,6 +1438,25 @@ Check console logs for details:
         <p class="font-mono text-sm">{walletMessage}</p>
       {/if}
 
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Simulate failure</h3>
+      <p class="text-muted-foreground text-sm">
+        Fires once, on the next paid operation, at a point where money has already moved — then
+        disarms itself, so the following attempt runs the resume path. Use it to check that an
+        interrupted purchase is still findable, and that finishing a paid-for resize costs nothing.
+      </p>
+      <div class="flex flex-wrap items-end gap-2">
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Fail at</span>
+          <Select
+            options={faultOptions}
+            bind:value={faultPoint}
+            class="w-96"
+            onchange={() => armFaultPoint(faultPoint)}
+          />
+        </label>
+      </div>
       <div class="bg-border my-4 h-px"></div>
 
       <h3 class="text-lg font-semibold">On-chain drive tooling</h3>
