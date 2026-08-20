@@ -1393,6 +1393,87 @@ describe("SwarmIdProxy deferred install re-checks the baked account inputs", () 
   })
 })
 
+describe("SwarmIdProxy promoted binding follows an account migration", () => {
+  // When no default pointer resolves, `refreshStampFromStorage` keeps the
+  // PROMOTED binding (a targeted write's batch) — but it used to return before
+  // ever comparing account inputs, so a local→synced migration left that
+  // binding on the pre-migration stamper forever.
+  const OLD_OWNER = "ab".repeat(20)
+  const NEW_OWNER = "cd".repeat(20)
+  let proxy: SwarmIdProxy
+  let bindStamp: ReturnType<typeof vi.fn>
+  let owner: string
+
+  const fingerprint = (o: string) => `${o}-${"00".repeat(32)}`
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    vi.mocked(UtilizationAwareStamper.create).mockClear()
+    proxy = makeProxy()
+    owner = OLD_OWNER
+    bindStamp = vi.fn(() => Promise.resolve())
+    ;(proxy as never)["bindStamp"] = bindStamp
+    ;(proxy as never)["parentOrigin"] = PARENT_ORIGIN
+    // Promoted binding: B2 is bound, but no default pointer resolves.
+    ;(proxy as never)["postageBatchId"] = B2
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["stamper"] = { tag: B2 }
+    ;(proxy as never)["stamperAccountFingerprint"] = fingerprint(OLD_OWNER)
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn(), teardown: vi.fn() }
+    ;(proxy as never)["utilizationStore"] = {}
+    ;(proxy as never)["lookupPostageStampForApp"] = () => undefined
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [stampStub(B1), stampStub(B2)] },
+    })
+    ;(proxy as never)["lookupAccountForApp"] = () => {
+      const seen = owner
+      return Promise.resolve({
+        owner: { toHex: () => seen },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 2,
+      })
+    }
+  })
+
+  const refresh = () =>
+    (proxy as never)["refreshStampFromStorage"]() as Promise<
+      | { stamp: { batchID: { toHex: () => string } }; bindDefault: boolean }
+      | undefined
+    >
+
+  it("keeps the promoted binding while the account is unchanged", async () => {
+    const pending = await refresh()
+    expect(pending).toBeUndefined()
+    expect(bindStamp).not.toHaveBeenCalled()
+    expect((proxy as never)["postageBatchId"]).toBe(B2)
+  })
+
+  it("rebuilds the promoted binding when the account fingerprint changes", async () => {
+    const terminate = vi.fn()
+    ;(proxy as never)["stampEntries"] = new Map([
+      [
+        B2,
+        {
+          stamper: { tag: B2 },
+          signerKey: "11".repeat(32),
+          workerPool: { terminate },
+        },
+      ],
+    ])
+    owner = NEW_OWNER
+
+    const pending = await refresh()
+
+    // The whole cache is dropped (every entry bakes in the old account) and a
+    // default-binding rebuild is handed back for the promoted batch.
+    expect((proxy as never)["stampEntries"]).toEqual(new Map())
+    expect(pending?.bindDefault).toBe(true)
+    expect(pending?.stamp.batchID.toHex()).toBe(B2)
+  })
+})
+
 describe("SwarmIdProxy coordinator targets the configured Bee node", () => {
   const CoordinatorMock = vi.mocked(BatchWriteCoordinator)
 

@@ -553,14 +553,30 @@ export class SwarmIdProxy {
       return undefined
     }
 
+    // One parse for the whole refresh: the connection drives the prune, the
+    // stamp resolution, the ownership check and the account lookup, and
+    // re-reading + re-validating localStorage for each of them is pure cost.
+    const connection = this.findConnectionForParent()
+
     // Cached target stampers whose batch was tombstoned/removed must not
     // serve a later targeted write.
-    this.pruneStampEntries()
+    this.pruneStampEntries(connection)
 
-    const stamp = this.lookupPostageStampForApp()
+    const stamp = this.lookupPostageStampForApp(connection)
+    // No default resolves, but the bound batch may still be owned — a batch a
+    // targeted write PROMOTED to the binding on an account whose default
+    // pointer is gone. It is the effective default, so it must follow an
+    // account migration exactly like a real one.
+    const promoted =
+      !stamp && this.postageBatchId
+        ? this.findOwnedStamp(this.postageBatchId, connection)
+        : undefined
+    const effective = stamp ?? promoted
     const nextBatchId = stamp?.batchID.toHex()
     const nextSignerKey = stamp?.signerKey.toHex()
-    const account = stamp ? await this.lookupAccountForApp() : undefined
+    const account = effective
+      ? await this.lookupAccountForApp(connection)
+      : undefined
     const nextAccountFingerprint = account
       ? `${account.owner.toHex()}-${uint8ArrayToHex(account.encryptionKey)}`
       : undefined
@@ -573,40 +589,37 @@ export class SwarmIdProxy {
       return undefined
     }
 
-    if (stamp && account) {
+    if (effective && account) {
+      const accountChanged =
+        nextAccountFingerprint !== this.stamperAccountFingerprint
+      if (promoted && !accountChanged) {
+        // Keep the promotion; clearing would strand uploads for no reason.
+        return undefined
+      }
       // Account-level inputs are baked into every cached stamper, so a
       // fingerprint change (e.g. local→synced migration) invalidates the
       // whole cache, not just the default binding.
-      if (nextAccountFingerprint !== this.stamperAccountFingerprint) {
+      if (accountChanged) {
         this.clearStampEntries()
       }
-      const signerKey = stamp.signerKey.toHex()
-      const cached = this.stampEntries.get(stamp.batchID.toHex())
+      const signerKey = effective.signerKey.toHex()
+      const cached = this.stampEntries.get(effective.batchID.toHex())
       if (cached && cached.signerKey === signerKey) {
         // Nothing to build — install the cached instance as the binding here,
         // on the queue.
-        await this.bindStamp(stamp, cached.stamper)
+        await this.bindStamp(effective, cached.stamper)
         return undefined
       }
       this.utilizationStore ??= new UtilizationStoreDB()
       return {
-        stamp,
+        stamp: effective,
         signerKey,
         accountInfo: account,
         store: this.utilizationStore,
         bindDefault: true,
       }
-    } else if (
-      this.postageBatchId &&
-      this.findOwnedStamp(this.postageBatchId)
-    ) {
-      // No default resolves, but the bound batch is still owned — e.g. it was
-      // promoted from a targeted write on an account whose default pointer is
-      // gone. Keep it; clearing would strand uploads for no reason.
-      return undefined
-    } else {
-      this.clearDefaultBinding()
     }
+    this.clearDefaultBinding()
     return undefined
   }
 
@@ -1191,8 +1204,10 @@ export class SwarmIdProxy {
    * long worker-backed upload is running on (writes run off the work queue, so
    * a storage event can land during one).
    */
-  private pruneStampEntries(): void {
-    const connection = this.findConnectionForParent()
+  private pruneStampEntries(
+    parsed?: ReturnType<SwarmIdProxy["findConnectionForParent"]>,
+  ): void {
+    const connection = parsed ?? this.findConnectionForParent()
     if (!connection) return
     const owned = new Set(
       connection.account.postageStamps
@@ -1691,13 +1706,15 @@ export class SwarmIdProxy {
    * Look up the postage stamp for the currently connected app's identity
    * by reading from shared localStorage stores.
    */
-  private lookupPostageStampForApp(): PostageStamp | undefined {
+  private lookupPostageStampForApp(
+    parsed?: ReturnType<SwarmIdProxy["findConnectionForParent"]>,
+  ): PostageStamp | undefined {
     if (!this.parentOrigin) {
       return undefined
     }
 
     try {
-      const connection = this.findConnectionForParent()
+      const connection = parsed ?? this.findConnectionForParent()
       if (!connection) {
         return undefined
       }
@@ -1735,8 +1752,11 @@ export class SwarmIdProxy {
   /**
    * A non-tombstoned stamp the connected account owns, by hex batch id.
    */
-  private findOwnedStamp(batchIdHex: string): PostageStamp | undefined {
-    const connection = this.findConnectionForParent()
+  private findOwnedStamp(
+    batchIdHex: string,
+    parsed?: ReturnType<SwarmIdProxy["findConnectionForParent"]>,
+  ): PostageStamp | undefined {
+    const connection = parsed ?? this.findConnectionForParent()
     return connection?.account.postageStamps.find(
       (s) => !s.deletedAt && s.batchID.toHex() === batchIdHex,
     )
@@ -1896,7 +1916,9 @@ export class SwarmIdProxy {
    *
    * @returns Account info with owner address and encryption key, or undefined if not found
    */
-  private async lookupAccountForApp(): Promise<
+  private async lookupAccountForApp(
+    parsed?: ReturnType<SwarmIdProxy["findConnectionForParent"]>,
+  ): Promise<
     | {
         owner: EthAddress
         encryptionKey: Uint8Array
@@ -1910,7 +1932,7 @@ export class SwarmIdProxy {
     }
 
     try {
-      const connection = this.findConnectionForParent()
+      const connection = parsed ?? this.findConnectionForParent()
       if (!connection) {
         return undefined
       }
