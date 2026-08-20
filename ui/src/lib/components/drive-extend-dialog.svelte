@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts">
+  import { onDestroy } from 'svelte'
+
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import Minus from '@lucide/svelte/icons/minus'
   import Plus from '@lucide/svelte/icons/plus'
@@ -99,6 +101,11 @@
     funding.cancel()
     onClose()
   }
+
+  // The dialog can unmount without close() (account switch, sign-out) — abandon
+  // any pending payment request so nothing is left waiting on a dialog that no
+  // longer exists.
+  onDestroy(() => funding.cancel())
 
   async function proceed() {
     if (!changed) {
