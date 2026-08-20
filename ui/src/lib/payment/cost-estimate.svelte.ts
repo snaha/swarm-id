@@ -41,7 +41,12 @@ export interface CostEstimate {
  */
 export function createCostEstimate(cost: () => EstimatedCost | undefined): CostEstimate {
   let rate = $state<bigint | undefined>(undefined)
+  // Re-runs when the configured endpoint changes (the fetch reads it before
+  // its first await). Cleared first: a rate from the previous endpoint must
+  // not survive into this one — not while the new read is in flight, and not
+  // when it fails (see chain-cache.ts) — so a miss falls back to BZZ.
   $effect(() => {
+    rate = undefined
     currentBzzXdaiRate()
       .then((quoted) => (rate = quoted))
       .catch(() => undefined)

@@ -156,8 +156,12 @@
   })
 
   // Best-effort: the price only feeds the cost estimate here (and the TTL guess
-  // for a settled purchase); the purchase itself never gates on it.
+  // for a settled purchase); the purchase itself never gates on it. Cleared
+  // first because the effect re-runs when the configured endpoint changes: a
+  // price from the previous chain must not survive into this one, in flight or
+  // on failure (see chain-cache.ts).
   $effect(() => {
+    currentPrice = undefined
     currentChainPrice()
       .then((price) => (currentPrice = price))
       .catch(() => undefined)

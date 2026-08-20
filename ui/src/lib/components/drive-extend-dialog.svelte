@@ -85,8 +85,11 @@
   )
 
   // Best-effort prefetch for the live estimate; the run fetches for real, so a
-  // miss here only hides the estimate.
+  // miss here only hides the estimate. Cleared first because the effect re-runs
+  // when the configured endpoint changes: a price from the previous chain must
+  // not survive into this one, in flight or on failure (see chain-cache.ts).
   $effect(() => {
+    currentPrice = undefined
     currentChainPrice()
       .then((price) => (currentPrice = price))
       .catch(() => undefined)
