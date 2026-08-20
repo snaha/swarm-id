@@ -9,6 +9,7 @@
 
   import DriveDialogStatus from '$lib/components/drive-dialog-status.svelte'
   import { Button } from '$lib/components/ui/button'
+  import { driveLabel } from '$lib/drives'
   import { type OperationStep, resumePending } from '$lib/payment/drive-operation'
   import { describeStep } from '$lib/payment/funding-request.svelte'
   import { type PendingOperation, operationJournal } from '$lib/payment/operation-journal.svelte'
@@ -43,10 +44,9 @@
   const busy = $derived(busyBatchId !== undefined)
 
   function describe(entry: PendingOperation): string {
-    // The name is optional at purchase time, so fall back to the batch — the
-    // drive still has to be identifiable in the sentence that offers to
-    // rescue it.
-    const label = entry.name.trim() || `Drive ${entry.batchId.replace(/^0x/, '').slice(0, 4)}`
+    // The name is optional at purchase time; the shared fallback names it the
+    // way the drive list will once it is recorded.
+    const label = driveLabel(entry.name, entry.batchId)
     // Careful not to promise the money left: the id is written down BEFORE the
     // transaction is sent, so an entry can describe a purchase that never made
     // it onto the chain.

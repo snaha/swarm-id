@@ -151,7 +151,7 @@
     if (!canProceed) {
       return 'Set storage options to proceed.'
     }
-    return estimate.value ? `Estimated cost ≈ ${estimate.value}` : 'Final cost is shown at payment.'
+    return estimate.value ? `Estimated cost ~${estimate.value}` : 'Final cost is shown at payment.'
   })
 
   // Best-effort: the price only feeds the cost estimate here (and the TTL guess
@@ -180,6 +180,7 @@
 
   function proceed() {
     errorMessage = ''
+    errorDetail = ''
     // The batch owner is a deterministic function of the account's (plaintext)
     // derivation key, so no unlock is needed — buying spends real money, and
     // the payment screens are confirmation enough.
@@ -334,6 +335,10 @@
         fetchExistingBatchFromChain(batchIdInput.trim(), signerKey, driveName),
       )
       if (!stamp) {
+        // No exception behind this one — and no stale stack from an earlier
+        // failure either, which "View details" would otherwise offer as if it
+        // belonged to it.
+        errorDetail = ''
         errorMessage =
           'Couldn’t find that batch on chain. Check the Batch ID, or the Gnosis RPC endpoint in Network settings.'
         phase = 'error'
@@ -346,6 +351,7 @@
         verifyBatchStampable(stamp.batchID, signerKey, stamp.depth),
       )
       if (!stampable) {
+        errorDetail = ''
         errorMessage =
           'That batch exists, but this signer key can’t stamp uploads for it. Check the signer key.'
         phase = 'error'
@@ -403,7 +409,7 @@
     successTitle={success.title}
     successBody={success.body}
     cancellable
-    onRetry={() => ((phase = 'form'), (errorMessage = ''))}
+    onRetry={() => ((phase = 'form'), (errorMessage = ''), (errorDetail = ''))}
     onClose={phase === 'success' ? succeed : close}
   />
 {:else if phase === 'unconfirmed'}

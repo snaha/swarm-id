@@ -72,6 +72,10 @@
   const GNOSIS_DECIMALS = 18
   const BZZ_DECIMALS = 16
 
+  /** Enough of the wallet address, from each end, to recognise it by. */
+  const ADDRESS_HEAD_CHARS = 6
+  const ADDRESS_TAIL_CHARS = 4
+
   type Method = 'widget' | 'in-app'
 
   const IN_APP_METHOD_OPTION = { value: 'in-app', label: 'Pay with crypto in app (experimental)' }
@@ -114,7 +118,9 @@
     rail.tokens(Number(chainId)).find((token) => token.address === tokenAddress)?.symbol ?? '',
   )
   const shortAddress = $derived(
-    walletAddress ? `${walletAddress.slice(0, 6)}…${walletAddress.slice(-4)}` : '',
+    walletAddress
+      ? `${walletAddress.slice(0, ADDRESS_HEAD_CHARS)}…${walletAddress.slice(-ADDRESS_TAIL_CHARS)}`
+      : '',
   )
 
   /**

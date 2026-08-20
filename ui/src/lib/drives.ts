@@ -3,6 +3,8 @@
 import { Utils } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id'
 
+import { strip0x } from '$lib/crypto/hex'
+
 /**
  * Pure presentation helpers that turn a {@link PostageStamp} (a "drive") into
  * the labels the Storage UI renders: human size, used %, status, friendly
@@ -134,12 +136,21 @@ function driveUsedPercent(drive: PostageStamp): number {
 const FALLBACK_NAME_HEX_CHARS = 4
 
 /**
- * The drive's label, falling back to `Drive <batch-ID prefix>` when unnamed.
+ * A drive's label, falling back to `Drive <batch-ID prefix>` when unnamed.
  * Deriving the fallback from the batch ID (not the list position) keeps it
  * stable when drives are added/removed and identical on every device.
+ *
+ * Takes the two fields rather than a stamp, so a drive that exists only as a
+ * journal entry — bought, not yet recorded — is named the same way it will be
+ * once it becomes a stamp.
  */
+export function driveLabel(name: string | undefined, batchIdHex: string): string {
+  return name?.trim() || `Drive ${strip0x(batchIdHex).slice(0, FALLBACK_NAME_HEX_CHARS)}`
+}
+
+/** {@link driveLabel} for a stamp. */
 export function driveDisplayName(drive: PostageStamp): string {
-  return drive.name?.trim() || `Drive ${drive.batchID.toHex().slice(0, FALLBACK_NAME_HEX_CHARS)}`
+  return driveLabel(drive.name, drive.batchID.toHex())
 }
 
 /**

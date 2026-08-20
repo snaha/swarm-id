@@ -27,8 +27,8 @@ export interface EstimatedCost {
 
 export interface CostEstimate {
   /**
-   * The figure with its unit ("7.05 USD", "187.5 BZZ"), or undefined when there
-   * is nothing to price yet. Callers add their own "~" or "≈".
+   * The figure with its unit ("7.05 USD", "187.5 xBZZ"), or undefined when
+   * there is nothing to price yet. Callers add their own "~".
    */
   readonly value: string | undefined
 }
@@ -59,7 +59,9 @@ export function createCostEstimate(cost: () => EstimatedCost | undefined): CostE
       return `${usd} USD`
     }
     const bzz = stampCostBzz(priced.depth, priced.amountPerChunk)
-    return bzz ? `${bzz} BZZ` : undefined
+    // "xBZZ", as the pay screen prices the same money — the Gnosis token is
+    // what is actually spent, and two names for it read as two currencies.
+    return bzz ? `${bzz} xBZZ` : undefined
   })
 
   return {
