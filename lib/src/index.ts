@@ -556,6 +556,7 @@ export type { ChainState } from "./utils/ttl"
 // On-chain postage batch reads (PostageStamp contract, ground-truth TTL)
 export {
   fetchOnChainBatchState,
+  fetchOnChainBatchStateResult,
   fetchBatchTTLFromContract,
   fetchAuthoritativeBatchTTL,
   resolveBatchStatus,
