@@ -56,7 +56,9 @@ Verify after start (read-only): every node `bee_kademlia_reachability_status{...
 | Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
-Developer Tools at http://localhost:5500/dev provide stamp buying and sync testing.
+Developer Tools at http://localhost:5500/dev provide, on the **Chain** tab, a faucet, on-chain batch
+creation (**Create drive to test with** buys one and attaches it as a drive) and batch import by ID;
+and on the **Node** tab, stored stamps, retrievability checks and sync testing.
 
 ## Known Bee Node Private Keys
 

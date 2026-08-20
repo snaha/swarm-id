@@ -10,7 +10,7 @@ The identity UI is a SvelteKit SPA.
 - **License headers**: enforced by eslint (`eslint-plugin-notice` + shared svelte rule);
   `pnpm --filter @swarm-id/ui format` auto-inserts them
 - **`BASE_PATH`** env var sets the SvelteKit base path at build time (`/id` in deployments)
-- **Dev mock stamp purchase** (`/dev` → Stamps tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
+- **Dev mock stamp purchase** (`/dev` → Chain tab, backed by `src/lib/stores/dev-settings.svelte.ts`):
   toggles that make the product **Add drive** flow settle a mocked postage batch instead of a real
   cross-chain payment. "Open widget popup" **off** simulates locally with **no `window.open`** — the
   only mode that works where popups are blocked (headless previews) or the widget origin is offline;
