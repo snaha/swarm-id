@@ -630,18 +630,25 @@ export class BatchWriteCoordinator {
 
   /**
    * Reset the pending-restore ledger for a new lease session from the cached
-   * snapshot's batch list. The CURRENT lease batch is excluded — it is bound
-   * by the acquire/adopt itself (after a default-stamp change the snapshot's
-   * old lease batch is just another restorable secondary here).
+   * snapshot. The CURRENT lease batch is excluded — it is bound by the
+   * acquire/adopt itself (after a default-stamp change the snapshot's old lease
+   * batch is just another restorable secondary here).
+   *
+   * One id escapes the caller's `seed` mode: one the previous session listed
+   * but never SEEDED (`pendingBatchIds`) carries no local state for this
+   * partition, so `"local"` would bind a ZERO counter over a prior holder's
+   * resume point. Those stay `"network"` on every path.
    */
   private seedPendingRestores(
-    batchIds: string[] | undefined,
+    cached: PartitionLeaseStateSnapshot | undefined,
     seed: "local" | "network",
   ): void {
     this.pendingJoinedRestores.clear()
     const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
-    for (const id of batchIds ?? []) {
-      if (id !== leaseBatchHex) this.pendingJoinedRestores.set(id, seed)
+    const neverSeeded = new Set(cached?.pendingBatchIds ?? [])
+    for (const id of cached?.joinedBatchIds ?? []) {
+      if (id === leaseBatchHex) continue
+      this.pendingJoinedRestores.set(id, neverSeeded.has(id) ? "network" : seed)
     }
   }
 
@@ -660,10 +667,14 @@ export class BatchWriteCoordinator {
    */
   private persistLeaseSnapshot(lease: PartitionLease): void {
     const snap = lease.serialize()
+    // Recorded separately as well as merged: an id that is only in the ledger
+    // because it is still PENDING has no local state, and the next session's
+    // adopt must network-seed it rather than bind zero (see `pendingBatchIds`).
+    snap.pendingBatchIds = [...this.pendingJoinedRestores.keys()]
     snap.joinedBatchIds = [
       ...new Set([
         ...(snap.joinedBatchIds ?? []),
-        ...this.pendingJoinedRestores.keys(),
+        ...snap.pendingBatchIds,
         this.deps.leaseStamper.batchId.toHex(),
       ]),
     ]
@@ -684,17 +695,28 @@ export class BatchWriteCoordinator {
    */
   private persistReducedLeaseCache(): void {
     const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
+    const prior = this.deps.readLeaseCache?.()
+    // Still-unseeded ids carry forward from the prior cache too (this path can
+    // run before `seedPendingRestores` ever populated the in-memory ledger),
+    // minus anything this session has since actually seeded.
+    const pending = new Set([
+      ...(prior?.pendingBatchIds ?? []),
+      ...this.pendingJoinedRestores.keys(),
+    ])
+    for (const key of this.joinedSecondaries.keys()) pending.delete(key)
+    pending.delete(leaseBatchHex)
     this.deps.writeLeaseCache?.({
       deviceId: this.deps.deviceId,
       batchId: leaseBatchHex,
       joinedBatchIds: [
         ...new Set([
-          ...(this.deps.readLeaseCache?.()?.joinedBatchIds ?? []),
-          ...this.pendingJoinedRestores.keys(),
+          ...(prior?.joinedBatchIds ?? []),
+          ...pending,
           ...this.joinedSecondaries.keys(),
           leaseBatchHex,
         ]),
       ],
+      pendingBatchIds: [...pending],
     })
   }
 
@@ -1050,7 +1072,10 @@ export class BatchWriteCoordinator {
         // Local seeding is sound here and only here: `adoptIfLive` proved the
         // cached lease is still unexpired, so no peer can have held this
         // partition since our last write — local state is the newest there is.
-        this.seedPendingRestores(cached?.joinedBatchIds, "local")
+        // "Our last write" is the qualifier: ids the snapshot lists but never
+        // SEEDED (`pendingBatchIds`) have no local state at all and stay
+        // network-seeded — `seedPendingRestores` applies that exception.
+        this.seedPendingRestores(cached, "local")
         this.persistLeaseSnapshot(lease)
         this.startRefreshTimer(lease)
         this.lastLeaseValidatedAt = Date.now()
@@ -1076,7 +1101,7 @@ export class BatchWriteCoordinator {
       // batches past our local state. Local seeding here could full-publish a
       // LOWER counter over the peer's resume point (slot reuse); `joinBatch`'s
       // read is the same one a targeted write would pay.
-      this.seedPendingRestores(cached?.joinedBatchIds, "network")
+      this.seedPendingRestores(cached, "network")
 
       if (result.partition === undefined) {
         if (result.isReadOnly) {

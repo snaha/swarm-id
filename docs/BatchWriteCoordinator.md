@@ -190,10 +190,14 @@ being lost:
 - **Restores are retried** from the refresh tick until the pending set drains
   (`pendingJoinedRestores`), because a transient resolver failure or a reload mid-restore would
   otherwise drop a batch from the list permanently.
-- **Seed mode is per acquire path.** After an adopt the lease demonstrably never lapsed, so local
-  state is the newest there is (`"local"`). After a cold acquire a peer may have held the
-  partition meanwhile, so each batch re-seeds from the network via `joinBatch` (`"network"`),
-  which throws rather than zero-seed on an inconclusive read.
+- **Seed mode is per acquire path — and per id.** After an adopt the lease demonstrably never
+  lapsed, so local state is the newest there is (`"local"`). After a cold acquire a peer may have
+  held the partition meanwhile, so each batch re-seeds from the network via `joinBatch`
+  (`"network"`), which throws rather than zero-seed on an inconclusive read. The exception rides
+  the snapshot as `pendingBatchIds`: an id a previous session listed but never actually SEEDED
+  has no local state at all, so `buildLeaseLocalCounter()` for it is ZERO. Without recording that,
+  a cold acquire's un-restored `"network"` id is silently re-tagged `"local"` by the next adopt
+  and binds zero over a prior holder's resume point. Those ids stay `"network"` on every path.
 
 ## The displacement-during-upload race fix
 

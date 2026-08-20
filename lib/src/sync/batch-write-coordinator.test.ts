@@ -2728,3 +2728,84 @@ describe("BatchWriteCoordinator — the worker pool is resolved under the write 
     )
   })
 })
+
+describe("BatchWriteCoordinator — restore seeding cannot degrade to local", () => {
+  const liveSelf = () => ({
+    partition: 2,
+    generation: { timestampMs: NOW, tiebreaker: SELF },
+    acquiredAt: NOW,
+    leasedUntil: Date.now() + LEASE_TTL_MS,
+  })
+
+  it("network-seeds an adopted id the previous session never actually seeded", async () => {
+    // The ledger conflates "seeded, so local state is current" with "listed but
+    // never restored". The seed mode is not persisted, so a cold acquire's
+    // `"network"` id that failed to restore is re-tagged `"local"` by the next
+    // adopt — and the local branch binds `buildLeaseLocalCounter()`, which is
+    // ZERO for a batch this device has never written at this partition. The
+    // next targeted write then re-issues the prior holder's acked slots.
+    const lease = makeLease({ partition: 2 })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const calls: string[] = []
+    const leaseStamper = makeStamper(calls, "lease")
+    const secondary = makeStamper(calls, "b2", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          self: liveSelf(),
+          joinedBatchIds: [BATCH_ID_2],
+          // Listed, never seeded — the previous session's restore kept failing.
+          pendingBatchIds: [BATCH_ID_2],
+        }),
+        resolveStamperForBatch: async () => asStamper(secondary),
+      }),
+    )
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    expect(lease.joinBatch).toHaveBeenCalledWith(asStamper(secondary))
+    expect(lease.seedReferenceHex).not.toHaveBeenCalledWith(
+      expect.anything(),
+      asStamper(secondary),
+    )
+  })
+
+  it("persists which ids are still pending so the next session can tell", async () => {
+    const lease = makeLease({ partition: 2 })
+    lease.adoptIfLive = vi.fn(() => 2)
+    leaseController.lease = lease
+    const leaseStamper = makeStamper([], "lease")
+    const writes: (PartitionLeaseStateSnapshot | undefined)[] = []
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        writeLeaseCache: (snap) => writes.push(snap),
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          self: liveSelf(),
+          joinedBatchIds: [BATCH_ID_2],
+        }),
+        // Never resolves — the id stays pending.
+        resolveStamperForBatch: async () => undefined,
+      }),
+    )
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    expect(writes.at(-1)?.joinedBatchIds).toContain(BATCH_ID_2)
+    expect(writes.at(-1)?.pendingBatchIds).toContain(BATCH_ID_2)
+  })
+})

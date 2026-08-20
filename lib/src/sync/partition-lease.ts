@@ -194,6 +194,19 @@ export interface PartitionLeaseStateSnapshot {
    * like any secondary. Absent on snapshots from builds predating the field.
    */
   joinedBatchIds?: string[]
+  /**
+   * The subset of {@link joinedBatchIds} a previous session listed but never
+   * actually SEEDED state for — a restore that kept failing, or a batch the
+   * account no longer owns (which stays pending by design). Persisted because
+   * the two cases are otherwise indistinguishable and demand OPPOSITE seed
+   * modes: a seeded batch's local state is current for this claim chain, while
+   * a never-seeded one has no local state for this partition at all, so
+   * `buildLeaseLocalCounter()` returns ZERO and binding it would full-publish
+   * over a prior holder's resume point. The adopt path re-reads these from the
+   * network exactly as a cold acquire does. Absent on snapshots from builds
+   * predating the field.
+   */
+  pendingBatchIds?: string[]
 }
 
 /**
