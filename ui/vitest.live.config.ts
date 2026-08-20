@@ -6,8 +6,10 @@ import { defineConfig } from 'vitest/config'
  * The suites that talk to a real hosted service — today, Relay's quote API.
  *
  * Separate from `pnpm test` because it needs the internet, and `check:all` must
- * stay runnable offline. The suites skip themselves when the service cannot be
- * reached, so a green run offline means "not checked", not "checked and fine".
+ * stay runnable offline. A contract check whose service cannot be reached
+ * reports SKIPPED rather than passing, so an offline run says "not checked" out
+ * loud instead of looking like "checked and fine". Under CI the suite also
+ * asserts reachability, so an outage there is a red build on purpose.
  */
 export default defineConfig({
   test: {
