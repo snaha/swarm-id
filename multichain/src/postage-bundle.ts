@@ -32,7 +32,7 @@ import { walletClientFor } from "./chain"
 import { withFeeTooLowRetry } from "./write-retry"
 
 /** One call inside the bundle. */
-interface BundledCall {
+export interface BundledCall {
   target: `0x${string}`
   value: bigint
   data: `0x${string}`
@@ -168,28 +168,9 @@ export async function bundleCreate(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<CreateBatchResult> {
-  const owner = privateKeyToAccount(options.originPrivateKey).address
   const transactionHash = await sendBundle(
     options.originPrivateKey,
-    [
-      approveCall(settings, options.totalPlur),
-      {
-        target: settings.addresses.postageStamp,
-        value: 0n,
-        data: encodeFunctionData({
-          abi: POSTAGE_STAMP_ABI,
-          functionName: "createBatch",
-          args: [
-            owner,
-            options.amountPerChunk,
-            options.depth,
-            options.bucketDepth,
-            options.batchNonce,
-            options.immutable,
-          ],
-        }),
-      },
-    ],
+    createCalls(options, settings),
     settings,
     rpcProvider,
   )
@@ -220,6 +201,36 @@ export async function bundleCreate(
     return { transactionHash, batchId }
   }
   throw new Error("Timed out waiting for the createBatch bundle receipt.")
+}
+
+/**
+ * approve + createBatch, in that order — the approve has to exist before
+ * `createBatch` pulls against it.
+ */
+export function createCalls(
+  options: CreateBundleOptions,
+  settings: MultichainSettings,
+): BundledCall[] {
+  const owner = privateKeyToAccount(options.originPrivateKey).address
+  return [
+    approveCall(settings, options.totalPlur),
+    {
+      target: settings.addresses.postageStamp,
+      value: 0n,
+      data: encodeFunctionData({
+        abi: POSTAGE_STAMP_ABI,
+        functionName: "createBatch",
+        args: [
+          owner,
+          options.amountPerChunk,
+          options.depth,
+          options.bucketDepth,
+          options.batchNonce,
+          options.immutable,
+        ],
+      }),
+    },
+  ]
 }
 
 function approveCall(
@@ -253,6 +264,50 @@ function topUpCall(
   }
 }
 
+/** approve + topUp, in that order. */
+export function extendCalls(
+  options: ExtendBundleOptions,
+  settings: MultichainSettings,
+): BundledCall[] {
+  return [
+    approveCall(settings, options.totalPlur),
+    topUpCall(settings, options.batchId, options.amountPerChunk),
+  ]
+}
+
+/**
+ * approve + topUp + increaseDepth, in the order the contract requires (see the
+ * module comment) — or `increaseDepth` alone when there is no lifespan to keep.
+ *
+ * Pure, and exported, because the ORDER is the load-bearing part: it is a
+ * property of these three calls, not of the transaction that carries them, so
+ * it can be pinned without a chain. `postage-bundle.test.ts` does exactly that.
+ */
+export function resizeCalls(
+  options: ResizeBundleOptions,
+  settings: MultichainSettings,
+): BundledCall[] {
+  const increaseDepthCall: BundledCall = {
+    target: settings.addresses.postageStamp,
+    value: 0n,
+    data: encodeFunctionData({
+      abi: POSTAGE_STAMP_ABI,
+      functionName: "increaseDepth",
+      args: [options.batchId, options.newDepth],
+    }),
+  }
+  // A resize that keeps no lifespan needs no top-up at all; approving and
+  // topping up zero would just be two wasted calls inside the bundle.
+  if (options.amountPerChunk === 0n) {
+    return [increaseDepthCall]
+  }
+  return [
+    approveCall(settings, options.totalPlur),
+    topUpCall(settings, options.batchId, options.amountPerChunk),
+    increaseDepthCall,
+  ]
+}
+
 /** approve + topUp, atomically. */
 export function bundleExtend(
   options: ExtendBundleOptions,
@@ -261,10 +316,7 @@ export function bundleExtend(
 ): Promise<`0x${string}`> {
   return sendBundle(
     options.originPrivateKey,
-    [
-      approveCall(settings, options.totalPlur),
-      topUpCall(settings, options.batchId, options.amountPerChunk),
-    ],
+    extendCalls(options, settings),
     settings,
     rpcProvider,
   )
@@ -279,24 +331,10 @@ export function bundleResize(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<`0x${string}`> {
-  const increaseDepthCall: BundledCall = {
-    target: settings.addresses.postageStamp,
-    value: 0n,
-    data: encodeFunctionData({
-      abi: POSTAGE_STAMP_ABI,
-      functionName: "increaseDepth",
-      args: [options.batchId, options.newDepth],
-    }),
-  }
-  // A resize that keeps no lifespan needs no top-up at all; approving and
-  // topping up zero would just be two wasted calls inside the bundle.
-  const calls: BundledCall[] =
-    options.amountPerChunk > 0n
-      ? [
-          approveCall(settings, options.totalPlur),
-          topUpCall(settings, options.batchId, options.amountPerChunk),
-          increaseDepthCall,
-        ]
-      : [increaseDepthCall]
-  return sendBundle(options.originPrivateKey, calls, settings, rpcProvider)
+  return sendBundle(
+    options.originPrivateKey,
+    resizeCalls(options, settings),
+    settings,
+    rpcProvider,
+  )
 }

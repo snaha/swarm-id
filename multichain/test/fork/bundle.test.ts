@@ -9,8 +9,10 @@
  *   1. A bundle really does all of approve + topUp + increaseDepth in ONE
  *      transaction — and in that order, because the contract's floor check
  *      makes any other order revert whether or not the calls are atomic.
- *   2. `supportsBundling` is honest, so the sequential fallback is reachable
- *      on a chain without the delegate rather than silently failing.
+ *   2. `supportsBundling` is honest. There is no sequential fallback any more,
+ *      so a false REFUSES the operation outright: a wrong answer either strands
+ *      a chain that can pay atomically, or sends a bundle to a chain that will
+ *      execute nothing and still report success.
  *
  * Run with:
  *   pnpm dev:chain:detach    # repo root; the baked chain on :9545
