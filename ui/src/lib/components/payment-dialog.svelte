@@ -280,11 +280,16 @@
             ? 'Approve the connection in your wallet.'
             : screen === 'switching'
               ? 'Confirm the network change in your wallet.'
-              : 'Approve the payment in your wallet.'}
+              : 'Approve the payment in your wallet, or reject it there to back out.'}
         </p>
       {/if}
     </div>
-    {#if screen !== 'relaying'}
+    <!-- Only while nothing can already be in flight. The wallet's approval
+         prompt outlives a Cancel here: signing after it would deliver money
+         this dialog is no longer watching for, and re-quoting could charge the
+         same amount twice. Backing out of a payment happens in the wallet, by
+         rejecting the signature — as the copy above says. -->
+    {#if screen === 'connecting' || screen === 'switching'}
       <Button variant="outline" class="w-full" onclick={cancel}>Cancel</Button>
     {/if}
   </Dialog>
