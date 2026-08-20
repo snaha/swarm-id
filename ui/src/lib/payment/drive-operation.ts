@@ -165,6 +165,20 @@ export interface PurchaseOptions extends OperationSeams {
   journal: OperationJournal
 }
 
+/** How a purchase settled. */
+export interface PurchaseResult {
+  /** The batch now recorded on the account. */
+  batchId: string
+  /**
+   * True when the run finished a drive an EARLIER attempt had already paid for
+   * instead of buying the one just configured: the size, lifespan and name on
+   * the form went unused and no new payment was taken. The dialogs say so —
+   * generic success copy over an adopted orphan reads as "your drive is ready"
+   * about a drive the user did not ask for.
+   */
+  resumedUnfinished: boolean
+}
+
 /**
  * Buy a drive: fund the signer, then create the batch it will own.
  *
@@ -176,9 +190,10 @@ export interface PurchaseOptions extends OperationSeams {
  * wallet: the derived postage signer buys the batch and is its owner, so
  * nothing has to be handed across afterwards and no dust is left behind.
  *
- * @returns the new batch id, already recorded on the account.
+ * @returns the batch now recorded on the account, and whether it is the one the
+ *   caller asked for or an earlier unfinished purchase adopted instead.
  */
-export async function runPurchase(options: PurchaseOptions): Promise<string> {
+export async function runPurchase(options: PurchaseOptions): Promise<PurchaseResult> {
   const { account, depth, lifespanSeconds, name, journal, cancelled, onStep } = options
   const client = await postageChain()
   onStep?.('checking')
@@ -187,7 +202,10 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
   // batches up by owner, so buying again would abandon it — and its money.
   const orphan = journal.entries().find((entry) => entry.accountId === account.id.toString())
   if (orphan) {
-    return recordPurchase(account, orphan.batchId, orphan.name, journal, onStep)
+    return {
+      batchId: await recordPurchase(account, orphan.batchId, orphan.name, journal, onStep),
+      resumedUnfinished: true,
+    }
   }
 
   await assertBundlingSupported(client)
@@ -240,7 +258,10 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
     journal.record(purchaseEntry(account, batchId, name))
     journal.clear(account.id.toString(), plan.batchId)
   }
-  return recordPurchase(account, batchId, name, journal, onStep)
+  return {
+    batchId: await recordPurchase(account, batchId, name, journal, onStep),
+    resumedUnfinished: false,
+  }
 }
 
 function purchaseEntry(account: Account, batchId: string, name: string): PendingOperation {

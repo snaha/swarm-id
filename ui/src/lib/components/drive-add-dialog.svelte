@@ -46,6 +46,21 @@
     { value: 'existing', label: 'Use existing batch' },
   ]
 
+  /** The drive on the form was bought. */
+  const BOUGHT_SUCCESS = {
+    title: 'Purchase completed!',
+    body: 'Your drive is ready to use.',
+  }
+  /**
+   * A drive an earlier attempt had already paid for was finished instead — the
+   * size, lifespan and name just chosen went unused, and saying "your drive is
+   * ready to use" over that would describe a drive the user never bought.
+   */
+  const RESUMED_SUCCESS = {
+    title: 'Earlier purchase completed',
+    body: 'An unfinished drive from an earlier attempt was finished instead of buying a new one. No new payment was taken.',
+  }
+
   interface Props {
     account: Account
     onClose: () => void
@@ -71,6 +86,8 @@
   let history = $state<string[]>([])
   let errorMessage = $state('')
   let errorDetail = $state('')
+  // Which ending the success screen describes; only a purchase reaches it.
+  let success = $state(BOUGHT_SUCCESS)
 
   let currentPrice = $state<bigint | undefined>(undefined)
   // Superseded on cancel/close so a late ceremony or widget callback can't complete.
@@ -183,7 +200,7 @@
       // boundaries via `cancelled` below, and everything after the send is a
       // tail that must land even if the dialog closed — a paid-for batch has to
       // be recorded. Only the UI epilogue is gated on `attempt.current`.
-      await runPurchase({
+      const result = await runPurchase({
         journal: operationJournal,
         account,
         depth: Number(depthValue),
@@ -206,7 +223,7 @@
       if (!attempt.current) {
         return
       }
-      succeed()
+      purchased(result.resumedUnfinished)
     } catch (caught) {
       if (!attempt.current) {
         return
@@ -268,7 +285,8 @@
               ? undefined
               : stampTtlSeconds(BigInt(batch.amount), currentPrice)
           account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
-          succeed()
+          // The widget settles the batch it was opened for, never an orphan.
+          purchased(false)
         },
         onError: (error) => {
           if (!attempt.current) {
@@ -345,6 +363,20 @@
     }
   }
 
+  /**
+   * A purchase settled. Money moved, so the flow stops on the success screen
+   * and says what it bought, rather than vanishing behind a toast — which is
+   * what the screen was designed for and never reached.
+   */
+  function purchased(resumedUnfinished: boolean) {
+    success = resumedUnfinished ? RESUMED_SUCCESS : BOUGHT_SUCCESS
+    phase = 'success'
+  }
+
+  /**
+   * Announce the drive and leave: the success screen's Close, and the whole
+   * ending for an attach, which spends nothing and has nothing to confirm.
+   */
   function succeed() {
     onAdded?.('Drive added')
     close()
@@ -360,7 +392,7 @@
     onCancel={funding.cancel}
     onPayWithWidget={payWithWidget}
   />
-{:else if phase === 'pending' || phase === 'error'}
+{:else if phase === 'pending' || phase === 'success' || phase === 'error'}
   <DriveDialogStatus
     title="Add drive"
     {phase}
@@ -368,11 +400,11 @@
     {history}
     {errorMessage}
     errorDetails={errorDetail}
-    successTitle="Purchase completed!"
-    successBody="Your drive is ready to use."
+    successTitle={success.title}
+    successBody={success.body}
     cancellable
     onRetry={() => ((phase = 'form'), (errorMessage = ''))}
-    onClose={close}
+    onClose={phase === 'success' ? succeed : close}
   />
 {:else if phase === 'unconfirmed'}
   <Dialog onclose={close} title="Purchase not confirmed">

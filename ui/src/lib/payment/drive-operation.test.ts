@@ -139,8 +139,9 @@ function contractBatchId(sender: `0x${string}`, nonce: `0x${string}`): string {
   return keccak256(encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [sender, nonce]))
 }
 
+/** The tests below only ever care which batch settled, not how. */
 async function purchase(journal: OperationJournal): Promise<string> {
-  return runPurchase({
+  const { batchId } = await runPurchase({
     account: fakeAccount(),
     depth: DEPTH,
     lifespanSeconds: LIFESPAN_SECONDS,
@@ -148,6 +149,7 @@ async function purchase(journal: OperationJournal): Promise<string> {
     requestFunding: () => Promise.reject(new Error('funding must not be needed here')),
     journal,
   })
+  return batchId
 }
 
 beforeEach(async () => {
