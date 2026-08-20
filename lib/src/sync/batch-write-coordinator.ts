@@ -390,8 +390,17 @@ export class BatchWriteCoordinator {
           // bucket (same effect as a successful heartbeat), so an idle-blip
           // failure streak is stale — clear it. Otherwise the refresh tick keeps
           // measuring drift from the old timestamp across this fresh publish and
-          // could demote a healthy holder prematurely.
-          this.pointerHeartbeatFailingSince = undefined
+          // could demote a healthy holder prematurely. `publishState` only
+          // touches the STAMPER's batch, so clear only that batch's streak:
+          // clearing the lease batch's from a targeted write would mask a dying
+          // lease batch for as long as targeted uploads keep arriving. Compare
+          // batch ids, not instances — the proxy rebuilds stampers.
+          const publishedHex = stamper.batchId.toHex()
+          if (publishedHex === this.deps.leaseStamper.batchId.toHex()) {
+            this.pointerHeartbeatFailingSince = undefined
+          } else {
+            this.secondaryHeartbeatFailingSince.delete(publishedHex)
+          }
         } else if (this.currentPartition !== undefined) {
           // Held a partition lease but the stamper has no local counter: the
           // commit publish (ack-after-publish) would be silently skipped,
@@ -782,6 +791,7 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
+    this.secondaryHeartbeatFailingSince.clear()
     this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
   }
@@ -1273,6 +1283,7 @@ export class BatchWriteCoordinator {
     this.readOnly = true
     this.lastLeaseValidatedAt = 0
     this.pointerHeartbeatFailingSince = undefined
+    this.secondaryHeartbeatFailingSince.clear()
     this.deps.writeLeaseCache?.(undefined)
     // Re-arm so the next write re-acquires.
     this.pendingAcquire = true
@@ -1611,6 +1622,7 @@ export class BatchWriteCoordinator {
     }
     this.forEachBoundStamper((s) => s.unbindPartition())
     this.joinedSecondaries.clear()
+    this.secondaryHeartbeatFailingSince.clear()
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
@@ -1635,6 +1647,7 @@ export class BatchWriteCoordinator {
     this.partitionLease = undefined
     this.readOnly = false
     this.joinedSecondaries.clear()
+    this.secondaryHeartbeatFailingSince.clear()
     this.deps.writeLeaseCache?.(undefined)
   }
 

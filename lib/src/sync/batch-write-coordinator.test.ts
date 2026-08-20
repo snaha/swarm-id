@@ -272,6 +272,8 @@ type Internals = {
   acquire: () => Promise<void>
   acquireWithSlotWait: () => Promise<void>
   pauseLeaseBackgroundWork: () => void
+  finalizeDemote: () => void
+  yieldIdleLease: (lease: unknown) => Promise<void>
   joinedSecondaries: Map<string, unknown>
   secondaryHeartbeatFailingSince: Map<string, number>
 }
@@ -1808,6 +1810,115 @@ describe("BatchWriteCoordinator — upload publish resets the heartbeat streak",
     })
 
     expect(internals.pointerHeartbeatFailingSince).toBeUndefined()
+  })
+
+  // `publishState(counter, stamper)` re-writes the pointer of the STAMPER's
+  // batch only. A targeted write therefore repairs the secondary's pointer and
+  // says nothing about the lease batch's — clearing the lease streak from it
+  // would mask a dying lease batch for as long as targeted uploads keep coming.
+  it("a targeted publish leaves the LEASE batch's streak alone", async () => {
+    const calls: string[] = []
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    const leaseStamper = makeStamper(calls, "lease")
+    const target2 = makeStamper(calls, "b2", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(leaseStamper), mode: "oneshot" }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    await coordinator.withWrite(asStamper(target2), async () => "ok", {
+      wait: "block",
+    })
+    const armedAt = Date.now() - (STATE_POINTER_EPOCH_MS + 1)
+    internals.pointerHeartbeatFailingSince = armedAt
+
+    await coordinator.withWrite(asStamper(target2), async () => "ok", {
+      wait: "block",
+    })
+
+    expect(internals.pointerHeartbeatFailingSince).toBe(armedAt)
+  })
+
+  it("a targeted publish clears its OWN batch's secondary streak", async () => {
+    const calls: string[] = []
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    const leaseStamper = makeStamper(calls, "lease")
+    const target2 = makeStamper(calls, "b2", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(leaseStamper), mode: "oneshot" }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    await coordinator.withWrite(asStamper(target2), async () => "ok", {
+      wait: "block",
+    })
+    internals.secondaryHeartbeatFailingSince.set(
+      BATCH_ID_2,
+      Date.now() - (STATE_POINTER_EPOCH_MS + 1),
+    )
+
+    await coordinator.withWrite(asStamper(target2), async () => "ok", {
+      wait: "block",
+    })
+
+    expect(internals.secondaryHeartbeatFailingSince.has(BATCH_ID_2)).toBe(false)
+  })
+
+  // A lifecycle transition drops the joined set; the per-secondary streaks it
+  // was measuring must go with it, or a batch re-joined in the next session
+  // inherits a streak from the last one and is evicted on its first tick.
+  it.each([
+    ["finalizeDemote", (i: Internals) => i.finalizeDemote()],
+    [
+      "yieldIdleLease",
+      (i: Internals) => i.yieldIdleLease(leaseController.lease),
+    ],
+    [
+      "pauseLeaseBackgroundWork",
+      (i: Internals) => i.pauseLeaseBackgroundWork(),
+    ],
+  ])("%s drops the stale secondary streaks", async (_name, transition) => {
+    const calls: string[] = []
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    const leaseStamper = makeStamper(calls, "lease")
+    const target2 = makeStamper(calls, "b2", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(leaseStamper), mode: "oneshot" }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    await coordinator.withWrite(asStamper(target2), async () => "ok", {
+      wait: "block",
+    })
+    internals.secondaryHeartbeatFailingSince.set(BATCH_ID_2, Date.now())
+
+    await transition(internals)
+
+    expect(internals.secondaryHeartbeatFailingSince.size).toBe(0)
   })
 })
 
