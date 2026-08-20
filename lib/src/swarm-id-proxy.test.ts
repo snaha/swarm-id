@@ -942,6 +942,19 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     expect(bindStamp).not.toHaveBeenCalled()
   })
 
+  it("rejects the BOUND default batch once the account stops owning it", async () => {
+    // The binding is only re-resolved from storage on the untargeted path, so
+    // a targeted write can arrive with `postageBatchId` still naming a batch
+    // the trusted UI just tombstoned. It must be refused like any other
+    // unowned target — not waved through because it happens to be bound.
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      account: { postageStamps: [stampStub(B1, 1_700_000_000), stampStub(B2)] },
+    })
+
+    await expect(resolve(B1)).rejects.toThrow("Batch not owned by account")
+    expect(bindStamp).not.toHaveBeenCalled()
+  })
+
   it("builds a working stamper when the bound default batch's stamper failed to build", async () => {
     // Lenient `initializeStamper` can leave the batch id bound with NO
     // stamper. An upload explicitly targeting that batch must not resolve to

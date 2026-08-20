@@ -1917,10 +1917,15 @@ export class SwarmIdProxy {
     let dilutedDefault = false
     if (targetHex === this.postageBatchId && this.stamper) {
       const bound = this.findOwnedStamp(targetHex)
-      if (!bound || bound.depth === this.stamper.depth) {
+      if (bound?.depth === this.stamper.depth) {
         return { stamper: this.stamper }
       }
-      dilutedDefault = true
+      // A batch the account no longer owns (`bound` undefined — tombstoned in
+      // the trusted UI since this binding was made; only the UNTARGETED path
+      // re-resolves the binding from storage) falls through to the ownership
+      // check below and is rejected like any other unowned target. Being bound
+      // is not a licence to keep writing a drive the account gave up.
+      dilutedDefault = bound !== undefined
     }
     // NB: when the target IS the bound default batch but its stamper failed to
     // build (lenient `initializeStamper`), fall through — the targeted build
