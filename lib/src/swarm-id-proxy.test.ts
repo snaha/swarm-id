@@ -26,10 +26,26 @@ vi.mock("./utils/batch-utilization", async (importActual) => {
   return {
     ...actual,
     UtilizationAwareStamper: {
-      // Carries the batchId it was created for — the proxy's per-batch stamp
-      // entries and the coordinator's per-write context key off it.
-      create: vi.fn((_signerKey: string, batchId: unknown) =>
-        Promise.resolve({ mock: "stamper", batchId }),
+      // Carries every input baked into the instance — the proxy's per-batch
+      // stamp entries key off `batchId`, and the deferred install re-checks
+      // the signer/depth/account inputs the build was made from.
+      create: vi.fn(
+        (
+          signerKey: string,
+          batchId: unknown,
+          depth: number,
+          _store: unknown,
+          owner?: unknown,
+          encryptionKey?: unknown,
+        ) =>
+          Promise.resolve({
+            mock: "stamper",
+            batchId,
+            signerKey,
+            depth,
+            owner,
+            encryptionKey,
+          }),
       ),
     },
   }
@@ -843,12 +859,10 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
       batchID,
     )) as Resolved
     if (!picked.pendingBuild) return picked.stamper
-    const { stamp, accountInfo, store } = picked.pendingBuild
-    return (proxy as never)["buildAndCacheStamper"](
-      stamp,
-      accountInfo,
-      store,
-    ) as Promise<Resolved["stamper"]>
+    const installed = (await (proxy as never)["completeDeferredBuild"](
+      picked.pendingBuild,
+    )) as Resolved
+    return installed.stamper
   }
 
   it("re-resolves the default binding when no batchID is given", async () => {
@@ -921,9 +935,12 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
     ;(proxy as never)["postageBatchId"] = undefined
     ;(proxy as never)["stamper"] = undefined
 
-    const stamper = await resolve(B2)
+    const stamper = await resolveAndBuild(B2)
     expect(bindStamp).toHaveBeenCalledTimes(1)
     expect(bindStamp.mock.calls[0][0].batchID.toHex()).toBe(B2)
+    // The promotion binds the stamper built OFF the queue — `bindStamp` gets
+    // it as `prebuilt` rather than rebuilding it under the batch lock.
+    expect(bindStamp.mock.calls[0][1]).toMatchObject({ mock: "stamper" })
     expect(stamper).toEqual({ tag: B2 })
   })
 
@@ -1179,6 +1196,144 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
 
     expect(target).toMatchObject({ mode: "subsidised" })
     expect(withWrite).not.toHaveBeenCalled()
+  })
+})
+
+describe("SwarmIdProxy stamper builds never hold the work queue", () => {
+  // Building waits on the batch's `swarm-write-<batchId>` lock, which another
+  // tab's long upload holds across write+flush. Every (re)bind must therefore
+  // build OFF the serialized work queue and re-enter it only to install —
+  // otherwise one tab's upload freezes this tab's sign-out propagation, stamp
+  // changes and node rebinds for the whole upload.
+  let proxy: SwarmIdProxy
+  let bindStamp: ReturnType<typeof vi.fn>
+  let emit: ReturnType<typeof vi.fn>
+  let grantLock: () => void
+  let create: ReturnType<
+    typeof vi.mocked<typeof UtilizationAwareStamper.create>
+  >
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    proxy = makeProxy()
+    create = vi.mocked(UtilizationAwareStamper.create)
+    create.mockClear()
+    bindStamp = vi.fn(() => Promise.resolve())
+    emit = vi.fn()
+    ;(proxy as never)["bindStamp"] = bindStamp
+    ;(proxy as never)["emitConnectionInfoIfChanged"] = emit
+    ;(proxy as never)["parentOrigin"] = PARENT_ORIGIN
+    ;(proxy as never)["authenticated"] = true
+    ;(proxy as never)["appSecret"] = "secret-1"
+    // Bound to B1; storage now names B2 as the default → a genuine rebuild.
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["signerKey"] = "k1"
+    ;(proxy as never)["stamper"] = { tag: B1 }
+    ;(proxy as never)["stamperAccountFingerprint"] =
+      `${"ab".repeat(20)}-${"00".repeat(32)}`
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn(), teardown: vi.fn() }
+    ;(proxy as never)["utilizationStore"] = {}
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: { appSecret: "secret-1" },
+      account: { postageStamps: [stampStub(B1), stampStub(B2)] },
+    })
+    ;(proxy as never)["lookupPostageStampForApp"] = () => stampStub(B2)
+    ;(proxy as never)["lookupAccountForApp"] = () =>
+      Promise.resolve({
+        owner: { toHex: () => "ab".repeat(20) },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 2,
+      })
+    // The batch state lock stays HELD — as if another tab were mid-upload on
+    // the same batch — until the test grants it.
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: (_n: string, _o: unknown, cb: () => Promise<unknown>) =>
+          new Promise((res) => {
+            grantLock = () => res(cb())
+          }),
+      },
+    })
+  })
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  const flush = () => new Promise((r) => setTimeout(r, 0))
+  const enqueue = <T>(work: () => Promise<T>) =>
+    (proxy as never)["enqueueWork"](work) as Promise<T>
+
+  it("an untargeted upload's default rebuild leaves the queue drainable", async () => {
+    const write = (proxy as never)["withModeAwareWriteLock"](
+      undefined,
+      async (t: unknown) => t,
+    ) as Promise<unknown>
+    void write.catch(() => undefined)
+    await flush()
+
+    // The build is parked on the held batch lock…
+    expect(create).not.toHaveBeenCalled()
+    expect(bindStamp).not.toHaveBeenCalled()
+    // …and the queue still drains: this resolves without the lock being freed.
+    const order: string[] = []
+    await enqueue(async () => {
+      order.push("queued-work")
+    })
+    expect(order).toEqual(["queued-work"])
+
+    grantLock()
+    await flush()
+    expect(create).toHaveBeenCalledTimes(1)
+    expect(bindStamp).toHaveBeenCalledTimes(1)
+    expect(bindStamp.mock.calls[0][1]).toMatchObject({ mock: "stamper" })
+  })
+
+  it("a cold-start promotion builds off-queue and installs the binding", async () => {
+    ;(proxy as never)["coordinator"] = undefined
+    ;(proxy as never)["postageBatchId"] = undefined
+    ;(proxy as never)["stamper"] = undefined
+
+    const picked = (await enqueue(() =>
+      (proxy as never)["resolveUploadStamper"](B2),
+    )) as { pendingBuild?: { bindDefault: boolean } }
+    expect(picked.pendingBuild?.bindDefault).toBe(true)
+    expect(create).not.toHaveBeenCalled()
+
+    const installed = (proxy as never)["completeDeferredBuild"](
+      picked.pendingBuild,
+    ) as Promise<unknown>
+    void installed.catch(() => undefined)
+    await flush()
+    const order: string[] = []
+    await enqueue(async () => {
+      order.push("queued-work")
+    })
+    expect(order).toEqual(["queued-work"])
+
+    grantLock()
+    await installed
+    expect(bindStamp).toHaveBeenCalledTimes(1)
+    expect(bindStamp.mock.calls[0][0].batchID.toHex()).toBe(B2)
+  })
+
+  it("a storage-event rebind leaves the queue drainable and emits after install", async () => {
+    await enqueue(() => (proxy as never)["handleAccountStorageChange"]())
+    await flush()
+
+    expect(create).not.toHaveBeenCalled()
+    const emitsBeforeInstall = emit.mock.calls.length
+    const order: string[] = []
+    await enqueue(async () => {
+      order.push("queued-work")
+    })
+    expect(order).toEqual(["queued-work"])
+
+    grantLock()
+    await flush()
+    await flush()
+    expect(bindStamp).toHaveBeenCalledTimes(1)
+    // The dApp is told about the new binding only once it is actually live.
+    expect(emit.mock.calls.length).toBeGreaterThan(emitsBeforeInstall)
   })
 })
 
