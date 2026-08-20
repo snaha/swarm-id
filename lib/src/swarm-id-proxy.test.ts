@@ -809,7 +809,7 @@ describe("SwarmIdProxy upload stamp targeting (multi-stamp, doc §2)", () => {
   let proxy: SwarmIdProxy
   let bindStamp: ReturnType<typeof vi.fn>
   let refreshStampFromStorage: ReturnType<typeof vi.fn>
-  const prevStamper = { tag: "stamper-b1" }
+  const prevStamper = { tag: "stamper-b1", depth: 20 }
 
   beforeEach(() => {
     vi.restoreAllMocks()
@@ -1417,7 +1417,8 @@ describe("SwarmIdProxy promoted binding follows an account migration", () => {
     // Promoted binding: B2 is bound, but no default pointer resolves.
     ;(proxy as never)["postageBatchId"] = B2
     ;(proxy as never)["signerKey"] = "11".repeat(32)
-    ;(proxy as never)["stamper"] = { tag: B2 }
+    ;(proxy as never)["stamper"] = { tag: B2, depth: 20 }
+    ;(proxy as never)["boundStampDepth"] = 20
     ;(proxy as never)["stamperAccountFingerprint"] = fingerprint(OLD_OWNER)
     ;(proxy as never)["coordinator"] = { withWrite: vi.fn(), teardown: vi.fn() }
     ;(proxy as never)["utilizationStore"] = {}
@@ -1456,7 +1457,7 @@ describe("SwarmIdProxy promoted binding follows an account migration", () => {
       [
         B2,
         {
-          stamper: { tag: B2 },
+          stamper: { tag: B2, depth: 20 },
           signerKey: "11".repeat(32),
           workerPool: { terminate },
         },
@@ -1471,6 +1472,159 @@ describe("SwarmIdProxy promoted binding follows an account migration", () => {
     expect((proxy as never)["stampEntries"]).toEqual(new Map())
     expect(pending?.bindDefault).toBe(true)
     expect(pending?.stamp.batchID.toHex()).toBe(B2)
+  })
+})
+
+describe("SwarmIdProxy rebuilds stampers when a batch is diluted", () => {
+  // `UtilizationAwareStamper` bakes the batch depth into its bucket capacity,
+  // so a dilution (depth 20 → 22) leaves every cached instance sizing its
+  // buckets for the OLD capacity until the page reloads. Every cache hit has to
+  // compare depth, not just the signer key.
+  const diluted = (hex: string) => ({ ...stampStub(hex), depth: 22 })
+  let proxy: SwarmIdProxy
+  let create: ReturnType<
+    typeof vi.mocked<typeof UtilizationAwareStamper.create>
+  >
+
+  const account = () =>
+    Promise.resolve({
+      owner: { toHex: () => "ab".repeat(20) },
+      encryptionKey: new Uint8Array(32),
+      accountId: "acct-1",
+      partitionCount: 2,
+    })
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    proxy = makeProxy()
+    create = vi.mocked(UtilizationAwareStamper.create)
+    create.mockClear()
+    ;(proxy as never)["parentOrigin"] = PARENT_ORIGIN
+    ;(proxy as never)["utilizationStore"] = {}
+    ;(proxy as never)["lookupAccountForApp"] = account
+  })
+
+  it("a dilution of the DEFAULT batch returns a rebind descriptor on refresh", async () => {
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["stamper"] = { tag: B1, depth: 20 }
+    ;(proxy as never)["boundStampDepth"] = 20
+    ;(proxy as never)["stamperAccountFingerprint"] =
+      `${"ab".repeat(20)}-${"00".repeat(32)}`
+    ;(proxy as never)["lookupPostageStampForApp"] = () => diluted(B1)
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [diluted(B1)] },
+    })
+
+    const pending = (await (proxy as never)["refreshStampFromStorage"]()) as
+      | { bindDefault: boolean; stamp: { depth: number } }
+      | undefined
+
+    expect(pending?.bindDefault).toBe(true)
+    expect(pending?.stamp.depth).toBe(22)
+  })
+
+  it("a targeted write rebuilds a depth-stale cached stamper (old pool deferred)", async () => {
+    const terminate = vi.fn()
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn() }
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["stamper"] = { tag: B1, depth: 20 }
+    ;(proxy as never)["stampEntries"] = new Map([
+      [
+        B2,
+        {
+          stamper: { tag: B2, depth: 20 },
+          signerKey: "11".repeat(32),
+          workerPool: { terminate },
+        },
+      ],
+    ])
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [stampStub(B1), diluted(B2)] },
+    })
+
+    const picked = (await (proxy as never)["resolveUploadStamper"](B2)) as {
+      stamper?: unknown
+      pendingBuild?: { stamp: { depth: number }; bindDefault: boolean }
+    }
+
+    expect(picked.stamper).toBeUndefined()
+    expect(picked.pendingBuild?.stamp.depth).toBe(22)
+    // The stale entry is evicted so the deferred install cannot reuse it…
+    expect((proxy as never)["stampEntries"]).toEqual(new Map())
+    // …and its pool is terminated only once the batch lock frees.
+    expect(terminate).toHaveBeenCalledTimes(1)
+  })
+
+  it("a targeted write to the DEFAULT batch rebuilds the binding, not just the cache", async () => {
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn() }
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["stamper"] = { tag: B1, depth: 20 }
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [diluted(B1)] },
+    })
+
+    const picked = (await (proxy as never)["resolveUploadStamper"](B1)) as {
+      stamper?: unknown
+      pendingBuild?: { bindDefault: boolean }
+    }
+
+    // The coordinator's lease stamper IS the binding's stamper, so a diluted
+    // default must rebuild both — returning the stale instance would keep the
+    // whole write path on the old capacity.
+    expect(picked.stamper).toBeUndefined()
+    expect(picked.pendingBuild?.bindDefault).toBe(true)
+  })
+
+  it("resolveStamperForBatch rebuilds a depth-stale cached stamper", async () => {
+    ;(proxy as never)["stampEntries"] = new Map([
+      [B2, { stamper: { tag: B2, depth: 20 }, signerKey: "11".repeat(32) }],
+    ])
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [diluted(B2)] },
+    })
+
+    const stamper = (await (proxy as never)["resolveStamperForBatch"](B2)) as {
+      depth?: number
+    }
+
+    expect(stamper?.depth).toBe(22)
+    expect(create).toHaveBeenCalledTimes(1)
+  })
+
+  it("never shares an in-flight build across different depths", async () => {
+    const build = (depth: number) =>
+      (
+        proxy as never as {
+          createStamperUnderBatchLock: (
+            a: unknown,
+            s: string,
+            b: unknown,
+            d: number,
+            st: unknown,
+          ) => Promise<unknown>
+        }
+      )["createStamperUnderBatchLock"](
+        {
+          accountId: "acct-1",
+          owner: { toHex: () => "ab".repeat(20) },
+          encryptionKey: new Uint8Array(32),
+        },
+        "sig",
+        { toHex: () => B2 },
+        depth,
+        {},
+      )
+
+    const [a, b] = await Promise.all([build(20), build(22)])
+
+    expect(create).toHaveBeenCalledTimes(2)
+    expect(a).not.toBe(b)
   })
 })
 
@@ -1518,7 +1672,11 @@ describe("SwarmIdProxy coordinator targets the configured Bee node", () => {
     const proxy = makeProxy()
     const create = vi.mocked(UtilizationAwareStamper.create)
     const signerKey = "11".repeat(32)
-    const cachedStamper = { mock: "cached", batchId: { toHex: () => B1 } }
+    const cachedStamper = {
+      mock: "cached",
+      batchId: { toHex: () => B1 },
+      depth: 20,
+    }
     ;(proxy as never)["signerKey"] = signerKey
     ;(proxy as never)["postageBatchId"] = B1
     ;(proxy as never)["deviceId"] = "device-1"

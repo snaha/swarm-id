@@ -258,6 +258,14 @@ export class SwarmIdProxy {
    */
   private stamperAccountFingerprint: string | undefined
   /**
+   * Depth of the stamp the default binding was built from. `UtilizationAware
+   * Stamper` bakes depth into its bucket capacity, so a dilution must rebuild
+   * it; tracked separately from `this.stamper` because a lenient
+   * `initializeStamper` failure legitimately leaves the stamper undefined
+   * while the binding fields stand.
+   */
+  private boundStampDepth: number | undefined
+  /**
    * Per-batch stamper cache, keyed by batch id hex — the default binding's
    * stamper plus one per targeted batch (`UploadOptions.batchID`), each with
    * its signing key and (lazily) its parallel-signing worker pool. Stampers
@@ -574,6 +582,7 @@ export class SwarmIdProxy {
     const effective = stamp ?? promoted
     const nextBatchId = stamp?.batchID.toHex()
     const nextSignerKey = stamp?.signerKey.toHex()
+    const nextDepth = stamp?.depth
     const account = effective
       ? await this.lookupAccountForApp(connection)
       : undefined
@@ -584,6 +593,7 @@ export class SwarmIdProxy {
     if (
       nextBatchId === this.postageBatchId &&
       nextSignerKey === this.signerKey &&
+      nextDepth === this.boundStampDepth &&
       nextAccountFingerprint === this.stamperAccountFingerprint
     ) {
       return undefined
@@ -592,7 +602,11 @@ export class SwarmIdProxy {
     if (effective && account) {
       const accountChanged =
         nextAccountFingerprint !== this.stamperAccountFingerprint
-      if (promoted && !accountChanged) {
+      if (
+        promoted &&
+        !accountChanged &&
+        promoted.depth === this.boundStampDepth
+      ) {
         // Keep the promotion; clearing would strand uploads for no reason.
         return undefined
       }
@@ -640,7 +654,9 @@ export class SwarmIdProxy {
     // duplicated — two live stampers for one batch would diverge on buckets.
     const cached = this.stampEntries.get(targetHex)
     const stamper =
-      cached && cached.signerKey === signerKey
+      cached &&
+      cached.signerKey === signerKey &&
+      cached.stamper.depth === stamp.depth
         ? cached.stamper
         : await this.createStamperUnderBatchLock(
             accountInfo,
@@ -706,6 +722,7 @@ export class SwarmIdProxy {
     this.signerKey = undefined
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
+    this.boundStampDepth = undefined
     this.coordinator?.teardown()
     this.coordinator = undefined
   }
@@ -955,6 +972,7 @@ export class SwarmIdProxy {
     const key = [
       batchId.toHex(),
       signerKey,
+      String(depth),
       accountInfo.owner.toHex(),
       uint8ArrayToHex(accountInfo.encryptionKey),
     ].join(":")
@@ -1025,7 +1043,9 @@ export class SwarmIdProxy {
       const cached = this.stampEntries.get(this.postageBatchId)
       this.stamper =
         prebuilt ??
-        (cached && cached.signerKey === this.signerKey
+        (cached &&
+        cached.signerKey === this.signerKey &&
+        cached.stamper.depth === stampDepth
           ? cached.stamper
           : await this.createStamperUnderBatchLock(
               accountInfo,
@@ -1742,6 +1762,7 @@ export class SwarmIdProxy {
   ): Promise<void> {
     this.postageBatchId = stamp.batchID.toHex()
     this.signerKey = stamp.signerKey.toHex()
+    this.boundStampDepth = stamp.depth
     // Clear first so a swallowed `initializeStamper` failure can't leave the
     // previous batch's stamper paired with the new batch id.
     this.stamper = undefined
@@ -1809,8 +1830,18 @@ export class SwarmIdProxy {
       return pending ? { pendingBuild: pending } : { stamper: this.stamper }
     }
     const targetHex = batchID.toLowerCase()
+    // A dilution of the BOUND batch falls through to the rebuild below with
+    // this set: the coordinator's lease stamper IS the binding's instance, so
+    // both must be rebuilt or the whole write path keeps sizing buckets for the
+    // old capacity. (A binding whose stamper merely failed to build is NOT this
+    // case — that one gets a plain targeted build, leaving the binding alone.)
+    let dilutedDefault = false
     if (targetHex === this.postageBatchId && this.stamper) {
-      return { stamper: this.stamper }
+      const bound = this.findOwnedStamp(targetHex)
+      if (!bound || bound.depth === this.stamper.depth) {
+        return { stamper: this.stamper }
+      }
+      dilutedDefault = true
     }
     // NB: when the target IS the bound default batch but its stamper failed to
     // build (lenient `initializeStamper`), fall through — the targeted build
@@ -1828,8 +1859,16 @@ export class SwarmIdProxy {
     }
     const signerKey = stamp.signerKey.toHex()
     const cached = this.stampEntries.get(targetHex)
-    if (this.coordinator && cached && cached.signerKey === signerKey) {
-      return { stamper: cached.stamper }
+    if (cached && cached.signerKey === signerKey) {
+      if (this.coordinator && cached.stamper.depth === stamp.depth) {
+        return { stamper: cached.stamper }
+      }
+      if (cached.stamper.depth !== stamp.depth) {
+        // Diluted: evict now so the deferred install cannot reuse it, and let
+        // the pool die once any in-flight same-batch write frees the lock.
+        this.stampEntries.delete(targetHex)
+        this.deferPoolTermination(targetHex, cached.workerPool)
+      }
     }
     const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo) {
@@ -1846,7 +1885,9 @@ export class SwarmIdProxy {
         signerKey,
         accountInfo,
         store: this.utilizationStore,
-        bindDefault: !this.coordinator,
+        // No coordinator: a cold start with no default at all, so this stamp is
+        // promoted to the binding.
+        bindDefault: !this.coordinator || dilutedDefault,
       },
     }
   }
@@ -1865,7 +1906,13 @@ export class SwarmIdProxy {
     if (!stamp) return undefined
     const signerKey = stamp.signerKey.toHex()
     const cached = this.stampEntries.get(batchIdHex)
-    if (cached && cached.signerKey === signerKey) return cached.stamper
+    if (
+      cached &&
+      cached.signerKey === signerKey &&
+      cached.stamper.depth === stamp.depth
+    ) {
+      return cached.stamper
+    }
     const accountInfo = await this.lookupAccountForApp()
     if (!accountInfo || !this.utilizationStore) return undefined
     try {

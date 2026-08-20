@@ -2414,6 +2414,25 @@ describe("BatchWriteCoordinator — per-write batch targeting (account-scoped le
     expect(calls).toContain("rebuilt:bind")
   })
 
+  it("joins a REBUILT SECONDARY stamper instead of stamping it unbound", async () => {
+    // The proxy rebuilds a batch's stamper when its depth changes on-chain
+    // (a dilution re-sizes the buckets). The joined-set check must compare the
+    // INSTANCE, not just the batch id — otherwise the write gets a stamper that
+    // was never bound to the partition and falls back to partition 0's lane.
+    const { lease, coordinator, calls } = await setupJoined()
+    const rebuilt = makeStamper(calls, "b2-rebuilt", BATCH_ID_2)
+
+    await coordinator.withWrite(asStamper(rebuilt), async () => "ok", {
+      wait: "block",
+    })
+
+    expect(lease.joinBatch).toHaveBeenCalledTimes(2)
+    expect(lease.joinBatch).toHaveBeenLastCalledWith(asStamper(rebuilt))
+    expect(rebuilt.bindPartition).toHaveBeenCalledWith(
+      expect.objectContaining({ partition: 1, partitionCount: 4 }),
+    )
+  })
+
   it("takes the write lock under the ACCOUNT key, nesting the legacy per-batch keys", async () => {
     await setupJoined()
     expect(writeLockController.lastKey).toBe("acct-1")
