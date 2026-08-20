@@ -54,16 +54,37 @@
     /** Resolves the operation's funding request once the payment lands. */
     onPaid: () => void
     onCancel: () => void
+    /**
+     * Offer the proven multichain-widget flow as the "Pay with crypto" method,
+     * beside the in-app one. Only purchases can take it — the widget settles a
+     * whole batch, not an arbitrary funding need — so extend and resize leave
+     * this unset and the picker offers the in-app flow alone. Choosing it hands
+     * the flow back to the caller, which abandons this funding request and
+     * drives the widget instead.
+     */
+    onPayWithWidget?: () => void
   }
 
-  let { need, rail, fundingQuote, onPaid, onCancel }: Props = $props()
+  let { need, rail, fundingQuote, onPaid, onCancel, onPayWithWidget }: Props = $props()
 
   type Screen = 'method' | 'connecting' | 'configure' | 'switching' | 'approving' | 'relaying'
 
   const GNOSIS_DECIMALS = 18
   const BZZ_DECIMALS = 16
 
+  type Method = 'widget' | 'in-app'
+
+  const IN_APP_METHOD_OPTION = { value: 'in-app', label: 'Pay with crypto in app (experimental)' }
+  const methodOptions = $derived(
+    onPayWithWidget
+      ? [{ value: 'widget', label: 'Pay with crypto' }, IN_APP_METHOD_OPTION]
+      : [IN_APP_METHOD_OPTION],
+  )
+
   let screen = $state<Screen>('method')
+  // The proven path leads wherever it is available; the in-app flow is the
+  // experimental alternative, not the default.
+  let method = $state<Method>(untrack(() => (onPayWithWidget ? 'widget' : 'in-app')))
   let errorMessage = $state('')
   let provider = $state<EthereumProvider | undefined>(undefined)
   let walletAddress = $state('')
@@ -284,15 +305,25 @@
     {#if screen === 'method'}
       <div class="flex w-full flex-col gap-2">
         <span class="text-sm font-medium">Method</span>
-        <Select options={[{ value: 'crypto', label: 'Pay with crypto' }]} value="crypto" />
+        <Select options={methodOptions} bind:value={method} />
       </div>
       <p class="bg-muted rounded-md px-3 py-2 text-sm">
-        {errorMessage || 'Connect wallet to proceed'}
+        {errorMessage ||
+          (method === 'widget'
+            ? 'The payment continues in a popup window'
+            : 'Connect wallet to proceed')}
       </p>
-      <Button class="w-full" onclick={connect}>
-        Connect wallet
-        <ArrowRight />
-      </Button>
+      {#if method === 'widget'}
+        <Button class="w-full" onclick={() => onPayWithWidget?.()}>
+          Continue
+          <ArrowRight />
+        </Button>
+      {:else}
+        <Button class="w-full" onclick={connect}>
+          Connect wallet
+          <ArrowRight />
+        </Button>
+      {/if}
     {:else}
       <div
         class="bg-muted flex w-full items-center justify-between gap-2 rounded-md px-3 py-2 text-sm"

@@ -8,6 +8,7 @@
 
   import { PrivateKey, Utils } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
+  import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
 
   import { createAttemptTracker } from '$lib/attempt'
@@ -34,8 +35,14 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
+  import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
   import { operationJournal } from '$lib/payment/operation-journal.svelte'
-  import { derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
+  import {
+    derivePostageSigner,
+    stampAmountForSeconds,
+    stampFromBatch,
+    stampTtlSeconds,
+  } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   const STORAGE_OPTIONS = [
@@ -52,7 +59,7 @@
   let { account, onClose, onAdded }: Props = $props()
 
   type Storage = 'new' | 'existing'
-  type Phase = 'form' | 'pending' | 'success' | 'error'
+  type Phase = 'form' | 'pending' | 'success' | 'error' | 'unconfirmed'
 
   let storage = $state<Storage>('new')
   let name = $state('')
@@ -75,6 +82,7 @@
   const funding = createFundingRequester(() => account)
   // In-flight widget purchase; cancelled on close so the popup can't settle a
   // payment we would silently drop.
+  let purchase: StampPurchaseHandle | undefined
 
   const sizeOptions = [
     { value: '', label: 'Please select' },
@@ -144,13 +152,18 @@
   function close() {
     attempts.supersede()
     funding.cancel()
+    purchase?.cancel()
     onClose()
   }
 
   // The dialog can unmount without close() (tab switch, navigation) — abandon
   // any pending payment request so nothing is left waiting on a dialog that no
-  // longer exists.
-  onDestroy(() => funding.cancel())
+  // longer exists, and close the widget popup so it can't settle a payment we
+  // would silently drop.
+  onDestroy(() => {
+    funding.cancel()
+    purchase?.cancel()
+  })
 
   function proceed() {
     errorMessage = ''
@@ -208,6 +221,80 @@
       }
       errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not buy the drive.'
+      phase = 'error'
+    }
+  }
+
+  /**
+   * The design's proven "Pay with crypto" method: hand the whole purchase to
+   * the fund.bzz.limo widget popup instead of the in-app engine. Reached from
+   * the payment screen's method picker, i.e. only once the in-app run found a
+   * shortfall — a prefunded signer buys in-app without ever paying.
+   */
+  function payWithWidget() {
+    void purchaseViaWidget()
+  }
+
+  async function purchaseViaWidget() {
+    const attempt = attempts.begin()
+    // Abandon the in-app run suspended on this funding request. Its rejection
+    // lands in a catch gated on the attempt this begin() just superseded, so
+    // the engine's epilogue cannot fight the widget flow for the dialog.
+    funding.cancel()
+    phase = 'pending'
+    pendingLabel = 'Complete the purchase in the popup window.'
+    history = []
+    errorMessage = ''
+    errorDetail = ''
+    // Left blank, the drive stays unnamed and the UI falls back to its stable
+    // batch-ID-derived label.
+    const driveName = name.trim() || undefined
+    try {
+      // The user may have cancelled during the derivation — bail before the
+      // popup opens, or a payment window would appear after they backed out.
+      const { signerKey, destination } = await attempt.guard(
+        derivePostageSigner(account.derivationKey),
+      )
+      purchase = openStampPurchaseWidget({
+        destination,
+        onSuccess: (batch) => {
+          if (!attempt.current) {
+            return
+          }
+          // The size/lifespan actually bought are chosen INSIDE the widget —
+          // the form's selection is only a pre-payment estimate. Derive the
+          // lifespan from what settled (funded blocks × block time); when the
+          // chain price never loaded it stays unknown rather than wrong.
+          const ttl =
+            currentPrice === undefined
+              ? undefined
+              : stampTtlSeconds(BigInt(batch.amount), currentPrice)
+          account.addStamp(stampFromBatch(batch, signerKey, driveName, ttl))
+          succeed()
+        },
+        onError: (error) => {
+          if (!attempt.current) {
+            return
+          }
+          errorMessage = error.message
+          phase = 'error'
+        },
+        onCancel: () => {
+          if (attempt.current) {
+            phase = 'form'
+          }
+        },
+        onUnconfirmedClose: () => {
+          if (attempt.current) {
+            phase = 'unconfirmed'
+          }
+        },
+      })
+    } catch (caught) {
+      if (!attempt.current) {
+        return
+      }
+      errorMessage = caught instanceof Error ? caught.message : 'Could not start the purchase.'
       phase = 'error'
     }
   }
@@ -273,6 +360,7 @@
     fundingQuote={funding.pending.quote}
     onPaid={funding.resolve}
     onCancel={funding.cancel}
+    onPayWithWidget={payWithWidget}
   />
 {:else if phase === 'pending' || phase === 'error'}
   <DriveDialogStatus
@@ -288,6 +376,17 @@
     onRetry={() => ((phase = 'form'), (errorMessage = ''))}
     onClose={close}
   />
+{:else if phase === 'unconfirmed'}
+  <Dialog onclose={close} title="Purchase not confirmed">
+    <div class="flex items-start gap-2">
+      <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
+      <p class="text-sm">
+        The payment window closed before we could confirm the purchase. If you completed payment,
+        your drive may still appear shortly — don't pay again without checking.
+      </p>
+    </div>
+    <Button variant="outline" class="w-full" onclick={close}>Close</Button>
+  </Dialog>
 {:else}
   <Dialog onclose={close} title="Add drive">
     <div class="flex w-full flex-col gap-2">

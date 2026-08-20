@@ -44,6 +44,12 @@ Two properties hold throughout:
 The multichain widget's UI is neither forked nor embedded: it is React, and its PostageStamp ABI
 contains only `createBatch`, so it cannot top up or dilute at all.
 
+The widget still exists as its own **method**, not as a rail: on a purchase's payment screen the
+method picker offers **Pay with crypto** — the proven fund.bzz.limo popup flow
+(`multichain-widget.ts`), which settles the whole batch itself — beside **Pay with crypto in app
+(experimental)**, the flow this document describes. Extend and resize cannot take the widget (it
+only creates batches), so there the picker offers the in-app method alone.
+
 Instead the payment leg is a **`PaymentRail`** (`ui/src/lib/payment/payment-rail.ts`): `chains`,
 `tokens(chainId)`, `quote()`, `execute()`, plus `switchWalletChain`. A rail's quote reduces to an
 opaque `handle` that only the rail which produced it consumes, which is what lets more than one

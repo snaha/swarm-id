@@ -1,7 +1,8 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { PrivateKey, Utils } from '@ethersphere/bee-js'
+import { BatchId, PrivateKey, Utils } from '@ethersphere/bee-js'
 import {
+  BUCKET_DEPTH,
   GNOSIS_BLOCK_TIME,
   type PostageStamp,
   calculateStampAmountForDays,
@@ -9,6 +10,7 @@ import {
 } from '@snaha/swarm-id'
 
 import { SECONDS_PER_DAY } from '$lib/drives'
+import type { BatchEvent } from '$lib/payment/multichain-widget'
 
 /** Cost estimates shown in the drive dialogs round to this many significant digits. */
 const COST_SIGNIFICANT_DIGITS = 4
@@ -78,6 +80,36 @@ export function stampTtlSeconds(amount: bigint, pricePerBlock: bigint): number |
     return undefined
   }
   return Number(amount / pricePerBlock) * GNOSIS_BLOCK_TIME
+}
+
+/** Parse the widget's block number (hex `0x…` or decimal) into an integer; `0`
+ * for garbage or non-integer input (downstream stores it as a block height). */
+export function parseBlockNumber(value: string): number {
+  const parsed = value.startsWith('0x') ? Number.parseInt(value.slice(2), 16) : Number(value)
+  return Number.isInteger(parsed) ? parsed : 0
+}
+
+/** Build a stamp record from a completed widget purchase. */
+export function stampFromBatch(
+  batch: BatchEvent,
+  signerKey: PrivateKey,
+  name: string | undefined,
+  batchTTL?: number,
+): NewStamp {
+  return {
+    batchID: new BatchId(batch.batchId),
+    name,
+    signerKey,
+    depth: batch.depth,
+    amount: BigInt(batch.amount),
+    bucketDepth: BUCKET_DEPTH,
+    blockNumber: parseBlockNumber(batch.blockNumber),
+    immutableFlag: false,
+    utilization: 0,
+    usable: true,
+    exists: true,
+    batchTTL,
+  }
 }
 
 /**
