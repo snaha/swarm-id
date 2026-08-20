@@ -256,15 +256,34 @@ export async function fetchOnChainBatchStateResult(
   rpcUrl: string,
   batchId: string,
   contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
+  getGlobals?: () => Promise<OnChainGlobals | undefined>,
 ): Promise<OnChainBatchResult> {
   try {
     const id = normalizeBatchId(batchId)
+    const batchCall = {
+      to: contractAddress,
+      data: `0x${SELECTOR_BATCHES}${id}`,
+    }
+
+    // With a supplied memo the per-batch request carries only `batches(id)`;
+    // the two chain globals are read once for the whole caller. A memo that
+    // failed collapses to `error` exactly like an inline failure would.
+    if (getGlobals) {
+      const [globals, [batchesResult]] = await Promise.all([
+        getGlobals(),
+        ethCallBatch(rpcUrl, [batchCall]),
+      ])
+      if (!globals) return { status: "error" }
+      const batch = decodeBatches(batchesResult)
+      if (batch.owner === ZERO_ADDRESS) {
+        return { status: "not-found" }
+      }
+      return { status: "found", state: { batch, ...globals } }
+    }
+
     const [batchesResult, outPaymentResult, lastPriceResult] =
       await ethCallBatch(rpcUrl, [
-        {
-          to: contractAddress,
-          data: `0x${SELECTOR_BATCHES}${id}`,
-        },
+        batchCall,
         {
           to: contractAddress,
           data: `0x${SELECTOR_CURRENT_TOTAL_OUT_PAYMENT}`,
@@ -295,15 +314,46 @@ export async function fetchOnChainBatchStateResult(
   }
 }
 
+/**
+ * The batch-INDEPENDENT half of an on-chain batch read. Both values are chain
+ * globals, so a caller reading N batches at once (the stamp list) can fetch
+ * them once instead of N times.
+ */
+export interface OnChainGlobals {
+  currentTotalOutPayment: bigint
+  lastPrice: bigint
+}
+
+/** Read the chain globals in one request. `undefined` on any RPC failure. */
+export async function fetchOnChainGlobals(
+  rpcUrl: string,
+  contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
+): Promise<OnChainGlobals | undefined> {
+  try {
+    const [outPaymentResult, lastPriceResult] = await ethCallBatch(rpcUrl, [
+      { to: contractAddress, data: `0x${SELECTOR_CURRENT_TOTAL_OUT_PAYMENT}` },
+      { to: contractAddress, data: `0x${SELECTOR_LAST_PRICE}` },
+    ])
+    return {
+      currentTotalOutPayment: decodeUint(outPaymentResult),
+      lastPrice: decodeUint(lastPriceResult),
+    }
+  } catch {
+    return undefined
+  }
+}
+
 export async function fetchOnChainBatchState(
   rpcUrl: string,
   batchId: string,
   contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
+  getGlobals?: () => Promise<OnChainGlobals | undefined>,
 ): Promise<OnChainBatchState | undefined> {
   const result = await fetchOnChainBatchStateResult(
     rpcUrl,
     batchId,
     contractAddress,
+    getGlobals,
   )
   return result.status === "found" ? result.state : undefined
 }
@@ -347,8 +397,14 @@ export async function fetchBatchTTLFromContract(
   rpcUrl: string,
   batchId: string,
   contractAddress: string = POSTAGE_STAMP_CONTRACT_ADDRESS,
+  getGlobals?: () => Promise<OnChainGlobals | undefined>,
 ): Promise<number | undefined> {
-  const state = await fetchOnChainBatchState(rpcUrl, batchId, contractAddress)
+  const state = await fetchOnChainBatchState(
+    rpcUrl,
+    batchId,
+    contractAddress,
+    getGlobals,
+  )
   if (state === undefined) {
     return undefined
   }
@@ -374,6 +430,10 @@ export async function fetchBatchTTLFromContract(
  *          honoured when `gnosisRpcUrl` targets a local node; against any remote
  *          RPC the Gnosis mainnet deployment is used regardless (see
  *          {@link resolvePostageStampContractAddress}).
+ * @param getGlobals - For a caller resolving MANY batches at once: a memo of
+ *          the batch-independent chain globals ({@link fetchOnChainGlobals}), so
+ *          the per-batch request carries only `batches(id)`. A memo that
+ *          resolves `undefined` is treated as a failed contract read.
  * @param prefetchedBeeTTL - For a caller that already asks the Bee node for this
  *          batch (e.g. reads `/stamps` for `usable`/`exists` anyway): supply its
  *          `batchTTL` and the internal `fetchBatchTTL` call is skipped, so the
@@ -389,6 +449,7 @@ export async function fetchAuthoritativeBatchTTL(
   batchId: string,
   localContractAddress?: string,
   prefetchedBeeTTL?: number | Promise<number | undefined>,
+  getGlobals?: () => Promise<OnChainGlobals | undefined>,
 ): Promise<number | undefined> {
   const contractAddress = resolvePostageStampContractAddress(
     gnosisRpcUrl,
@@ -398,6 +459,7 @@ export async function fetchAuthoritativeBatchTTL(
     gnosisRpcUrl,
     batchId,
     contractAddress,
+    getGlobals,
   )
   if (fromContract !== undefined) return fromContract
   if (prefetchedBeeTTL !== undefined) return await prefetchedBeeTTL

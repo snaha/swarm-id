@@ -131,7 +131,10 @@ import {
 } from "./utils/ttl"
 import {
   fetchAuthoritativeBatchTTL,
+  fetchOnChainGlobals,
+  resolvePostageStampContractAddress,
   POSTAGE_STAMP_CONTRACT_ADDRESS,
+  type OnChainGlobals,
 } from "./utils/postage-contract"
 import { withTimeout } from "./utils/promise"
 import { tryCreateTag } from "./utils/tag"
@@ -4784,10 +4787,19 @@ export class SwarmIdProxy {
     // request, shared across all stamps' fallback paths.
     let price: Promise<number> | undefined
     const getPrice = () => (price ??= fetchSwarmPrice())
+    // Same for the chain globals every contract read needs: one `eth_call`
+    // pair for the whole request instead of a pair per stamp.
+    const contractAddress = resolvePostageStampContractAddress(
+      this.gnosisRpcUrl,
+      this.postageStampContractAddress,
+    )
+    let globals: Promise<OnChainGlobals | undefined> | undefined
+    const getGlobals = () =>
+      (globals ??= fetchOnChainGlobals(this.gnosisRpcUrl, contractAddress))
 
     const postageBatches = await Promise.all(
       stamps.map(async (stamp) => ({
-        ...(await this.stampToPostageBatch(stamp, getPrice)),
+        ...(await this.stampToPostageBatch(stamp, getPrice, getGlobals)),
         isDefault: stamp === defaultStamp,
       })),
     )
@@ -4810,6 +4822,7 @@ export class SwarmIdProxy {
   private async stampToPostageBatch(
     stamp: PostageStamp,
     getPrice: () => Promise<number>,
+    getGlobals?: () => Promise<OnChainGlobals | undefined>,
   ): Promise<Omit<PostageBatch, "isDefault">> {
     const batchIdHex = stamp.batchID.toHex()
 
@@ -4838,6 +4851,7 @@ export class SwarmIdProxy {
         batchIdHex,
         this.postageStampContractAddress,
         detailsPromise.then((d) => d?.batchTTL),
+        getGlobals,
       )
       const details = await detailsPromise
       if (batchTTL === undefined) {

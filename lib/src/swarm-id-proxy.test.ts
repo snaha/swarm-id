@@ -753,6 +753,47 @@ describe("SwarmIdProxy stamp enrichment (getPostageBatches efficiency)", () => {
     }
   })
 
+  it("reads the batch-independent chain globals once for the whole request", async () => {
+    // `currentTotalOutPayment()` and `lastPrice()` are account- and
+    // batch-independent, but each stamp's contract read used to fetch them
+    // again: 3N eth_calls where N+2 suffice.
+    const selectors: string[] = []
+    vi.stubGlobal(
+      "fetch",
+      vi.fn((url: unknown, init?: { body?: string }) => {
+        if (String(url).includes("swarmscan")) {
+          return Promise.resolve({
+            ok: true,
+            json: () => Promise.resolve({ pricePerGBPerMonth: 1 }),
+          })
+        }
+        if (init?.body?.includes("eth_call")) {
+          const calls = JSON.parse(init.body) as {
+            params: [{ data: string }]
+          }[]
+          for (const call of calls) {
+            selectors.push(call.params[0].data.slice(2, 10))
+          }
+          // Undecodable payload → the read fails; the point here is the SHAPE
+          // of the requests, not their answers.
+          return Promise.resolve({
+            ok: true,
+            json: () =>
+              Promise.resolve(calls.map((_c, id) => ({ id, result: "0x" }))),
+          })
+        }
+        return Promise.resolve({ ok: false, status: 500 })
+      }),
+    )
+
+    await getBatches()
+
+    const globals = selectors.filter((sel) => sel !== "c81e25ab")
+    const perBatch = selectors.filter((sel) => sel === "c81e25ab")
+    expect(perBatch).toHaveLength(2) // one batches(id) per stamp
+    expect(globals).toHaveLength(2) // currentTotalOutPayment + lastPrice, once
+  })
+
   it("passes the stamp's drive name through as the batch label", async () => {
     ;(proxy as never)["findConnectionForParent"] = () => ({
       app: {},
