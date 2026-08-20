@@ -2015,6 +2015,29 @@ describe("BatchWriteCoordinator — lifecycle transitions keep the restore ledge
     expect(writes.at(-1)?.joinedBatchIds).toContain(BATCH_ID_2)
   })
 
+  it("a read-only acquire keeps the LEASE batch in the ledger", async () => {
+    // `serialize()` reports only the batches this session seeded state for,
+    // and a read-only acquire seeds none — so the lease batch has to be merged
+    // in here exactly as `persistReducedLeaseCache` does. Without it the
+    // persisted ledger loses BATCH_ID, and after a later default-stamp change
+    // nothing re-joins it: its pointer ages out of the takeover lookup span
+    // and a peer resumes it from ZERO.
+    const { writes, internals } = setup({
+      readLeaseCache: () => ({
+        deviceId: SELF,
+        batchId: BATCH_ID,
+        joinedBatchIds: [BATCH_ID, BATCH_ID_2],
+      }),
+    })
+    // Read-only: every partition is held by a live peer, so nothing is claimed.
+    leaseController.lease = makeLease()
+
+    return internals.acquire().then(() => {
+      expect(writes.at(-1)?.joinedBatchIds).toContain(BATCH_ID)
+      expect(writes.at(-1)?.joinedBatchIds).toContain(BATCH_ID_2)
+    })
+  })
+
   it("the next cold acquire network-restores from the reduced snapshot", async () => {
     const first = setup()
     await first.coordinator.withWrite(

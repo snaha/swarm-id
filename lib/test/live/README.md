@@ -27,8 +27,9 @@ default mocked unit suite (`pnpm test`) and the local-cluster `pnpm test:integra
 | `cross-batch-adopt.test.ts`               | after a default switch the adopt network-seeds the new lease batch, never zero      |
 | `default-batch-switch.test.ts`            | switch A→B, reload, hold past the pointer span; a takeover resumes A at its acked   |
 | `aborted-join-synced-reference.test.ts`   | a join aborted before the bind leaves no synced reference (no later zero-seed)      |
+| `read-only-acquire-ledger.test.ts`        | a contended (read-only) acquire keeps the LEASE batch in the ledger; L survives L→X |
 
-The multi-batch scenarios (the last four, plus the idle-yield one) need a
+The multi-batch scenarios (the last five, plus the idle-yield one) need a
 **second** funded batch in `BATCH_ID_2`; they skip without it.
 
 The deterministic, always-on guards for the same logic are the mocked tests in

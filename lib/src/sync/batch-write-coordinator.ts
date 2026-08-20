@@ -652,22 +652,26 @@ export class BatchWriteCoordinator {
   }
 
   /**
-   * Persist the lease snapshot, merging batches still awaiting restore into
-   * `joinedBatchIds`: `serialize()` only knows successfully seeded batches, so
-   * without the merge any persist that lands before the restore finishes — or
-   * after one transient restore failure — would drop those batches from every
-   * future session's restore list.
+   * Persist the lease snapshot, merging the lease batch and the batches still
+   * awaiting restore into `joinedBatchIds`: `serialize()` only knows batches
+   * this session actually SEEDED state for, so without the merge a persist
+   * that lands before the restore finishes — or after one transient restore
+   * failure — drops those batches from every future session's restore list.
+   *
+   * The lease batch is merged for the same reason `persistReducedLeaseCache`
+   * adds it: a session that seeded nothing at all (a read-only acquire —
+   * every partition held) would otherwise persist a ledger WITHOUT it, and a
+   * later default-stamp change would leave the old default unrestorable.
    */
   private persistLeaseSnapshot(lease: PartitionLease): void {
     const snap = lease.serialize()
-    if (this.pendingJoinedRestores.size > 0) {
-      snap.joinedBatchIds = [
-        ...new Set([
-          ...(snap.joinedBatchIds ?? []),
-          ...this.pendingJoinedRestores.keys(),
-        ]),
-      ]
-    }
+    snap.joinedBatchIds = [
+      ...new Set([
+        ...(snap.joinedBatchIds ?? []),
+        ...this.pendingJoinedRestores.keys(),
+        this.deps.leaseStamper.batchId.toHex(),
+      ]),
+    ]
     this.deps.writeLeaseCache?.(snap)
   }
 
