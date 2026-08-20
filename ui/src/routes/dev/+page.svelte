@@ -45,7 +45,7 @@
   } from '$lib/dev/chain-funding'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
-  import { chainIdentity, probeChainId } from '$lib/payment/chain'
+  import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
@@ -155,12 +155,23 @@
   let networkDialogOpen = $state(false)
 
   /**
-   * Bumped to re-ask which chain is there. A failed probe is never cached, so a
-   * retry really re-probes — but only the endpoint changing re-runs the await,
-   * so a page opened before the local chain was up would otherwise read "No
-   * chain reachable" until it is reloaded.
+   * Bumped to re-ask which chain is there: only the endpoint changing re-runs
+   * the await, so a page opened before the local chain was up would otherwise
+   * read "No chain reachable" until it is reloaded.
    */
   let chainProbeAttempt = $state(0)
+
+  /**
+   * Really re-ask. Bumping the counter alone only re-runs the await, which for
+   * an answer already cached hands back the same one — so a localhost port
+   * restarted as a different chain would keep reporting the old one. Dropping
+   * the cached answer first is what makes Retry mean "look again", which is
+   * why every branch of the banner offers it and not just the failed one.
+   */
+  function retryChainProbe() {
+    evictChainCaches(networkSettingsStore.gnosisRpcUrl)
+    chainProbeAttempt++
+  }
 
   // Both presets apply straight away; anything else goes through the product's
   // own Network settings dialog rather than a second copy of its fields.
@@ -900,12 +911,14 @@ Check console logs for details:
           'GNOSIS MAINNET — these tools spend real funds. ',
           networkSettingsStore.gnosisRpcUrl,
           true,
+          retryChainProbe,
         )}
       {:else if identity.kind === 'dev'}
         {@render chainBanner(
           'Local dev chain, nothing here is real. ',
           networkSettingsStore.gnosisRpcUrl,
           false,
+          retryChainProbe,
         )}
       {:else}
         <!--
@@ -917,6 +930,7 @@ Check console logs for details:
           `Chain ${identity.chainId} is not Gnosis — these tools will not run against `,
           networkSettingsStore.gnosisRpcUrl,
           true,
+          retryChainProbe,
         )}
       {/if}
     {:catch}
@@ -924,7 +938,7 @@ Check console logs for details:
         'No chain reachable at ',
         networkSettingsStore.gnosisRpcUrl,
         true,
-        () => chainProbeAttempt++,
+        retryChainProbe,
       )}
     {/await}
   {/key}

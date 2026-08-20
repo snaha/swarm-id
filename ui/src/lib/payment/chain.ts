@@ -209,6 +209,21 @@ export function postageChain(
   })
 }
 
+/**
+ * Forget what `rpcUrl` answered, so the next ask probes again.
+ *
+ * A *successful* answer is otherwise kept for the life of the page, which is
+ * right for the assumption behind the cache — a url serves one chain — and
+ * wrong for the one place that breaks it: a developer restarting localhost as
+ * a different chain, so the same port that was the dev snapshot is now a
+ * mainnet fork. Without this, the page keeps reporting the chain that used to
+ * be there until it is reloaded, under a banner saying nothing is real.
+ */
+export function evictChainCaches(rpcUrl: string): void {
+  identities.delete(rpcUrl)
+  clients.delete(rpcUrl)
+}
+
 export interface OwnerFunds {
   xdai: bigint
   bzz: bigint
