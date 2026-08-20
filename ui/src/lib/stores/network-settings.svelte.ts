@@ -9,10 +9,16 @@ import {
 
 import { browser } from '$app/environment'
 
+/**
+ * Read through the getters, written only through `updateSettings` (pin these
+ * exact endpoints) or `reset` (go back to following the defaults). Readonly on
+ * purpose: a per-field setter existed for one input binding that no longer
+ * exists, and a store with two write paths invites saving half a pair.
+ */
 export interface NetworkSettingsStore {
-  settings: NetworkSettings
-  beeNodeUrl: string
-  gnosisRpcUrl: string
+  readonly settings: NetworkSettings
+  readonly beeNodeUrl: string
+  readonly gnosisRpcUrl: string
   updateSettings(newSettings: NetworkSettings): void
   reset(): void
 }
@@ -35,6 +41,12 @@ function withNetworkSettingsStore(): NetworkSettingsStore {
     storageManager?.save(newSettings)
   }
 
+  /**
+   * Back to following the defaults — storage cleared, not overwritten with
+   * today's values. Saving the current defaults would pin them, so a later
+   * change to `DEFAULT_BEE_NODE_URL` would never reach anyone who had once
+   * pressed this.
+   */
   function reset() {
     settings = defaultSettings
     storageManager?.clear()
@@ -46,11 +58,6 @@ function withNetworkSettingsStore(): NetworkSettingsStore {
     },
     get beeNodeUrl() {
       return settings.beeNodeUrl
-    },
-    // Settable so the /dev page can bind its URL input straight to the shared
-    // setting; persists like updateSettings.
-    set beeNodeUrl(url: string) {
-      updateSettings({ ...settings, beeNodeUrl: url })
     },
     get gnosisRpcUrl() {
       return settings.gnosisRpcUrl
