@@ -14,11 +14,7 @@ import { encodeAbiParameters, keccak256 } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { runExtend, runPurchase } from '$lib/payment/drive-operation'
-import {
-  type OperationJournal,
-  type PendingOperation,
-  nullJournal,
-} from '$lib/payment/operation-journal.svelte'
+import type { OperationJournal, PendingOperation } from '$lib/payment/operation-journal.svelte'
 import { type StampUpdate, derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
 import type { Account } from '$lib/types'
 
@@ -263,7 +259,6 @@ describe('runExtend', () => {
       drive: extended,
       addedSeconds: ADDED_SECONDS,
       requestFunding: () => Promise.reject(new Error('funding must not be needed here')),
-      journal: nullJournal(),
     })
 
     const topUpAmount = stampAmountForSeconds(harness.constraints.lastPrice, ADDED_SECONDS)
@@ -283,7 +278,6 @@ describe('runExtend', () => {
       drive: drive(),
       addedSeconds: ADDED_SECONDS,
       requestFunding: () => Promise.reject(new Error('funding must not be needed here')),
-      journal: nullJournal(),
     })
     expect(patches).toEqual([
       { depth: harness.batch.depth, amount: harness.remaining, batchTTL: expect.any(Number) },

@@ -30,7 +30,6 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { operationJournal } from '$lib/payment/operation-journal.svelte'
   import type { Account } from '$lib/types'
 
   interface Props {
@@ -155,7 +154,6 @@
       // only the UI epilogue is skipped when superseded. Resume is decided
       // from chain state inside runResize, not from component-local memory.
       await runResize({
-        journal: operationJournal,
         account,
         drive,
         newDepth: Number(newDepth),

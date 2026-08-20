@@ -32,7 +32,6 @@
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
-  import { operationJournal } from '$lib/payment/operation-journal.svelte'
   import { stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -115,7 +114,6 @@
       // so the record update must land even if the dialog was closed — only
       // the UI epilogue below is skipped for a superseded attempt.
       await runExtend({
-        journal: operationJournal,
         account,
         drive,
         addedSeconds,

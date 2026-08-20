@@ -70,16 +70,17 @@ export type OperationStep =
   | 'resizing'
   | 'recording'
 
+/**
+ * What extend and resize both need. No journal: these two operate on a batch
+ * the account already has, so an interrupted attempt is found again by reading
+ * that batch back — chain truth answers the whole resume question, and there is
+ * nothing to write down (unlike a purchase, whose id would otherwise exist
+ * nowhere).
+ */
 export interface RunOptions {
   account: Account
   drive: PostageStamp
   requestFunding: RequestFunding
-  /**
-   * Where this device records what it is part-way through paying for, so a
-   * failure between two spends can be resumed rather than repeated. Pass
-   * `nullJournal()` when there is nothing to resume into.
-   */
-  journal: OperationJournal
   onStep?: (step: OperationStep) => void
 }
 
@@ -116,7 +117,11 @@ export interface PurchaseOptions {
   /** What to call the drive. */
   name: string
   requestFunding: RequestFunding
-  /** See {@link RunOptions.journal}. */
+  /**
+   * Where this device records the batch it is part-way through buying, so a
+   * purchase interrupted between paying and recording can be finished rather
+   * than lost. Pass `nullJournal()` when there is nothing to resume into.
+   */
   journal: OperationJournal
   onStep?: (step: OperationStep) => void
 }
