@@ -464,6 +464,10 @@ export class BatchWriteCoordinator {
     })
     stamper.setLeaseValidUntil(lease.leasedUntil)
     this.joinedSecondaries.set(key, stamper)
+    // The bind committed, so the seed's synced reference may now be persisted
+    // (see `PartitionLease.commitBatchSeed`). After the map insert: the guard
+    // above and that insert must stay await-free.
+    await lease.commitBatchSeed(stamper)
     // Persist the join immediately rather than waiting for the next refresh
     // tick: a reload inside that window would lose this batch from the cached
     // snapshot, and its state pointer would stop being heartbeated.
@@ -556,6 +560,8 @@ export class BatchWriteCoordinator {
             })
             stamper.setLeaseValidUntil(lease.leasedUntil)
             this.joinedSecondaries.set(key, stamper)
+            // Bind committed → the seed's synced reference may be persisted.
+            await lease.commitBatchSeed(stamper)
             this.pendingJoinedRestores.delete(key)
             restored++
           }, [key])
@@ -1034,6 +1040,9 @@ export class BatchWriteCoordinator {
         })
         // Fence in-flight stamps to the lease's local expiry (bind clears it).
         this.syncStamperLeaseDeadline()
+        // Bind committed → persist the cross-batch seed's synced reference
+        // (no-op on the same-batch path, which stages nothing).
+        await lease.commitBatchSeed(stamper)
         // Seed before `onLeaseAcquired` (which may publish): a publish's
         // `flushState` then overwrites this with the fresh reference.
         if (!crossBatchAdopt) lease.seedReferenceHex(seededReferenceHex)
@@ -1085,6 +1094,8 @@ export class BatchWriteCoordinator {
       })
       // Fence in-flight stamps to the lease's local expiry (bind clears it).
       this.syncStamperLeaseDeadline()
+      // Bind committed → persist `claimPartition`'s staged synced reference.
+      await lease.commitBatchSeed()
       this.persistLeaseSnapshot(lease)
       this.startRefreshTimer(lease)
       this.lastLeaseValidatedAt = Date.now()

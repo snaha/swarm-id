@@ -147,6 +147,7 @@ function makeLease(
     refresh: vi.fn(async () => opts.refreshResult ?? "held"),
     release: vi.fn(async () => {}),
     joinBatch: vi.fn(async () => new Uint32Array(8)),
+    commitBatchSeed: vi.fn(async () => {}),
     publishState: vi.fn(async () => {}),
     heartbeatStatePointer: vi.fn(async () => {}),
     seedReferenceHex: vi.fn(),
@@ -2529,6 +2530,25 @@ describe("BatchWriteCoordinator — per-write batch targeting (account-scoped le
     await expect(inFlight).rejects.toThrow(PartitionLeaseLostError)
     expect(target2.bindPartition).not.toHaveBeenCalled()
     expect(op).not.toHaveBeenCalled()
+    // …and THIS batch's seed stays uncommitted (the acquire commits the lease
+    // batch's own seed, which is bound). A synced reference persisted without
+    // its counter being bound makes the next read short-circuit to
+    // `unchanged` and seed ZERO for a batch this device never wrote — see
+    // `PartitionLease.commitBatchSeed`.
+    expect(lease.commitBatchSeed).not.toHaveBeenCalledWith(target2)
+  })
+
+  it("commits the seed only after a successful join binds the counter", async () => {
+    const { lease, target2 } = await setupJoined()
+    // The commit is the LAST step of the join, never part of the seed: it is
+    // what makes the persisted synced reference mean "a bound counter is in
+    // sync with this published state".
+    expect(lease.joinBatch).toHaveBeenCalledTimes(1)
+    expect(target2.bindPartition).toHaveBeenCalled()
+    expect(lease.commitBatchSeed).toHaveBeenCalledWith(target2)
+    expect(
+      lease.commitBatchSeed.mock.invocationCallOrder.at(-1)!,
+    ).toBeGreaterThan(target2.bindPartition.mock.invocationCallOrder[0])
   })
 
   it("teardown publishes each joined batch's final counter before the release sentinel", async () => {

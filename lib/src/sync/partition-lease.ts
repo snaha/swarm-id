@@ -222,6 +222,16 @@ interface BatchPublishState {
    * `readFailed` path). undefined after `acquire`.
    */
   lastFullPublishEpoch?: number
+  /**
+   * A seed's synced reference + protected state buckets, staged by
+   * `seedBatchState` and persisted only once the caller has bound the counter
+   * that seed returned. See {@link PartitionLease.commitBatchSeed}.
+   */
+  pendingSync?: {
+    partition: number
+    referenceHex: string
+    stateBuckets?: number[]
+  }
 }
 
 export class PartitionLease {
@@ -1018,9 +1028,10 @@ export class PartitionLease {
    * caller binds. Shared by `claimPartition` (the lease batch) and `joinBatch`
    * (secondary batches) — one seeding code path.
    *
-   * The synced reference is recorded only on a real read — never on `unchanged`
-   * (already cached) or a failed read (no `referenceHex`) — and the published
-   * state chunks' buckets are protected from our utilisation saves.
+   * The synced reference is STAGED only on a real read — never on `unchanged`
+   * (already cached) or a failed read (no `referenceHex`) — and is persisted,
+   * together with the published state chunks' bucket protection, only by
+   * {@link commitBatchSeed} once the caller has bound the returned counter.
    *
    * Seeding the publish baseline makes the FIRST publish of this session
    * incremental (only the bucket the upload touches + the reference chunk)
@@ -1077,26 +1088,62 @@ export class PartitionLease {
         ? stamper.buildLeaseLocalCounter()
         : (stateResult.localCounter ?? new Uint32Array(NUM_BUCKETS))
 
-    if (
-      !stateResult.unchanged &&
-      stateResult.referenceHex &&
-      stamper instanceof UtilizationAwareStamper
-    ) {
-      await stamper.setSyncedReference(partition, stateResult.referenceHex)
-      if (stateResult.stateBuckets) {
-        await stamper.setProtectedStateBuckets(
-          partition,
-          stateResult.stateBuckets,
-        )
+    const state = this.batchState(batchId)
+    // STAGED, never persisted here — see `commitBatchSeed`. Writing the synced
+    // reference before the caller binds `localCounter` would let an aborted
+    // join leave a reference describing a counter this stamper never adopted.
+    if (!stateResult.unchanged && stateResult.referenceHex) {
+      state.pendingSync = {
+        partition,
+        referenceHex: stateResult.referenceHex,
+        stateBuckets: stateResult.stateBuckets,
       }
     }
 
-    const state = this.batchState(batchId)
     state.publishedReferences = stateResult.references
     state.publishedCounter = localCounter.slice()
     state.lastFullPublishEpoch = intentEpochBucket(this.now())
     state.lastReferenceHex = stateResult.referenceHex
     return localCounter
+  }
+
+  /**
+   * Persist the seed staged by `seedBatchState` for `stamper`'s batch (the
+   * lease batch when omitted). MUST be called by every seeding caller — and
+   * only AFTER it has bound the counter that seed returned.
+   *
+   * Splitting the persist from the seed is what keeps the KEYSTONE invariant
+   * above true across an aborted join. Each caller re-checks the lease between
+   * the seed and `bindPartition` and can bail — `ensureBatchJoined` throws
+   * `PartitionLeaseLostError`, the cross-batch adopt and the network restore
+   * return on a bumped epoch. Persisting inline would leave a synced reference
+   * describing a counter the stamper never adopted, and the NEXT read passes
+   * that reference as `knownReference`: `readPartitionState` matches it
+   * against the live pointer, short-circuits to `unchanged` without
+   * downloading a counter chunk, and the seed falls to
+   * `buildLeaseLocalCounter()` — ZERO for a batch this device never wrote. The
+   * device would then bind zero over a prior holder's resume point and
+   * re-issue its acked slots, with `writePartitionState`'s tripwire blind to
+   * it (its `previousCounter` is that same zero). Staged and dropped, the
+   * abort simply costs the next session one full counter read.
+   *
+   * No-op when nothing is staged (cache-hit read, failed read, or already
+   * committed) or the batch context cannot persist (a non-persisting stamper
+   * double).
+   */
+  async commitBatchSeed(ctx?: UtilizationAwareStamper): Promise<void> {
+    const { stamper, batchId } = this.resolveWriteContext(ctx)
+    const state = this.batchState(batchId)
+    const pending = state.pendingSync
+    if (!pending || !(stamper instanceof UtilizationAwareStamper)) return
+    state.pendingSync = undefined
+    await stamper.setSyncedReference(pending.partition, pending.referenceHex)
+    if (pending.stateBuckets) {
+      await stamper.setProtectedStateBuckets(
+        pending.partition,
+        pending.stateBuckets,
+      )
+    }
   }
 
   /**
