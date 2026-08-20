@@ -415,6 +415,34 @@ describe("fetchAuthoritativeBatchTTL", () => {
     expect(ttl).toBe(EXPECTED_TTL_SECONDS)
   })
 
+  it("a REJECTING prefetched promise never escapes as an unhandled rejection", async () => {
+    // The doc tells callers to hand over an in-flight promise, and the contract
+    // path returns without awaiting it. Without a handler attached up front
+    // that rejection is unhandled — fatal in Node.
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on("unhandledRejection", onUnhandled)
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(batchResponse(FULL_RESPONSE)),
+    )
+
+    try {
+      const ttl = await fetchAuthoritativeBatchTTL(
+        RPC,
+        BEE,
+        BATCH_ID,
+        undefined,
+        Promise.reject(new Error("stamps read blew up")),
+      )
+      expect(ttl).toBe(EXPECTED_TTL_SECONDS)
+      // Let the microtask queue drain so a missing handler would be reported.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
+  })
+
   it("does not await a prefetched promise when the contract answers", async () => {
     fetchSpy.mockImplementation(() =>
       Promise.resolve(batchResponse(FULL_RESPONSE)),

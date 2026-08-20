@@ -125,6 +125,22 @@ async function updatePostageStampInfo(generation: number) {
     // drive as the active stamp is a lie — untargeted uploads go subsidised,
     // and the badge that says so would be suppressed.
     const batch = fetched.find((b) => b.isDefault)
+    // A freshly bought batch reports usable=false until it warms up on chain
+    // (~30s) — re-poll until it flips so the UI catches up without a reload.
+    // Driven by the drive the sidebar actually RENDERS (the selection, else the
+    // default): polling the default only would leave a freshly bought
+    // non-default drive reading "Unusable" for as long as it stays selected.
+    const shown = fetched.find((b) => String(b.batchID) === selectedBatchId) ?? batch
+    if (shown?.usable === false && stampPollAttempts < STAMP_USABLE_POLL_MAX_ATTEMPTS) {
+      stampPollAttempts++
+      stampPollTimer = setTimeout(() => {
+        stampPollTimer = undefined
+        if (generation !== connectionGeneration) return
+        void updatePostageStampInfo(generation)
+      }, STAMP_USABLE_POLL_INTERVAL)
+    } else if (shown?.usable !== false) {
+      stampPollAttempts = 0
+    }
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
@@ -135,30 +151,15 @@ async function updatePostageStampInfo(generation: number) {
       } else if (previous.usable !== batch.usable) {
         logStore.log(`Postage stamp is now ${batch.usable ? 'usable' : 'unusable'}`)
       }
-      // A freshly bought batch reports usable=false until it warms up on
-      // chain (~30s) — re-poll until it flips so the UI catches up without
-      // a reload.
-      if (batch.usable) {
-        stampPollAttempts = 0
-      } else if (stampPollAttempts < STAMP_USABLE_POLL_MAX_ATTEMPTS) {
-        stampPollAttempts++
-        stampPollTimer = setTimeout(() => {
-          stampPollTimer = undefined
-          if (generation !== connectionGeneration) return
-          void updatePostageStampInfo(generation)
-        }, STAMP_USABLE_POLL_INTERVAL)
-      }
     } else if (fetched.length === 0) {
       stamp = undefined
       selectedBatchId = undefined
-      stampPollAttempts = 0
       logStore.log('No postage stamp configured')
     } else {
       // Drives exist but none is the account default. `selectedBatchId` stays:
       // it names a batch that is still there, and a user-chosen upload target
       // must survive (the stale-selection cleanup above drops removed ones).
       stamp = undefined
-      stampPollAttempts = 0
       logStore.log('No default drive set; untargeted uploads use the gateway')
     }
   } catch (error) {

@@ -265,34 +265,29 @@ export async function fetchOnChainBatchStateResult(
       data: `0x${SELECTOR_BATCHES}${id}`,
     }
 
-    // With a supplied memo the per-batch request carries only `batches(id)`;
-    // the two chain globals are read once for the whole caller. A memo that
-    // failed collapses to `error` exactly like an inline failure would.
-    if (getGlobals) {
-      const [globals, [batchesResult]] = await Promise.all([
-        getGlobals(),
-        ethCallBatch(rpcUrl, [batchCall]),
-      ])
-      if (!globals) return { status: "error" }
-      const batch = decodeBatches(batchesResult)
-      if (batch.owner === ZERO_ADDRESS) {
-        return { status: "not-found" }
-      }
-      return { status: "found", state: { batch, ...globals } }
-    }
-
+    // With a supplied memo the per-batch request carries only `batches(id)` —
+    // the two chain globals are read once for the whole caller. Started here so
+    // it overlaps this request, with its handler attached immediately (the
+    // not-found return below never awaits it). Without a memo they ride along
+    // in the same batched call.
+    const memo = getGlobals?.().catch(() => undefined)
     const [batchesResult, outPaymentResult, lastPriceResult] =
-      await ethCallBatch(rpcUrl, [
-        batchCall,
-        {
-          to: contractAddress,
-          data: `0x${SELECTOR_CURRENT_TOTAL_OUT_PAYMENT}`,
-        },
-        {
-          to: contractAddress,
-          data: `0x${SELECTOR_LAST_PRICE}`,
-        },
-      ])
+      await ethCallBatch(
+        rpcUrl,
+        memo
+          ? [batchCall]
+          : [
+              batchCall,
+              {
+                to: contractAddress,
+                data: `0x${SELECTOR_CURRENT_TOTAL_OUT_PAYMENT}`,
+              },
+              {
+                to: contractAddress,
+                data: `0x${SELECTOR_LAST_PRICE}`,
+              },
+            ],
+      )
 
     const batch = decodeBatches(batchesResult)
     // A non-existent batch decodes to an all-zero tuple — a definitive "no such
@@ -301,14 +296,15 @@ export async function fetchOnChainBatchStateResult(
       return { status: "not-found" }
     }
 
-    return {
-      status: "found",
-      state: {
-        batch,
-        currentTotalOutPayment: decodeUint(outPaymentResult),
-        lastPrice: decodeUint(lastPriceResult),
-      },
-    }
+    const globals = memo
+      ? await memo
+      : {
+          currentTotalOutPayment: decodeUint(outPaymentResult),
+          lastPrice: decodeUint(lastPriceResult),
+        }
+    // A memo that failed collapses to `error` exactly like an inline failure.
+    if (!globals) return { status: "error" }
+    return { status: "found", state: { batch, ...globals } }
   } catch {
     return { status: "error" }
   }
@@ -455,6 +451,13 @@ export async function fetchAuthoritativeBatchTTL(
     gnosisRpcUrl,
     localContractAddress,
   )
+  // Handled up front, before the contract read that may make us skip it: an
+  // in-flight promise we never await would surface as an unhandled rejection
+  // (fatal in Node). A rejected prefetch reads as "the node couldn't answer".
+  const beeTTL =
+    prefetchedBeeTTL instanceof Promise
+      ? prefetchedBeeTTL.catch(() => undefined)
+      : prefetchedBeeTTL
   const fromContract = await fetchBatchTTLFromContract(
     gnosisRpcUrl,
     batchId,
@@ -462,7 +465,7 @@ export async function fetchAuthoritativeBatchTTL(
     getGlobals,
   )
   if (fromContract !== undefined) return fromContract
-  if (prefetchedBeeTTL !== undefined) return await prefetchedBeeTTL
+  if (beeTTL !== undefined) return await beeTTL
   return fetchBatchTTL(beeUrl, batchId)
 }
 
