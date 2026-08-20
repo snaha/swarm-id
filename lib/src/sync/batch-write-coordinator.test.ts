@@ -54,7 +54,10 @@ import {
   type BatchWriteCoordinatorDeps,
 } from "./batch-write-coordinator"
 import { NO_HOLDER_DEVICE_ID } from "./partition-lock"
-import type { LeaseRefreshOutcome } from "./partition-lease"
+import type {
+  LeaseRefreshOutcome,
+  PartitionLeaseStateSnapshot,
+} from "./partition-lease"
 import { STATE_POINTER_EPOCH_MS } from "./partition-state"
 import {
   LEASE_REFRESH_MS,
@@ -1919,6 +1922,136 @@ describe("BatchWriteCoordinator — upload publish resets the heartbeat streak",
     await transition(internals)
 
     expect(internals.secondaryHeartbeatFailingSince.size).toBe(0)
+  })
+})
+
+describe("BatchWriteCoordinator — lifecycle transitions keep the restore ledger", () => {
+  // Wiping the cache on yield/demote/pause drops `joinedBatchIds`, so the next
+  // acquire never re-joins those secondaries: their state pointers stop being
+  // heartbeated, age out of the takeover lookup span, and a peer's takeover
+  // resumes them from ZERO — re-issuing slots this device already acked. What
+  // must NOT survive is the CLAIM (`self`/`priorHolderLeasedUntil`): a yielded
+  // or demoted session has to cold-acquire, which network-seeds every restore.
+  function setup(overrides: Partial<BatchWriteCoordinatorDeps> = {}) {
+    const calls: string[] = []
+    const lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    leaseController.lease = lease
+    const leaseStamper = makeStamper(calls, "lease")
+    const target2 = makeStamper(calls, "b2", BATCH_ID_2)
+    const writes: (PartitionLeaseStateSnapshot | undefined)[] = []
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        writeLeaseCache: (snap) => writes.push(snap),
+        ...overrides,
+      }),
+    )
+    return {
+      lease,
+      leaseStamper,
+      target2,
+      writes,
+      coordinator,
+      internals: coordinator as unknown as Internals,
+    }
+  }
+
+  it.each([
+    [
+      "an idle yield",
+      (i: Internals) => i.yieldIdleLease(leaseController.lease),
+    ],
+    ["a streak demote", (i: Internals) => i.finalizeDemote()],
+  ])(
+    "%s persists a self-less snapshot keeping the joined ids",
+    async (_name, transition) => {
+      const { target2, writes, coordinator, internals } = setup()
+      await coordinator.withWrite(asStamper(target2), async () => "ok", {
+        wait: "block",
+      })
+
+      await transition(internals)
+
+      const last = writes.at(-1)
+      expect(last).toBeDefined()
+      expect(last?.self).toBeUndefined()
+      expect(last?.priorHolderLeasedUntil).toBeUndefined()
+      expect(last?.joinedBatchIds).toContain(BATCH_ID_2)
+    },
+  )
+
+  it("a paused acquire keeps the ledger the previous session cached", () => {
+    // The pause path can run before `seedPendingRestores` ever did (the acquire
+    // timed out), so the ledger has to come from the prior cache.
+    const { internals, writes } = setup({
+      readLeaseCache: () => ({
+        deviceId: SELF,
+        batchId: BATCH_ID,
+        joinedBatchIds: [BATCH_ID, BATCH_ID_2],
+      }),
+    })
+
+    internals.pauseLeaseBackgroundWork()
+
+    expect(writes.at(-1)?.self).toBeUndefined()
+    expect(writes.at(-1)?.joinedBatchIds).toContain(BATCH_ID_2)
+  })
+
+  it("the next cold acquire network-restores from the reduced snapshot", async () => {
+    const first = setup()
+    await first.coordinator.withWrite(
+      asStamper(first.target2),
+      async () => "ok",
+      { wait: "block" },
+    )
+    await first.internals.yieldIdleLease(leaseController.lease)
+    const reduced = first.writes.at(-1)
+
+    // Fresh session over the same cache: no `self` → cold acquire → the
+    // secondary is re-joined through the NETWORK (`joinBatch`), not zero-seeded.
+    const networkCounter = new Uint32Array(8)
+    networkCounter[3] = 7
+    const lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    lease.joinBatch = vi.fn(async () => networkCounter)
+    leaseController.lease = lease
+    const calls: string[] = []
+    const leaseStamper = makeStamper(calls, "lease2")
+    const secondary = makeStamper(calls, "b2-restored", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => reduced,
+        resolveStamperForBatch: async () => asStamper(secondary),
+      }),
+    )
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    expect(lease.joinBatch).toHaveBeenCalledWith(asStamper(secondary))
+    expect(secondary.bindPartition).toHaveBeenCalledWith(
+      expect.objectContaining({ partition: 1, localCounter: networkCounter }),
+    )
   })
 })
 

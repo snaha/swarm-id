@@ -696,6 +696,38 @@ export class BatchWriteCoordinator {
     this.deps.writeLeaseCache?.(snap)
   }
 
+  /**
+   * Persist a CLAIM-less snapshot for the paths that end a lease session but
+   * not the account's write history (idle yield, demote, acquire pause/unwind).
+   * Dropping the cache entirely there also drops `joinedBatchIds`, so the next
+   * acquire never re-joins those secondaries: their state pointers stop being
+   * heartbeated, age out of `readStatePointer`'s lookup span, and a peer's
+   * takeover resumes them from ZERO — re-issuing slots this device acked.
+   *
+   * `self`/`priorHolderLeasedUntil` are deliberately omitted so `adoptIfLive`
+   * can never re-adopt a session that gave its partition up: the next acquire
+   * is a cold one, which network-seeds every restore. The union with the prior
+   * cache keeps the pause/unwind paths lossless — they can run before
+   * `seedPendingRestores` ever populated the in-memory ledger.
+   * (`teardown` still clears: it flushes every secondary and releases with a
+   * sentinel, and it is the sign-out path.)
+   */
+  private persistReducedLeaseCache(): void {
+    const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
+    this.deps.writeLeaseCache?.({
+      deviceId: this.deps.deviceId,
+      batchId: leaseBatchHex,
+      joinedBatchIds: [
+        ...new Set([
+          ...(this.deps.readLeaseCache?.()?.joinedBatchIds ?? []),
+          ...this.pendingJoinedRestores.keys(),
+          ...this.joinedSecondaries.keys(),
+          leaseBatchHex,
+        ]),
+      ],
+    })
+  }
+
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
    *  the background so the first upload doesn't pay the acquire latency. */
   startLease(): void {
@@ -1073,8 +1105,9 @@ export class BatchWriteCoordinator {
       stamper.unbindPartition()
       this.partitionLease = undefined
       this.readOnly = false
-      // Keep cache and in-memory state in lockstep: no lease → no live cache.
-      this.deps.writeLeaseCache?.(undefined)
+      // Keep cache and in-memory state in lockstep: no live claim in the
+      // cache, but the restore ledger outlives the failed acquire.
+      this.persistReducedLeaseCache()
       // Operational failure (the lock-SOC scan/claim threw) — NOT contention.
       // Propagate so the skip path reports an error instead of "all partitions
       // held", and the block path pauses background work on the real cause.
@@ -1274,6 +1307,7 @@ export class BatchWriteCoordinator {
     this.leaseEpoch++
     this.lostLease = undefined
     this.forEachBoundStamper((s) => s.unbindPartition())
+    this.persistReducedLeaseCache()
     this.joinedSecondaries.clear()
     if (this.partitionRefreshTimer !== undefined) {
       clearInterval(this.partitionRefreshTimer)
@@ -1284,7 +1318,6 @@ export class BatchWriteCoordinator {
     this.lastLeaseValidatedAt = 0
     this.pointerHeartbeatFailingSince = undefined
     this.secondaryHeartbeatFailingSince.clear()
-    this.deps.writeLeaseCache?.(undefined)
     // Re-arm so the next write re-acquires.
     this.pendingAcquire = true
     this.emitLeaseChange()
@@ -1621,12 +1654,12 @@ export class BatchWriteCoordinator {
       }
     }
     this.forEachBoundStamper((s) => s.unbindPartition())
+    this.persistReducedLeaseCache()
     this.joinedSecondaries.clear()
     this.secondaryHeartbeatFailingSince.clear()
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
-    this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
     console.info(
       `[BatchWriteCoordinator] Released idle partition ${yieldedPartition ?? "?"}; will re-acquire on next write.`,
@@ -1646,9 +1679,9 @@ export class BatchWriteCoordinator {
     }
     this.partitionLease = undefined
     this.readOnly = false
+    this.persistReducedLeaseCache()
     this.joinedSecondaries.clear()
     this.secondaryHeartbeatFailingSince.clear()
-    this.deps.writeLeaseCache?.(undefined)
   }
 
   // ---- helpers ------------------------------------------------------------
