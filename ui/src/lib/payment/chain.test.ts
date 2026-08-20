@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { chainIdentity, postageChain, probeChainId } from './chain'
+import { chainIdentity, evictChainCaches, postageChain, probeChainId } from './chain'
 
 /** The real one. A chain cannot borrow it, which is the whole point. */
 const GNOSIS_GENESIS = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
@@ -112,6 +112,21 @@ describe('chainIdentity', () => {
   it('rejects when the chain id itself cannot be read', async () => {
     stubRpc({ ...mainnetAnswers, eth_chainId: { error: { message: 'rate limited' } } })
     await expect(chainIdentity(freshUrl())).rejects.toThrow()
+  })
+
+  // A *success* is cached for the life of the page, which is right — until the
+  // one case that breaks the assumption: the same localhost port restarted as a
+  // different chain. Evicting is what lets Retry mean "look again".
+  it('re-probes a successful answer once it is evicted', async () => {
+    const url = freshUrl()
+    stubRpc(devChainAnswers)
+    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'dev' })
+
+    stubRpc(mainnetAnswers)
+    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'dev' })
+
+    evictChainCaches(url)
+    await expect(chainIdentity(url)).resolves.toEqual({ chainId: 100, kind: 'mainnet' })
   })
 
   it('does not cache a failure — the node may just have been starting up', async () => {
