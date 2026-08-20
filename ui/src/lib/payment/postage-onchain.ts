@@ -310,9 +310,16 @@ export async function preflightResize(
 
 /**
  * Patch the stamp record from chain truth (depth, live per-chunk balance, and
- * the TTL it implies). Called after every confirmed transaction and on dialog
- * open, so an interrupted flow reconciles instead of trusting local state.
- * Returns false when the chain could not answer (record left untouched).
+ * the TTL it implies).
+ *
+ * Called after every confirmed transaction, and by the resize path when
+ * preflight finds the depth increase already landed in a session that was lost
+ * — so an interrupted flow records what the chain has rather than what this
+ * device last believed.
+ *
+ * Returns false when the chain could not answer (record left untouched); the
+ * callers then fall back to projecting the operation's own outcome, which is
+ * why this must not collapse a failed read into a plausible-looking success.
  */
 export async function reconcileStampFromChain(
   account: Account,

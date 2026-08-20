@@ -18,6 +18,7 @@
 import type { PostageStamp } from '@snaha/swarm-id'
 import type { MultichainClient } from '@swarm-id/multichain'
 
+import { remainingLifespanSeconds } from '$lib/drives'
 import { type OwnerFunds, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { faultPoint } from '$lib/payment/fault-injection'
@@ -231,11 +232,12 @@ export interface ExtendOptions extends RunOptions {
 }
 
 /**
- * Extend a drive's lifespan: approve, then top up the batch.
+ * Extend a drive's lifespan: one bundled transaction that approves the BZZ and
+ * tops the batch up.
  *
- * Everything from `ensureBzzAllowance` on is a spend whose record must land
- * even if the dialog closed — callers keep this call outside their attempt
- * guard and gate only their UI epilogue on `attempt.current`.
+ * Everything from `bundledExtend` on is a spend whose record must land even if
+ * the dialog closed — callers keep this call outside their attempt guard and
+ * gate only their UI epilogue on `attempt.current`.
  */
 export async function runExtend(options: ExtendOptions): Promise<void> {
   const { account, drive, addedSeconds, requestFunding, onStep } = options
@@ -260,10 +262,13 @@ export async function runExtend(options: ExtendOptions): Promise<void> {
   const reconciled = await reconcileStampFromChain(account, drive, client)
   if (!reconciled) {
     // Chain read failed after a confirmed spend — record the projection so the
-    // UI never shows the pre-payment state.
+    // UI never shows the pre-payment state. From the AGED remaining lifespan,
+    // not the stored `batchTTL` snapshot: `updateStamp` re-anchors the TTL's
+    // measurement instant to now, so projecting from the snapshot would hand
+    // the drive back every day it has already lived through.
     account.updateStamp(
       drive.batchID,
-      extendedStamp(drive, addedSeconds, topUpAmount, drive.batchTTL),
+      extendedStamp(drive, addedSeconds, topUpAmount, remainingLifespanSeconds(drive)),
     )
   }
 }

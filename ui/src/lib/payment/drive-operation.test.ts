@@ -11,11 +11,15 @@
 import { BatchId } from '@ethersphere/bee-js'
 import type { PostageStamp } from '@snaha/swarm-id'
 import { encodeAbiParameters, keccak256 } from 'viem'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { runPurchase } from '$lib/payment/drive-operation'
-import type { OperationJournal, PendingOperation } from '$lib/payment/operation-journal.svelte'
-import { derivePostageSigner } from '$lib/payment/purchase'
+import { runExtend, runPurchase } from '$lib/payment/drive-operation'
+import {
+  type OperationJournal,
+  type PendingOperation,
+  nullJournal,
+} from '$lib/payment/operation-journal.svelte'
+import { type StampUpdate, derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
 import type { Account } from '$lib/types'
 
 const DERIVATION_KEY = '11'.repeat(32)
@@ -42,6 +46,18 @@ const harness = vi.hoisted(() => ({
   constraints: { paused: false, lastPrice: 1_000n, minimumInitialBalancePerChunk: 1n },
   /** Filled in per test — the id the fake contract derives from the nonce. */
   batchIdForNonce: (nonce: `0x${string}`): string => nonce,
+  /** The batch as the chain has it; only the depth is read back here. */
+  batch: {
+    owner: '0x0000000000000000000000000000000000000000',
+    depth: 20,
+    bucketDepth: 16,
+    immutableFlag: false,
+    normalisedBalance: 0n,
+    lastUpdatedBlockNumber: 0n,
+  },
+  remaining: 1_000n,
+  /** Chain reads stop answering once the spend has landed, as a flaky RPC does. */
+  readsFailAfterSpend: false,
 }))
 
 vi.mock('$lib/payment/chain', () => ({
@@ -59,6 +75,16 @@ vi.mock('$lib/payment/chain', () => ({
           batchId: harness.eventBatchId ?? harness.batchIdForNonce(options.batchNonce),
         })
       },
+      bundleExtend: () => {
+        harness.calls.push('send')
+        return Promise.resolve(harness.transactionHash)
+      },
+      waitForTransactionSuccess: () => Promise.resolve(),
+      getPostageBatch: () =>
+        harness.readsFailAfterSpend && harness.calls.includes('send')
+          ? Promise.reject(new Error('the RPC stopped answering'))
+          : Promise.resolve(harness.batch),
+      getRemainingBalance: () => Promise.resolve(harness.remaining),
     }),
   ownerFunds: () => Promise.resolve({ xdai: harness.ownerXdai, bzz: harness.ownerBzz }),
 }))
@@ -89,12 +115,15 @@ function trackingJournal(): OperationJournal {
 }
 
 const added: PostageStamp[] = []
+const patches: StampUpdate[] = []
 
 function fakeAccount(): Account {
   return {
     id: { toString: () => ACCOUNT_ID },
     derivationKey: DERIVATION_KEY,
     addStamp: (stamp: PostageStamp) => added.push(stamp),
+    updateStamp: (_batchID: BatchId, patch: StampUpdate) => patches.push(patch),
+    hasLiveStamp: () => true,
   } as unknown as Account
 }
 
@@ -123,7 +152,9 @@ beforeEach(async () => {
   harness.calls.length = 0
   harness.eventBatchId = undefined
   harness.sendFails = false
+  harness.readsFailAfterSpend = false
   added.length = 0
+  patches.length = 0
   const { destination } = await derivePostageSigner(DERIVATION_KEY)
   harness.batchIdForNonce = (nonce) => contractBatchId(destination as `0x${string}`, nonce)
 })
@@ -187,5 +218,75 @@ describe('runPurchase', () => {
       `clear:${eventBatchId}`,
     ])
     expect(journal.entries()).toEqual([])
+  })
+})
+
+describe('runExtend', () => {
+  const NOW = Date.UTC(2026, 5, 1)
+  const SECONDS_PER_DAY = 24 * 60 * 60
+  const MEASURED_TTL_SECONDS = 30 * SECONDS_PER_DAY
+  const AGE_SECONDS = 10 * SECONDS_PER_DAY
+  const ADDED_SECONDS = 5 * SECONDS_PER_DAY
+  const MS_PER_SECOND = 1000
+
+  /** A drive bought 30 days' worth of lifespan, 10 days ago. */
+  function drive(): PostageStamp {
+    return {
+      batchID: new BatchId('f9'.repeat(32)),
+      depth: harness.batch.depth,
+      amount: 500n,
+      batchTTL: MEASURED_TTL_SECONDS,
+      createdAt: NOW - AGE_SECONDS * MS_PER_SECOND,
+    } as unknown as PostageStamp
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers({ now: NOW })
+  })
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  /**
+   * The post-spend chain read is what normally writes the record, and when it
+   * fails the projection stands in for it. `account.updateStamp` re-anchors the
+   * TTL's measurement instant to now, so the projection has to start from the
+   * AGED remaining lifespan: patching from the stored snapshot would hand the
+   * drive back the ten days it has already lived through, and the countdown
+   * would silently jump forward.
+   */
+  it('projects from the aged lifespan when the chain read fails', async () => {
+    harness.readsFailAfterSpend = true
+    const extended = drive()
+    await runExtend({
+      account: fakeAccount(),
+      drive: extended,
+      addedSeconds: ADDED_SECONDS,
+      requestFunding: () => Promise.reject(new Error('funding must not be needed here')),
+      journal: nullJournal(),
+    })
+
+    const topUpAmount = stampAmountForSeconds(harness.constraints.lastPrice, ADDED_SECONDS)
+    expect(patches).toEqual([
+      {
+        amount: extended.amount + topUpAmount,
+        batchTTL: MEASURED_TTL_SECONDS - AGE_SECONDS + ADDED_SECONDS,
+      },
+    ])
+  })
+
+  it('leaves the record to chain truth when the read succeeds', async () => {
+    // Reconciled records come from the chain; the projection is a fallback, not
+    // a second writer racing it.
+    await runExtend({
+      account: fakeAccount(),
+      drive: drive(),
+      addedSeconds: ADDED_SECONDS,
+      requestFunding: () => Promise.reject(new Error('funding must not be needed here')),
+      journal: nullJournal(),
+    })
+    expect(patches).toEqual([
+      { depth: harness.batch.depth, amount: harness.remaining, batchTTL: expect.any(Number) },
+    ])
   })
 })
