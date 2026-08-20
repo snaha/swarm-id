@@ -4,6 +4,10 @@ import { defineConfig, devices } from '@playwright/test'
 
 export default defineConfig({
   testDir: './tests',
+  // `playwright.cluster.config.ts` owns the cluster suite: it takes no `page`,
+  // so here it would only ever skip (no Bee node in the browser job) or
+  // double-run (locally, where both configs are used).
+  testIgnore: '**/gnosis-cluster.test.ts',
   fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,

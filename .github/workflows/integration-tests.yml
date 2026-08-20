@@ -6,6 +6,11 @@ on:
   pull_request:
     paths:
       - 'lib/**'
+      # The job also runs the ui cluster e2e, which exercises the ui +
+      # multichain purchase path against a real Bee node — so a change to
+      # either must trigger it, not only a lib or lockfile change.
+      - 'ui/**'
+      - 'multichain/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/integration-tests.yml'
 
