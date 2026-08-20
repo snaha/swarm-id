@@ -59,6 +59,7 @@ pnpm clean            # Clean build outputs
 Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
 
 - **@snaha/swarm-id**: `format:check`, `lint`, `typecheck`, `test`
+- **@swarm-id/multichain**: `format:check`, `lint`, `typecheck`, `test`
 - **@swarm-id/ui**: `lint` (includes license headers), `check`, `knip`, `test`
 - **@swarm-id/demo**: `lint`, `check`, `knip`
 
