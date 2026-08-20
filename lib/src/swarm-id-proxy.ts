@@ -1251,6 +1251,17 @@ export class SwarmIdProxy {
    * a pool captures a specific stamper's batch/buckets, so it is never shared
    * across batches (or across a rebuilt stamper instance). Recreated when
    * requestedCount differs from the cached pool's size.
+   *
+   * Runs UNDER the account write lock: the coordinator resolves the pool
+   * inside `withWrite`'s locked section (`buildStamperTarget`), and that lock
+   * is exclusive across tabs. So no stamped write for this account can be
+   * signing anywhere while this method runs — which is what lets the two
+   * terminations below be synchronous, unlike the storage-event eviction
+   * paths (`clearStampEntries`, `pruneStampEntries`, the stale-target
+   * eviction), which fire off both the lock and the work queue and must go
+   * through {@link deferPoolTermination}. Pinned by the coordinator test
+   * "the worker pool is resolved under the write lock"; if that ever stops
+   * holding, both terminations here have to defer too.
    */
   private async getOrCreateWorkerPool(
     stamper: UtilizationAwareStamper,
@@ -1269,7 +1280,8 @@ export class SwarmIdProxy {
       return entry.workerPool
     }
 
-    // Terminate old pool if count changed
+    // Terminate old pool if count changed — safe synchronously (see above):
+    // the write lock proves nothing is signing with it.
     if (entry.workerPool) {
       entry.workerPool.terminate()
       entry.workerPool = undefined
@@ -1285,7 +1297,9 @@ export class SwarmIdProxy {
       // Each pool holds up to 8 workers and entries are cached for the whole
       // session, so keeping one pool per batch ever targeted would let worker
       // count grow with every drive touched. An evicted batch just re-creates
-      // its pool on its next worker-backed write.
+      // its pool on its next worker-backed write. Synchronous for the same
+      // reason: the account lock is account-WIDE, so the other batches'
+      // pools cannot be mid-signing either.
       const keep = new Set([stamper.batchId.toHex(), this.postageBatchId])
       for (const [key, other] of this.stampEntries) {
         if (keep.has(key) || !other.workerPool) continue

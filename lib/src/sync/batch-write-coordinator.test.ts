@@ -2620,3 +2620,60 @@ describe("BatchWriteCoordinator — restore holds the RESTORING batch's state lo
     expect(idsAtSeed).toContain(BATCH_ID_2)
   })
 })
+
+describe("BatchWriteCoordinator — the worker pool is resolved under the write lock", () => {
+  // Load-bearing for the proxy: `getOrCreateWorkerPool` may terminate a pool
+  // synchronously (a size change, or the cap-at-two eviction of another
+  // batch's pool) ONLY because the account-wide, cross-tab write lock is held
+  // here — no other stamped write for this account can be signing with that
+  // pool, in this tab or any other. Move this resolution out of the locked
+  // section and those terminations become the mid-signing kill that the
+  // storage-event eviction paths have to defer around.
+  it("asks for the pool after the lock is granted and before the write ends", async () => {
+    const order: string[] = []
+    leaseController.lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    const stamper = makeStamper([])
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(stamper),
+        mode: "oneshot",
+        getWorkerPool: async () => {
+          order.push("get-pool")
+          return undefined
+        },
+      }),
+    )
+
+    writeLockController.onGrant = () => order.push("lock-granted")
+    try {
+      await coordinator.withWrite(
+        asStamper(stamper),
+        async () => {
+          order.push("op")
+          return "ok"
+        },
+        { wait: "block", useWorkers: true },
+      )
+    } finally {
+      writeLockController.onGrant = undefined
+    }
+    order.push("write-returned")
+
+    expect(order.indexOf("lock-granted")).toBeGreaterThanOrEqual(0)
+    expect(order.indexOf("get-pool")).toBeGreaterThan(
+      order.indexOf("lock-granted"),
+    )
+    expect(order.indexOf("op")).toBeGreaterThan(order.indexOf("get-pool"))
+    expect(order.indexOf("get-pool")).toBeLessThan(
+      order.indexOf("write-returned"),
+    )
+  })
+})
