@@ -28,6 +28,7 @@ import {
   bundledExtend,
   bundledResize,
   fundingShortfall,
+  planBatchCreation,
   preflightExtend,
   preflightResize,
   reconcileStampFromChain,
@@ -164,33 +165,42 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
   faultPoint('after-funding')
 
   onStep?.('paying')
-  const batchId = await bundledCreate(signerKey, amountPerChunk, depth, bzzNeeded, client)
-  return journalThenRecord(account, batchId, name, journal, onStep)
+  // Write the id down BEFORE spending anything on it. The nonce decides the id,
+  // so it can be known here rather than read out of a receipt — and it has to
+  // be: the send confirms on chain, not in this tab, and the id exists nowhere
+  // else afterwards (not on the account, and in no index the app can search).
+  // Journalling first turns a tab that dies mid-send from a lost paid-for drive
+  // into a resume.
+  const plan = planBatchCreation(signerKey)
+  journal.record(purchaseEntry(account, plan.batchId, name))
+  const batchId = await bundledCreate(
+    signerKey,
+    plan.batchNonce,
+    amountPerChunk,
+    depth,
+    bzzNeeded,
+    client,
+  )
+  faultPoint('after-create')
+  if (batchId.toLowerCase() !== plan.batchId.toLowerCase()) {
+    // Cannot happen while the derivation matches the contract's — and precisely
+    // therefore, if it ever does, the chain's answer is the real one and must
+    // be written down BEFORE anything acts on it. Recording the new entry ahead
+    // of dropping the old leaves no instant with nothing journalled.
+    journal.record(purchaseEntry(account, batchId, name))
+    journal.clear(account.id.toString(), plan.batchId)
+  }
+  return recordPurchase(account, batchId, name, journal, onStep)
 }
 
-/**
- * Write the batch id down BEFORE reading it back.
- *
- * The read-back can fail — a node behind the chain, a closed tab — and the id
- * exists nowhere else: not in the account, and not in any index the app can
- * search. Journalling first turns that from a lost drive into a resume.
- */
-async function journalThenRecord(
-  account: Account,
-  batchId: string,
-  name: string,
-  journal: OperationJournal,
-  onStep: ((step: OperationStep) => void) | undefined,
-): Promise<string> {
-  journal.record({
+function purchaseEntry(account: Account, batchId: string, name: string): PendingOperation {
+  return {
     kind: 'purchase',
     accountId: account.id.toString(),
     batchId,
     name,
     startedAt: Date.now(),
-  })
-  faultPoint('after-create')
-  return recordPurchase(account, batchId, name, journal, onStep)
+  }
 }
 
 /** Read the new batch back from chain truth and attach it to the account. */

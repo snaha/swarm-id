@@ -11,8 +11,13 @@
  * owner. An id nobody wrote down is money spent on a drive that cannot be
  * found again.
  *
- * Written BEFORE the spend it describes and cleared only once the operation is
- * recorded, so the window it covers is exactly the one where money is at risk.
+ * Written BEFORE the spend it describes — the id is derived from a nonce the
+ * buyer chooses, so it is known before the transaction is sent rather than read
+ * back from its receipt — and cleared only once the operation is recorded, so
+ * the window it covers is exactly the one where money is at risk. The cost of
+ * writing first is an entry for a purchase that never got mined; that reads as
+ * an unfinished drive the user can resume or dismiss, which is a far smaller
+ * problem than a paid-for batch nobody can name.
  *
  * Device-local on purpose: it records what *this* browser started, and a
  * half-finished operation is a device event, not account state. It is

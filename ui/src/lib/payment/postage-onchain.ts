@@ -20,6 +20,7 @@ import {
   type PostageBatch,
   type PostageWriteConstraints,
 } from '@swarm-id/multichain'
+import { encodeAbiParameters, keccak256 } from 'viem'
 
 import { prefix0x } from '$lib/crypto/hex'
 import { type OwnerFunds, ownerFunds, postageChain } from '$lib/payment/chain'
@@ -43,6 +44,57 @@ function randomBatchNonce(): `0x${string}` {
   return `0x${Array.from(crypto.getRandomValues(new Uint8Array(BATCH_NONCE_BYTES)))
     .map((byte) => byte.toString(HEX_RADIX).padStart(2, '0'))
     .join('')}`
+}
+
+/** A batch id and the nonce that will produce it — see {@link planBatchCreation}. */
+export interface BatchCreationPlan {
+  /** The nonce the create must be sent with; never reused. */
+  batchNonce: `0x${string}`
+  /** The id the batch will have once that create is mined. */
+  batchId: `0x${string}`
+}
+
+/**
+ * The id the PostageStamp contract gives a batch created by `sender` with
+ * `nonce`: `keccak256(abi.encode(msg.sender, nonce))`.
+ *
+ * `abi.encode`, NOT `encodePacked`: the padded 64-byte preimage is what the
+ * deployed contract hashes. Verified against a real `BatchCreated` event — the
+ * packed 52-byte form yields an entirely different id — and pinned by that
+ * on-chain vector in the unit test, since getting this wrong would journal an
+ * id no batch ever has.
+ *
+ * `msg.sender`, not the `_owner` argument: the two may differ in general (a
+ * Bee node buys batches for other owners), but a bundle is sent from the owner
+ * EOA to itself and the delegate's calls run in its context — see
+ * `multichain/src/postage-bundle.ts` — so here they are the same address.
+ */
+export function deriveBatchId(sender: string, nonce: `0x${string}`): `0x${string}` {
+  // Lower-cased, not passed through: the contract hashes 20 raw bytes, so the
+  // display case is noise — but viem rejects a mixed-case address whose EIP-55
+  // checksum does not verify, which would turn a cosmetic difference at a call
+  // site into a thrown purchase.
+  const address = prefix0x(sender).toLowerCase() as `0x${string}`
+  return keccak256(
+    encodeAbiParameters([{ type: 'address' }, { type: 'bytes32' }], [address, nonce]),
+  )
+}
+
+/**
+ * Decide what a batch's id WILL be, before buying it.
+ *
+ * Picking the nonce picks the id ({@link deriveBatchId}), which is what lets
+ * the purchase journal be written before the money moves rather than after it.
+ * An id that exists nowhere but a mined receipt is an id a closed tab can lose
+ * — and with it a paid-for batch nothing can look up, since no index maps an
+ * owner to its batches.
+ */
+export function planBatchCreation(signerKey: PrivateKey): BatchCreationPlan {
+  const batchNonce = randomBatchNonce()
+  return {
+    batchNonce,
+    batchId: deriveBatchId(signerKey.publicKey().address().toHex(), batchNonce),
+  }
 }
 
 /** The batch-owner key in the 0x-hex form the multichain package signs with. */
@@ -94,10 +146,20 @@ async function bundled(
 
 /**
  * Buy a batch atomically: approve + createBatch, owned by the signer that pays.
- * @returns the new batch id.
+ *
+ * The nonce comes from the caller — from {@link planBatchCreation}, whose id it
+ * has already written down. Generating one here would put the id's first
+ * existence inside this call, which is the thing the journal exists to prevent.
+ *
+ * Confirmation is not waited for again here: `bundleCreate` polls for its own
+ * receipt and reads the batch id out of the `BatchCreated` event, so it has
+ * already confirmed — or thrown — by the time it returns.
+ *
+ * @returns the new batch id, as the chain reported it.
  */
 export async function bundledCreate(
   signerKey: PrivateKey,
+  batchNonce: `0x${string}`,
   amountPerChunk: bigint,
   depth: number,
   totalPlur: bigint,
@@ -109,15 +171,10 @@ export async function bundledCreate(
     amountPerChunk,
     depth,
     bucketDepth: BUCKET_DEPTH,
-    batchNonce: randomBatchNonce(),
+    batchNonce,
     immutable: false,
     totalPlur,
   })
-  await withTimeout(
-    chain.waitForTransactionSuccess(created.transactionHash),
-    CONFIRMATION_TIMEOUT_MS,
-    'The purchase transaction was not confirmed in time.',
-  )
   return created.batchId
 }
 
