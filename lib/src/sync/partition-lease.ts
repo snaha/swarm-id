@@ -187,6 +187,12 @@ export interface PartitionLeaseStateSnapshot {
    * was holding. This device's own writes are safe either way (they resume
    * off the persisted synced reference); the exposure is to peers.
    *
+   * The list is not limited to what this device wrote: a cold acquire widens
+   * it to every batch the account owns
+   * (`BatchWriteCoordinatorDeps.ownedBatchIds`), because a drive a PREVIOUS
+   * holder published state for is invisible here and `readStatePointer`'s span
+   * reaches only the immediately prior holder.
+   *
    * The coordinator keeps its joined stampers in memory only, so persisting
    * the ids is what lets it re-join them after any acquisition. The restore
    * skips whichever id is the CURRENT lease batch — after a default-stamp

@@ -198,6 +198,14 @@ being lost:
   has no local state at all, so `buildLeaseLocalCounter()` for it is ZERO. Without recording that,
   a cold acquire's un-restored `"network"` id is silently re-tagged `"local"` by the next adopt
   and binds zero over a prior holder's resume point. Those ids stay `"network"` on every path.
+- **A cold acquire widens the set to every OWNED batch** (`ownedBatchIds`). The ledger is
+  per-device local storage, so nothing carries a drive across a handoff: `readStatePointer`'s span
+  is anchored on the immediately prior holder alone (`lastSeenLeasedUntil`, cleared and re-learnt
+  by every `refreshFromSwarm`). One intervening holder that never touched a drive therefore puts
+  that drive's pointer permanently out of every later takeover's reach — a conclusive
+  zero-resume over acked slots. Seeding every owned batch makes each holder heartbeat what its
+  predecessors published. Drives with no state at this partition cost one read and nothing else:
+  `joinBatch` seeds no pointer, so their heartbeat stays a no-op.
 
 ## The displacement-during-upload race fix
 

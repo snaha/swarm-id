@@ -192,6 +192,23 @@ export interface BatchWriteCoordinatorDeps {
   resolveStamperForBatch?: (
     batchIdHex: string,
   ) => Promise<UtilizationAwareStamper | undefined>
+  /**
+   * Hex ids of every batch the account currently owns (proxy: the connection's
+   * non-tombstoned stamps). A COLD acquire seeds a restore for each, so a drive
+   * a PREVIOUS holder of this partition published state for keeps being
+   * heartbeated by this one.
+   *
+   * Without it the ledger only ever covers batches THIS device has written, and
+   * nothing carries a batch across a handoff: `readStatePointer`'s span is
+   * anchored on the immediately prior holder alone (`lastSeenLeasedUntil`, reset
+   * every `refreshFromSwarm`), so one intervening holder that never touched a
+   * drive puts that drive's pointer permanently out of every later takeover's
+   * reach — a conclusive zero-resume over acked slots. Batches with no published
+   * state cost one read and nothing more: `joinBatch` seeds no pointer, so their
+   * heartbeat stays a no-op. Omit for callers with no stamp list
+   * (`sync-account`).
+   */
+  ownedBatchIds?: () => string[]
   /** Fired on every partition / read-only transition. */
   onLeaseChange?: (info: LeaseChangeInfo) => void
   /** Fired when a partition is (re)acquired (phase-5 publish trigger). */
@@ -634,10 +651,15 @@ export class BatchWriteCoordinator {
    * acquire/adopt itself (after a default-stamp change the snapshot's old lease
    * batch is just another restorable secondary here).
    *
-   * One id escapes the caller's `seed` mode: one the previous session listed
-   * but never SEEDED (`pendingBatchIds`) carries no local state for this
-   * partition, so `"local"` would bind a ZERO counter over a prior holder's
-   * resume point. Those stay `"network"` on every path.
+   * Two ids escape the caller's `seed` mode:
+   *  - one the previous session listed but never SEEDED (`pendingBatchIds`)
+   *    carries no local state for this partition, so `"local"` would bind a
+   *    ZERO counter over a prior holder's resume point. Always `"network"`.
+   *  - on a COLD acquire the set is widened to every batch the account owns
+   *    ({@link BatchWriteCoordinatorDeps.ownedBatchIds}), so a drive a previous
+   *    holder published state for keeps being heartbeated by us. Not on an
+   *    adopt: our own claim chain already carries its ledger forward, and the
+   *    cold acquire that started it did the widening.
    */
   private seedPendingRestores(
     cached: PartitionLeaseStateSnapshot | undefined,
@@ -646,7 +668,11 @@ export class BatchWriteCoordinator {
     this.pendingJoinedRestores.clear()
     const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
     const neverSeeded = new Set(cached?.pendingBatchIds ?? [])
-    for (const id of cached?.joinedBatchIds ?? []) {
+    const ids = new Set([
+      ...(cached?.joinedBatchIds ?? []),
+      ...(seed === "network" ? (this.deps.ownedBatchIds?.() ?? []) : []),
+    ])
+    for (const id of ids) {
       if (id === leaseBatchHex) continue
       this.pendingJoinedRestores.set(id, neverSeeded.has(id) ? "network" : seed)
     }

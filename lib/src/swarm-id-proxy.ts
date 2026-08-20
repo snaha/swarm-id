@@ -1186,6 +1186,7 @@ export class SwarmIdProxy {
         this.getOrCreateWorkerPool(stamper, count),
       resolveStamperForBatch: (batchIdHex) =>
         this.resolveStamperForBatch(batchIdHex),
+      ownedBatchIds: () => this.ownedBatchIdsHex(),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
       // On first acquiring a partition, announce this device by publishing the
       // account snapshot (which includes ourselves in metadata.devices) to the
@@ -1294,11 +1295,7 @@ export class SwarmIdProxy {
   ): void {
     const connection = parsed ?? this.findConnectionForParent()
     if (!connection) return
-    const owned = new Set(
-      connection.account.postageStamps
-        .filter((s) => !s.deletedAt)
-        .map((s) => s.batchID.toHex()),
-    )
+    const owned = new Set(this.ownedBatchIdsHex(connection))
     for (const [key, entry] of this.stampEntries) {
       if (!owned.has(key)) {
         this.stampEntries.delete(key)
@@ -1847,6 +1844,22 @@ export class SwarmIdProxy {
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
     await this.initializeStamper(stamp.depth, prebuilt)
+  }
+
+  /**
+   * Hex batch ids of every non-tombstoned stamp the connected account owns.
+   * Empty when the connection can't be read — which for both callers means
+   * "can't tell", never "owns nothing".
+   */
+  private ownedBatchIdsHex(
+    parsed?: ReturnType<SwarmIdProxy["findConnectionForParent"]>,
+  ): string[] {
+    const connection = parsed ?? this.findConnectionForParent()
+    return (
+      connection?.account.postageStamps
+        .filter((s) => !s.deletedAt)
+        .map((s) => s.batchID.toHex()) ?? []
+    )
   }
 
   /**

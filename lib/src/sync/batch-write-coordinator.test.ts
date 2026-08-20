@@ -2808,4 +2808,45 @@ describe("BatchWriteCoordinator — restore seeding cannot degrade to local", ()
     expect(writes.at(-1)?.joinedBatchIds).toContain(BATCH_ID_2)
     expect(writes.at(-1)?.pendingBatchIds).toContain(BATCH_ID_2)
   })
+
+  it("a cold acquire restores every OWNED batch, not just this device's ledger", async () => {
+    // The ledger is per-device local storage, so a drive a PREVIOUS holder of
+    // this partition published state for is invisible to us. Nothing then
+    // heartbeats its pointer; it ages out of `readStatePointer`'s ~90s span and
+    // the next takeover resumes it from ZERO. `readStatePointer`'s span is
+    // anchored on the IMMEDIATELY prior holder only, so it cannot reach back
+    // past a holder that never touched that drive.
+    const lease = makeLease({
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+    })
+    leaseController.lease = lease
+    const leaseStamper = makeStamper([], "lease")
+    const secondary = makeStamper([], "b2", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        // This device has never written BATCH_ID_2 — an empty ledger.
+        readLeaseCache: () => undefined,
+        ownedBatchIds: () => [BATCH_ID, BATCH_ID_2],
+        resolveStamperForBatch: async () => asStamper(secondary),
+      }),
+    )
+    const internals = coordinator as unknown as Internals
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    expect(lease.joinBatch).toHaveBeenCalledWith(asStamper(secondary))
+    expect(internals.joinedSecondaries.get(BATCH_ID_2)).toBe(
+      asStamper(secondary),
+    )
+  })
 })
