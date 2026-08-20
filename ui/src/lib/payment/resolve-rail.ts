@@ -8,6 +8,7 @@
  * no risk of an initialisation cycle. This module is where knowing about every
  * rail is allowed.
  */
+import { chainIdentity } from '$lib/payment/chain'
 import { resolveGnosisDirectRail } from '$lib/payment/gnosis-direct'
 import type { PaymentRail, PaymentToken } from '$lib/payment/payment-rail'
 import { relayRail } from '$lib/payment/relay'
@@ -79,8 +80,10 @@ export function combineRails(rails: PaymentRail[]): PaymentRail {
  *
  * Then, for the other chains:
  *
- * Everything not on the destination chain goes through Relay. A local stand-in
- * for it — Relay cannot run locally at all — arrives with the dev payment rig.
+ * Everything not on the destination chain goes through Relay — and only when
+ * the destination really is Gnosis mainnet (see {@link resolveBridgedRail}). A
+ * local stand-in for Relay, which cannot itself run locally, is planned with
+ * the dev payment rig; until it exists, a dev chain simply has no bridged rail.
  *
  * @returns the rail to pay through, or undefined when there is none — which is
  *   an error at the funding seam, not a licence to conjure the money.
@@ -92,7 +95,17 @@ export async function resolvePaymentRail(): Promise<PaymentRail | undefined> {
   return rails.length > 0 ? combineRails(rails) : undefined
 }
 
-/** The rail for chains other than the destination itself. */
+/**
+ * The rail for chains other than the destination itself — Gnosis MAINNET only.
+ *
+ * Relay is an intent network: the quote comes from a hosted API and the payout
+ * is a solver spending its own inventory on real Gnosis. Offered against a dev
+ * endpoint, the user's payment would be genuinely taken and genuinely
+ * delivered — to an address on a chain the operation is not watching, while it
+ * polls localhost for funds that can never arrive. An endpoint that cannot be
+ * identified is treated the same way: unproven is not mainnet.
+ */
 async function resolveBridgedRail(): Promise<PaymentRail | undefined> {
-  return relayRail
+  const identity = await chainIdentity().catch(() => undefined)
+  return identity?.kind === 'mainnet' ? relayRail : undefined
 }

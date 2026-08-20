@@ -4,16 +4,19 @@
  * The payment rail seam: what carries the user's money from whatever chain
  * they hold funds on to native xDAI at the batch-owner address on Gnosis.
  *
- * Production has exactly one — Relay Protocol (`relay.ts`). Locally there can
- * be no real one: Relay is an intent/solver network, so its quote comes from a
- * hosted API and the delivery is an off-chain solver paying out of its own
- * inventory on real Gnosis. A local chain is invisible to all of it. The dev
- * rail (`$lib/dev/local-payment-rail`) stands in by taking a genuine signature
- * on a local source chain and having the baked faucet play the solver.
+ * Production has two: a plain transfer when the money is already on Gnosis
+ * (`gnosis-direct.ts`), and Relay Protocol (`relay.ts`) for every other source
+ * chain. Only the direct one exists locally — Relay is an intent/solver
+ * network, so its quote comes from a hosted API and the delivery is an
+ * off-chain solver paying out of its own inventory on real Gnosis, none of
+ * which can see a local chain. `resolve-rail.ts` therefore withholds it off
+ * mainnet. A local stand-in — taking a genuine signature on a local source
+ * chain and having the baked faucet play the solver — is planned with the dev
+ * payment rig and does not exist yet.
  *
  * Everything downstream of a rail is untouched production code: the delivered
  * xDAI is swapped to BZZ by `swapDeliveredXdai` and spent by the postage
- * engine, on both rails alike.
+ * engine, on every rail alike.
  *
  * This module is deliberately a LEAF — it defines the contract and imports no
  * rail. Picking one lives in `resolve-rail.ts`, which may import them all; a
