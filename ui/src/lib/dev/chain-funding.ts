@@ -142,11 +142,18 @@ export interface FundsRow {
   bzz: bigint
 }
 
-/** What the faucet has left to give, and what `address` holds. */
+/**
+ * What the faucet has left to give, and what `address` holds.
+ *
+ * @param rpcUrl — the chain the figures are FROM. Passed in by a caller that
+ *   must be able to tell whether the answer still belongs to the endpoint it
+ *   asked, since a balance means nothing without the chain it is on.
+ */
 export async function devChainFunds(
   address: string,
+  rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
 ): Promise<{ faucet: FundsRow; recipient: FundsRow }> {
-  const chain = await postageChain()
+  const chain = await postageChain(rpcUrl)
   const recipient = new EthAddress(address).toChecksum() as `0x${string}`
   const [faucetFunds, recipientFunds] = await Promise.all([
     ownerFunds(DEV_FAUCET_ADDRESS, chain),

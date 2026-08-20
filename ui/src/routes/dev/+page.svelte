@@ -4,6 +4,8 @@
 -->
 
 <script lang="ts">
+  import { untrack } from 'svelte'
+
   import { BatchId, Bee, EthAddress, Identifier, PrivateKey } from '@ethersphere/bee-js'
   import ChevronDown from '@lucide/svelte/icons/chevron-down'
   import Info from '@lucide/svelte/icons/info'
@@ -328,15 +330,29 @@
       fundsError = ''
       return
     }
+    // A balance is only meaningful as "this address, on this chain", so both
+    // are pinned for the read and re-checked after it. The endpoint half is not
+    // pedantry: switching chains leaves the previous one's read in flight, and
+    // it used to win — mainnet figures under the "Local dev chain" banner.
+    const rpcUrl = networkSettingsStore.gnosisRpcUrl
+    // Untracked because this runs from an $effect: reading `funds` normally
+    // would make that effect depend on what it writes. Dropping a read that
+    // belongs to another address now, rather than when the new one lands,
+    // is what stops the old numbers sitting under the new label meanwhile.
+    if (untrack(() => funds)?.recipient.address !== requested) {
+      funds = undefined
+    }
+    const stale = () =>
+      faucetRecipient !== requested || networkSettingsStore.gnosisRpcUrl !== rpcUrl
     try {
-      const read = await devChainFunds(requested)
+      const read = await devChainFunds(requested, rpcUrl)
       // Typing an address fires this per keystroke and two reads can land out
       // of order — never show one address's balances under another.
-      if (faucetRecipient !== requested) return
+      if (stale()) return
       funds = read
       fundsError = ''
     } catch (e) {
-      if (faucetRecipient !== requested) return
+      if (stale()) return
       funds = undefined
       fundsError = e instanceof Error ? e.message : String(e)
     }
@@ -350,23 +366,32 @@
     }
   })
 
-  /** The rows of the balances table, formatted. */
+  /**
+   * The rows of the balances table, formatted.
+   *
+   * The read is only used for the address it was made for. The row is labelled
+   * with the CURRENT recipient, so pairing it with the previous read's figures
+   * — which is what pasting a second address did until the new read landed —
+   * puts one address's balances under another's name. Both are checksummed, so
+   * they compare directly.
+   */
   const balanceRows = $derived.by(() => {
     const rows: { label: string; address: string; xdai: string; bzz: string }[] = []
+    const shown = funds?.recipient.address === faucetRecipient ? funds : undefined
     if (faucetRecipient) {
       rows.push({
         label: 'Recipient',
         address: faucetRecipient,
-        xdai: funds ? formatAmount(funds.recipient.xdai, XDAI_DECIMALS) : NO_FIGURE,
-        bzz: funds ? formatAmount(funds.recipient.bzz, BZZ_DECIMALS) : NO_FIGURE,
+        xdai: shown ? formatAmount(shown.recipient.xdai, XDAI_DECIMALS) : NO_FIGURE,
+        bzz: shown ? formatAmount(shown.recipient.bzz, BZZ_DECIMALS) : NO_FIGURE,
       })
     }
-    if (funds) {
+    if (shown) {
       rows.push({
         label: 'Faucet',
-        address: funds.faucet.address,
-        xdai: formatAmount(funds.faucet.xdai, XDAI_DECIMALS),
-        bzz: formatAmount(funds.faucet.bzz, BZZ_DECIMALS),
+        address: shown.faucet.address,
+        xdai: formatAmount(shown.faucet.xdai, XDAI_DECIMALS),
+        bzz: formatAmount(shown.faucet.bzz, BZZ_DECIMALS),
       })
     }
     return rows
