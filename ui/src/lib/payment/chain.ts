@@ -146,6 +146,36 @@ const identities = new Map<string, Promise<ChainIdentity>>()
 const clients = new Map<string, Promise<MultichainClient>>()
 
 /**
+ * Get-or-create, keyed by RPC url, with the failure rule both caches need:
+ * a rejected answer is never kept, because the node may just have been
+ * starting up.
+ *
+ * The promise is stored before anything can reject — the catch handler is a
+ * microtask, so the `set` below always wins the race — which is what makes
+ * concurrent callers share one probe instead of racing two.
+ */
+function cachedPerUrl<T>(
+  cache: Map<string, Promise<T>>,
+  rpcUrl: string,
+  make: () => Promise<T>,
+): Promise<T> {
+  const existing = cache.get(rpcUrl)
+  if (existing) {
+    return existing
+  }
+  const entry: Promise<T> = make().catch((error: unknown) => {
+    // Only evict OUR entry: a retry may already have stored a healthy answer
+    // under this url, and dropping that one would re-probe for nothing.
+    if (cache.get(rpcUrl) === entry) {
+      cache.delete(rpcUrl)
+    }
+    throw error
+  })
+  cache.set(rpcUrl, entry)
+  return entry
+}
+
+/**
  * What chain is actually on the other end of `rpcUrl`.
  *
  * The chain id alone cannot answer this: the local chain deliberately reports
@@ -155,28 +185,13 @@ const clients = new Map<string, Promise<MultichainClient>>()
 export function chainIdentity(
   rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
 ): Promise<ChainIdentity> {
-  const existing = identities.get(rpcUrl)
-  if (existing) {
-    return existing
-  }
-  const identity: Promise<ChainIdentity> = Promise.all([
-    probeChainId(rpcUrl),
-    probeGenesisHash(rpcUrl),
-  ])
-    .then(([chainId, genesisHash]) => ({
-      chainId,
-      kind: kindOf(chainId, genesisHash),
-    }))
-    .catch((error: unknown) => {
-      // Only evict OUR entry: a retry may already have stored a healthy probe
-      // under this url, and dropping that one would re-probe for nothing.
-      if (identities.get(rpcUrl) === identity) {
-        identities.delete(rpcUrl)
-      }
-      throw error
-    })
-  identities.set(rpcUrl, identity)
-  return identity
+  return cachedPerUrl(identities, rpcUrl, async () => {
+    const [chainId, genesisHash] = await Promise.all([
+      probeChainId(rpcUrl),
+      probeGenesisHash(rpcUrl),
+    ])
+    return { chainId, kind: kindOf(chainId, genesisHash) }
+  })
 }
 
 /**
@@ -188,22 +203,10 @@ export function chainIdentity(
 export function postageChain(
   rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
 ): Promise<MultichainClient> {
-  const existing = clients.get(rpcUrl)
-  if (existing) {
-    return existing
-  }
-  const client: Promise<MultichainClient> = chainIdentity(rpcUrl)
-    .then((identity) => new MultichainClient(settingsFor(identity, rpcUrl)))
-    .catch((error: unknown) => {
-      // Only evict OUR entry, as above: a retry may already have stored a
-      // working client under this url.
-      if (clients.get(rpcUrl) === client) {
-        clients.delete(rpcUrl)
-      }
-      throw error
-    })
-  clients.set(rpcUrl, client)
-  return client
+  return cachedPerUrl(clients, rpcUrl, async () => {
+    const identity = await chainIdentity(rpcUrl)
+    return new MultichainClient(settingsFor(identity, rpcUrl))
+  })
 }
 
 export interface OwnerFunds {
