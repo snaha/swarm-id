@@ -464,27 +464,6 @@ describe("SwarmIdProxy getPostageBatches (multi-stamp, doc §2)", () => {
     })
   })
 
-  it("answers the removed getPostageBatch message (deployed old clients)", async () => {
-    // Pre-multi-batch dApp bundles keep sending this after the trusted domain
-    // redeploys; dropping it silently would hang their request to its timeout
-    // on every stamp display.
-    ;(proxy as never)["lookupPostageStampForApp"] = () => stampStub(B1)
-    ;(proxy as never)["stampToPostageBatch"] = (stamp: {
-      batchID: { toHex: () => string }
-    }) => Promise.resolve({ batchID: stamp.batchID.toHex() })
-
-    await (proxy as never)["handleLegacyGetPostageBatch"](
-      { type: "getPostageBatch", requestId: "r9" },
-      { source, origin: PARENT_ORIGIN } as unknown as MessageEvent,
-    )
-
-    expect(lastMessage()).toMatchObject({
-      type: "getPostageBatchResponse",
-      requestId: "r9",
-      postageBatch: { batchID: B1, isDefault: true },
-    })
-  })
-
   it("flags a PROMOTED binding as the default when no default pointer resolves", async () => {
     // The account's default pointer is gone, so `resolveStampForApp` finds
     // nothing — but a targeted write promoted B2 to the binding, and untargeted

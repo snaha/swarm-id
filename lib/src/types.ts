@@ -1056,18 +1056,6 @@ export const GetPostageBatchesMessageSchema = z.object({
   requestId: z.string(),
 })
 
-/**
- * @deprecated Compat shim for ALREADY-DEPLOYED pre-multi-batch clients: their
- * bundles keep sending this after the trusted domain redeploys, and without a
- * handler the discriminated-union parse silently drops the message and the
- * dApp's request hangs to its timeout. The proxy answers with the resolved
- * default batch. Remove once no pre-multi-batch clients remain in the wild.
- */
-export const GetPostageBatchMessageSchema = z.object({
-  type: z.literal("getPostageBatch"),
-  requestId: z.string(),
-})
-
 export const ConnectMessageSchema = z.object({
   type: z.literal("connect"),
   requestId: z.string(),
@@ -1111,7 +1099,6 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
   GetPostageBatchesMessageSchema,
-  GetPostageBatchMessageSchema,
   ConnectMessageSchema,
 ])
 
@@ -1179,10 +1166,6 @@ export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
 export type GetPostageBatchesMessage = z.infer<
   typeof GetPostageBatchesMessageSchema
 >
-/** @deprecated See {@link GetPostageBatchMessageSchema}. */
-export type GetPostageBatchMessage = z.infer<
-  typeof GetPostageBatchMessageSchema
->
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
 
@@ -1194,14 +1177,6 @@ export const ProxyReadyMessageSchema = z.object({
   type: z.literal("proxyReady"),
   authenticated: z.boolean(),
   parentOrigin: z.string(),
-  /**
-   * Capability advertisement: this proxy understands `batchID` upload
-   * targeting. Absent on pre-multi-batch proxies, whose Zod parse silently
-   * STRIPS unknown fields — a targeted upload sent to one would land on the
-   * resolved default batch with a success response. The client refuses to
-   * send a `batchID` unless the proxy advertised support.
-   */
-  supportsBatchTargeting: z.boolean().optional(),
 })
 
 export const InitErrorMessageSchema = z.object({
@@ -1523,14 +1498,6 @@ export const GetPostageBatchesResponseMessageSchema = z.object({
   postageBatches: z.array(PostageBatchSchema),
 })
 
-/** @deprecated Compat response for {@link GetPostageBatchMessageSchema}. The
- * extra `isDefault` field is stripped by the old client's parse. */
-export const GetPostageBatchResponseMessageSchema = z.object({
-  type: z.literal("getPostageBatchResponse"),
-  requestId: z.string(),
-  postageBatch: PostageBatchSchema.optional(),
-})
-
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ProxyReadyMessageSchema,
   InitErrorMessageSchema,
@@ -1574,7 +1541,6 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
   GetPostageBatchesResponseMessageSchema,
-  GetPostageBatchResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>

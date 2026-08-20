@@ -311,38 +311,8 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(postageBatches)
   })
 
-  it("refuses batchID targeting when the proxy never advertised support", async () => {
-    // A pre-multi-batch proxy's Zod parse silently STRIPS the unknown batchID
-    // and uploads to the resolved default with a success response — the exact
-    // misroute an explicit target exists to prevent. `proxyReady` without the
-    // capability flag (or from an old proxy, without the field at all) must
-    // make targeted calls fail loudly instead.
-    const batchID = "cc".repeat(32)
-    await expect(
-      client.uploadData(new Uint8Array([1]), { batchID }),
-    ).rejects.toThrow("does not support batchID")
-
-    // Untargeted calls are unaffected.
-    void client.uploadData(new Uint8Array([1]))
-    expect(lastPostedMessage()).toMatchObject({ type: "uploadData" })
-
-    // A proxy that advertises the capability unlocks targeting.
-    ;(client as never)["handleIframeMessage"]({
-      type: "proxyReady",
-      authenticated: true,
-      parentOrigin: "https://dapp.example.com",
-      supportsBatchTargeting: true,
-    })
-    void client.uploadData(new Uint8Array([1]), { batchID })
-    expect(lastPostedMessage()).toMatchObject({
-      type: "uploadData",
-      options: { batchID },
-    })
-  })
-
   it("epoch feed uploadReference targets the SOC at the payload's batch", async () => {
     const batchID = "cc".repeat(32)
-    ;(client as never)["proxySupportsBatchTargeting"] = true
     const writer = client.makeEpochFeedWriter({ topic: "dd".repeat(32) })
 
     void writer.uploadReference("ee".repeat(32), {
