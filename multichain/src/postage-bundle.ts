@@ -75,13 +75,17 @@ export interface CreateBundleOptions {
 
 /**
  * Whether this chain can run a bundle — i.e. whether the delegate is deployed
- * on it. False is not an error: the caller falls back to sending the operations
- * one at a time, which is the same work with recoverable seams in between.
+ * on it.
+ *
+ * False means the delegate is genuinely absent. An unreachable or erroring
+ * endpoint THROWS rather than reporting absence: there is no sequential
+ * fallback any more, so the caller refuses the operation on false, and a
+ * transient RPC failure must not read as "this chain cannot pay atomically".
  *
  * Deliberately not cached, though the answer is stable in production. One
  * `eth_getCode` is nothing beside the transaction it precedes, and caching it
- * would make the delegate impossible to add or remove under a running client —
- * which is exactly what the tests covering the fallback path do.
+ * would make the delegate impossible to add under a running client — which is
+ * what local dev does on first run.
  */
 export async function supportsBundling(
   settings: MultichainSettings,
@@ -90,8 +94,13 @@ export async function supportsBundling(
   const code = await jsonRpc(rpcProvider, settings, "eth_getCode", [
     settings.addresses.eip7702Delegate,
     "latest",
-  ]).catch(() => "0x")
-  return typeof code === "string" && code !== "0x"
+  ])
+  if (typeof code !== "string") {
+    throw new Error(
+      "The chain did not report whether it carries the 7702 delegate.",
+    )
+  }
+  return code !== "0x"
 }
 
 async function sendBundle(

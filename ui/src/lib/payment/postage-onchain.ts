@@ -73,84 +73,28 @@ export async function fundingShortfall(
 }
 
 /**
- * Ensure the PostageStamp contract may pull `totalPlur` from the owner —
- * approve EXACTLY the missing allowance (never unlimited) and wait for it.
- */
-export async function ensureBzzAllowance(
-  signerKey: PrivateKey,
-  totalPlur: bigint,
-  client?: MultichainClient,
-): Promise<void> {
-  const chain = client ?? (await postageChain())
-  const owner = ownerHexKey(signerKey)
-  const ownerAddress = signerKey.publicKey().address().toChecksum() as `0x${string}`
-  const spender = chain.settings.addresses.postageStamp
-  const allowance = await chain.getBzzAllowance(ownerAddress, spender)
-  if (allowance >= totalPlur) {
-    return
-  }
-  const hash = await chain.approveBzz({
-    amount: totalPlur,
-    originPrivateKey: owner,
-    spender,
-  })
-  await withTimeout(
-    chain.waitForTransactionSuccess(hash),
-    CONFIRMATION_TIMEOUT_MS,
-    'The BZZ approval transaction was not confirmed in time.',
-  )
-}
-
-/**
- * Send + confirm a topUp of `amountPerChunk` PLUR per chunk. The caller must
- * have run `ensureBzzAllowance` for `amountPerChunk << depth` first.
- */
-export async function topUpOnChain(
-  signerKey: PrivateKey,
-  stamp: Pick<PostageStamp, 'batchID'>,
-  amountPerChunk: bigint,
-  client?: MultichainClient,
-): Promise<void> {
-  const chain = client ?? (await postageChain())
-  const hash = await chain.topUpBatch({
-    originPrivateKey: ownerHexKey(signerKey),
-    batchId: batchIdHex(stamp),
-    amountPerChunk,
-  })
-  await withTimeout(
-    chain.waitForTransactionSuccess(hash),
-    CONFIRMATION_TIMEOUT_MS,
-    'The top-up transaction was not confirmed in time.',
-  )
-}
-
-/**
  * Run a postage operation as ONE atomic EIP-7702 transaction, when the chain
  * has the delegate deployed.
  *
- * @returns false when it does not — the caller then sends the operations
- *   separately, which is the same work with recoverable seams in between.
+ * The caller has already established that the chain can bundle
+ * ({@link assertBundlingSupported}); there is no second path if it cannot.
  */
 async function bundled(
   send: (chain: MultichainClient) => Promise<`0x${string}`>,
   timeoutMessage: string,
   client?: MultichainClient,
-): Promise<boolean> {
+): Promise<void> {
   const chain = client ?? (await postageChain())
-  if (!(await chain.supportsBundling())) {
-    return false
-  }
   await withTimeout(
     chain.waitForTransactionSuccess(await send(chain)),
     CONFIRMATION_TIMEOUT_MS,
     timeoutMessage,
   )
-  return true
 }
 
 /**
  * Buy a batch atomically: approve + createBatch, owned by the signer that pays.
- * @returns the new batch id, or undefined when the chain cannot bundle.
+ * @returns the new batch id.
  */
 export async function bundledCreate(
   signerKey: PrivateKey,
@@ -158,11 +102,8 @@ export async function bundledCreate(
   depth: number,
   totalPlur: bigint,
   client?: MultichainClient,
-): Promise<string | undefined> {
+): Promise<string> {
   const chain = client ?? (await postageChain())
-  if (!(await chain.supportsBundling())) {
-    return undefined
-  }
   const created = await chain.bundleCreate({
     originPrivateKey: ownerHexKey(signerKey),
     amountPerChunk,
@@ -180,44 +121,14 @@ export async function bundledCreate(
   return created.batchId
 }
 
-/**
- * Create a batch as its own transaction — the fallback where the chain has no
- * 7702 delegate. The caller must have approved the total first.
- * @returns the new batch id.
- */
-export async function createOnChain(
-  signerKey: PrivateKey,
-  amountPerChunk: bigint,
-  depth: number,
-  client?: MultichainClient,
-): Promise<string> {
-  const chain = client ?? (await postageChain())
-  const owner = signerKey.publicKey().address().toChecksum() as `0x${string}`
-  const created = await chain.createBatch({
-    originPrivateKey: ownerHexKey(signerKey),
-    owner,
-    amount: amountPerChunk,
-    depth,
-    bucketDepth: BUCKET_DEPTH,
-    batchNonce: randomBatchNonce(),
-    immutable: false,
-  })
-  await withTimeout(
-    chain.waitForTransactionSuccess(created.transactionHash),
-    CONFIRMATION_TIMEOUT_MS,
-    'The purchase transaction was not confirmed in time.',
-  )
-  return created.batchId
-}
-
-/** Extend atomically: approve + topUp. False if the chain cannot bundle. */
+/** Extend atomically: approve + topUp. */
 export function bundledExtend(
   signerKey: PrivateKey,
   stamp: Pick<PostageStamp, 'batchID'>,
   amountPerChunk: bigint,
   totalPlur: bigint,
   client?: MultichainClient,
-): Promise<boolean> {
+): Promise<void> {
   return bundled(
     (chain) =>
       chain.bundleExtend({
@@ -243,7 +154,7 @@ export function bundledResize(
   totalPlur: bigint,
   newDepth: number,
   client?: MultichainClient,
-): Promise<boolean> {
+): Promise<void> {
   return bundled(
     (chain) =>
       chain.bundleResize({
@@ -255,26 +166,6 @@ export function bundledResize(
       }),
     'The resize transaction was not confirmed in time.',
     client,
-  )
-}
-
-/** Send + confirm an increaseDepth — the signer MUST be the batch owner. */
-export async function increaseDepthOnChain(
-  signerKey: PrivateKey,
-  stamp: Pick<PostageStamp, 'batchID'>,
-  newDepth: number,
-  client?: MultichainClient,
-): Promise<void> {
-  const chain = client ?? (await postageChain())
-  const hash = await chain.increaseDepth({
-    originPrivateKey: ownerHexKey(signerKey),
-    batchId: batchIdHex(stamp),
-    newDepth,
-  })
-  await withTimeout(
-    chain.waitForTransactionSuccess(hash),
-    CONFIRMATION_TIMEOUT_MS,
-    'The resize transaction was not confirmed in time.',
   )
 }
 
@@ -290,11 +181,34 @@ export interface PostagePreflight {
  * Read the batch + write constraints and refuse early — with user-worded
  * errors — every condition the contract would revert on anyway.
  */
+/**
+ * Refuse a chain that cannot bundle, rather than doing the same work in
+ * separate transactions.
+ *
+ * The sequential path was the only way to reach a half-finished operation —
+ * a top-up that lands and a depth increase that then fails — and resuming it
+ * needs intent the chain cannot express (see #541). Every chain this product
+ * targets carries the delegate, so refusing here costs nothing real and
+ * removes the whole class of partial states.
+ *
+ * Deliberately a precondition, not a branch taken mid-flight: it fails before
+ * any money moves.
+ */
+export async function assertBundlingSupported(client?: MultichainClient): Promise<void> {
+  const chain = client ?? (await postageChain())
+  if (!(await chain.supportsBundling())) {
+    throw new Error(
+      'This chain cannot process the payment as a single transaction, so the operation was not started. Nothing has been charged.',
+    )
+  }
+}
+
 export async function preflightExtend(
   stamp: Pick<PostageStamp, 'batchID'>,
   client?: MultichainClient,
 ): Promise<PostagePreflight> {
   const chain = client ?? (await postageChain())
+  await assertBundlingSupported(chain)
   const [batch, constraints] = await Promise.all([
     chain.getPostageBatch(batchIdHex(stamp)),
     chain.getPostageWriteConstraints(),

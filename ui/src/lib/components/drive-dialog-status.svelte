@@ -5,7 +5,6 @@
 
 <script lang="ts">
   import CircleCheck from '@lucide/svelte/icons/circle-check'
-  import Info from '@lucide/svelte/icons/info'
   import LoaderCircle from '@lucide/svelte/icons/loader-circle'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
 
@@ -47,11 +46,6 @@
     onClose: () => void
     /** Offer a Cancel button while pending (e.g. an abortable payment). */
     cancellable?: boolean
-    /**
-     * `notice` for an outcome that failed to finish but lost nothing — a red
-     * warning there reads as damage the user then goes looking for.
-     */
-    tone?: 'error' | 'notice'
   }
 
   let {
@@ -63,7 +57,6 @@
     onRetry,
     onClose,
     cancellable = false,
-    tone = 'error',
     successTitle = 'Payment completed!',
     successBody = '',
     errorDetails = '',
@@ -110,11 +103,7 @@
 {:else}
   <Dialog onclose={onClose} {title}>
     <div class="flex items-start gap-2">
-      {#if tone === 'notice'}
-        <Info class="text-muted-foreground mt-0.5 size-4 shrink-0" />
-      {:else}
-        <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
-      {/if}
+      <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">{errorMessage}</p>
     </div>
     {#if errorDetails && errorDetails !== errorMessage}

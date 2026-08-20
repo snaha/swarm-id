@@ -179,7 +179,9 @@ The owner EOA authorises **`Simple7702Account`** — eth-infinitism's audited mi
 verified on Gnosis at `0x4Cd241E8d1510e30b2076397afc7508Ae59C66c9` — and sends the transaction from
 the EOA to itself, so `msg.sender` stays the owner throughout. Both `topUp` (which pulls from the
 sender) and `increaseDepth` (owner-only) require that. `supportsBundling()` gates it on the delegate
-having code, so an endpoint without one degrades to the sequential path. EIP-7702 has been live on
+having code, and an endpoint without one is REFUSED in preflight — there is no second path. It
+throws rather than reporting absence when the endpoint cannot answer, so an RPC blip cannot read as
+"this chain cannot pay atomically". EIP-7702 has been live on
 Gnosis since the Pectra fork, 30 April 2025.
 
 A replacement delegate must preserve two properties: **execution restricted to the account itself**,
@@ -189,9 +191,8 @@ larger surface than a three-call batch needs, and a bespoke delegate would add S
 burden to a TypeScript repo.
 
 Bundling makes the resize partial-failure state unreachable and removes the window in which an
-allowance sits unspent. `SizeIncreasePendingError` and its dialog copy remain for the sequential
-path — see [Resize partial failure](./Drive-Payment-Flow.md#resize-partial-failure), and
-[#541](https://github.com/snaha/swarm-id/issues/541) for dropping that path altogether.
+allowance sits unspent. Since it is the only path, that state cannot arise at all — see
+[Resize cannot half-finish](./Drive-Payment-Flow.md#resize-cannot-half-finish).
 
 ## Errors and wording
 
@@ -258,8 +259,8 @@ Nothing pins that, so a future cache could reintroduce the bug silently —
 - `@swarm-id/multichain` pins the `b67644b9` / `47aab79b` selectors in `abi.test.ts` and runs a fork
   suite (`pnpm test:fork`): fund → swap → create → topUp → increaseDepth → non-owner revert.
 - `ui/tests/drive-onchain.test.ts` runs four Playwright tests against the local chain, skipped when
-  no chain answers: extend grows the on-chain balance and the recorded TTL; extend again with the
-  delegate cleared, covering the sequential fallback; resize keeps the lifespan by topping up before
+  no chain answers: extend grows the on-chain balance and the recorded TTL; an extend with the
+  delegate cleared is refused without charging; resize keeps the lifespan by topping up before
   increasing depth; an interrupted resize resumes from chain truth without paying twice.
 - Chain-level dev helpers live in `@swarm-id/multichain`'s `src/dev.ts` (`fundLocalAccount`,
   `simulateWidgetPurchase`), wrapped by `ui/src/lib/dev/chain-funding.ts` and driven from the /dev

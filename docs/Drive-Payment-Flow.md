@@ -163,41 +163,31 @@ in SushiSwap V3 BZZ/USDC. So:
 
 ## Failure handling
 
-| Failure point                            | State after                                          | Recovery                                |
-| ---------------------------------------- | ---------------------------------------------------- | --------------------------------------- |
-| Quote fails / no route                   | nothing spent                                        | retry, other token or chain             |
-| User rejects source tx                   | nothing spent                                        | back to the pay screen                  |
-| Relay leg fails                          | per Relay SDK semantics (refunded or held)           | retry re-quotes; "View details"         |
-| xDAI delivered, swap fails               | xDAI parked at owner                                 | funds check consumes residual on retry  |
-| Swap done, approve or topUp fails        | BZZ parked at owner                                  | same                                    |
-| topUp done, increaseDepth fails (resize) | unbundled path only: lifespan extended, size pending | see below                               |
-| Anything after payment, dialog closed    | funds and state on chain                             | next dialog open reconciles and resumes |
+| Failure point                          | State after                                | Recovery                                |
+| -------------------------------------- | ------------------------------------------ | --------------------------------------- |
+| Quote fails / no route                 | nothing spent                              | retry, other token or chain             |
+| User rejects source tx                 | nothing spent                              | back to the pay screen                  |
+| Relay leg fails                        | per Relay SDK semantics (refunded or held) | retry re-quotes; "View details"         |
+| xDAI delivered, swap fails             | xDAI parked at owner                       | funds check consumes residual on retry  |
+| Swap done, approve or topUp fails      | BZZ parked at owner                        | same                                    |
+| Chain cannot bundle (no 7702 delegate) | nothing spent — refused in preflight       | nothing to recover                      |
+| Anything after payment, dialog closed  | funds and state on chain                   | next dialog open reconciles and resumes |
 
 Value is never parked deliberately. The quote requests exactly what the operation needs plus the swap
 buffer, which the exact-input swap turns into a little surplus BZZ rather than xDAI. Both kinds of
 residual are consumed before the next request: BZZ by `fundingShortfall`, and xDAI above the gas
 budget by `quoteFunding`, which subtracts it from what the rail is asked to deliver.
 
-### Resize partial failure
+### Resize cannot half-finish
 
-On any chain with the EIP-7702 delegate — which includes Gnosis mainnet — the resize is one atomic
-transaction, so the top-up and the depth increase land together or not at all. What follows applies
-only to the unbundled fallback.
+A resize is one atomic EIP-7702 transaction: the compensating top-up and the depth increase land
+together or not at all. A chain without the delegate is refused in preflight, before anything is
+charged, rather than served by a second orchestration path — so the "payment succeeded, only the
+depth increase is pending" state the earlier design worried about (#392) is unreachable, and there
+is no partial-failure copy to get right.
 
-Because the engine inverts the old dilute-first ordering, a drive can never come out of a resize
-shorter-lived than it went in. The reachable partial state is the benign inverse: **payment
-succeeded, the lifespan got longer, and only the depth increase is pending**. `runResize` throws a
-typed `SizeIncreasePendingError` for it, and `DriveDialogStatus` renders it with a neutral `tone`
-rather than a red warning — nothing shrank, so a warning icon would send the user looking for damage
-that did not happen. The drive row needs no warning state either.
-
-Retrying it is **not yet free**. `runResize` re-derives `resizePlan` from the live remaining balance,
-which the top-up has just increased, so a keep-lifespan retry asks for a second top-up sized against
-the grown figure — for a depth step of one, exactly twice the first. Chain state alone cannot fix
-this: a batch topped up for a pending resize is indistinguishable from one that always held that
-balance, so resuming needs the target depth persisted on the record. Tracked, along with the dialog
-copy that currently promises otherwise, in
-[#541](https://github.com/snaha/swarm-id/issues/541).
+Because the engine also inverts the old dilute-first ordering, a drive can never come out of a
+resize shorter-lived than it went in.
 
 ## Dev and testing
 

@@ -19,12 +19,7 @@
   import { Switch } from '$lib/components/ui/switch'
   import { formatBytes, formatRemaining } from '$lib/drives'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
-  import {
-    type OperationStep,
-    SizeIncreasePendingError,
-    previewResize,
-    runResize,
-  } from '$lib/payment/drive-operation'
+  import { type OperationStep, previewResize, runResize } from '$lib/payment/drive-operation'
   import {
     PaymentCancelledError,
     createFundingRequester,
@@ -51,7 +46,6 @@
   let phase = $state<Phase>('form')
   let errorMessage = $state('')
   let errorDetail = $state('')
-  let errorTone = $state<'error' | 'notice'>('error')
   let step = $state<OperationStep>('checking')
   // The steps already finished this attempt, so a failure says what was paid for.
   let history = $state<string[]>([])
@@ -149,7 +143,6 @@
     errorMessage = ''
     step = 'checking'
     history = []
-    errorTone = 'error'
     try {
       // Deliberately unguarded: the top-up and the depth increase are on-chain
       // spends whose record updates must land even if the dialog was closed —
@@ -186,10 +179,6 @@
         phase = 'form'
         return
       }
-      // A pending size increase is not a loss — the payment landed and the
-      // lifespan grew, so it gets the benign presentation and its own wording
-      // rather than the generic failure surface (#392).
-      errorTone = caught instanceof SizeIncreasePendingError ? 'notice' : 'error'
       errorDetail = caught instanceof Error ? (caught.stack ?? caught.message) : String(caught)
       errorMessage = caught instanceof Error ? caught.message : 'Could not increase the size.'
       phase = 'error'
@@ -213,7 +202,6 @@
     {history}
     {errorMessage}
     errorDetails={errorDetail}
-    tone={errorTone}
     successTitle="Payment completed!"
     successBody="Your drive is now larger."
     onRetry={() => (phase = 'form')}

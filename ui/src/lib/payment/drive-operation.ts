@@ -23,17 +23,14 @@ import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { faultPoint } from '$lib/payment/fault-injection'
 import type { OperationJournal, PendingOperation } from '$lib/payment/operation-journal.svelte'
 import {
+  assertBundlingSupported,
   bundledCreate,
   bundledExtend,
   bundledResize,
-  createOnChain,
-  ensureBzzAllowance,
   fundingShortfall,
-  increaseDepthOnChain,
   preflightExtend,
   preflightResize,
   reconcileStampFromChain,
-  topUpOnChain,
 } from '$lib/payment/postage-onchain'
 import {
   type ResizePlan,
@@ -147,6 +144,7 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
     return recordPurchase(account, orphan.batchId, orphan.name, journal, onStep)
   }
 
+  await assertBundlingSupported(client)
   const constraints = await client.getPostageWriteConstraints()
   if (constraints.paused) {
     throw new Error("Swarm's payment contract is temporarily paused. Try again later.")
@@ -167,15 +165,7 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
 
   onStep?.('paying')
   const batchId = await bundledCreate(signerKey, amountPerChunk, depth, bzzNeeded, client)
-  if (batchId) {
-    return journalThenRecord(account, batchId, name, journal, onStep)
-  }
-  // No delegate on this chain: approve, then create, as two transactions.
-  onStep?.('approving')
-  await ensureBzzAllowance(signerKey, bzzNeeded, client)
-  onStep?.('paying')
-  const created = await createOnChain(signerKey, amountPerChunk, depth, client)
-  return journalThenRecord(account, created, name, journal, onStep)
+  return journalThenRecord(account, batchId, name, journal, onStep)
 }
 
 /**
@@ -253,14 +243,8 @@ export async function runExtend(options: ExtendOptions): Promise<void> {
   await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
 
   onStep?.('paying')
-  // One atomic transaction where the chain supports it; otherwise the same two
-  // operations in sequence, with an approval left standing in between.
-  if (!(await bundledExtend(signerKey, drive, topUpAmount, bzzNeeded, client))) {
-    onStep?.('approving')
-    await ensureBzzAllowance(signerKey, bzzNeeded, client)
-    onStep?.('paying')
-    await topUpOnChain(signerKey, drive, topUpAmount, client)
-  }
+  // One atomic transaction: approve and top up together, or neither.
+  await bundledExtend(signerKey, drive, topUpAmount, bzzNeeded, client)
 
   onStep?.('recording')
   const reconciled = await reconcileStampFromChain(account, drive, client)
@@ -280,44 +264,13 @@ export interface ResizeOptions extends RunOptions {
 }
 
 /**
- * The depth increase failed after everything payable had already landed.
- *
- * Worth its own type because it is the ONLY partial state a resize can end in,
- * and it is a benign one: the drive is bigger-lifespan, not smaller-anything.
- * The design this replaced ("Lifespan decreased", #392) was drawn for the
- * opposite outcome, which the engine's ordering makes unreachable — so the
- * dialog must not present this as a loss.
- *
- * The retry really is free now: the journal remembers that the compensating
- * top-up was paid and which depth it was paid for, so resuming submits the
- * depth increase alone. Without that record the plan would be re-derived from
- * the grown balance and would charge for the compensation twice (§6.6).
- */
-export class SizeIncreasePendingError extends Error {
-  constructor(cause: unknown) {
-    super(
-      'Your payment went through and the drive’s lifespan is longer, but the size increase did not finish. Trying again finishes it — the payment already made covers it, so there is nothing more to pay.',
-      { cause },
-    )
-    this.name = 'SizeIncreasePendingError'
-  }
-}
-
-/**
  * Grow a drive: compensating top-up FIRST, then the depth increase — the order
  * the contract requires (it checks the post-dilution balance against its
  * minimum before any compensation).
  *
- * Where the chain has the 7702 delegate — which includes Gnosis mainnet — this
- * runs as ONE transaction and there is no partial state to reach.
- *
- * On the unbundled fallback there is: the payment landed and the lifespan grew,
- * only the depth increase is pending. Nothing shrank, so nothing is damaged,
- * and the retry is free — the journal holds the target depth and the fact the
- * compensating top-up was paid, which is exactly what chain state cannot say
- * (a batch topped up for a pending resize looks like one that always held that
- * balance). Re-planning without it would charge for the compensation twice.
- * See docs/Drive-Payment-Flow.md §6.6.
+ * Both land in ONE transaction, so there is no partial state to reach: a chain
+ * without the 7702 delegate is refused in preflight rather than served by a
+ * second, seam-ful path (#541).
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
   const { account, drive, newDepth, keepLifespan, requestFunding, onStep } = options
@@ -355,40 +308,11 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
   faultPoint('after-funding')
 
-  // Bundled, there is no seam to fail at: top-up and depth increase land
-  // together or not at all, so the partial state below cannot arise.
+  // There is no seam to fail at: the compensating top-up and the depth
+  // increase land together or not at all, so a half-resized drive — the state
+  // #392 was drawn for — cannot arise.
   onStep?.('paying')
-  const bundled = await bundledResize(
-    signerKey,
-    drive,
-    plan.topUpAmount,
-    bzzNeeded,
-    newDepth,
-    client,
-  )
-
-  if (!bundled) {
-    if (plan.topUpAmount > 0n) {
-      onStep?.('approving')
-      await ensureBzzAllowance(signerKey, bzzNeeded, client)
-      onStep?.('paying')
-      await topUpOnChain(signerKey, drive, plan.topUpAmount, client)
-      // The money is on-chain: record the grown lifespan before attempting the
-      // increase, so a failure here leaves an accurate record.
-      account.updateStamp(drive.batchID, plan.afterTopUp)
-    }
-
-    onStep?.('resizing')
-    try {
-      await increaseDepthOnChain(signerKey, drive, newDepth, client)
-    } catch (caught) {
-      // Only reachable on the unbundled path. By here the top-up has confirmed
-      // (or none was needed), so nothing shrank and the drive is intact — but
-      // retrying re-prices against the now-longer lifespan and charges again.
-      // Typed so the dialog can say precisely that (#392, §6.6).
-      throw new SizeIncreasePendingError(caught)
-    }
-  }
+  await bundledResize(signerKey, drive, plan.topUpAmount, bzzNeeded, newDepth, client)
 
   onStep?.('recording')
   const reconciled = await reconcileStampFromChain(account, drive, client)

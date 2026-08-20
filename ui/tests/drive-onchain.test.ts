@@ -149,12 +149,12 @@ test('extend tops the batch up on chain and records the longer lifespan', async 
 })
 
 /**
- * The sequential path is only reachable where the EIP-7702 delegate is absent —
- * which, since every dev flow installs it, is nowhere by default. Without this
- * test the fallback and its whole partial-failure treatment could rot unnoticed
- * while the bundled path stayed green.
+ * With no sequential fallback, a chain missing the delegate must REFUSE — and
+ * refuse before charging anything. The failure mode this replaces was worse
+ * than an error: the same work in separate transactions, with a seam in the
+ * middle that could leave a drive paid for and half-resized (#541).
  */
-test('extends without the 7702 delegate, one transaction at a time', async ({ page }) => {
+test('refuses to operate on a chain without the 7702 delegate', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)
   await createAccountWithOnChainDrive(page)
   const before = await storedDrive(page)
@@ -170,16 +170,17 @@ test('extends without the 7702 delegate, one transaction at a time', async ({ pa
     await dialog.getByRole('button', { name: 'Increase' }).click()
     await dialog.getByRole('button', { name: 'Proceed' }).click()
 
-    await expect(page.getByText('lifespan has been extended')).toBeVisible({
+    await expect(page.getByText('single transaction')).toBeVisible({
       timeout: ONCHAIN_TIMEOUT_MS,
     })
   } finally {
     await restoreDelegate()
   }
 
+  // Refused, not half-done: the drive is exactly as it was.
   const after = await storedDrive(page)
-  expect(BigInt(after!.amount)).toBeGreaterThan(BigInt(before!.amount))
-  expect(after!.ttl).toBeGreaterThan(before!.ttl)
+  expect(after!.amount).toBe(before!.amount)
+  expect(after!.ttl).toBe(before!.ttl)
   expect(after!.depth).toBe(before!.depth)
 })
 
