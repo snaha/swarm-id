@@ -24,7 +24,8 @@ import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { simulateWidgetPurchase } from '@swarm-id/multichain/dev'
 import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 
-const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
+import { CHAIN_RPC_URL, chainReachable } from './helpers'
+
 const BEE_URL = 'http://localhost:1633'
 const PROBE_TIMEOUT_MS = 2000
 /** Bee polls the postage contract on a ~25s cycle; leave room for a few. */
@@ -43,21 +44,19 @@ const PAYER_XDAI = 2n * XDAI
  */
 const SWAP_XDAI = XDAI / 4n
 
-async function reachable(url: string, init?: RequestInit): Promise<boolean> {
+/** The Bee half of the cluster; the chain half is the shared `chainReachable`. */
+async function beeReachable(): Promise<boolean> {
   try {
-    const response = await fetch(url, { ...init, signal: AbortSignal.timeout(PROBE_TIMEOUT_MS) })
+    const response = await fetch(`${BEE_URL}/health`, {
+      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
+    })
     return response.ok
   } catch {
     return false
   }
 }
 
-const clusterUp =
-  (await reachable(CHAIN_RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-  })) && (await reachable(`${BEE_URL}/health`))
+const clusterUp = (await chainReachable()) && (await beeReachable())
 
 interface KnownBatch {
   batchID: string

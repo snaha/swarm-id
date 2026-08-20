@@ -16,34 +16,19 @@ import { type Page, expect, test } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
 import { devRpc, ensureBundlingDelegate } from '@swarm-id/multichain/dev'
 
-import { completeCreateFlow } from './helpers'
+import { CHAIN_RPC_URL, chainReachable, completeCreateFlow } from './helpers'
 
 // Defaults to the bee-compose cluster's chain; set CHAIN_RPC_URL
 // to run the identical suite against the same snapshot standalone
 // (`pnpm dev:chain`).
-const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
+const ANVIL_RPC_URL = CHAIN_RPC_URL
 const BEE_NODE_URL = 'http://localhost:1633/'
 /** On-chain work spans several 5s-block confirmations. */
 const ONCHAIN_TIMEOUT_MS = 120_000
 /** A cold dev server compiling a heavy route, not a chain wait. */
 const PAGE_READY_TIMEOUT_MS = 30_000
-const PROBE_TIMEOUT_MS = 2000
 
-async function anvilReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(ANVIL_RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    })
-    return typeof ((await response.json()) as { result?: string }).result === 'string'
-  } catch {
-    return false
-  }
-}
-
-const chainUp = await anvilReachable()
+const chainUp = await chainReachable()
 
 /** The chain this suite mutates, and the delegate address the app resolves. */
 const SETTINGS = gnosisMainnetSettings({ rpcUrls: [ANVIL_RPC_URL] })

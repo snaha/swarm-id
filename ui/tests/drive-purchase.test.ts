@@ -10,52 +10,29 @@
  */
 import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect, test } from '@playwright/test'
+import { gnosisMainnetSettings } from '@swarm-id/multichain'
 
-import { addDrive, completeCreateFlow, confirmPurchased, fundPostageSigner } from './helpers'
+import {
+  CHAIN_RPC_URL,
+  addDrive,
+  chainReachable,
+  completeCreateFlow,
+  confirmPurchased,
+  fundPostageSigner,
+} from './helpers'
 
-const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
+const ANVIL_RPC_URL = CHAIN_RPC_URL
 const BEE_NODE_URL = 'http://localhost:1633/'
 const ONCHAIN_TIMEOUT_MS = 120_000
-const PROBE_TIMEOUT_MS = 2000
-const LOCAL_POSTAGE_STAMP = '0xe7f1725E7734CE288F8367e1Bb143E90bb3F0512'
-const GNOSIS_POSTAGE_STAMP = '0x45a1502382541Cd610CC9068e88727426b696293'
-const GNOSIS_CHAIN_ID = 100
+/** The deployment the app itself resolves — the local chain carries it too. */
+const POSTAGE_STAMP = gnosisMainnetSettings().addresses.postageStamp
 const BATCHES_SELECTOR = '0xc81e25ab'
 const ZERO_ADDRESS_WORD = '0'.repeat(64)
 
-async function anvilReachable(): Promise<boolean> {
-  try {
-    const response = await fetch(ANVIL_RPC_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-      signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
-    })
-    return typeof ((await response.json()) as { result?: string }).result === 'string'
-  } catch {
-    return false
-  }
-}
+const chainUp = await chainReachable()
 
-const chainUp = await anvilReachable()
-
-async function chainId(): Promise<number> {
-  const response = await fetch(ANVIL_RPC_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-  })
-  return Number(BigInt(((await response.json()) as { result: string }).result))
-}
-
-/**
- * The batch's on-chain owner, or undefined when the contract has no such
- * batch. Which PostageStamp to ask follows the chain: a Gnosis chain (the
- * bee-compose cluster) carries the mainnet deployment.
- */
+/** The batch's on-chain owner, or undefined when the contract has no such batch. */
 async function onChainOwner(batchId: string): Promise<string | undefined> {
-  const postageStamp =
-    (await chainId()) === GNOSIS_CHAIN_ID ? GNOSIS_POSTAGE_STAMP : LOCAL_POSTAGE_STAMP
   const response = await fetch(ANVIL_RPC_URL, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -63,7 +40,7 @@ async function onChainOwner(batchId: string): Promise<string | undefined> {
       jsonrpc: '2.0',
       id: 1,
       method: 'eth_call',
-      params: [{ to: postageStamp, data: `${BATCHES_SELECTOR}${batchId}` }, 'latest'],
+      params: [{ to: POSTAGE_STAMP, data: `${BATCHES_SELECTOR}${batchId}` }, 'latest'],
     }),
   })
   const { result } = (await response.json()) as { result?: string }
