@@ -39,6 +39,7 @@
     stampFromBatch,
     stampTtlSeconds,
   } from '$lib/payment/purchase'
+  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import type { Account } from '$lib/types'
 
   const STORAGE_OPTIONS = [
@@ -187,9 +188,17 @@
     // the payment screens are confirmation enough.
     if (storage === 'existing') {
       void attachExisting()
-    } else {
-      void purchaseNew()
+      return
     }
+    // The /dev mock exercises the widget method without a chain or a funding
+    // shortfall in the way — the real widget only settles on mainnet. In
+    // production the toggle is off and this branch is never taken; the in-app
+    // engine below is never mocked.
+    if (devSettingsStore.data.mockStampEnabled) {
+      void purchaseViaWidget()
+      return
+    }
+    void purchaseNew()
   }
 
   async function purchaseNew() {
@@ -246,7 +255,9 @@
    * The design's proven "Pay with crypto" method: hand the whole purchase to
    * the fund.bzz.limo widget popup instead of the in-app engine. Reached from
    * the payment screen's method picker, i.e. only once the in-app run found a
-   * shortfall — a prefunded signer buys in-app without ever paying.
+   * shortfall — a prefunded signer buys in-app without ever paying. (The /dev
+   * mock reaches `purchaseViaWidget` directly, which is how this path stays
+   * exercisable off mainnet.)
    */
   function payWithWidget() {
     void purchaseViaWidget()
@@ -259,7 +270,12 @@
     // the engine's epilogue cannot fight the widget flow for the dialog.
     funding.cancel()
     phase = 'pending'
-    pendingLabel = 'Complete the purchase in the popup window.'
+    // The popup-less /dev mock settles locally — telling the user to look for a
+    // popup window there is wrong.
+    pendingLabel =
+      devSettingsStore.data.mockStampEnabled && !devSettingsStore.data.mockStampPopup
+        ? 'Simulating the purchase…'
+        : 'Complete the purchase in the popup window.'
     history = []
     errorMessage = ''
     errorDetail = ''
@@ -274,6 +290,13 @@
       )
       purchase = openStampPurchaseWidget({
         destination,
+        // /dev mock (see dev-settings): simulate the purchase without a real
+        // cross-chain payment. No-op in production, where the toggle is off.
+        mocked: devSettingsStore.data.mockStampEnabled,
+        mockPopup: devSettingsStore.data.mockStampPopup,
+        mockError: devSettingsStore.data.mockStampResult === 'error',
+        // Only the mock can honour this — the real widget picks the size itself.
+        mockDepth: depthValue === '' ? undefined : Number(depthValue),
         onSuccess: (batch) => {
           if (!attempt.current) {
             return

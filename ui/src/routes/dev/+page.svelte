@@ -34,6 +34,7 @@
   } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
+  import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
   import {
     ANVIL_ACCOUNT,
@@ -59,6 +60,7 @@
   import { resolvePaymentRail } from '$lib/payment/resolve-rail'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
+  import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
   import type { Account } from '$lib/types'
@@ -909,6 +911,14 @@ Check console logs for details:
   const LABEL_CLASS = 'flex flex-col gap-1.5 text-sm'
   const LABEL_TEXT_CLASS = 'text-muted-foreground'
   const CARD_CLASS = 'flex flex-col gap-2 rounded-lg border bg-card p-4'
+
+  // Mock stamp widget settings — `devSettingsStore` is the single source of
+  // truth (durable + cross-tab); the controls bind straight to its setters via
+  // function bindings, so there is no local mirror to drift.
+  const MOCK_RESULT_OPTIONS = [
+    { value: 'success', label: 'Success (creates a drive)' },
+    { value: 'error', label: 'Error (purchase failed)' },
+  ]
 </script>
 
 {#snippet chainBanner(
@@ -1305,13 +1315,53 @@ Check console logs for details:
   <!-- Chain Tab -->
   {#if activeTab === 'chain'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Simulated purchase</h3>
+      <h3 class="text-lg font-semibold">Mock widget purchase</h3>
       <p class="text-muted-foreground text-sm">
-        <strong>Add drive</strong> and the paid drive operations all buy for real, against whichever chain
-        this page is pointed at — there is no simulated settlement any more, and no outcome to choose.
-        Money always reaches the batch owner through a payment the user makes. Nothing in the app settles
-        an operation out of the faucet below; that is yours to do here, before an operation needs it.
+        In-app purchases, extends and resizes are always real — they buy against whichever chain
+        this page is pointed at, and nothing settles them out of the faucet below. The one mock is
+        the
+        <strong>Pay with crypto</strong>
+        widget method: the real widget only settles on mainnet, so this is what makes that path exercisable
+        here. While it is on, <strong>Add drive</strong> goes through the (mocked) widget instead of
+        the in-app engine. The batch it fabricates is not on chain, which is why extend and resize
+        cannot act on it; for a drive backed by a real batch, use
+        <strong>Create drive to test with</strong> below.
       </p>
+      <label class="flex items-center gap-2">
+        <Switch
+          bind:checked={
+            () => devSettingsStore.data.mockStampEnabled,
+            (enabled) => devSettingsStore.setMockStampEnabled(enabled)
+          }
+          aria-label="Enable mock stamp purchase"
+        />
+        <span class="text-sm">Enable mock purchases</span>
+      </label>
+      {#if devSettingsStore.data.mockStampEnabled}
+        <label class="flex items-center gap-2">
+          <Switch
+            bind:checked={
+              () => devSettingsStore.data.mockStampPopup,
+              (popup) => devSettingsStore.setMockStampPopup(popup)
+            }
+            aria-label="Open widget popup while mocking"
+          />
+          <span class="text-sm"
+            >Open widget popup (off = local, works where popups are blocked)</span
+          >
+        </label>
+        <label class={`${LABEL_CLASS} w-64`}>
+          <span class={LABEL_TEXT_CLASS}>Outcome</span>
+          <Select
+            options={MOCK_RESULT_OPTIONS}
+            bind:value={
+              () => devSettingsStore.data.mockStampResult,
+              (result) =>
+                devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
+            }
+          />
+        </label>
+      {/if}
 
       <div class="bg-border my-4 h-px"></div>
 
