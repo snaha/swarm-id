@@ -1833,3 +1833,88 @@ describe("SwarmIdProxy coordinator lifetime + flush (PR #537 review)", () => {
     expect(stamper.flush).toHaveBeenCalledTimes(1)
   })
 })
+
+describe("SwarmIdProxy redundant default rebinds (PR #537 review)", () => {
+  const CoordinatorMock = vi.mocked(BatchWriteCoordinator)
+  let proxy: SwarmIdProxy
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+    CoordinatorMock.mockClear()
+    vi.stubGlobal("localStorage", {
+      getItem: () => null,
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    })
+    proxy = makeProxy()
+    ;(proxy as never)["parentOrigin"] = PARENT_ORIGIN
+    ;(proxy as never)["deviceId"] = "device-1"
+    ;(proxy as never)["utilizationStore"] = {}
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: {
+        postageStamps: [stampStub(B1)],
+        defaultPostageStampBatchID: stampStub(B1).batchID,
+      },
+    })
+    ;(proxy as never)["lookupAccountForApp"] = () =>
+      Promise.resolve({
+        owner: { toHex: () => "ab".repeat(20) },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 2,
+      })
+  })
+
+  const write = () =>
+    (proxy as never)["withModeAwareWriteLock"](
+      undefined,
+      async (t: unknown) => t,
+    ) as Promise<unknown>
+
+  const builtCoordinators = () =>
+    CoordinatorMock.mock.results.map(
+      (r) =>
+        r.value as unknown as {
+          teardown: ReturnType<typeof vi.fn>
+          withWrite: ReturnType<typeof vi.fn>
+        },
+    )
+
+  it("two concurrent cold-start writes build ONE coordinator and never tear it down", async () => {
+    // Both writes resolve their stamper before either install lands, so both
+    // come back with a `bindDefault` build for the SAME stamp. A second
+    // install tears the first's coordinator down — and the first write is
+    // already holding that instance, so its `withWrite` would run against a
+    // disposed coordinator ("BatchWriteCoordinator has been torn down"), plus
+    // the teardown releases the partition on-network for nothing.
+    await Promise.all([write(), write()])
+
+    expect(CoordinatorMock).toHaveBeenCalledTimes(1)
+    const [built] = builtCoordinators()
+    expect(built.teardown).not.toHaveBeenCalled()
+    // Both writes ran against the single live coordinator...
+    expect(built.withWrite).toHaveBeenCalledTimes(2)
+    expect((proxy as never)["coordinator"]).toBe(built)
+    // ...with the SAME stamper instance. The loser's duplicate build is
+    // discarded at install time; two live stampers for one batch would
+    // diverge on bucket state.
+    const [first, second] = built.withWrite.mock.calls.map((c) => c[0])
+    expect(first).toBe(second)
+  })
+
+  it("a re-install of the SAME binding keeps the live coordinator", async () => {
+    // `bindStamp` is also reached off the work queue (parentIdentify / the auth
+    // flow). Rebuilding an identical binding costs a lease release + cold
+    // re-acquire and kills any write holding the old instance.
+    await write()
+    expect(CoordinatorMock).toHaveBeenCalledTimes(1)
+    const [built] = builtCoordinators()
+
+    await (proxy as never)["bindStamp"](stampStub(B1))
+
+    expect(CoordinatorMock).toHaveBeenCalledTimes(1)
+    expect(built.teardown).not.toHaveBeenCalled()
+    expect((proxy as never)["coordinator"]).toBe(built)
+  })
+})

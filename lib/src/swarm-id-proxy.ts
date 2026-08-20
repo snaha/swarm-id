@@ -269,6 +269,16 @@ export class SwarmIdProxy {
    */
   private boundStampDepth: number | undefined
   /**
+   * What the LIVE coordinator was built from: its lease stamper instance, and
+   * everything else it captured that isn't baked into that stamper (Bee node
+   * URL, account id, partition count, device id, account fingerprint). A
+   * rebind matching both reuses the coordinator instead of tearing it down —
+   * see the reuse guard in {@link initializeStamper}. Always cleared together
+   * with `this.coordinator`.
+   */
+  private coordinatorStamper: UtilizationAwareStamper | undefined
+  private coordinatorInputs: string | undefined
+  /**
    * Per-batch stamper cache, keyed by batch id hex — the default binding's
    * stamper plus one per targeted batch (`UploadOptions.batchID`), each with
    * its signing key and (lazily) its parallel-signing worker pool. Stampers
@@ -655,6 +665,9 @@ export class SwarmIdProxy {
     // Concurrent callers for the same batch share one in-flight build
     // (`stamperBuilds`); a cached instance for the batch is reused rather than
     // duplicated — two live stampers for one batch would diverge on buckets.
+    // A build that already finished but whose install is still queued is NOT
+    // visible here (nothing is cached before the install re-validates the
+    // account inputs) — that duplicate is discarded at install time instead.
     const cached = this.stampEntries.get(targetHex)
     const stamper =
       cached &&
@@ -698,13 +711,29 @@ export class SwarmIdProxy {
           `Account inputs changed while building the stamper for batch ${targetHex}`,
         )
       }
+      // The queue was also open for another caller's INSTALL. Two concurrent
+      // writes can each resolve their own build for this batch (the in-flight
+      // dedupe only covers overlapping builds, and nothing is cached before
+      // this re-validation), so a validated instance may already be live.
+      // Install the one that WON and discard our duplicate: one live stamper
+      // per batch — and for `bindDefault`, the coordinator's lease stamper
+      // stays the instance it was built with, so `initializeStamper`'s reuse
+      // guard keeps the coordinator instead of tearing it down under the write
+      // that is already holding it.
+      const live = this.stampEntries.get(targetHex)
+      const winner =
+        live &&
+        live.signerKey === signerKey &&
+        live.stamper.depth === stamp.depth
+          ? live.stamper
+          : stamper
       if (bindDefault) {
-        await this.bindStamp(stamp, stamper)
+        await this.bindStamp(stamp, winner)
         this.emitConnectionInfoIfChanged()
         return { stamper: this.stamper, coordinator: this.coordinator }
       }
-      this.setStampEntry(stamper, signerKey)
-      return { stamper, coordinator: this.coordinator }
+      this.setStampEntry(winner, signerKey)
+      return { stamper: winner, coordinator: this.coordinator }
     })
   }
 
@@ -726,8 +755,19 @@ export class SwarmIdProxy {
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
     this.boundStampDepth = undefined
+    this.dropCoordinator()
+  }
+
+  /**
+   * Tear the write coordinator down and forget it — including the inputs
+   * `initializeStamper`'s reuse guard compares against, which must never
+   * outlive the instance they describe.
+   */
+  private dropCoordinator(): void {
     this.coordinator?.teardown()
     this.coordinator = undefined
+    this.coordinatorStamper = undefined
+    this.coordinatorInputs = undefined
   }
 
   /**
@@ -847,8 +887,7 @@ export class SwarmIdProxy {
 
     // Release the partition lease (best-effort) so peers see this device
     // vacate its partition promptly.
-    this.coordinator?.teardown()
-    this.coordinator = undefined
+    this.dropCoordinator()
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
@@ -1005,10 +1044,7 @@ export class SwarmIdProxy {
     // belong to the PREVIOUS batch — heartbeating lease SOCs under a batch
     // this proxy no longer serves, and stranding `resolveUploadStamper`'s
     // promotion path, which is gated on `!this.coordinator`.
-    const bailOut = (): void => {
-      this.coordinator?.teardown()
-      this.coordinator = undefined
-    }
+    const bailOut = (): void => this.dropCoordinator()
     if (!this.signerKey || !this.postageBatchId) {
       console.warn(
         "[Proxy] Cannot initialize stamper: missing signer key or batch ID",
@@ -1079,7 +1115,31 @@ export class SwarmIdProxy {
     // acquire latency; a concurrent first upload queues on the same write
     // lock and then finds the lease already held. Single-device accounts get
     // a lock-only coordinator.
-    this.coordinator?.teardown()
+    //
+    // A rebind that changes NOTHING the coordinator captured reuses the live
+    // one. Rebuilding is never free — teardown releases the partition on the
+    // network and the successor pays a cold re-acquire — and it is not safe
+    // either: `withModeAwareWriteLock` captures the coordinator on the queue
+    // and runs the write off it, so tearing down a still-current instance
+    // fails an in-flight upload with "BatchWriteCoordinator has been torn
+    // down". Reachable without any storage change at all: two concurrent
+    // cold-start writes both resolve a `bindDefault` build for the same stamp
+    // and both install it.
+    const coordinatorInputs = [
+      this.beeApiUrl,
+      accountInfo.accountId,
+      String(accountInfo.partitionCount),
+      this.requireDeviceId(),
+      this.stamperAccountFingerprint,
+    ].join("|")
+    if (
+      this.coordinator &&
+      this.coordinatorStamper === this.stamper &&
+      this.coordinatorInputs === coordinatorInputs
+    ) {
+      return
+    }
+    this.dropCoordinator()
     const backupKeyHex = await deriveSecret(
       uint8ArrayToHex(accountInfo.encryptionKey),
       "backup-key",
@@ -1133,6 +1193,8 @@ export class SwarmIdProxy {
       // lock (the publish re-enters the lock via the coordinator).
       onLeaseAcquired: () => this.schedulePublish("acquired"),
     })
+    this.coordinatorStamper = this.stamper
+    this.coordinatorInputs = coordinatorInputs
     this.coordinator.startLease()
   }
 
@@ -2401,8 +2463,7 @@ export class SwarmIdProxy {
     this.authLoading = false
     this.appSecret = undefined
     this.deviceId = undefined
-    this.coordinator?.teardown()
-    this.coordinator = undefined
+    this.dropCoordinator()
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
