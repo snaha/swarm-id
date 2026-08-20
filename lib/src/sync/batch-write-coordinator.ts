@@ -454,11 +454,7 @@ export class BatchWriteCoordinator {
     // `joinedSecondaries` yet): a displacement signalled meanwhile must abort
     // the write here — `bindPartition` below would reset `leaseStale` and let
     // the upload stamp a partition a peer now owns.
-    if (
-      this.disposed ||
-      this.partitionLease !== lease ||
-      this.lostLease === lease
-    ) {
+    if (this.leaseSessionLost(lease)) {
       throw new PartitionLeaseLostError()
     }
     stamper.bindPartition({
@@ -501,13 +497,7 @@ export class BatchWriteCoordinator {
     if (!resolve || this.deps.partitionCount <= 1) return
     let restored = 0
     for (const [key, seed] of [...this.pendingJoinedRestores]) {
-      if (
-        this.disposed ||
-        this.leaseEpoch !== epoch ||
-        this.partitionLease !== lease
-      ) {
-        return
-      }
+      if (this.leaseSessionLost(lease, epoch)) return
       const partition = lease.currentPartition
       if (partition === undefined) return
       if (this.joinedSecondaries.has(key)) {
@@ -549,14 +539,7 @@ export class BatchWriteCoordinator {
             // straggles past a lease loss would re-arm a stamper on a
             // partition a peer now owns. Same triple check
             // `ensureBatchJoined` makes, plus the epoch.
-            if (
-              this.disposed ||
-              this.leaseEpoch !== epoch ||
-              this.partitionLease !== lease ||
-              this.lostLease === lease
-            ) {
-              return
-            }
+            if (this.leaseSessionLost(lease, epoch)) return
             if (this.joinedSecondaries.has(key)) {
               this.pendingJoinedRestores.delete(key)
               return
@@ -565,14 +548,7 @@ export class BatchWriteCoordinator {
             // Same post-join re-check as `ensureBatchJoined`: a displacement
             // signalled during the read (`signalLeaseLost` fires off-lock)
             // must not bind.
-            if (
-              this.disposed ||
-              this.leaseEpoch !== epoch ||
-              this.partitionLease !== lease ||
-              this.lostLease === lease
-            ) {
-              return
-            }
+            if (this.leaseSessionLost(lease, epoch)) return
             stamper.bindPartition({
               partition,
               partitionCount: this.deps.partitionCount,
@@ -591,14 +567,7 @@ export class BatchWriteCoordinator {
           // Commit under the lock so it cannot interleave with a demote or an
           // idle-yield, with no await between the guard and the map insert.
           await this.lock(async () => {
-            if (
-              this.disposed ||
-              this.leaseEpoch !== epoch ||
-              this.partitionLease !== lease ||
-              this.lostLease === lease
-            ) {
-              return
-            }
+            if (this.leaseSessionLost(lease, epoch)) return
             // Re-checked HERE, not only before the awaits above: a targeted
             // write can join this batch properly (network read + publish)
             // while we were resolving. Its state is fresher — committing ours
@@ -728,6 +697,60 @@ export class BatchWriteCoordinator {
     })
   }
 
+  /**
+   * Publish every joined secondary's final counter before the lease's slot is
+   * freed: a peer's takeover must resume each batch at its acked counter, not
+   * just the lease batch's. Best-effort per batch — the publishes are
+   * independent, and one failure must abort neither the others nor the release
+   * that follows (an unreleased slot costs every peer the full LEASE_TTL_MS).
+   *
+   * Counters are passed IN rather than read here: teardown must capture them
+   * before its synchronous unbind, after which `getLocalCounter()` is already
+   * `undefined`.
+   */
+  private async flushJoinedSecondaryCounters(
+    lease: PartitionLease,
+    entries: {
+      stamper: UtilizationAwareStamper
+      counter: Uint32Array | undefined
+    }[],
+    context: string,
+  ): Promise<void> {
+    const publishes: Promise<void>[] = []
+    for (const { stamper, counter } of entries) {
+      if (counter === undefined) continue
+      publishes.push(lease.publishState(counter, stamper))
+    }
+    for (const result of await Promise.allSettled(publishes)) {
+      if (result.status === "rejected") {
+        console.warn(
+          `[BatchWriteCoordinator] ${context} state publish failed for a joined batch:`,
+          result.reason,
+        )
+      }
+    }
+  }
+
+  /**
+   * Has this lease session stopped being ours? Disposed, a bumped epoch (when
+   * `epoch` is given), a replaced `partitionLease`, or a `signalLeaseLost` that
+   * named this session. Every section that binds a stamper re-checks it —
+   * `bindPartition` clears `leaseStale`, so binding after a loss would re-arm a
+   * stamper on a partition a peer now owns.
+   *
+   * The restore loop head checks `lostLease` too, which the per-site copies did
+   * not: the locked commit refuses on it anyway, so aborting earlier only skips
+   * wasted resolver reads — the id stays pending for the next tick either way.
+   */
+  private leaseSessionLost(lease: PartitionLease, epoch?: number): boolean {
+    return (
+      this.disposed ||
+      (epoch !== undefined && this.leaseEpoch !== epoch) ||
+      this.partitionLease !== lease ||
+      this.lostLease === lease
+    )
+  }
+
   /** Persistent mode: eagerly acquire a partition + start the refresh timer in
    *  the background so the first upload doesn't pay the acquire latency. */
   startLease(): void {
@@ -785,21 +808,11 @@ export class BatchWriteCoordinator {
         // `writePartitionState` marks its chunks with the explicit partition
         // slot.
         void this.lock(async () => {
-          // Flush every joined batch's final counter first (best-effort,
-          // per batch) — the release sentinel below frees the partition for
-          // peers, whose takeover must resume each batch at its acked
-          // counter, not just the lease batch's.
-          for (const { stamper, counter } of secondaries) {
-            if (counter === undefined) continue
-            try {
-              await lease.publishState(counter, stamper)
-            } catch (err) {
-              console.warn(
-                "[BatchWriteCoordinator] Teardown state publish failed for a joined batch:",
-                err,
-              )
-            }
-          }
+          await this.flushJoinedSecondaryCounters(
+            lease,
+            secondaries,
+            "Teardown",
+          )
           await lease.release(localCounter)
         }).catch((err) =>
           console.warn(
@@ -1625,23 +1638,14 @@ export class BatchWriteCoordinator {
     }
     const localCounter = this.deps.leaseStamper.getLocalCounter()
     if (localCounter !== undefined) {
-      // Joined batches' final counters flush first — a peer's takeover must
-      // resume each batch at its acked counter. Best-effort PER BATCH (like
-      // teardown): one failed flush must not abort the remaining flushes or
-      // the release below — an unreleased slot costs every peer the full
-      // LEASE_TTL_MS wait.
-      for (const s of this.joinedSecondaries.values()) {
-        const counter = s.getLocalCounter()
-        if (counter === undefined) continue
-        try {
-          await lease.publishState(counter, s)
-        } catch (err) {
-          console.warn(
-            "[BatchWriteCoordinator] Idle-yield state publish failed for a joined batch:",
-            err,
-          )
-        }
-      }
+      await this.flushJoinedSecondaryCounters(
+        lease,
+        [...this.joinedSecondaries.values()].map((s) => ({
+          stamper: s,
+          counter: s.getLocalCounter(),
+        })),
+        "Idle-yield",
+      )
       try {
         // Best-effort: on a Swarm-write failure the slot still lapses via the
         // TTL within LEASE_TTL_MS, so peers recover either way.
