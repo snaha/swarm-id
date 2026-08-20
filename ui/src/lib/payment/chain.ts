@@ -74,7 +74,14 @@ function kindOf(chainId: number, genesisHash: string): ChainKind {
 }
 
 interface JsonRpcResponse<T> {
-  result?: T
+  /**
+   * `null`, not a missing field, is how JSON-RPC says "no such thing" — a node
+   * that has pruned block 0 answers `result: null` rather than omitting it. It
+   * is typed here so the guard below has to reject it; without that, `null`
+   * flowed out as an answer and the caller crashed reading a field off it,
+   * losing the crafted "could not prove it" error this module is built on.
+   */
+  result?: T | null
   error?: { code?: number; message?: string }
 }
 
@@ -99,7 +106,7 @@ async function jsonRpc<T>(rpcUrl: string, method: string, params: unknown[]): Pr
       `The configured Gnosis RPC refused ${method}: ${data.error.message ?? 'unknown error'}`,
     )
   }
-  if (data.result === undefined) {
+  if (data.result === undefined || data.result === null) {
     throw new Error(`The configured Gnosis RPC returned no result for ${method}.`)
   }
   return data.result
