@@ -173,9 +173,20 @@
     chainProbeAttempt++
   }
 
+  /**
+   * Which endpoint switch is the live one. "Use local" spends up to ~5s
+   * probing, and nobody is obliged to wait for it: picking production
+   * meanwhile — the natural move when the locals are plainly down — used to be
+   * silently undone when those probes finally landed. Each switch supersedes
+   * the one before it, which is all this needs; the attempt guard in
+   * `$lib/attempt` is for cancellable ceremonies, not a two-line token.
+   */
+  let endpointSwitchAttempt = 0
+
   // Both presets apply straight away; anything else goes through the product's
   // own Network settings dialog rather than a second copy of its fields.
   async function useLocalEndpoints() {
+    const attempt = ++endpointSwitchAttempt
     const reachable = await Promise.all(
       LOCAL_GNOSIS_RPC_URLS.map((url) =>
         probeChainId(url).then(
@@ -184,11 +195,13 @@
         ),
       ),
     )
+    if (attempt !== endpointSwitchAttempt) return
     const gnosisRpcUrl = reachable.find((url) => url !== undefined) ?? LOCAL_GNOSIS_RPC_URLS[0]
     networkSettingsStore.updateSettings({ beeNodeUrl: LOCAL_BEE_NODE_URL, gnosisRpcUrl })
   }
 
   function useProductionEndpoints() {
+    endpointSwitchAttempt++
     networkSettingsStore.updateSettings({
       beeNodeUrl: DEFAULT_BEE_NODE_URL,
       gnosisRpcUrl: DEFAULT_GNOSIS_RPC_URL,
