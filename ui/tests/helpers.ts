@@ -170,7 +170,7 @@ export async function fundPostageSigner(page: Page) {
  * the money lands at an address the operation is not looking at, so it raises a
  * funding need and the payment screen opens over the test.
  */
-async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
+export async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
   const signerKey = await page.evaluate(async () => {
     const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
       data?: { derivationKey?: string }[]
