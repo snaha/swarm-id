@@ -631,7 +631,16 @@ export class SwarmIdProxy {
       }
       const signerKey = effective.signerKey.toHex()
       const cached = this.stampEntries.get(effective.batchID.toHex())
-      if (cached && cached.signerKey === signerKey) {
+      if (
+        cached &&
+        cached.signerKey === signerKey &&
+        // Depth too, like every other cache hit: the instance bakes in the
+        // batch's bucket capacity, so installing a pre-dilution stamper here
+        // would ALSO set `boundStampDepth` to the new depth — after which the
+        // no-change guard above suppresses every later rebuild and the session
+        // keeps signing at the old capacity until a reload.
+        cached.stamper.depth === effective.depth
+      ) {
         // Nothing to build — install the cached instance as the binding here,
         // on the queue.
         await this.bindStamp(effective, cached.stamper)

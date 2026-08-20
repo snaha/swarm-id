@@ -1597,6 +1597,35 @@ describe("SwarmIdProxy rebuilds stampers when a batch is diluted", () => {
     expect(pending?.stamp.depth).toBe(22)
   })
 
+  it("a cached stamper for the default batch does not mask its dilution", async () => {
+    // The dilution rebind must survive the refresh's per-batch cache hit. That
+    // hit compares the signer key, so without a depth comparison it re-installs
+    // the OLD-capacity instance as the binding AND sets `boundStampDepth` to the
+    // new depth — after which the no-change guard suppresses every later
+    // rebuild and the session signs at the old capacity until a reload.
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["signerKey"] = "11".repeat(32)
+    ;(proxy as never)["stamper"] = { tag: B1, depth: 20 }
+    ;(proxy as never)["boundStampDepth"] = 20
+    ;(proxy as never)["stamperAccountFingerprint"] =
+      `${"ab".repeat(20)}-${"00".repeat(32)}`
+    ;(proxy as never)["stampEntries"] = new Map([
+      [B1, { stamper: { tag: B1, depth: 20 }, signerKey: "11".repeat(32) }],
+    ])
+    ;(proxy as never)["lookupPostageStampForApp"] = () => diluted(B1)
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      app: {},
+      account: { postageStamps: [diluted(B1)] },
+    })
+
+    const pending = (await (proxy as never)["refreshStampFromStorage"]()) as
+      | { bindDefault: boolean; stamp: { depth: number } }
+      | undefined
+
+    expect(pending?.bindDefault).toBe(true)
+    expect(pending?.stamp.depth).toBe(22)
+  })
+
   it("a targeted write rebuilds a depth-stale cached stamper (old pool deferred)", async () => {
     const terminate = vi.fn()
     ;(proxy as never)["coordinator"] = { withWrite: vi.fn() }
