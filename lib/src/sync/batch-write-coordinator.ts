@@ -684,8 +684,11 @@ export class BatchWriteCoordinator {
    * is a cold one, which network-seeds every restore. The union with the prior
    * cache keeps the pause/unwind paths lossless — they can run before
    * `seedPendingRestores` ever populated the in-memory ledger.
-   * (`teardown` still clears: it flushes every secondary and releases with a
-   * sentinel, and it is the sign-out path.)
+   *
+   * `teardown` uses this too. It flushes every secondary and releases with a
+   * sentinel, but it is NOT only the sign-out path: the proxy tears the
+   * coordinator down and rebuilds it for the same account on every rebind, and
+   * a cleared ledger there costs the successor every secondary's heartbeat.
    */
   private persistReducedLeaseCache(): void {
     const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
@@ -837,13 +840,24 @@ export class BatchWriteCoordinator {
       // stamper — a targeted in-flight stamp must abort the same way.
       this.forEachBoundStamper((s) => s.invalidateLease())
       this.forEachBoundStamper((s) => s.unbindPartition())
-      this.joinedSecondaries.clear()
     }
+    // A CLAIM-less snapshot, not a cleared cache: teardown is not only the
+    // sign-out path — `SwarmIdProxy.initializeStamper` tears the coordinator
+    // down and builds its successor for the same account in the next
+    // statement on every rebind (node change, default-stamp change, stamp
+    // dilution), as does `clearDefaultBinding`. Clearing there would drop
+    // `joinedBatchIds`, and the successor would re-join no secondary: their
+    // state pointers stop being heartbeated, age out of `readStatePointer`'s
+    // lookup span, and a peer's takeover resumes them from ZERO. Persisted
+    // BEFORE `joinedSecondaries` is cleared — that map is what it is built
+    // from (same ordering as `finalizeDemote`). On a genuine sign-out the
+    // leftover entry is inert: it is account-keyed and carries no claim.
+    this.persistReducedLeaseCache()
+    this.joinedSecondaries.clear()
     this.partitionLease = undefined
     this.readOnly = false
     this.lastLeaseValidatedAt = 0
     this.secondaryHeartbeatFailingSince.clear()
-    this.deps.writeLeaseCache?.(undefined)
     this.emitLeaseChange()
   }
 

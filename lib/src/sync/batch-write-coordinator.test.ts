@@ -242,14 +242,22 @@ describe("BatchWriteCoordinator (Step A shell)", () => {
     expect(coordinator.stamperRef).toBe(leaseStamper)
   })
 
-  it("teardown clears the lease cache and notifies onLeaseChange", () => {
+  it("teardown drops the claim but keeps the ledger, and notifies onLeaseChange", () => {
     const writeLeaseCache = vi.fn()
     const onLeaseChange = vi.fn()
     const coordinator = new BatchWriteCoordinator(
       makeDeps({ writeLeaseCache, onLeaseChange }),
     )
     coordinator.teardown()
-    expect(writeLeaseCache).toHaveBeenCalledWith(undefined)
+    // Claim-less, never `undefined`: the proxy tears the coordinator down and
+    // rebuilds it for the same account on every rebind, and a cleared cache
+    // there loses `joinedBatchIds` for good.
+    const snap = writeLeaseCache.mock.calls.at(-1)?.[0] as
+      | PartitionLeaseStateSnapshot
+      | undefined
+    expect(snap?.deviceId).toBe(SELF)
+    expect(snap?.self).toBeUndefined()
+    expect(snap?.joinedBatchIds).toContain(BATCH_ID)
     expect(onLeaseChange).toHaveBeenCalledWith({
       currentPartition: undefined,
       isReadOnly: false,
