@@ -42,8 +42,13 @@ interface BundledCall {
  * Covers approve + topUp + increaseDepth together. Measured at ~420k for the
  * full resize bundle on a real batch; the headroom absorbs `increaseDepth`'s
  * internal expired-batch sweep, whose cost varies with the chain's backlog.
+ *
+ * Exported because it is half of what an operation must be funded for: a
+ * transaction is only sendable with a balance of `gas × maxFeePerGas`, so the
+ * caller sizing the gas budget has to price THIS number against the chain's
+ * current gas price rather than guess at it.
  */
-const BUNDLE_GAS = 1_200_000n
+export const BUNDLE_GAS = 1_200_000n
 
 export interface ExtendBundleOptions {
   /** The batch owner's key — authority, sender and `msg.sender` alike. */

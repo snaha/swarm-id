@@ -39,6 +39,8 @@ const harness = vi.hoisted(() => ({
   /** Balances far past anything an operation asks for: funding is not the subject. */
   ownerXdai: 10n ** 30n,
   ownerBzz: 10n ** 30n,
+  /** 1 gwei — a quiet chain, so the gas budget stays at its floor. */
+  gasPrice: 1_000_000_000n,
   constraints: { paused: false, lastPrice: 1_000n, minimumInitialBalancePerChunk: 1n },
   /** Filled in per test — the id the fake contract derives from the nonce. */
   batchIdForNonce: (nonce: `0x${string}`): string => nonce,
@@ -61,6 +63,7 @@ vi.mock('$lib/payment/chain', () => ({
     Promise.resolve({
       supportsBundling: () => Promise.resolve(true),
       getPostageWriteConstraints: () => Promise.resolve(harness.constraints),
+      getGasPrice: () => Promise.resolve(harness.gasPrice),
       bundleCreate: (options: { batchNonce: `0x${string}` }) => {
         harness.calls.push('send')
         if (harness.sendFails) {

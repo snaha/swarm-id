@@ -16,6 +16,7 @@
 import type { PrivateKey } from '@ethersphere/bee-js'
 import { type PostageStamp, withTimeout } from '@snaha/swarm-id'
 import {
+  BUNDLE_GAS,
   MultichainClient,
   type PostageBatch,
   type PostageWriteConstraints,
@@ -30,9 +31,14 @@ import type { Account } from '$lib/types'
 /** Upper bound on waiting for one confirmation (the client polls inside it). */
 const CONFIRMATION_TIMEOUT_MS = 90_000
 
-/** xDAI budget covering approve + topUp + increaseDepth with ample headroom
- * (each op costs well under 0.001 xDAI at current Gnosis gas prices). */
-export const GAS_BUDGET_XDAI_WEI = 5_000_000_000_000_000n // 0.005 xDAI
+/** The gas budget never drops below this, however cheap the chain looks — a
+ * price read a moment before a spike would otherwise fund an operation that
+ * cannot pay for itself by the time it is sent. */
+export const GAS_BUDGET_FLOOR_XDAI_WEI = 5_000_000_000_000_000n // 0.005 xDAI
+
+/** How many times the bundle's own cost the budget covers, so a price that
+ * moves between funding and sending does not strand the operation. */
+const GAS_PRICE_HEADROOM = 2n
 
 /** Bee's fixed bucket depth; a batch's depth must exceed it. */
 const BUCKET_DEPTH = 16
@@ -107,9 +113,29 @@ function batchIdHex(stamp: Pick<PostageStamp, 'batchID'>): `0x${string}` {
 }
 
 /**
+ * The xDAI an operation must have at the owner address to be sendable at all.
+ *
+ * A transaction is rejected unless the sender can cover `gas × maxFeePerGas`,
+ * and the bundle is sent at the chain's current gas price with a fixed gas
+ * limit — so a flat budget is a bet on the price. The old flat 0.005 xDAI lost
+ * that bet above ~4 gwei: the payment screens collected exactly the budget, and
+ * the operation then refused to send, leaving the money parked at the owner
+ * address until Gnosis got cheaper again.
+ *
+ * The floor still applies, so a cheap chain funds an operation as generously as
+ * before. THE one definition of "enough gas": both the shortfall above and the
+ * surplus in `funding.ts` measure against this, and they must not disagree
+ * about what counts as spare, or the same balance is both owed and refunded.
+ */
+export async function gasBudgetXdai(client: MultichainClient): Promise<bigint> {
+  const priced = BUNDLE_GAS * (await client.getGasPrice()) * GAS_PRICE_HEADROOM
+  return priced > GAS_BUDGET_FLOOR_XDAI_WEI ? priced : GAS_BUDGET_FLOOR_XDAI_WEI
+}
+
+/**
  * What the owner address is missing for an operation needing `bzzPlur` of BZZ
- * (plus the fixed gas budget). Zeros when the residual balances already cover
- * it — funds parked by an earlier interrupted attempt are consumed first.
+ * (plus the gas budget). Zeros when the residual balances already cover it —
+ * funds parked by an earlier interrupted attempt are consumed first.
  */
 export async function fundingShortfall(
   address: string,
@@ -117,9 +143,9 @@ export async function fundingShortfall(
   client?: MultichainClient,
 ): Promise<OwnerFunds> {
   const chain = client ?? (await postageChain())
-  const funds = await ownerFunds(address, chain)
+  const [funds, gasBudget] = await Promise.all([ownerFunds(address, chain), gasBudgetXdai(chain)])
   return {
-    xdai: funds.xdai >= GAS_BUDGET_XDAI_WEI ? 0n : GAS_BUDGET_XDAI_WEI - funds.xdai,
+    xdai: funds.xdai >= gasBudget ? 0n : gasBudget - funds.xdai,
     bzz: funds.bzz >= bzzPlur ? 0n : bzzPlur - funds.bzz,
   }
 }

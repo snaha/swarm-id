@@ -75,6 +75,7 @@ export type {
   ExtendBundleOptions,
   ResizeBundleOptions,
 } from "./postage-bundle"
+export { BUNDLE_GAS } from "./postage-bundle"
 export { buildExactInputSwapData } from "./sushi"
 
 /**

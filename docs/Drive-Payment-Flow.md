@@ -89,9 +89,11 @@ side. `swapDeliveredXdai` lives here too, turning delivered xDAI into the BZZ th
    × 1.2 (`SWAP_BUFFER_NUMERATOR` / `_DENOMINATOR`), mirroring the widget's 20% buffer. The swap
    executes exact-**input**, so the buffer is spent buying BZZ rather than left over: the surplus
    lands as BZZ at the owner address and the next operation's funds check consumes it.
-3. Add `GAS_BUDGET_XDAI = 0.005` (approve + topUp + increaseDepth at 1 gwei, with headroom) minus the
-   owner address's existing xDAI, floored at 0 — **plus `SWAP_GAS_XDAI = 0.002` whenever a swap will
-   run**. The swap is signed by the owner key and pays for itself out of the same balance, before any
+3. Add the gas budget (`gasBudgetXdai`: the bundle's gas limit at the chain's current gas price,
+   doubled, and never below the `GAS_BUDGET_FLOOR_XDAI = 0.005` floor — a transaction needs a balance
+   of `gas × maxFeePerGas` to be sendable, so a flat budget strands the operation in a gas spike)
+   minus the owner address's existing xDAI, floored at 0 — **plus `SWAP_GAS_XDAI = 0.002` whenever a
+   swap will run**. The swap is signed by the owner key and pays for itself out of the same balance, before any
    of the operations the gas budget covers; without that term the swap spends the budget back down and
    the funds re-check immediately afterwards rejects a payment that in fact succeeded.
 4. The rail's own quote for the selected source chain and token. Relay is asked for an

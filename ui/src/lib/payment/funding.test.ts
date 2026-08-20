@@ -13,8 +13,10 @@ const { GAS_BUDGET } = vi.hoisted(() => ({ GAS_BUDGET: 10n ** 18n / 200n })) // 
 const quoteXdaiInForBzzOut = vi.fn()
 /** The owner address's xDAI, which the quote consumes before asking the rail. */
 let ownerXdai = 0n
+// A fixed budget: what the operation reserves for gas is the postage engine's
+// business, and these tests are about what the rail is asked to deliver.
 vi.mock('$lib/payment/postage-onchain', () => ({
-  GAS_BUDGET_XDAI_WEI: GAS_BUDGET,
+  gasBudgetXdai: () => Promise.resolve(GAS_BUDGET),
 }))
 vi.mock('$lib/payment/chain', () => ({
   postageChain: () =>

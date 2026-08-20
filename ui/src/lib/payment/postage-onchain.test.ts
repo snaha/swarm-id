@@ -1,9 +1,15 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { PrivateKey } from '@ethersphere/bee-js'
+import { BUNDLE_GAS, type MultichainClient } from '@swarm-id/multichain'
 import { describe, expect, it, vi } from 'vitest'
 
-import { deriveBatchId, planBatchCreation } from '$lib/payment/postage-onchain'
+import {
+  GAS_BUDGET_FLOOR_XDAI_WEI,
+  deriveBatchId,
+  gasBudgetXdai,
+  planBatchCreation,
+} from '$lib/payment/postage-onchain'
 
 // This module resolves a chain client on import paths the tests never take.
 vi.mock('$lib/payment/chain', () => ({
@@ -41,6 +47,37 @@ describe('deriveBatchId', () => {
   })
 })
 
+describe('gasBudgetXdai', () => {
+  const GWEI = 1_000_000_000n
+  const clientAt = (gasPrice: bigint) =>
+    ({ getGasPrice: () => Promise.resolve(gasPrice) }) as unknown as MultichainClient
+
+  it('keeps the floor while gas is cheap', async () => {
+    await expect(gasBudgetXdai(clientAt(GWEI))).resolves.toBe(GAS_BUDGET_FLOOR_XDAI_WEI)
+  })
+
+  /**
+   * The case the fixed budget got wrong. A transaction needs a balance of
+   * `gas × maxFeePerGas` to be sendable at all, so a Gnosis gas spike put the
+   * bundle's cost above a budget the funding screens had just collected exactly
+   * — leaving the user's money parked at the owner address and the operation
+   * refusing to send, with nothing to do but wait for prices to fall.
+   */
+  it('follows the gas price once it outgrows the floor', async () => {
+    const spike = 50n * GWEI
+    await expect(gasBudgetXdai(clientAt(spike))).resolves.toBe(BUNDLE_GAS * spike * 2n)
+  })
+
+  it('always covers the bundle at the price it would be sent at', async () => {
+    // Both sides of the max(), with headroom to spare: a budget merely equal to
+    // the cost leaves nothing for a price that moved between quote and send.
+    for (const gasPrice of [GWEI / 10n, GWEI, 5n * GWEI, 100n * GWEI]) {
+      const budget = await gasBudgetXdai(clientAt(gasPrice))
+      expect(budget).toBeGreaterThanOrEqual(BUNDLE_GAS * gasPrice)
+    }
+  })
+})
+
 describe('planBatchCreation', () => {
   const signerKey = new PrivateKey('ee'.repeat(32))
 
@@ -54,7 +91,9 @@ describe('planBatchCreation', () => {
   it('never reuses a nonce', () => {
     // Reuse would collide with a batch the same owner already bought, and the
     // contract would revert the purchase the journal already promised.
-    const SAMPLES = 32
+    // Few, because each plan pays for a public-key derivation; a nonce that
+    // repeated at all would repeat within any handful.
+    const SAMPLES = 8
     const nonces = new Set(
       Array.from({ length: SAMPLES }, () => planBatchCreation(signerKey).batchNonce),
     )

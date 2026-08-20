@@ -15,7 +15,7 @@ import { withTimeout } from '@snaha/swarm-id'
 import { prefix0x } from '$lib/crypto/hex'
 import { postageChain } from '$lib/payment/chain'
 import type { FundingNeed } from '$lib/payment/drive-operation'
-import { GAS_BUDGET_XDAI_WEI } from '$lib/payment/postage-onchain'
+import { gasBudgetXdai } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 
 /** Swap slippage/rounding headroom on the quoted xDAI, as the widget uses.
@@ -42,7 +42,7 @@ const SWAP_TIMEOUT_MS = 120_000
  *
  * `swapDeliveredXdai` is signed by the owner key and pays for itself out of the
  * owner's balance — and it runs BEFORE the postage operations that
- * `GAS_BUDGET_XDAI_WEI` covers. Size the delivery without it and the swap
+ * `gasBudgetXdai` covers. Size the delivery without it and the swap
  * spends the operating budget back down, so the funds check that re-runs
  * immediately afterwards finds the owner short and rejects a payment that in
  * fact succeeded. Generous against a Gnosis swap's real cost (~0.0003 xDAI),
@@ -100,8 +100,13 @@ async function ownerSurplusXdai(
   destination: string,
   client: Awaited<ReturnType<typeof postageChain>>,
 ): Promise<bigint> {
-  const balance = await client.getNativeBalance(prefix0x(destination) as `0x${string}`)
-  return balance > GAS_BUDGET_XDAI_WEI ? balance - GAS_BUDGET_XDAI_WEI : 0n
+  // The same budget the shortfall is measured against — anything else would
+  // let this call a balance spare that the operation is about to demand back.
+  const [balance, gasBudget] = await Promise.all([
+    client.getNativeBalance(prefix0x(destination) as `0x${string}`),
+    gasBudgetXdai(client),
+  ])
+  return balance > gasBudget ? balance - gasBudget : 0n
 }
 
 /**
