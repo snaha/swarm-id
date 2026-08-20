@@ -46,6 +46,8 @@ Once the cluster is running, these endpoints are available:
 
 The Identity UI includes a Developer Tools page at `http://localhost:5500/dev` with utilities for testing and debugging.
 
+A menu in the page header switches the whole app between the local endpoints and the production ones in a click; anything else is edited through the product's own Network settings dialog. Below it, a banner names the chain the configured RPC actually serves — proven by its genesis hash, since the local chain reports Gnosis' chain id on purpose — so it is always visible whether the tools below would be spending real money.
+
 ### Overview Tab
 
 - **Endpoint Status** — Live indicators showing connectivity to local Bee endpoints
@@ -53,36 +55,27 @@ The Identity UI includes a Developer Tools page at `http://localhost:5500/dev` w
 - **Local Data Summary** — Shows counts of accounts, identities, connected apps, and stamps
 - **Clear All Data** — Wipes all local storage (accounts, identities, stamps)
 
-### Stamps Tab
+### Chain Tab
 
-The main tool for managing postage stamps in development:
+Everything that talks to the Gnosis-side chain, acting on the account selected at the top of the page. These tools refuse to run anywhere but a chain that is provably a development one.
 
-**Buy Postage Stamp**
+- **Simulated purchase** — makes the product's **Add drive** flow settle a mocked batch instead of a real cross-chain payment. The purchase widget only settles on mainnet, so this is what makes that flow reachable locally at all. The batch it leaves behind is fabricated, which is why extend and resize cannot act on it.
+- **Faucet** — hands any address xDAI or BZZ out of the float the local chain is baked with, and shows what that address and the faucet hold. It starts pointed at the selected account's postage signer, which is the address that usually needs topping up.
+- **On-chain drive tooling** — buys a batch the account's own postage signer OWNS, running the widget's real step list (swap → approve → createBatch) against the local chain's BZZ pool. **Create drive to test with** goes one step further and attaches the batch as an ordinary drive; that is the button to reach for before hand-testing extend or resize. A companion makes one that is already inside the "Expires soon" window, for testing that warning.
+- **Import batch by ID** — reads a batch's parameters straight from the PostageStamp contract, so any batch id works even when the configured node has never seen it. The signer key is not on chain, so paste the one the batch was bought with.
 
-1. Select a signer key (Queen, Wallet 0, or Wallet 1)
-2. Set amount and depth (defaults work for testing)
-3. Click "Buy Stamp"
-4. Wait ~30 seconds for the stamp to become usable
+### Node Tab
 
-**Manage Existing Stamps**
+Everything that talks to the Bee node:
 
-- Click "Refresh" to load stamps from the Bee node
-- View batch ID, depth, and utilization for each stamp
-- Assign stamps to accounts or identities
-- Remove stamp assignments
+- **Stored stamps** — the batches saved in this browser, with the fields needed to re-adopt one on a fresh account.
+- **Retrievability self-check** — writes a throwaway single-owner chunk and reads it back, to confirm the node serves back what you write. Multi-device coordination (and reliable sync) only works where it does; a companion read-by-address runs the same check across two devices, which is the one that mirrors real coordination on a load-balanced gateway.
+- **Manual sync testing** — triggers a sync for every account, to exercise postage-stamp utilization tracking. Detailed `[StateSync]` logs go to the browser console.
+- **Partition tuning** — overrides the multi-device intent-round timings for a gateway with slower propagation.
 
-**Mock Stamp Widget**
+### Devices Tab
 
-- Toggle mock mode to test the stamp purchase UI without blockchain transactions
-- Configure mock responses (success or error) for widget testing
-
-### Sync Tab
-
-Test the postage stamp utilization tracking:
-
-- Trigger manual sync for all accounts with stamps
-- View sync results with success/failure counts
-- Check browser console for detailed `[StateSync]` logs
+The devices registered to the selected account, and which partitions each currently holds.
 
 ## Getting a Postage Batch
 
@@ -91,11 +84,10 @@ Postage stamps are required for uploading data to Swarm. In development, you can
 ### Using Developer Tools (Recommended)
 
 1. Navigate to `http://localhost:5500/dev`
-2. Go to the **Stamps** tab
-3. Select a signer key (Queen is pre-funded)
-4. Click **Buy Stamp**
-5. Wait ~30 seconds for the stamp to become usable
-6. Assign the stamp to an account
+2. Go to the **Chain** tab and select an account
+3. Click **Create drive to test with**
+
+That buys a real batch on the local chain, owned by the account's own postage signer, and attaches it as a drive — with no signer keys to copy between fields. To adopt a batch bought elsewhere instead, use **Import batch by ID** on the same tab.
 
 ### Using the API
 
@@ -114,7 +106,7 @@ curl -X POST "http://localhost:1633/stamps/500000000/20"
 For local development, the defaults (amount: 500000000, depth: 20) are sufficient for testing. The amount must exceed roughly `414720000` — the local chain's postage price (`24000`) multiplied by Bee's 17280-block (~24h) minimum validity period. Smaller amounts are rejected with an HTTP 400 error.
 
 :::caution
-After purchasing a stamp, you must wait approximately 30 seconds before it becomes usable. The Developer Tools page will show "Usable: No" until the stamp is ready.
+A batch exists on chain before the Bee node knows about it: until the node's chain sync reaches the block the purchase landed in, stamping with it is rejected with `400 invalid batch id`. **Create drive to test with** waits for that itself; a batch bought straight from the API needs roughly 30 seconds.
 :::
 
 ## Common Gotchas

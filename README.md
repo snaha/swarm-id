@@ -134,13 +134,14 @@ pnpm dev:cluster:start --fresh
 | Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
-**Buying a Postage Stamp:**
+**Getting a Postage Batch:**
 
 The easiest way is to use the Developer Tools page in the Identity UI:
 
 1. Navigate to http://localhost:5500/dev
-2. Go to the **Stamps** tab
-3. Click **Buy Stamp** with the default settings
+2. Go to the **Chain** tab and select an account
+3. Click **Create drive to test with** — it buys a real batch on the local chain, owned by that
+   account's own postage signer, and attaches it as a drive
 
 Or use the Bee API directly:
 
@@ -160,9 +161,15 @@ See the [Local Development guide](https://swarm.snaha.net/docs/local-development
 
 The Identity UI includes a Developer Tools page at http://localhost:5500/dev with utilities for local development:
 
-- **Overview**: Quick start guide and local Bee endpoint links with copy buttons
-- **Stamps**: Buy postage stamps from the local Bee node using pre-funded signer keys
-- **Sync**: Manually trigger account sync to test postage stamp utilization tracking
+A menu in the header switches the whole app between the local and production endpoints, and a
+banner names the chain the configured RPC actually serves — so it is always visible whether these
+tools would be spending real money.
+
+- **Overview**: Live endpoint status, a link into the demo app's connect flow, and local-data counters
+- **Chain**: Faucet, on-chain batch and test-drive creation, batch import by ID, and the mock
+  purchase toggles for the **Add drive** flow
+- **Node**: Stored stamps, retrievability checks, manual sync, and partition tuning
+- **Devices**: The devices registered to an account and the partitions they hold
 
 ## Project Structure
 
