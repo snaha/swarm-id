@@ -58,19 +58,19 @@ new BatchWriteCoordinator(deps: BatchWriteCoordinatorDeps)
 
 Dependencies are injected — no global storage-manager reach-in:
 
-| Dep                                  | Role                                                                                                                                  |
-| ------------------------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `bee`                                | Bee client for lock/lease/state reads and writes                                                                                       |
+| Dep                                  | Role                                                                                                                                                                                                                                                  |
+| ------------------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `bee`                                | Bee client for lock/lease/state reads and writes                                                                                                                                                                                                      |
 | `leaseStamper`                       | The resolved-default batch's `UtilizationAwareStamper` — stamps the lease SOCs and names the lease batch; already created + account-bound by the caller; the coordinator binds/unbinds the held partition on it and on every joined per-write stamper |
-| `deviceId`, `accountId`              | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                        |
-| `backupSigner`, `swarmEncryptionKey` | Own/read the per-partition lock SOCs                                                                                                  |
-| `partitionCount`                     | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                     |
-| `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                      |
-| `readLeaseCache` / `writeLeaseCache` | Optional local lease-cache hint (persistent mode)                                                                                     |
-| `flushStamperState(stamper)`         | Flush the GIVEN stamper's bucket state after a write — called for the write's stamper and, when different, the lease stamper          |
-| `getWorkerPool(stamper, count?)`     | Build/reuse a parallel-signing worker pool for the GIVEN stamper (pools are per batch, never shared)                                  |
-| `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                               |
-| `onLeaseAcquired`                    | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                    |
+| `deviceId`, `accountId`              | This device's identity (one `getOrCreateDeviceId` per browser) and the account                                                                                                                                                                        |
+| `backupSigner`, `swarmEncryptionKey` | Own/read the per-partition lock SOCs                                                                                                                                                                                                                  |
+| `partitionCount`                     | `<= 1` (legacy single-device accounts) means: never lease, lock-only coordination                                                                                                                                                                     |
+| `mode`                               | `"persistent"` (proxy) or `"oneshot"` (sync-account) — see below                                                                                                                                                                                      |
+| `readLeaseCache` / `writeLeaseCache` | Optional local lease-cache hint (persistent mode)                                                                                                                                                                                                     |
+| `flushStamperState(stamper)`         | Flush the GIVEN stamper's bucket state after a write — called for the write's stamper and, when different, the lease stamper                                                                                                                          |
+| `getWorkerPool(stamper, count?)`     | Build/reuse a parallel-signing worker pool for the GIVEN stamper (pools are per batch, never shared)                                                                                                                                                  |
+| `onLeaseChange`                      | Fired on every partition / read-only transition (proxy → `emitConnectionInfoIfChanged`)                                                                                                                                                               |
+| `onLeaseAcquired`                    | Fired when a partition is (re)acquired (proxy → schedule an account-state publish)                                                                                                                                                                    |
 
 Methods and getters:
 
