@@ -400,6 +400,12 @@
   async function sendFaucetFunds() {
     const to = faucetRecipient
     if (!to || faucetValue === 0n) return
+    // What was actually sent, read before the send rather than after it. The
+    // fields are disabled while it runs, so this is belt and braces — but a
+    // receipt that reports the boxes' current contents instead of the transfer
+    // is the kind of wrong that gets believed.
+    const amountLabel = faucetTyped.trim()
+    const assetLabel = faucetAsset.label
     faucetBusy = true
     faucetMessage = ''
     faucetError = ''
@@ -408,7 +414,7 @@
         xdai: faucetToken === 'xdai' ? faucetValue : 0n,
         bzzPlur: faucetToken === 'bzz' ? faucetValue : 0n,
       })
-      faucetMessage = `✅ Sent ${faucetTyped.trim()} ${faucetAsset.label} to ${to}`
+      faucetMessage = `✅ Sent ${amountLabel} ${assetLabel} to ${to}`
     } catch (error) {
       faucetError = error instanceof Error ? error.message : String(error)
     } finally {
@@ -1360,9 +1366,14 @@ Check console logs for details:
       {/if}
 
       <div class="flex flex-wrap items-end gap-2">
+        <!--
+          Locked while a send is in flight: what these say is what the receipt
+          below will report, so editing them mid-send would make it describe a
+          transfer that never happened.
+        -->
         <label class={LABEL_CLASS}>
           <span class={LABEL_TEXT_CLASS}>Amount</span>
-          <Input bind:value={faucetTyped} class="w-32" />
+          <Input bind:value={faucetTyped} class="w-32" disabled={faucetBusy} />
         </label>
         <label class={LABEL_CLASS}>
           <span class={LABEL_TEXT_CLASS}>Token</span>
@@ -1370,6 +1381,7 @@ Check console logs for details:
             options={faucetTokenOptions}
             bind:value={faucetToken}
             class="w-32"
+            disabled={faucetBusy}
             onchange={pickFaucetToken}
           />
         </label>
