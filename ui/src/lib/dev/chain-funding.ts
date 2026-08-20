@@ -26,7 +26,7 @@ import { generatePrivateKey } from 'viem/accounts'
 
 import { chainIdentity, ownerFunds, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
-import { derivePostageSigner } from '$lib/payment/purchase'
+import { type PostageSigner, derivePostageSigner } from '$lib/payment/purchase'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 import type { Account } from '$lib/types'
 
@@ -160,6 +160,13 @@ export interface LocalBatch {
   amountPerChunk: bigint
   /** Block the creation landed in, as the widget reports it (hex). */
   blockNumber: string
+  /**
+   * The account's postage signer, which owns this batch. Handed back because
+   * creating it required deriving it: a caller that goes on to attach the
+   * drive needs the same signer, and deriving it twice only invites the two
+   * to drift.
+   */
+  signer: PostageSigner
 }
 
 /** How long a created batch should last, and how big it should be. */
@@ -187,13 +194,13 @@ export async function createOwnedBatchOnChain(
   rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
 ): Promise<LocalBatch> {
   await assertDevChain('Creating a batch here', rpcUrl)
-  const { destination } = await derivePostageSigner(derivationKey)
+  const signer = await derivePostageSigner(derivationKey)
   const chain = await postageChain(rpcUrl)
   // Any dev flow that makes a batch will go on to extend or resize it, so this
   // is the one place that guarantees the delegate is there for the bundled
   // path — including in e2e runs, which never start the solver.
   await ensureBundlingDelegate(chain.settings)
-  const owner = destination as `0x${string}`
+  const owner = signer.destination as `0x${string}`
   const depth = requestedDepth ?? DEV_BATCH_DEPTH
   const { minimumInitialBalancePerChunk } = await chain.getPostageWriteConstraints()
   const amountPerChunk = minimumInitialBalancePerChunk * days
@@ -216,6 +223,7 @@ export async function createOwnedBatchOnChain(
     depth,
     amountPerChunk,
     blockNumber: receipt?.blockNumber ?? '0x0',
+    signer,
   }
 }
 
@@ -299,13 +307,15 @@ export async function createTestDrive(account: Account, shape?: BatchShape): Pro
   // batch was never bought on — reported as "could not be read back".
   const rpcUrl = networkSettingsStore.gnosisRpcUrl
   const beeNodeUrl = networkSettingsStore.beeNodeUrl
-  const { batchId, blockNumber } = await createOwnedBatchOnChain(
+  const { batchId, blockNumber, signer } = await createOwnedBatchOnChain(
     account.derivationKey,
     shape,
     rpcUrl,
   )
-  const { signerKey } = await derivePostageSigner(account.derivationKey)
-  const stamp = await fetchExistingBatchFromChain(batchId, signerKey, '', { rpcUrl })
+  // Read back rather than assembled from what we just asked for: the contract
+  // is what decides the batch's amount, TTL and bucket depth, so this doubles
+  // as proof the purchase actually landed.
+  const stamp = await fetchExistingBatchFromChain(batchId, signer.signerKey, '', { rpcUrl })
   if (!stamp) {
     throw new Error('The batch was created but could not be read back from the chain.')
   }
