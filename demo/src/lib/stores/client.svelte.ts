@@ -121,7 +121,10 @@ async function updatePostageStampInfo(generation: number) {
     // The demo shows one stamp; an account may own several ("drives") —
     // track the one untargeted uploads consume (the sidebar getter overlays
     // the upload-batch selection on top of this).
-    const batch = fetched.find((b) => b.isDefault) ?? fetched[0]
+    // No `?? fetched[0]` fallback: with no default, presenting an arbitrary
+    // drive as the active stamp is a lie — untargeted uploads go subsidised,
+    // and the badge that says so would be suppressed.
+    const batch = fetched.find((b) => b.isDefault)
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
@@ -145,11 +148,18 @@ async function updatePostageStampInfo(generation: number) {
           void updatePostageStampInfo(generation)
         }, STAMP_USABLE_POLL_INTERVAL)
       }
-    } else {
+    } else if (fetched.length === 0) {
       stamp = undefined
       selectedBatchId = undefined
       stampPollAttempts = 0
       logStore.log('No postage stamp configured')
+    } else {
+      // Drives exist but none is the account default. `selectedBatchId` stays:
+      // it names a batch that is still there, and a user-chosen upload target
+      // must survive (the stale-selection cleanup above drops removed ones).
+      stamp = undefined
+      stampPollAttempts = 0
+      logStore.log('No default drive set; untargeted uploads use the gateway')
     }
   } catch (error) {
     if (generation !== connectionGeneration) return
