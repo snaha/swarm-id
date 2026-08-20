@@ -2531,3 +2531,73 @@ describe("BatchWriteCoordinator — per-write batch targeting (account-scoped le
     expect(calls.indexOf("publish:b2")).toBeLessThan(calls.indexOf("release"))
   })
 })
+
+describe("BatchWriteCoordinator — restore holds the RESTORING batch's state lock", () => {
+  // The restore's `joinBatch`/`seedReferenceHex` do IndexedDB read-modify-write
+  // on the restored batch's own state, but `batchStateLockIds()` only names the
+  // lease batch and the ALREADY-joined secondaries — so another tab's
+  // `createStamperUnderBatchLock` for that batch could interleave and clobber
+  // the seed. The restoring batch's key must be granted for the section.
+  function makeRestoreSetup(adopted: number | undefined) {
+    const calls: string[] = []
+    const lease = makeLease({
+      partition: 1,
+      acquireResult: {
+        partition: 1,
+        partitionCount: 4,
+        localCounter: new Uint32Array(8),
+        isReadOnly: false,
+      },
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    if (adopted !== undefined) lease.adoptIfLive = vi.fn(() => adopted)
+    leaseController.lease = lease
+    const leaseStamper = makeStamper(calls, "lease")
+    const secondary = makeStamper(calls, "b2", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({
+        leaseStamper: asStamper(leaseStamper),
+        mode: "oneshot",
+        readLeaseCache: () => ({
+          deviceId: SELF,
+          batchId: BATCH_ID,
+          // `self` only matters to the mocked `adoptIfLive` above.
+          joinedBatchIds: [BATCH_ID, BATCH_ID_2],
+        }),
+        resolveStamperForBatch: async () => asStamper(secondary),
+      }),
+    )
+    return { lease, leaseStamper, secondary, coordinator }
+  }
+
+  it("grants the restoring batch's key for a NETWORK (cold-acquire) restore", async () => {
+    const { lease, leaseStamper, coordinator } = makeRestoreSetup(undefined)
+    let idsAtJoin: string[] | undefined
+    lease.joinBatch = vi.fn(async () => {
+      idsAtJoin = writeLockController.lastLegacyIds
+      return new Uint32Array(8)
+    })
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    expect(idsAtJoin).toContain(BATCH_ID_2)
+  })
+
+  it("grants the restoring batch's key for a LOCAL (adopt) restore", async () => {
+    const { lease, leaseStamper, coordinator } = makeRestoreSetup(1)
+    let idsAtSeed: string[] | undefined
+    lease.seedReferenceHex = vi.fn(() => {
+      idsAtSeed = writeLockController.lastLegacyIds
+    })
+
+    await coordinator.withWrite(asStamper(leaseStamper), async () => "ok", {
+      wait: "block",
+    })
+    await coordinator.joinedRestoreSettled
+
+    expect(idsAtSeed).toContain(BATCH_ID_2)
+  })
+})

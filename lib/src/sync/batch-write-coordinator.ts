@@ -582,7 +582,7 @@ export class BatchWriteCoordinator {
             this.joinedSecondaries.set(key, stamper)
             this.pendingJoinedRestores.delete(key)
             restored++
-          })
+          }, [key])
         } else {
           const localCounter = stamper.buildLeaseLocalCounter()
           const referenceHex = await stamper
@@ -618,7 +618,7 @@ export class BatchWriteCoordinator {
             this.joinedSecondaries.set(key, stamper)
             this.pendingJoinedRestores.delete(key)
             restored++
-          })
+          }, [key])
         }
       } catch (error) {
         console.warn(
@@ -1727,13 +1727,21 @@ export class BatchWriteCoordinator {
     )
   }
 
-  /** Take the cross-tab Web Lock without the stamper flush (lease mutations). */
-  private lock<T>(op: () => Promise<T>): Promise<T> {
-    return withAccountWriteLock(
-      this.deps.accountId,
-      op,
-      this.batchStateLockIds(),
-    )
+  /**
+   * Take the cross-tab Web Lock without the stamper flush (lease mutations).
+   * `extraBatchIdsHex` names batches this section stamps under that are not
+   * joined yet — the restore's target, whose seed is a read-modify-write on
+   * that batch's own state. `withAccountWriteLock` sorts + dedupes the nested
+   * batch keys, so adding ids cannot deadlock against another section.
+   */
+  private lock<T>(
+    op: () => Promise<T>,
+    extraBatchIdsHex: string[] = [],
+  ): Promise<T> {
+    return withAccountWriteLock(this.deps.accountId, op, [
+      ...this.batchStateLockIds(),
+      ...extraBatchIdsHex,
+    ])
   }
 
   /**
