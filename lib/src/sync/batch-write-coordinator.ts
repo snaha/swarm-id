@@ -1756,6 +1756,17 @@ export class BatchWriteCoordinator {
    * `withBatchStateLock`-guarded stamper builds rely on it to order their
    * IndexedDB seed reads after a same-batch flush. Captured at lock-request
    * time; `withWrite`'s not-yet-joined target rides in via `writeStamper`.
+   *
+   * Deliberately BROAD — narrowing it per call site would be wrong, because
+   * every section really can touch every joined batch:
+   *  - the heartbeat tick relocates each joined batch's retained state chunk,
+   *    stamping under every one of them;
+   *  - the idle-yield flush publishes every secondary's final counter;
+   *  - a restore commits its seed under the batch being restored (which is not
+   *    joined yet — `lock()`'s `extraBatchIdsHex` ADDS that id here);
+   *  - `teardown` requests the lock while `joinedSecondaries` is still
+   *    populated and clears the map synchronously afterwards, so this
+   *    capture-time list is what covers its deferred release's publishes.
    */
   private batchStateLockIds(writeStamper?: UtilizationAwareStamper): string[] {
     const ids = [this.deps.leaseStamper.batchId.toHex()]
