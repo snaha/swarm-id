@@ -1008,6 +1008,27 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Terminate `pool` only once the batch's state lock frees. Writes run OFF the
+   * work queue holding `swarm-write-<batchId>` across write+flush, so an
+   * immediate terminate kills a worker-backed upload mid-signing (opaque worker
+   * errors instead of a clean rejection). Callers evict the ENTRY synchronously
+   * — no later write can pick it up — and hand the pool here.
+   */
+  private deferPoolTermination(
+    batchIdHex: string,
+    pool: StampWorkerPool | undefined,
+  ): void {
+    if (!pool) return
+    void withBatchStateLock(batchIdHex, async () => pool.terminate()).catch(
+      (error: unknown) =>
+        console.warn(
+          `[Proxy] Deferred worker-pool termination failed for ${batchIdHex}:`,
+          error,
+        ),
+    )
+  }
+
+  /**
    * Record `stamper` as the cached instance for its batch. A replaced instance
    * (rebuild after a signer/account change) terminates the old entry's worker
    * pool — the pool captured the old stamper's buckets.
@@ -1018,18 +1039,19 @@ export class SwarmIdProxy {
   ): void {
     const key = stamper.batchId.toHex()
     const existing = this.stampEntries.get(key)
-    if (existing && existing.stamper !== stamper) {
-      existing.workerPool?.terminate()
-    }
     this.stampEntries.set(key, { stamper, signerKey })
+    if (existing && existing.stamper !== stamper) {
+      this.deferPoolTermination(key, existing.workerPool)
+    }
   }
 
   /** Drop every cached stamper + worker pool (account/sign-out transitions). */
   private clearStampEntries(): void {
-    for (const entry of this.stampEntries.values()) {
-      entry.workerPool?.terminate()
-    }
+    const evicted = [...this.stampEntries]
     this.stampEntries.clear()
+    for (const [key, entry] of evicted) {
+      this.deferPoolTermination(key, entry.workerPool)
+    }
   }
 
   /**
@@ -1052,24 +1074,8 @@ export class SwarmIdProxy {
     )
     for (const [key, entry] of this.stampEntries) {
       if (!owned.has(key)) {
-        const pool = entry.workerPool
-        if (pool) {
-          // Writes run OFF the work queue holding this batch's
-          // `swarm-write-<batchId>` lock across write+flush. Terminating the
-          // pool NOW would kill a worker-backed upload mid-signing (opaque
-          // worker errors instead of a clean rejection) — evict the entry
-          // immediately so no later write can pick it up, but terminate only
-          // once the batch's state lock frees, i.e. after any in-flight
-          // same-batch write has finished.
-          void withBatchStateLock(key, async () => pool.terminate()).catch(
-            (error: unknown) =>
-              console.warn(
-                `[Proxy] Deferred worker-pool termination failed for ${key}:`,
-                error,
-              ),
-          )
-        }
         this.stampEntries.delete(key)
+        this.deferPoolTermination(key, entry.workerPool)
       }
     }
   }
@@ -1698,8 +1704,8 @@ export class SwarmIdProxy {
     if (!stamp) {
       const stale = this.stampEntries.get(targetHex)
       if (stale) {
-        stale.workerPool?.terminate()
         this.stampEntries.delete(targetHex)
+        this.deferPoolTermination(targetHex, stale.workerPool)
       }
       throw new Error("Batch not owned by account")
     }

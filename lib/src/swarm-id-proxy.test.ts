@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-import { describe, it, expect, vi, beforeEach } from "vitest"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
@@ -575,6 +575,102 @@ describe("SwarmIdProxy pruneStampEntries", () => {
     ;(proxy as never)["pruneStampEntries"]()
 
     expect(entries.size).toBe(0)
+    expect(terminate).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("SwarmIdProxy deferred worker-pool termination (every eviction path)", () => {
+  // `pruneStampEntries` gets this right; the other three eviction paths killed
+  // the pool synchronously, which takes down a worker-backed upload mid-signing
+  // (writes run OFF the work queue, holding the batch's swarm-write-<id> lock).
+  // Every path must evict the ENTRY now and terminate only once that lock frees.
+  let grantLock: () => void
+
+  function stubHeldBatchLock() {
+    vi.stubGlobal("navigator", {
+      locks: {
+        request: (_n: string, _o: unknown, cb: () => Promise<unknown>) =>
+          new Promise((res) => {
+            grantLock = () => res(cb())
+          }),
+      },
+    })
+  }
+
+  afterEach(() => vi.unstubAllGlobals())
+
+  const settle = () => new Promise((r) => setTimeout(r, 0))
+
+  it("clearStampEntries defers past an in-flight same-batch write", async () => {
+    const proxy = makeProxy()
+    const terminate = vi.fn()
+    const entries = new Map([
+      [
+        B1,
+        { stamper: { tag: B1 }, signerKey: "k1", workerPool: { terminate } },
+      ],
+    ])
+    ;(proxy as never)["stampEntries"] = entries
+    stubHeldBatchLock()
+    ;(proxy as never)["clearStampEntries"]()
+
+    expect(entries.size).toBe(0)
+    expect(terminate).not.toHaveBeenCalled()
+
+    grantLock()
+    await settle()
+    expect(terminate).toHaveBeenCalledTimes(1)
+  })
+
+  it("the stale-target eviction defers", async () => {
+    const proxy = makeProxy()
+    const terminate = vi.fn()
+    const entries = new Map([
+      [
+        B3,
+        { stamper: { tag: B3 }, signerKey: "k3", workerPool: { terminate } },
+      ],
+    ])
+    ;(proxy as never)["stampEntries"] = entries
+    ;(proxy as never)["postageBatchId"] = B1
+    ;(proxy as never)["stamper"] = { tag: B1 }
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn() }
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      account: { postageStamps: [stampStub(B1), stampStub(B2)] },
+    })
+    stubHeldBatchLock()
+
+    await expect((proxy as never)["resolveUploadStamper"](B3)).rejects.toThrow(
+      "Batch not owned by account",
+    )
+    expect(entries.size).toBe(0)
+    expect(terminate).not.toHaveBeenCalled()
+
+    grantLock()
+    await settle()
+    expect(terminate).toHaveBeenCalledTimes(1)
+  })
+
+  it("a setStampEntry replacement defers the replaced pool's termination", async () => {
+    const proxy = makeProxy()
+    const terminate = vi.fn()
+    const entries = new Map([
+      [
+        B1,
+        { stamper: { tag: "old" }, signerKey: "k1", workerPool: { terminate } },
+      ],
+    ])
+    ;(proxy as never)["stampEntries"] = entries
+    stubHeldBatchLock()
+
+    const rebuilt = { tag: "new", batchId: { toHex: () => B1 } }
+    ;(proxy as never)["setStampEntry"](rebuilt, "k1")
+
+    expect(entries.get(B1)?.stamper).toBe(rebuilt)
+    expect(terminate).not.toHaveBeenCalled()
+
+    grantLock()
+    await settle()
     expect(terminate).toHaveBeenCalledTimes(1)
   })
 })
