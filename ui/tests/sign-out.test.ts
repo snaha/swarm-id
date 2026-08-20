@@ -10,11 +10,11 @@
 import { type Page, expect, test } from '@playwright/test'
 
 import {
-  DRIVE_SETTLE_TIMEOUT_MS,
   PASSWORD,
   addDrive,
   chainReachable,
   completeCreateFlow,
+  confirmPurchased,
   fundPostageSigner,
   seedLocalChain,
 } from './helpers'
@@ -22,7 +22,7 @@ import {
 // Buying a drive is a real on-chain purchase now — there is no simulated
 // settlement to fall back on — so this suite needs a chain.
 const chainUp = await chainReachable()
-test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:cluster:start, or pnpm dev:chain:detach)')
 
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
@@ -37,9 +37,8 @@ async function createAccountWithDrive(page: Page) {
   // A drive makes the account non-local — sign-out is only offered then.
   await fundPostageSigner(page)
   await addDrive(page)
-  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
-    timeout: DRIVE_SETTLE_TIMEOUT_MS,
-  })
+  await confirmPurchased(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible()
 }
 
 async function signOut(page: Page) {
@@ -66,7 +65,8 @@ test('sign out keeps only the encrypted remnant and signs back in from it', asyn
     return { keys: Object.keys(record).sort(), raw: JSON.stringify(record) }
   })
   // `soonestDriveExpiry` is optional — it only exists when a drive's TTL is
-  // known, and the mocked purchase records none.
+  // known, which depends on what the chain read back, so it is not part of
+  // what makes a remnant minimal.
   expect(remnant.keys.filter((key) => key !== 'soonestDriveExpiry')).toEqual([
     'access',
     'createdAt',

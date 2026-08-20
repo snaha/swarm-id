@@ -3,11 +3,11 @@
 import { type Page, expect, test } from '@playwright/test'
 
 import {
-  DRIVE_SETTLE_TIMEOUT_MS,
   PASSWORD,
   addDrive,
   chainReachable,
   completeCreateFlow,
+  confirmPurchased,
   fundPostageSigner,
   openConnectPopup,
   seedLocalChain,
@@ -16,7 +16,7 @@ import {
 // Buying a drive is a real on-chain purchase now — there is no simulated
 // settlement to fall back on — so this suite needs a chain.
 const chainUp = await chainReachable()
-test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:cluster:start, or pnpm dev:chain:detach)')
 
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
@@ -71,9 +71,8 @@ test('first connect with a single drive confirms without picker or pitch', async
   await expect(page).toHaveURL(/\/$/)
   await fundPostageSigner(page)
   await addDrive(page)
-  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
-    timeout: DRIVE_SETTLE_TIMEOUT_MS,
-  })
+  await confirmPurchased(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible()
 
   // First connect + one drive → the drive question answers itself: plain
   // confirmation, no picker, no pitch.
@@ -109,16 +108,15 @@ test('connect flow shows the done screen variants and closes the popup', async (
   const accountButton = page.getByRole('button', { name: /0x|[0-9a-f]{6}\.\.\./ }).first()
   await expect(accountButton).toBeVisible({ timeout: 10000 })
 
-  // Give the account a drive via the mocked Add-drive flow (dev default:
-  // mock enabled, no widget popup).
+  // Give the account a drive: a real purchase against the local chain, with
+  // the signer prefunded so no payment screen opens over it.
   await seedLocalChain(page)
   await page.goto('/')
   await fundPostageSigner(page)
   await addDrive(page)
+  await confirmPurchased(page)
   // Drive cards are labelled "Drive <4 hex chars>" (batch-ID-derived name).
-  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
-    timeout: DRIVE_SETTLE_TIMEOUT_MS,
-  })
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible()
 
   // Disconnect and reconnect: the lapsed connection lists the account under
   // "Previously used with this app" — with NO "Signed out" badge, since the
@@ -155,9 +153,8 @@ test('connect flow shows the done screen variants and closes the popup', async (
   // the app should use.
   await fundPostageSigner(page)
   await addDrive(page)
-  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2, {
-    timeout: DRIVE_SETTLE_TIMEOUT_MS,
-  })
+  await confirmPurchased(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toHaveCount(2)
 
   await page.goto(DEMO_URL)
   popup = await openConnectPopup(page)

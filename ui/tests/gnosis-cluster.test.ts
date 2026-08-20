@@ -14,9 +14,9 @@
  * their mainnet addresses, so the nodes follow the same PostageStamp the
  * purchase went through. See bee-compose's blockchain/HYBRID-CHAIN.md.
  *
- * Start it with `pnpm dev:local`; skipped when it is down. The upload
+ * Start it with `pnpm dev:cluster:start`; skipped when it is down. The upload
  * needs a peer to pushsync a receipt from, so run with workers
- * (`pnpm dev:local` brings up four full nodes).
+ * (`pnpm dev:cluster:start` brings up four full nodes).
  */
 import { Bee, MerkleTree, Stamper } from '@ethersphere/bee-js'
 import { expect, test } from '@playwright/test'
@@ -122,7 +122,7 @@ async function waitForIngestion(batchId: `0x${string}`): Promise<KnownBatch | un
   return undefined
 }
 
-test.skip(!clusterUp, 'requires the bee-compose cluster (pnpm dev:local)')
+test.skip(!clusterUp, 'requires the bee-compose cluster (pnpm dev:cluster:start)')
 
 test('the node ingests a batch bought through the multichain path', async () => {
   test.setTimeout(INGEST_TIMEOUT_MS * 2)

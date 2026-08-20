@@ -3,10 +3,11 @@
 /**
  * Extend and resize executed as REAL transactions against the bee-compose
  * anvil chain, signed by the account's derived postage signer — no Bee node
- * involved. Nothing about the funding is mocked either: the drive is made with
- * `/dev`'s Create-drive action, whose simulated purchase leaves its leftover
- * BZZ and xDAI with the owner, so the signer is already funded when it extends
- * and no payment is owed.
+ * involved. The drive they operate on is bought for real too: `/dev`'s
+ * Create-drive action swaps, approves and calls `createBatch` on chain, faking
+ * only the cross-chain leg (the payer's xDAI is minted rather than bridged),
+ * and hands its leftover BZZ and xDAI to the owner. So the signer is already
+ * funded when it extends, and no payment screen opens.
  *
  * Skipped automatically when the local chain is unreachable, so the suite
  * never breaks a run without the cluster.
@@ -24,6 +25,8 @@ const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 const BEE_NODE_URL = 'http://localhost:1633/'
 /** On-chain work spans several 5s-block confirmations. */
 const ONCHAIN_TIMEOUT_MS = 120_000
+/** A cold dev server compiling a heavy route, not a chain wait. */
+const PAGE_READY_TIMEOUT_MS = 30_000
 const PROBE_TIMEOUT_MS = 2000
 
 async function anvilReachable(): Promise<boolean> {
@@ -93,7 +96,12 @@ async function createAccountWithOnChainDrive(page: Page) {
   await page.getByRole('button', { name: 'Stay local for now' }).click()
 
   await page.goto('/dev')
-  await page.getByRole('tab', { name: 'Chain' }).click()
+  // /dev is by far the heaviest route, and on a cold dev server its first paint
+  // routinely outlasts the 5s action timeout — a failure about a missing tab
+  // that is really about compilation. Wait for it to exist before clicking it.
+  const chainTab = page.getByRole('tab', { name: 'Chain' })
+  await expect(chainTab).toBeVisible({ timeout: PAGE_READY_TIMEOUT_MS })
+  await chainTab.click()
   // One action rather than create-batch → copy id → copy signer key → paste →
   // import. It is also the path the README tells a newcomer to use, so this
   // keeps that instruction honest.
@@ -112,7 +120,7 @@ async function createAccountWithOnChainDrive(page: Page) {
 
 test.describe.configure({ mode: 'serial' })
 
-test.skip(!chainUp, 'requires a local chain (pnpm dev:local, or pnpm dev:chain:detach)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:cluster:start, or pnpm dev:chain:detach)')
 
 test.beforeAll(async () => {
   if (chainUp) {

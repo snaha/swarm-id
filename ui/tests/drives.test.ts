@@ -1,15 +1,15 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * Drive (postage stamp) management on the Storage tab, against the simulated
- * purchase flow: add, rename, set default, remove, and the failed-purchase
- * outcome.
+ * Drive (postage stamp) management on the Storage tab: add, rename, set
+ * default, remove, and the failed-purchase outcome.
  *
  * Every purchase here is a real one against the local chain — nothing about it
- * is fabricated any more. What keeps this suite about drive bookkeeping rather
- * than about paying is that the postage signer is funded out of band first
+ * is fabricated. What keeps this suite about drive bookkeeping rather than
+ * about paying is that the postage signer is funded out of band first
  * (`fundPostageSigner`), so the operation is never short and the payment
- * screens never open. `payment-rail.test.ts` is where paying is the subject.
+ * screens never open. `drive-resume.test.ts` is where an interrupted spend is
+ * the subject.
  */
 import { expect, test } from '@playwright/test'
 
@@ -18,6 +18,7 @@ import {
   addDrive,
   chainReachable,
   completeCreateFlow,
+  confirmPurchased,
   fundPostageSigner,
   seedLocalChain,
   seedNoChain,
@@ -26,7 +27,7 @@ import {
 // Buying a drive is a real on-chain purchase now — there is no simulated
 // settlement to fall back on — so this suite needs a chain.
 const chainUp = await chainReachable()
-test.skip(!chainUp, 'requires a local chain (pnpm dev:local)')
+test.skip(!chainUp, 'requires a local chain (pnpm dev:cluster:start, or pnpm dev:chain:detach)')
 
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
@@ -76,9 +77,8 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
   // The first drive settles and becomes the account default.
   await fundPostageSigner(page)
   await addDrive(page)
-  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
-    timeout: DRIVE_SETTLE_TIMEOUT_MS,
-  })
+  await confirmPurchased(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible()
   await expect(page.getByText('Default', { exact: true })).toBeVisible()
 
   // Rename it (the name input renders in the expanded card).
@@ -98,10 +98,11 @@ test('drive management: add, rename, set default, remove', async ({ page }) => {
     .filter({ has: page.getByRole('button', { name: 'Collapse drive' }) })
   await fundPostageSigner(page)
   await addDrive(page)
+  await confirmPurchased(page)
   const newCard = page.locator('div.overflow-hidden.rounded-lg', {
     hasText: /Drive [0-9a-f]{4}/,
   })
-  await expect(newCard).toBeVisible({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
+  await expect(newCard).toBeVisible()
   await newCard.getByRole('button', { name: 'Expand drive' }).click()
   await expandedCard.getByRole('button', { name: 'Drive actions' }).click()
   await page.getByRole('menuitem', { name: 'Set as default' }).click()

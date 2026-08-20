@@ -11,7 +11,7 @@
 import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect, test } from '@playwright/test'
 
-import { addDrive, completeCreateFlow, fundPostageSigner } from './helpers'
+import { addDrive, completeCreateFlow, confirmPurchased, fundPostageSigner } from './helpers'
 
 const ANVIL_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
 const BEE_NODE_URL = 'http://localhost:1633/'
@@ -88,7 +88,10 @@ function storedDrive(page: Page) {
 // A real purchase spans several 5s blocks; the 30s default is not enough.
 test.setTimeout(180_000)
 
-test.skip(!chainUp, 'requires the bee-compose chain (pnpm dev:local)')
+test.skip(
+  !chainUp,
+  'requires the bee-compose chain (pnpm dev:cluster:start, or pnpm dev:chain:detach)',
+)
 
 test('buying a drive creates a batch the account owns on chain', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)
@@ -110,10 +113,10 @@ test('buying a drive creates a batch the account owns on chain', async ({ page }
   await fundPostageSigner(page)
   await addDrive(page)
   // Settling for real takes chain time: approve + createBatch, then reading the
-  // batch back.
-  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
-    timeout: ONCHAIN_TIMEOUT_MS,
-  })
+  // batch back. It ends on the success screen, which has to be acknowledged
+  // before the drive list is reachable again.
+  await confirmPurchased(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible()
 
   const drive = await storedDrive(page)
   expect(drive).toBeDefined()

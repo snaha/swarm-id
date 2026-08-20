@@ -93,19 +93,39 @@ export function seedNoChain(page: Page) {
 }
 
 /**
- * Buy a drive through the normal flow, from the home page (Storage tab).
+ * Start a drive purchase through the normal flow, from the home page (Storage
+ * tab), and leave it settling.
  *
  * Every suite that calls this needs a chain: buying is a real on-chain
  * purchase, with no simulated settlement to fall back on. Gate with
- * {@link chainReachable}. It settles asynchronously — callers assert the
- * outcome (a "Drive xxxx" card, or the error phase) with
- * `DRIVE_SETTLE_TIMEOUT_MS`.
+ * {@link chainReachable}. It settles asynchronously — a successful one lands on
+ * the screen {@link confirmPurchased} dismisses, a failed one on the error
+ * phase, which callers assert with `DRIVE_SETTLE_TIMEOUT_MS`.
  */
 export async function addDrive(page: Page) {
   await page.getByRole('tab', { name: 'Storage' }).click()
   await page.getByRole('button', { name: 'Add drive' }).click()
   await page.getByRole('dialog').getByRole('combobox').nth(1).selectOption({ index: 1 })
   await page.getByRole('button', { name: 'Proceed' }).click()
+}
+
+/**
+ * Wait out a purchase started by {@link addDrive} and acknowledge it.
+ *
+ * Money moved, so the flow stops on a success screen and says what it bought
+ * instead of vanishing behind a toast. That screen is modal: until it is
+ * dismissed its backdrop swallows every click on the page behind it, so this is
+ * not decoration — it is how a suite gets back to the drive list.
+ *
+ * @param resumed asserts the "finished an earlier unfinished purchase" ending
+ *   rather than the "bought the drive you configured" one.
+ */
+export async function confirmPurchased(page: Page, resumed = false) {
+  const dialog = page.getByRole('dialog')
+  const title = resumed ? 'Earlier purchase completed' : 'Purchase completed!'
+  await expect(dialog.getByText(title)).toBeVisible({ timeout: DRIVE_SETTLE_TIMEOUT_MS })
+  await dialog.getByRole('button', { name: 'Done' }).click()
+  await expect(dialog).toBeHidden()
 }
 
 export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545'
