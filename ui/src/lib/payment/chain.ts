@@ -7,8 +7,10 @@
  * Separate from the operations built on top because the question is asked well
  * before any of them: the dev tools, the network settings dialog and the
  * postage engine all need to know whether they are talking to Gnosis mainnet
- * or to a local chain wearing its chain id, and the answer decides which
- * contract addresses and which RPC fallbacks apply.
+ * or to a local chain wearing its chain id, before anything signs or spends.
+ *
+ * Whatever the answer, the client talks to the configured endpoint and to
+ * nothing else — see `settingsFor`.
  */
 import {
   GNOSIS_CHAIN_ID,
@@ -24,6 +26,12 @@ import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
  * Settings for the endpoint. There is one preset: the baked local chain carries
  * a real BZZ market and the contracts at their mainnet addresses, so it is
  * driven with the production ones — which is what makes it worth testing on.
+ *
+ * The configured endpoint is the ONLY one, whichever chain it turns out to
+ * serve. On a dev chain a public fallback would silently read REAL mainnet
+ * state the moment a call failed; on mainnet it would silently move the reads
+ * off the endpoint the user chose — and a rotation whose members disagree
+ * about what exists is worse than a call that plainly failed.
  */
 function settingsFor(identity: ChainIdentity, rpcUrl: string): MultichainSettings {
   if (identity.kind === 'unsupported') {
@@ -31,15 +39,7 @@ function settingsFor(identity: ChainIdentity, rpcUrl: string): MultichainSetting
       `The configured Gnosis RPC reports chain id ${identity.chainId}, not Gnosis (${GNOSIS_CHAIN_ID}). Check the network settings.`,
     )
   }
-  // A dev chain answering as Gnosis must never fall back to the public RPCs:
-  // a failed call would silently read REAL mainnet state.
-  const mainnet = gnosisMainnetSettings()
-  return gnosisMainnetSettings({
-    rpcUrls:
-      identity.kind === 'mainnet'
-        ? [rpcUrl, ...mainnet.rpcUrls.filter((url) => url !== rpcUrl)]
-        : [rpcUrl],
-  })
+  return gnosisMainnetSettings({ rpcUrls: [rpcUrl] })
 }
 
 const CHAIN_ID_PROBE_TIMEOUT_MS = 5000

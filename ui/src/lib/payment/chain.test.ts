@@ -132,12 +132,14 @@ describe('postageChain', () => {
     expect(chain.settings.rpcUrls).toEqual([url])
   })
 
-  it('keeps the public fallbacks behind the configured endpoint on mainnet', async () => {
+  // Mainnet gets no rotation either: a fallback would move reads off the
+  // endpoint the user configured, and two endpoints that disagree about what
+  // exists are worse than one call that plainly failed.
+  it('uses only the configured endpoint on mainnet', async () => {
     stubRpc(mainnetAnswers)
     const url = freshUrl()
     const chain = await postageChain(url)
-    expect(chain.settings.rpcUrls[0]).toBe(url)
-    expect(chain.settings.rpcUrls.length).toBeGreaterThan(1)
+    expect(chain.settings.rpcUrls).toEqual([url])
   })
 
   it('refuses a chain that is not Gnosis at all', async () => {
