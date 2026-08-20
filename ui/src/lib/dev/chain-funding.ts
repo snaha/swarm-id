@@ -77,14 +77,19 @@ const PURCHASE_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
  * Nothing here can currently do damage on mainnet — the faucet key is public
  * and holds nothing, and no real node serves `anvil_setBalance` — but both of
  * those facts live two packages away, and neither was chosen as a safeguard.
- * The red banner warns the person; this stops the code. The identity is
- * already cached by the time any of these run, so it costs a map lookup.
+ * The red banner warns the person; this stops the code. The banner has
+ * normally probed this endpoint already, so it costs a map lookup.
+ *
+ * Takes the endpoint rather than reading it: every operation here pins one url
+ * at entry and checks and spends against that same one. Re-reading the setting
+ * per step let a switch mid-purchase send the spend to a chain this assertion
+ * never saw.
  *
  * Asked positively on purpose: "not mainnet" waves through every other
  * reachable chain, and an unproven all-clear is exactly what spends real money.
  */
-async function assertDevChain(tool: string): Promise<void> {
-  const { kind } = await chainIdentity()
+async function assertDevChain(tool: string, rpcUrl: string): Promise<void> {
+  const { kind } = await chainIdentity(rpcUrl)
   if (kind !== 'dev') {
     const what = kind === 'mainnet' ? 'Gnosis mainnet' : 'a chain that is not Gnosis'
     throw new Error(`${tool} only runs on a dev chain — the configured Gnosis RPC serves ${what}.`)
@@ -111,14 +116,16 @@ export interface FaucetAmounts {
  * funding the one address that is stuck.
  */
 export async function sendFromFaucet(address: string, amounts: FaucetAmounts): Promise<void> {
+  // Read once: the assertion and the transfer must be about the same chain.
+  const rpcUrl = networkSettingsStore.gnosisRpcUrl
   const to = new EthAddress(address).toChecksum() as `0x${string}`
   // Nothing to send is a mistyped amount, not a send: reporting "✅ Sent 0" for
   // it reads as a transfer that happened.
   if (amounts.xdai <= 0n && amounts.bzzPlur <= 0n) {
     throw new Error('Enter an amount above zero.')
   }
-  await assertDevChain('The faucet')
-  const chain = await postageChain()
+  await assertDevChain('The faucet', rpcUrl)
+  const chain = await postageChain(rpcUrl)
   await fundLocalAccount({ to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur }, chain.settings)
 }
 
@@ -169,14 +176,19 @@ export interface BatchShape {
  *
  * Runs the widget's actual step list: swap → approve → createBatch → hand the
  * leftovers to the owner.
+ *
+ * @param rpcUrl — the endpoint every step of this purchase runs against;
+ *   defaults to the current setting, and is passed in by a caller that has
+ *   more to do on the same chain afterwards.
  */
 export async function createOwnedBatchOnChain(
   derivationKey: string,
   { depth: requestedDepth, days = DEV_BATCH_DAYS }: BatchShape = {},
+  rpcUrl: string = networkSettingsStore.gnosisRpcUrl,
 ): Promise<LocalBatch> {
-  await assertDevChain('Creating a batch here')
+  await assertDevChain('Creating a batch here', rpcUrl)
   const { destination } = await derivePostageSigner(derivationKey)
-  const chain = await postageChain()
+  const chain = await postageChain(rpcUrl)
   // Any dev flow that makes a batch will go on to extend or resize it, so this
   // is the one place that guarantees the delegate is there for the bundled
   // path — including in e2e runs, which never start the solver.
@@ -263,13 +275,22 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
  * @returns the attached drive's batch id.
  */
 export async function createTestDrive(account: Account, shape?: BatchShape): Promise<string> {
-  const { batchId, blockNumber } = await createOwnedBatchOnChain(account.derivationKey, shape)
+  // Both endpoints read once, at the top: a purchase takes tens of seconds, and
+  // an endpoint switch during it used to send the read-back to a chain the
+  // batch was never bought on — reported as "could not be read back".
+  const rpcUrl = networkSettingsStore.gnosisRpcUrl
+  const beeNodeUrl = networkSettingsStore.beeNodeUrl
+  const { batchId, blockNumber } = await createOwnedBatchOnChain(
+    account.derivationKey,
+    shape,
+    rpcUrl,
+  )
   const { signerKey } = await derivePostageSigner(account.derivationKey)
-  const stamp = await fetchExistingBatchFromChain(batchId, signerKey, '')
+  const stamp = await fetchExistingBatchFromChain(batchId, signerKey, '', { rpcUrl })
   if (!stamp) {
     throw new Error('The batch was created but could not be read back from the chain.')
   }
-  await waitForNodeToSeeBatch(networkSettingsStore.beeNodeUrl, blockNumber)
+  await waitForNodeToSeeBatch(beeNodeUrl, blockNumber)
   account.addStamp(stamp)
   return batchId
 }
