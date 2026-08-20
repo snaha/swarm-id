@@ -64,10 +64,16 @@ const DEV_BATCH_EXPIRING_DAYS = 1n
 /** Bankrolls the simulated purchase's throwaway payer: swap, batch and gas. */
 const PURCHASE_PAYER_XDAI = 2n * 10n ** 18n // 2 xDAI
 /**
- * Of that, what goes into BZZ. Two orders of magnitude more than a dev batch
- * costs, so price drift on a long-lived chain cannot starve a purchase, and
- * still small against a ~$10k pool. The leftovers go to the batch owner, as
- * they do in production.
+ * Of that, what goes into BZZ. Measured against the baked chain: 0.25 xDAI
+ * buys ≈3.78 BZZ, where the default batch — depth 20 for 15 days at the
+ * 24 000 PLUR floor — costs ≈0.65. So roughly 6× headroom over a default
+ * purchase, comfortable but not the two orders of magnitude once claimed here.
+ *
+ * The margin also erodes: the pool is real, thin and never rewound, so every
+ * swap on a long-lived chain moves the price against the next one. A purchase
+ * that comes up short does not fail cleanly — it reverts at createBatch with
+ * the BZZ already swapped and stranded on the throwaway payer. The leftovers
+ * go to the batch owner, as they do in production.
  */
 const PURCHASE_SWAP_XDAI = 10n ** 18n / 4n // 0.25 xDAI
 
