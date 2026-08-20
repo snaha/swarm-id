@@ -97,10 +97,16 @@ describe('chainIdentity', () => {
     ['a JSON-RPC error', { error: { message: 'pruned' } }],
     ['a non-2xx status', { status: 429 }],
     ['no result at all', {}],
+    // JSON-RPC's own "no such block": a pruned node answers with an explicit
+    // null rather than by omitting the field.
+    ['a null result', { result: null }],
     ['a block with no hash', { result: {} }],
   ])('rejects when the genesis probe answers %s', async (_label, answer: RpcAnswer) => {
     stubRpc({ ...mainnetAnswers, eth_getBlockByNumber: answer })
-    await expect(chainIdentity(freshUrl())).rejects.toThrow()
+    // The module's own wording, not just any rejection: a null result read as an
+    // answer still rejects — with a TypeError from dereferencing it — and that
+    // is the failure this asserts is gone.
+    await expect(chainIdentity(freshUrl())).rejects.toThrow(/configured Gnosis RPC/)
   })
 
   it('rejects when the chain id itself cannot be read', async () => {
