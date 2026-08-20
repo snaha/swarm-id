@@ -8,7 +8,7 @@
 import { PrivateKey } from '@ethersphere/bee-js'
 import { type Page, expect } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
-import { fundLocalAccount } from '@swarm-id/multichain/dev'
+import { ensureBundlingDelegate, fundLocalAccount } from '@swarm-id/multichain/dev'
 
 export const PASSWORD = 'testpassword123'
 
@@ -206,7 +206,18 @@ export async function postageSignerAddress(page: Page): Promise<`0x${string}`> {
 
 const PROBE_TIMEOUT_MS = 2000
 
-/** Whether a local chain is answering, so a suite can skip rather than fail. */
+/**
+ * Whether a local chain is answering, so a suite can skip rather than fail.
+ *
+ * A chain that answers is also converged before this returns: the 7702
+ * delegate is spliced in (idempotent — see `ensureBundlingDelegate`). The
+ * baked snapshot cannot carry the delegate, so on a fresh chain every paid
+ * operation would be refused until `drive-onchain.test.ts` happened to run
+ * first and install it — which is exactly what CI's alphabetical order did to
+ * the done-page suite. Deliberately outside the probe's try: a chain that
+ * answers but cannot be converged must fail the suite loudly, not read as
+ * "no chain" and skip it.
+ */
 export async function chainReachable(rpcUrl: string = CHAIN_RPC_URL): Promise<boolean> {
   try {
     const response = await fetch(rpcUrl, {
@@ -215,8 +226,12 @@ export async function chainReachable(rpcUrl: string = CHAIN_RPC_URL): Promise<bo
       body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
       signal: AbortSignal.timeout(PROBE_TIMEOUT_MS),
     })
-    return typeof ((await response.json()) as { result?: string }).result === 'string'
+    if (typeof ((await response.json()) as { result?: string }).result !== 'string') {
+      return false
+    }
   } catch {
     return false
   }
+  await ensureBundlingDelegate(gnosisMainnetSettings({ rpcUrls: [rpcUrl] }))
+  return true
 }
