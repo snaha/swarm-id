@@ -761,8 +761,11 @@ Check console logs for details:
         contractAddress: importContractOverride.trim() || undefined,
       })
       if (!stamp) {
+        // Only ever an authoritative "not here" now — an endpoint that could
+        // not be read throws instead, and lands in the catch below with its
+        // own message.
         importError =
-          'Could not read the batch from the chain — no such batch here, or the RPC URL / contract address is wrong.'
+          'No such batch on this chain — check the batch ID, the RPC URL, or the contract address.'
         return
       }
 
