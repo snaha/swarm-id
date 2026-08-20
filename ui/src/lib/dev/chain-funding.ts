@@ -222,6 +222,15 @@ export async function createOwnedBatchOnChain(
 /** How long to wait for the Bee node to catch up to the batch's block. */
 const BATCH_VISIBLE_TIMEOUT_MS = 30_000
 const BATCH_VISIBLE_POLL_MS = 500
+/**
+ * How many status reads may fail in a row before the wait gives up.
+ *
+ * A dropped request is what a restarting node looks like — the very state this
+ * wait exists for — so one is not a reason to stop. A CORS rejection throws
+ * identically and will never recover, which is why the run of them is capped
+ * rather than tolerated to the deadline.
+ */
+const MAX_CONSECUTIVE_STATUS_FAILURES = 3
 
 /**
  * Wait until the Bee node has synced past the block the batch landed in.
@@ -242,9 +251,12 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
   }
   const deadline = Date.now() + BATCH_VISIBLE_TIMEOUT_MS
   const statusUrl = new URL('status', beeNodeUrl.endsWith('/') ? beeNodeUrl : `${beeNodeUrl}/`)
+  let consecutiveFailures = 0
   while (Date.now() < deadline) {
     try {
       const response = await fetch(statusUrl)
+      // A node that answers, but not with a sync figure, is a gateway: a
+      // persistent condition no amount of waiting changes, so stop asking.
       if (!response.ok) {
         return
       }
@@ -255,8 +267,15 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
       if (lastSyncedBlock >= target) {
         return
       }
+      consecutiveFailures = 0
     } catch {
-      return
+      // Unlike the two above, a failed request says nothing durable — a node
+      // coming back up drops exactly this. Keep waiting; the cap is what stops
+      // a permanently unreachable node from holding the whole deadline.
+      consecutiveFailures += 1
+      if (consecutiveFailures >= MAX_CONSECUTIVE_STATUS_FAILURES) {
+        return
+      }
     }
     await new Promise((resolve) => setTimeout(resolve, BATCH_VISIBLE_POLL_MS))
   }
