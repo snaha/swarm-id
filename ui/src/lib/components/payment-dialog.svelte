@@ -268,7 +268,7 @@
 </script>
 
 {#if screen === 'connecting' || screen === 'switching' || screen === 'approving' || screen === 'relaying'}
-  <Dialog onclose={cancel} dismissable={false}>
+  <Dialog onclose={cancel} dismissable={false} ariaLabel="Payment">
     <div class="flex flex-col items-center gap-2 py-6 text-center">
       <LoaderCircle class="size-5 animate-spin" />
       {#if screen === 'relaying'}

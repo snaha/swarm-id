@@ -22,6 +22,12 @@
   interface Props {
     /** Omitted for pending states which render their own centered content. */
     title?: string
+    /**
+     * The accessible name when there is no visible `title` to take it from.
+     * Without one a pending dialog is announced as an unnamed dialog — which is
+     * precisely what those screens cover: a wallet approval, a spend in flight.
+     */
+    ariaLabel?: string
     /** Rendered left of the title — e.g. a back arrow in a multi-step flow. */
     leading?: Snippet
     /** Hide the X button while an operation is pending. */
@@ -31,7 +37,15 @@
     children: Snippet
   }
 
-  let { title, leading, dismissable = true, onclose, class: className, children }: Props = $props()
+  let {
+    title,
+    ariaLabel,
+    leading,
+    dismissable = true,
+    onclose,
+    class: className,
+    children,
+  }: Props = $props()
 
   let panel = $state<HTMLDivElement>()
 
@@ -125,7 +139,7 @@
     bind:this={panel}
     role="dialog"
     aria-modal="true"
-    aria-label={title}
+    aria-label={title ?? ariaLabel}
     tabindex="-1"
     class={cn(
       'bg-popover flex w-96 max-w-[calc(100vw-4rem)] flex-col gap-4 rounded-lg border p-4 shadow-lg outline-none',
