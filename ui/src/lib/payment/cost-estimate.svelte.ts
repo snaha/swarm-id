@@ -4,9 +4,8 @@
  * The drive dialogs' shared cost estimate: what an operation will cost, in
  * dollars where the pool can price it and in BZZ where it cannot.
  *
- * One implementation for all three dialogs (add, extend, resize), because they
- * had grown three — same rate fetch, same fallback, three different shapes for
- * the same decision, and so three places for the two to disagree about how the
+ * ONE definition, shared by all three dialogs (add, extend, resize) and the pay
+ * screen: same rate fetch, same fallback, so they cannot disagree about how the
  * same money reads. Each still supplies its own cost: a purchase spreads the
  * per-chunk amount over the new depth, an extend over the drive's current one.
  *

@@ -63,15 +63,17 @@ describe('operationJournal', () => {
     expect(JSON.parse(stored.get('swarm-id:pending-operations') ?? '[]')).toEqual([purchase])
   })
 
-  // Stored by an older version, or corrupted: one bad entry must not strand
-  // the others, since this store exists to rescue money that is already spent.
-  it('drops malformed entries instead of failing to load', () => {
+  // The WRITE side, not the load path — the journal singleton parses storage
+  // at module import, long before this seeds anything. What is pinned here is
+  // that `record` rewrites storage from the validated in-memory list, so a
+  // malformed neighbour is dropped rather than carried forward while the good
+  // entry survives. Which matters because this store exists to rescue money
+  // that is already spent.
+  it('rewrites storage from the validated list, dropping a malformed neighbour', () => {
     stored.set(
       'swarm-id:pending-operations',
       JSON.stringify([{ kind: 'purchase', accountId: ACCOUNT }, purchase]),
     )
-    // `record` rewrites the file from the validated in-memory list, so the
-    // malformed neighbour is what gets dropped — not the good entry.
     operationJournal.record(purchase)
     expect(JSON.parse(stored.get('swarm-id:pending-operations') ?? '[]')).toEqual([purchase])
   })

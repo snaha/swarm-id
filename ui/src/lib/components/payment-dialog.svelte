@@ -35,7 +35,7 @@
    *
    * Which rail carries the money is the caller's choice (`resolve-rail.ts`),
    * and nothing here depends on which one it is — the screens are identical
-   * against Relay and against the local dev rail.
+   * against Relay and against the Gnosis direct rail.
    *
    * The connected wallet only ever signs on the source chain — it never sees
    * the owner key, so passkey and password accounts use this unchanged.
@@ -124,9 +124,9 @@
   )
 
   /**
-   * Through `displayAmount`, not a local copy of it. The copy this replaces had
-   * lost the "only trim after a decimal point" guard, so a four-significant-
-   * digit integer lost its real zeros: 1230 rendered as 123.
+   * Through `displayAmount`, not a local copy of it: trailing zeros are only
+   * padding after a decimal point, so an integer's are significant — 1230 is
+   * not 123. A test pins it.
    */
   function formatAmount(value: bigint, decimals: number): string {
     return displayAmount(formatUnits(value, decimals))

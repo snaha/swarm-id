@@ -249,11 +249,12 @@
   /**
    * Where the next paid operation should fail on purpose.
    *
-   * The failures worth testing are the expensive ones — a resize whose depth
-   * increase dies after the top-up confirmed, a purchase whose read-back dies
-   * after the batch exists — and they are exactly the ones that never happen
-   * while you are watching. Arming one fires it once, so the attempt after it
-   * exercises the resume path rather than the same failure again.
+   * The failures worth testing are the expensive ones — a purchase that dies
+   * once its payment has landed but before the batch is recorded, a purchase
+   * whose read-back dies after the batch exists — and they are exactly the ones
+   * that never happen while you are watching. Arming one fires it once, so the
+   * attempt after it exercises the resume path rather than the same failure
+   * again.
    */
   let faultPoint = $state<FaultPoint>(armedFaultPoint())
   const faultOptions = FAULT_POINTS.map((point) => ({

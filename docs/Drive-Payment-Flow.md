@@ -281,7 +281,7 @@ than assumes; whether Relay's own solver does is what the canary has to establis
 
 - Units: `funding.test.ts`, `resolve-rail.test.ts`, `gnosis-direct.test.ts`,
   `payment-rail.test.ts`, `multichain-widget.test.ts`.
-- Live contract test: `relay.live.test.ts` (`pnpm test:live`).
+- Live contract test: `relay.live.test.ts` (`pnpm --filter @swarm-id/ui test:live`).
 - E2E, against the local chain: `ui/tests/drive-purchase.test.ts`, `ui/tests/drive-onchain.test.ts`
   (the engine's flows) and `ui/tests/drive-resume.test.ts` (an interrupted spend). All prefund the
   signer, so none of them opens a payment screen — see [Dev and testing](#dev-and-testing).

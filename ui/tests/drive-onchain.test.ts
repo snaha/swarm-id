@@ -127,7 +127,8 @@ test.beforeAll(async () => {
 // re-scans below it, so rewinding under a running cluster desyncs it
 // permanently — it stops ingesting, and only a volume reset recovers it. The
 // cost of not rewinding is small: a purchase swaps 0.25 xDAI against
-// ~50 xDAI of warmed range, and `pnpm bake` resets the pool outright.
+// ~50 xDAI of warmed range, and `pnpm bake` in bee-compose resets the pool
+// outright.
 
 test('extend tops the batch up on chain and records the longer lifespan', async ({ page }) => {
   test.setTimeout(ONCHAIN_TIMEOUT_MS * 2)

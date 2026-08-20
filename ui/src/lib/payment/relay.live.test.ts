@@ -3,15 +3,16 @@
 /**
  * Contract test against the REAL Relay API — `pnpm --filter @swarm-id/ui test:live`.
  *
- * Relay is the production rail and nothing else can exercise it: the dev rail
- * reproduces the shape, not the service. But the risk worth insuring against is
- * not "Relay is down" — it is *our request being wrong or our reading of the
- * response drifting from theirs*, which no local rail can catch and which would
- * surface as a broken pay screen in production only.
+ * Relay is the production rail and nothing else can exercise it: the local
+ * stand-in that would reproduce its shape (not its service) is planned but does
+ * not exist — see the header of `payment-rail.ts`. And the risk worth insuring
+ * against is not "Relay is down" — it is *our request being wrong or our
+ * reading of the response drifting from theirs*, which no local rail can catch
+ * and which would surface as a broken pay screen in production only.
  *
  * So this quotes for real and asserts what we depend on. It is a **read**:
  * `getQuote` prices a route, it does not move money, needs no wallet and no
- * key. The addresses below are anvil's public dev accounts.
+ * key. The address below is one of anvil's public dev accounts.
  *
  * Kept out of `pnpm test` because it needs the internet. Locally the contract
  * checks SKIP when the API cannot be reached — an outage is not our bug, and a

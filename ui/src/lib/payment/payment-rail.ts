@@ -86,10 +86,10 @@ function trimTrailingZeros(rounded: string): string {
  *
  * Normalising here rather than trusting each rail is the point. Rails hand back
  * wildly different precision — Relay's `amountFormatted` carries the full wei
- * expansion (`0.000043465998997394` for a native token), the dev rail derives
- * its own — and the pay screen puts this figure directly above breakdown rows
- * that ARE rounded. Eighteen decimals over four reads as a different product
- * depending on which rail happens to be behind it.
+ * expansion (`0.000043465998997394` for a native token), the direct rail
+ * derives its own — and the pay screen puts this figure directly above
+ * breakdown rows that ARE rounded. Eighteen decimals over four reads as a
+ * different product depending on which rail happens to be behind it.
  */
 export function displayAmount(value: string | number): string {
   const amount = Number(value)
@@ -128,7 +128,7 @@ export function displayUsd(value: string | number): string {
 export interface PaymentQuote {
   /**
    * Rail-private payload, consumed only by the rail that produced it — Relay
-   * keeps its SDK `Execute` here, the dev rail its own record. Opaque so a
+   * keeps its SDK `Execute` here, the direct rail its own record. Opaque so a
    * second rail can exist at all.
    */
   handle: unknown

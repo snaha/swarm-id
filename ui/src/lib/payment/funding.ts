@@ -8,7 +8,8 @@
  *
  * The swap leg is the same either way: the local chain carries a real BZZ
  * market at the mainnet addresses, so only the delivery differs (Relay in
- * production, the baked faucet playing solver locally — see `payment-rail.ts`).
+ * production, a direct Gnosis transfer when source and destination are the same
+ * chain — see `payment-rail.ts`).
  */
 import { withTimeout } from '@snaha/swarm-id'
 
@@ -18,7 +19,7 @@ import type { FundingNeed } from '$lib/payment/drive-operation'
 import { gasBudgetXdai } from '$lib/payment/postage-onchain'
 import { derivePostageSigner } from '$lib/payment/purchase'
 
-/** Swap slippage/rounding headroom on the quoted xDAI, as the widget uses.
+/** Swap slippage/rounding headroom on the quoted xDAI, matching the widget's.
  * The swap executes exact-INPUT, so the headroom is spent buying BZZ rather
  * than left over: the surplus lands as BZZ at the owner address, where the
  * next operation's funds check consumes it before asking for more. */
@@ -134,7 +135,7 @@ export async function quoteFunding(need: FundingNeed): Promise<FundingQuote> {
   }
   // Only when a swap will actually run — a gas-only shortfall is delivered and
   // spent directly, with nothing in between (and asking the rail to bridge an
-  // allowance nobody spends would be the user's money).
+  // allowance nobody spends would waste the user's money).
   const xdaiForGasWei = xdaiForBzzWei > 0n ? need.xdai + SWAP_GAS_XDAI_WEI : need.xdai
   const required = xdaiForBzzWei + xdaiForGasWei
   // A gas-only need means the balance is BELOW the budget, so there is nothing

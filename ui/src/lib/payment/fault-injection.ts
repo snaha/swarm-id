@@ -10,8 +10,8 @@
  * work ships.
  *
  * Armed from /dev, read here. Production code calls `faultPoint` freely: the
- * `DEV` guard is statically false in a production build, so the call compiles
- * away with the rest of this module.
+ * `DEV` guard is statically false in a production build, so the call sites
+ * remain as dead no-ops and the /dev-only helpers behind them tree-shake away.
  */
 const STORAGE_KEY = 'swarm-id:fault-point'
 

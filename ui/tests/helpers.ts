@@ -133,8 +133,10 @@ export const CHAIN_RPC_URL = process.env.CHAIN_RPC_URL ?? 'http://localhost:9545
 /**
  * One depth-17 drive at the default one-year lifespan costs ~2 BZZ, measured
  * against the baked chain; three is headroom for price drift. The xDAI is ten
- * times the operation's fixed gas budget, which is what `fundingShortfall`
- * compares against — under it, a need is raised however much BZZ is there.
+ * times `GAS_BUDGET_FLOOR_XDAI_WEI`, which is what the gas budget resolves to
+ * at the local chain's near-zero gas price — and the budget is what
+ * `fundingShortfall` compares against, so under it a need is raised however
+ * much BZZ is there.
  */
 const DRIVE_FUNDING = {
   xdai: 5n * 10n ** 16n, // 0.05 xDAI

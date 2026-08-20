@@ -23,10 +23,9 @@ import { relayRail } from '$lib/payment/relay'
  *
  * Dispatch is per TOKEN, not per chain, because two rails can each serve part
  * of the same chain. The direct rail moves native xDAI only — it is a plain
- * transfer — so a chain-level claim on Gnosis silently removed Gnosis USDC from
- * the picker, stranding anyone holding it there. Now the direct rail takes the
- * native token, Relay keeps the rest, and the earlier rail wins only the tokens
- * it actually offers.
+ * transfer — so it takes the native token, Relay keeps the rest of Gnosis, and
+ * the earlier rail wins only the tokens it actually offers. A chain-level claim
+ * would strand anyone holding Gnosis USDC, by removing it from the picker.
  *
  * Exported for its test: the composition rule is the subtle part of this
  * module, and `resolvePaymentRail` cannot be asked about it without a chain.

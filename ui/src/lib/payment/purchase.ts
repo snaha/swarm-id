@@ -44,8 +44,9 @@ export async function derivePostageSigner(derivationKey: string): Promise<Postag
 
 /**
  * PLUR per chunk funding `seconds` of lifespan at the chain's current price.
- * Rounds up to whole days (Bee enforces a 24h floor, and rounding a fractional
- * day down would under-fund the target lifespan).
+ * Rounds up to whole days (the contract enforces a floor of its own,
+ * `minimumInitialBalancePerChunk` — about 24h of storage — and rounding a
+ * fractional day down would under-fund the target lifespan).
  */
 export function stampAmountForSeconds(pricePerBlock: bigint, seconds: number): bigint {
   return calculateStampAmountForDays(
@@ -114,7 +115,7 @@ export function stampFromBatch(
 
 /**
  * The batch patch for a top-up that adds `addedSeconds` of lifespan, funded by
- * `topUpAmount` PLUR per chunk. Mirrors the node's outcome so the UI reflects
+ * `topUpAmount` PLUR per chunk. Mirrors the on-chain outcome so the UI reflects
  * the extension immediately. `remainingTtl` is the drive's CURRENT remaining
  * lifespan (the aged value from `remainingLifespanSeconds`, not the stored
  * snapshot) — `account.updateStamp` re-anchors the TTL's measurement instant,

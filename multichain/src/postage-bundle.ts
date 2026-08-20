@@ -186,8 +186,9 @@ export async function bundleCreate(
       continue
     }
     // The batch id is the BatchCreated event's first indexed argument. Inside a
-    // bundle the approve emits a Transfer too, so match on the emitting
-    // contract rather than taking the first log.
+    // bundle the approve emits an Approval, and the token pull a Transfer, from
+    // the BZZ contract — so match on the emitting contract rather than taking
+    // the first log.
     const batchId = receipt.logs.find(
       (log) =>
         log.address.toLowerCase() ===

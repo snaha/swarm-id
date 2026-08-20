@@ -123,9 +123,10 @@ function batchIdHex(stamp: Pick<PostageStamp, 'batchID'>): `0x${string}` {
  * address until Gnosis got cheaper again.
  *
  * The floor still applies, so a cheap chain funds an operation as generously as
- * before. THE one definition of "enough gas": both the shortfall above and the
- * surplus in `funding.ts` measure against this, and they must not disagree
- * about what counts as spare, or the same balance is both owed and refunded.
+ * before. THE one definition of "enough gas": both the shortfall in
+ * `fundingShortfall` below and the surplus in `funding.ts` measure against
+ * this, and they must not disagree about what counts as spare, or the same
+ * balance is both owed and refunded.
  */
 export async function gasBudgetXdai(client: MultichainClient): Promise<bigint> {
   const priced = BUNDLE_GAS * (await client.getGasPrice()) * GAS_PRICE_HEADROOM
@@ -261,10 +262,6 @@ export interface PostagePreflight {
 }
 
 /**
- * Read the batch + write constraints and refuse early — with user-worded
- * errors — every condition the contract would revert on anyway.
- */
-/**
  * Refuse a chain that cannot bundle, rather than doing the same work in
  * separate transactions.
  *
@@ -286,6 +283,10 @@ export async function assertBundlingSupported(client?: MultichainClient): Promis
   }
 }
 
+/**
+ * Read the batch + write constraints and refuse early — with user-worded
+ * errors — every condition the contract would revert on anyway.
+ */
 export async function preflightExtend(
   stamp: Pick<PostageStamp, 'batchID'>,
   client?: MultichainClient,
@@ -338,10 +339,11 @@ export async function preflightResize(
  * Patch the stamp record from chain truth (depth, live per-chunk balance, and
  * the TTL it implies).
  *
- * Called after every confirmed transaction, and by the resize path when
- * preflight finds the depth increase already landed in a session that was lost
- * — so an interrupted flow records what the chain has rather than what this
- * device last believed.
+ * Called after every confirmed extend or resize transaction (a purchase records
+ * itself via `fetchExistingBatchFromChain` instead, having no stamp record to
+ * patch yet), and by the resize path when preflight finds the depth increase
+ * already landed in a session that was lost — so an interrupted flow records
+ * what the chain has rather than what this device last believed.
  *
  * Returns false when the chain could not answer (record left untouched); the
  * callers then fall back to projecting the operation's own outcome, which is

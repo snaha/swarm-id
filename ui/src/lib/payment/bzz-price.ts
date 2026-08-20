@@ -6,9 +6,9 @@
  * There is no price oracle here and no third-party feed: the same SushiSwap
  * pool the funding flow actually buys through is asked what BZZ costs in xDAI,
  * and xDAI — a dollar stablecoin — is taken as the dollar. That is already the
- * assumption the pay screen ships with on two of its three rails
- * (`gnosis-direct.ts`, the dev rail), so this makes the forms agree with the
- * screen they lead to rather than introducing a second notion of price.
+ * assumption the pay screen ships with on the direct rail
+ * (`gnosis-direct.ts`), so this makes the forms agree with the screen they lead
+ * to rather than introducing a second notion of price.
  *
  * A RATE is cached, not a quote. `quoteExactOutputSingle` is a contract
  * simulation, and the extend dialog re-derives its estimate on every keystroke
