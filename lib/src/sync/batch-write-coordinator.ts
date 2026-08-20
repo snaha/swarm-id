@@ -1458,6 +1458,10 @@ export class BatchWriteCoordinator {
       this.activeUploadCount === 0 &&
       Date.now() - this.lastLeaseActivityAt >= IDLE_YIELD_MS
     ) {
+      // Captured HERE, not inside the callback: `lock()` derives its nested
+      // `swarm-write-<batchId>` keys at request time, so a batch joined while
+      // we queue is one whose state lock we do not hold — see `batchStateLockIds`.
+      const secondaries = [...this.joinedSecondaries.values()]
       await this.lock(async () => {
         if (this.disposed) return
         if (this.partitionLease !== lease) return
@@ -1467,7 +1471,7 @@ export class BatchWriteCoordinator {
         ) {
           return
         }
-        await this.yieldIdleLease(lease)
+        await this.yieldIdleLease(lease, secondaries)
       })
       return
     }
@@ -1595,6 +1599,15 @@ export class BatchWriteCoordinator {
     // AFTER the gate but before the heartbeat wins the lock (the concurrent
     // publish then already refreshes the pointer, so the heartbeat is redundant).
     if (this.activeUploadCount === 0) {
+      // Captured BEFORE the lock request, because `lock()` derives its nested
+      // `swarm-write-<batchId>` keys at request time (see `batchStateLockIds`).
+      // A background restore's commit can land a join while we queue on the
+      // account lock; heartbeating THAT batch would stamp it — and write its
+      // IndexedDB state — with its state lock free, so a concurrent
+      // `createStamperUnderBatchLock` could seed mid-update and leave two live
+      // stampers for one batch. It loses nothing: an unheartbeated tick is one
+      // the restore's own join already re-pinned the pointer for.
+      const captured = [...this.joinedSecondaries.entries()]
       try {
         await this.lock(async () => {
           if (this.disposed || this.partitionLease !== lease) return
@@ -1616,7 +1629,11 @@ export class BatchWriteCoordinator {
           // SECONDARY is evicted from the joined set instead — its in-flight
           // stamps fence like a lease loss, and the next targeted write
           // re-joins with a fresh read (failing loudly if the batch is dead).
-          const secondaries = [...this.joinedSecondaries.entries()]
+          // Of the captured set, only the entries still joined with the same
+          // instance (an eviction or a rebuild may have landed meanwhile).
+          const secondaries = captured.filter(
+            ([key, s]) => this.joinedSecondaries.get(key) === s,
+          )
           const [leaseResult, ...secondaryResults] = await Promise.allSettled([
             lease.heartbeatStatePointer(
               this.deps.leaseStamper.getLocalCounter(),
@@ -1692,7 +1709,12 @@ export class BatchWriteCoordinator {
    * coordinator able to re-acquire on the next write (re-arm via `ensureLease`).
    * MUST run under the write lock (see the idle-yield note in `refreshTick`).
    */
-  private async yieldIdleLease(lease: PartitionLease): Promise<void> {
+  private async yieldIdleLease(
+    lease: PartitionLease,
+    secondaries: UtilizationAwareStamper[] = [
+      ...this.joinedSecondaries.values(),
+    ],
+  ): Promise<void> {
     this.leaseEpoch++
     const yieldedPartition = lease.currentPartition
     if (this.partitionRefreshTimer !== undefined) {
@@ -1701,9 +1723,11 @@ export class BatchWriteCoordinator {
     }
     const localCounter = this.deps.leaseStamper.getLocalCounter()
     if (localCounter !== undefined) {
+      // Only the batches whose state locks the caller captured — a batch joined
+      // after the lock request is published by its own write anyway.
       await this.flushJoinedSecondaryCounters(
         lease,
-        [...this.joinedSecondaries.values()].map((s) => ({
+        secondaries.map((s) => ({
           stamper: s,
           counter: s.getLocalCounter(),
         })),

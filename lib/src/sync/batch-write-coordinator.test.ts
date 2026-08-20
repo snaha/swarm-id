@@ -2850,3 +2850,42 @@ describe("BatchWriteCoordinator — restore seeding cannot degrade to local", ()
     )
   })
 })
+
+describe("BatchWriteCoordinator — the heartbeat stays inside its captured lock set", () => {
+  it("skips a batch joined while the heartbeat queued on the account lock", async () => {
+    // `lock()` derives its nested `swarm-write-<batchId>` keys at REQUEST time,
+    // but the callback read `joinedSecondaries` at EXECUTION time. A restore
+    // committing a join in between left the heartbeat stamping a batch whose
+    // state lock it never took — so a concurrent `createStamperUnderBatchLock`
+    // for that batch could seed from IndexedDB mid-update and produce a second,
+    // divergent live stamper for it.
+    const lease = makeLease({
+      partition: 1,
+      leasedUntil: Date.now() + LEASE_TTL_MS,
+    })
+    leaseController.lease = lease
+    const leaseStamper = makeStamper([], "lease")
+    const lateJoiner = makeStamper([], "late", BATCH_ID_2)
+    const coordinator = new BatchWriteCoordinator(
+      makeDeps({ leaseStamper: asStamper(leaseStamper), mode: "oneshot" }),
+    )
+    const internals = coordinator as unknown as Internals
+    internals.partitionLease = lease
+    internals.lastLeaseActivityAt = Date.now()
+
+    lease.heartbeatStatePointer.mockClear()
+    writeLockController.onGrant = () => {
+      // A background restore's commit landed while we waited for the lock.
+      internals.joinedSecondaries.set(BATCH_ID_2, asStamper(lateJoiner))
+      writeLockController.onGrant = undefined
+    }
+    try {
+      await internals.refreshTick(lease)
+    } finally {
+      writeLockController.onGrant = undefined
+    }
+
+    // Only the lease batch's pointer — BATCH_ID_2's state lock was never taken.
+    expect(lease.heartbeatStatePointer).toHaveBeenCalledTimes(1)
+  })
+})
