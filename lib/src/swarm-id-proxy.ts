@@ -1435,6 +1435,16 @@ export class SwarmIdProxy {
         gatewayUrl: this.subsidisedGatewayUrl!,
       })
     }
+    if (batchID && this.storagePartitioned) {
+      // `ensureCanUpload` waved this through: `isSubsidisedModeActive()` is true
+      // whenever storage is partitioned, but a targeted write never takes the
+      // gateway path. Without this it reaches `resolveUploadStamper`, which
+      // cannot read the (partitioned) stamp list, and reports "Batch not owned
+      // by account" — the wrong diagnosis for download-only mode (#167).
+      throw new Error(
+        "Uploads are unavailable in download-only mode due to browser storage partitioning.",
+      )
+    }
     let resolved: {
       stamper?: UtilizationAwareStamper
       pendingBuild?: PendingStamperBuild

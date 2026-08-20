@@ -1238,6 +1238,24 @@ describe("SwarmIdProxy serialized stamped writes (PR #537 review)", () => {
     expect(withWrite).not.toHaveBeenCalled()
   })
 
+  it("a targeted write in download-only mode reports the partitioning, not 'not owned'", async () => {
+    // `ensureCanUpload` returns early whenever `isSubsidisedModeActive()` — which
+    // is true for ANY partitioned session with a gateway configured — but a
+    // targeted write never takes the gateway path. Without an explicit guard it
+    // reaches `resolveUploadStamper`, which cannot read the partitioned stamp
+    // list, and fails as "Batch not owned by account" (#167).
+    ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
+    ;(proxy as never)["storagePartitioned"] = true
+    const resolveUploadStamper = vi.fn(() => Promise.resolve({}))
+    ;(proxy as never)["resolveUploadStamper"] = resolveUploadStamper
+
+    await expect(write(async (t) => t, B2)).rejects.toThrow(
+      "download-only mode",
+    )
+    expect(resolveUploadStamper).not.toHaveBeenCalled()
+    expect(withWrite).not.toHaveBeenCalled()
+  })
+
   it("falls back to the gateway when the default binding resolves to nothing", async () => {
     ;(proxy as never)["subsidisedGatewayUrl"] = "https://gateway.example/"
     ;(proxy as never)["postageBatchId"] = undefined
