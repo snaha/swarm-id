@@ -67,8 +67,7 @@
 
 {#if phase === 'pending'}
   <!-- Headerless while working, per the designs: the step label is the whole
-       message, and there is nothing to dismiss or navigate. The title is still
-       the dialog's name, just not drawn. -->
+       message, so the title is still the dialog's name, just not drawn. -->
   <Dialog onclose={onClose} dismissable={false} ariaLabel={title}>
     <div class="flex flex-col items-center gap-2 py-2 text-center">
       <LoaderCircle class="size-5 animate-spin" />
@@ -107,6 +106,18 @@
       <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">{errorMessage}</p>
     </div>
+    <!-- The same ticked list the pending screen shows, and here it matters
+         most: a part-way failure has to say what was already paid for. -->
+    {#if history.length > 0}
+      <ul class="text-muted-foreground flex w-full flex-col gap-1 text-left text-xs">
+        {#each history as done, index (`${index}-${done}`)}
+          <li class="flex items-center gap-2">
+            <CircleCheck class="size-3.5 shrink-0 text-green-600" />
+            <span>{done}</span>
+          </li>
+        {/each}
+      </ul>
+    {/if}
     {#if errorDetails && errorDetails !== errorMessage}
       <button
         type="button"

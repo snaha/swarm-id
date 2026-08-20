@@ -1,19 +1,20 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The two paid drive operations, executed on-chain with the account's derived
- * batch-owner key: extend (lifespan top-up) and resize (compensating top-up
- * followed by a depth increase).
+ * The three paid drive operations, executed on-chain with the account's derived
+ * batch-owner key: purchase (buy a batch), extend (lifespan top-up) and resize
+ * (compensating top-up followed by a depth increase).
  *
- * Funding is a seam, not a step: the caller supplies `requestFunding`, which
- * either opens the payment flow or — on a dev chain with no source chain to
- * sign on — transfers from the chain's baked faucet. Whatever it does, it must
- * leave the owner address holding the requested funds; the runner re-checks
- * and proceeds.
+ * Funding is a seam, not a step: the caller supplies `requestFunding`, and how
+ * the money gets there is none of this module's business. Whatever it does, it
+ * must leave the owner address holding the requested funds; the runner
+ * re-checks and proceeds.
  *
- * Resume is chain truth. Both runners re-read the batch before spending, so an
- * operation interrupted by a closed tab or a failed second transaction is
- * detected and continued rather than repeated.
+ * Resume differs by operation. Extend and resize resume from chain truth: both
+ * re-read the batch before spending, so an attempt interrupted by a closed tab
+ * is detected and continued rather than repeated. A purchase has no batch to
+ * re-read — its id exists nowhere until the create is mined — so it resumes
+ * from the journal, which is written before the money moves.
  *
  * Backing out is a seam as well: the caller supplies `cancelled`, read at the
  * two moments money is about to move — before asking for funds, and before the
@@ -80,18 +81,13 @@ export class PaymentCancelledError extends Error {
 }
 
 /**
- * Coarse progress states for the pending UI. `paying` covers the top-up
- * transaction in BOTH operations — during a resize it buys the larger size's
- * lifespan, so labelling it "extending" there would misdescribe what the user
- * asked for.
+ * Coarse progress states for the pending UI. `paying` covers the one spending
+ * transaction of every operation — a purchase's create bundle, an extend's
+ * top-up, a resize's bundle — so the wording is left to the caller: during a
+ * resize the same step buys the larger size's lifespan, and labelling it
+ * "extending" there would misdescribe what the user asked for.
  */
-export type OperationStep =
-  | 'checking'
-  | 'funding'
-  | 'approving'
-  | 'paying'
-  | 'resizing'
-  | 'recording'
+export type OperationStep = 'checking' | 'funding' | 'paying' | 'recording'
 
 /** What every runner is handed: how to pay, how to report, how to back out. */
 export interface OperationSeams {
@@ -189,9 +185,10 @@ export interface PurchaseResult {
  * the same funding seam, so it inherits the payment screens, the rail and the
  * local solver rather than needing a second way to pay for things.
  *
- * Unlike the fund.bzz.limo widget this replaces, there is no throwaway creator
- * wallet: the derived postage signer buys the batch and is its owner, so
- * nothing has to be handed across afterwards and no dust is left behind.
+ * Unlike the fund.bzz.limo widget flow (still offered as the "Pay with crypto"
+ * method), there is no throwaway creator wallet: the derived postage signer
+ * buys the batch and is its owner, so nothing has to be handed across
+ * afterwards and no dust is left behind.
  *
  * @returns the batch now recorded on the account, and whether it is the one the
  *   caller asked for or an earlier unfinished purchase adopted instead.

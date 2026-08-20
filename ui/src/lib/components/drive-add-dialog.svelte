@@ -166,6 +166,7 @@
     attempts.supersede()
     funding.cancel()
     purchase?.cancel()
+    purchase = undefined
     onClose()
   }
 
