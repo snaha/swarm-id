@@ -13,7 +13,7 @@ import type { PostageStamp } from '@snaha/swarm-id'
 import { encodeAbiParameters, keccak256 } from 'viem'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
-import { runExtend, runPurchase } from '$lib/payment/drive-operation'
+import { PaymentCancelledError, runExtend, runPurchase } from '$lib/payment/drive-operation'
 import type { OperationJournal, PendingOperation } from '$lib/payment/operation-journal.svelte'
 import { type StampUpdate, derivePostageSigner, stampAmountForSeconds } from '$lib/payment/purchase'
 import type { Account } from '$lib/types'
@@ -36,9 +36,9 @@ const harness = vi.hoisted(() => ({
   eventBatchId: undefined as string | undefined,
   /** Set to make the bundle fail the way a stalled chain does. */
   sendFails: false,
-  /** Balances far past anything an operation asks for: funding is not the subject. */
-  ownerXdai: 10n ** 30n,
-  ownerBzz: 10n ** 30n,
+  /** Restored to {@link FUNDED_BALANCE} before each test; zeroed to force a payment. */
+  ownerXdai: 0n,
+  ownerBzz: 0n,
   /** 1 gwei — a quiet chain, so the gas budget stays at its floor. */
   gasPrice: 1_000_000_000n,
   constraints: { paused: false, lastPrice: 1_000n, minimumInitialBalancePerChunk: 1n },
@@ -113,6 +113,9 @@ function trackingJournal(): OperationJournal {
   }
 }
 
+/** Far past anything an operation asks for: funding is not usually the subject. */
+const FUNDED_BALANCE = 10n ** 30n
+
 const added: PostageStamp[] = []
 const patches: StampUpdate[] = []
 
@@ -152,6 +155,8 @@ beforeEach(async () => {
   harness.eventBatchId = undefined
   harness.sendFails = false
   harness.readsFailAfterSpend = false
+  harness.ownerXdai = FUNDED_BALANCE
+  harness.ownerBzz = FUNDED_BALANCE
   added.length = 0
   patches.length = 0
   const { destination } = await derivePostageSigner(DERIVATION_KEY)
@@ -192,6 +197,40 @@ describe('runPurchase', () => {
     await expect(purchase(journal)).rejects.toThrow(/receipt/)
     expect(journal.entries()).toHaveLength(1)
     expect(harness.calls).toEqual([`journal:${journal.entries()[0].batchId}`, 'send'])
+  })
+
+  /**
+   * Cancel is pressed between things, and the gap that matters is the one after
+   * the payment: past it the run writes an id down and sends money for it. A
+   * cancelled run has to stop there having recorded nothing — an entry for a
+   * purchase that was never sent would offer to finish a drive that never was.
+   */
+  it('journals nothing and sends nothing when cancelled during funding', async () => {
+    harness.ownerXdai = 0n
+    harness.ownerBzz = 0n
+    const journal = trackingJournal()
+    let cancelled = false
+
+    await expect(
+      runPurchase({
+        account: fakeAccount(),
+        depth: DEPTH,
+        lifespanSeconds: LIFESPAN_SECONDS,
+        name: 'Photos',
+        journal,
+        // The payment lands, and the user closes the dialog while it settles.
+        requestFunding: () => {
+          harness.ownerXdai = FUNDED_BALANCE
+          harness.ownerBzz = FUNDED_BALANCE
+          cancelled = true
+          return Promise.resolve()
+        },
+        cancelled: () => cancelled,
+      }),
+    ).rejects.toBeInstanceOf(PaymentCancelledError)
+
+    expect(harness.calls).toEqual([])
+    expect(journal.entries()).toEqual([])
   })
 
   /**

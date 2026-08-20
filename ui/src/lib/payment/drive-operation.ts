@@ -14,6 +14,12 @@
  * Resume is chain truth. Both runners re-read the batch before spending, so an
  * operation interrupted by a closed tab or a failed second transaction is
  * detected and continued rather than repeated.
+ *
+ * Backing out is a seam as well: the caller supplies `cancelled`, read at the
+ * two moments money is about to move — before asking for funds, and before the
+ * transaction that spends them. Nothing else is interruptible, because nothing
+ * else can be: once a bundle is sent the tail that records it must finish, or
+ * the user pays for a drive the app never writes down.
  */
 import type { PostageStamp } from '@snaha/swarm-id'
 import type { MultichainClient } from '@swarm-id/multichain'
@@ -57,6 +63,20 @@ export interface FundingNeed {
 export type RequestFunding = (need: FundingNeed) => Promise<void>
 
 /**
+ * The user backed out of paying. Typed so the dialogs can return to their form
+ * instead of presenting a deliberate choice as a failure.
+ *
+ * Lives here, beside the runners that throw it at their money boundaries, so
+ * the funding seam depends on the engine rather than the other way round.
+ */
+export class PaymentCancelledError extends Error {
+  constructor() {
+    super('Payment cancelled.')
+    this.name = 'PaymentCancelledError'
+  }
+}
+
+/**
  * Coarse progress states for the pending UI. `paying` covers the top-up
  * transaction in BOTH operations — during a resize it buys the larger size's
  * lifespan, so labelling it "extending" there would misdescribe what the user
@@ -70,6 +90,19 @@ export type OperationStep =
   | 'resizing'
   | 'recording'
 
+/** What every runner is handed: how to pay, how to report, how to back out. */
+export interface OperationSeams {
+  requestFunding: RequestFunding
+  onStep?: (step: OperationStep) => void
+  /**
+   * Has the caller backed out? Read at the money boundaries only, and a `true`
+   * throws {@link PaymentCancelledError} rather than returning — a cancelled
+   * run must not journal, spend, or leave a funding request hanging on a dialog
+   * that has already gone.
+   */
+  cancelled?: () => boolean
+}
+
 /**
  * What extend and resize both need. No journal: these two operate on a batch
  * the account already has, so an interrupted attempt is found again by reading
@@ -77,11 +110,16 @@ export type OperationStep =
  * nothing to write down (unlike a purchase, whose id would otherwise exist
  * nowhere).
  */
-export interface RunOptions {
+export interface RunOptions extends OperationSeams {
   account: Account
   drive: PostageStamp
-  requestFunding: RequestFunding
-  onStep?: (step: OperationStep) => void
+}
+
+/** Stop here if the caller has backed out since the last boundary. */
+function assertNotCancelled(cancelled: (() => boolean) | undefined): void {
+  if (cancelled?.()) {
+    throw new PaymentCancelledError()
+  }
 }
 
 /**
@@ -91,8 +129,7 @@ export interface RunOptions {
 async function ensureFunded(
   destination: string,
   bzzNeeded: bigint,
-  requestFunding: RequestFunding,
-  onStep: ((step: OperationStep) => void) | undefined,
+  seams: OperationSeams,
   client?: MultichainClient,
 ): Promise<void> {
   const chain = client ?? (await postageChain())
@@ -100,15 +137,19 @@ async function ensureFunded(
   if (shortfall.bzz === 0n && shortfall.xdai === 0n) {
     return
   }
-  onStep?.('funding')
-  await requestFunding({ destination, bzz: shortfall.bzz, xdai: shortfall.xdai })
+  // The chain reads above take time, and the user may have cancelled during
+  // them. Raising a payment now would put a screen in front of a dialog that
+  // is gone, and suspend this run on a request nothing can ever answer.
+  assertNotCancelled(seams.cancelled)
+  seams.onStep?.('funding')
+  await seams.requestFunding({ destination, bzz: shortfall.bzz, xdai: shortfall.xdai })
   const remainingShortfall = await fundingShortfall(destination, bzzNeeded, chain)
   if (remainingShortfall.bzz > 0n || remainingShortfall.xdai > 0n) {
     throw new Error('The payment did not deliver enough funds. You can retry to finish it.')
   }
 }
 
-export interface PurchaseOptions {
+export interface PurchaseOptions extends OperationSeams {
   account: Account
   /** Capacity, as a PostageStamp depth. */
   depth: number
@@ -116,14 +157,12 @@ export interface PurchaseOptions {
   lifespanSeconds: number
   /** What to call the drive. */
   name: string
-  requestFunding: RequestFunding
   /**
    * Where this device records the batch it is part-way through buying, so a
    * purchase interrupted between paying and recording can be finished rather
    * than lost. Pass `nullJournal()` when there is nothing to resume into.
    */
   journal: OperationJournal
-  onStep?: (step: OperationStep) => void
 }
 
 /**
@@ -140,7 +179,7 @@ export interface PurchaseOptions {
  * @returns the new batch id, already recorded on the account.
  */
 export async function runPurchase(options: PurchaseOptions): Promise<string> {
-  const { account, depth, lifespanSeconds, name, requestFunding, journal, onStep } = options
+  const { account, depth, lifespanSeconds, name, journal, cancelled, onStep } = options
   const client = await postageChain()
   onStep?.('checking')
 
@@ -167,8 +206,13 @@ export async function runPurchase(options: PurchaseOptions): Promise<string> {
       : requested
   const bzzNeeded = amountPerChunk << BigInt(depth)
 
-  await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
+  await ensureFunded(destination, bzzNeeded, options, client)
   faultPoint('after-funding')
+
+  // The last moment this can stop: everything below journals or spends, and a
+  // run the user has backed out of must do neither — a phantom entry for a
+  // purchase that was never sent would offer to "finish" nothing.
+  assertNotCancelled(cancelled)
 
   onStep?.('paying')
   // Write the id down BEFORE spending anything on it. The nonce decides the id,
@@ -245,7 +289,7 @@ export interface ExtendOptions extends RunOptions {
  * gate only their UI epilogue on `attempt.current`.
  */
 export async function runExtend(options: ExtendOptions): Promise<void> {
-  const { account, drive, addedSeconds, requestFunding, onStep } = options
+  const { account, drive, addedSeconds, cancelled, onStep } = options
   const client = await postageChain()
   onStep?.('checking')
 
@@ -257,8 +301,10 @@ export async function runExtend(options: ExtendOptions): Promise<void> {
 
   const topUpAmount = stampAmountForSeconds(constraints.lastPrice, addedSeconds)
   const bzzNeeded = topUpAmount << BigInt(drive.depth)
-  await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
+  await ensureFunded(destination, bzzNeeded, options, client)
 
+  // Last exit before the spend; past it the money is gone whatever the UI does.
+  assertNotCancelled(cancelled)
   onStep?.('paying')
   // One atomic transaction: approve and top up together, or neither.
   await bundledExtend(signerKey, drive, topUpAmount, bzzNeeded, client)
@@ -293,7 +339,7 @@ export interface ResizeOptions extends RunOptions {
  * second, seam-ful path (#541).
  */
 export async function runResize(options: ResizeOptions): Promise<void> {
-  const { account, drive, newDepth, keepLifespan, requestFunding, onStep } = options
+  const { account, drive, newDepth, keepLifespan, cancelled, onStep } = options
   const client = await postageChain()
   onStep?.('checking')
 
@@ -325,9 +371,11 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   // `topUpAmount > 0` meant that case sent a transaction the owner could not
   // pay for, and never asked the user for anything. `fundingShortfall` already
   // reports a gas-only need, and the payment screens already price one.
-  await ensureFunded(destination, bzzNeeded, requestFunding, onStep, client)
+  await ensureFunded(destination, bzzNeeded, options, client)
   faultPoint('after-funding')
 
+  // Last exit before the spend; past it the money is gone whatever the UI does.
+  assertNotCancelled(cancelled)
   // There is no seam to fail at: the compensating top-up and the depth
   // increase land together or not at all, so a half-resized drive — the state
   // #392 was drawn for — cannot arise.

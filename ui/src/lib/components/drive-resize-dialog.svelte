@@ -21,15 +21,12 @@
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
   import {
     type OperationStep,
+    PaymentCancelledError,
     type ResizePreview,
     previewResize,
     runResize,
   } from '$lib/payment/drive-operation'
-  import {
-    PaymentCancelledError,
-    createFundingRequester,
-    describeStep,
-  } from '$lib/payment/funding-request.svelte'
+  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
   import type { Account } from '$lib/types'
 
   interface Props {
@@ -149,16 +146,18 @@
     step = 'checking'
     history = []
     try {
-      // Deliberately unguarded: the top-up and the depth increase are on-chain
-      // spends whose record updates must land even if the dialog was closed —
-      // only the UI epilogue is skipped when superseded. Resume is decided
-      // from chain state inside runResize, not from component-local memory.
+      // Deliberately unguarded: `runResize` stops itself at its money
+      // boundaries via `cancelled` below, and the tail after the send — the
+      // record update for an on-chain spend — must land even if the dialog was
+      // closed. Only the UI epilogue is skipped when superseded. Resume is
+      // decided from chain state inside runResize, not component-local memory.
       await runResize({
         account,
         drive,
         newDepth: Number(newDepth),
         keepLifespan,
         requestFunding: funding.request,
+        cancelled: () => !attempt.current,
         onStep: (next) => {
           const finished = describeStep(step, 'resize')
           // The initial state and the first reported step describe the same

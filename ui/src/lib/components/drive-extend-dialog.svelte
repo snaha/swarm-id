@@ -26,12 +26,12 @@
   } from '$lib/drives'
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
-  import { type OperationStep, runExtend } from '$lib/payment/drive-operation'
   import {
+    type OperationStep,
     PaymentCancelledError,
-    createFundingRequester,
-    describeStep,
-  } from '$lib/payment/funding-request.svelte'
+    runExtend,
+  } from '$lib/payment/drive-operation'
+  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
   import { stampAmountForSeconds } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
@@ -110,14 +110,17 @@
     step = 'checking'
     history = []
     try {
-      // Deliberately unguarded: once a transaction is sent the money is spent,
-      // so the record update must land even if the dialog was closed — only
-      // the UI epilogue below is skipped for a superseded attempt.
+      // Deliberately unguarded: `runExtend` stops itself at its money
+      // boundaries via `cancelled` below, and the tail after the send must land
+      // even if the dialog was closed — once a transaction is sent the money is
+      // spent, so the record has to catch up. Only the UI epilogue below is
+      // skipped for a superseded attempt.
       await runExtend({
         account,
         drive,
         addedSeconds,
         requestFunding: funding.request,
+        cancelled: () => !attempt.current,
         onStep: (next) => {
           const finished = describeStep(step, 'extend')
           // The initial state and the first reported step describe the same

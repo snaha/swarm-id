@@ -6,7 +6,12 @@
  *
  * A rail is the only way to fund an operation; when none resolves, this throws.
  */
-import type { FundingNeed, OperationStep, RequestFunding } from '$lib/payment/drive-operation'
+import {
+  type FundingNeed,
+  type OperationStep,
+  PaymentCancelledError,
+  type RequestFunding,
+} from '$lib/payment/drive-operation'
 import { type FundingQuote, quoteFunding, swapDeliveredXdai } from '$lib/payment/funding'
 import type { PaymentRail } from '$lib/payment/payment-rail'
 import { resolvePaymentRail } from '$lib/payment/resolve-rail'
@@ -37,17 +42,6 @@ export function describeStep(
       return 'Increasing the drive size…'
     default:
       return 'Recording the change…'
-  }
-}
-
-/**
- * The user backed out of paying. Typed so the dialogs can return to their form
- * instead of presenting a deliberate choice as a failure.
- */
-export class PaymentCancelledError extends Error {
-  constructor() {
-    super('Payment cancelled.')
-    this.name = 'PaymentCancelledError'
   }
 }
 

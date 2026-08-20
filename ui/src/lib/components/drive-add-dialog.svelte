@@ -29,12 +29,8 @@
   import { currentChainPrice } from '$lib/payment/chain-price'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
-  import { runPurchase } from '$lib/payment/drive-operation'
-  import {
-    PaymentCancelledError,
-    createFundingRequester,
-    describeStep,
-  } from '$lib/payment/funding-request.svelte'
+  import { PaymentCancelledError, runPurchase } from '$lib/payment/drive-operation'
+  import { createFundingRequester, describeStep } from '$lib/payment/funding-request.svelte'
   import { type StampPurchaseHandle, openStampPurchaseWidget } from '$lib/payment/multichain-widget'
   import { operationJournal } from '$lib/payment/operation-journal.svelte'
   import {
@@ -183,9 +179,10 @@
     pendingLabel = 'Checking the chain…'
     history = []
     try {
-      // Deliberately unguarded from here: this is an on-chain spend whose
-      // record must land even if the dialog closed. Only the UI epilogue is
-      // gated on `attempt.current`.
+      // Deliberately unguarded: `runPurchase` stops itself at its money
+      // boundaries via `cancelled` below, and everything after the send is a
+      // tail that must land even if the dialog closed — a paid-for batch has to
+      // be recorded. Only the UI epilogue is gated on `attempt.current`.
       await runPurchase({
         journal: operationJournal,
         account,
@@ -195,6 +192,7 @@
         // stable batch-ID-derived label.
         name: name.trim(),
         requestFunding: funding.request,
+        cancelled: () => !attempt.current,
         onStep: (step) => {
           const next = describeStep(step, 'purchase')
           // The seeded label and the first step say the same thing; listing
