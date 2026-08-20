@@ -229,10 +229,18 @@ export interface OwnerFunds {
   bzz: bigint
 }
 
-/** Current balances at the batch-owner address. */
-export async function ownerFunds(address: string, client?: MultichainClient): Promise<OwnerFunds> {
-  const chain = client ?? (await postageChain())
+/**
+ * Current balances at the batch-owner address.
+ *
+ * The client is required rather than resolved here: a balance is only
+ * meaningful together with the chain it was read from, so the caller — which
+ * knows which endpoint it is reporting — supplies it.
+ */
+export async function ownerFunds(address: string, client: MultichainClient): Promise<OwnerFunds> {
   const owner = prefix0x(address) as `0x${string}`
-  const [xdai, bzz] = await Promise.all([chain.getNativeBalance(owner), chain.getBzzBalance(owner)])
+  const [xdai, bzz] = await Promise.all([
+    client.getNativeBalance(owner),
+    client.getBzzBalance(owner),
+  ])
   return { xdai, bzz }
 }

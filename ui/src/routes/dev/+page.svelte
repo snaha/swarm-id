@@ -297,7 +297,6 @@
   )
   /** What Send would deliver; zero disables it. */
   const faucetValue = $derived(faucetAmount(faucetTyped, faucetAsset.decimals))
-  const faucetTokenOptions = $derived(FAUCET_TOKENS.map(({ value, label }) => ({ value, label })))
 
   // Amounts differ by orders of magnitude between assets, so carrying the
   // previous box over is a wrong default every time; each token brings its own.
@@ -424,13 +423,8 @@
     await refreshFunds()
   }
 
-  async function runChainTool(
-    label: string,
-    action: (derivationKey: string, account: Account) => Promise<string>,
-  ) {
-    const account = selectedAccountId
-      ? accountsStore.getAccount(new EthAddress(selectedAccountId))
-      : undefined
+  async function runChainTool(label: string, action: (account: Account) => Promise<string>) {
+    const account = selectedAccount
     if (!account) {
       chainToolError = 'Select an account first.'
       return
@@ -439,7 +433,7 @@
     chainToolMessage = ''
     chainToolError = ''
     try {
-      chainToolMessage = `${label}: ${await action(account.derivationKey, account)}`
+      chainToolMessage = `${label}: ${await action(account)}`
     } catch (e) {
       chainToolError = e instanceof Error ? e.message : String(e)
     } finally {
@@ -848,10 +842,6 @@ Check console logs for details:
     })
     location.reload()
   }
-
-  // Clears the account's DEFAULT-stamp pointer only; the stamp stays in the
-  // account's stamps (delete it outright in "Stored Stamps" above). Assign is
-  // the symmetric op — it sets the default.
 
   const LABEL_CLASS = 'flex flex-col gap-1.5 text-sm'
   const LABEL_TEXT_CLASS = 'text-muted-foreground'
@@ -1378,8 +1368,10 @@ Check console logs for details:
         </label>
         <label class={LABEL_CLASS}>
           <span class={LABEL_TEXT_CLASS}>Token</span>
+          <!-- The token list itself: Select reads `value` and `label` and
+               ignores the rest, so there is nothing to map over. -->
           <Select
-            options={faucetTokenOptions}
+            options={FAUCET_TOKENS}
             bind:value={faucetToken}
             class="w-32"
             disabled={faucetBusy}
@@ -1421,24 +1413,21 @@ Check console logs for details:
           onclick={() =>
             runChainTool(
               'Created owned batch',
-              async (key) => (await createOwnedBatchOnChain(key)).batchId,
+              async (account) => (await createOwnedBatchOnChain(account.derivationKey)).batchId,
             )}
         >
           Create owned batch (depth 20)
         </Button>
         <Button
           disabled={chainToolBusy || !selectedAccountId}
-          onclick={() => runChainTool('Created drive', (_key, account) => createTestDrive(account))}
+          onclick={() => runChainTool('Created drive', createTestDrive)}
         >
           Create drive to test with
         </Button>
         <Button
           variant="secondary"
           disabled={chainToolBusy || !selectedAccountId}
-          onclick={() =>
-            runChainTool('Created expiring drive', (_key, account) =>
-              createExpiringTestDrive(account),
-            )}
+          onclick={() => runChainTool('Created expiring drive', createExpiringTestDrive)}
         >
           Create expiring drive
         </Button>
