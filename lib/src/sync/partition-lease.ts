@@ -173,16 +173,25 @@ export interface PartitionLeaseStateSnapshot {
   priorHolderLeasedUntil?: number
   /**
    * Every batch this lease session seeded state for — the lease batch plus all
-   * `joinBatch`ed ones. The coordinator keeps its joined stampers in memory
-   * only, so after a reload a re-established session would stop heartbeating
-   * these batches' state pointers — and a pointer that goes unrefreshed for
-   * ~90s drops out of `readStatePointer`'s lookup span, leaving a later
-   * cross-device takeover to resume that batch from a ZERO counter and
-   * re-issue acked slots. Persisting the ids lets the coordinator re-join them
-   * after any acquisition (the restore skips the id that is the CURRENT lease
-   * batch — after a default-stamp change that is a different one, and the old
-   * default must be restorable like any secondary). Absent on snapshots from
-   * builds predating the field.
+   * `joinBatch`ed ones.
+   *
+   * THE INVARIANT this protects (stated here once; the consequences for the
+   * coordinator are in "The joined-batch restore ledger" in
+   * docs/BatchWriteCoordinator.md): a batch this device has published
+   * partition state for must keep having its state pointer heartbeated for as
+   * long as this device holds the partition. A pointer left unrefreshed for
+   * ~90s drops out of `readStatePointer`'s lookup span; a cross-device
+   * takeover then finds no pointer on a CLEAN scan, reads that as a
+   * conclusive "nothing published", and resumes that batch from a ZERO
+   * counter — re-issuing acked slots, each overstamp evicting the chunk it
+   * was holding. This device's own writes are safe either way (they resume
+   * off the persisted synced reference); the exposure is to peers.
+   *
+   * The coordinator keeps its joined stampers in memory only, so persisting
+   * the ids is what lets it re-join them after any acquisition. The restore
+   * skips whichever id is the CURRENT lease batch — after a default-stamp
+   * change that is a different one, and the old default must be restorable
+   * like any secondary. Absent on snapshots from builds predating the field.
    */
   joinedBatchIds?: string[]
 }

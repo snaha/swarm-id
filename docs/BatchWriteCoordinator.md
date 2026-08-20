@@ -156,6 +156,45 @@ Methods and getters:
   when the acquire _completed_ read-only — a Bee outage surfaces from `sync-account` as
   `status: "error"`, never as a quiet "all partitions held" skip.
 
+## The joined-batch restore ledger
+
+**The invariant, stated once.** Every batch this device has published partition state for must
+keep having its state pointer heartbeated for as long as this device holds the partition. A
+pointer that goes unrefreshed drops out of `readStatePointer`'s (~90 s) lookup span; a later
+cross-device takeover then finds no pointer on a _clean_ scan, reads that as a conclusive
+"nothing published", and resumes that batch from a **zero counter** — re-issuing slots this
+device already acked, each overstamp evicting the data chunk it was holding. This device's own
+writes are safe either way (they resume off the persisted synced reference); the exposure is
+entirely to peers.
+
+`joinedSecondaries` — the stampers the heartbeat fans out to — lives only in memory, so the
+ledger of _which_ batches need re-joining rides the persisted lease snapshot as
+`joinedBatchIds` (`PartitionLeaseStateSnapshot`, where the field-level doc is the canonical
+in-code statement of the above). Consequences, all of which exist only to keep that list from
+being lost:
+
+- **`serialize()` reports only batches the session actually seeded state for**, so both persist
+  paths merge in what it cannot know: the still-pending restores, and the lease batch itself
+  (`persistLeaseSnapshot`, `persistReducedLeaseCache`). A session that seeded nothing — a
+  read-only acquire — would otherwise persist a ledger without its own lease batch.
+- **Lifecycle transitions persist a claim-less snapshot rather than clearing the cache**
+  (`persistReducedLeaseCache`: idle yield, demote, acquire pause/unwind, `teardown`). What must
+  not survive is the CLAIM (`self` / `priorHolderLeasedUntil`) — a yielded or demoted session has
+  to cold-acquire, which network-seeds every restore.
+- **`teardown` is not only the sign-out path.** The proxy tears the coordinator down and rebuilds
+  it for the same account on a genuine rebind (node change, default-stamp change, dilution).
+  Nor is a leftover entry after a real disconnect wrong: the lease cache is keyed by ACCOUNT and
+  shared by every dApp iframe on the trusted origin, so one app disconnecting must not wipe a
+  ledger another app's coordinator still depends on. It carries no claim, so it cannot be
+  adopted.
+- **Restores are retried** from the refresh tick until the pending set drains
+  (`pendingJoinedRestores`), because a transient resolver failure or a reload mid-restore would
+  otherwise drop a batch from the list permanently.
+- **Seed mode is per acquire path.** After an adopt the lease demonstrably never lapsed, so local
+  state is the newest there is (`"local"`). After a cold acquire a peer may have held the
+  partition meanwhile, so each batch re-seeds from the network via `joinBatch` (`"network"`),
+  which throws rather than zero-seed on an inconclusive read.
+
 ## The displacement-during-upload race fix
 
 `refreshTick` runs off-lock, so it can detect that a peer took our partition while an upload is

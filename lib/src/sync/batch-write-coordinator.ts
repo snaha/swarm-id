@@ -275,14 +275,12 @@ export class BatchWriteCoordinator {
    * Batch ids from the persisted snapshot still awaiting a successful re-join,
    * each with the seed mode its acquire path mandates ("local" only after an
    * adopt — the lease never lapsed, so this device's persisted state is
-   * current; "network" after a cold acquire). `serialize()` only knows
-   * successfully seeded batches, so every snapshot persist merges these ids
-   * into `joinedBatchIds` ({@link persistLeaseSnapshot}) and the refresh tick
-   * retries them — otherwise a transient resolver failure, or a reload landing
-   * before the restore finishes, would permanently drop a batch from the
-   * restore list and let its state pointer age out of the takeover lookup
-   * span. A batch the account no longer owns never resolves and just stays
-   * pending: one cheap local lookup per tick.
+   * current; "network" after a cold acquire). Every snapshot persist merges
+   * these ids into `joinedBatchIds` ({@link persistLeaseSnapshot}) and the
+   * refresh tick retries them until the set drains — see "The joined-batch
+   * restore ledger" in docs/BatchWriteCoordinator.md. A batch the account no
+   * longer owns never resolves and just stays pending: one cheap local lookup
+   * per tick.
    */
   private readonly pendingJoinedRestores = new Map<
     string,
@@ -482,12 +480,8 @@ export class BatchWriteCoordinator {
    * refresh tick until the pending set drains.
    *
    * `joinedSecondaries` lives only in memory, so without this a reload leaves
-   * every secondary batch unheartbeated: `heartbeatStatePointer` no-ops for a
-   * batch whose `lastReferenceHex` is unset, the pointer ages out of
-   * `readStatePointer`'s ~90s lookup span, and a later cross-device takeover
-   * resumes that batch from a ZERO counter — re-issuing acked slots and
-   * evicting their chunks. This device's own writes are safe either way (they
-   * resume off the persisted synced reference); the exposure is to peers.
+   * every secondary batch unheartbeated — the zero-resume exposure described
+   * under "The joined-batch restore ledger" in docs/BatchWriteCoordinator.md.
    *
    * Mirrors the adopt path's lease-batch sequence per batch. Best-effort per
    * batch: a failed batch stays in {@link pendingJoinedRestores} and the
@@ -661,7 +655,8 @@ export class BatchWriteCoordinator {
    * The lease batch is merged for the same reason `persistReducedLeaseCache`
    * adds it: a session that seeded nothing at all (a read-only acquire —
    * every partition held) would otherwise persist a ledger WITHOUT it, and a
-   * later default-stamp change would leave the old default unrestorable.
+   * later default-stamp change would leave the old default unrestorable. See
+   * "The joined-batch restore ledger" in docs/BatchWriteCoordinator.md.
    */
   private persistLeaseSnapshot(lease: PartitionLease): void {
     const snap = lease.serialize()
@@ -677,22 +672,15 @@ export class BatchWriteCoordinator {
 
   /**
    * Persist a CLAIM-less snapshot for the paths that end a lease session but
-   * not the account's write history (idle yield, demote, acquire pause/unwind).
-   * Dropping the cache entirely there also drops `joinedBatchIds`, so the next
-   * acquire never re-joins those secondaries: their state pointers stop being
-   * heartbeated, age out of `readStatePointer`'s lookup span, and a peer's
-   * takeover resumes them from ZERO — re-issuing slots this device acked.
+   * not the account's write history (idle yield, demote, acquire pause/unwind,
+   * `teardown`) — see "The joined-batch restore ledger" in
+   * docs/BatchWriteCoordinator.md for why the ledger must not be dropped.
    *
    * `self`/`priorHolderLeasedUntil` are deliberately omitted so `adoptIfLive`
    * can never re-adopt a session that gave its partition up: the next acquire
    * is a cold one, which network-seeds every restore. The union with the prior
    * cache keeps the pause/unwind paths lossless — they can run before
    * `seedPendingRestores` ever populated the in-memory ledger.
-   *
-   * `teardown` uses this too. It flushes every secondary and releases with a
-   * sentinel, but it is NOT only the sign-out path: the proxy tears the
-   * coordinator down and rebuilds it for the same account on every rebind, and
-   * a cleared ledger there costs the successor every secondary's heartbeat.
    */
   private persistReducedLeaseCache(): void {
     const leaseBatchHex = this.deps.leaseStamper.batchId.toHex()
@@ -845,17 +833,12 @@ export class BatchWriteCoordinator {
       this.forEachBoundStamper((s) => s.invalidateLease())
       this.forEachBoundStamper((s) => s.unbindPartition())
     }
-    // A CLAIM-less snapshot, not a cleared cache: teardown is not only the
-    // sign-out path — `SwarmIdProxy.initializeStamper` tears the coordinator
-    // down and builds its successor for the same account in the next
-    // statement on every rebind (node change, default-stamp change, stamp
-    // dilution), as does `clearDefaultBinding`. Clearing there would drop
-    // `joinedBatchIds`, and the successor would re-join no secondary: their
-    // state pointers stop being heartbeated, age out of `readStatePointer`'s
-    // lookup span, and a peer's takeover resumes them from ZERO. Persisted
-    // BEFORE `joinedSecondaries` is cleared — that map is what it is built
-    // from (same ordering as `finalizeDemote`). On a genuine sign-out the
-    // leftover entry is inert: it is account-keyed and carries no claim.
+    // A CLAIM-less snapshot, not a cleared cache — teardown is not only the
+    // sign-out path, and even after a real disconnect the ledger must survive
+    // (the cache is account-keyed and shared by every dApp iframe on the
+    // origin). See "The joined-batch restore ledger" in
+    // docs/BatchWriteCoordinator.md. Persisted BEFORE `joinedSecondaries` is
+    // cleared — that map is what it is built from (as in `finalizeDemote`).
     this.persistReducedLeaseCache()
     this.joinedSecondaries.clear()
     this.partitionLease = undefined
