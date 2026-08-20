@@ -21,7 +21,7 @@
  * else can be: once a bundle is sent the tail that records it must finish, or
  * the user pays for a drive the app never writes down.
  */
-import type { PostageStamp } from '@snaha/swarm-id'
+import { type PostageStamp, withTimeout } from '@snaha/swarm-id'
 import type { MultichainClient } from '@swarm-id/multichain'
 
 import { remainingLifespanSeconds } from '$lib/drives'
@@ -48,6 +48,9 @@ import {
   stampAmountForSeconds,
 } from '$lib/payment/purchase'
 import type { Account } from '$lib/types'
+
+/** Upper bound on the chain read that records a purchase — see `recordPurchase`. */
+const BATCH_READ_TIMEOUT_MS = 30_000
 
 /** What the owner address is missing, and where it must end up. */
 export interface FundingNeed {
@@ -274,7 +277,14 @@ function purchaseEntry(account: Account, batchId: string, name: string): Pending
   }
 }
 
-/** Read the new batch back from chain truth and attach it to the account. */
+/**
+ * Read the new batch back from chain truth and attach it to the account.
+ *
+ * The read is bounded. Every caller waits on it behind a modal the user cannot
+ * dismiss — the unfinished-drives banner most of all — and a JSON-RPC endpoint
+ * that accepts a connection and then says nothing would otherwise lock the app
+ * for as long as the tab is open.
+ */
 async function recordPurchase(
   account: Account,
   batchId: string,
@@ -284,12 +294,16 @@ async function recordPurchase(
 ): Promise<string> {
   onStep?.('recording')
   const { signerKey } = await derivePostageSigner(account.derivationKey)
-  const stamp = await fetchExistingBatchFromChain(batchId, signerKey, name)
+  const stamp = await withTimeout(
+    fetchExistingBatchFromChain(batchId, signerKey, name),
+    BATCH_READ_TIMEOUT_MS,
+    'The Gnosis RPC did not answer in time. Nothing is lost — try finishing the drive again from Storage.',
+  )
   if (!stamp) {
-    // The journal entry stays: the drive is bought and findable, and the
-    // Storage tab offers to finish it. Retrying costs nothing.
+    // The journal entry stays: if the purchase did go through, the batch is on
+    // chain and the Storage tab offers to finish it, at no further cost.
     throw new Error(
-      'The drive was paid for but could not be read back from the chain yet. Nothing is lost — finish it from Storage once the chain catches up.',
+      'The chain does not know about this drive yet. Nothing is lost — finish it from Storage once the chain catches up, or dismiss it if the payment never went through.',
     )
   }
   account.addStamp(stamp)

@@ -32,21 +32,30 @@
     operationJournal.entries().filter((entry) => entry.accountId === account.id.toString()),
   )
 
-  let busy = $state(false)
+  // Which entry is being finished, if any — one at a time, and the others'
+  // buttons are disabled while it runs.
+  let busyBatchId = $state<string | undefined>(undefined)
   let step = $state<OperationStep>('recording')
-  let errorMessage = $state('')
+  // Per entry: a failure belongs under the drive it happened to, not under
+  // every drive in the list.
+  let errors = $state<Record<string, string>>({})
+
+  const busy = $derived(busyBatchId !== undefined)
 
   function describe(entry: PendingOperation): string {
     // The name is optional at purchase time, so fall back to the batch — the
     // drive still has to be identifiable in the sentence that offers to
     // rescue it.
     const label = entry.name.trim() || `Drive ${entry.batchId.replace(/^0x/, '').slice(0, 4)}`
-    return `“${label}” was paid for, but this device never finished setting it up. Finishing costs nothing more.`
+    // Careful not to promise the money left: the id is written down BEFORE the
+    // transaction is sent, so an entry can describe a purchase that never made
+    // it onto the chain.
+    return `This device started buying “${label}” and never finished setting it up. If the payment went through, finishing costs nothing more — if it never did, dismiss it.`
   }
 
   async function finish(entry: PendingOperation) {
-    busy = true
-    errorMessage = ''
+    busyBatchId = entry.batchId
+    errors = { ...errors, [entry.batchId]: '' }
     try {
       await resumePending({
         account,
@@ -55,9 +64,10 @@
         onStep: (next) => (step = next),
       })
     } catch (caught) {
-      errorMessage = caught instanceof Error ? caught.message : 'Could not finish it.'
+      const message = caught instanceof Error ? caught.message : 'Could not finish it.'
+      errors = { ...errors, [entry.batchId]: message }
     } finally {
-      busy = false
+      busyBatchId = undefined
     }
   }
 
@@ -72,12 +82,12 @@
       <TriangleAlert class="text-destructive mt-0.5 size-4 shrink-0" />
       <p class="text-sm">{describe(entry)}</p>
     </div>
-    {#if errorMessage}
-      <p class="text-destructive text-xs">{errorMessage}</p>
+    {#if errors[entry.batchId]}
+      <p class="text-destructive text-xs">{errors[entry.batchId]}</p>
     {/if}
     <div class="flex items-center gap-2">
       <Button size="sm" disabled={busy} onclick={() => finish(entry)}>
-        {#if busy}
+        {#if busyBatchId === entry.batchId}
           <LoaderCircle class="size-4 animate-spin" />
         {/if}
         Finish setting up
