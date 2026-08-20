@@ -64,7 +64,17 @@ export async function requestWalletKeySource(): Promise<WalletKeySource> {
   // Normalize the representation first, so unlock derives the same bytes as
   // creation, then reject non-ECDSA signatures (smart-contract wallets) — they
   // can't be reproduced for key derivation.
-  const canonical = canonicalSignature(signature)
+  //
+  // Every representation we know how to read is handled in `canonicalSignature`;
+  // what is left throwing is a wallet whose output we genuinely cannot
+  // reproduce, which is this flow's "not supported" — not viem's internals
+  // ("Invalid yParityOrV value") shown to someone who only clicked Sign.
+  let canonical
+  try {
+    canonical = canonicalSignature(signature)
+  } catch {
+    throw new Error('This wallet type is not supported for securing an account.')
+  }
   const signer = await recoverMessageAddress({ message: SIGNING_MESSAGE, signature: canonical })
   if (getAddress(signer) !== getAddress(walletAddress)) {
     throw new Error('This wallet type is not supported for securing an account.')
