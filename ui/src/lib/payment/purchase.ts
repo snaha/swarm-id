@@ -159,10 +159,7 @@ export interface ResizePlan {
   /** True when the contract's minimum-balance floor forced `topUpAmount`
    * above what the lifespan goal alone required. */
   clampedToFloor: boolean
-  /** Record patch once the top-up lands: depth unchanged, lifespan grown —
-   * the benign intermediate state a failed increase leaves behind. */
-  afterTopUp: StampUpdate
-  /** Final record patch once increaseDepth lands. */
+  /** Record patch once the atomic bundle lands. */
   afterDilute: StampUpdate
 }
 
@@ -191,16 +188,11 @@ export function resizePlan(
   const clampedToFloor = liveRemaining + lifespanTopUp < floorTarget
   const topUpAmount = clampedToFloor ? floorTarget - liveRemaining : lifespanTopUp
 
-  const preDilute = liveRemaining + topUpAmount
-  const postDilute = preDilute / factor
+  const postDilute = (liveRemaining + topUpAmount) / factor
   return {
     newDepth,
     topUpAmount,
     clampedToFloor,
-    afterTopUp: {
-      amount: preDilute,
-      batchTTL: ttlSecondsFor(preDilute, lastPrice),
-    },
     afterDilute: {
       depth: newDepth,
       amount: postDilute,

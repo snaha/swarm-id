@@ -77,10 +77,6 @@ describe('resizePlan', () => {
     const plan = resizePlan(20, 22, true, REMAINING, MINIMUM, PRICE)
     expect(plan.topUpAmount).toBe(REMAINING * 3n) // 2^2 − 1
     expect(plan.clampedToFloor).toBe(false)
-    // Intermediate state: still the old depth, lifespan ×4.
-    expect(plan.afterTopUp.depth).toBeUndefined()
-    expect(plan.afterTopUp.amount).toBe(REMAINING * 4n)
-    expect(plan.afterTopUp.batchTTL).toBe(400 * DAY)
     // Final state: new depth, lifespan back to the current 100 days.
     expect(plan.afterDilute.depth).toBe(22)
     expect(plan.afterDilute.amount).toBe(REMAINING)
@@ -123,7 +119,6 @@ describe('resizePlan', () => {
 
   it('reports unknown TTLs on a zero price instead of guessing', () => {
     const plan = resizePlan(20, 21, true, REMAINING, MINIMUM, 0n)
-    expect(plan.afterTopUp.batchTTL).toBeUndefined()
     expect(plan.afterDilute.batchTTL).toBeUndefined()
   })
 })
