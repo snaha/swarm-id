@@ -20,5 +20,5 @@ The identity UI is a SvelteKit SPA.
 - **Hex helpers**: byte⇄hex conversion comes from the lib — `uint8ArrayToHex`/`hexToUint8Array`
   from `@snaha/swarm-id` (0x-tolerant, throws on malformed input); `src/lib/crypto/hex.ts` keeps
   only `strip0x`/`prefix0x` to move between bare hex (how the lib and shared records store it)
-  and the `0x`-prefixed form (ethers keys, display). For an address use `new EthAddress(value)`
+  and the `0x`-prefixed form (derived keys, display). For an address use `new EthAddress(value)`
   (parse) and `.toChecksum()` (EIP-55 display) rather than raw string juggling.
