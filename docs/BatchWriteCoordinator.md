@@ -190,6 +190,13 @@ being lost:
 - **Restores are retried** from the refresh tick until the pending set drains
   (`pendingJoinedRestores`), because a transient resolver failure or a reload mid-restore would
   otherwise drop a batch from the list permanently.
+- **An evicted secondary goes back on the ledger.** A batch whose pointer heartbeat fails for
+  longer than one pointer epoch is dropped from `joinedSecondaries` rather than demoting the whole
+  account lease — but dropping it there and nowhere else would stop its pointer for the rest of
+  the session (only a targeted write re-joins one, and none may ever come), which is the
+  zero-resume exposure above. So the eviction re-arms the restore, `"network"`: a batch that stays
+  sick re-joins, fails another epoch of heartbeats and is evicted again — one state read per cycle
+  — and one that recovers is picked straight back up.
 - **Seed mode is per acquire path — and per id.** After an adopt the lease demonstrably never
   lapsed, so local state is the newest there is (`"local"`). After a cold acquire a peer may have
   held the partition meanwhile, so each batch re-seeds from the network via `joinBatch`

@@ -1667,6 +1667,16 @@ export class BatchWriteCoordinator {
               s.unbindPartition()
               this.joinedSecondaries.delete(key)
               this.secondaryHeartbeatFailingSince.delete(key)
+              // Back onto the restore ledger, or the eviction silently reopens
+              // the zero-resume window this batch was joined to close: nothing
+              // else re-joins an evicted batch (a targeted write to it may
+              // never come), and an unheartbeated pointer ages out of the
+              // takeover lookup span — see "The joined-batch restore ledger" in
+              // docs/BatchWriteCoordinator.md. The retry re-joins with a fresh
+              // NETWORK read the moment the batch is writable again; while it
+              // stays sick it re-joins, fails its heartbeats for another epoch
+              // and is evicted again — one state read per cycle.
+              this.pendingJoinedRestores.set(key, "network")
             }
           })
           if (leaseResult.status === "rejected") throw leaseResult.reason

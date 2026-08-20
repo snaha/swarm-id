@@ -288,6 +288,7 @@ type Internals = {
   yieldIdleLease: (lease: unknown) => Promise<void>
   joinedSecondaries: Map<string, unknown>
   secondaryHeartbeatFailingSince: Map<string, number>
+  pendingJoinedRestores: Map<string, "local" | "network">
 }
 
 describe("BatchWriteCoordinator.withWrite — wait fork", () => {
@@ -1764,6 +1765,11 @@ describe("BatchWriteCoordinator — self-demote on persistently failing pointer 
     // The account lease is untouched.
     expect(coordinator.isReadOnly).toBe(false)
     expect(coordinator.currentPartition).toBe(0)
+    // …and the batch goes back on the restore ledger. Nothing else re-joins an
+    // evicted batch, and an unheartbeated pointer ages out of the takeover
+    // lookup span — a peer would then zero-resume over its acked slots. Seeded
+    // from the NETWORK: our local state may no longer describe its counter.
+    expect(internals.pendingJoinedRestores.get(BATCH_ID_2)).toBe("network")
   })
 
   it("a successful heartbeat resets the failure streak", async () => {
