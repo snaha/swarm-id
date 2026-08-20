@@ -336,6 +336,18 @@ export async function runResize(options: ResizeOptions): Promise<void> {
   }
 }
 
+/** A priced resize, together with the depth it was priced from. */
+export interface ResizePreview {
+  plan: ResizePlan
+  /**
+   * The batch's depth ON CHAIN. The compensating top-up runs before the depth
+   * increase, so this — not the stored record's depth — is what the per-chunk
+   * cost is spread over. An interrupted resize leaves the two disagreeing, and
+   * a price computed from the stale one is out by a factor of 2^Δ.
+   */
+  currentDepth: number
+}
+
 /**
  * The resize plan for a drive as the chain sees it right now — used by the
  * dialog to price the operation before the user commits. Returns `undefined`
@@ -345,7 +357,7 @@ export async function previewResize(
   drive: PostageStamp,
   newDepth: number,
   keepLifespan: boolean,
-): Promise<{ plan: ResizePlan; currentDepth: number } | undefined> {
+): Promise<ResizePreview | undefined> {
   try {
     const client = await postageChain()
     const preflight = await preflightExtend(drive, client)

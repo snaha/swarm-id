@@ -19,14 +19,18 @@
   import { Switch } from '$lib/components/ui/switch'
   import { formatBytes, formatRemaining } from '$lib/drives'
   import { createCostEstimate } from '$lib/payment/cost-estimate.svelte'
-  import { type OperationStep, previewResize, runResize } from '$lib/payment/drive-operation'
+  import {
+    type OperationStep,
+    type ResizePreview,
+    previewResize,
+    runResize,
+  } from '$lib/payment/drive-operation'
   import {
     PaymentCancelledError,
     createFundingRequester,
     describeStep,
   } from '$lib/payment/funding-request.svelte'
   import { operationJournal } from '$lib/payment/operation-journal.svelte'
-  import type { ResizePlan } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
 
   interface Props {
@@ -49,9 +53,9 @@
   let step = $state<OperationStep>('checking')
   // The steps already finished this attempt, so a failure says what was paid for.
   let history = $state<string[]>([])
-  // The plan as the CHAIN sees it (live remaining balance), which is what the
-  // operation will actually execute — the stored record can be stale.
-  let preview = $state<ResizePlan | undefined>(undefined)
+  // The plan as the CHAIN sees it (live remaining balance and depth), which is
+  // what the operation will actually execute — the stored record can be stale.
+  let preview = $state<ResizePreview | undefined>(undefined)
   const attempts = createAttemptTracker()
   const funding = createFundingRequester(() => account)
 
@@ -85,26 +89,28 @@
     const request = ++previewRequest
     void previewResize(drive, depth, keep).then((result) => {
       if (request === previewRequest) {
-        preview = result?.plan
+        preview = result
       }
     })
   })
 
   // Keep-lifespan cost: the top-up is paid at the CURRENT depth (it runs before
-  // the depth increase), so that is the depth the cost is spread over.
+  // the depth increase), so that is the depth the cost is spread over — as the
+  // CHAIN reports it, since a resize interrupted after its increase leaves the
+  // stored record a depth behind and the price out by a factor of 2^Δ.
   const estimate = createCostEstimate(() =>
-    preview && preview.topUpAmount > 0n
-      ? { depth: drive.depth, amountPerChunk: preview.topUpAmount }
+    preview && preview.plan.topUpAmount > 0n
+      ? { depth: preview.currentDepth, amountPerChunk: preview.plan.topUpAmount }
       : undefined,
   )
   /** The estimate as the strip shows it. */
   const estimateLabel = $derived(estimate.value ? `~${estimate.value}` : undefined)
 
   const reducedLifespan = $derived.by(() => {
-    if (!preview || keepLifespan || preview.afterDilute.batchTTL === undefined) {
+    if (!preview || keepLifespan || preview.plan.afterDilute.batchTTL === undefined) {
       return ''
     }
-    return formatRemaining(preview.afterDilute.batchTTL).replace(/ left$/, '')
+    return formatRemaining(preview.plan.afterDilute.batchTTL).replace(/ left$/, '')
   })
 
   // The strip above the action: a label, plus the figure that matters on the
@@ -113,7 +119,7 @@
     if (!changed) {
       return { label: 'No changes made yet' }
     }
-    if (preview?.clampedToFloor) {
+    if (preview?.plan.clampedToFloor) {
       return estimateLabel
         ? { label: 'Includes the ~1 day minimum', value: estimateLabel }
         : { label: 'Resizing needs at least ~1 day of lifespan' }
