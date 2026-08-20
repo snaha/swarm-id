@@ -14,7 +14,7 @@
  */
 import { type Page, expect, test } from '@playwright/test'
 import { gnosisMainnetSettings } from '@swarm-id/multichain'
-import { devRpc } from '@swarm-id/multichain/dev'
+import { devRpc, ensureBundlingDelegate } from '@swarm-id/multichain/dev'
 
 import { completeCreateFlow } from './helpers'
 
@@ -45,20 +45,27 @@ async function anvilReachable(): Promise<boolean> {
 
 const chainUp = await anvilReachable()
 
-/** The EIP-7702 delegate, from the settings the app itself resolves. */
-const DELEGATE_ADDRESS = gnosisMainnetSettings().addresses.eip7702Delegate
+/** The chain this suite mutates, and the delegate address the app resolves. */
+const SETTINGS = gnosisMainnetSettings({ rpcUrls: [ANVIL_RPC_URL] })
+const DELEGATE_ADDRESS = SETTINGS.addresses.eip7702Delegate
 
 const delegateCode = () =>
   devRpc(ANVIL_RPC_URL, 'eth_getCode', [DELEGATE_ADDRESS, 'latest']).then(String)
-const setDelegateCode = (code: string) =>
-  devRpc(ANVIL_RPC_URL, 'anvil_setCode', [DELEGATE_ADDRESS, code])
+const clearDelegate = () => devRpc(ANVIL_RPC_URL, 'anvil_setCode', [DELEGATE_ADDRESS, '0x'])
 
 /**
- * Put the delegate back exactly as it was, so a suite ordering change cannot
- * leave later tests silently exercising the fallback instead of the real path.
+ * Put the delegate back from the canonical bytecode, NOT from a snapshot taken
+ * at startup.
+ *
+ * The dev chain is long-lived and shared, and this suite deliberately breaks
+ * it. A snapshot restores the wrong thing in exactly the case that matters: a
+ * worker that crashed between the wipe and the restore leaves a chain with no
+ * delegate, and the next run snapshots THAT as "the original" and faithfully
+ * puts it back. `ensureBundlingDelegate` is idempotent and knows what the
+ * delegate should be, so every path — including a crashed one — converges on a
+ * working chain.
  */
-let savedDelegateCode = ''
-const restoreDelegate = () => setDelegateCode(savedDelegateCode)
+const restoreDelegate = () => ensureBundlingDelegate(SETTINGS)
 
 /** The stored drive's on-chain-relevant fields. */
 function storedDrive(page: Page) {
@@ -122,9 +129,11 @@ test.describe.configure({ mode: 'serial' })
 
 test.skip(!chainUp, 'requires a local chain (pnpm dev:cluster:start, or pnpm dev:chain:detach)')
 
+// Start from a chain that can bundle, whatever an earlier crashed run left
+// behind — a no-op when the delegate is already there, which is the normal case.
 test.beforeAll(async () => {
   if (chainUp) {
-    savedDelegateCode = await delegateCode()
+    await restoreDelegate()
   }
 })
 
@@ -168,7 +177,7 @@ test('refuses to operate on a chain without the 7702 delegate', async ({ page })
   const before = await storedDrive(page)
 
   // After setup, so the batch creation that installs it has already run.
-  await setDelegateCode('0x')
+  await clearDelegate()
   try {
     expect(await delegateCode()).toBe('0x')
 
@@ -184,6 +193,7 @@ test('refuses to operate on a chain without the 7702 delegate', async ({ page })
   } finally {
     await restoreDelegate()
   }
+  expect(await delegateCode()).not.toBe('0x')
 
   // Refused, not half-done: the drive is exactly as it was.
   const after = await storedDrive(page)

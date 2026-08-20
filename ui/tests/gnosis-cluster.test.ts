@@ -29,6 +29,8 @@ const BEE_URL = 'http://localhost:1633'
 const PROBE_TIMEOUT_MS = 2000
 /** Bee polls the postage contract on a ~25s cycle; leave room for a few. */
 const INGEST_TIMEOUT_MS = 180_000
+/** Workers connect within seconds of the queen; longer than that is "none". */
+const PEERS_TIMEOUT_MS = 30_000
 const POLL_INTERVAL_MS = 5000
 const XDAI = 10n ** 18n
 const DEPTH = 20
@@ -65,12 +67,36 @@ interface KnownBatch {
 
 async function knownBatches(): Promise<KnownBatch[]> {
   const response = await fetch(`${BEE_URL}/batches`)
+  if (!response.ok) {
+    throw new Error(`GET /batches → ${response.status}`)
+  }
   return ((await response.json()) as { batches?: KnownBatch[] }).batches ?? []
 }
 
-async function peerCount(): Promise<number> {
-  const response = await fetch(`${BEE_URL}/peers`)
-  return ((await response.json()) as { peers?: unknown[] }).peers?.length ?? 0
+/**
+ * Wait for the node to report a peer, rather than asking once.
+ *
+ * A node still settling has no peers yet and may not be answering at all, and
+ * either reads as "start workers" on a single ask. Only a full deadline with
+ * nothing is worth skipping over.
+ */
+async function waitForPeers(): Promise<boolean> {
+  const deadline = Date.now() + PEERS_TIMEOUT_MS
+  while (Date.now() < deadline) {
+    try {
+      const response = await fetch(`${BEE_URL}/peers`)
+      if (response.ok) {
+        const { peers } = (await response.json()) as { peers?: unknown[] }
+        if ((peers?.length ?? 0) > 0) {
+          return true
+        }
+      }
+    } catch {
+      // A node that is not answering yet; keep asking until the deadline.
+    }
+    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
+  }
+  return false
 }
 
 /** The whole purchase, exactly as the widget arranges it in production. */
@@ -108,18 +134,31 @@ async function buyBatch(): Promise<{ batchId: `0x${string}`; ownerKey: `0x${stri
   return { batchId: purchase.batchId, ownerKey }
 }
 
-/** Wait for the node to see the batch on chain, as it only learns by watching. */
-async function waitForIngestion(batchId: `0x${string}`): Promise<KnownBatch | undefined> {
+/**
+ * Wait for the node to see the batch on chain, as it only learns by watching.
+ *
+ * Transport failures are swallowed and retried: this polls a node that is
+ * ingesting blocks, and a refused connection or a 503 from one under load is
+ * exactly the transient the deadline exists to absorb. Only the deadline is
+ * fatal — and it reports the last failure, so a genuinely broken node still
+ * says why.
+ */
+async function waitForIngestion(batchId: `0x${string}`): Promise<KnownBatch> {
   const wanted = batchId.slice(2).toLowerCase()
   const deadline = Date.now() + INGEST_TIMEOUT_MS
+  let lastFailure = 'the node never listed it'
   while (Date.now() < deadline) {
-    const found = (await knownBatches()).find((batch) => batch.batchID.toLowerCase() === wanted)
-    if (found) {
-      return found
+    try {
+      const found = (await knownBatches()).find((batch) => batch.batchID.toLowerCase() === wanted)
+      if (found) {
+        return found
+      }
+    } catch (caught) {
+      lastFailure = caught instanceof Error ? caught.message : String(caught)
     }
     await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS))
   }
-  return undefined
+  throw new Error(`Node never ingested ${batchId} from the PostageStamp: ${lastFailure}`)
 }
 
 test.skip(!clusterUp, 'requires the bee-compose cluster (pnpm dev:cluster:start)')
@@ -130,20 +169,19 @@ test('the node ingests a batch bought through the multichain path', async () => 
   const owner = privateKeyToAccount(ownerKey).address
 
   const ingested = await waitForIngestion(batchId)
-  expect(ingested, `node never ingested ${batchId} from the PostageStamp`).toBeDefined()
   // ...and it records the account's signer as the owner, not the payer.
-  expect(ingested!.owner.toLowerCase()).toBe(owner.slice(2).toLowerCase())
-  expect(ingested!.depth).toBe(DEPTH)
+  expect(ingested.owner.toLowerCase()).toBe(owner.slice(2).toLowerCase())
+  expect(ingested.depth).toBe(DEPTH)
 })
 
 test('a chunk stamped client-side by the batch owner uploads and reads back', async () => {
   test.setTimeout(INGEST_TIMEOUT_MS * 2)
   // A non-deferred upload only returns once the chunk is pushsynced to a peer,
   // which a lone queen cannot do.
-  test.skip((await peerCount()) === 0, 'needs peers — start workers')
+  test.skip(!(await waitForPeers()), 'needs peers — start workers')
 
   const { batchId, ownerKey } = await buyBatch()
-  expect(await waitForIngestion(batchId), `node never ingested ${batchId}`).toBeDefined()
+  await waitForIngestion(batchId)
 
   // The batch owner signs the stamp itself and the node only ever sees a signed
   // envelope — the point of the key hierarchy is that the node is never trusted
