@@ -202,12 +202,13 @@
     networkSettingsStore.updateSettings({ beeNodeUrl: LOCAL_BEE_NODE_URL, gnosisRpcUrl })
   }
 
+  // Reset rather than save today's defaults: writing them would pin them, so a
+  // later change to what production means would never reach anyone who once
+  // pressed this. Clearing storage leaves the app following the defaults, which
+  // is what the button is asking for.
   function useProductionEndpoints() {
     endpointSwitchAttempt++
-    networkSettingsStore.updateSettings({
-      beeNodeUrl: DEFAULT_BEE_NODE_URL,
-      gnosisRpcUrl: DEFAULT_GNOSIS_RPC_URL,
-    })
+    networkSettingsStore.reset()
   }
 
   // Sync state
