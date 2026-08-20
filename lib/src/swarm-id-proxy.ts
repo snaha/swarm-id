@@ -640,11 +640,31 @@ export class SwarmIdProxy {
             throw new Error(`Failed to build stamper for batch ${targetHex}`)
           })
     return this.enqueueWork(async () => {
-      // The stamp may have been tombstoned or its signer rotated while we were
-      // building, in which case the fresh stamper must NOT be installed.
+      // The queue was open for the whole build, so re-validate EVERY input
+      // baked into the instance, not just ownership: the stamp may have been
+      // tombstoned or its signer rotated, and an account migration
+      // (local→synced: same batch, same signer, different owner/encryption key)
+      // may have landed — installing a pre-migration stamper would pin the
+      // session to the old account's encryption inputs for good. A rejection
+      // just means the caller retries and rebuilds from current truth.
       const still = this.findOwnedStamp(targetHex)
-      if (!still || still.signerKey.toHex() !== signerKey) {
+      if (
+        !still ||
+        still.signerKey.toHex() !== signerKey ||
+        still.depth !== stamp.depth
+      ) {
         throw new Error("Batch not owned by account")
+      }
+      const current = await this.lookupAccountForApp()
+      const bakedFingerprint = `${accountInfo.owner.toHex()}-${uint8ArrayToHex(accountInfo.encryptionKey)}`
+      if (
+        !current ||
+        `${current.owner.toHex()}-${uint8ArrayToHex(current.encryptionKey)}` !==
+          bakedFingerprint
+      ) {
+        throw new Error(
+          `Account inputs changed while building the stamper for batch ${targetHex}`,
+        )
       }
       if (bindDefault) {
         await this.bindStamp(stamp, stamper)

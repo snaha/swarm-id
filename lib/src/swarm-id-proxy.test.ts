@@ -1337,6 +1337,62 @@ describe("SwarmIdProxy stamper builds never hold the work queue", () => {
   })
 })
 
+describe("SwarmIdProxy deferred install re-checks the baked account inputs", () => {
+  // A stamper bakes in the account's owner + encryption key. The queue is open
+  // for the whole off-queue build, so a local→synced migration can land in the
+  // middle: the migration's own refresh already updated
+  // `stamperAccountFingerprint`, and installing the pre-migration stamper would
+  // pin the session to the OLD account's encryption inputs forever.
+  it("refuses to install a stamper built with superseded account inputs", async () => {
+    vi.restoreAllMocks()
+    const proxy = makeProxy()
+    const create = vi.mocked(UtilizationAwareStamper.create)
+    create.mockClear()
+    let releaseBuild!: () => void
+    create.mockImplementationOnce(
+      (signerKey: string, batchId: unknown, depth: number) =>
+        new Promise((res) => {
+          releaseBuild = () =>
+            res({ mock: "stamper", batchId, signerKey, depth } as never)
+        }),
+    )
+    ;(proxy as never)["coordinator"] = { withWrite: vi.fn() }
+    ;(proxy as never)["utilizationStore"] = {}
+    ;(proxy as never)["findConnectionForParent"] = () => ({
+      account: { postageStamps: [stampStub(B1), stampStub(B2)] },
+    })
+    const OLD_OWNER = "ab".repeat(20)
+    const NEW_OWNER = "cd".repeat(20)
+    let owner = OLD_OWNER
+    ;(proxy as never)["lookupAccountForApp"] = () => {
+      // Snapshot per call, like the real lookup's freshly parsed EthAddress.
+      const seen = owner
+      return Promise.resolve({
+        owner: { toHex: () => seen },
+        encryptionKey: new Uint8Array(32),
+        accountId: "acct-1",
+        partitionCount: 2,
+      })
+    }
+
+    const picked = (await (proxy as never)["resolveUploadStamper"](B2)) as {
+      pendingBuild?: unknown
+    }
+    const install = (proxy as never)["completeDeferredBuild"](
+      picked.pendingBuild,
+    ) as Promise<unknown>
+    const settled = install.catch((error: Error) => error)
+
+    // The migration lands while the build is in flight.
+    owner = NEW_OWNER
+    releaseBuild()
+
+    const result = await settled
+    expect(result).toBeInstanceOf(Error)
+    expect((proxy as never)["stampEntries"]).toEqual(new Map())
+  })
+})
+
 describe("SwarmIdProxy coordinator targets the configured Bee node", () => {
   const CoordinatorMock = vi.mocked(BatchWriteCoordinator)
 
