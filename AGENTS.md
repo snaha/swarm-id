@@ -84,6 +84,10 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
   timer stays armed and leaks its handle. `withTimeout(work, ms, message)` clears the timer and
   rejects with `TimeoutError`, so discriminate timeouts with `instanceof TimeoutError`, not by
   message.
+- **JSON-RPC: use `jsonRpcCall`/`jsonRpcBatch`** (`lib/src/utils/json-rpc.ts`, exported from
+  `@snaha/swarm-id`) — never a hand-rolled `fetch` + envelope read; the module header says what
+  counts as an answer. `@swarm-id/multichain` keeps its own copy on purpose, so a change to one
+  belongs in both.
 
 ## Testing
 
