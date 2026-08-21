@@ -27,7 +27,9 @@
     "install:all": "pnpm install",
     "test:live": "pnpm --filter @snaha/swarm-id test:live",
     "test:fork": "pnpm --filter @swarm-id/multichain test:fork",
-    "check:all": "pnpm --filter @snaha/swarm-id check:all && pnpm --filter @swarm-id/multichain check:all && pnpm --filter @swarm-id/ui check:all && pnpm --filter @swarm-id/demo check:all",
+    "check:all": "pnpm format:check && pnpm --filter @snaha/swarm-id check:all && pnpm --filter @swarm-id/multichain check:all && pnpm --filter @swarm-id/ui check:all && pnpm --filter @swarm-id/demo check:all",
+    "format": "git ls-files -z ':(exclude)CLAUDE.md' ':(exclude)*/CLAUDE.md' | xargs -0 prettier --write --ignore-unknown",
+    "format:check": "git ls-files -z ':(exclude)CLAUDE.md' ':(exclude)*/CLAUDE.md' | xargs -0 prettier --check --ignore-unknown",
     "format:all": "pnpm --filter @snaha/swarm-id format && pnpm --filter @swarm-id/multichain format && pnpm --filter @swarm-id/ui format && pnpm --filter @swarm-id/demo format && pnpm --filter @swarm-id/docs format && prettier --write .",
     "format:lib": "pnpm --filter @snaha/swarm-id format"
   },
