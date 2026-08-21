@@ -1,31 +1,20 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
-export function bytesToHex(bytes: Uint8Array): string {
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('')
-}
-
-export function hexToBytes(hex: string): Uint8Array {
-  const clean = hex.startsWith('0x') ? hex.slice(2) : hex
-  const bytes = new Uint8Array(clean.length / 2)
-  for (let i = 0; i < bytes.length; i++) {
-    bytes[i] = parseInt(clean.substr(i * 2, 2), 16)
-  }
-  return bytes
-}
+// Byte⇄hex conversion comes from the lib, which rejects malformed input.
+import { hexToUint8Array } from '@snaha/swarm-id'
 
 const V1_TIMESTAMP_BYTES = 8
 const V1_REFERENCE_OFFSET = 8
 const V1_PAYLOAD_SIZE = 40
 
+/** A V1 feed payload: an 8-byte big-endian timestamp then a 32-byte reference. */
 export function buildV1Payload(referenceHex: string, timestamp: number): Uint8Array {
   const timestampBytes = new Uint8Array(V1_TIMESTAMP_BYTES)
   const view = new DataView(timestampBytes.buffer)
   view.setBigUint64(0, BigInt(timestamp), false)
 
-  const referenceBytes = hexToBytes(referenceHex)
+  const referenceBytes = hexToUint8Array(referenceHex)
   const EXPECTED_REFERENCE_BYTES = 32
   if (referenceBytes.length !== EXPECTED_REFERENCE_BYTES) {
     throw new Error(

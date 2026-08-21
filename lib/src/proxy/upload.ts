@@ -35,9 +35,9 @@ import {
 import {
   splitDataIntoChunks,
   CHUNK_SIZE,
+  ENCRYPTED_REFS_PER_CHUNK,
   PLAIN_REFS_PER_CHUNK,
 } from "./chunking"
-import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
 import { ChunkUploadStream } from "./chunk-upload-stream"
 import { marshalEnvelope } from "./stamp-marshal"
 import type { ChunkReference, UploadProgress } from "./types"

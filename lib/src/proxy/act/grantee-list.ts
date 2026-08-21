@@ -3,6 +3,7 @@
 
 import { Binary } from "cafe-utility"
 import { counterModeEncrypt, counterModeDecrypt } from "./crypto"
+import { publicKeysEqual } from "./act"
 
 // Grantee list format constants
 const UNCOMPRESSED_PUBLIC_KEY_SIZE = 65 // 0x04 prefix + 32 byte X + 32 byte Y
@@ -222,21 +223,4 @@ export function removeFromGranteeList(
 
   // Re-encrypt
   return serializeAndEncryptGranteeList(remainingGrantees, publisherPrivKey)
-}
-
-/**
- * Check if two public keys are equal
- */
-function publicKeysEqual(
-  a: UncompressedPublicKey,
-  b: UncompressedPublicKey,
-): boolean {
-  if (a.x.length !== b.x.length || a.y.length !== b.y.length) return false
-  for (let i = 0; i < a.x.length; i++) {
-    if (a.x[i] !== b.x[i]) return false
-  }
-  for (let i = 0; i < a.y.length; i++) {
-    if (a.y[i] !== b.y[i]) return false
-  }
-  return true
 }

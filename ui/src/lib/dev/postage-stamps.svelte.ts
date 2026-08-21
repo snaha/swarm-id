@@ -18,7 +18,15 @@ import { accountsStore } from '$lib/stores/accounts.svelte'
 
 let utilizationStore: UtilizationStoreDB | undefined
 
-const getUtilizationStore = () => {
+/**
+ * The tab's ONE utilization cache, shared with `sync.svelte.ts` — both reach
+ * the same IndexedDB database, so a second instance is a second connection to
+ * it for nothing.
+ *
+ * @throws off the browser, where there is no IndexedDB to open. Callers that
+ *   can run during SSR check `browser` before asking.
+ */
+export const getUtilizationStore = () => {
   if (!browser) {
     throw new Error('Utilization store not available (browser only)')
   }

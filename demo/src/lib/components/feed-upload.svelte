@@ -10,9 +10,13 @@
   import ResultDisplay from './result-display.svelte'
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
-  import { buildV1Payload, hexToBytes } from '$lib/utils/hex'
+  import { buildV1Payload } from '$lib/utils/feed-payload'
   import { validateHex } from '$lib/utils/validation'
-  import { buildBzzManifestNode, saveMantarayTreeRecursively } from '@snaha/swarm-id'
+  import {
+    buildBzzManifestNode,
+    hexToUint8Array,
+    saveMantarayTreeRecursively,
+  } from '@snaha/swarm-id'
   import type { ResultData } from './result-types'
 
   interface Props {
@@ -331,7 +335,7 @@
           return
         }
         const uploadResult = uploadEncryptionKey
-          ? await writer.uploadRawPayload(hexToBytes(ref), {
+          ? await writer.uploadRawPayload(hexToUint8Array(ref), {
               ...options,
               encryptionKey: uploadEncryptionKey,
             })
