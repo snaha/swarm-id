@@ -12,7 +12,8 @@
 
 import { RollingValueProvider } from "cafe-utility"
 import { SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE } from "./delegate-bytecode"
-import { jsonRpc } from "./fetch"
+import { devRpc } from "./dev-rpc"
+import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
 import { privateKeyToAccount } from "viem/accounts"
 import { createBatch, type CreateBatchResult } from "./postage-write"
 import { getNativeBalance } from "./rpc"
@@ -113,22 +114,8 @@ export async function anvilSetBalance(
   address: `0x${string}`,
   wei: bigint,
 ): Promise<void> {
-  const response = await fetch(rpcUrl, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({
-      jsonrpc: "2.0",
-      id: 1,
-      method: "anvil_setBalance",
-      params: [address, `0x${wei.toString(16)}`],
-    }),
-  })
-  const data = (await response.json()) as { error?: { message?: string } }
-  if (data.error) {
-    throw new Error(
-      `anvil_setBalance failed: ${data.error.message ?? "unknown error"}`,
-    )
-  }
+  // `devRpc` is the null-tolerant call: anvil answers `null` on success here.
+  await devRpc(rpcUrl, "anvil_setBalance", [address, `0x${wei.toString(16)}`])
 }
 
 export interface SimulateWidgetPurchaseOptions {
@@ -260,13 +247,14 @@ export async function ensureBundlingDelegate(
   if (typeof existing === "string" && existing !== "0x") {
     return
   }
-  await jsonRpc(rpcProvider, settings, "anvil_setCode", [
+  // Null-tolerant: `anvil_setCode` answers `null` when it SUCCEEDS.
+  await jsonRpcOrUndefined(rpcProvider, settings, "anvil_setCode", [
     address,
     SIMPLE_7702_ACCOUNT_RUNTIME_BYTECODE,
   ])
 }
 
-export { devRpc } from "./dev-rpc"
+export { devRpc }
 export {
   type DeliveryInstruction,
   LOCAL_SOLVER_ADDRESS,

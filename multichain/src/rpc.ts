@@ -4,7 +4,7 @@
 // https://github.com/ethersphere/multichain-library
 
 import { RollingValueProvider, Types } from "cafe-utility"
-import { jsonRpc } from "./fetch"
+import { jsonRpc, jsonRpcOrUndefined } from "./fetch"
 import type { MultichainSettings } from "./settings"
 
 export interface TransactionReceipt {
@@ -24,13 +24,15 @@ export async function getTransactionReceipt(
   settings: MultichainSettings,
   rpcProvider: RollingValueProvider<string>,
 ): Promise<TransactionReceipt | undefined> {
-  const result = await jsonRpc(
+  // Null-tolerant: a pending transaction has no receipt yet, and JSON-RPC says
+  // so with `result: null` — the normal answer here, not a failed read.
+  const result = await jsonRpcOrUndefined(
     rpcProvider,
     settings,
     "eth_getTransactionReceipt",
     [transactionHash],
   ).catch(() => undefined)
-  if (result === undefined || result === null) {
+  if (result === undefined) {
     return undefined
   }
   return Types.asObject(result) as unknown as TransactionReceipt

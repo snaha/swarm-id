@@ -554,6 +554,14 @@ export {
 } from "./utils/ttl"
 export type { ChainState } from "./utils/ttl"
 
+// Checked JSON-RPC transport — the one contract for "is this an answer?"
+export {
+  jsonRpcCall,
+  jsonRpcBatch,
+  CHAIN_READ_TIMEOUT_MS,
+} from "./utils/json-rpc"
+export type { JsonRpcOptions, JsonRpcRequest } from "./utils/json-rpc"
+
 // On-chain postage batch reads (PostageStamp contract, ground-truth TTL)
 export {
   fetchOnChainBatchState,
