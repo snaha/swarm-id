@@ -12,6 +12,7 @@
  * Whatever the answer, the client talks to the configured endpoint and to
  * nothing else — see `settingsFor`.
  */
+import { EthAddress } from '@ethersphere/bee-js'
 import {
   GNOSIS_CHAIN_ID,
   MultichainClient,
@@ -19,7 +20,6 @@ import {
   gnosisMainnetSettings,
 } from '@swarm-id/multichain'
 
-import { prefix0x } from '$lib/crypto/hex'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 /**
@@ -235,9 +235,14 @@ export interface OwnerFunds {
  * The client is required rather than resolved here: a balance is only
  * meaningful together with the chain it was read from, so the caller — which
  * knows which endpoint it is reporting — supplies it.
+ *
+ * @throws when `address` is not one. Parsing it rather than prefixing a string
+ *   is what makes that true: a bare `0x` in front of the wrong number of nibbles
+ *   travels to the RPC and comes back as a balance of zero, which reads as a
+ *   funded account that has spent everything.
  */
 export async function ownerFunds(address: string, client: MultichainClient): Promise<OwnerFunds> {
-  const owner = prefix0x(address) as `0x${string}`
+  const owner = new EthAddress(address).toChecksum() as `0x${string}`
   const [xdai, bzz] = await Promise.all([
     client.getNativeBalance(owner),
     client.getBzzBalance(owner),

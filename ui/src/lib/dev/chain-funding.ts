@@ -15,7 +15,7 @@
  *
  * Production code must never import this module.
  */
-import { EthAddress } from '@ethersphere/bee-js'
+import { Bee, BeeResponseError, EthAddress } from '@ethersphere/bee-js'
 import {
   DEV_FAUCET_ADDRESS,
   ensureBundlingDelegate,
@@ -270,29 +270,33 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
   if (!Number.isFinite(target) || target === 0) {
     return
   }
+  // bee-js rather than a hand-rolled read of `/status`: it parses the answer
+  // against the node's schema, so a renamed or dropped `lastSyncedBlock` is a
+  // type error here rather than a poller that silently never advances.
+  const bee = new Bee(beeNodeUrl)
   const deadline = Date.now() + BATCH_VISIBLE_TIMEOUT_MS
-  const statusUrl = new URL('status', beeNodeUrl.endsWith('/') ? beeNodeUrl : `${beeNodeUrl}/`)
   let consecutiveFailures = 0
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(statusUrl)
-      // A node that answers, but not with a sync figure, is a gateway: a
-      // persistent condition no amount of waiting changes, so stop asking.
-      if (!response.ok) {
-        return
-      }
-      const { lastSyncedBlock } = (await response.json()) as { lastSyncedBlock?: number }
-      if (lastSyncedBlock === undefined) {
-        return
-      }
+      const { lastSyncedBlock } = await bee.getStatus()
       if (lastSyncedBlock >= target) {
         return
       }
       consecutiveFailures = 0
-    } catch {
-      // Unlike the two above, a failed request says nothing durable — a node
-      // coming back up drops exactly this. Keep waiting; the cap is what stops
-      // a permanently unreachable node from holding the whole deadline.
+    } catch (error) {
+      // A status code means something answered and refused: a gateway, or
+      // anything else not serving `/status`. Persistent, so stop asking.
+      //
+      // It has to be the status rather than the error type: bee-js wraps every
+      // transport failure in a `BeeResponseError` too, and a refused connection
+      // — a node coming back up, the very case this wait exists for — arrives
+      // as one carrying no status at all.
+      if (error instanceof BeeResponseError && error.status !== undefined) {
+        return
+      }
+      // Unlike that one, a failed request says nothing durable. Keep waiting;
+      // the cap is what stops a permanently unreachable node from holding the
+      // whole deadline.
       consecutiveFailures += 1
       if (consecutiveFailures >= MAX_CONSECUTIVE_STATUS_FAILURES) {
         return

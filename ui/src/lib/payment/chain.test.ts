@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
-import { chainIdentity, evictChainCaches, postageChain, probeChainId } from './chain'
+import { chainIdentity, evictChainCaches, ownerFunds, postageChain, probeChainId } from './chain'
 
 /** The real one. A chain cannot borrow it, which is the whole point. */
 const GNOSIS_GENESIS = '0x4f1dd23188aab3a76b463e4af801b52b1248ef073c648cbdc4c9333d3da79756'
@@ -168,5 +168,45 @@ describe('postageChain', () => {
     const [first, second] = await Promise.all([postageChain(url), postageChain(url)])
     expect(first).toBe(second)
     expect(rpc).toHaveBeenCalledTimes(2) // chain id + genesis, once between them
+  })
+})
+
+describe('ownerFunds', () => {
+  /** Anvil's first account, as it is written down — and in lower case. */
+  const OWNER = '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266'
+
+  async function stubbedClient() {
+    stubRpc(devChainAnswers)
+    const client = await postageChain(freshUrl())
+    return {
+      client,
+      xdai: vi.spyOn(client, 'getNativeBalance').mockResolvedValue(1n),
+      bzz: vi.spyOn(client, 'getBzzBalance').mockResolvedValue(2n),
+    }
+  }
+
+  it.each([
+    ['checksummed', OWNER],
+    ['lower case', OWNER.toLowerCase()],
+    ['bare, without the 0x', OWNER.slice(2)],
+  ])('reads both balances at an address written %s', async (_label, written) => {
+    const { client, xdai, bzz } = await stubbedClient()
+    await expect(ownerFunds(written, client)).resolves.toEqual({ xdai: 1n, bzz: 2n })
+    expect(xdai).toHaveBeenCalledWith(OWNER)
+    expect(bzz).toHaveBeenCalledWith(OWNER)
+  })
+
+  // Prefixing a string cannot fail, so the wrong number of nibbles used to
+  // travel to the chain and come back as zero — which reads on the page as a
+  // funded account that has spent everything, not as a typo.
+  it.each([
+    ['too short', '0xdeadbeef'],
+    ['not hex at all', '0xzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz'],
+    ['empty', ''],
+  ])('refuses an address that is %s rather than asking the chain', async (_label, written) => {
+    const { client, xdai, bzz } = await stubbedClient()
+    await expect(ownerFunds(written, client)).rejects.toThrow()
+    expect(xdai).not.toHaveBeenCalled()
+    expect(bzz).not.toHaveBeenCalled()
   })
 })
