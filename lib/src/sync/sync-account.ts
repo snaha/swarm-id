@@ -343,8 +343,7 @@ export function createSyncAccount(
     // live foreign device, so we skip rather than wait.
     const coordinator = new BatchWriteCoordinator({
       bee,
-      batchId: defaultStamp.batchID.toHex(),
-      stamper,
+      leaseStamper: stamper,
       deviceId: getOrCreateDeviceId(),
       accountId,
       // Read fresh so the presence/intent rounds see the current device
@@ -395,6 +394,7 @@ export function createSyncAccount(
     try {
       const result = await Promise.race([
         coordinator.withWrite(
+          stamper,
           (target) =>
             publishDeviceState({
               bee,

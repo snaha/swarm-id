@@ -68,6 +68,9 @@
     const opts: Record<string, string> = {}
     if (feedIndex) opts.index = feedIndex
     if (feedAt) opts.at = feedAt
+    // Target the sidebar-selected batch (Default → omitted, the proxy
+    // resolves). Sequential and epoch feed writers both honour batchID.
+    if (clientStore.uploadBatchID) opts.batchID = clientStore.uploadBatchID
     return opts
   }
 
@@ -105,6 +108,7 @@
         const uploadResult = await clientStore.client!.uploadData(uint8Data, {
           encrypt: false,
           deferred,
+          batchID: clientStore.uploadBatchID,
         })
         const contentReference = uploadResult.reference
         logStore.log(`Content uploaded: ${contentReference}`)
@@ -120,6 +124,7 @@
             const uploadResult = await clientStore.client!.uploadData(data, {
               encrypt: false,
               deferred,
+              batchID: clientStore.uploadBatchID,
             })
             return { reference: uploadResult.reference }
           },
@@ -134,6 +139,9 @@
           const writer = clientStore.client!.makeEpochFeedWriter({ topic })
           const feedResult = await writer.uploadRawReference(manifestReference, {
             at: atRaw,
+            // Same drive as the content + manifest chunks above — a feed SOC on
+            // the default batch would split the dataset across two TTLs.
+            uploadOptions: { batchID: clientStore.uploadBatchID },
           })
 
           onDownloadAtUpdate?.(atRaw)
@@ -200,6 +208,7 @@
           const uploadResult = await writer.uploadPayload(payload, {
             at: atRaw,
             encryptionKey: epochEncKey,
+            uploadOptions: { batchID: clientStore.uploadBatchID },
           })
           logStore.log(
             `Epoch upload key: ${epochEncKey.slice(0, 8)}... (allZero=${/^0+$/.test(epochEncKey)})`,
@@ -300,6 +309,7 @@
         const uploadResult = await writer.uploadReference(ref, {
           at: atRaw,
           encryptionKey: epochEncKey,
+          uploadOptions: { batchID: clientStore.uploadBatchID },
         })
         logStore.log(
           `Epoch upload key: ${epochEncKey.slice(0, 8)}... (allZero=${/^0+$/.test(epochEncKey)})`,

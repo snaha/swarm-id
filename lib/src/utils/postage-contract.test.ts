@@ -376,6 +376,91 @@ describe("fetchAuthoritativeBatchTTL", () => {
 
     expect(ttl).toBeUndefined()
   })
+
+  it("uses a prefetched Bee TTL instead of asking the node again", async () => {
+    fetchSpy.mockImplementation((url) =>
+      url === RPC
+        ? Promise.reject(new Error("rpc down"))
+        : Promise.resolve(beeStampResponse(111)),
+    )
+
+    const ttl = await fetchAuthoritativeBatchTTL(
+      RPC,
+      BEE,
+      BATCH_ID,
+      undefined,
+      86400,
+    )
+
+    expect(ttl).toBe(86400)
+    // Only the (failed) contract read went out — no /stamps round-trip.
+    expect(fetchSpy.mock.calls.every(([url]) => url === RPC)).toBe(true)
+  })
+
+  it("still prefers the contract over a prefetched Bee TTL", async () => {
+    fetchSpy.mockImplementation((url) =>
+      Promise.resolve(
+        url === RPC ? batchResponse(FULL_RESPONSE) : beeStampResponse(999),
+      ),
+    )
+
+    const ttl = await fetchAuthoritativeBatchTTL(
+      RPC,
+      BEE,
+      BATCH_ID,
+      undefined,
+      86400,
+    )
+
+    expect(ttl).toBe(EXPECTED_TTL_SECONDS)
+  })
+
+  it("a REJECTING prefetched promise never escapes as an unhandled rejection", async () => {
+    // The doc tells callers to hand over an in-flight promise, and the contract
+    // path returns without awaiting it. Without a handler attached up front
+    // that rejection is unhandled — fatal in Node.
+    const unhandled: unknown[] = []
+    const onUnhandled = (reason: unknown) => unhandled.push(reason)
+    process.on("unhandledRejection", onUnhandled)
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(batchResponse(FULL_RESPONSE)),
+    )
+
+    try {
+      const ttl = await fetchAuthoritativeBatchTTL(
+        RPC,
+        BEE,
+        BATCH_ID,
+        undefined,
+        Promise.reject(new Error("stamps read blew up")),
+      )
+      expect(ttl).toBe(EXPECTED_TTL_SECONDS)
+      // Let the microtask queue drain so a missing handler would be reported.
+      await new Promise((resolve) => setTimeout(resolve, 0))
+      expect(unhandled).toEqual([])
+    } finally {
+      process.off("unhandledRejection", onUnhandled)
+    }
+  })
+
+  it("does not await a prefetched promise when the contract answers", async () => {
+    fetchSpy.mockImplementation(() =>
+      Promise.resolve(batchResponse(FULL_RESPONSE)),
+    )
+    // A hung Bee request must not hold the whole lookup: the caller overlaps
+    // it with the contract read, so a contract hit resolves without it.
+    const neverResolves = new Promise<number | undefined>(() => {})
+
+    const ttl = await fetchAuthoritativeBatchTTL(
+      RPC,
+      BEE,
+      BATCH_ID,
+      undefined,
+      neverResolves,
+    )
+
+    expect(ttl).toBe(EXPECTED_TTL_SECONDS)
+  })
 })
 
 describe("resolvePostageStampContractAddress", () => {

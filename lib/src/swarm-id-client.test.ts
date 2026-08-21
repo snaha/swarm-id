@@ -279,11 +279,11 @@ describe("SwarmIdClient request seam", () => {
     await expect(promise).resolves.toEqual(data)
   })
 
-  it("getPostageBatch rejects on a proxy error message", async () => {
-    const promise = client.getPostageBatch()
+  it("getPostageBatches rejects on a proxy error message", async () => {
+    const promise = client.getPostageBatches()
 
     const sent = lastPostedMessage()
-    expect(sent).toMatchObject({ type: "getPostageBatch" })
+    expect(sent).toMatchObject({ type: "getPostageBatches" })
 
     deliver({
       type: "error",
@@ -291,6 +291,41 @@ describe("SwarmIdClient request seam", () => {
       error: "Bee node unreachable",
     })
     await expect(promise).rejects.toThrow("Bee node unreachable")
+  })
+
+  it("getPostageBatches returns the account's full batch list (doc §2)", async () => {
+    const promise = client.getPostageBatches()
+
+    const sent = lastPostedMessage()
+    expect(sent).toMatchObject({ type: "getPostageBatches" })
+
+    const postageBatches = [
+      { batchID: "aa".repeat(32), isDefault: false },
+      { batchID: "bb".repeat(32), isDefault: true },
+    ]
+    deliver({
+      type: "getPostageBatchesResponse",
+      requestId: sent.requestId,
+      postageBatches,
+    })
+    await expect(promise).resolves.toEqual(postageBatches)
+  })
+
+  it("epoch feed uploadReference targets the SOC at the payload's batch", async () => {
+    const batchID = "cc".repeat(32)
+    const writer = client.makeEpochFeedWriter({ topic: "dd".repeat(32) })
+
+    void writer.uploadReference("ee".repeat(32), {
+      uploadOptions: { batchID },
+    })
+
+    // Without this the payload lands on the targeted batch while the feed SOC
+    // goes to the resolved default — one dataset across two batches with
+    // independent TTLs.
+    expect(lastPostedMessage()).toMatchObject({
+      type: "epochFeedUploadReference",
+      batchID,
+    })
   })
 
   it("deriveAppSecret round-trips the label and returns the secret (#520)", async () => {

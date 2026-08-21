@@ -21,6 +21,7 @@ import {
 } from "./schemas"
 import type {
   Reference,
+  BatchId,
   Address,
   Identifier,
   Signature,
@@ -72,6 +73,9 @@ const UploadOptionsObjectSchema = z.object({
   encryptManifest: z.boolean().optional(),
   tag: z.number().optional(),
   deferred: z.boolean().optional(),
+  // Target a specific stamp the account owns (a "drive") instead of the
+  // resolved default.
+  batchID: BatchIdSchema.optional(),
 })
 
 export const UploadOptionsSchema = UploadOptionsObjectSchema.optional()
@@ -123,6 +127,16 @@ export interface UploadOptions {
   workerCount?: number
   /** Upload concurrency (parallel in-flight chunks). HTTP default: 8, WebSocket default: 32. */
   concurrency?: number
+  /**
+   * Hex id of a stamp the account owns (a "drive") to upload under, instead of
+   * the resolved default. Rejects if the account does not own it.
+   *
+   * AUTHORIZATION: any connected app can target ANY batch the account owns —
+   * per-app stamp assignment only scopes which batch untargeted uploads
+   * resolve to, it is not an isolation boundary. Accepted trade-off of the
+   * origin-only permission model (see `getPostageBatches`).
+   */
+  batchID?: BatchId
 }
 
 export type RequestOptions = z.infer<typeof RequestOptionsSchema>
@@ -167,6 +181,11 @@ export const PostageBatchSchema = z.object({
   immutableFlag: z.boolean(),
   exists: z.boolean(),
   batchTTL: z.number().optional(),
+  /**
+   * Whether this is the stamp uploads without an explicit `batchID` resolve to
+   * (the app's per-app override if set, else the account default).
+   */
+  isDefault: z.boolean(),
 })
 
 export type UploadResult = z.infer<typeof UploadResultSchema>
@@ -877,6 +896,10 @@ export const EpochFeedUploadReferenceMessageSchema = z.object({
   reference: ReferenceSchema,
   encryptionKey: EncryptionKeySchema.optional(),
   hints: EpochHintsSchema,
+  // The feed SOC's target batch, mirroring `UploadOptions.batchID`. Without it
+  // an epoch write with a targeted payload straddles two batches: the payload
+  // on the target, the SOC on the resolved default, with independent TTLs.
+  batchID: BatchIdSchema.optional(),
   requestOptions: RequestOptionsSchema,
 })
 
@@ -1028,8 +1051,8 @@ export const ActGetGranteesMessageSchema = z.object({
   requestOptions: RequestOptionsSchema,
 })
 
-export const GetPostageBatchMessageSchema = z.object({
-  type: z.literal("getPostageBatch"),
+export const GetPostageBatchesMessageSchema = z.object({
+  type: z.literal("getPostageBatches"),
   requestId: z.string(),
 })
 
@@ -1075,7 +1098,7 @@ export const ParentToIframeMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesMessageSchema,
   ActRevokeGranteesMessageSchema,
   ActGetGranteesMessageSchema,
-  GetPostageBatchMessageSchema,
+  GetPostageBatchesMessageSchema,
   ConnectMessageSchema,
 ])
 
@@ -1140,8 +1163,8 @@ export type ActRevokeGranteesMessage = z.infer<
   typeof ActRevokeGranteesMessageSchema
 >
 export type ActGetGranteesMessage = z.infer<typeof ActGetGranteesMessageSchema>
-export type GetPostageBatchMessage = z.infer<
-  typeof GetPostageBatchMessageSchema
+export type GetPostageBatchesMessage = z.infer<
+  typeof GetPostageBatchesMessageSchema
 >
 export type ConnectMessage = z.infer<typeof ConnectMessageSchema>
 export type ParentToIframeMessage = z.infer<typeof ParentToIframeMessageSchema>
@@ -1469,10 +1492,10 @@ export const ActGetGranteesResponseMessageSchema = z.object({
   grantees: z.array(z.string()),
 })
 
-export const GetPostageBatchResponseMessageSchema = z.object({
-  type: z.literal("getPostageBatchResponse"),
+export const GetPostageBatchesResponseMessageSchema = z.object({
+  type: z.literal("getPostageBatchesResponse"),
   requestId: z.string(),
-  postageBatch: PostageBatchSchema.optional(),
+  postageBatches: z.array(PostageBatchSchema),
 })
 
 export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
@@ -1517,7 +1540,7 @@ export const IframeToParentMessageSchema = z.discriminatedUnion("type", [
   ActAddGranteesResponseMessageSchema,
   ActRevokeGranteesResponseMessageSchema,
   ActGetGranteesResponseMessageSchema,
-  GetPostageBatchResponseMessageSchema,
+  GetPostageBatchesResponseMessageSchema,
 ])
 
 export type ProxyReadyMessage = z.infer<typeof ProxyReadyMessageSchema>
@@ -1633,8 +1656,8 @@ export type ActRevokeGranteesResponseMessage = z.infer<
 export type ActGetGranteesResponseMessage = z.infer<
   typeof ActGetGranteesResponseMessageSchema
 >
-export type GetPostageBatchResponseMessage = z.infer<
-  typeof GetPostageBatchResponseMessageSchema
+export type GetPostageBatchesResponseMessage = z.infer<
+  typeof GetPostageBatchesResponseMessageSchema
 >
 export type IframeToParentMessage = z.infer<typeof IframeToParentMessageSchema>
 

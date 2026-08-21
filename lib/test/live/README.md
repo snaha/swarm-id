@@ -11,17 +11,26 @@ default mocked unit suite (`pnpm test`) and the local-cluster `pnpm test:integra
 
 ## What it covers
 
-| File                                   | Scenario                                                                           |
-| -------------------------------------- | ---------------------------------------------------------------------------------- |
-| `per-device-sync.test.ts`              | 2 devices: per-device feeds converge; stamp/device tombstones; §7 invariant        |
-| `per-device-sync-3.test.ts`            | 3 devices: append-only roster (no clobber); fold-latency report                    |
-| `partition-acquire-3.test.ts`          | 3 devices race for 2 partitions; idle-then-reacquire → no dual-acquire             |
-| `rename-clobber.test.ts`               | a never-renamed device must not clobber a peer's account rename                    |
-| `single-device-acquire-upload.test.ts` | timings: 1 device, clean acquire → SOC upload → publish wall times                 |
-| `multi-device-acquire-upload.test.ts`  | timings: 2 devices, per-device acquire + SOC upload + publish                      |
-| `three-device-acquire-handoff.test.ts` | timings: 3 devices, K=2, full p1 handoff cycle B→C→B (A holds p0 throughout)       |
-| `second-upload-delay.test.ts`          | timings: held-lease re-validation throttle (when a 2nd upload pays a gateway read) |
-| `upload-cost-breakdown.test.ts`        | timings: held-lease upload phase breakdown (op vs publish)                         |
+| File                                      | Scenario                                                                            |
+| ----------------------------------------- | ----------------------------------------------------------------------------------- |
+| `per-device-sync.test.ts`                 | 2 devices: per-device feeds converge; stamp/device tombstones; §7 invariant         |
+| `per-device-sync-3.test.ts`               | 3 devices: append-only roster (no clobber); fold-latency report                     |
+| `partition-acquire-3.test.ts`             | 3 devices race for 2 partitions; idle-then-reacquire → no dual-acquire              |
+| `rename-clobber.test.ts`                  | a never-renamed device must not clobber a peer's account rename                     |
+| `single-device-acquire-upload.test.ts`    | timings: 1 device, clean acquire → SOC upload → publish wall times                  |
+| `multi-device-acquire-upload.test.ts`     | timings: 2 devices, per-device acquire + SOC upload + publish                       |
+| `three-device-acquire-handoff.test.ts`    | timings: 3 devices, K=2, full p1 handoff cycle B→C→B (A holds p0 throughout)        |
+| `second-upload-delay.test.ts`             | timings: held-lease re-validation throttle (when a 2nd upload pays a gateway read)  |
+| `upload-cost-breakdown.test.ts`           | timings: held-lease upload phase breakdown (op vs publish)                          |
+| `idle-yield-joined-batch-restore.test.ts` | an idle yield keeps the joined-batch ledger; a peer resumes it at the acked counter |
+| `teardown-rebind-joined-restore.test.ts`  | a teardown that is a REBIND keeps the ledger; the successor re-joins the secondary  |
+| `cross-batch-adopt.test.ts`               | after a default switch the adopt network-seeds the new lease batch, never zero      |
+| `default-batch-switch.test.ts`            | switch A→B, reload, hold past the pointer span; a takeover resumes A at its acked   |
+| `aborted-join-synced-reference.test.ts`   | a join aborted before the bind leaves no synced reference (no later zero-seed)      |
+| `read-only-acquire-ledger.test.ts`        | a contended (read-only) acquire keeps the LEASE batch in the ledger; L survives L→X |
+
+The multi-batch scenarios (the last five, plus the idle-yield one) need a
+**second** funded batch in `BATCH_ID_2`; they skip without it.
 
 The deterministic, always-on guards for the same logic are the mocked tests in
 `lib/src/sync/*.test.ts` (run in CI). This suite is the live counterpart.

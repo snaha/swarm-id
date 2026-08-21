@@ -64,8 +64,7 @@ describe.skipIf(!liveEnv.configured)(
       )
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
-        batchId: ctx.batchID.toHex(),
-        stamper,
+        leaseStamper: stamper,
         deviceId: D,
         accountId: keys.accountId,
         knownDeviceIds: () => [D],
@@ -73,7 +72,7 @@ describe.skipIf(!liveEnv.configured)(
         swarmEncryptionKey: encryptionKey,
         partitionCount: PARTITION_COUNT,
         mode: "persistent", // match the demo's proxy coordinator
-        flushStamperState: () => stamper.flush(),
+        flushStamperState: (s) => s.flush(),
       })
 
       const socSigner = new PrivateKey(randomBytes(32))
@@ -84,6 +83,7 @@ describe.skipIf(!liveEnv.configured)(
         let opStart = 0
         let opEnd = 0
         const result = await coordinator.withWrite(
+          stamper,
           async (target: UploadTarget) => {
             opStart = Date.now()
             // Encrypted SOC — exactly what the demo's "Upload SOC" sends.

@@ -53,6 +53,7 @@
         useWorkers,
         workerCount: useWorkers ? workerCount : undefined,
         concurrency,
+        batchID: clientStore.uploadBatchID,
       })
       logStore.log(
         `Upload successful! Reference: ${uploadResult.reference} (${uploadResult.reference.length} chars)`,

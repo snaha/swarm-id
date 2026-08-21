@@ -48,6 +48,8 @@ import {
 interface DeviceHarness {
   id: string
   coordinator: BatchWriteCoordinator
+  /** The lease batch's stamper — `withWrite`'s per-write batch context. */
+  stamper: UtilizationAwareStamper
   /** Set by `onLeaseAcquired` so a fresh acquire can be timed off the call. */
   state: { acquiredAt: number }
 }
@@ -87,8 +89,7 @@ describe.skipIf(!liveEnv.configured)(
       const state = { acquiredAt: 0 }
       const coordinator = new BatchWriteCoordinator({
         bee: ctx.bee,
-        batchId: ctx.batchID.toHex(),
-        stamper,
+        leaseStamper: stamper,
         deviceId: id,
         accountId: keys.accountId,
         // Both devices are known rivals → a fresh claim runs the intent round
@@ -99,12 +100,12 @@ describe.skipIf(!liveEnv.configured)(
         partitionCount: PARTITION_COUNT,
         mode: "oneshot", // lazy acquire inside withWrite → clean per-call timing
         intentGuardWindowMs: liveEnv.intentWindowMs,
-        flushStamperState: () => stamper.flush(),
+        flushStamperState: (s) => s.flush(),
         onLeaseAcquired: () => {
           state.acquiredAt = Date.now()
         },
       })
-      return { id, coordinator, state }
+      return { id, coordinator, stamper, state }
     }
 
     // One SOC upload of a random chunk through the real write path, timed.
@@ -117,6 +118,7 @@ describe.skipIf(!liveEnv.configured)(
       let uploadMs = 0
       const t0 = Date.now()
       const result = await h.coordinator.withWrite(
+        h.stamper,
         async (target: UploadTarget) => {
           const u0 = Date.now()
           const r = await uploadSOC(

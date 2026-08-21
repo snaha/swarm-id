@@ -1997,6 +1997,272 @@ describe("PartitionLease.publishState — commit without release", () => {
   })
 })
 
+// ============================================================================
+// Per-batch state under one account-scoped lease (joinBatch)
+// ============================================================================
+
+const BATCH_2 = new BatchId("cd".repeat(32))
+
+/**
+ * A second batch's write context for `joinBatch` / per-batch publishes: the
+ * mock stamper plus the `batchId`/`depth` fields `PartitionLease` reads off a
+ * `UtilizationAwareStamper`. Not an `instanceof` UAS, so the optional
+ * persistence branches (synced reference, protected buckets) stay skipped —
+ * same as `createMockStamper()` on the lease-batch paths.
+ */
+function makeBatchStamper(batchId: BatchId): UtilizationAwareStamper {
+  return Object.assign(createMockStamper(), {
+    batchId,
+    depth: TEST_BATCH_DEPTH,
+  }) as unknown as UtilizationAwareStamper
+}
+
+/** Publish partition-0 state for `batchId` as a prior holder would. */
+async function seedBatchState(
+  batchId: BatchId,
+  localCounter: Uint32Array,
+  nowMs: number,
+): Promise<void> {
+  await partitionState.writePartitionState({
+    bee: bee as unknown as Bee,
+    stamper: createMockStamper() as unknown as Stamper,
+    batchId,
+    batchDepth: TEST_BATCH_DEPTH,
+    partition: 0,
+    localCounter,
+    backupSigner: BACKUP_SIGNER,
+    swarmEncryptionKey: TEST_ENC_KEY,
+    nowMs,
+  })
+}
+
+describe("PartitionLease.joinBatch — per-batch state under one lease", () => {
+  it("seeds the second batch's counter from ITS published state without touching the lock", async () => {
+    const NOW = 1_000_000
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    published[3000] = 7
+    await seedBatchState(BATCH_2, published, NOW)
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+
+    const lockBefore = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+
+    const counter = await lease.joinBatch(makeBatchStamper(BATCH_2))
+    expect(counter).toEqual(published)
+
+    // The account-scoped claim is untouched: same holder, same generation.
+    const lockAfter = await readPartitionLock({
+      bee: bee as unknown as Bee,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+    })
+    expect(lockAfter?.holderDeviceId).toBe(DEVICE_A)
+    expect(lockAfter?.generation).toEqual(lockBefore?.generation)
+  })
+
+  it("serialize carries the joined batches so a re-adopt can restore them", async () => {
+    const NOW = 1_000_000
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await seedBatchState(BATCH_2, published, NOW)
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+
+    // The lease batch itself is INCLUDED: after a default-stamp change the
+    // next session's lease batch is a different one, and the old default —
+    // then just another written batch — must be restorable like any secondary,
+    // or its pointer ages out of the takeover span. The restore skips whichever
+    // id is the CURRENT session's lease batch.
+    expect(lease.serialize().joinedBatchIds).toEqual([TEST_BATCH_ID.toHex()])
+
+    await lease.joinBatch(makeBatchStamper(BATCH_2))
+
+    expect(lease.serialize().joinedBatchIds).toEqual([
+      TEST_BATCH_ID.toHex(),
+      BATCH_2.toHex(),
+    ])
+
+    // A new session resumes from the partition's published counters, so the
+    // joined set is per-session and must not leak across an acquire.
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(lease.serialize().joinedBatchIds).toEqual([TEST_BATCH_ID.toHex()])
+  })
+
+  it("joinBatch after a cached-lease re-adopt scans the prior holder's lease span (no zero-seed)", async () => {
+    // The coordinator's re-adopt fast path (hydrate + adoptIfLive) runs no
+    // Swarm scan, so the acquire-time knowledge of the prior holder's
+    // `leasedUntil` must survive serialize/hydrate — without it, joinBatch
+    // probes only the `now`/`now-1` pointer buckets, treats the miss as
+    // conclusive, and zero-seeds a batch the prior holder had published,
+    // re-issuing every slot it acked.
+    const STATE_EPOCH_MS = 30_000
+    const PAST = 1_000_000
+    // >2 pointer epochs later: the pointer is reachable ONLY via the prior
+    // holder's lease span, never via the `now` window.
+    const NOW = PAST + LEASE_TTL_MS + 3 * STATE_EPOCH_MS
+
+    // DEVICE_B published BATCH_2 state on p0 at PAST, then departed without
+    // releasing (its lock is expired at NOW).
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await seedBatchState(BATCH_2, published, PAST)
+    await writePartitionLock({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      partition: 0,
+      payload: {
+        holderDeviceId: DEVICE_B,
+        generation: {
+          timestampMs: PAST,
+          tiebreaker: makeDeviceTiebreaker(DEVICE_B),
+        },
+        acquiredAt: PAST,
+        leasedUntil: PAST + LEASE_TTL_MS, // < NOW → expired
+      },
+    })
+
+    // Session 1: cold acquire (scans the locks, learns B's leasedUntil).
+    const session1 = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    const acquired = await session1.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+    const snap = session1.serialize()
+
+    // Session 2 (reload within the TTL): re-adopt from the cache — no scan.
+    const session2 = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    session2.hydrate(snap)
+    expect(session2.adoptIfLive()).toBe(0)
+
+    // The join must resume B's exact published counter, not a zero seed.
+    const counter = await session2.joinBatch(makeBatchStamper(BATCH_2))
+    expect(counter).toEqual(published)
+  })
+
+  it("throws on an unreadable second-batch state and keeps the lease", async () => {
+    const NOW = 1_000_000
+    // BATCH_2's partition-0 pointer names an unreadable reference — the
+    // partition has a real resume point for that batch we failed to learn.
+    await partitionState.writeStatePointer({
+      bee: bee as unknown as Bee,
+      stamper: createMockStamper() as unknown as Stamper,
+      backupSigner: BACKUP_SIGNER,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      batchId: BATCH_2,
+      partition: 0,
+      referenceHex: Binary.uint8ArrayToHex(new Uint8Array(64).fill(0x99)),
+      nowMs: NOW,
+    })
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.partition).toBe(0)
+
+    await expect(lease.joinBatch(makeBatchStamper(BATCH_2))).rejects.toThrow()
+    // The failed join must not demote the account lease.
+    expect(lease.currentPartition).toBe(0)
+  })
+
+  it("keeps each batch's publish cache independent (incremental against its own seed)", async () => {
+    // Pinned clock: an epoch roll between publishes would force a full re-pin
+    // and mask the incremental assertion (same rationale as the seeding tests).
+    const clock = 30_000 * 1000
+    const b1 = new Uint32Array(NUM_BUCKETS)
+    b1[100] = 5
+    b1[3000] = 7
+    const b2 = new Uint32Array(NUM_BUCKETS)
+    b2[200] = 9
+    b2[4000] = 2
+    await seedBatchState(TEST_BATCH_ID, b1, clock)
+    await seedBatchState(BATCH_2, b2, clock)
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => clock,
+    })
+    const acquired = await lease.acquire({ partitionCount: PARTITION_COUNT })
+    expect(acquired.localCounter).toEqual(b1)
+    const stamper2 = makeBatchStamper(BATCH_2)
+    expect(await lease.joinBatch(stamper2)).toEqual(b2)
+
+    const writeSpy = vi.spyOn(partitionState, "writePartitionState")
+
+    // B2 publish: incremental against B2's seed.
+    const b2next = b2.slice()
+    b2next[201] += 1
+    await lease.publishState(b2next, stamper2)
+    expect(writeSpy.mock.calls[0][0].batchId.toHex()).toBe(BATCH_2.toHex())
+    expect(writeSpy.mock.calls[0][0].previousCounter).toEqual(b2)
+
+    // B1 publish afterwards: still incremental against B1's own seed — the B2
+    // publish consumed nothing of it.
+    const b1next = b1.slice()
+    b1next[101] += 1
+    await lease.publishState(b1next)
+    expect(writeSpy.mock.calls[1][0].batchId.toHex()).toBe(
+      TEST_BATCH_ID.toHex(),
+    )
+    expect(writeSpy.mock.calls[1][0].previousCounter).toEqual(b1)
+  })
+
+  it("heartbeats the second batch's pointer at ITS state-pointer address", async () => {
+    const NOW = 1_000_000
+    const published = new Uint32Array(NUM_BUCKETS)
+    published[100] = 5
+    await seedBatchState(BATCH_2, published, NOW)
+
+    const lease = makeLease({
+      deviceId: DEVICE_A,
+      bee: bee as unknown as Bee,
+      now: () => NOW,
+    })
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const stamper2 = makeBatchStamper(BATCH_2)
+    await lease.joinBatch(stamper2)
+
+    const pointerSpy = vi.spyOn(partitionState, "writeStatePointer")
+    await lease.heartbeatStatePointer(undefined, stamper2)
+    expect(pointerSpy).toHaveBeenCalledTimes(1)
+    expect(pointerSpy.mock.calls[0][0].batchId.toHex()).toBe(BATCH_2.toHex())
+  })
+
+  it("requires a held lease", async () => {
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    await expect(lease.joinBatch(makeBatchStamper(BATCH_2))).rejects.toThrow()
+  })
+})
+
 describe("PartitionLease.release", () => {
   it("writes the NO_HOLDER_DEVICE_ID sentinel carrying the released claim's generation", async () => {
     const NOW = 1_000_000
@@ -2273,6 +2539,36 @@ describe("PartitionLease.serialize / hydrate", () => {
     const other = makeLease({ deviceId: DEVICE_B, bee: bee as unknown as Bee })
     other.hydrate(snap)
     expect(other.currentPartition).toBeUndefined()
+  })
+
+  it("adopts a snapshot serialized under a different lease batch — the CLAIM transfers, the counter must not", async () => {
+    const lease = makeLease({ deviceId: DEVICE_A, bee: bee as unknown as Bee })
+    await lease.acquire({ partitionCount: PARTITION_COUNT })
+    const snap = lease.serialize()
+
+    // The on-network claim (lock/intent/occupancy SOCs) is account-scoped, so
+    // a lease rebuilt under a different batch — a default-stamp change — still
+    // adopts the cached claim instead of paying a cold re-acquire. CONTRACT:
+    // only the claim transfers; the adopter must seed the new lease batch's
+    // counter from the NETWORK (`joinBatch`, bounded by the restored
+    // prior-holder span) — local state describes the OLD batch, and binding it
+    // could full-publish (near) zero over a prior holder's resume point. The
+    // coordinator's cross-batch adopt branch enforces that (see its unit
+    // tests); joinBatch works against the adopted claim:
+    const rebuilt = new PartitionLease({
+      bee: bee as unknown as Bee,
+      deviceId: DEVICE_A,
+      batchId: new BatchId("cd".repeat(32)),
+      batchDepth: TEST_BATCH_DEPTH,
+      swarmEncryptionKey: TEST_ENC_KEY,
+      backupSigner: BACKUP_SIGNER,
+      stamper: createMockStamper() as unknown as Stamper,
+    })
+    rebuilt.hydrate(snap)
+    expect(rebuilt.currentPartition).toBe(0)
+    await expect(
+      rebuilt.joinBatch(makeBatchStamper(new BatchId("cd".repeat(32)))),
+    ).resolves.toBeDefined()
   })
 })
 

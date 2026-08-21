@@ -7,6 +7,7 @@ import {
   DEFAULT_BEE_NODE_URL,
   type Avatar,
   type ConnectionInfo,
+  type PostageBatch,
 } from '@snaha/swarm-id'
 import { resolveProxyOrigin } from '$lib/utils/environment'
 import { logStore } from './log.svelte'
@@ -55,6 +56,12 @@ let uploadMode = $state<'user-stamp' | 'subsidised' | 'unavailable'>('unavailabl
 let identity = $state<IdentityInfo | undefined>(undefined)
 let appKey = $state<AppKeyInfo | undefined>(undefined)
 let stamp = $state<StampInfo | undefined>(undefined)
+// Every batch the account owns (a "drive" each) — drives the upload batch
+// selector when there is more than one.
+let batches = $state<PostageBatch[]>([])
+// Batch id targeted by uploads; undefined = "Default" (the proxy resolves the
+// per-app override / account default).
+let selectedBatchId = $state<string | undefined>(undefined)
 let partition = $state<number | undefined>(undefined)
 let deferred = $state(false)
 let initializing = $state(false)
@@ -66,7 +73,7 @@ let socWriterInstance: ReturnType<SwarmIdClient['makeSOCWriter']> | undefined
 let currentSubsidisedGatewayUrl: string | undefined = undefined
 
 // Monotonic generation counter for connection-change handler runs. Used to
-// drop stale results from in-flight `getPostageBatch()` calls when the user
+// drop stale results from in-flight `getPostageBatches()` calls when the user
 // switches identity or disconnects while a fetch is pending.
 let connectionGeneration = 0
 
@@ -82,49 +89,78 @@ function clearStampPollTimer() {
   stampPollAttempts = 0
 }
 
+function toStampInfo(batch: PostageBatch): StampInfo {
+  return {
+    batchID: String(batch.batchID),
+    utilization: batch.utilization.toFixed(2),
+    usable: batch.usable,
+    depth: batch.depth,
+    bucketDepth: batch.bucketDepth,
+    amount: batch.amount,
+    blockNumber: batch.blockNumber,
+    immutableFlag: batch.immutableFlag,
+    ttl: formatTTL(batch.batchTTL),
+  }
+}
+
 async function updatePostageStampInfo(generation: number) {
   if (!client) return
 
   try {
-    const batch = await client.getPostageBatch()
+    const fetched = await client.getPostageBatches()
     if (generation !== connectionGeneration) return
+    batches = fetched
+    // A selected batch that no longer exists (identity switch, deleted drive)
+    // falls back to Default rather than silently failing every upload.
+    if (
+      selectedBatchId !== undefined &&
+      !fetched.some((b) => String(b.batchID) === selectedBatchId)
+    ) {
+      selectedBatchId = undefined
+    }
+    // The demo shows one stamp; an account may own several ("drives") —
+    // track the one untargeted uploads consume (the sidebar getter overlays
+    // the upload-batch selection on top of this).
+    // No `?? fetched[0]` fallback: with no default, presenting an arbitrary
+    // drive as the active stamp is a lie — untargeted uploads go subsidised,
+    // and the badge that says so would be suppressed.
+    const batch = fetched.find((b) => b.isDefault)
+    // A freshly bought batch reports usable=false until it warms up on chain
+    // (~30s) — re-poll until it flips so the UI catches up without a reload.
+    // Driven by the drive the sidebar actually RENDERS (the selection, else the
+    // default): polling the default only would leave a freshly bought
+    // non-default drive reading "Unusable" for as long as it stays selected.
+    const shown = fetched.find((b) => String(b.batchID) === selectedBatchId) ?? batch
+    if (shown?.usable === false && stampPollAttempts < STAMP_USABLE_POLL_MAX_ATTEMPTS) {
+      stampPollAttempts++
+      stampPollTimer = setTimeout(() => {
+        stampPollTimer = undefined
+        if (generation !== connectionGeneration) return
+        void updatePostageStampInfo(generation)
+      }, STAMP_USABLE_POLL_INTERVAL)
+    } else if (shown?.usable !== false) {
+      stampPollAttempts = 0
+    }
     if (batch) {
       const batchIdStr = String(batch.batchID)
       const previous = stamp
-      stamp = {
-        batchID: batchIdStr,
-        utilization: batch.utilization.toFixed(2),
-        usable: batch.usable,
-        depth: batch.depth,
-        bucketDepth: batch.bucketDepth,
-        amount: batch.amount,
-        blockNumber: batch.blockNumber,
-        immutableFlag: batch.immutableFlag,
-        ttl: formatTTL(batch.batchTTL),
-      }
+      stamp = toStampInfo(batch)
       // Poll re-runs only log when something the user can see changed.
       if (previous === undefined || previous.batchID !== batchIdStr) {
         logStore.log(`Postage stamp loaded: ${batchIdStr.slice(0, 16)}...`)
       } else if (previous.usable !== batch.usable) {
         logStore.log(`Postage stamp is now ${batch.usable ? 'usable' : 'unusable'}`)
       }
-      // A freshly bought batch reports usable=false until it warms up on
-      // chain (~30s) — re-poll until it flips so the UI catches up without
-      // a reload.
-      if (batch.usable) {
-        stampPollAttempts = 0
-      } else if (stampPollAttempts < STAMP_USABLE_POLL_MAX_ATTEMPTS) {
-        stampPollAttempts++
-        stampPollTimer = setTimeout(() => {
-          stampPollTimer = undefined
-          if (generation !== connectionGeneration) return
-          void updatePostageStampInfo(generation)
-        }, STAMP_USABLE_POLL_INTERVAL)
-      }
-    } else {
+    } else if (fetched.length === 0) {
       stamp = undefined
-      stampPollAttempts = 0
+      selectedBatchId = undefined
       logStore.log('No postage stamp configured')
+    } else {
+      // Drives exist but none is the account default. `selectedBatchId` stays:
+      // it names a batch that is still there, and a user-chosen upload target
+      // must survive (the stale-selection cleanup above drops removed ones).
+      stamp = undefined
+      logStore.log('No default drive set; untargeted uploads use the gateway')
     }
   } catch (error) {
     if (generation !== connectionGeneration) return
@@ -137,7 +173,7 @@ async function updatePostageStampInfo(generation: number) {
 }
 
 async function onConnectionChange(info: ConnectionInfo) {
-  // Bump the generation so any in-flight `getPostageBatch` from the previous
+  // Bump the generation so any in-flight `getPostageBatches` from the previous
   // snapshot (e.g. a different identity or pre-disconnect state) is dropped
   // when it resolves instead of overwriting current state.
   const generation = ++connectionGeneration
@@ -187,6 +223,8 @@ async function onConnectionChange(info: ConnectionInfo) {
     await updatePostageStampInfo(generation)
   } else {
     stamp = undefined
+    batches = []
+    selectedBatchId = undefined
   }
 }
 
@@ -213,7 +251,27 @@ export const clientStore = {
     return appKey
   },
   get stamp() {
-    return stamp
+    // The sidebar follows the upload-batch selection: a selected batch shows
+    // ITS properties; "Default" shows the resolved default stamp.
+    const selected =
+      selectedBatchId !== undefined
+        ? batches.find((b) => String(b.batchID) === selectedBatchId)
+        : undefined
+    return selected ? toStampInfo(selected) : stamp
+  },
+  get batches() {
+    return batches
+  },
+  get selectedBatchId() {
+    return selectedBatchId
+  },
+  set selectedBatchId(value: string | undefined) {
+    selectedBatchId = value
+  },
+  /** `UploadOptions.batchID` for upload calls: the selected batch, or
+   *  undefined so the proxy resolves the default. */
+  get uploadBatchID() {
+    return selectedBatchId
   },
   get partition() {
     return partition
@@ -330,7 +388,7 @@ export const clientStore = {
   },
 
   destroy() {
-    // Bump the generation so an in-flight `getPostageBatch` resolving after
+    // Bump the generation so an in-flight `getPostageBatches` resolving after
     // destroy can't write `stamp` back, and stop any pending re-poll.
     connectionGeneration++
     clearStampPollTimer()
@@ -343,6 +401,8 @@ export const clientStore = {
     identity = undefined
     appKey = undefined
     stamp = undefined
+    batches = []
+    selectedBatchId = undefined
     partition = undefined
     socWriterInstance = undefined
   },

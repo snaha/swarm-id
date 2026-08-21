@@ -752,42 +752,46 @@ export class SwarmIdClient {
   }
 
   /**
-   * Gets the current postage batch for the authenticated identity.
+   * Lists every postage batch the authenticated account owns.
    *
-   * Returns information about the postage stamp associated with the
-   * connected identity, including batch ID, utilization, depth, and TTL.
+   * The account can hold several stamps (each shown as a "drive" in the
+   * identity UI), so this returns all of them — letting an app reach a
+   * specific stamp (e.g. to upload with {@link UploadOptions.batchID}). With no
+   * `batchID`, uploads use the account's resolved default stamp — the batch
+   * flagged `isDefault: true` in this list.
    *
-   * @returns A promise resolving to the PostageBatch or undefined if none is configured
+   * PRIVACY/AUTHORIZATION: every connected app sees this full list AND can
+   * upload to any batch in it via `batchID` — access is origin-scoped, there
+   * is no per-app permission model. Per-app stamp assignment only picks an
+   * app's default, it does not fence the other drives off from it. Accepted
+   * trade-off.
+   *
+   * @returns A promise resolving to the account's postage batches (empty if none)
    * @throws {Error} If the client is not initialized
    * @throws {Error} If the request times out
    *
    * @example
    * ```typescript
-   * const batch = await client.getPostageBatch()
-   * if (batch) {
-   *   console.log('Batch ID:', batch.batchID)
-   *   console.log('Utilization:', batch.utilization)
-   *   console.log('Depth:', batch.depth)
-   *   console.log('TTL:', batch.batchTTL)
-   * } else {
-   *   console.log('No postage batch configured')
+   * const batches = await client.getPostageBatches()
+   * for (const batch of batches) {
+   *   console.log(batch.batchID, batch.utilization, batch.batchTTL)
    * }
    * ```
    */
-  async getPostageBatch(): Promise<PostageBatch | undefined> {
+  async getPostageBatches(): Promise<PostageBatch[]> {
     this.ensureReady()
     const requestId = this.generateRequestId()
 
     const response = await this.sendRequest<{
-      type: "getPostageBatchResponse"
+      type: "getPostageBatchesResponse"
       requestId: string
-      postageBatch?: PostageBatch
+      postageBatches: PostageBatch[]
     }>({
-      type: "getPostageBatch",
+      type: "getPostageBatches",
       requestId,
     })
 
-    return response.postageBatch
+    return response.postageBatches
   }
 
   /**
@@ -2057,6 +2061,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2104,6 +2109,7 @@ export class SwarmIdClient {
         encryptionKey:
           feedKey !== undefined ? this.normalizeSocKey(feedKey) : undefined,
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2190,6 +2196,7 @@ export class SwarmIdClient {
         reference: normalizedRef,
         encryptionKey: undefined, // No encryption for raw upload
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -2229,6 +2236,7 @@ export class SwarmIdClient {
         reference: uploadResult.reference,
         encryptionKey: undefined, // No encryption for raw upload
         hints: options?.hints,
+        batchID: options?.uploadOptions?.batchID,
         requestOptions,
       })
       const socAddress = response.socAddress
@@ -3043,6 +3051,14 @@ export class SwarmIdClient {
    * Only the publisher (original uploader) can add grantees.
    * Returns new references since Swarm content is immutable.
    *
+   * NOTE: grantee/history chunks always stamp under the account's resolved
+   * DEFAULT batch — this call takes no `batchID`. If the ACT content was
+   * uploaded to a different batch ({@link ActUploadOptions.batchID}), the
+   * dataset straddles two batches with independent TTLs, and the access
+   * structure dies with the default batch even while the content lives. Keep
+   * ACT datasets on the default batch until grantee operations support
+   * `batchID`.
+   *
    * @param historyReference - The current history reference
    * @param grantees - Array of new grantee public keys as compressed hex strings
    * @param requestOptions - Optional request configuration (timeout, headers, endlesslyRetry)
@@ -3107,6 +3123,10 @@ export class SwarmIdClient {
    * revocation. Revocation only stops access to content published afterwards.
    * The returned `encryptedReference` is unchanged — it is NOT re-encrypted, as
    * that would leak the keystream to former grantees (#496).
+   *
+   * NOTE: like `actAddGrantees`, the new grantee/history chunks stamp under
+   * the account's resolved DEFAULT batch (no `batchID` support) — see the
+   * batch-straddling caveat there.
    *
    * @param historyReference - The current history reference
    * @param encryptedReference - The current encrypted reference

@@ -72,6 +72,7 @@
       const actResult = await clientStore.client!.actUploadData(uint8Data, grantees, {
         deferred: clientStore.deferred,
         beeCompatible,
+        batchID: clientStore.uploadBatchID,
       })
 
       logStore.log('ACT Upload successful!')

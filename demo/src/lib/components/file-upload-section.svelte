@@ -70,6 +70,7 @@
         useWorkers,
         workerCount: useWorkers ? workerCount : undefined,
         concurrency,
+        batchID: clientStore.uploadBatchID,
         onProgress: (progress) => {
           uploadProgress = progress
           progressTracker.total = progress.total

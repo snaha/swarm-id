@@ -67,7 +67,9 @@
     try {
       const uint8Data = new TextEncoder().encode(uploadData)
       logStore.log('Uploading encrypted SOC...')
-      const result = await clientStore.socWriter.upload(identifier, uint8Data)
+      const result = await clientStore.socWriter.upload(identifier, uint8Data, {
+        batchID: clientStore.uploadBatchID,
+      })
 
       logStore.log(`SOC upload successful! Reference: ${result.reference}`)
       owner = result.owner
@@ -113,7 +115,9 @@
     try {
       const uint8Data = new TextEncoder().encode(uploadData)
       logStore.log('Uploading raw SOC...')
-      const result = await clientStore.socWriter.rawUpload(identifier, uint8Data)
+      const result = await clientStore.socWriter.rawUpload(identifier, uint8Data, {
+        batchID: clientStore.uploadBatchID,
+      })
 
       logStore.log(`SOC raw upload successful! Reference: ${result.reference}`)
       owner = result.owner
