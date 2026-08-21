@@ -1,0 +1,1 @@
+import{s as r}from"./2A11KV22.js";const n=2e3,t=new Map;function m(e){const s=t.get(e);s&&clearTimeout(s);const i=setTimeout(()=>{t.delete(e),r.syncAccount(e).catch(o=>{console.error(`[sync] account ${e} failed:`,o)})},n);t.set(e,i)}export{m as t};
