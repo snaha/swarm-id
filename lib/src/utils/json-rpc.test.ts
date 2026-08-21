@@ -3,6 +3,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { jsonRpcBatch, jsonRpcCall } from "./json-rpc"
+import { TimeoutError } from "./promise"
 
 const RPC_URL = "https://rpc.example"
 const OPTIONS = { timeoutMs: 1000 }
@@ -60,7 +61,7 @@ describe("jsonRpcCall", () => {
       "a JSON-RPC error under a 200",
       mockResponse({ error: { message: "pruned" } }),
     ],
-    ["no result at all", mockResponse({ jsonrpc: "2.0", id: 1 })],
+    ["no result member at all", mockResponse({ jsonrpc: "2.0", id: 1 })],
     // JSON-RPC's "no such thing": a pruned node answers an explicit null
     // rather than omitting the field.
     ["an explicit null result", mockResponse({ result: null })],
@@ -70,6 +71,21 @@ describe("jsonRpcCall", () => {
     await expect(
       jsonRpcCall(RPC_URL, "eth_getBlockByNumber", ["0x0", false], OPTIONS),
     ).rejects.toThrow()
+  })
+
+  // Both reject here, but they are not the same event, and the vendored copy
+  // in `@swarm-id/multichain` lets `null` through for the methods that mean it.
+  // Reading a malformed envelope as that outcome is what the split prevents.
+  it("tells a malformed envelope apart from an explicit null", async () => {
+    fetchSpy.mockResolvedValueOnce(mockResponse({ jsonrpc: "2.0", id: 1 }))
+    await expect(
+      jsonRpcCall(RPC_URL, "eth_chainId", [], OPTIONS),
+    ).rejects.toThrow(/malformed envelope/)
+
+    fetchSpy.mockResolvedValueOnce(mockResponse({ result: null }))
+    await expect(
+      jsonRpcCall(RPC_URL, "eth_chainId", [], OPTIONS),
+    ).rejects.toThrow(/returned no result/)
   })
 
   it("names the endpoint the way the caller asked, since the message reaches users", async () => {
@@ -83,12 +99,33 @@ describe("jsonRpcCall", () => {
     ).rejects.toThrow("The configured Gnosis RPC answered 429 to eth_chainId.")
   })
 
-  it("falls back to the url when the caller has no better name for it", async () => {
+  // Unlabelled it falls back to the ORIGIN, never the whole url: a provider
+  // url carries its API key in the path or query, and these messages reach
+  // logs and dialogs.
+  it("falls back to the origin when the caller has no better name for it", async () => {
     fetchSpy.mockResolvedValue(mockResponse({ error: { message: "nope" } }))
 
     await expect(
-      jsonRpcCall(RPC_URL, "eth_chainId", [], OPTIONS),
+      jsonRpcCall(`${RPC_URL}/v2/secret-api-key`, "eth_chainId", [], OPTIONS),
     ).rejects.toThrow(`${RPC_URL} refused eth_chainId: nope`)
+  })
+
+  // `AbortSignal.timeout` would reject with a DOMException that merely shares
+  // the name. Callers are told to discriminate a deadline with `instanceof`,
+  // so it has to be the real class.
+  it("rejects a blown deadline with the library's TimeoutError", async () => {
+    fetchSpy.mockImplementation(
+      (_url, init) =>
+        new Promise((_resolve, reject) => {
+          ;(init as RequestInit).signal?.addEventListener("abort", () =>
+            reject(new DOMException("aborted", "AbortError")),
+          )
+        }),
+    )
+
+    await expect(
+      jsonRpcCall(RPC_URL, "eth_chainId", [], { timeoutMs: 10 }),
+    ).rejects.toBeInstanceOf(TimeoutError)
   })
 })
 

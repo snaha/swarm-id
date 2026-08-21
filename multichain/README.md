@@ -47,6 +47,20 @@ Deliberate changes from upstream:
   receipt/balance waiters take their cadence from settings (anvil mines every
   5s; mainnet polling is slower), and dropped modules we do not use (USDC,
   token prices, multi-transfer, the deprecated Sushi HTTP API quote).
+- **A checked JSON-RPC transport** (`json-rpc.ts`): a response is an answer only
+  with a 2xx status, no `error` member, and a `result` present in the envelope.
+  A missing `result` is always malformed; an explicit `null` is a real outcome
+  for a few methods (`eth_getTransactionReceipt` while pending, anvil's admin
+  calls on success), so the two are checked separately and each call site picks
+  between `jsonRpc` and `jsonRpcOrUndefined`. This is a verbatim copy of
+  `lib/src/utils/json-rpc.ts` rather than an import, so the package stays
+  self-contained and its tests do not wait on a lib build — change one, change
+  both.
+- **Where the rotation boundary sits** (`fetch.ts`): the status check runs
+  inside `System.withRetries`, so a 429 or a 502 rotates to the next configured
+  RPC. The JSON-RPC `error` check runs outside it — every endpoint refuses a
+  reverted `eth_estimateGas` identically, so retrying is the same answer five
+  times slower.
 
 ## Local testing
 
