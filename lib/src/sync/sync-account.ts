@@ -364,20 +364,6 @@ export function createSyncAccount(
       `[SyncCoordinator ${timestamp()}] Starting sync for ${accountId} bee.url=${bee.url}`,
     )
 
-    // Race the publish against a timeout. Bee client requests have no built-in
-    // timeout, so a non-responding node would otherwise hang the UI forever.
-    // Note: this surfaces the timeout to the caller but does NOT cancel the
-    // underlying fetch (would require AbortSignal propagation through bee-js).
-    let timer: ReturnType<typeof setTimeout> | undefined
-    const timeoutPromise = new Promise<SyncResult>((resolve) => {
-      timer = setTimeout(() => {
-        resolve({
-          status: "error",
-          error: `Sync timed out after ${SYNC_TIMEOUT_MS}ms`,
-        })
-      }, SYNC_TIMEOUT_MS)
-    })
-
     // Build this device's view + registry seed from the captured snapshot. The
     // per-field scalar clocks (incl. the stable-`createdAt` fallback for a
     // never-edited field) are derived by `accountStateToDeviceView`.
@@ -393,7 +379,13 @@ export function createSyncAccount(
     const view = accountStateToDeviceView(state)
 
     try {
-      const result = await Promise.race([
+      // Time-bound the publish: Bee client requests have no built-in timeout,
+      // so a non-responding node would otherwise hang the UI forever. This
+      // surfaces the timeout to the caller but does NOT cancel the underlying
+      // fetch (that would need AbortSignal propagation through bee-js). The
+      // TimeoutError lands in the catch below, which returns it as a
+      // `status: "error"` SyncResult — same shape and message as before.
+      const result = await withTimeout(
         coordinator.withWrite(
           (target) =>
             publishDeviceState({
@@ -410,8 +402,9 @@ export function createSyncAccount(
             }),
           { wait: "skip" },
         ),
-        timeoutPromise,
-      ])
+        SYNC_TIMEOUT_MS,
+        `Sync timed out after ${SYNC_TIMEOUT_MS}ms`,
+      )
       if (result.status === "error") {
         console.error(
           `[SyncCoordinator ${timestamp()}] Sync failed (+${(performance.now() - startTime).toFixed(2)}ms):`,
@@ -438,8 +431,6 @@ export function createSyncAccount(
         status: "error",
         error: error instanceof Error ? error.message : String(error),
       }
-    } finally {
-      if (timer !== undefined) clearTimeout(timer)
     }
   }
 }
