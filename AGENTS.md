@@ -79,11 +79,11 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
   of the rest of the monorepo
 - **Recursive scripts: `pnpm -r run <script>`** — a bare `pnpm -r <script>` resolves to a
   built-in pnpm command whenever the names collide (pnpm 11 added a built-in `clean`)
-- **Timeouts: use `withTimeout`** (`lib/src/utils/promise.ts`) — never `Promise.race` work against
-  `rejectAfter` or an inline `setTimeout` rejection: when the work wins, the losing timer stays
-  armed and leaks its handle. `withTimeout(work, ms, message)` clears the timer and rejects with
-  `TimeoutError`, so discriminate timeouts with `instanceof TimeoutError`, not by message.
-  `rejectAfter` is deprecated and kept only for the public API.
+- **Timeouts: use `withTimeout`** (`lib/src/utils/promise.ts`, exported from the package) — never
+  `Promise.race` work against an inline `setTimeout` rejection: when the work wins, the losing
+  timer stays armed and leaks its handle. `withTimeout(work, ms, message)` clears the timer and
+  rejects with `TimeoutError`, so discriminate timeouts with `instanceof TimeoutError`, not by
+  message.
 
 ## Testing
 
