@@ -1,7 +1,10 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
-import { hexToUint8Array } from '@snaha/swarm-id'
-import { HDNodeWallet, Mnemonic } from 'ethers'
+import { entropyToMnemonic, mnemonicToEntropy, validateMnemonic } from '@scure/bip39'
+import { uint8ArrayToHex } from '@snaha/swarm-id'
+import { english, mnemonicToAccount } from 'viem/accounts'
+
+import { prefix0x } from '$lib/crypto/hex'
 
 export interface DerivedWallet {
   /** 0x-prefixed Ethereum address — the account id. */
@@ -19,44 +22,48 @@ export function normalizePhrase(phrase: string): string {
 }
 
 export function isValidPhrase(phrase: string): boolean {
-  return Mnemonic.isValidMnemonic(normalizePhrase(phrase))
+  return validateMnemonic(normalizePhrase(phrase), english)
 }
 
 export function walletFromPhrase(phrase: string): DerivedWallet {
-  return walletFromMnemonic(Mnemonic.fromPhrase(normalizePhrase(phrase)))
+  return walletFromNormalizedPhrase(normalizePhrase(phrase))
 }
 
 /** Rebuild the wallet from decrypted vault entropy (the sign-back-in path). */
 export function walletFromEntropy(entropy: Uint8Array): DerivedWallet {
-  return walletFromMnemonic(Mnemonic.fromEntropy(entropy))
+  return walletFromNormalizedPhrase(phraseFromEntropy(entropy))
 }
 
-function walletFromMnemonic(mnemonic: Mnemonic): DerivedWallet {
-  const wallet = HDNodeWallet.fromMnemonic(mnemonic)
+/**
+ * The account's keys at BIP-44's first Ethereum path, which is what
+ * `mnemonicToAccount` derives by default.
+ */
+function walletFromNormalizedPhrase(phrase: string): DerivedWallet {
+  const account = mnemonicToAccount(phrase)
+  const hdKey = account.getHdKey()
+  if (!hdKey.privateKey || !hdKey.publicKey) {
+    throw new Error('The recovery phrase did not derive a key pair.')
+  }
   return {
-    address: wallet.address,
-    publicKey: wallet.publicKey,
-    privateKey: wallet.privateKey,
-    entropy: hexToUint8Array(mnemonic.entropy),
+    address: account.address,
+    publicKey: prefix0x(uint8ArrayToHex(hdKey.publicKey)),
+    privateKey: prefix0x(uint8ArrayToHex(hdKey.privateKey)),
+    entropy: mnemonicToEntropy(phrase, english),
   }
 }
 
 const PHRASE_ENTROPY_BYTES = 16 // 128 bits → a 12-word phrase
 
-/**
- * Generate a random recovery phrase. Entropy-only — `Wallet.createRandom()`
- * would run a full EC key generation just to throw the wallet away.
- */
+/** Generate a random recovery phrase. */
 export function generatePhrase(): string {
   return phraseFromEntropy(crypto.getRandomValues(new Uint8Array(PHRASE_ENTROPY_BYTES)))
 }
 
 export function phraseFromEntropy(entropy: Uint8Array): string {
-  return Mnemonic.fromEntropy(entropy).phrase
+  return entropyToMnemonic(entropy, english)
 }
 
 /** The account's signing key (0x-prefixed hex), derived on demand after unlock. */
 export function privateKeyFromEntropy(entropy: Uint8Array): string {
-  const mnemonic = Mnemonic.fromEntropy(entropy)
-  return HDNodeWallet.fromMnemonic(mnemonic).privateKey
+  return walletFromEntropy(entropy).privateKey
 }

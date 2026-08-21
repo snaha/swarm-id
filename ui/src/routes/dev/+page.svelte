@@ -4,37 +4,57 @@
 -->
 
 <script lang="ts">
-  import { SvelteMap } from 'svelte/reactivity'
+  import { untrack } from 'svelte'
 
-  import { BatchId, Bee, EthAddress, Identifier, PrivateKey, Utils } from '@ethersphere/bee-js'
+  import { BatchId, Bee, EthAddress, Identifier, PrivateKey } from '@ethersphere/bee-js'
+  import ChevronDown from '@lucide/svelte/icons/chevron-down'
+  import Info from '@lucide/svelte/icons/info'
+  import Settings from '@lucide/svelte/icons/settings'
   import {
-    calculateStampAmountForDays,
+    DEFAULT_BEE_NODE_URL,
+    DEFAULT_GNOSIS_RPC_URL,
     derivePostageSignerKey,
     downloadEncryptedSOC,
-    fetchChainState,
-    formatTTL,
     rejectAfter,
-    resolvePostageStampContractAddress,
     uint8ArrayToHex,
     uploadSOC,
   } from '@snaha/swarm-id'
+  import { gnosisMainnetSettings } from '@swarm-id/multichain'
+  import { formatUnits, parseUnits } from 'viem'
 
   import { resolve } from '$app/paths'
 
   import CopyButton from '$lib/components/copy-button.svelte'
+  import NetworkSettingsDialog from '$lib/components/network-settings-dialog.svelte'
   import { Button } from '$lib/components/ui/button'
+  import {
+    DropdownMenu,
+    DropdownMenuItem,
+    DropdownMenuSeparator,
+  } from '$lib/components/ui/dropdown-menu'
   import { Input } from '$lib/components/ui/input'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
   import { Tabs } from '$lib/components/ui/tabs'
+  import {
+    ANVIL_ACCOUNT,
+    type FundsRow,
+    createExpiringTestDrive,
+    createOwnedBatchOnChain,
+    createTestDrive,
+    devChainFunds,
+    sendFromFaucet,
+  } from '$lib/dev/chain-funding'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
+  import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
   import { fetchExistingBatchFromChain } from '$lib/payment/contract'
   import routes from '$lib/routes'
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { devSettingsStore } from '$lib/stores/dev-settings.svelte'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import type { Account } from '$lib/types'
 
   import DeviceList from './device-list.svelte'
   import StatusDot from './status-dot.svelte'
@@ -43,26 +63,6 @@
   // (`+layout.svelte`), so /dev no longer manages it — a local install +
   // unmount cleanup here would toggle publishing off for the whole app on
   // navigating away.
-
-  // Milliseconds per second — for converting TTL/Unix seconds to JS `Date` ms.
-  const MS_PER_SECOND = 1000
-
-  // How many days of validity to fund by default when auto-filling the
-  // stamp amount from current chain price. Bee enforces a 24h minimum on
-  // POST /stamps; 7 days gives comfortable headroom for dev testing without
-  // re-buying constantly.
-  const DEFAULT_STAMP_DAYS = 7
-
-  // Renders a listed stamp's remaining lifetime as "<ttl> (<date>)". batchTTL
-  // comes straight from the Bee node's /stamps response — authoritative for the
-  // batches it tracks, which is exactly what this list shows (no contract read
-  // needed here, and the default chain is local where the mainnet PostageStamp
-  // contract isn't deployed).
-  function formatStampExpiry(batchTTL: number): string {
-    if (!batchTTL || batchTTL <= 0) return 'Expired'
-    const date = new Date(Date.now() + batchTTL * MS_PER_SECOND).toLocaleDateString()
-    return `${formatTTL(batchTTL)} (${date})`
-  }
 
   // Every live (non-tombstoned) stamp across all accounts — the account owns its
   // stamps now, and a removed stamp lingers as a `deletedAt` tombstone so its
@@ -92,36 +92,128 @@
 
   const tabs = [
     { value: 'overview', label: 'Overview' },
-    { value: 'stamps', label: 'Stamps' },
-    { value: 'sync', label: 'Sync' },
+    { value: 'chain', label: 'Chain' },
+    { value: 'node', label: 'Node' },
     { value: 'devices', label: 'Devices' },
   ]
 
   // Demo app URL for connect flow testing (the new UI's demo runs on :3500).
   const demoAppOrigin = 'http://localhost:3500'
 
+  /**
+   * The local endpoints "Use local" points the app at. Two chains can be
+   * serving Gnosis locally — bee-compose's cluster and the standalone snapshot
+   * — so it asks which is actually answering rather than making the user
+   * remember. The cluster comes first: it also serves the Bee node, so if it
+   * is up that is the environment you want. This lives here rather than in
+   * Network settings, which ships to production.
+   */
+  const LOCAL_BEE_NODE_URL = 'http://localhost:1633/'
+  const LOCAL_GNOSIS_RPC_URLS = ['http://localhost:9545', 'http://localhost:8545']
+  /** Worker 1 of the same cluster; only meaningful while the queen is in use. */
+  const LOCAL_CLUSTER_WORKER_URL = 'http://localhost:16331'
+
+  /**
+   * Which environment the saved endpoints amount to — the one word the menu
+   * needs. Anything else, a gateway or a colleague's node, is `Custom`: the
+   * pair is what makes an environment, so one preset URL beside a hand-typed
+   * one is not that preset.
+   */
+  /**
+   * Endpoints compared as URLs rather than as strings: the settings dialog
+   * saves whatever was typed, and `http://localhost:1633` is the same node as
+   * the `http://localhost:1633/` written here. Anything unparseable can only be
+   * `Custom`, so it compares as itself.
+   */
+  function sameEndpoint(a: string, b: string): boolean {
+    return normalizeEndpoint(a) === normalizeEndpoint(b)
+  }
+
+  function normalizeEndpoint(url: string): string {
+    try {
+      return new URL(url.trim()).href
+    } catch {
+      return url.trim()
+    }
+  }
+
+  const endpointMode = $derived.by(() => {
+    const { beeNodeUrl, gnosisRpcUrl } = networkSettingsStore
+    if (
+      sameEndpoint(beeNodeUrl, LOCAL_BEE_NODE_URL) &&
+      LOCAL_GNOSIS_RPC_URLS.some((url) => sameEndpoint(url, gnosisRpcUrl))
+    ) {
+      return 'Local'
+    }
+    if (
+      sameEndpoint(beeNodeUrl, DEFAULT_BEE_NODE_URL) &&
+      sameEndpoint(gnosisRpcUrl, DEFAULT_GNOSIS_RPC_URL)
+    ) {
+      return 'Production'
+    }
+    return 'Custom'
+  })
+
+  let networkDialogOpen = $state(false)
+
+  /**
+   * Bumped to re-ask which chain is there: only the endpoint changing re-runs
+   * the await, so a page opened before the local chain was up would otherwise
+   * read "No chain reachable" until it is reloaded.
+   */
+  let chainProbeAttempt = $state(0)
+
+  /**
+   * Really re-ask. Bumping the counter alone only re-runs the await, which for
+   * an answer already cached hands back the same one — so a localhost port
+   * restarted as a different chain would keep reporting the old one. Dropping
+   * the cached answer first is what makes Retry mean "look again", which is
+   * why every branch of the banner offers it and not just the failed one.
+   */
+  function retryChainProbe() {
+    evictChainCaches(networkSettingsStore.gnosisRpcUrl)
+    chainProbeAttempt++
+  }
+
+  /**
+   * Which endpoint switch is the live one. "Use local" spends up to ~5s
+   * probing, and nobody is obliged to wait for it: picking production
+   * meanwhile — the natural move when the locals are plainly down — used to be
+   * silently undone when those probes finally landed. Each switch supersedes
+   * the one before it, which is all this needs; the attempt guard in
+   * `$lib/attempt` is for cancellable ceremonies, not a two-line token.
+   */
+  let endpointSwitchAttempt = 0
+
+  // Both presets apply straight away; anything else goes through the product's
+  // own Network settings dialog rather than a second copy of its fields.
+  async function useLocalEndpoints() {
+    const attempt = ++endpointSwitchAttempt
+    const reachable = await Promise.all(
+      LOCAL_GNOSIS_RPC_URLS.map((url) =>
+        probeChainId(url).then(
+          () => url,
+          () => undefined,
+        ),
+      ),
+    )
+    if (attempt !== endpointSwitchAttempt) return
+    const gnosisRpcUrl = reachable.find((url) => url !== undefined) ?? LOCAL_GNOSIS_RPC_URLS[0]
+    networkSettingsStore.updateSettings({ beeNodeUrl: LOCAL_BEE_NODE_URL, gnosisRpcUrl })
+  }
+
+  // Reset rather than save today's defaults: writing them would pin them, so a
+  // later change to what production means would never reach anyone who once
+  // pressed this. Clearing storage leaves the app following the defaults, which
+  // is what the button is asking for.
+  function useProductionEndpoints() {
+    endpointSwitchAttempt++
+    networkSettingsStore.reset()
+  }
+
   // Sync state
   let syncMessage = $state('')
 
-  // Stamp buying state. The Bee node URL is NOT page-local: every dev
-  // subsystem (stamp buying/listing here, sync, account refresh, the
-  // retrievability checks) reads the one persisted network setting, so a URL
-  // change applies everywhere at once — buying a stamp against one node while
-  // sync silently targets another was a debugging trap.
-  // Amount starts empty — autofilled from chain price on first chainstate
-  // load (see loadChainState). Hardcoding a default is fragile across chain
-  // configs: bee-compose's PriceOracle floor (24_000 PLUR/chunk/block) needs
-  // ≥ 414_720_000 PLUR/chunk for 24h, and other chains have different floors.
-  let stampAmount = $state('')
-  let stampDepth = $state('20')
-  let buying = $state(false)
-  let stampResult = $state<{ batchID: string; txHash: string } | undefined>(undefined)
-  let stampError = $state('')
-  let currentPrice = $state<bigint | undefined>(undefined)
-  let chainStateError = $state('')
-  let assignMessage = $state('')
-  let assignError = $state('')
-  let selectedStampId = $state('')
   let selectedAccountId = $state('')
 
   // Derived postage signer key + owner address for the selected account.
@@ -147,24 +239,207 @@
       accountSigner = { privateKey: k, owner: new PrivateKey(k).publicKey().address().toHex() }
     })()
   })
-  let beeStamps = $state<
-    Array<{
-      batchID: string
-      utilization: number
-      usable: boolean
-      label: string
-      depth: number
-      amount: string
-      bucketDepth: number
-      blockNumber: number
-      immutableFlag: boolean
-      exists: boolean
-      batchTTL: number
-    }>
-  >([])
-  let beeStampsLoading = $state(false)
-  let beeStampsError = $state('')
-  let lastBeeUrl = $state('')
+  // On-chain drive tooling: fund the account's postage signer and create a
+  // batch it OWNS, so extend/resize can run for real against the local chain.
+  let chainToolBusy = $state(false)
+  let chainToolMessage = $state('')
+  let chainToolError = $state('')
+
+  // Faucet panel. Amounts are what you type — no hidden multiplier, since the
+  // point of the panel is to hand over an exact amount and watch it land.
+  const XDAI_DECIMALS = 18
+  const BZZ_DECIMALS = 16
+  const AMOUNT_PRECISION = 4
+  /** Stands in where the chain has no figure to give, rather than a lying zero. */
+  const NO_FIGURE = '—'
+  /** The assets the faucet can hand over, and how to read an amount for each. */
+  const FAUCET_TOKENS = [
+    { value: 'xdai', label: 'xDAI', decimals: XDAI_DECIMALS, placeholder: '0.05' },
+    { value: 'bzz', label: 'BZZ', decimals: BZZ_DECIMALS, placeholder: '1' },
+  ]
+  let faucetTo = $state('')
+  let faucetToken = $state(FAUCET_TOKENS[0].value)
+  let faucetTyped = $state('0.05')
+  let faucetHelpOpen = $state(false)
+  let faucetBusy = $state(false)
+  let faucetMessage = $state('')
+  let faucetError = $state('')
+  let funds = $state<{ faucet: FundsRow; recipient: FundsRow } | undefined>(undefined)
+  let fundsError = $state('')
+
+  // The typed recipient, normalized. Undefined while it is not an address,
+  // which is also what disables Send.
+  const faucetRecipient = $derived.by(() => {
+    try {
+      return new EthAddress(faucetTo.trim()).toChecksum()
+    } catch {
+      return undefined
+    }
+  })
+
+  /**
+   * Read the amount box. Anything that is not a positive number reads as zero
+   * rather than an error — a half-typed figure disables Send, it does not take
+   * the panel down with it.
+   */
+  function faucetAmount(typed: string, decimals: number): bigint {
+    const value = typed.trim()
+    if (!(Number(value) > 0)) return 0n
+    try {
+      return parseUnits(value, decimals)
+    } catch {
+      return 0n
+    }
+  }
+
+  const faucetAsset = $derived(
+    FAUCET_TOKENS.find((token) => token.value === faucetToken) ?? FAUCET_TOKENS[0],
+  )
+  /** What Send would deliver; zero disables it. */
+  const faucetValue = $derived(faucetAmount(faucetTyped, faucetAsset.decimals))
+
+  // Amounts differ by orders of magnitude between assets, so carrying the
+  // previous box over is a wrong default every time; each token brings its own.
+  function pickFaucetToken(value: string) {
+    faucetTyped = FAUCET_TOKENS.find((token) => token.value === value)?.placeholder ?? faucetTyped
+  }
+
+  // Point the faucet at the selected account's signer, and re-point it when the
+  // account changes — reaching for Send with the previous account's address
+  // still in the box is the trap this panel would otherwise set. Only the value
+  // we filled in is ever replaced; anything typed or pasted is left alone.
+  let prefilledSigner = ''
+  $effect(() => {
+    if (!accountSigner) return
+    const owner = new EthAddress(accountSigner.owner).toChecksum()
+    if (owner === prefilledSigner) return
+    if (faucetTo === '' || faucetTo === prefilledSigner) faucetTo = owner
+    prefilledSigner = owner
+  })
+
+  function formatAmount(value: bigint, decimals: number): string {
+    return Number(formatUnits(value, decimals)).toLocaleString(undefined, {
+      maximumFractionDigits: AMOUNT_PRECISION,
+    })
+  }
+
+  async function refreshFunds() {
+    const requested = faucetRecipient
+    if (!requested) {
+      funds = undefined
+      fundsError = ''
+      return
+    }
+    // A balance is only meaningful as "this address, on this chain", so both
+    // are pinned for the read and re-checked after it. The endpoint half is not
+    // pedantry: switching chains leaves the previous one's read in flight, and
+    // it used to win — mainnet figures under the "Local dev chain" banner.
+    const rpcUrl = networkSettingsStore.gnosisRpcUrl
+    // Untracked because this runs from an $effect: reading `funds` normally
+    // would make that effect depend on what it writes. Dropping a read that
+    // belongs to another address now, rather than when the new one lands,
+    // is what stops the old numbers sitting under the new label meanwhile.
+    if (untrack(() => funds)?.recipient.address !== requested) {
+      funds = undefined
+    }
+    const stale = () =>
+      faucetRecipient !== requested || networkSettingsStore.gnosisRpcUrl !== rpcUrl
+    try {
+      const read = await devChainFunds(requested, rpcUrl)
+      // Typing an address fires this per keystroke and two reads can land out
+      // of order — never show one address's balances under another.
+      if (stale()) return
+      funds = read
+      fundsError = ''
+    } catch (e) {
+      if (stale()) return
+      funds = undefined
+      fundsError = e instanceof Error ? e.message : String(e)
+    }
+  }
+
+  // Re-read whenever the recipient changes; the Chain tab is the only consumer,
+  // so this costs nothing on a tab most sessions never open.
+  $effect(() => {
+    if (activeTab === 'chain' && faucetRecipient) {
+      void refreshFunds()
+    }
+  })
+
+  /**
+   * The rows of the balances table, formatted.
+   *
+   * The read is only used for the address it was made for. The row is labelled
+   * with the CURRENT recipient, so pairing it with the previous read's figures
+   * — which is what pasting a second address did until the new read landed —
+   * puts one address's balances under another's name. Both are checksummed, so
+   * they compare directly.
+   */
+  const balanceRows = $derived.by(() => {
+    const rows: { label: string; address: string; xdai: string; bzz: string }[] = []
+    const shown = funds?.recipient.address === faucetRecipient ? funds : undefined
+    if (faucetRecipient) {
+      rows.push({
+        label: 'Recipient',
+        address: faucetRecipient,
+        xdai: shown ? formatAmount(shown.recipient.xdai, XDAI_DECIMALS) : NO_FIGURE,
+        bzz: shown ? formatAmount(shown.recipient.bzz, BZZ_DECIMALS) : NO_FIGURE,
+      })
+    }
+    if (shown) {
+      rows.push({
+        label: 'Faucet',
+        address: shown.faucet.address,
+        xdai: formatAmount(shown.faucet.xdai, XDAI_DECIMALS),
+        bzz: formatAmount(shown.faucet.bzz, BZZ_DECIMALS),
+      })
+    }
+    return rows
+  })
+
+  async function sendFaucetFunds() {
+    const to = faucetRecipient
+    if (!to || faucetValue === 0n) return
+    // What was actually sent, read before the send rather than after it. The
+    // fields are disabled while it runs, so this is belt and braces — but a
+    // receipt that reports the boxes' current contents instead of the transfer
+    // is the kind of wrong that gets believed.
+    const amountLabel = faucetTyped.trim()
+    const assetLabel = faucetAsset.label
+    faucetBusy = true
+    faucetMessage = ''
+    faucetError = ''
+    try {
+      await sendFromFaucet(to, {
+        xdai: faucetToken === 'xdai' ? faucetValue : 0n,
+        bzzPlur: faucetToken === 'bzz' ? faucetValue : 0n,
+      })
+      faucetMessage = `✅ Sent ${amountLabel} ${assetLabel} to ${to}`
+    } catch (error) {
+      faucetError = error instanceof Error ? error.message : String(error)
+    } finally {
+      faucetBusy = false
+    }
+    await refreshFunds()
+  }
+
+  async function runChainTool(label: string, action: (account: Account) => Promise<string>) {
+    const account = selectedAccount
+    if (!account) {
+      chainToolError = 'Select an account first.'
+      return
+    }
+    chainToolBusy = true
+    chainToolMessage = ''
+    chainToolError = ''
+    try {
+      chainToolMessage = `${label}: ${await action(account)}`
+    } catch (e) {
+      chainToolError = e instanceof Error ? e.message : String(e)
+    } finally {
+      chainToolBusy = false
+    }
+  }
 
   // Retrievability self-check: does the configured Bee node serve back a SOC we
   // just wrote? (If not, no cross-device coordination — lock/intent/presence
@@ -374,62 +649,6 @@
     }
   }
 
-  // Known dev signers (pre-funded with ETH + BZZ in the local Bee cluster)
-  const KNOWN_SIGNERS = [
-    {
-      value: '566058308ad5fa3888173c741a1fb902c9f1f19559b11fc2738dfc53637ce4e9',
-      label: 'Queen (node owner)',
-    },
-    {
-      value: '4f3edf983ac636a65a842ce7c78d9aa706d3b113bce9c46f30d7d21715b23b1d',
-      label: 'Wallet 0 (pre-funded)',
-    },
-    {
-      value: '6cbed15c793ce57650b9877cf6fa156fbef513c4e6134f022a85b1ffdd59b2a1',
-      label: 'Wallet 1 (pre-funded)',
-    },
-  ]
-  let selectedSigner = $state(KNOWN_SIGNERS[0].value)
-
-  // Custom signer key settings
-  let useCustomSigner = $state(false)
-  let customSignerKey = $state('')
-  // Unchecked = stack the batch onto the account WITHOUT stealing the default
-  // pointer, so an account can hold multiple drives.
-  let assignSetDefault = $state(true)
-  let customSignerError = $state<string | undefined>(undefined)
-
-  // Mock stamp widget settings — `devSettingsStore` is the single source of
-  // truth (durable + cross-tab); the controls bind straight to its setters via
-  // function bindings, so there is no local mirror to drift.
-  const MOCK_RESULT_OPTIONS = [
-    { value: 'success', label: 'Success (creates a drive)' },
-    { value: 'error', label: 'Error (purchase failed)' },
-  ]
-
-  // Validate custom signer key when enabled
-  $effect(() => {
-    if (useCustomSigner) {
-      if (customSignerKey.length === 0) {
-        customSignerError = 'Custom signer key is required'
-      } else if (!/^[0-9a-fA-F]+$/.test(customSignerKey)) {
-        customSignerError = 'Signer key must be a valid hex string'
-      } else if (customSignerKey.length !== 64) {
-        customSignerError = 'Signer key must be exactly 64 characters (hex)'
-      } else {
-        customSignerError = undefined
-      }
-    } else {
-      customSignerError = undefined
-    }
-  })
-
-  const stampOptions = $derived(
-    beeStamps.map((stamp) => ({
-      value: stamp.batchID,
-      label: `${stamp.batchID.slice(0, 10)}… (depth ${stamp.depth})`,
-    })),
-  )
   // Stored stamps (with signerKey) usable to pay for the retrievability check.
   const storedStampOptions = $derived(
     allStamps.map((stamp) => ({
@@ -451,30 +670,6 @@
   const selectedAccount = $derived(
     selectedAccountId ? accountsStore.getAccount(new EthAddress(selectedAccountId)) : undefined,
   )
-  const accountHasDefaultStamp = $derived(!!selectedAccount?.defaultPostageStampBatchID)
-  const stampAssignments = $derived(
-    (() => {
-      const map = new SvelteMap<string, { account?: string }>()
-      for (const account of accountsStore.accounts) {
-        const batch = account.defaultPostageStampBatchID?.toHex()
-        if (batch) {
-          map.set(batch, { ...(map.get(batch) ?? {}), account: account.name })
-        }
-      }
-      return map
-    })(),
-  )
-
-  $effect(() => {
-    if (stampOptions.length && !selectedStampId) {
-      selectedStampId = stampOptions[0].value
-    } else if (
-      selectedStampId &&
-      !stampOptions.some((option) => option.value === selectedStampId)
-    ) {
-      selectedStampId = stampOptions[0]?.value ?? ''
-    }
-  })
 
   $effect(() => {
     if (accountOptions.length && !selectedAccountId) {
@@ -553,34 +748,6 @@ Check console logs for details:
 - [PostageStamps] Updated utilization`
   }
 
-  async function buyStamp() {
-    buying = true
-    stampError = ''
-    stampResult = undefined
-
-    try {
-      // Buy a MUTABLE batch. Bee's POST /stamps defaults to immutable, but the
-      // multi-device partition scheme rewrites the partition-lock SOC on every
-      // lease refresh, which an immutable batch forbids. Request mutable
-      // explicitly so /dev-bought stamps work with partitioning.
-      // Tolerate a trailing slash (the default gateway URL has one).
-      const base = networkSettingsStore.beeNodeUrl.replace(/\/$/, '')
-      const response = await fetch(`${base}/stamps/${stampAmount}/${stampDepth}`, {
-        method: 'POST',
-        headers: { immutable: 'false' },
-      })
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(errorText || `HTTP ${response.status}`)
-      }
-      stampResult = await response.json()
-    } catch (e) {
-      stampError = e instanceof Error ? e.message : String(e)
-    } finally {
-      buying = false
-    }
-  }
-
   // Import a batch by ID, reading its parameters from the PostageStamp contract
   // ON-CHAIN (not from a Bee node) — works for any batch id even when the
   // configured node never saw it. The signer key is NOT on-chain, so the user
@@ -589,19 +756,25 @@ Check console logs for details:
 
   let importBatchId = $state('')
   let importSignerKey = $state('')
-  let importRpcUrl = $state('http://localhost:9545')
-  // Blank → auto-detect from the RPC (local vs Gnosis mainnet); a value overrides.
+  // Follows the shared network setting, like every other dev tool here —
+  // reading a batch from one chain while the app talks to another is a trap,
+  // and this page switches endpoints in one click. Deliberately overwrites a
+  // hand-typed value when that happens: after switching chains the old one is
+  // the trap, not a preference worth keeping.
+  let importRpcUrl = $derived(networkSettingsStore.gnosisRpcUrl)
+  // Blank → resolve from the chain the RPC serves; a value overrides.
   let importContractOverride = $state('')
   let importSetDefault = $state(true)
   let importing = $state(false)
   let importMessage = $state('')
   let importError = $state('')
 
-  // Contract address the read will use: the override if set, else the mainnet
-  // deployment — the cluster's chain carries the Swarm contracts at their
-  // mainnet addresses, so local and remote resolve to the same one.
-  const resolvedContract = $derived(resolvePostageStampContractAddress(importRpcUrl.trim()))
-  const effectiveContract = $derived(importContractOverride.trim() || resolvedContract)
+  // Contract address the read will use unless the override is filled in. Every
+  // chain the app supports is Gnosis or a fork of it carrying the deployment at
+  // the same address, so this is one constant rather than something to resolve
+  // — asking the endpoint would spend two probes per keystroke to be told what
+  // is already known.
+  const resolvedContract = gnosisMainnetSettings().addresses.postageStamp
 
   async function importBatchById() {
     importError = ''
@@ -622,11 +795,16 @@ Check console logs for details:
 
       const stamp = await fetchExistingBatchFromChain(batchId.toHex(), signerKey, '', {
         rpcUrl: importRpcUrl.trim(),
-        contractAddress: effectiveContract,
+        // Only force an address when the user typed one; otherwise let the
+        // read resolve it from the chain the RPC actually serves.
+        contractAddress: importContractOverride.trim() || undefined,
       })
       if (!stamp) {
+        // Only ever an authoritative "not here" now — an endpoint that could
+        // not be read throws instead, and lands in the catch below with its
+        // own message.
         importError =
-          'Could not read the batch from the chain — no such batch here, or the RPC URL / contract address is wrong.'
+          'No such batch on this chain — check the batch ID, the RPC URL, or the contract address.'
         return
       }
 
@@ -644,7 +822,8 @@ Check console logs for details:
   }
 
   // Clear this browser's accounts (which own their apps + stamps) + session.
-  function clearAccount() {
+  /** Every account on the device, not just a selected one. */
+  function clearAccounts() {
     accountsStore.clear()
     sessionStore.clearCurrentAccount()
   }
@@ -664,164 +843,37 @@ Check console logs for details:
     location.reload()
   }
 
-  async function loadBeeStamps() {
-    const url = networkSettingsStore.beeNodeUrl
-    // Record the attempt BEFORE fetching — success or failure. The auto-load
-    // effect is guarded by `url !== lastBeeUrl`; recording only on success made
-    // every failure re-arm the effect, hammering an unreachable node in a loop.
-    lastBeeUrl = url
-    beeStampsLoading = true
-    beeStampsError = ''
-    try {
-      // Tolerate a trailing slash (the default gateway URL has one);
-      // `lastBeeUrl` keeps the raw value so the effect's guard compares equal.
-      const response = await fetch(`${url.replace(/\/$/, '')}/stamps`)
-      if (!response.ok) {
-        const errorText = await response.text()
-        throw new Error(errorText || `HTTP ${response.status}`)
-      }
-      const data = await response.json()
-      beeStamps = data.stamps ?? []
-    } catch (error) {
-      beeStampsError = error instanceof Error ? error.message : String(error)
-      beeStamps = []
-    } finally {
-      beeStampsLoading = false
-    }
-  }
-
-  async function loadChainState() {
-    chainStateError = ''
-    try {
-      const state = await fetchChainState(networkSettingsStore.beeNodeUrl)
-      currentPrice = state.currentPrice
-      // Only autofill if the user hasn't typed (or pre-typed) a value yet.
-      // After the first fill, the user owns this field — switching bee URLs
-      // updates the displayed price but does not clobber their input.
-      if (stampAmount === '') {
-        stampAmount = calculateStampAmountForDays(state.currentPrice, DEFAULT_STAMP_DAYS).toString()
-      }
-    } catch (error) {
-      chainStateError = error instanceof Error ? error.message : String(error)
-      currentPrice = undefined
-    }
-  }
-
-  $effect(() => {
-    const url = networkSettingsStore.beeNodeUrl
-    if (activeTab === 'stamps' && url && url !== lastBeeUrl && !beeStampsLoading) {
-      loadBeeStamps()
-      loadChainState()
-    }
-  })
-
-  function assignAccountStamp() {
-    assignError = ''
-    assignMessage = ''
-    if (!selectedStampId || !selectedAccountId) {
-      assignError = 'Select a stamp and an account first.'
-      return
-    }
-
-    // Validate custom signer if enabled
-    if (useCustomSigner && customSignerError) {
-      assignError = customSignerError
-      return
-    }
-
-    try {
-      const batchId = new BatchId(selectedStampId)
-      const accountId = new EthAddress(selectedAccountId)
-      const account = accountsStore.getAccount(accountId)
-      if (!account) {
-        assignError = 'Account not found.'
-        return
-      }
-
-      // Determine which signer key to use
-      const signerKeyToUse =
-        useCustomSigner && customSignerKey
-          ? new PrivateKey(customSignerKey)
-          : new PrivateKey(selectedSigner)
-
-      // Existence is per-ACCOUNT (`hasLiveStamp`), not the cross-account
-      // runtime view: a batch already owned by another account must still be
-      // added to THIS one, else only the default pointer would move and dangle
-      // at a batch the account doesn't own.
-      if (!account.hasLiveStamp(batchId)) {
-        // Stamp data source: another account's live copy, or the node list.
-        const stored = postageStampsStore.getStamp(batchId)
-        const beeStamp = beeStamps.find((s) => s.batchID === selectedStampId)
-        if (stored) {
-          account.addStamp({ ...stored, signerKey: signerKeyToUse })
-        } else if (beeStamp) {
-          account.addStamp({
-            batchID: batchId,
-            signerKey: signerKeyToUse,
-            utilization: Utils.getStampUsage(
-              beeStamp.utilization,
-              beeStamp.depth,
-              beeStamp.bucketDepth,
-            ),
-            usable: beeStamp.usable,
-            depth: beeStamp.depth,
-            amount: BigInt(beeStamp.amount),
-            bucketDepth: beeStamp.bucketDepth,
-            blockNumber: beeStamp.blockNumber,
-            immutableFlag: beeStamp.immutableFlag,
-            exists: beeStamp.exists,
-            // Without this the drive card's Lifespan section has nothing to
-            // show — the node listing knows the remaining TTL.
-            batchTTL: beeStamp.batchTTL,
-          })
-        } else {
-          assignError = 'Stamp data not found. Reload stamps first.'
-          return
-        }
-      } else if (useCustomSigner) {
-        const owned = account.stamps.find((s) => s.batchID.equals(batchId))
-        if (!owned) {
-          assignError = 'Stamp not found on the account.'
-          return
-        }
-        // Compare by value — `signerKey` is a bee-js PrivateKey, so `!==` would
-        // always be true (distinct instances) and re-add the stamp needlessly.
-        if (!owned.signerKey.equals(signerKeyToUse)) {
-          account.removeStamp(batchId)
-          account.addStamp({ ...owned, signerKey: signerKeyToUse })
-        }
-      }
-
-      if (assignSetDefault) {
-        account.setDefaultStamp(batchId)
-        assignMessage = `✅ Set account stamp for ${accountId.toHex().slice(0, 8)}…`
-      } else {
-        assignMessage = `✅ Added stamp to ${accountId.toHex().slice(0, 8)}…`
-      }
-    } catch (error) {
-      assignError = error instanceof Error ? error.message : String(error)
-    }
-  }
-
-  // Clears the account's DEFAULT-stamp pointer only; the stamp stays in the
-  // account's stamps (delete it outright in "Stored Stamps" above). Assign is
-  // the symmetric op — it sets the default.
-  function clearDefaultStamp() {
-    assignError = ''
-    assignMessage = ''
-    if (!selectedAccountId) {
-      assignError = 'Select an account first.'
-      return
-    }
-    const accountId = new EthAddress(selectedAccountId)
-    accountsStore.getAccount(accountId)?.setDefaultStamp(undefined)
-    assignMessage = `✅ Cleared default stamp for ${selectedAccountId.slice(0, 8)}…`
-  }
-
   const LABEL_CLASS = 'flex flex-col gap-1.5 text-sm'
   const LABEL_TEXT_CLASS = 'text-muted-foreground'
   const CARD_CLASS = 'flex flex-col gap-2 rounded-lg border bg-card p-4'
+
+  // Mock stamp widget settings — `devSettingsStore` is the single source of
+  // truth (durable + cross-tab); the controls bind straight to its setters via
+  // function bindings, so there is no local mirror to drift.
+  const MOCK_RESULT_OPTIONS = [
+    { value: 'success', label: 'Success (creates a drive)' },
+    { value: 'error', label: 'Error (purchase failed)' },
+  ]
 </script>
+
+{#snippet chainBanner(
+  label: string,
+  detail: string,
+  alarming: boolean,
+  onretry?: () => void,
+)}
+  <div
+    class="rounded-md border px-4 py-3 text-sm {alarming
+      ? 'border-destructive bg-destructive/10 text-destructive font-medium'
+      : 'border-border text-muted-foreground'}"
+  >
+    <span>{label}</span>
+    <span class="font-mono">{detail}</span>
+    {#if onretry}
+      <Button variant="outline" size="sm" class="ml-2 align-middle" onclick={onretry}>Retry</Button>
+    {/if}
+  </div>
+{/snippet}
 
 {#snippet copyRow(label: string, value: string, mono = true)}
   <div class="flex flex-col gap-1.5">
@@ -842,9 +894,112 @@ Check console logs for details:
 {/snippet}
 
 <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 p-8">
-  <h2 class="text-xl font-bold">Developer Tools</h2>
+  <div class="flex items-center justify-between gap-2">
+    <h2 class="text-xl font-bold">Developer Tools</h2>
+
+    <!--
+      Switching environments is a rare act, so it sits in a menu rather than
+      occupying the page: the trigger carries the one word worth seeing at a
+      glance, and anything that is neither preset is edited through the
+      product's own Network settings dialog.
+    -->
+    <DropdownMenu class="top-full right-0 mt-2 min-w-44 p-1">
+      {#snippet trigger(props)}
+        <Button variant="outline" {...props}>
+          Connected to: {endpointMode}
+          <ChevronDown class="size-4 shrink-0" />
+        </Button>
+      {/snippet}
+
+      <DropdownMenuItem onclick={useLocalEndpoints}>
+        <span class="flex-1 whitespace-nowrap">Use local</span>
+      </DropdownMenuItem>
+      <DropdownMenuItem onclick={useProductionEndpoints}>
+        <span class="flex-1 whitespace-nowrap">Use production</span>
+      </DropdownMenuItem>
+
+      <DropdownMenuSeparator />
+
+      <DropdownMenuItem onclick={() => (networkDialogOpen = true)}>
+        <Settings class="size-4 shrink-0" />
+        <span class="flex-1 whitespace-nowrap">Network settings</span>
+      </DropdownMenuItem>
+    </DropdownMenu>
+  </div>
+
+  <!--
+    Which chain these tools are pointed at. Every action on this page spends,
+    and a dev chain reports the same chain id as mainnet on purpose — so the
+    only honest answer comes from the genesis hash. Red is for MAINNET: on this
+    page that is the state nobody intends to be in.
+
+    Keyed on the endpoint: without it a switch away from an unreachable RPC
+    keeps rendering the failed branch — with the NEW url interpolated into it,
+    since the message reads that from the store — so a healthy endpoint is
+    reported dead the instant it is selected. The attempt counter is the other
+    half: a chain that comes up after the page did needs something to re-ask,
+    and nothing else here would.
+  -->
+  {#key `${networkSettingsStore.gnosisRpcUrl}#${chainProbeAttempt}`}
+    {#await chainIdentity(networkSettingsStore.gnosisRpcUrl)}
+      {@render chainBanner('Checking the chain at ', networkSettingsStore.gnosisRpcUrl, false)}
+    {:then identity}
+      {#if identity.kind === 'mainnet'}
+        {@render chainBanner(
+          'GNOSIS MAINNET — these tools spend real funds. ',
+          networkSettingsStore.gnosisRpcUrl,
+          true,
+          retryChainProbe,
+        )}
+      {:else if identity.kind === 'dev'}
+        {@render chainBanner(
+          'Local dev chain, nothing here is real. ',
+          networkSettingsStore.gnosisRpcUrl,
+          false,
+          retryChainProbe,
+        )}
+      {:else}
+        <!--
+          Alarming, and not the "nothing here is real" line: an endpoint that is
+          reachable but not Gnosis may well be somebody's real chain, and the
+          tools below refuse to run there rather than guess.
+        -->
+        {@render chainBanner(
+          `Chain ${identity.chainId} is not Gnosis — these tools will not run against `,
+          networkSettingsStore.gnosisRpcUrl,
+          true,
+          retryChainProbe,
+        )}
+      {/if}
+    {:catch}
+      {@render chainBanner(
+        'No chain reachable at ',
+        networkSettingsStore.gnosisRpcUrl,
+        true,
+        retryChainProbe,
+      )}
+    {/await}
+  {/key}
+
+  {#if networkDialogOpen}
+    <NetworkSettingsDialog onclose={() => (networkDialogOpen = false)} />
+  {/if}
 
   <Tabs {tabs} bind:value={activeTab} />
+
+  <!--
+    Under the tabs, and only for the tabs that act on ONE account: Chain signs
+    with its derived postage signer, Devices lists its devices. Overview and
+    Node read across every account, so a selector there would imply a scoping
+    they do not have — and placing it above would shift the tabs each time it
+    appeared.
+  -->
+  {#if activeTab === 'chain' || activeTab === 'devices'}
+    <label class={LABEL_CLASS}>
+      <span class={LABEL_TEXT_CLASS}>Account these tools act on</span>
+      <Select options={accountOptions} bind:value={selectedAccountId} />
+    </label>
+  {/if}
 
   <!-- Overview Tab -->
   {#if activeTab === 'overview'}
@@ -857,44 +1012,63 @@ Check console logs for details:
     {@const connectUrl = `${resolve(routes.CONNECT)}?origin=${encodeURIComponent(demoAppOrigin)}`}
     <div class="flex flex-col gap-4">
       <div class="flex flex-col gap-2">
-        <h4 class="text-sm font-semibold">Local Bee Endpoints</h4>
+        <h4 class="text-sm font-semibold">Endpoints these tools use</h4>
+        <!--
+          These hrefs are absolute http(s) endpoints read from network settings —
+          never app routes — which a dynamic href cannot prove to the rule.
+        -->
+        <!-- eslint-disable svelte/no-navigation-without-resolve -->
         <div class="flex items-center gap-2">
-          <StatusDot endpoint="http://localhost:1633" />
-          <span class="font-mono text-sm">Queen API:</span>
+          <StatusDot endpoint={networkSettingsStore.beeNodeUrl} />
+          <span class="font-mono text-sm">Bee node:</span>
           <a
-            href="http://localhost:1633"
+            href={networkSettingsStore.beeNodeUrl}
             target="_blank"
             rel="noopener"
-            class="text-primary font-mono text-sm">http://localhost:1633</a
+            class="text-primary font-mono text-sm">{networkSettingsStore.beeNodeUrl}</a
           >
-          <CopyButton text="http://localhost:1633" />
+          <CopyButton text={networkSettingsStore.beeNodeUrl} />
         </div>
+        <!--
+          A second node of the bee-compose cluster, useful for checking that a
+          chunk replicated off the node that took it. It only exists while the
+          Bee node IS that cluster — against a gateway there is no such peer to
+          link to, and a dead localhost row reads as something being broken.
+        -->
+        {#if sameEndpoint(networkSettingsStore.beeNodeUrl, LOCAL_BEE_NODE_URL)}
+          <div class="flex items-center gap-2">
+            <StatusDot endpoint={LOCAL_CLUSTER_WORKER_URL} />
+            <span class="font-mono text-sm">Cluster worker:</span>
+            <a
+              href={LOCAL_CLUSTER_WORKER_URL}
+              target="_blank"
+              rel="noopener"
+              class="text-primary font-mono text-sm">{LOCAL_CLUSTER_WORKER_URL}</a
+            >
+            <CopyButton text={LOCAL_CLUSTER_WORKER_URL} />
+          </div>
+        {/if}
         <div class="flex items-center gap-2">
-          <StatusDot endpoint="http://localhost:16331" />
-          <span class="font-mono text-sm">Worker API:</span>
+          <StatusDot endpoint={networkSettingsStore.gnosisRpcUrl} method="json-rpc" />
+          <!--
+            Not labelled "(fake)": this endpoint is whatever it is configured to
+            be, and the banner above says which. Asserting it here would
+            contradict that banner the moment someone points at mainnet.
+          -->
+          <span class="font-mono text-sm">Gnosis Chain RPC:</span>
           <a
-            href="http://localhost:16331"
+            href={networkSettingsStore.gnosisRpcUrl}
             target="_blank"
             rel="noopener"
-            class="text-primary font-mono text-sm">http://localhost:16331</a
+            class="text-primary font-mono text-sm">{networkSettingsStore.gnosisRpcUrl}</a
           >
-          <CopyButton text="http://localhost:16331" />
+          <CopyButton text={networkSettingsStore.gnosisRpcUrl} />
         </div>
-        <div class="flex items-center gap-2">
-          <StatusDot endpoint="http://localhost:9545" method="json-rpc" />
-          <span class="font-mono text-sm">Blockchain RPC:</span>
-          <a
-            href="http://localhost:9545"
-            target="_blank"
-            rel="noopener"
-            class="text-primary font-mono text-sm">http://localhost:9545</a
-          >
-          <CopyButton text="http://localhost:9545" />
-        </div>
+        <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </div>
 
       <div class="flex flex-col gap-2">
-        <h4 class="text-sm font-semibold">Test Connect Flow</h4>
+        <h4 class="text-sm font-semibold">Test connect flow</h4>
         <p class="text-sm">Test the connect flow with the demo app:</p>
         <div class="flex items-center gap-2">
           <StatusDot endpoint={demoAppOrigin} />
@@ -905,7 +1079,7 @@ Check console logs for details:
       </div>
 
       <div class="flex flex-col items-start gap-2">
-        <h4 class="text-sm font-semibold">Local Data</h4>
+        <h4 class="text-sm font-semibold">Local data</h4>
         <p class="text-sm">
           {accountCount} accounts, {connectionCount} connections, {stampCount} stamps
         </p>
@@ -915,184 +1089,17 @@ Check console logs for details:
           connection required).
         </p>
         <div class="flex gap-2">
-          <Button variant="destructive" onclick={clearAccount}>Clear account</Button>
-          <Button variant="destructive" onclick={clearAll}>Clear all</Button>
+          <Button variant="destructive" onclick={clearAccounts}>Clear accounts</Button>
+          <Button variant="destructive" onclick={clearAll}>Clear everything</Button>
         </div>
       </div>
     </div>
   {/if}
 
-  <!-- Stamps Tab -->
-  {#if activeTab === 'stamps'}
+  <!-- Node Tab: everything that talks to the Bee node -->
+  {#if activeTab === 'node'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Mock stamp purchase</h3>
-      <p class="text-muted-foreground text-sm">
-        Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real cross-chain
-        payment. When enabled, the purchase widget resolves locally after a short delay.
-      </p>
-      <label class="flex items-center gap-2">
-        <Switch
-          bind:checked={
-            () => devSettingsStore.data.mockStampEnabled,
-            (enabled) => devSettingsStore.setMockStampEnabled(enabled)
-          }
-          aria-label="Enable mock stamp purchase"
-        />
-        <span class="text-sm">Enable mock purchases</span>
-      </label>
-      {#if devSettingsStore.data.mockStampEnabled}
-        <label class="flex items-center gap-2">
-          <Switch
-            bind:checked={
-              () => devSettingsStore.data.mockStampPopup,
-              (popup) => devSettingsStore.setMockStampPopup(popup)
-            }
-            aria-label="Open widget popup while mocking"
-          />
-          <span class="text-sm"
-            >Open widget popup (off = local, works where popups are blocked)</span
-          >
-        </label>
-        <label class={`${LABEL_CLASS} w-64`}>
-          <span class={LABEL_TEXT_CLASS}>Outcome</span>
-          <Select
-            options={MOCK_RESULT_OPTIONS}
-            bind:value={
-              () => devSettingsStore.data.mockStampResult,
-              (result) =>
-                devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
-            }
-          />
-        </label>
-      {/if}
-
-      <div class="bg-border my-4 h-px"></div>
-
-      <h3 class="text-lg font-semibold">Buy Postage Stamp</h3>
-      <p class="text-sm">Buy a postage stamp on the local blockchain for testing uploads.</p>
-
-      <div class="flex flex-col gap-2">
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Bee Node URL (network settings)</span>
-          <div class="flex gap-2">
-            <Input bind:value={networkSettingsStore.beeNodeUrl} />
-            <Button variant="secondary" onclick={networkSettingsStore.reset}>Reset</Button>
-          </div>
-        </label>
-        <p class="text-muted-foreground text-sm">
-          One URL for all dev tooling — stamp buying/listing here, plus sync, account refresh and
-          the retrievability checks below. Persisted across reloads; point it at
-          http://localhost:1633 for the local cluster.
-        </p>
-        <div class="flex gap-4">
-          <label class={`${LABEL_CLASS} flex-1`}>
-            <span class={LABEL_TEXT_CLASS}>Amount</span>
-            <Input bind:value={stampAmount} />
-          </label>
-          <label class={`${LABEL_CLASS} w-32`}>
-            <span class={LABEL_TEXT_CLASS}>Depth (17-40)</span>
-            <Input bind:value={stampDepth} />
-          </label>
-        </div>
-        {#if currentPrice !== undefined}
-          {@const minAmount = calculateStampAmountForDays(currentPrice, 1)}
-          <p class="text-muted-foreground text-sm">
-            Chain price: {currentPrice.toLocaleString()} PLUR/chunk/block · 24h min: {minAmount.toLocaleString()}
-            PLUR · default fills {DEFAULT_STAMP_DAYS}d validity
-          </p>
-        {:else if chainStateError}
-          <p class="text-destructive text-sm">
-            Could not fetch chainstate from Bee: {chainStateError}
-          </p>
-        {/if}
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Signer Key</span>
-          <Select options={KNOWN_SIGNERS} bind:value={selectedSigner} />
-        </label>
-      </div>
-
-      <Button onclick={buyStamp} disabled={buying || !stampAmount}>
-        {buying ? 'Buying...' : 'Buy Stamp'}
-      </Button>
-
-      {#if stampResult}
-        {@const batchId = stampResult.batchID}
-        {@const txHash = stampResult.txHash}
-        <div class={CARD_CLASS}>
-          <p class="font-mono text-sm font-semibold">✅ Stamp purchased!</p>
-          {@render copyRow('Batch ID', batchId)}
-          <div class="flex gap-8">
-            {@render copyRow('Amount', stampAmount)}
-            {@render copyRow('Depth', stampDepth)}
-          </div>
-          {@render copyRow('Signer Key (for Stamper)', selectedSigner)}
-          {@render copyRow('Tx Hash', txHash)}
-          <p class="text-muted-foreground mt-2 text-sm">
-            Note: Wait ~30s for stamp to become usable.
-          </p>
-        </div>
-      {/if}
-
-      {#if stampError}
-        <div class={CARD_CLASS}>
-          <p class="text-destructive font-mono text-sm">❌ {stampError}</p>
-        </div>
-      {/if}
-
-      <div class="bg-border my-4 h-px"></div>
-
-      <h3 class="text-lg font-semibold">Import batch by ID</h3>
-      <p class="text-muted-foreground text-sm">
-        Read a batch's parameters straight from the PostageStamp contract on-chain (not from a Bee
-        node), so any batch id works even if the configured node never saw it. The signer key is not
-        on-chain — paste the one the batch was bought with.
-      </p>
-      <div class="flex flex-col gap-2">
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Batch ID</span>
-          <Input bind:value={importBatchId} placeholder="0x… (64 hex chars)" />
-        </label>
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Signer Key</span>
-          <Input bind:value={importSignerKey} placeholder="64 hex chars" />
-        </label>
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Gnosis RPC URL</span>
-          <Input bind:value={importRpcUrl} />
-        </label>
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>PostageStamp contract</span>
-          <Input bind:value={importContractOverride} placeholder={resolvedContract} />
-          <span class="text-muted-foreground text-xs">
-            Auto from RPC: <span class="font-mono">{resolvedContract}</span> — leave blank to use it (local
-            RPC → local deployment, else Gnosis mainnet).
-          </span>
-        </label>
-        <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Account</span>
-          <Select options={accountOptions} bind:value={selectedAccountId} />
-        </label>
-        <label class="flex cursor-pointer items-center gap-2 text-sm">
-          <input type="checkbox" bind:checked={importSetDefault} />
-          Set as account default
-        </label>
-      </div>
-      <Button
-        onclick={importBatchById}
-        disabled={importing || !importBatchId || !importSignerKey || !selectedAccountId}
-      >
-        {importing ? 'Importing…' : 'Import batch'}
-      </Button>
-      {#if importMessage}
-        <p class="text-success text-sm">{importMessage}</p>
-      {/if}
-      {#if importError}
-        <p class="text-destructive text-sm">{importError}</p>
-      {/if}
-
-      <div class="bg-border my-4 h-px"></div>
-
-      <h3 class="text-lg font-semibold">Stored Stamps (local)</h3>
+      <h3 class="text-lg font-semibold">Stored stamps (local)</h3>
       <p class="text-muted-foreground text-sm">
         The postage batches saved in this browser. Copy these fields before clearing storage — paste
         them into the "Use existing one" screen to re-adopt the same batch on a fresh account (the
@@ -1184,6 +1191,32 @@ Check console logs for details:
 
       <div class="bg-border my-4 h-px"></div>
 
+      <h3 class="text-lg font-semibold">Manual sync testing</h3>
+      <p class="text-sm">
+        Trigger a manual sync for ALL accounts to test postage stamp utilization tracking.
+      </p>
+      <div class="flex gap-4">
+        <Button onclick={triggerManualSync}>Sync All Accounts</Button>
+      </div>
+
+      {#if syncMessage}
+        <div class="flex flex-col gap-4 rounded-lg border bg-card p-4 whitespace-pre-wrap">
+          <p class="font-mono text-sm">{syncMessage}</p>
+        </div>
+      {/if}
+
+      <div class="flex flex-col gap-2">
+        <p class="text-muted-foreground text-sm">Requirements for sync:</p>
+        <p class="text-muted-foreground font-mono text-sm">
+          • At least one account with a default postage stamp
+        </p>
+        <p class="text-muted-foreground font-mono text-sm">
+          • Open browser console to see detailed logs
+        </p>
+      </div>
+
+      <div class="bg-border my-4 h-px"></div>
+
       <h3 class="text-lg font-semibold">Partition tuning</h3>
       <p class="text-muted-foreground text-sm">
         Tune the multi-device intent-round timing for this gateway's propagation delay. Blank =
@@ -1211,92 +1244,252 @@ Check console logs for details:
           <p class="text-muted-foreground text-sm">{tuningSaved}</p>
         {/if}
       </div>
+    </div>
+  {/if}
+
+  <!-- Chain Tab -->
+  {#if activeTab === 'chain'}
+    <div class="flex flex-col gap-4">
+      <h3 class="text-lg font-semibold">Simulated purchase</h3>
+      <p class="text-muted-foreground text-sm">
+        Simulate the product <strong>Add drive</strong> flow (Storage tab / Upgrade) without a real
+        cross-chain payment — the purchase widget only settles on mainnet, so this is what makes
+        that flow reachable at all here. The batch it leaves behind is fabricated, which is why
+        extend and resize cannot act on it; for a drive backed by a real batch, use
+        <strong>Create drive to test with</strong> below.
+      </p>
+      <label class="flex items-center gap-2">
+        <Switch
+          bind:checked={
+            () => devSettingsStore.data.mockStampEnabled,
+            (enabled) => devSettingsStore.setMockStampEnabled(enabled)
+          }
+          aria-label="Enable mock stamp purchase"
+        />
+        <span class="text-sm">Enable mock purchases</span>
+      </label>
+      {#if devSettingsStore.data.mockStampEnabled}
+        <label class="flex items-center gap-2">
+          <Switch
+            bind:checked={
+              () => devSettingsStore.data.mockStampPopup,
+              (popup) => devSettingsStore.setMockStampPopup(popup)
+            }
+            aria-label="Open widget popup while mocking"
+          />
+          <span class="text-sm"
+            >Open widget popup (off = local, works where popups are blocked)</span
+          >
+        </label>
+        <label class={`${LABEL_CLASS} w-64`}>
+          <span class={LABEL_TEXT_CLASS}>Outcome</span>
+          <Select
+            options={MOCK_RESULT_OPTIONS}
+            bind:value={
+              () => devSettingsStore.data.mockStampResult,
+              (result) =>
+                devSettingsStore.setMockStampResult(result === 'error' ? 'error' : 'success')
+            }
+          />
+        </label>
+      {/if}
 
       <div class="bg-border my-4 h-px"></div>
 
-      <div class="flex items-center justify-between">
-        <h3 class="text-lg font-semibold">Existing Stamps (Bee Node)</h3>
-        <Button variant="secondary" onclick={loadBeeStamps} disabled={beeStampsLoading}>
-          {beeStampsLoading ? 'Refreshing...' : 'Refresh'}
+      <div class="flex items-center gap-1">
+        <h3 class="text-lg font-semibold">Faucet</h3>
+        <Button
+          variant="ghost"
+          size="sm"
+          aria-label="About the faucet"
+          aria-expanded={faucetHelpOpen}
+          onclick={() => (faucetHelpOpen = !faucetHelpOpen)}
+        >
+          <Info class="size-4" />
         </Button>
       </div>
-      {#if beeStampsError}
-        <p class="text-destructive text-sm">❌ {beeStampsError}</p>
-      {/if}
-      {#if beeStamps.length === 0}
-        <p class="text-muted-foreground text-sm">No stamps found on the Bee node.</p>
-      {:else}
-        <div class="flex flex-col gap-2">
-          {#each beeStamps as stamp (stamp.batchID)}
-            {@const assignment = stampAssignments.get(stamp.batchID)}
-            <div class="flex flex-col gap-2 rounded-lg border bg-card p-4">
-              <div class="flex items-center justify-between">
-                <p class="font-mono text-sm">{stamp.batchID}</p>
-                <CopyButton text={stamp.batchID} />
-              </div>
-              <div class="text-muted-foreground flex flex-wrap gap-2 text-sm">
-                <span>Depth: {stamp.depth}</span>
-                <span>Utilization: {stamp.utilization}</span>
-                <span>Expires: {formatStampExpiry(stamp.batchTTL)}</span>
-                <span>Account: {assignment?.account ?? '—'}</span>
-              </div>
-            </div>
-          {/each}
+
+      {#if faucetHelpOpen}
+        <div class={CARD_CLASS}>
+          <p class="text-muted-foreground text-sm">
+            Hands <em>any</em> address money on the dev chain — a plain transfer from the faucet the bake
+            stocked, since the BZZ pool here is real and thin and only a purchase is worth spending it
+            on.
+          </p>
+          <p class="text-muted-foreground text-sm">
+            <strong>Anvil account 0</strong> starts with 10 000 xDAI and no BZZ, which is the bake faucet's
+            to give. Importing its key into MetaMask is the shortcut to a wallet that already holds something
+            here.
+          </p>
+          {@render copyRow('Address', ANVIL_ACCOUNT.address)}
+          {@render copyRow('Private key', ANVIL_ACCOUNT.privateKey)}
         </div>
       {/if}
 
-      <div class="bg-border my-4 h-px"></div>
-
-      <h3 class="text-lg font-semibold">Assign stamp to account</h3>
       <div class="flex flex-col gap-2">
         <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Stamp</span>
-          <Select options={stampOptions} bind:value={selectedStampId} />
+          <span class={LABEL_TEXT_CLASS}>Recipient</span>
+          <Input bind:value={faucetTo} placeholder="0x… any address" />
+        </label>
+        {#if faucetTo.trim() && !faucetRecipient}
+          <span class="text-destructive text-sm">Not an address.</span>
+        {/if}
+      </div>
+
+      {#if fundsError}
+        <p class="text-destructive text-sm">{fundsError}</p>
+      {/if}
+      {#if balanceRows.length}
+        <div class="grid grid-cols-[auto_1fr_auto_auto] items-center gap-x-4 gap-y-1 text-sm">
+          <span></span>
+          <span></span>
+          <span class="text-muted-foreground text-right text-xs">xDAI</span>
+          <span class="text-muted-foreground text-right text-xs">BZZ</span>
+          {#each balanceRows as row (row.label)}
+            <span class="text-muted-foreground">{row.label}</span>
+            <span class="font-mono text-xs break-all">{row.address}</span>
+            <span class="text-right font-mono">{row.xdai}</span>
+            <span class="text-right font-mono">{row.bzz}</span>
+          {/each}
+        </div>
+      {:else}
+        <p class="text-muted-foreground text-sm">Enter a recipient to see balances.</p>
+      {/if}
+
+      <div class="flex flex-wrap items-end gap-2">
+        <!--
+          Locked while a send is in flight: what these say is what the receipt
+          below will report, so editing them mid-send would make it describe a
+          transfer that never happened.
+        -->
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Amount</span>
+          <Input bind:value={faucetTyped} class="w-32" disabled={faucetBusy} />
         </label>
         <label class={LABEL_CLASS}>
-          <span class={LABEL_TEXT_CLASS}>Account</span>
-          <Select options={accountOptions} bind:value={selectedAccountId} />
+          <span class={LABEL_TEXT_CLASS}>Token</span>
+          <!-- The token list itself: Select reads `value` and `label` and
+               ignores the rest, so there is nothing to map over. -->
+          <Select
+            options={FAUCET_TOKENS}
+            bind:value={faucetToken}
+            class="w-32"
+            disabled={faucetBusy}
+            onchange={pickFaucetToken}
+          />
         </label>
+        <Button
+          disabled={faucetBusy || !faucetRecipient || faucetValue === 0n}
+          onclick={sendFaucetFunds}
+        >
+          {faucetBusy ? 'Sending…' : 'Send'}
+        </Button>
+        <Button variant="secondary" disabled={!faucetRecipient} onclick={refreshFunds}>
+          Refresh
+        </Button>
+      </div>
+      {#if faucetMessage}
+        <p class="text-sm break-all">{faucetMessage}</p>
+      {/if}
+      {#if faucetError}
+        <p class="text-destructive text-sm">{faucetError}</p>
+      {/if}
 
-        <label class="flex cursor-pointer items-center gap-2 text-sm">
-          <input type="checkbox" bind:checked={useCustomSigner} />
-          Use custom signer key
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">On-chain drive tooling</h3>
+      <p class="text-muted-foreground text-sm">
+        Creates a batch the account's own postage signer OWNS on chain, which the purchase widget
+        cannot do off mainnet. That ownership is the point: it is what the paid drive operations
+        will need once they are signed by that signer rather than by a Bee node. The batch is bought
+        rather than granted — <strong>Create owned batch</strong> runs the widget's real step list against
+        the local chain's BZZ pool, swapping rather than drawing on the faucet above, since the purchase
+        is the one leg worth simulating faithfully.
+      </p>
+      <div class="flex flex-wrap gap-2">
+        <Button
+          variant="secondary"
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() =>
+            runChainTool(
+              'Created owned batch',
+              async (account) => (await createOwnedBatchOnChain(account.derivationKey)).batchId,
+            )}
+        >
+          Create owned batch (depth 20)
+        </Button>
+        <Button
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() => runChainTool('Created drive', createTestDrive)}
+        >
+          Create drive to test with
+        </Button>
+        <Button
+          variant="secondary"
+          disabled={chainToolBusy || !selectedAccountId}
+          onclick={() => runChainTool('Created expiring drive', createExpiringTestDrive)}
+        >
+          Create expiring drive
+        </Button>
+      </div>
+      <p class="text-muted-foreground text-sm">
+        Acts on the account selected at the top of the page. For the normal path just use
+        <em>Add drive</em> — off mainnet it creates the batch the same way. These buttons are for
+        driving the chain directly: topping the signer up, or making a batch to attach by hand via
+        <em>Add drive → Use existing</em>.
+      </p>
+      {#if chainToolMessage}
+        <p class="text-sm break-all">{chainToolMessage}</p>
+      {/if}
+      {#if chainToolError}
+        <p class="text-destructive text-sm">{chainToolError}</p>
+      {/if}
+
+      <div class="bg-border my-4 h-px"></div>
+
+      <h3 class="text-lg font-semibold">Import batch by ID</h3>
+      <p class="text-muted-foreground text-sm">
+        Read a batch's parameters straight from the PostageStamp contract on-chain (not from a Bee
+        node), so any batch id works even if the configured node never saw it. The signer key is not
+        on-chain — paste the one the batch was bought with.
+      </p>
+      <div class="flex flex-col gap-2">
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Batch ID</span>
+          <Input bind:value={importBatchId} placeholder="0x… (64 hex chars)" />
         </label>
-
-        {#if useCustomSigner}
-          <label class={LABEL_CLASS}>
-            <span class={LABEL_TEXT_CLASS}>Custom Signer Key</span>
-            <Input bind:value={customSignerKey} aria-invalid={!!customSignerError} />
-            {#if customSignerError}
-              <span class="text-destructive text-xs">{customSignerError}</span>
-            {/if}
-          </label>
-        {/if}
-
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Signer Key</span>
+          <Input bind:value={importSignerKey} placeholder="64 hex chars" />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Gnosis RPC URL</span>
+          <Input bind:value={importRpcUrl} />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>PostageStamp contract</span>
+          <Input bind:value={importContractOverride} placeholder={resolvedContract} />
+          <span class="text-muted-foreground text-xs">
+            The Gnosis deployment, <span class="font-mono">{resolvedContract}</span> — which the local
+            chain carries at the same address. Leave blank to use it.
+          </span>
+        </label>
         <label class="flex cursor-pointer items-center gap-2 text-sm">
-          <input type="checkbox" bind:checked={assignSetDefault} />
+          <input type="checkbox" bind:checked={importSetDefault} />
           Set as account default
         </label>
       </div>
-
-      <div class="flex items-center gap-2">
-        <Button onclick={assignAccountStamp} disabled={!selectedStampId || !selectedAccountId}>
-          {assignSetDefault ? 'Set account stamp' : 'Add stamp to account'}
-        </Button>
-        <Button
-          variant="destructive"
-          onclick={clearDefaultStamp}
-          disabled={!accountHasDefaultStamp}
-        >
-          Clear default stamp
-        </Button>
-      </div>
-
-      {#if assignMessage}
-        <p class="text-success text-sm">{assignMessage}</p>
+      <Button
+        onclick={importBatchById}
+        disabled={importing || !importBatchId || !importSignerKey || !selectedAccountId}
+      >
+        {importing ? 'Importing…' : 'Import batch'}
+      </Button>
+      {#if importMessage}
+        <p class="text-success text-sm">{importMessage}</p>
       {/if}
-      {#if assignError}
-        <p class="text-destructive text-sm">{assignError}</p>
+      {#if importError}
+        <p class="text-destructive text-sm">{importError}</p>
       {/if}
 
       <div class="bg-border my-4 h-px"></div>
@@ -1317,46 +1510,13 @@ Check console logs for details:
     </div>
   {/if}
 
-  <!-- Sync Tab -->
-  {#if activeTab === 'sync'}
-    <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Manual Sync Testing</h3>
-      <p class="text-sm">
-        Trigger a manual sync for ALL accounts to test postage stamp utilization tracking.
-      </p>
-      <div class="flex gap-4">
-        <Button onclick={triggerManualSync}>Sync All Accounts</Button>
-      </div>
-
-      {#if syncMessage}
-        <div class="flex flex-col gap-4 rounded-lg border bg-card p-4 whitespace-pre-wrap">
-          <p class="font-mono text-sm">{syncMessage}</p>
-        </div>
-      {/if}
-
-      <div class="flex flex-col gap-2">
-        <p class="text-muted-foreground text-sm">Requirements for sync:</p>
-        <p class="text-muted-foreground font-mono text-sm">
-          • At least one account with a default postage stamp
-        </p>
-        <p class="text-muted-foreground font-mono text-sm">
-          • Open browser console to see detailed logs
-        </p>
-      </div>
-    </div>
-  {/if}
-
   <!-- Devices Tab -->
   {#if activeTab === 'devices'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Account Devices</h3>
+      <h3 class="text-lg font-semibold">Account devices</h3>
       <p class="text-sm">
         Inspect the devices registered to an account and which partitions they currently hold.
       </p>
-      <label class={LABEL_CLASS}>
-        <span class={LABEL_TEXT_CLASS}>Account</span>
-        <Select options={accountOptions} bind:value={selectedAccountId} />
-      </label>
       {#if selectedAccount}
         {#key selectedAccountId}
           <DeviceList account={selectedAccount} />

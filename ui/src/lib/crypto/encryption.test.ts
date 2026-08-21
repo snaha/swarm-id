@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { hexToUint8Array } from '@snaha/swarm-id'
-import { Signature, Wallet } from 'ethers'
+import { generatePrivateKey, privateKeyToAccount } from 'viem/accounts'
 import { describe, expect, it } from 'vitest'
 
 import {
@@ -12,6 +12,7 @@ import {
   encryptSeed,
   randomSalt,
 } from './encryption'
+import { canonicalSignature } from './signature'
 
 // Fast KDF settings for tests only.
 const TEST_ITERATIONS = 10
@@ -49,13 +50,13 @@ describe('seed encryption round-trips', () => {
   })
 
   it('with a wallet-signature-derived key', async () => {
-    const wallet = Wallet.createRandom()
+    const wallet = privateKeyToAccount(generatePrivateKey())
     const message = 'sign to encrypt'
     const salt = randomSalt()
 
     // Deterministic ECDSA: signing the same message again yields the same key.
-    const signature = Signature.from(await wallet.signMessage(message)).serialized
-    const reSignature = Signature.from(await wallet.signMessage(message)).serialized
+    const signature = canonicalSignature(await wallet.signMessage({ message }))
+    const reSignature = canonicalSignature(await wallet.signMessage({ message }))
     expect(reSignature).toBe(signature)
 
     const key = await deriveKeyFromSignature(hexToUint8Array(signature), salt)

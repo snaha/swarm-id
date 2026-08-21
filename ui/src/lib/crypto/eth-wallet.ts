@@ -14,10 +14,11 @@
  * rejected up front.
  */
 import { hexToUint8Array } from '@snaha/swarm-id'
-import { Signature, getAddress, verifyMessage } from 'ethers'
+import { getAddress, recoverMessageAddress } from 'viem'
 
 import { deriveKeyFromSignature } from '$lib/crypto/encryption'
 import { onboard } from '$lib/crypto/onboard'
+import { canonicalSignature } from '$lib/crypto/signature'
 
 interface EthereumProvider {
   request(args: { method: string; params?: unknown[] }): Promise<unknown>
@@ -60,15 +61,27 @@ export async function requestWalletKeySource(): Promise<WalletKeySource> {
     params: [SIGNING_MESSAGE, walletAddress],
   })) as string
 
-  // Reject non-ECDSA signatures (smart-contract wallets) — they can't be
-  // reproduced for key derivation — and normalize the representation so
-  // unlock derives the same bytes as creation.
-  if (getAddress(verifyMessage(SIGNING_MESSAGE, signature)) !== getAddress(walletAddress)) {
+  // Normalize the representation first, so unlock derives the same bytes as
+  // creation, then reject non-ECDSA signatures (smart-contract wallets) — they
+  // can't be reproduced for key derivation.
+  //
+  // Every representation we know how to read is handled in `canonicalSignature`;
+  // what is left throwing is a wallet whose output we genuinely cannot
+  // reproduce, which is this flow's "not supported" — not viem's internals
+  // ("Invalid yParityOrV value") shown to someone who only clicked Sign.
+  let canonical
+  try {
+    canonical = canonicalSignature(signature)
+  } catch {
+    throw new Error('This wallet type is not supported for securing an account.')
+  }
+  const signer = await recoverMessageAddress({ message: SIGNING_MESSAGE, signature: canonical })
+  if (getAddress(signer) !== getAddress(walletAddress)) {
     throw new Error('This wallet type is not supported for securing an account.')
   }
   return {
     walletAddress: getAddress(walletAddress),
-    signature: Signature.from(signature).serialized,
+    signature: canonical,
   }
 }
 

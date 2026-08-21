@@ -4,8 +4,6 @@
 -->
 
 <script lang="ts">
-  import { onMount } from 'svelte'
-
   import { cn } from '$lib/utils'
 
   const CHECK_INTERVAL_MS = 10000
@@ -23,29 +21,43 @@
     checking: 'bg-muted-foreground animate-pulse',
   }
 
-  async function checkEndpoint() {
+  async function probe(url: string, how: CheckMethod): Promise<Status> {
     try {
-      if (method === 'json-rpc') {
+      if (how === 'json-rpc') {
         // Use eth_blockNumber for JSON-RPC endpoints
-        const response = await fetch(endpoint, {
+        const response = await fetch(url, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
         })
-        status = response.ok ? 'online' : 'offline'
-      } else {
-        // Use no-cors HEAD for regular HTTP endpoints
-        await fetch(endpoint, { method: 'HEAD', mode: 'no-cors' })
-        status = 'online'
+        return response.ok ? 'online' : 'offline'
       }
+      // Use no-cors HEAD for regular HTTP endpoints
+      await fetch(url, { method: 'HEAD', mode: 'no-cors' })
+      return 'online'
     } catch {
-      status = 'offline'
+      return 'offline'
     }
   }
 
-  onMount(() => {
-    checkEndpoint()
-    const interval = setInterval(checkEndpoint, CHECK_INTERVAL_MS)
+  async function checkEndpoint(url: string, how: CheckMethod) {
+    const result = await probe(url, how)
+    // The dot sits beside whichever endpoint is configured NOW, so a probe of
+    // the one we just left must not colour it.
+    if (url !== endpoint) return
+    status = result
+  }
+
+  // Re-armed whenever the endpoint (or the way to ask it) changes. /dev
+  // switches environments in one click, and a dot that only probed on mount
+  // showed the previous endpoint's verdict beside the new url for up to the
+  // full poll interval — reporting a healthy node dead, or worse.
+  $effect(() => {
+    const url = endpoint
+    const how = method
+    status = 'checking'
+    void checkEndpoint(url, how)
+    const interval = setInterval(() => void checkEndpoint(url, how), CHECK_INTERVAL_MS)
     return () => clearInterval(interval)
   })
 </script>

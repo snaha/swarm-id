@@ -9,6 +9,7 @@
   import { Button } from '$lib/components/ui/button'
   import { Dialog } from '$lib/components/ui/dialog'
   import { Input } from '$lib/components/ui/input'
+  import { chainIdentity } from '$lib/payment/chain'
   import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
   interface Props {
@@ -27,6 +28,39 @@
   const canSave = $derived(beeNodeUrlValid && gnosisRpcUrlValid)
   const beeNodeUrlError = $derived(beeNodeUrl.trim().length > 0 && !beeNodeUrlValid)
   const gnosisRpcUrlError = $derived(gnosisRpcUrl.trim().length > 0 && !gnosisRpcUrlValid)
+  /** Whether the field has been edited away from what `connected` describes. */
+  const gnosisRpcUrlEdited = $derived(gnosisRpcUrl.trim() !== networkSettingsStore.gnosisRpcUrl)
+
+  /**
+   * What is actually answering at the SAVED endpoint. Worth showing, because a
+   * dev chain reports the same chain id as mainnet on purpose — so the URL is
+   * otherwise the only clue, and a stale `localhost` looks exactly like the
+   * real thing. Probed for the saved value rather than the field being edited,
+   * so typing a URL does not fire a request per keystroke — and hidden as soon
+   * as the two differ, since otherwise typing the real mainnet RPC over a stale
+   * `localhost` leaves "funds here are not real" sitting under the mainnet URL
+   * that was just entered.
+   *
+   * A chain that is neither says so rather than borrowing either line: nothing
+   * in the app works there, and calling it fake would be an all-clear about
+   * somebody's real funds.
+   */
+  const connected = chainIdentity(networkSettingsStore.gnosisRpcUrl).then(
+    (identity) => {
+      switch (identity.kind) {
+        case 'mainnet':
+          return { label: 'Gnosis Chain', tone: 'text-muted-foreground' }
+        case 'dev':
+          return { label: 'Gnosis Chain (fake) — funds here are not real', tone: 'font-medium' }
+        case 'unsupported':
+          return {
+            label: `Not Gnosis Chain — this endpoint serves chain ${identity.chainId}`,
+            tone: 'text-destructive',
+          }
+      }
+    },
+    () => ({ label: 'Not reachable', tone: 'text-destructive' }),
+  )
 
   function save() {
     if (!canSave) {
@@ -72,6 +106,10 @@
     />
     {#if gnosisRpcUrlError}
       <p class="text-destructive text-xs">Please enter a valid URL</p>
+    {:else if !gnosisRpcUrlEdited}
+      {#await connected then chain}
+        <p class="text-xs {chain.tone}">Connected to: {chain.label}</p>
+      {/await}
     {/if}
   </div>
 
