@@ -86,7 +86,8 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
   message.
 - **JSON-RPC: use `jsonRpcCall`/`jsonRpcBatch`** (`lib/src/utils/json-rpc.ts`, exported from
   `@snaha/swarm-id`) — never a hand-rolled `fetch` + envelope read. Reach for a null-tolerant
-  variant only where `null` is a real outcome. A deadline rejects with `TimeoutError`, as above.
+  variant only where `null` is a real outcome. A deadline rejects with `TimeoutError`, as above,
+  and every rejection from them names the endpoint, so `error.message` can be shown as-is.
   `@swarm-id/multichain` keeps a verbatim copy of the envelope checks; change one, change both.
 
 ## Testing
