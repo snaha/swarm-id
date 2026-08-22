@@ -61,6 +61,15 @@ function defaultLabel(rpcUrl: string): string {
   }
 }
 
+/** Every member is optional, so being an object is the whole check. */
+function isEnvelope(value: unknown): value is JsonRpcEnvelope {
+  return typeof value === "object" && value !== null
+}
+
+function messageOf(cause: unknown): string {
+  return cause instanceof Error ? cause.message : String(cause)
+}
+
 /**
  * The status half of the contract.
  * @throws when the endpoint answered anything but 2xx.
@@ -128,22 +137,39 @@ async function postJsonRpc(
   // name, and so the timer is cleared once the read settles either way.
   const controller = new AbortController()
   const timer = setTimeout(() => controller.abort(), options.timeoutMs)
+  /** The deadline outranks whatever shape the abort surfaced as downstream. */
+  const deadlineOr = (message: string): Error =>
+    controller.signal.aborted
+      ? new TimeoutError(
+          `${label} did not answer ${subject} within ${options.timeoutMs}ms.`,
+        )
+      : new Error(message)
   try {
-    const response = await fetch(rpcUrl, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-      signal: controller.signal,
-    })
-    checkStatus(response, subject, label)
-    return await response.json()
-  } catch (error) {
-    if (controller.signal.aborted) {
-      throw new TimeoutError(
-        `${label} did not answer ${subject} within ${options.timeoutMs}ms.`,
+    // `checkStatus` names the endpoint; `fetch` and `json()` do not. They
+    // reject with "Failed to fetch" and "Unexpected token <" — wording that
+    // reaches a drive dialog naming neither the endpoint nor the call, and
+    // unreachable and unparseable are the likeliest failures of the three.
+    let response: Response
+    try {
+      response = await fetch(rpcUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+        signal: controller.signal,
+      })
+    } catch (error) {
+      throw deadlineOr(
+        `${label} could not be reached for ${subject}: ${messageOf(error)}`,
       )
     }
-    throw error
+    checkStatus(response, subject, label)
+    try {
+      return (await response.json()) as unknown
+    } catch {
+      throw deadlineOr(
+        `${label} answered ${subject} with a body that is not JSON.`,
+      )
+    }
   } finally {
     clearTimeout(timer)
   }
@@ -202,14 +228,29 @@ export async function jsonRpcBatch(
     params: request.params,
   }))
 
+  const malformed = () =>
+    new Error(`${label} returned a malformed response to ${subject}.`)
+
   const data = await postJsonRpc(rpcUrl, payload, subject, options)
-  if (!Array.isArray(data) || data.length !== requests.length) {
-    throw new Error(`${label} returned a malformed response to ${subject}.`)
+  if (!Array.isArray(data)) {
+    // A provider that refuses the batch outright — over its size limit, say —
+    // answers one envelope rather than an array, and the reason it gives is
+    // the one worth reporting.
+    if (isEnvelope(data) && data.error) {
+      checkedResult(data, subject, label)
+    }
+    throw malformed()
+  }
+  if (data.length !== requests.length) {
+    throw malformed()
   }
 
   const results: unknown[] = new Array(requests.length)
   const seen = new Set<number>()
-  for (const envelope of data as JsonRpcEnvelope[]) {
+  for (const envelope of data) {
+    if (!isEnvelope(envelope)) {
+      throw malformed()
+    }
     const { id } = envelope
     if (typeof id !== "number" || id < 0 || id >= requests.length) {
       throw new Error(`${label} returned a response with an unknown id.`)

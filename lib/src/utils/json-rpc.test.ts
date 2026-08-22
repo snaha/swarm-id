@@ -127,6 +127,39 @@ describe("jsonRpcCall", () => {
       jsonRpcCall(RPC_URL, "eth_chainId", [], { timeoutMs: 10 }),
     ).rejects.toBeInstanceOf(TimeoutError)
   })
+
+  // The status check names the endpoint; `fetch` and `json()` do not, and the
+  // drive dialogs render `error.message` verbatim.
+  it("names the endpoint when it cannot be reached at all", async () => {
+    fetchSpy.mockRejectedValue(new TypeError("Failed to fetch"))
+
+    await expect(
+      jsonRpcCall(RPC_URL, "eth_chainId", [], {
+        ...OPTIONS,
+        label: "The configured Gnosis RPC",
+      }),
+    ).rejects.toThrow(
+      "The configured Gnosis RPC could not be reached for eth_chainId: Failed to fetch",
+    )
+  })
+
+  // A captive portal or a misconfigured proxy answers 200 with HTML.
+  it("names the endpoint when the body is not JSON", async () => {
+    fetchSpy.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: () => Promise.reject(new SyntaxError("Unexpected token <")),
+    } as Response)
+
+    await expect(
+      jsonRpcCall(RPC_URL, "eth_chainId", [], {
+        ...OPTIONS,
+        label: "The configured Gnosis RPC",
+      }),
+    ).rejects.toThrow(
+      "The configured Gnosis RPC answered eth_chainId with a body that is not JSON.",
+    )
+  })
 })
 
 describe("jsonRpcBatch", () => {
@@ -229,5 +262,31 @@ describe("jsonRpcBatch", () => {
   it("answers an empty batch without asking the endpoint", async () => {
     await expect(jsonRpcBatch(RPC_URL, [], OPTIONS)).resolves.toEqual([])
     expect(fetchSpy).not.toHaveBeenCalled()
+  })
+
+  // Providers refuse an over-limit batch with one envelope rather than an
+  // array, and the reason they give is the actionable one.
+  it("reports the endpoint's own reason when it refuses the whole batch", async () => {
+    fetchSpy.mockResolvedValue(
+      mockResponse({ error: { message: "batch size limit exceeded" } }),
+    )
+
+    await expect(jsonRpcBatch(RPC_URL, CALLS, OPTIONS)).rejects.toThrow(
+      "batch size limit exceeded",
+    )
+  })
+
+  it("rejects a member that is not an envelope", async () => {
+    fetchSpy.mockResolvedValue(
+      mockResponse([
+        { id: 0, result: "0xaa" },
+        null,
+        { id: 2, result: "0xcc" },
+      ]),
+    )
+
+    await expect(jsonRpcBatch(RPC_URL, CALLS, OPTIONS)).rejects.toThrow(
+      /malformed response/,
+    )
   })
 })

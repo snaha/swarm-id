@@ -74,7 +74,11 @@ function kindOf(chainId: number, genesisHash: string): ChainKind {
   return genesisHash === GNOSIS_GENESIS_HASH ? 'mainnet' : 'dev'
 }
 
-/** How the endpoint is named in the errors the network-settings dialog shows. */
+/**
+ * How the endpoint is named in the errors that reach users: the drive dialogs
+ * render `error.message` verbatim. (The network-settings dialog does not — it
+ * collapses every rejection to "Not reachable".)
+ */
 const CHAIN_RPC_LABEL = 'The configured Gnosis RPC'
 
 /**
