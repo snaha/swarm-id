@@ -85,13 +85,9 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
   rejects with `TimeoutError`, so discriminate timeouts with `instanceof TimeoutError`, not by
   message.
 - **JSON-RPC: use `jsonRpcCall`/`jsonRpcBatch`** (`lib/src/utils/json-rpc.ts`, exported from
-  `@snaha/swarm-id`) — never a hand-rolled `fetch` + envelope read; the module header says what
-  counts as an answer. A missing `result` member and an explicit `null` are checked separately:
-  the first is always a malformed envelope, the second is a real outcome for a few methods
-  (`eth_getTransactionReceipt` while pending, anvil's admin calls on success), so collapsing them
-  lets a broken endpoint read as success. These calls honour the `withTimeout` rule above — a
-  deadline rejects with the same `TimeoutError`. `@swarm-id/multichain` keeps its own copy on
-  purpose; the three envelope checks there are verbatim, so a change to one belongs in both.
+  `@snaha/swarm-id`) — never a hand-rolled `fetch` + envelope read. Reach for a null-tolerant
+  variant only where `null` is a real outcome. A deadline rejects with `TimeoutError`, as above.
+  `@swarm-id/multichain` keeps a verbatim copy of the envelope checks; change one, change both.
 
 ## Testing
 
