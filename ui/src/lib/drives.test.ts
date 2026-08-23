@@ -1,10 +1,11 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { BatchId, PrivateKey } from '@ethersphere/bee-js'
-import type { PostageStamp } from '@snaha/swarm-id'
+import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id'
 import { describe, expect, it } from 'vitest'
 
 import {
+  DRIVE_SIZE_BREAKPOINTS,
   accountNeedsStorageAttention,
   describeDrive,
   driveNeedsAttention,
@@ -228,5 +229,20 @@ describe('soonestDriveExpiry / accountNeedsStorageAttention', () => {
   it('uses the live drive state for signed-in accounts', () => {
     const account = { stamps: [makeDrive({ utilization: 1 })], isSignedOut: false }
     expect(accountNeedsStorageAttention(account, measuredAt)).toBe(true)
+  })
+})
+
+describe('DRIVE_SIZE_BREAKPOINTS', () => {
+  it('starts at the smallest usable depth, dropping 17 and 18 (#538)', () => {
+    const depths = DRIVE_SIZE_BREAKPOINTS.map(([depth]) => depth)
+    expect(depths).not.toContain(17)
+    expect(depths).not.toContain(18)
+    expect(depths[0]).toBe(MIN_USABLE_BATCH_DEPTH)
+  })
+
+  it('lists the remaining sizes smallest first', () => {
+    const depths = DRIVE_SIZE_BREAKPOINTS.map(([depth]) => depth)
+    expect(depths).toEqual([...depths].sort((a, b) => a - b))
+    expect(depths.length).toBeGreaterThan(1)
   })
 })

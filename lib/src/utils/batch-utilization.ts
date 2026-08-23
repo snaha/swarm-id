@@ -794,6 +794,32 @@ export function partitionCapacity(
   return Math.floor(slotsPerBucket / partitionCount) - 1
 }
 
+/**
+ * Fewest data chunks a partition's bucket lane must hold for a batch to be
+ * worth buying. At 1 the first chunk written to a bucket already fills that
+ * lane, so the batch reports 100% used while effectively empty.
+ */
+const MIN_USABLE_PARTITION_CAPACITY = 2
+
+/**
+ * Smallest batch depth with a usable data lane: the first depth whose
+ * {@link partitionCapacity} reaches {@link MIN_USABLE_PARTITION_CAPACITY}.
+ * Searched rather than written out, so it follows BUCKET_DEPTH,
+ * PARTITION_COUNT and the reserved-slot term; capacity doubles with every
+ * depth, so the search terminates. With BUCKET_DEPTH 16 and PARTITION_COUNT 2
+ * it is 19 — depth 17 has no data slot at all and depth 18 exactly one (#538).
+ */
+export const MIN_USABLE_BATCH_DEPTH = ((): number => {
+  let batchDepth = BUCKET_DEPTH
+  while (
+    partitionCapacity(batchDepth, PARTITION_COUNT) <
+    MIN_USABLE_PARTITION_CAPACITY
+  ) {
+    batchDepth += 1
+  }
+  return batchDepth
+})()
+
 // ============================================================================
 // Stamper Integration
 // ============================================================================
