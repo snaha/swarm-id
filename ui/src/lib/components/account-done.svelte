@@ -11,8 +11,8 @@
   import AccountAvatar from '$lib/components/account-avatar.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
-  import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import type { Account } from '$lib/types'
   import { truncateAddress } from '$lib/utils'
 
@@ -30,18 +30,16 @@
 
   const { account, toast, finishLabel, doneMessage, onFinish }: Props = $props()
 
-  const TOAST_DURATION_MS = 4000
   const AVATAR_SIZE = 80
 
   const hasDrive = $derived(account.postageStamps.length > 0)
 
-  let toastMessage = $state<string | undefined>(undefined)
   let addDriveOpen = $state(false)
 
   onMount(() => {
-    toastMessage = toast
-    const timer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
-    return () => clearTimeout(timer)
+    if (toast) {
+      toastStore.show(toast)
+    }
   })
 </script>
 
@@ -101,6 +99,4 @@
   {#if addDriveOpen}
     <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={onFinish} />
   {/if}
-
-  <Toast message={toastMessage} />
 </div>
