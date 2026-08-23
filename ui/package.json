@@ -7,6 +7,7 @@
   "scripts": {
     "dev": "vite dev --port 5500",
     "build": "vite build",
+    "clean": "rm -rf build .svelte-kit",
     "preview": "vite preview --port 5501",
     "check": "svelte-kit sync && svelte-check --tsconfig ./tsconfig.json",
     "check:all": "pnpm lint && pnpm check && pnpm knip",

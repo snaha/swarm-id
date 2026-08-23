@@ -77,6 +77,8 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 - **Monorepo version pinning**: toolchain versions are pinned across the monorepo (eslint 9,
   vite 7, svelte 5.48, vite-plugin-svelte 6) — do NOT bump these in one package independently
   of the rest of the monorepo
+- **Recursive scripts: `pnpm -r run <script>`** — a bare `pnpm -r <script>` resolves to a
+  built-in pnpm command whenever the names collide (pnpm 11 added a built-in `clean`)
 - **Timeouts: use `withTimeout`** (`lib/src/utils/promise.ts`) — never `Promise.race` work against
   `rejectAfter` or an inline `setTimeout` rejection: when the work wins, the losing timer stays
   armed and leaks its handle. `withTimeout(work, ms, message)` clears the timer and rejects with
