@@ -65,13 +65,14 @@ import {
   MantarayNode,
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
-import { makeContentAddressedChunk } from "./chunk"
+import { makeContentAddressedChunk, MAX_PAYLOAD_SIZE } from "./chunk"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
   uploadSOC,
   uploadChunk,
   type UploadTarget,
+  type UploadSOCResult,
 } from "./proxy/upload"
 import {
   downloadDataWithChunkAPI,
@@ -196,6 +197,15 @@ function readPartitionTuningOverride():
     return undefined
   }
 }
+
+/**
+ * The fields the three sequential-feed upload messages have in common — every
+ * input the shared upload body reads.
+ */
+type SequentialFeedUploadRequest = Omit<
+  SequentialFeedUploadPayloadMessage,
+  "type" | "data"
+>
 
 /**
  * Swarm ID Proxy - Runs inside the iframe
@@ -3409,15 +3419,30 @@ export class SwarmIdProxy {
     return Binary.concatBytes(timestamp, data)
   }
 
-  private async handleSequentialFeedUploadPayload(
-    message: SequentialFeedUploadPayloadMessage,
+  /**
+   * Shared body of the three sequential-feed upload handlers: resolve the feed
+   * index (explicit, or one past the current tail), prefix the timestamp, and
+   * write the SOC under the mode-aware write lock. Callers supply the payload
+   * bytes, the encryption key the SOC is written with, and the response.
+   */
+  private async handleSequentialFeedUpload(
+    message: SequentialFeedUploadRequest,
     event: MessageEvent,
+    spec: {
+      data: Uint8Array
+      encryptionKey: Uint8Array | true | undefined
+      respond: (
+        result: UploadSOCResult,
+        feedIndex: bigint,
+        owner: EthAddress,
+      ) => IframeToParentMessage
+      errorMessage: string
+    },
   ): Promise<void> {
     const {
       requestId,
       topic,
       signer,
-      data,
       index,
       at,
       hasTimestamp,
@@ -3453,10 +3478,14 @@ export class SwarmIdProxy {
           latest === undefined ? 0n : this.sequentialNextIndex(latest)
       }
 
-      const payload = this.buildSequentialPayload(data, useTimestamp, atValue)
-      if (payload.length < 1 || payload.length > 4096) {
+      const payload = this.buildSequentialPayload(
+        spec.data,
+        useTimestamp,
+        atValue,
+      )
+      if (payload.length < 1 || payload.length > MAX_PAYLOAD_SIZE) {
         throw new Error(
-          `Invalid payload length: ${payload.length} (expected 1-4096)`,
+          `Invalid payload length: ${payload.length} (expected 1-${MAX_PAYLOAD_SIZE})`,
         )
       }
 
@@ -3466,12 +3495,11 @@ export class SwarmIdProxy {
       )
       const identifier = new Identifier(identifierBytes)
 
-      // Upload SOC with optional encryption (enabled by default)
       const result = await this.withModeAwareWriteLock(
         undefined,
         async (target) => {
           return await uploadSOC(target, signerKeyObj, identifier, payload, {
-            encryptionKey: options?.encrypt !== false ? true : undefined,
+            encryptionKey: spec.encryptionKey,
             pin: options?.pin,
             deferred: options?.deferred,
             tag: options?.tag,
@@ -3479,216 +3507,86 @@ export class SwarmIdProxy {
         },
       )
 
-      this.postMessage(event, {
-        type: "seqFeedUploadPayloadResponse",
-        requestId,
-        reference: uint8ArrayToHex(result.socAddress),
-        feedIndex: resolvedIndex.toString(),
-        owner: ownerAddress.toHex(),
-        encryptionKey: result.encryptionKey
-          ? uint8ArrayToHex(result.encryptionKey)
-          : undefined,
-        tagUid: result.tagUid,
-      })
+      this.postMessage(event, spec.respond(result, resolvedIndex, ownerAddress))
     } catch (error) {
       this.sendErrorToParent(
         event,
         requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload payload failed",
+        error instanceof Error ? error.message : spec.errorMessage,
       )
     }
+  }
+
+  private async handleSequentialFeedUploadPayload(
+    message: SequentialFeedUploadPayloadMessage,
+    event: MessageEvent,
+  ): Promise<void> {
+    // Encrypted by default, with an auto-generated key.
+    await this.handleSequentialFeedUpload(message, event, {
+      data: message.data,
+      encryptionKey: message.options?.encrypt !== false ? true : undefined,
+      respond: (result, feedIndex, owner) => ({
+        type: "seqFeedUploadPayloadResponse",
+        requestId: message.requestId,
+        reference: uint8ArrayToHex(result.socAddress),
+        feedIndex: feedIndex.toString(),
+        owner: owner.toHex(),
+        encryptionKey: result.encryptionKey
+          ? uint8ArrayToHex(result.encryptionKey)
+          : undefined,
+        tagUid: result.tagUid,
+      }),
+      errorMessage: "Sequential feed upload payload failed",
+    })
   }
 
   private async handleSequentialFeedUploadRawPayload(
     message: SequentialFeedUploadRawPayloadMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const {
-      requestId,
-      topic,
-      signer,
-      data,
-      index,
-      at,
-      hasTimestamp,
-      encryptionKey,
-      lookupTimeoutMs,
-      options,
-      requestOptions,
-    } = message
-
-    try {
-      this.ensureCanUpload()
-
-      const signerKey = signer ?? this.appSecret!
-      const signerKeyObj = new PrivateKey(signerKey)
-      const ownerAddress = signerKeyObj.publicKey().address()
-      const topicBytes = hexToUint8Array(topic)
-
-      const useTimestamp = hasTimestamp !== false
-      const atValue =
-        at !== undefined
-          ? this.parseFeedTimestamp(at)
-          : BigInt(Math.floor(Date.now() / 1000))
-      let resolvedIndex: bigint
-      if (index !== undefined) {
-        resolvedIndex = this.parseFeedIndex(index)
-      } else {
-        const latest = await this.findLatestSequentialIndex(
-          topicBytes,
-          ownerAddress,
-          requestOptions,
-          lookupTimeoutMs,
-        )
-        resolvedIndex =
-          latest === undefined ? 0n : this.sequentialNextIndex(latest)
-      }
-
-      const payload = this.buildSequentialPayload(data, useTimestamp, atValue)
-      if (payload.length < 1 || payload.length > 4096) {
-        throw new Error(
-          `Invalid payload length: ${payload.length} (expected 1-4096)`,
-        )
-      }
-
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
-
-      // Upload SOC - use encryption if key provided, otherwise plain SOC
-      const result = await this.withModeAwareWriteLock(
-        undefined,
-        async (target) => {
-          return await uploadSOC(target, signerKeyObj, identifier, payload, {
-            encryptionKey: encryptionKey
-              ? hexToUint8Array(encryptionKey)
-              : undefined,
-            pin: options?.pin,
-            deferred: options?.deferred,
-            tag: options?.tag,
-          })
-        },
-      )
-
-      this.postMessage(event, {
+    // Encrypted only when the caller supplies a key, which is echoed back
+    // verbatim — the caller owns it, so it is never re-derived from the result.
+    await this.handleSequentialFeedUpload(message, event, {
+      data: message.data,
+      encryptionKey: message.encryptionKey
+        ? hexToUint8Array(message.encryptionKey)
+        : undefined,
+      respond: (result, feedIndex, owner) => ({
         type: "seqFeedUploadRawPayloadResponse",
-        requestId,
+        requestId: message.requestId,
         reference: uint8ArrayToHex(result.socAddress),
-        feedIndex: resolvedIndex.toString(),
-        owner: ownerAddress.toHex(),
-        encryptionKey: encryptionKey ? encryptionKey : undefined,
+        feedIndex: feedIndex.toString(),
+        owner: owner.toHex(),
+        encryptionKey: message.encryptionKey
+          ? message.encryptionKey
+          : undefined,
         tagUid: result.tagUid,
-      })
-    } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload raw payload failed",
-      )
-    }
+      }),
+      errorMessage: "Sequential feed upload raw payload failed",
+    })
   }
 
   private async handleSequentialFeedUploadReference(
     message: SequentialFeedUploadReferenceMessage,
     event: MessageEvent,
   ): Promise<void> {
-    const {
-      requestId,
-      topic,
-      signer,
-      reference,
-      index,
-      at,
-      hasTimestamp,
-      lookupTimeoutMs,
-      options,
-      requestOptions,
-    } = message
-
-    try {
-      this.ensureCanUpload()
-
-      const signerKey = signer ?? this.appSecret!
-      const signerKeyObj = new PrivateKey(signerKey)
-      const ownerAddress = signerKeyObj.publicKey().address()
-      const topicBytes = hexToUint8Array(topic)
-
-      const useTimestamp = hasTimestamp !== false
-      const atValue =
-        at !== undefined
-          ? this.parseFeedTimestamp(at)
-          : BigInt(Math.floor(Date.now() / 1000))
-      let resolvedIndex: bigint
-      if (index !== undefined) {
-        resolvedIndex = this.parseFeedIndex(index)
-      } else {
-        const latest = await this.findLatestSequentialIndex(
-          topicBytes,
-          ownerAddress,
-          requestOptions,
-          lookupTimeoutMs,
-        )
-        resolvedIndex =
-          latest === undefined ? 0n : this.sequentialNextIndex(latest)
-      }
-
-      const referenceBytes = hexToUint8Array(reference)
-      const payload = this.buildSequentialPayload(
-        referenceBytes,
-        useTimestamp,
-        atValue,
-      )
-      if (payload.length < 1 || payload.length > 4096) {
-        throw new Error(
-          `Invalid payload length: ${payload.length} (expected 1-4096)`,
-        )
-      }
-
-      const identifierBytes = this.makeSequentialFeedIdentifier(
-        topicBytes,
-        resolvedIndex,
-      )
-      const identifier = new Identifier(identifierBytes)
-
-      // uploadReference always uses encryption with auto-generated key
-      const result = await this.withModeAwareWriteLock(
-        undefined,
-        async (target) => {
-          return await uploadSOC(target, signerKeyObj, identifier, payload, {
-            encryptionKey: true,
-            pin: options?.pin,
-            deferred: options?.deferred,
-            tag: options?.tag,
-          })
-        },
-      )
-
-      this.postMessage(event, {
+    // Always encrypted with an auto-generated key.
+    await this.handleSequentialFeedUpload(message, event, {
+      data: hexToUint8Array(message.reference),
+      encryptionKey: true,
+      respond: (result, feedIndex, owner) => ({
         type: "seqFeedUploadReferenceResponse",
-        requestId,
+        requestId: message.requestId,
         reference: uint8ArrayToHex(result.socAddress),
-        feedIndex: resolvedIndex.toString(),
-        owner: ownerAddress.toHex(),
+        feedIndex: feedIndex.toString(),
+        owner: owner.toHex(),
         encryptionKey: result.encryptionKey
           ? uint8ArrayToHex(result.encryptionKey)
           : undefined,
         tagUid: result.tagUid,
-      })
-    } catch (error) {
-      this.sendErrorToParent(
-        event,
-        requestId,
-        error instanceof Error
-          ? error.message
-          : "Sequential feed upload reference failed",
-      )
-    }
+      }),
+      errorMessage: "Sequential feed upload reference failed",
+    })
   }
 
   // ============================================================================

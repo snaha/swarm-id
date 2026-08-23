@@ -44,6 +44,7 @@ import type { ChunkReference, UploadProgress } from "./types"
 import type { StampWorkerPool } from "./stamp-worker-pool"
 import { tryCreateTag } from "../utils/tag"
 import { uint8ArrayToHex } from "../utils/hex"
+import { socAddress } from "../utils/soc-address"
 import { normalizeUrl } from "../utils/url"
 
 // ============================================================================
@@ -927,10 +928,7 @@ export async function uploadSOC(
   const toSign = Binary.concatBytes(identifier.toUint8Array(), chunkAddress)
   const signature = signer.sign(toSign)
 
-  // Calculate SOC address
-  const socAddressBytes = Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
+  const socAddressBytes = socAddress(identifier, owner)
 
   if (isSubsidisedTarget(target)) {
     // Subsidised gateway mode - no stamp needed

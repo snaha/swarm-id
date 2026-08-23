@@ -12,6 +12,7 @@ import { Binary } from "cafe-utility"
 import { EthAddress, Topic, PrivateKey, Identifier } from "@ethersphere/bee-js"
 import { EpochIndex, MAX_LEVEL } from "./epoch"
 import { uploadSOC, isStamperTarget, type UploadTarget } from "../../upload"
+import { socAddress } from "../../../utils/soc-address"
 import type { EpochUpdater, EpochUpdateHints, EpochUpdateResult } from "./types"
 import { AsyncEpochFinder } from "./async-finder"
 
@@ -32,19 +33,13 @@ export async function makeEpochIdentifier(
   )
 }
 
-/**
- * 32-byte SOC chunk address of one epoch-feed entry:
- * `keccak256(identifier ‖ owner)` — same formula as every SOC address.
- */
+/** 32-byte SOC chunk address of one epoch-feed entry. */
 export async function epochSocAddress(
   topic: Topic,
   epoch: EpochIndex,
   owner: EthAddress,
 ): Promise<Uint8Array> {
-  const identifier = await makeEpochIdentifier(topic, epoch)
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
+  return socAddress(await makeEpochIdentifier(topic, epoch), owner)
 }
 
 /**

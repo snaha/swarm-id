@@ -57,6 +57,7 @@ import {
   toBucket,
 } from "../utils/batch-utilization"
 import { lockSocBucket } from "../utils/lock-soc"
+import { socAddress } from "../utils/soc-address"
 import {
   INTENT_EPOCH_MS,
   intentEpochBucket,
@@ -226,7 +227,7 @@ export async function writeStatePointer(opts: {
   const epochBucket = statePointerEpochBucket(opts.nowMs)
   const identifier = makeStatePointerIdentifier(topic, epochBucket)
   const owner = opts.backupSigner.publicKey().address()
-  const address = makeStatePointerAddress(identifier, owner)
+  const address = socAddress(identifier, owner)
   const data = new TextEncoder().encode(
     JSON.stringify({
       referenceHex: opts.referenceHex,
@@ -253,16 +254,6 @@ export async function writeStatePointer(opts: {
   })
 }
 
-/** 32-byte SOC address `keccak256(identifier ‖ owner)`. */
-function makeStatePointerAddress(
-  identifier: Identifier,
-  owner: EthAddress,
-): Uint8Array {
-  return Binary.keccak256(
-    Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-  )
-}
-
 /**
  * The 32-byte state-pointer SOC address for `partition` at the epoch bucket
  * covering `nowMs`. Exposed so `writePartitionState` can exclude the pointer's
@@ -281,7 +272,7 @@ export function statePointerAddress(
     topic,
     statePointerEpochBucket(nowMs),
   )
-  return makeStatePointerAddress(identifier, owner)
+  return socAddress(identifier, owner)
 }
 
 /**

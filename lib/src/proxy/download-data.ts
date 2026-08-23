@@ -29,6 +29,7 @@ import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"
+import { socAddress } from "../utils/soc-address"
 
 function readSpan(spanBytes: Uint8Array): number {
   const view = new DataView(
@@ -37,14 +38,6 @@ function readSpan(spanBytes: Uint8Array): number {
     spanBytes.byteLength,
   )
   return Number(view.getBigUint64(0, true))
-}
-
-function makeSocAddress(identifier: Identifier, owner: EthAddress): Reference {
-  return new Reference(
-    Binary.keccak256(
-      Binary.concatBytes(identifier.toUint8Array(), owner.toUint8Array()),
-    ),
-  )
 }
 
 function makeSingleOwnerChunkFromData(
@@ -67,8 +60,8 @@ function makeSingleOwnerChunkFromData(
     throw new Error("SOC owner mismatch")
   }
 
-  const socAddress = makeSocAddress(identifier, recoveredOwner)
-  if (!Binary.equals(address.toUint8Array(), socAddress.toUint8Array())) {
+  const expectedAddress = socAddress(identifier, recoveredOwner)
+  if (!Binary.equals(address.toUint8Array(), expectedAddress)) {
     throw new Error("SOC data does not match given address")
   }
 
@@ -434,15 +427,15 @@ export async function downloadSOC(
 ): Promise<SingleOwnerChunk> {
   const ownerAddress = new EthAddress(owner)
   const id = new Identifier(identifier)
-  const socAddress = makeSocAddress(id, ownerAddress)
+  const address = new Reference(socAddress(id, ownerAddress))
 
   const data = await bee.downloadChunk(
-    socAddress.toHex(),
+    address.toHex(),
     undefined,
     requestOptions,
   )
 
-  return makeSingleOwnerChunkFromData(data, socAddress, ownerAddress)
+  return makeSingleOwnerChunkFromData(data, address, ownerAddress)
 }
 
 export async function downloadEncryptedSOC(
@@ -454,17 +447,17 @@ export async function downloadEncryptedSOC(
 ): Promise<SingleOwnerChunk> {
   const ownerAddress = new EthAddress(owner)
   const id = new Identifier(identifier)
-  const socAddress = makeSocAddress(id, ownerAddress)
+  const address = new Reference(socAddress(id, ownerAddress))
   const keyBytes =
     typeof encryptionKey === "string"
       ? hexToUint8Array(encryptionKey)
       : encryptionKey
 
   const data = await bee.downloadChunk(
-    socAddress.toHex(),
+    address.toHex(),
     undefined,
     requestOptions,
   )
 
-  return makeSingleOwnerChunkFromData(data, socAddress, ownerAddress, keyBytes)
+  return makeSingleOwnerChunkFromData(data, address, ownerAddress, keyBytes)
 }
