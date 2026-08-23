@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
-import { TimeoutError, withTimeout } from "./promise"
+import { TimeoutError, sleep, withTimeout } from "./promise"
 
 describe("withTimeout", () => {
   beforeEach(() => {
@@ -65,5 +65,37 @@ describe("withTimeout", () => {
     })
     expect(caught).toBeInstanceOf(Error)
     expect(caught).not.toBeInstanceOf(TimeoutError)
+  })
+})
+
+describe("sleep", () => {
+  beforeEach(() => {
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it("stays pending until the delay elapses, then resolves", async () => {
+    let settled = false
+    const pending = sleep(100).then(() => {
+      settled = true
+    })
+
+    vi.advanceTimersByTime(99)
+    await Promise.resolve()
+    expect(settled).toBe(false)
+
+    vi.advanceTimersByTime(1)
+    await pending
+    expect(settled).toBe(true)
+  })
+
+  it("leaves no timer behind once it has resolved", async () => {
+    const pending = sleep(10)
+    vi.advanceTimersByTime(10)
+    await pending
+    expect(vi.getTimerCount()).toBe(0)
   })
 })

@@ -16,6 +16,7 @@
  * Production code must never import this module.
  */
 import { Bee, BeeResponseError, EthAddress } from '@ethersphere/bee-js'
+import { sleep } from '@snaha/swarm-id'
 import {
   DEV_FAUCET_ADDRESS,
   ensureBundlingDelegate,
@@ -302,7 +303,7 @@ async function waitForNodeToSeeBatch(beeNodeUrl: string, blockNumber: string): P
         return
       }
     }
-    await new Promise((resolve) => setTimeout(resolve, BATCH_VISIBLE_POLL_MS))
+    await sleep(BATCH_VISIBLE_POLL_MS)
   }
 }
 

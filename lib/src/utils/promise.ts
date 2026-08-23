@@ -32,3 +32,15 @@ export function withTimeout<T>(
   })
   return Promise.race([work, timeout]).finally(() => clearTimeout(timer))
 }
+
+/**
+ * Resolve after `ms` milliseconds — the default delay behind a poll or backoff.
+ *
+ * A caller whose timing a test needs to drive should keep taking an injectable
+ * wait and pass this as its default (as `acquirePartitionLock` does with
+ * `opts.wait`) rather than calling it directly, which would pin real time into
+ * the test path.
+ */
+export function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms))
+}

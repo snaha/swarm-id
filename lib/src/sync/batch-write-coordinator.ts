@@ -46,7 +46,7 @@ import {
   UtilizationAwareStamper,
 } from "../utils/batch-utilization"
 import { withBatchWriteLock } from "../utils/batch-write-lock"
-import { withTimeout } from "../utils/promise"
+import { sleep, withTimeout } from "../utils/promise"
 import { PartitionLease } from "./partition-lease"
 import type {
   LeaseRefreshOutcome,
@@ -633,9 +633,7 @@ export class BatchWriteCoordinator {
           this.deps.accountId,
         )
       }
-      await new Promise<void>((resolve) =>
-        setTimeout(resolve, LEASE_REFRESH_MS),
-      )
+      await sleep(LEASE_REFRESH_MS)
       // Checked between the sleep and the next acquire: a fresh `acquire()`
       // call would capture the bumped epoch as its own baseline and commit.
       if (this.leaseEpoch !== epoch) return
