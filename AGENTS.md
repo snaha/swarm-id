@@ -88,9 +88,6 @@ Before committing, you MUST pass `pnpm check:all` which runs filtered checks acr
 - Unit tests (`*.test.ts`): Vitest
 - Component tests (`*.ct.spec.ts`): Playwright
 - E2E tests (`tests/*.test.ts`): Playwright
-- **TDD for `lib/` fixes**: when fixing a bug in `lib/`, always work TDD-style if
-  applicable — write a failing test that reproduces the bug first, then fix, then
-  confirm the test passes (pure refactors/docs are exempt)
 
 ## Version control conventions
 

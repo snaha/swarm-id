@@ -11,3 +11,9 @@ All cross-origin communication via `postMessage` with Zod validation:
 - **Iframe → Parent**: `proxyReady`, `authStatusResponse`, `authSuccess`, `uploadDataResponse`, `error`
 
 Authentication uses storage events: popup writes to localStorage → storage event fires in iframe → iframe authenticates.
+
+## Testing
+
+- **TDD for `lib/` fixes**: when fixing a bug in `lib/`, always work TDD-style if
+  applicable — write a failing test that reproduces the bug first, then fix, then
+  confirm the test passes (pure refactors/docs are exempt)
