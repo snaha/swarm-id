@@ -31,6 +31,7 @@ export default defineConfig({
             { label: 'Quick Start', slug: 'getting-started' },
             { label: 'Architecture', slug: 'architecture' },
             { label: 'Subsidised Gateway', slug: 'subsidised-gateway' },
+            { label: 'Using Your Own Bee Node', slug: 'own-bee-node' },
             { label: 'Local Development', slug: 'local-development' },
           ],
         },
