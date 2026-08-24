@@ -28,6 +28,7 @@ import {
   initializeBatchUtilization,
   LEASE_SKEW_MARGIN_MS,
   LEASE_TTL_MS,
+  MIN_USABLE_BATCH_DEPTH,
   mergeChunk,
   serializeUint16Array,
   serializeUint32Array,
@@ -275,6 +276,32 @@ describe("per-bucket reservation constants", () => {
   it("reserves 2 slots per bucket (down from the historical 4)", () => {
     expect(DATA_COUNTER_START).toBe(2)
     expect(UTILIZATION_SLOTS_PER_BUCKET).toBe(2)
+  })
+})
+
+describe("MIN_USABLE_BATCH_DEPTH (#538)", () => {
+  it("is the smallest depth whose partition lane holds more than one chunk", () => {
+    expect(
+      partitionCapacity(MIN_USABLE_BATCH_DEPTH, PARTITION_COUNT),
+    ).toBeGreaterThan(1)
+    expect(
+      partitionCapacity(MIN_USABLE_BATCH_DEPTH - 1, PARTITION_COUNT),
+    ).toBeLessThanOrEqual(1)
+  })
+
+  it("rules out depth 17 (no data slot at all) and 18 (exactly one)", () => {
+    expect(partitionCapacity(17, PARTITION_COUNT)).toBe(0)
+    expect(partitionCapacity(18, PARTITION_COUNT)).toBe(1)
+    expect(MIN_USABLE_BATCH_DEPTH).toBe(19)
+  })
+
+  it("leaves a bucket with room once its first data chunk lands", () => {
+    const state = initializeBatchUtilization(
+      TEST_BATCH_ID,
+      MIN_USABLE_BATCH_DEPTH,
+    )
+    state.dataCounters[0] = 1
+    expect(calculateUtilization(state, MIN_USABLE_BATCH_DEPTH)).toBeLessThan(1)
   })
 })
 

@@ -15,7 +15,12 @@
   import { Dialog } from '$lib/components/ui/dialog'
   import { Select } from '$lib/components/ui/select'
   import { Switch } from '$lib/components/ui/switch'
-  import { formatBytes, formatRemaining, remainingLifespanSeconds } from '$lib/drives'
+  import {
+    DRIVE_SIZE_BREAKPOINTS,
+    formatBytes,
+    formatRemaining,
+    remainingLifespanSeconds,
+  } from '$lib/drives'
   import { diluteStamp, topUpStamp } from '$lib/payment/bee'
   import { type DilutionPlan, dilutedStamp, stampCostBzz } from '$lib/payment/purchase'
   import type { Account } from '$lib/types'
@@ -45,13 +50,15 @@
   let committedPlan = $state<DilutionPlan | undefined>(undefined)
 
   // The current size is the default (empty-valued) option; only larger sizes are
-  // offered — Bee can grow a batch (dilute) but not shrink it.
+  // offered — Bee can grow a batch (dilute) but not shrink it. An existing drive
+  // below the usable floor can grow past it, never into the other unusable
+  // size (#538).
   const sizeOptions = $derived([
     { value: '', label: formatBytes(Utils.getStampEffectiveBytes(drive.depth)) },
-    ...[...Utils.getStampEffectiveBytesBreakpoints(false).entries()]
-      .filter(([depth]) => depth > drive.depth)
-      .sort(([a], [b]) => a - b)
-      .map(([depth, bytes]) => ({ value: String(depth), label: formatBytes(bytes) })),
+    ...DRIVE_SIZE_BREAKPOINTS.filter(([depth]) => depth > drive.depth).map(([depth, bytes]) => ({
+      value: String(depth),
+      label: formatBytes(bytes),
+    })),
   ])
 
   const changed = $derived(newDepth !== '' && Number(newDepth) > drive.depth)

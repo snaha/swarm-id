@@ -6,7 +6,7 @@
 <script lang="ts">
   import { onDestroy } from 'svelte'
 
-  import { PrivateKey, Utils } from '@ethersphere/bee-js'
+  import { PrivateKey } from '@ethersphere/bee-js'
   import ArrowRight from '@lucide/svelte/icons/arrow-right'
   import TriangleAlert from '@lucide/svelte/icons/triangle-alert'
   import { BatchIdSchema, PrivateKeySchema } from '@snaha/swarm-id'
@@ -19,6 +19,7 @@
   import { Select } from '$lib/components/ui/select'
   import { strip0x } from '$lib/crypto/hex'
   import {
+    DRIVE_SIZE_BREAKPOINTS,
     LIFESPAN_UNIT_OPTIONS,
     type LifespanUnit,
     formatBytes,
@@ -75,9 +76,10 @@
 
   const sizeOptions = [
     { value: '', label: 'Please select' },
-    ...[...Utils.getStampEffectiveBytesBreakpoints(false).entries()]
-      .sort(([a], [b]) => a - b)
-      .map(([depth, bytes]) => ({ value: String(depth), label: formatBytes(bytes) })),
+    ...DRIVE_SIZE_BREAKPOINTS.map(([depth, bytes]) => ({
+      value: String(depth),
+      label: formatBytes(bytes),
+    })),
   ]
 
   const lifespanSeconds = $derived(lifespanToSeconds(Number(lifespanValue), lifespanUnit))

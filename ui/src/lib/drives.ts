@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { Utils } from '@ethersphere/bee-js'
-import type { PostageStamp } from '@snaha/swarm-id'
+import { MIN_USABLE_BATCH_DEPTH, type PostageStamp } from '@snaha/swarm-id'
 
 /**
  * Pure presentation helpers that turn a {@link PostageStamp} (a "drive") into
@@ -29,6 +29,19 @@ const STORAGE_FULL_FRACTION = 1
 const BYTE_UNITS = ['B', 'KB', 'MB', 'GB', 'TB', 'PB'] as const
 const BYTES_PER_UNIT = 1024
 const DECIMAL_UNIT_CEILING = 100
+
+/**
+ * The drive sizes on offer, smallest first: bee-js's `[depth, bytes]`
+ * breakpoints floored at {@link MIN_USABLE_BATCH_DEPTH}. Smaller batches have
+ * no usable per-bucket data lane — depth 17 has no data slot at all and depth
+ * 18 exactly one — so they read "Storage full" from the first chunk written
+ * and are not worth buying or growing into (#538).
+ */
+export const DRIVE_SIZE_BREAKPOINTS: [depth: number, bytes: number][] = [
+  ...Utils.getStampEffectiveBytesBreakpoints(false).entries(),
+]
+  .filter(([depth]) => depth >= MIN_USABLE_BATCH_DEPTH)
+  .sort(([a], [b]) => a - b)
 
 /** A drive's lifespan state, driving badge/colour choices in the UI. */
 export type DriveStatus = 'active' | 'expires-soon' | 'expired'
