@@ -3,7 +3,8 @@
 /**
  * Drive (postage stamp) management on the Storage tab, against the mocked
  * purchase flow (/dev defaults: mock enabled, no widget popup): add, rename,
- * set default, remove, and the failed-purchase outcome.
+ * set default, remove, the failed-purchase outcome, and an expired drive's
+ * reduced set of actions.
  */
 import { expect, test } from '@playwright/test'
 
@@ -33,6 +34,19 @@ function storedDrives(page: import('@playwright/test').Page) {
         .filter((stamp) => stamp.deletedAt === undefined)
         .map((stamp) => ({ batchID: stamp.batchID, name: stamp.name })),
     }
+  })
+}
+
+/** Ages every stored drive past its expiry (a TTL snapshot of zero seconds). */
+async function expireStoredDrives(page: import('@playwright/test').Page) {
+  await page.evaluate(() => {
+    const doc = JSON.parse(localStorage.getItem('swarm-id-accounts') ?? '{}') as {
+      data?: { postageStamps?: { batchTTL?: number }[] }[]
+    }
+    for (const stamp of doc.data?.[0]?.postageStamps ?? []) {
+      stamp.batchTTL = 0
+    }
+    localStorage.setItem('swarm-id-accounts', JSON.stringify(doc))
   })
 }
 
@@ -104,4 +118,32 @@ test('a failed mock purchase surfaces the error and adds nothing', async ({ page
   })
   const drives = await storedDrives(page)
   expect(drives.live).toHaveLength(0)
+})
+
+test('an expired drive offers no extend or resize, only removal', async ({ page }) => {
+  await createLocalAccount(page)
+  await addMockedDrive(page)
+  await expect(page.getByText(/^Drive [0-9a-f]{4}$/)).toBeVisible({
+    timeout: DRIVE_SETTLE_TIMEOUT_MS,
+  })
+
+  // While the drive lives, the expanded card offers both edits.
+  await page.getByRole('button', { name: 'Expand drive' }).click()
+  await expect(page.getByRole('button', { name: 'Increase size' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Extend lifespan' })).toBeVisible()
+
+  // Age it past expiry (#545): an expired batch can be neither topped up nor
+  // diluted, so both edits go away and removal is all that is left.
+  await expireStoredDrives(page)
+  await page.reload()
+  await page.getByRole('tab', { name: 'Storage' }).click()
+  await expect(page.getByText('Drive expired')).toBeVisible()
+
+  await page.getByRole('button', { name: 'Expand drive' }).click()
+  await expect(page.getByRole('textbox', { name: 'Drive name' })).toBeVisible()
+  await expect(page.getByRole('button', { name: 'Increase size' })).toHaveCount(0)
+  await expect(page.getByRole('button', { name: 'Extend lifespan' })).toHaveCount(0)
+
+  await page.getByRole('button', { name: 'Drive actions' }).click()
+  await expect(page.getByRole('menuitem', { name: 'Remove' })).toBeVisible()
 })

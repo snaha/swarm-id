@@ -132,6 +132,16 @@ describe('describeDrive', () => {
     expect(display.expiryDate).toBeUndefined()
   })
 
+  it('marks only a live drive modifiable', () => {
+    expect(describeDrive(makeDrive({ batchTTL: 90 * DAY }), measuredAt).modifiable).toBe(true)
+    expect(describeDrive(makeDrive({ batchTTL: 6 * DAY }), measuredAt).modifiable).toBe(true)
+    // Unknown TTL is treated as active: don't hide the actions on a stamp
+    // stored before the source recorded a TTL.
+    expect(describeDrive(makeDrive({ batchTTL: undefined }), measuredAt).modifiable).toBe(true)
+    expect(describeDrive(makeDrive({ batchTTL: 0 }), measuredAt).modifiable).toBe(false)
+    expect(describeDrive(makeDrive({ batchTTL: -DAY }), measuredAt).modifiable).toBe(false)
+  })
+
   it('flags a full drive', () => {
     expect(describeDrive(makeDrive({ utilization: 1 }), measuredAt).storageFull).toBe(true)
   })

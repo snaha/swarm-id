@@ -59,6 +59,12 @@ export interface DriveDisplay {
   usedPercent: number
   storageFull: boolean
   status: DriveStatus
+  /**
+   * Whether the drive can still be changed. An expired batch can be neither
+   * topped up nor diluted, so the UI drops "Extend lifespan"/"Increase size"
+   * for it and leaves removal as the only action.
+   */
+  modifiable: boolean
   /** "3 months left" — empty when expired or TTL is unknown. */
   timeLeftLabel: string
   /** "2026-09-21" — undefined when expired or TTL is unknown. */
@@ -242,6 +248,7 @@ export function describeDrive(drive: PostageStamp, now = Date.now()): DriveDispl
     usedPercent: driveUsedPercent(drive),
     storageFull: drive.utilization >= STORAGE_FULL_FRACTION,
     status: expired ? 'expired' : expiresSoon ? 'expires-soon' : 'active',
+    modifiable: !expired,
     timeLeftLabel: hasLifespan ? formatRemaining(ttl) : '',
     expiryDate: hasLifespan ? formatYmd(now + ttl * MS_PER_SECOND) : undefined,
     purchasedOn: formatYmd(drive.createdAt),

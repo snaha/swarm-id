@@ -190,10 +190,12 @@
                   Up to {d.sizeLabel} · {d.usedPercent}% used
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onclick={() => increaseSize(drive)}>
-                <Pencil />
-                Increase size
-              </Button>
+              {#if d.modifiable}
+                <Button variant="ghost" size="sm" onclick={() => increaseSize(drive)}>
+                  <Pencil />
+                  Increase size
+                </Button>
+              {/if}
             </div>
 
             <!-- Lifespan -->
@@ -216,10 +218,12 @@
                   {lifespanCaption}
                 </p>
               </div>
-              <Button variant="ghost" size="sm" onclick={() => extendLifespan(drive)}>
-                <Pencil />
-                Extend lifespan
-              </Button>
+              {#if d.modifiable}
+                <Button variant="ghost" size="sm" onclick={() => extendLifespan(drive)}>
+                  <Pencil />
+                  Extend lifespan
+                </Button>
+              {/if}
             </div>
 
             <!-- Connected apps (account-wide; per-drive usage not yet tracked) -->
