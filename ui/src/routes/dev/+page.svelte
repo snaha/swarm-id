@@ -15,9 +15,9 @@
     DEFAULT_GNOSIS_RPC_URL,
     derivePostageSignerKey,
     downloadEncryptedSOC,
-    rejectAfter,
     uint8ArrayToHex,
     uploadSOC,
+    withTimeout,
   } from '@snaha/swarm-id'
   import { gnosisMainnetSettings } from '@swarm-id/multichain'
   import { formatUnits, parseUnits } from 'viem'
@@ -568,10 +568,11 @@
         await sleep(Math.max(0, checkpoint - prev))
         prev = checkpoint
         try {
-          await Promise.race([
+          await withTimeout(
             downloadEncryptedSOC(bee, owner, identifier, encryptionKey),
-            rejectAfter(SELF_CHECK_READ_TIMEOUT_MS, 'read timed out'),
-          ])
+            SELF_CHECK_READ_TIMEOUT_MS,
+            'read timed out',
+          )
           retrievedMs = Date.now() - t0
           break
         } catch (error) {
@@ -621,10 +622,7 @@
         await sleep(Math.max(0, checkpoint - prev))
         prev = checkpoint
         try {
-          await Promise.race([
-            bee.downloadChunk(addr),
-            rejectAfter(SELF_CHECK_READ_TIMEOUT_MS, 'read timed out'),
-          ])
+          await withTimeout(bee.downloadChunk(addr), SELF_CHECK_READ_TIMEOUT_MS, 'read timed out')
           foundMs = Date.now() - t0
           break
         } catch (error) {

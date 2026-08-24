@@ -1,7 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 import { type BatchId, Bee, Identifier, PrivateKey, Stamper } from '@ethersphere/bee-js'
-import { SocUploadError, type UploadTarget, rejectAfter, uploadSOC } from '@snaha/swarm-id'
+import { SocUploadError, type UploadTarget, uploadSOC, withTimeout } from '@snaha/swarm-id'
 
 import { strip0x } from '$lib/crypto/hex'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
@@ -58,7 +58,7 @@ export async function verifyBatchStampable(
     deferred: true,
   })
   try {
-    await Promise.race([upload, rejectAfter(VALIDATION_TIMEOUT_MS, 'batch validation timed out')])
+    await withTimeout(upload, VALIDATION_TIMEOUT_MS, 'batch validation timed out')
     return true
   } catch (error) {
     return !(error instanceof SocUploadError && error.status === STAMP_REJECTED_STATUS)
