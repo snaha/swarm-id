@@ -169,13 +169,20 @@ Each phase is an independent PR chain:
 
 ## Verification
 
+Done:
+
 - Unit (Vitest, TDD): envelope encryption/schema, "delta merged over bus ≡ delta merged from
-  feed payload", lease fast-path state machine.
-- Playwright e2e against the local bee cluster plus a dev signaling server (docker-compose):
+  feed payload", lease fast-path state machine, lane-scoped utilization deltas, partitioned
+  hydration. The relay tests run the real signaling server; WebRTC is faked.
+
+Planned — **not yet written**, do not read the list above as covering these:
+
+- Playwright e2e against the local bee cluster plus a dev signaling server (#569):
   two isolated contexts propagating a rename/revocation over the bus; partitioned-mode
   connect → upload succeeds → a second context observes the utilization/lease state; lease
   handover sub-second with both peers live, timeout fallback with one peer killed.
-- Manual Safari (macOS) smoke test against staging, under real ITP.
+- Manual Safari (macOS) smoke test against staging, under real ITP — until it lands, Safari
+  upload support is expected-but-unverified (see the README).
 
 ## Known gaps
 
