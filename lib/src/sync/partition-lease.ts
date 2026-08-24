@@ -269,6 +269,13 @@ export class PartitionLease {
       /** Override for tests; defaults to PARTITION_LOCK_GUARD_MS. */
       guardMs?: number
       /**
+       * Override for the lock protocol's guard-window wait; defaults to
+       * `sleep`. A test asserts the guard through this seam — on the `ms` it
+       * is handed — rather than timing `acquire` against a real clock, where
+       * the claim's own crypto/IO cost is indistinguishable from the guard.
+       */
+      wait?: (ms: number) => Promise<void>
+      /**
        * Current known device IDs for this account (from the synced device
        * registry). Read fresh each round so it reflects late-announced
        * devices. When provided with ≥1 rival, a fresh claim of a free
@@ -304,6 +311,7 @@ export class PartitionLease {
     stamper?: Stamper
     now?: () => number
     guardMs?: number
+    wait?: (ms: number) => Promise<void>
     knownDeviceIds?: () => string[]
     intentReadTimeoutMs?: number
     intentGuardWindowMs?: number
@@ -914,6 +922,7 @@ export class PartitionLease {
       guardMs: args.soloClean
         ? 0
         : (this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS),
+      wait: this.opts.wait,
       generation,
       now: () => this.now(),
       // `acquire`'s scan read this lock (timeout-bounded) moments ago and
@@ -1075,6 +1084,7 @@ export class PartitionLease {
       deviceId: this.opts.deviceId,
       ttlMs: LEASE_TTL_MS,
       guardMs: this.opts.guardMs ?? PARTITION_LOCK_GUARD_MS,
+      wait: this.opts.wait,
       // Reuse the held claim's generation — it identifies the claim SESSION.
       // Re-minting a fresh generation each tick stamps a later timestamp than
       // the rightful first claimant, inverting claim order (issue #413).

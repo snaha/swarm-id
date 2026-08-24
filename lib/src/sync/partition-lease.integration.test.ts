@@ -1686,6 +1686,20 @@ describe("PartitionLease.acquire — unknown-holder dual-acquire guard (regressi
 describe("PartitionLease.acquire — solo-clean guard skip", () => {
   const BIG_GUARD_MS = 1_500
 
+  /**
+   * Guard windows the lock protocol asked for, in order, recorded through the
+   * lease's `wait` seam. Asserting on these instead of wall-clock elapsed is
+   * what makes these tests deterministic: the claim path's own crypto + mock
+   * IO costs hundreds of ms cold (and far less once the file's earlier tests
+   * have warmed it), so an `elapsed < BIG_GUARD_MS / 2` assertion measures
+   * machine speed and test order, not whether the guard was skipped.
+   */
+  let guardWaits: number[]
+
+  beforeEach(() => {
+    guardWaits = []
+  })
+
   function makeGuardedLease(opts: {
     deviceId: string
     knownDeviceIds?: () => string[]
@@ -1701,18 +1715,26 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
       guardMs: BIG_GUARD_MS,
       knownDeviceIds: opts.knownDeviceIds,
       intentGuardWindowMs: 0,
+      // Record the guard and return immediately — the assertions are on the
+      // window the protocol requested, so no test here sleeps out a real one.
+      wait: async (ms) => {
+        guardWaits.push(ms)
+      },
     })
   }
 
   it("skips the guard window when no rival is known and no channel shows another device", async () => {
+    // Solo-clean needs no seeded state, and deliberately so: a pristine store
+    // is exactly "no holder, no release sentinel, no beacon, every lock read
+    // conclusive". `beforeEach` gives each test a fresh MockChunkStore, so the
+    // predicate holds identically whether this test runs alone or last.
     const lease = makeGuardedLease({ deviceId: DEVICE_A })
-    const t0 = Date.now()
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
-    const elapsed = Date.now() - t0
     expect(result.partition).not.toBeUndefined()
     expect(result.isReadOnly).toBe(false)
-    // Well under the guard: the solo-clean path must not sleep it out.
-    expect(elapsed).toBeLessThan(BIG_GUARD_MS / 2)
+    // Exactly one claim, and it asked for a zero guard: the solo-clean path
+    // collapsed the window rather than sleeping it out.
+    expect(guardWaits).toEqual([0])
   })
 
   it("keeps the guard window when a release sentinel shows another device existed", async () => {
@@ -1729,11 +1751,9 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
     await releaser.release(new Uint32Array(NUM_BUCKETS))
 
     const lease = makeGuardedLease({ deviceId: DEVICE_A })
-    const t0 = Date.now()
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
-    const elapsed = Date.now() - t0
     expect(result.partition).not.toBeUndefined()
-    expect(elapsed).toBeGreaterThanOrEqual(BIG_GUARD_MS)
+    expect(guardWaits).toEqual([BIG_GUARD_MS])
   })
 
   it("keeps the guard window when a rival deviceId is known", async () => {
@@ -1741,11 +1761,9 @@ describe("PartitionLease.acquire — solo-clean guard skip", () => {
       deviceId: DEVICE_A,
       knownDeviceIds: () => [DEVICE_A, DEVICE_B],
     })
-    const t0 = Date.now()
     const result = await lease.acquire({ partitionCount: PARTITION_COUNT })
-    const elapsed = Date.now() - t0
     expect(result.partition).not.toBeUndefined()
-    expect(elapsed).toBeGreaterThanOrEqual(BIG_GUARD_MS)
+    expect(guardWaits).toEqual([BIG_GUARD_MS])
   })
 })
 
