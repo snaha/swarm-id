@@ -394,7 +394,21 @@ export class SwarmIdProxy {
    * URL is unchanged, so an RPC-only change doesn't churn the client mid-op.
    */
   private applyNetworkSettings(): void {
-    const settings = createNetworkSettingsStorageManager().load()
+    this.applyNetworkSettingsValues(
+      createNetworkSettingsStorageManager().load(),
+    )
+  }
+
+  /**
+   * The body of `applyNetworkSettings`, taking the settings as a value: a
+   * partitioned session cannot read them from storage and is handed them by
+   * the connect popup instead (`hydratePartitionAccount`). One implementation,
+   * or the two paths drift — an RPC-only change is invisible to a `beeNodeUrl`
+   * guard, and the subsidised-gateway rules below are easy to forget.
+   */
+  private applyNetworkSettingsValues(
+    settings: NetworkSettings | undefined,
+  ): void {
     this.gnosisRpcUrl = settings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
 
     const beeNodeUrl = settings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
@@ -664,14 +678,7 @@ export class SwarmIdProxy {
       encryptedSeed: "",
     }
 
-    if (
-      networkSettings?.beeNodeUrl &&
-      networkSettings.beeNodeUrl !== this.beeApiUrl
-    ) {
-      this.beeApiUrl = networkSettings.beeNodeUrl
-      this.gnosisRpcUrl = networkSettings.gnosisRpcUrl || this.gnosisRpcUrl
-      this.bee = new Bee(this.beeApiUrl)
-    }
+    this.applyNetworkSettingsValues(networkSettings)
 
     await this.refreshStampFromStorage()
   }
@@ -778,11 +785,22 @@ export class SwarmIdProxy {
           // which is every other device of the account — is not comparable:
           // folding it in would skip this lane past its own unused slots and
           // then publish that as the partition's durable resume counter.
+          // An unbound stamper has no lane of its own, so only a legacy
+          // single-partition delta can apply. Spelled out rather than leaning
+          // on `currentPartition ?? 0` staying unreachable for multi-partition
+          // stampers (`unbindPartition` also resets the count to 1) — that
+          // coupling lives in another file and is exactly the assumption whose
+          // last violation caused the resume-pointer skip described above.
+          const lane = this.stamper?.currentPartition
+          const sameLane =
+            lane !== undefined
+              ? message.partition === lane &&
+                message.partitionCount === this.stamper?.partitionCount
+              : message.partition === 0 && message.partitionCount === 1
           if (
             message.batchId === this.postageBatchId &&
             this.stamper &&
-            message.partitionCount === this.stamper.partitionCount &&
-            message.partition === (this.stamper.currentPartition ?? 0)
+            sameLane
           ) {
             // Apply delta update directly - no IndexedDB read needed
             this.stamper.applyUtilizationUpdate(message.buckets)

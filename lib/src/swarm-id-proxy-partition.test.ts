@@ -92,6 +92,7 @@ import {
   serializeSyncedAccount,
 } from "./utils/storage-managers"
 import { STORAGE_CHALLENGE_KEY, STORAGE_KEY_ACCOUNTS } from "./types"
+import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type { SignedInAccount, SyncedAccount } from "./schemas"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
@@ -503,6 +504,24 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     await deps.refreshKnownDeviceIds()
 
     expect(deps.knownDeviceIds()).toContain(peer.deviceId)
+  })
+
+  // Hydration must go through the same network-settings path as the storage-
+  // backed one: an RPC-only difference is invisible to a `beeNodeUrl` guard,
+  // and a partitioned session that keeps the default RPC reads stamp TTLs and
+  // the postage contract off the wrong chain.
+  it("applies hydrated network settings when only the rpc url differs", async () => {
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+      networkSettings: {
+        beeNodeUrl: DEFAULT_BEE_NODE_URL,
+        gnosisRpcUrl: "https://rpc.example.test/",
+      },
+    })
+
+    const internals = proxy as unknown as { gnosisRpcUrl: string }
+    expect(internals.gnosisRpcUrl).toBe("https://rpc.example.test/")
   })
 
   it("rejects a hydration payload with a wrong challenge", async () => {
