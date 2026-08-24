@@ -110,6 +110,29 @@ describe("SignalingTransport — relay path", () => {
     }
   })
 
+  // The teardown announcement (`lease-released`) is published and the bus
+  // closed in the same synchronous tick, while `deliver` is still awaiting its
+  // encryption. Dropping it there costs a waiting peer the full poll interval
+  // — the exact latency the message exists to remove.
+  it("still delivers an envelope published in the same tick as close()", async () => {
+    const sender = makeTransport()
+    const receiver = makeTransport()
+    try {
+      const received = collect(receiver)
+      await waitForPeers(sender, 1)
+      await waitForPeers(receiver, 1)
+
+      sender.publish(UTILIZATION_MESSAGE)
+      sender.close()
+
+      await vi.waitFor(() => expect(received.length).toBe(1))
+      expect(received[0]).toEqual(UTILIZATION_MESSAGE)
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
   it("publishes nothing when the room has no other peers", async () => {
     const lonely = makeTransport()
     try {

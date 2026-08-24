@@ -81,6 +81,9 @@ export class SignalingTransport implements BusTransport {
   private closed = false
   private reconnectDelayMs = RECONNECT_BASE_DELAY_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
+  /** In-flight `deliver` calls, awaited by `close()` so a teardown
+   *  announcement published in the closing tick still reaches the wire. */
+  private pendingDeliveries = new Set<Promise<void>>()
 
   constructor(options: SignalingTransportOptions) {
     this.options = options
@@ -93,9 +96,11 @@ export class SignalingTransport implements BusTransport {
   }
 
   publish(message: BusMessageInput): void {
-    void this.deliver(message).catch((error) => {
+    const delivery = this.deliver(message).catch((error) => {
       console.error("[SignalingTransport] Publish failed:", error)
     })
+    this.pendingDeliveries.add(delivery)
+    void delivery.finally(() => this.pendingDeliveries.delete(delivery))
   }
 
   subscribe(handler: (raw: unknown) => void): () => void {
@@ -103,11 +108,30 @@ export class SignalingTransport implements BusTransport {
     return () => this.handlers.delete(handler)
   }
 
+  /**
+   * Stops reconnecting at once, but lets in-flight publishes reach the wire
+   * first: `deliver` awaits envelope encryption, and callers announce a
+   * teardown (`lease-released`) and close the bus in the same tick, so tearing
+   * the socket down synchronously would drop exactly the message a waiting
+   * peer is owed. Each pending delivery is a single encrypt plus synchronous
+   * sends, so this settles promptly — it is not a flush of a send queue.
+   */
   close(): void {
     this.closed = true
     if (this.reconnectTimer !== undefined) {
       clearTimeout(this.reconnectTimer)
     }
+    if (this.pendingDeliveries.size === 0) {
+      this.shutdown()
+      return
+    }
+    void Promise.allSettled([...this.pendingDeliveries]).then(() =>
+      this.shutdown(),
+    )
+  }
+
+  private shutdown(): void {
+    this.handlers.clear()
     for (const peer of this.peers.values()) {
       peer.connection?.close()
     }
