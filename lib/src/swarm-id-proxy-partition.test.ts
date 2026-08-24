@@ -57,6 +57,14 @@ vi.mock("./bus/signaling-transport", () => ({
     }
   }),
 }))
+/** Devices the mocked `readRoster` reports for the account's Swarm roster. */
+const rosterDevices = vi.hoisted(
+  () => [] as { deviceId: string; createdAt: number; lastSignedInAt: number }[],
+)
+vi.mock("./sync", async (importActual) => {
+  const actual = await importActual<typeof import("./sync")>()
+  return { ...actual, readRoster: vi.fn(async () => rosterDevices) }
+})
 vi.mock("./sync/batch-write-coordinator", () => ({
   BatchWriteCoordinator: vi.fn(function (deps: unknown) {
     return {
@@ -463,6 +471,38 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         busChannel.close()
       }
     })
+  })
+
+  // The partition-intent round and the idle-yield both read `knownDeviceIds`.
+  // In a partitioned iframe shared storage is invisible, so the roster has to
+  // fold into the hydrated account view or a Safari writer stays blind to every
+  // peer that signs in after connect.
+  it("folds the Swarm roster into the hydrated partition account", async () => {
+    const peer = {
+      deviceId: "peer-device-from-roster",
+      createdAt: Date.now(),
+      lastSignedInAt: Date.now(),
+    }
+    rosterDevices.length = 0
+    rosterDevices.push(peer)
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(makeSyncedAccount()),
+    })
+
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as {
+      deps: {
+        knownDeviceIds: () => string[]
+        refreshKnownDeviceIds: () => Promise<void>
+      }
+    }
+    expect(deps.knownDeviceIds()).not.toContain(peer.deviceId)
+
+    await deps.refreshKnownDeviceIds()
+
+    expect(deps.knownDeviceIds()).toContain(peer.deviceId)
   })
 
   it("rejects a hydration payload with a wrong challenge", async () => {

@@ -1580,9 +1580,19 @@ export class SwarmIdProxy {
     }
     this.lastDeviceRegistryRefreshAt = nowMs
     try {
-      const manager = createAccountsStorageManager()
-      const accounts = manager.load()
-      const account = accounts.find((a) => a.id.toHex() === accountId)
+      // A partitioned session cannot see shared storage — the hydrated account
+      // view is both the source and the destination there. Without this branch
+      // the load below returns nothing and the refresh silently no-ops, leaving
+      // a Safari writer's rival set frozen at whatever the connect popup handed
+      // over: the intent round never sees a peer that signs in later, and the
+      // idle-yield (gated on a known rival) never fires. Mirrors the same
+      // branch in `knownDeviceIdsForAccount`.
+      const partitioned = this.partitionAccount?.id.toHex() === accountId
+      const manager = partitioned ? undefined : createAccountsStorageManager()
+      const accounts = manager?.load() ?? []
+      const account = partitioned
+        ? this.partitionAccount
+        : accounts.find((a) => a.id.toHex() === accountId)
       if (!account || isSignedOutAccount(account)) return
 
       // Feed owner = backup signer (derived from the swarm encryption key).
@@ -1606,11 +1616,17 @@ export class SwarmIdProxy {
       // Only persist when a peer actually appeared, to avoid needless cross-tab
       // storage-event churn.
       if (mergedDevices.length !== account.devices.length) {
-        manager.save(
-          accounts.map((a) =>
-            a.id.toHex() === accountId ? { ...a, devices: mergedDevices } : a,
-          ),
-        )
+        if (partitioned) {
+          // In-memory only, like the rest of the hydrated view: the stored
+          // schema requires a vault, and the session re-handshakes per load.
+          this.partitionAccount = { ...account, devices: mergedDevices }
+        } else {
+          manager!.save(
+            accounts.map((a) =>
+              a.id.toHex() === accountId ? { ...a, devices: mergedDevices } : a,
+            ),
+          )
+        }
       }
     } catch (error) {
       console.warn(
