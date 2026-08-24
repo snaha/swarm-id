@@ -79,6 +79,7 @@ export class AccountBus {
   private transports: BusTransport[]
   private handlers = new Set<(message: BusMessage) => void>()
   private transportUnsubscribers: (() => void)[]
+  private closed = false
 
   constructor(transports: BusTransport[]) {
     this.transports = transports
@@ -96,6 +97,7 @@ export class AccountBus {
   }
 
   publish(message: BusMessageInput): void {
+    if (this.closed) return
     for (const transport of this.transports) {
       transport.publish(message)
     }
@@ -108,8 +110,17 @@ export class AccountBus {
    * design: every current message kind applies idempotently (LWW snapshot
    * merges; monotonic bucket counters, folded only by a receiver on the
    * publisher's own slot lane — see `UtilizationUpdateMessageSchema`).
+   *
+   * On a closed bus the transport is closed instead of attached: every join is
+   * fire-and-forget, so one whose key derivation was still in flight when the
+   * context tore down arrives here holding a live socket, with no other handle
+   * left to close it.
    */
   addTransport(transport: BusTransport): () => void {
+    if (this.closed) {
+      transport.close()
+      return () => {}
+    }
     this.transports.push(transport)
     const unsubscribe = transport.subscribe((raw) => this.dispatch(raw))
     this.transportUnsubscribers.push(unsubscribe)
@@ -128,14 +139,18 @@ export class AccountBus {
     return () => this.handlers.delete(handler)
   }
 
+  /** Idempotent, and terminal: a closed bus neither publishes nor attaches. */
   close(): void {
+    this.closed = true
     for (const unsubscribe of this.transportUnsubscribers) {
       unsubscribe()
     }
+    this.transportUnsubscribers = []
     this.handlers.clear()
     for (const transport of this.transports) {
       transport.close()
     }
+    this.transports = []
   }
 
   private dispatch(raw: unknown): void {

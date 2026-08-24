@@ -754,6 +754,13 @@ export class SwarmIdProxy {
       this.publishTimer = undefined
     }
 
+    // Retire any join still deriving its key — its continuation would
+    // otherwise attach a freshly-opened socket to the bus we are closing,
+    // with no handle left to close it. (`AccountBus.addTransport` also
+    // refuses once closed; this just avoids opening the socket at all.)
+    this.busJoinGeneration += 1
+    this.removeBusSignalingTransport = undefined
+    this.busSignalingTopic = undefined
     this.bus.close()
   }
 

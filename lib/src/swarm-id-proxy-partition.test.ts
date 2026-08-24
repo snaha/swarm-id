@@ -641,6 +641,26 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(SignalingTransport).not.toHaveBeenCalled()
     })
 
+    it("does not attach for a session destroyed mid-join", async () => {
+      await remountWithSignaling()
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      seedConnectedAccount()
+      expect(SignalingTransport).not.toHaveBeenCalled()
+
+      // Same in-flight window as the disconnect case, on the unload path.
+      // `destroy()` closes the bus; a continuation attaching after it would
+      // open a socket into the account's room with no handle left to close it.
+      ;(proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+      proxy.destroy()
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(SignalingTransport).not.toHaveBeenCalled()
+    })
+
     it("does not attach without a configured signaling url", async () => {
       seedConnectedAccount()
       vi.mocked(SignalingTransport).mockClear()

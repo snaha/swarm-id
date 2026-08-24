@@ -208,6 +208,22 @@ describe("AccountBus over BroadcastChannelTransport", () => {
     }
   })
 
+  // Every bus join is fire-and-forget (the proxy derives the account's bus key
+  // first), so one can land after the context tore down. Attaching then would
+  // put a live socket on a dead bus with nothing left holding a handle to it.
+  it("closes a transport attached after close() instead of adopting it", () => {
+    const bus = makeBus()
+    bus.close()
+    const late = new BroadcastChannelTransport("late-join-topic")
+    const closeSpy = vi.spyOn(late, "close")
+    const remove = bus.addTransport(late)
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+    // The remover is inert, and publishing on a closed bus is a no-op rather
+    // than an InvalidStateError from a closed BroadcastChannel.
+    expect(() => remove()).not.toThrow()
+    expect(() => bus.publish(UTILIZATION_MESSAGE)).not.toThrow()
+  })
+
   it("delivers an account delta whose snapshot merges exactly like a device-state feed payload", async () => {
     const sender = makeBus()
     const receiver = makeBus()
