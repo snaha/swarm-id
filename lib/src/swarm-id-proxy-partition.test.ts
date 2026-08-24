@@ -610,6 +610,37 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
+    it("does not attach for a session disconnected mid-join", async () => {
+      // Identify with nothing in storage yet, so the join below is the first
+      // one and the transport is still unattached when it starts.
+      await remountWithSignaling()
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      seedConnectedAccount()
+      expect(SignalingTransport).not.toHaveBeenCalled()
+
+      // Every join path is fire-and-forget (`loadAuthData`,
+      // `authenticateFromStorage`, `refreshStampFromStorage` — the last on
+      // every accounts storage event), so a join is in flight inside
+      // `deriveBusContext` for a few ticks after each auth event. A disconnect
+      // landing in that window clears `removeBusSignalingTransport`
+      // synchronously, and the join's continuation then attaches — and
+      // re-registers — a transport for a session that no longer exists: an
+      // open socket sitting in the signed-out account's room.
+      ;(proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+      await dispatch(
+        { type: "disconnect", requestId: "r2" },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await new Promise((resolve) => setTimeout(resolve, 20))
+
+      expect(SignalingTransport).not.toHaveBeenCalled()
+    })
+
     it("does not attach without a configured signaling url", async () => {
       seedConnectedAccount()
       vi.mocked(SignalingTransport).mockClear()

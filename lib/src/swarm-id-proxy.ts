@@ -248,6 +248,9 @@ export class SwarmIdProxy {
   /** Topic of the currently attached bus signaling transport (dedup guard). */
   private busSignalingTopic: string | undefined
   private removeBusSignalingTransport: (() => void) | undefined
+  /** Bumped by every bus join and by `clearAuthData`, so a join whose key
+   *  derivation is still in flight can tell it has been superseded. */
+  private busJoinGeneration = 0
   /** Account the live coordinator serves — routes bus lease messages. */
   private coordinatorAccountId: string | undefined
   private utilizationStore: UtilizationStoreDB | undefined
@@ -705,8 +708,15 @@ export class SwarmIdProxy {
   ): Promise<void> {
     const url = this.signalingUrl
     if (!url) return
+    const generation = ++this.busJoinGeneration
     try {
       const context = await deriveBusContext(derivationKey)
+      // Superseded while the key derivation was in flight — by a later join
+      // (another account) or by `clearAuthData`, which drops the remover
+      // synchronously. Attaching now would put a socket in a room this
+      // session no longer belongs to, and overwrite a remover that a live
+      // join owns.
+      if (generation !== this.busJoinGeneration) return
       if (this.busSignalingTopic === context.topic) return
       this.removeBusSignalingTransport?.()
       this.busSignalingTopic = context.topic
@@ -1970,6 +1980,8 @@ export class SwarmIdProxy {
     this.removeBusSignalingTransport?.()
     this.removeBusSignalingTransport = undefined
     this.busSignalingTopic = undefined
+    // Retire any join still deriving its key, or it would re-attach behind us.
+    this.busJoinGeneration += 1
     this.pendingChallenge = undefined
 
     this.emitConnectionInfoIfChanged()
