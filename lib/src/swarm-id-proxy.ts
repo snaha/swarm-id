@@ -311,6 +311,14 @@ export class SwarmIdProxy {
     this.postageStampContractAddress =
       config?.postageStampContractAddress || POSTAGE_STAMP_CONTRACT_ADDRESS
     this.signalingUrl = config?.signalingUrl
+    if (!this.signalingUrl) {
+      // Said out loud because the alternative is silence: without a URL the
+      // bus never leaves this origin+partition, and a static build that lost
+      // its `PUBLIC_BUS_SIGNALING_URL` looks exactly like a healthy one.
+      console.info(
+        "[Proxy] No account-bus signaling URL configured — cross-partition and cross-device coordination is off (docs/Account-Bus.md).",
+      )
+    }
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
