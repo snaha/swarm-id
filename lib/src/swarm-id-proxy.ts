@@ -476,12 +476,8 @@ export class SwarmIdProxy {
       return
     }
 
-    // Any resolved connection joins the account bus (idempotent per account);
-    // one code path on every browser, partitioned or not.
-    const busConnection = this.findConnectionForParent()
-    if (busConnection) {
-      void this.ensureBusSignalingTransport(busConnection.account.derivationKey)
-    }
+    // A rebound account is a different bus topic.
+    this.joinAccountBus()
 
     const stamp = this.lookupPostageStampForApp()
     const nextBatchId = stamp?.batchID.toHex()
@@ -526,6 +522,7 @@ export class SwarmIdProxy {
     // localStorage. Reused for every lease op so the identity never shifts
     // mid-session.
     this.deviceId = getOrCreateDeviceId()
+    this.joinAccountBus()
 
     // Look up postage stamp. When switching identities, the new identity may
     // not have a stamp at all — explicitly clear any prior stamper state so
@@ -677,7 +674,18 @@ export class SwarmIdProxy {
     }
 
     await this.refreshStampFromStorage()
-    void this.ensureBusSignalingTransport(account.derivationKey)
+  }
+
+  /**
+   * Join the account bus for whatever connection is resolvable right now
+   * (idempotent per account). Called from every path that establishes or
+   * re-resolves a connection — the unpartitioned ones included, or the bus
+   * would never reach past this origin+partition outside Safari.
+   */
+  private joinAccountBus(): void {
+    const connection = this.findConnectionForParent()
+    if (!connection) return
+    void this.ensureBusSignalingTransport(connection.account.derivationKey)
   }
 
   /**
@@ -723,15 +731,35 @@ export class SwarmIdProxy {
 
     // Release the partition lease (best-effort) so peers see this device
     // vacate its partition promptly.
-    this.coordinator?.teardown()
-    this.coordinator = undefined
-    this.coordinatorAccountId = undefined
+    this.teardownCoordinator()
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
 
     this.bus.close()
+  }
+
+  /**
+   * Tear the write coordinator down, announcing the partition it held so
+   * waiting peers wake now instead of sleeping out their poll interval
+   * (docs/Account-Bus.md, bus-accelerated leases). The announcement races the
+   * Swarm release it describes, which is harmless: the lock SOCs stay the
+   * authority, so a peer woken too early just spends one extra read round.
+   */
+  private teardownCoordinator(): void {
+    const partition = this.coordinator?.currentPartition
+    const accountId = this.coordinatorAccountId
+    this.coordinator?.teardown()
+    this.coordinator = undefined
+    this.coordinatorAccountId = undefined
+    if (partition === undefined || !accountId || !this.deviceId) return
+    this.bus.publish({
+      type: "lease-released",
+      accountId,
+      partition,
+      fromDeviceId: this.deviceId,
+    })
   }
 
   /**
@@ -891,7 +919,7 @@ export class SwarmIdProxy {
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
     // lease already held. Single-device accounts get a lock-only coordinator.
-    this.coordinator?.teardown()
+    this.teardownCoordinator()
     const backupKeyHex = await deriveSecret(
       uint8ArrayToHex(accountInfo.encryptionKey),
       "backup-key",
@@ -1395,6 +1423,7 @@ export class SwarmIdProxy {
       this.authenticated = true
       this.authLoading = false
       this.showAuthButton()
+      this.joinAccountBus()
 
       // Look up postage stamp from shared storage based on connected identity
       const stamp = this.lookupPostageStampForApp()
@@ -1877,10 +1906,9 @@ export class SwarmIdProxy {
     this.appSecret = undefined
     this.postageBatchId = undefined
     this.signerKey = undefined
+    // Before dropping `deviceId` — the release announcement is sent as us.
+    this.teardownCoordinator()
     this.deviceId = undefined
-    this.coordinator?.teardown()
-    this.coordinator = undefined
-    this.coordinatorAccountId = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined

@@ -32,6 +32,18 @@ vi.mock("./storage/utilization-store", () => ({
     return {}
   }),
 }))
+// The signaling transport opens a real WebSocket; the tests only assert that
+// the proxy attaches one (and with which topic).
+vi.mock("./bus/signaling-transport", () => ({
+  SignalingTransport: vi.fn(function (options: unknown) {
+    return {
+      options,
+      publish: vi.fn(),
+      subscribe: vi.fn(() => () => {}),
+      close: vi.fn(),
+    }
+  }),
+}))
 vi.mock("./sync/batch-write-coordinator", () => ({
   BatchWriteCoordinator: vi.fn(function (deps: unknown) {
     return {
@@ -49,11 +61,17 @@ vi.mock("./sync/batch-write-coordinator", () => ({
 import { BatchId, EthAddress, PrivateKey } from "@ethersphere/bee-js"
 
 import { SwarmIdProxy } from "./swarm-id-proxy"
+import type { ProxyConfig } from "./swarm-id-proxy"
+import { SignalingTransport } from "./bus/signaling-transport"
+import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
-import { serializeSyncedAccount } from "./utils/storage-managers"
-import { STORAGE_CHALLENGE_KEY } from "./types"
-import type { SyncedAccount } from "./schemas"
+import {
+  serializeAccount,
+  serializeSyncedAccount,
+} from "./utils/storage-managers"
+import { STORAGE_CHALLENGE_KEY, STORAGE_KEY_ACCOUNTS } from "./types"
+import type { SignedInAccount, SyncedAccount } from "./schemas"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ID_ORIGIN = "https://id.example.com"
@@ -112,12 +130,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   let localStorageFake: Storage
   let proxy: SwarmIdProxy
 
-  beforeEach(() => {
-    vi.restoreAllMocks()
-
-    parentWindow = { postMessage: vi.fn() }
-    localStorageFake = makeLocalStorage()
-
+  /** (Re)create the proxy under a fresh window mock; keeps `localStorageFake`. */
+  function mountProxy(config?: ProxyConfig): void {
     const listeners: Record<string, unknown> = {}
     const mockWindow = {
       addEventListener: vi.fn((type: string, listener: unknown) => {
@@ -134,8 +148,16 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     vi.stubGlobal("window", mockWindow)
     vi.stubGlobal("localStorage", localStorageFake)
 
-    proxy = new SwarmIdProxy()
+    proxy = new SwarmIdProxy(config)
     messageListener = listeners["message"] as MessageListener
+  }
+
+  beforeEach(() => {
+    vi.restoreAllMocks()
+
+    parentWindow = { postMessage: vi.fn() }
+    localStorageFake = makeLocalStorage()
+    mountProxy()
   })
 
   // Each proxy subscribes the shared BroadcastChannel bus; without a destroy a
@@ -270,6 +292,35 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
   })
 
+  it("announces the released partition when a teardown drops a held lease", async () => {
+    const account = makeSyncedAccount()
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, { account: serializeSyncedAccount(account) })
+
+    const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as { currentPartition: number | undefined }
+    coordinator.currentPartition = 2
+
+    const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+    const published: Record<string, unknown>[] = []
+    busChannel.onmessage = (event) =>
+      published.push(event.data as Record<string, unknown>)
+    try {
+      // A closing tab must wake waiters immediately; otherwise they sleep out
+      // the full poll interval the bus exists to skip.
+      proxy.destroy()
+      await vi.waitFor(() =>
+        expect(
+          published.filter((m) => m.type === "lease-released"),
+        ).toHaveLength(1),
+      )
+      expect(published[0].partition).toBe(2)
+      expect(published[0].accountId).toBe("aa".repeat(20))
+    } finally {
+      busChannel.close()
+    }
+  })
+
   it("ignores its own lease messages and other accounts' messages", async () => {
     const account = makeSyncedAccount()
     const challenge = await startPartitionedConnect()
@@ -325,5 +376,95 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     })
 
     expect(messagesOfType("authSuccess")).toHaveLength(0)
+  })
+
+  // The cross-partition/cross-device transport is what makes the bus more than
+  // a same-partition BroadcastChannel. Every path that resolves a connection
+  // must attach it — the unpartitioned ones too, or the bus only ever exists
+  // on Safari (docs/Account-Bus.md, phase 2).
+  describe("account-bus signaling transport", () => {
+    const SIGNALING_URL = "ws://signaling.test"
+
+    /** Seed shared storage with an account already connected to the dApp. */
+    function seedConnectedAccount(): SyncedAccount {
+      const synced = makeSyncedAccount()
+      const stored: SignedInAccount = {
+        ...synced,
+        connectedApps: [
+          {
+            appUrl: PARENT_ORIGIN,
+            appName: "dApp",
+            appSecret: "44".repeat(32),
+            lastConnectedAt: Date.now(),
+            connectedUntil: Date.now() + 60_000,
+          },
+        ],
+        // Inert but schema-valid: the vault is never opened here.
+        access: {
+          type: "password",
+          kdfSalt: "ab".repeat(16),
+          kdfIterations: 100_000,
+        },
+        encryptedSeed: "00".repeat(48),
+      }
+      localStorageFake.setItem(
+        STORAGE_KEY_ACCOUNTS,
+        JSON.stringify({ version: 1, data: [serializeAccount(stored)] }),
+      )
+      return synced
+    }
+
+    async function remountWithSignaling(): Promise<void> {
+      proxy.destroy()
+      vi.mocked(SignalingTransport).mockClear()
+      mountProxy({ signalingUrl: SIGNALING_URL })
+    }
+
+    it("attaches on a first authentication from shared storage", async () => {
+      const synced = seedConnectedAccount()
+      await remountWithSignaling()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      await vi.waitFor(() =>
+        expect(SignalingTransport).toHaveBeenCalledTimes(1),
+      )
+      const { topic } = await deriveBusContext(synced.derivationKey)
+      expect(vi.mocked(SignalingTransport).mock.calls[0][0]).toMatchObject({
+        url: SIGNALING_URL,
+        topic,
+      })
+    })
+
+    it("attaches on the partitioned hydration path", async () => {
+      const account = makeSyncedAccount()
+      await remountWithSignaling()
+
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(account),
+      })
+
+      await vi.waitFor(() =>
+        expect(SignalingTransport).toHaveBeenCalledTimes(1),
+      )
+    })
+
+    it("does not attach without a configured signaling url", async () => {
+      seedConnectedAccount()
+      vi.mocked(SignalingTransport).mockClear()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      expect(SignalingTransport).not.toHaveBeenCalled()
+    })
   })
 })
