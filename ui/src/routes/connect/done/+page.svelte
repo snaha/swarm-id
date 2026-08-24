@@ -25,7 +25,6 @@
   import AccountAvatar from '$lib/components/account-avatar.svelte'
   import AppHeader from '$lib/components/app-header.svelte'
   import DriveAddDialog from '$lib/components/drive-add-dialog.svelte'
-  import Toast from '$lib/components/toast.svelte'
   import { Button } from '$lib/components/ui/button'
   import { Select, type SelectOption } from '$lib/components/ui/select'
   import { driveDisplayName } from '$lib/drives'
@@ -33,9 +32,9 @@
   import { accountsStore } from '$lib/stores/accounts.svelte'
   import { connectStore } from '$lib/stores/connect.svelte'
   import { sessionStore } from '$lib/stores/session.svelte'
+  import { toastStore } from '$lib/stores/toast.svelte'
   import { truncateAddress } from '$lib/utils'
 
-  const TOAST_DURATION_MS = 4000
   const AVATAR_SIZE = 80
 
   const account = $derived(
@@ -61,7 +60,6 @@
   let chosenBatchHex = $state<string | undefined>(undefined)
   const selectedBatchHex = $derived(chosenBatchHex ?? defaultBatchHex)
 
-  let toastMessage = $state<string | undefined>(undefined)
   let addDriveOpen = $state(false)
 
   onMount(() => {
@@ -69,9 +67,7 @@
       goto(resolve(routes.ROOT))
       return
     }
-    toastMessage = `Connected to ${request.appName}!`
-    const timer = setTimeout(() => (toastMessage = undefined), TOAST_DURATION_MS)
-    return () => clearTimeout(timer)
+    toastStore.show(`Connected to ${request.appName}!`)
   })
 
   function goToApp() {
@@ -143,16 +139,7 @@
     </main>
 
     {#if addDriveOpen}
-      <DriveAddDialog
-        {account}
-        onClose={() => (addDriveOpen = false)}
-        onAdded={(message) => {
-          addDriveOpen = false
-          toastMessage = message
-        }}
-      />
+      <DriveAddDialog {account} onClose={() => (addDriveOpen = false)} onAdded={toastStore.show} />
     {/if}
-
-    <Toast message={toastMessage} />
   </div>
 {/if}
