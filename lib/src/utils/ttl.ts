@@ -5,7 +5,7 @@
  * TTL (Time To Live) calculation and formatting utilities for postage stamps
  */
 
-import { postJsonRpc } from "./json-rpc"
+import { CHAIN_READ_TIMEOUT_MS, jsonRpcCall } from "./json-rpc"
 
 /**
  * Gnosis Chain block time in seconds
@@ -140,21 +140,19 @@ export async function getBlockTimestamp(
   rpcUrl: string,
   blockNumber: number,
 ): Promise<number> {
-  const data = (await postJsonRpc(rpcUrl, {
-    jsonrpc: "2.0",
-    method: "eth_getBlockByNumber",
-    params: [`0x${blockNumber.toString(16)}`, false],
-    id: 1,
-  })) as { error?: { message?: string }; result?: { timestamp: string } }
-
-  if (data.error) {
-    throw new Error(`RPC error: ${data.error.message}`)
+  const block = await jsonRpcCall<{ timestamp?: string }>(
+    rpcUrl,
+    "eth_getBlockByNumber",
+    [`0x${blockNumber.toString(16)}`, false],
+    { timeoutMs: CHAIN_READ_TIMEOUT_MS },
+  )
+  // An unknown block already rejected above (JSON-RPC answers `null`). This is
+  // the block that exists without the field, where `parseInt` would hand the
+  // expiry math a NaN timestamp instead of failing.
+  if (typeof block.timestamp !== "string") {
+    throw new Error(`Block ${blockNumber} came back without a timestamp`)
   }
-  if (!data.result) {
-    throw new Error(`Block ${blockNumber} not found`)
-  }
-
-  return parseInt(data.result.timestamp, 16)
+  return parseInt(block.timestamp, 16)
 }
 
 /**

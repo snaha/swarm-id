@@ -20,7 +20,7 @@
  */
 
 import { fetchBatchTTL, GNOSIS_BLOCK_TIME } from "./ttl"
-import { postJsonRpc } from "./json-rpc"
+import { CHAIN_READ_TIMEOUT_MS, jsonRpcBatch } from "./json-rpc"
 
 /**
  * PostageStamp contract address on Gnosis Chain. Lowercased — RPC nodes accept
@@ -159,65 +159,35 @@ export function decodeUint(hex: string): bigint {
   return BigInt(`0x${body}`)
 }
 
-interface JsonRpcCall {
+interface EthCall {
   to: string
   data: string
 }
 
 /**
- * Sends a batched `eth_call` JSON-RPC request and returns the raw hex result of
- * each call, in the same order as `calls`. Responses are matched back by id
- * because JSON-RPC does not guarantee batch ordering.
- * @throws if the transport fails or any sub-call returns an error/empty result.
+ * Sends a batched `eth_call` and returns the raw hex result of each call, in
+ * the same order as `calls`. Id matching lives in {@link jsonRpcBatch}; this
+ * narrows its `unknown` results to the hex strings `eth_call` returns.
+ * @throws if the transport fails or any sub-call returns an error/non-hex result.
  */
 async function ethCallBatch(
   rpcUrl: string,
-  calls: JsonRpcCall[],
+  calls: EthCall[],
 ): Promise<string[]> {
-  const payload = calls.map((call, index) => ({
-    jsonrpc: "2.0",
-    id: index,
-    method: "eth_call",
-    params: [{ to: call.to, data: call.data }, "latest"],
-  }))
-
-  const data: unknown = await postJsonRpc(rpcUrl, payload)
-  if (!Array.isArray(data) || data.length !== calls.length) {
-    throw new Error("Malformed JSON-RPC batch response")
-  }
-
-  const results: string[] = new Array(calls.length)
-  const seen = new Set<number>()
-  for (const entry of data as Array<{
-    id?: unknown
-    result?: unknown
-    error?: { message?: string }
-  }>) {
-    if (
-      typeof entry.id !== "number" ||
-      entry.id < 0 ||
-      entry.id >= calls.length
-    ) {
-      throw new Error("JSON-RPC response with out-of-range id")
+  const results = await jsonRpcBatch(
+    rpcUrl,
+    calls.map((call) => ({
+      method: "eth_call",
+      params: [{ to: call.to, data: call.data }, "latest"],
+    })),
+    { timeoutMs: CHAIN_READ_TIMEOUT_MS },
+  )
+  return results.map((result) => {
+    if (typeof result !== "string") {
+      throw new Error("eth_call returned something other than a hex string")
     }
-    if (seen.has(entry.id)) {
-      throw new Error(`JSON-RPC response with duplicate id ${entry.id}`)
-    }
-    if (entry.error) {
-      throw new Error(`RPC error: ${entry.error.message ?? "unknown"}`)
-    }
-    if (typeof entry.result !== "string") {
-      throw new Error("JSON-RPC response missing result")
-    }
-    seen.add(entry.id)
-    results[entry.id] = entry.result
-  }
-  // Unique, in-range ids covering exactly `calls.length` slots means every
-  // slot is filled — so the `string[]` type holds no holes.
-  if (seen.size !== calls.length) {
-    throw new Error("JSON-RPC batch response missing results")
-  }
-  return results
+    return result
+  })
 }
 
 /**

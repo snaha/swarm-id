@@ -8,6 +8,7 @@ import type { ChunkReference } from "./types"
 // Constants
 export const CHUNK_SIZE = 4096
 export const PLAIN_REFS_PER_CHUNK = 128 // 4096 / 32 = 128 plain (unencrypted) refs per intermediate chunk
+export const ENCRYPTED_REFS_PER_CHUNK = 64 // 4096 / 64 = 64 encrypted refs per intermediate chunk
 
 /**
  * Split data into 4096-byte chunks

@@ -4,9 +4,13 @@
 -->
 
 <script lang="ts">
+  import { jsonRpcCall } from '@snaha/swarm-id'
+
   import { cn } from '$lib/utils'
 
   const CHECK_INTERVAL_MS = 10000
+  // Shorter than the interval, so a hung endpoint cannot stack up probes.
+  const PROBE_TIMEOUT_MS = 5000
 
   type Status = 'online' | 'offline' | 'checking'
   type CheckMethod = 'head' | 'json-rpc'
@@ -24,13 +28,10 @@
   async function probe(url: string, how: CheckMethod): Promise<Status> {
     try {
       if (how === 'json-rpc') {
-        // Use eth_blockNumber for JSON-RPC endpoints
-        const response = await fetch(url, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ jsonrpc: '2.0', method: 'eth_blockNumber', params: [], id: 1 }),
-        })
-        return response.ok ? 'online' : 'offline'
+        // Checked, not a bare fetch: a node answering 200 with a JSON-RPC
+        // error is not serving the chain.
+        await jsonRpcCall(url, 'eth_blockNumber', [], { timeoutMs: PROBE_TIMEOUT_MS })
+        return 'online'
       }
       // Use no-cors HEAD for regular HTTP endpoints
       await fetch(url, { method: 'HEAD', mode: 'no-cors' })

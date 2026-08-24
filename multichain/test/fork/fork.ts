@@ -10,34 +10,21 @@
  * now that nothing here rewinds the chain.
  */
 
+import { jsonRpcCall, jsonRpcCallOrUndefined } from "../../src/json-rpc"
+
 const PROBE_TIMEOUT_MILLIS = 2000
 const GNOSIS_CHAIN_ID = 100
 
 export const FORK_RPC_URL = process.env.FORK_RPC_URL ?? "http://localhost:9545"
 
-async function rpc(method: string, params: unknown[]): Promise<unknown> {
-  const response = await fetch(FORK_RPC_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-    signal: AbortSignal.timeout(PROBE_TIMEOUT_MILLIS),
-  })
-  const data = (await response.json()) as {
-    result?: unknown
-    error?: { message?: string }
-  }
-  if (data.error) {
-    throw new Error(`${method}: ${data.error.message ?? "unknown error"}`)
-  }
-  return data.result
-}
+/** Short deadline on purpose: "the chain is not up" should be quick to learn. */
+const probe = { timeoutMs: PROBE_TIMEOUT_MILLIS }
 
 /** True only when a node is answering AND it really is the Gnosis chain. */
 export async function isGnosisForkReachable(): Promise<boolean> {
   try {
-    return (
-      (await rpc("eth_chainId", [])) === `0x${GNOSIS_CHAIN_ID.toString(16)}`
-    )
+    const chainId = await jsonRpcCall(FORK_RPC_URL, "eth_chainId", [], probe)
+    return chainId === `0x${GNOSIS_CHAIN_ID.toString(16)}`
   } catch {
     return false
   }
@@ -52,7 +39,13 @@ export async function setNativeBalance(
   address: `0x${string}`,
   wei: bigint,
 ): Promise<void> {
-  await rpc("anvil_setBalance", [address, `0x${wei.toString(16)}`])
+  // Null-tolerant: anvil answers `null` when this succeeds.
+  await jsonRpcCallOrUndefined(
+    FORK_RPC_URL,
+    "anvil_setBalance",
+    [address, `0x${wei.toString(16)}`],
+    probe,
+  )
 }
 
 const NONCE_BYTES = 32

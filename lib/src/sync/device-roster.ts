@@ -38,7 +38,7 @@ import {
   BasicSequentialUpdater,
   SyncSequentialFinder,
 } from "../proxy/feeds/sequence"
-import { uploadData, type UploadTarget } from "../proxy/upload"
+import { isStamperTarget, uploadData, type UploadTarget } from "../proxy/upload"
 import { downloadDataWithChunkAPI } from "../proxy/download-data"
 import { withTimeout } from "../utils/promise"
 import { isNotFoundError } from "../utils/bee-error"
@@ -379,12 +379,6 @@ async function appendToRoster(opts: {
     rosterMemoKey(opts.accountId, opts.owner),
     Number(next) + 1,
   )
-}
-
-function isStamperTarget(
-  t: UploadTarget,
-): t is UploadTarget & { mode: "stamper" } {
-  return t.mode === "stamper"
 }
 
 /**

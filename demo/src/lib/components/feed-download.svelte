@@ -9,9 +9,12 @@
   import ResultDisplay from './result-display.svelte'
   import { clientStore } from '$lib/stores/client.svelte'
   import { logStore } from '$lib/stores/log.svelte'
-  import { bytesToHex } from '$lib/utils/hex'
   import { validateHex } from '$lib/utils/validation'
-  import { extractContentFromFlatManifest, extractEntryFromManifest } from '@snaha/swarm-id'
+  import {
+    extractContentFromFlatManifest,
+    extractEntryFromManifest,
+    uint8ArrayToHex,
+  } from '@snaha/swarm-id'
   import type { ResultData } from './result-types'
 
   interface Props {
@@ -197,7 +200,7 @@
           logStore.log('Epoch feed download payload not found')
         } else {
           const text = new TextDecoder().decode(feedResult.payload)
-          const hex = bytesToHex(feedResult.payload)
+          const hex = uint8ArrayToHex(feedResult.payload)
           result = {
             title: 'Epoch Feed Payload:',
             entries: [
@@ -218,7 +221,7 @@
         }
         const feedResult = await reader.downloadPayload(encryptionKey, getDownloadOptions())
         const text = new TextDecoder().decode(feedResult.payload)
-        const hex = bytesToHex(feedResult.payload)
+        const hex = uint8ArrayToHex(feedResult.payload)
         result = {
           title: 'Sequential Payload:',
           entries: [

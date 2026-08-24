@@ -24,8 +24,7 @@ import {
   UNENCRYPTED_REF_SIZE,
 } from "../chunk"
 import { Binary } from "cafe-utility"
-import { PLAIN_REFS_PER_CHUNK } from "./chunking"
-import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
+import { ENCRYPTED_REFS_PER_CHUNK, PLAIN_REFS_PER_CHUNK } from "./chunking"
 import type { UploadProgress } from "./types"
 import type { SingleOwnerChunk } from "../types"
 import { hexToUint8Array } from "../utils/hex"

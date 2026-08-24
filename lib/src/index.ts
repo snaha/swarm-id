@@ -496,7 +496,8 @@ export { buildAuthUrl, isHttpUrl } from "./utils/url"
 // Browser detection utilities
 export { isWebKit } from "./utils/browser"
 
-// Promise utilities
+// Promise utilities. `TimeoutError` is exported because it is the discriminator
+// for a deadline anywhere in this library, the chain reads included.
 export { sleep, withTimeout, TimeoutError } from "./utils/promise"
 
 // Manifest builder utilities for /bzz/ feed compatibility
@@ -553,6 +554,14 @@ export {
   BLOCKS_PER_DAY,
 } from "./utils/ttl"
 export type { ChainState } from "./utils/ttl"
+
+// Checked JSON-RPC transport — the one contract for "is this an answer?"
+export {
+  jsonRpcCall,
+  jsonRpcBatch,
+  CHAIN_READ_TIMEOUT_MS,
+} from "./utils/json-rpc"
+export type { JsonRpcOptions, JsonRpcRequest } from "./utils/json-rpc"
 
 // On-chain postage batch reads (PostageStamp contract, ground-truth TTL)
 export {

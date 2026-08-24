@@ -5,32 +5,18 @@ import {
   DebouncedUtilizationUploader,
   type SyncAccountFunction,
   type SyncResult,
-  UtilizationStoreDB,
   createSyncAccount,
 } from '@snaha/swarm-id'
 
 import { browser } from '$app/environment'
 
-import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
+import { getUtilizationStore, postageStampsStore } from '$lib/dev/postage-stamps.svelte'
 import { accountsStore } from '$lib/stores/accounts.svelte'
 import { networkSettingsStore } from '$lib/stores/network-settings.svelte'
 
 // ============================================================================
 // Lazy Initialization (Browser Only)
 // ============================================================================
-
-// Lazy utilization store initialization
-let utilizationStore: UtilizationStoreDB | undefined
-
-const getUtilizationStore = () => {
-  if (!browser) return undefined
-
-  if (!utilizationStore) {
-    utilizationStore = new UtilizationStoreDB()
-  }
-
-  return utilizationStore
-}
 
 // Lazy debounced uploader initialization
 let utilizationUploader: DebouncedUtilizationUploader | undefined
@@ -58,7 +44,7 @@ const getSyncAccount = () => {
   if (!syncAccountFn || currentUrl !== lastBeeUrl) {
     const utilStore = getUtilizationStore()
     const utilUploader = getUtilizationUploader()
-    if (!utilStore || !utilUploader) return undefined
+    if (!utilUploader) return undefined
 
     lastBeeUrl = currentUrl
     syncAccountFn = createSyncAccount({

@@ -3,6 +3,11 @@
 
 import { secp256k1 } from "@noble/curves/secp256k1"
 import { Binary } from "cafe-utility"
+// An ACT access key is the same 32 random bytes a chunk encryption key is.
+// Re-exported so ACT callers keep reaching for it beside the rest of the ACT crypto.
+import { generateRandomKey } from "../../chunk"
+
+export { generateRandomKey }
 
 // Key derivation nonces
 const LOOKUP_KEY_NONCE = 0x00
@@ -192,13 +197,4 @@ export function compressPublicKey(x: Uint8Array, y: Uint8Array): Uint8Array {
   result.set(x, 1)
 
   return result
-}
-
-/**
- * Generate a random 32-byte key using crypto.getRandomValues
- */
-export function generateRandomKey(): Uint8Array {
-  const key = new Uint8Array(KEY_SIZE)
-  crypto.getRandomValues(key)
-  return key
 }

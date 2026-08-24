@@ -21,8 +21,11 @@ import { describe, it, expect } from "vitest"
 import type { Bee, Stamper } from "@ethersphere/bee-js"
 import { uploadData, type UploadTarget } from "./upload"
 import { downloadDataWithChunkAPI } from "./download-data"
-import { CHUNK_SIZE, PLAIN_REFS_PER_CHUNK } from "./chunking"
-import { ENCRYPTED_REFS_PER_CHUNK } from "./chunking-encrypted"
+import {
+  CHUNK_SIZE,
+  ENCRYPTED_REFS_PER_CHUNK,
+  PLAIN_REFS_PER_CHUNK,
+} from "./chunking"
 import {
   MockBee,
   MockChunkStore,
