@@ -89,25 +89,26 @@ describe('signaling server', () => {
     }
   })
 
-  it('broadcasts an untargeted relay to the rest of the room only', async () => {
+  // There is no room-wide broadcast: an untargeted relay is simply malformed,
+  // so a peer that guessed a topic gets no amplifier.
+  it('drops an untargeted relay instead of broadcasting it', async () => {
     const topic = randomTopic()
     const sender = await connect(topic)
     const receiver = await connect(topic)
-    const outsider = await connect(randomTopic())
     try {
       sender.socket.send(JSON.stringify({ type: 'relay', payload: 'cipher' }))
+      sender.socket.send(JSON.stringify({ type: 'relay', to: receiver.peerId, payload: 'direct' }))
+      // The well-formed follow-up is the barrier: if the first had been
+      // relayed it would have arrived ahead of this one.
       const relayed = await receiver.next((m) => m.type === 'relay')
       expect(relayed).toEqual({
         type: 'relay',
         from: sender.peerId,
-        payload: 'cipher',
+        payload: 'direct',
       })
-      expect(sender.received.filter((m) => m.type === 'relay')).toEqual([])
-      expect(outsider.received.filter((m) => m.type === 'relay')).toEqual([])
     } finally {
       sender.close()
       receiver.close()
-      outsider.close()
     }
   })
 
@@ -172,7 +173,9 @@ describe('signaling server', () => {
     try {
       sender.socket.send('not json')
       sender.socket.send(JSON.stringify({ type: 'unknown' }))
-      sender.socket.send(JSON.stringify({ type: 'relay', payload: 'still-on' }))
+      sender.socket.send(
+        JSON.stringify({ type: 'relay', to: receiver.peerId, payload: 'still-on' }),
+      )
       const relayed = await receiver.next((m) => m.type === 'relay')
       expect(relayed.payload).toBe('still-on')
     } finally {

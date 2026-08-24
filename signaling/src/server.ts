@@ -10,9 +10,14 @@
  *
  * - `signal`: forward WebRTC SDP/ICE blobs to one named peer, so browsers can
  *   upgrade to direct DataChannels — the preferred data path.
- * - `relay`: forward an opaque encrypted payload to one peer (or the whole
- *   room) for peers WebRTC cannot connect. Payloads are end-to-end encrypted
- *   by the clients; the server never sees plaintext and stores nothing.
+ * - `relay`: forward an opaque encrypted payload to one named peer, for peers
+ *   WebRTC cannot connect. Payloads are end-to-end encrypted by the clients;
+ *   the server never sees plaintext and stores nothing.
+ *
+ * Both forward to exactly one peer. There is deliberately no room-wide
+ * broadcast: clients fan out per peer anyway (they pick relay vs DataChannel
+ * per peer), so a broadcast would only hand anyone who guesses a topic a
+ * one-to-many amplifier.
  */
 
 import { createServer } from 'node:http'
@@ -31,7 +36,7 @@ const WS_CLOSE_POLICY_VIOLATION = 1008
 const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('relay'),
-    to: z.string().optional(),
+    to: z.string(),
     payload: z.string(),
   }),
   z.object({
@@ -131,18 +136,9 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
         return
       }
 
-      const outgoing = {
-        type: 'relay',
-        from: peer.id,
-        payload: message.payload,
-      }
-      if (message.to !== undefined) {
-        const target = room.get(message.to)
-        if (target) send(target, outgoing)
-        return
-      }
-      for (const other of room.values()) {
-        if (other.id !== peer.id) send(other, outgoing)
+      const target = room.get(message.to)
+      if (target) {
+        send(target, { type: 'relay', from: peer.id, payload: message.payload })
       }
     })
 
