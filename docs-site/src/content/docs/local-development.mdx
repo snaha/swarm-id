@@ -42,6 +42,10 @@ Once the cluster is running, these endpoints are available:
 | Worker 1 API   | `http://localhost:16331` |
 | Blockchain RPC | `http://localhost:9545`  |
 
+Every node in the cluster allows all CORS origins, so the identity UI can talk to
+`http://localhost:1633` as soon as it is up. A Bee node you run yourself instead needs the identity
+UI's origin allowed explicitly — see [Using Your Own Bee Node](/own-bee-node).
+
 ## Developer Tools (/dev)
 
 The Identity UI includes a Developer Tools page at `http://localhost:5500/dev` with utilities for testing and debugging.
@@ -130,6 +134,13 @@ To check if storage is partitioned:
 3. Look for partitioned storage indicators
 
 On Chrome/Firefox localhost, storage should work immediately. If issues occur, try clicking the iframe first to trigger Storage Access API.
+
+### Bee Requests Blocked by CORS
+
+The cluster started by `pnpm dev:cluster:start` allows every origin, so this only bites a Bee node
+you run by hand: it has to allow the **identity UI's** origin (`http://localhost:5500` in
+development), because Bee requests are made by the Swarm ID iframe rather than by the app embedding
+it. See [Using Your Own Bee Node](/own-bee-node).
 
 ### Bee Cluster Won't Start
 

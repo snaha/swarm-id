@@ -1,0 +1,89 @@
+---
+title: Using Your Own Bee Node
+description: Point Swarm ID at a self-hosted Bee node, and allow the right origin in its CORS configuration
+---
+
+By default Swarm ID talks to the public gateway at `https://api.gateway.ethswarm.org/`. To use a
+node you run yourself, open the settings menu in the identity UI, choose **Network settings**, and
+put your node's API URL in **Bee address**.
+
+One thing has to be configured on the node itself: **CORS**. Requests reach Bee from a browser, and
+a node that does not allow the origin they come from rejects every one of them.
+
+## Why the iframe's origin is the one that matters
+
+Swarm ID never hands your dApp a Bee URL to fetch from. When your dApp calls `uploadData()`, the
+call is posted to the hidden iframe served from the identity UI's origin, and **the iframe makes the
+HTTP request to Bee**. The browser therefore sends `Origin: <identity UI origin>` — your dApp's own
+origin never appears on a request to Bee at all.
+
+So the origin to allow is the identity UI's, not your app's. This is the part that is easy to get
+backwards: allowing `https://my-dapp.example` and nothing else leaves every upload and download
+blocked, no matter how many dApps you add to the list.
+
+The identity UI also talks to Bee first-party — when you manage drives on it directly — but that is
+the same origin, so a single entry covers both paths.
+
+## Configuring Bee
+
+In `bee.yaml`:
+
+```yaml
+cors-allowed-origins:
+  - https://swarm-id.snaha.net
+  - https://swarm.snaha.net
+  - http://localhost:5500
+```
+
+The same setting is available as the `BEE_CORS_ALLOWED_ORIGINS` environment variable or the
+`--cors-allowed-origins` flag. Bee allows no origins at all by default, so a node you start yourself
+rejects browser requests until this is set. Restart the node after changing it.
+
+List only the identity UIs you actually use:
+
+| Identity UI                    | Origin to allow              |
+| ------------------------------ | ---------------------------- |
+| Production                     | `https://swarm-id.snaha.net` |
+| GitHub Pages build (`/id/`)    | `https://swarm.snaha.net`    |
+| Local development (`pnpm dev`) | `http://localhost:5500`      |
+
+Entries are **origins** — scheme, host and port, with no path and no trailing slash. That is why the
+GitHub Pages entry is the bare host: the identity UI is served under `/id/`, but a path is not part
+of an origin, so one entry also covers the per-PR previews under `/pr-N/id/`.
+
+`http://localhost:5500` is the identity UI's dev server, not the demo's — the demo runs on port 3500
+and, as above, never talks to Bee itself. If you serve the identity UI from a domain of your own
+(see the [SSH tunnel setup](/local-development#testing-with-real-domains-ssh-tunnel)), add that
+origin instead.
+
+:::caution
+`cors-allowed-origins: ["*"]` is a convenient shortcut for a node on your own machine, but on a
+reachable node it lets any website in the browser drive your node — including spending its postage
+batches. Name the origins explicitly there.
+:::
+
+:::caution
+If a reverse proxy (nginx, Caddy) sits in front of Bee, check that it is not stripping Bee's
+`Access-Control-Allow-Origin` header, and that it is not adding one of its own — two of those
+headers on a response is itself a CORS failure. Set the headers in one place, not both.
+:::
+
+## Recognising the failure
+
+A CORS rejection looks like a broken node rather than a misconfigured one. Uploads and downloads
+fail, the browser console reports the request as blocked by CORS policy, and the request shows up in
+the network tab with no usable response. Meanwhile `curl` against the very same URL succeeds — curl
+sends no `Origin` header, so nothing is checked. If the node answers your terminal but not the
+browser, this setting is the first thing to look at.
+
+## The local development cluster
+
+The [local Bee cluster](/local-development#starting-the-local-bee-cluster) started by
+`pnpm dev:cluster:start` already sets `BEE_CORS_ALLOWED_ORIGINS: "*"` on every node, so
+`http://localhost:1633` works from the identity UI with nothing further to configure. Only a node
+you run by hand needs the setting above.
+
+## Subsidised gateways
+
+A [subsidised gateway](/subsidised-gateway) is fetched by the same iframe, so it needs the same
+entry in its CORS configuration — the identity UI's origin, not the origins of the dApps it serves.
