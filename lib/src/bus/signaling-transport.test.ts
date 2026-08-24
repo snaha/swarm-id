@@ -16,6 +16,8 @@ const OTHER_DERIVATION_KEY = "99".repeat(32)
 const UTILIZATION_MESSAGE: BusMessageInput = {
   type: "utilization-updated",
   batchId: "ab".repeat(32),
+  partition: 0,
+  partitionCount: 2,
   buckets: [{ index: 1, value: 2 }],
 }
 

@@ -13,6 +13,17 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
 
+/**
+ * The single stamper the mocked `create` hands back, so a test can move the
+ * bound slot lane (`currentPartition` / `partitionCount`) and observe the
+ * utilization deltas the proxy folds in.
+ */
+const stamperStub = vi.hoisted(() => ({
+  currentPartition: 0 as number | undefined,
+  partitionCount: 2,
+  applyUtilizationUpdate: vi.fn(),
+}))
+
 // Stub the stamper/store/coordinator machinery so `initializeStamper` can run
 // without IndexedDB or network access.
 vi.mock("./utils/batch-utilization", async (importActual) => {
@@ -22,7 +33,9 @@ vi.mock("./utils/batch-utilization", async (importActual) => {
     ...actual,
     UtilizationAwareStamper: {
       create: vi.fn((_signerKey: string, batchId: unknown) =>
-        Promise.resolve({ mock: "stamper", batchId }),
+        Promise.resolve(
+          Object.assign(stamperStub, { mock: "stamper", batchId }),
+        ),
       ),
     },
   }
@@ -366,6 +379,90 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     } finally {
       busChannel.close()
     }
+  })
+
+  // `buckets` carry the PER-PARTITION counter `j`, not an absolute slot, so a
+  // delta is only foldable by a context bound to the same slot lane. The bus
+  // reaches other devices — which hold OTHER partitions of the same batch — so
+  // the lane must be on the wire and checked on receive.
+  describe("utilization deltas are lane-scoped", () => {
+    const LANE_BUCKETS = [{ index: 7, value: 900 }]
+    const OWN_BUCKETS = [{ index: 7, value: 6 }]
+
+    async function hydrateOnLane(partition: number): Promise<void> {
+      stamperStub.currentPartition = partition
+      stamperStub.partitionCount = 2
+      stamperStub.applyUtilizationUpdate.mockClear()
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+      })
+    }
+
+    it("drops a delta from a peer holding a different partition", async () => {
+      await hydrateOnLane(0)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        // A peer device on partition 1 is far ahead in ITS lane. Folding its
+        // `j` in would skip ~900 of our own partition-0 slots and publish that
+        // as partition 0's durable resume counter.
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 1,
+          partitionCount: 2,
+          buckets: LANE_BUCKETS,
+        })
+        // A same-lane delta afterwards proves the first was dropped, not
+        // merely still in flight.
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: OWN_BUCKETS,
+        })
+        await vi.waitFor(() =>
+          expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+        expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledWith(
+          OWN_BUCKETS,
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("drops a delta from a peer on a different partition count", async () => {
+      await hydrateOnLane(0)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        // Same partition index, different split: `j` maps to a different slot
+        // under `partitionCount + partition + partitionCount·j`.
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 4,
+          buckets: LANE_BUCKETS,
+        })
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: OWN_BUCKETS,
+        })
+        await vi.waitFor(() =>
+          expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+        expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledWith(
+          OWN_BUCKETS,
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
   })
 
   it("rejects a hydration payload with a wrong challenge", async () => {

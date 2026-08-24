@@ -32,6 +32,8 @@ async function waitForMessages(
 const UTILIZATION_MESSAGE: BusMessageInput = {
   type: "utilization-updated",
   batchId: "ab".repeat(32),
+  partition: 0,
+  partitionCount: 2,
   buckets: [{ index: 3, value: 7 }],
 }
 

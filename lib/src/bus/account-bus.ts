@@ -103,8 +103,9 @@ export class AccountBus {
    * Attach a transport after construction (e.g. the signaling transport once
    * the account's derivation key is known). Returns a remover that detaches
    * and closes it. Duplicate delivery across transports is tolerated by
-   * design: every current message kind applies idempotently (absolute bucket
-   * values; LWW snapshot merges).
+   * design: every current message kind applies idempotently (LWW snapshot
+   * merges; monotonic bucket counters, folded only by a receiver on the
+   * publisher's own slot lane — see `UtilizationUpdateMessageSchema`).
    */
   addTransport(transport: BusTransport): () => void {
     this.transports.push(transport)

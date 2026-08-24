@@ -105,7 +105,12 @@ account. Same service, no extra infrastructure; the default posture stays signal
 - **Coordination (P2).** Lease negotiation/handover requests and utilization deltas. Live
   peers release or transfer a partition sub-second; if nobody answers, the existing
   conservative Swarm lease protocol ([`BatchWriteCoordinator.md`](./BatchWriteCoordinator.md))
-  proceeds unchanged as the safety net.
+  proceeds unchanged as the safety net. Utilization deltas are **lane-scoped**: the buckets
+  carry the writer's per-partition counter `j`, not an absolute slot
+  (`slot = partitionCount + partition + partitionCount·j`), so the message names its lane and
+  a receiver folds it in only when the lane matches. Since leases are exclusive, this means a
+  delta is shared between contexts of the same holder and dropped everywhere else — the bus
+  widens its reach, not the set of contexts a counter is comparable across.
 
 ### Safari write enablement
 

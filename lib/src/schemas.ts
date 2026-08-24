@@ -553,11 +553,21 @@ export const BucketUpdateSchema = z.object({
 })
 
 /**
- * Utilization update message sent via BroadcastChannel
+ * Utilization update broadcast on the account bus after a write.
+ *
+ * `buckets` carry the writer's PER-PARTITION counter `j`, not an absolute slot
+ * — the physical slot is `partitionCount + partition + partitionCount·j`
+ * (`dataSlot`, `utils/batch-utilization.ts`). So a delta is only foldable by a
+ * context bound to the SAME lane, and the lane travels with the message: the
+ * bus reaches other devices, which hold other partitions of the same batch, and
+ * folding their `j` in would skip the receiver past its own unused slots.
+ * Legacy single-partition writers publish `partition: 0, partitionCount: 1`.
  */
 export const UtilizationUpdateMessageSchema = z.object({
   type: z.literal("utilization-updated"),
   batchId: z.string().length(64),
+  partition: z.number().int().min(0),
+  partitionCount: z.number().int().min(1),
   buckets: z.array(BucketUpdateSchema),
 })
 

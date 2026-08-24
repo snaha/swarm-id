@@ -772,7 +772,18 @@ export class SwarmIdProxy {
     this.bus.subscribe((message) => {
       switch (message.type) {
         case "utilization-updated": {
-          if (message.batchId === this.postageBatchId && this.stamper) {
+          // Same batch AND same slot lane. The counters are per-partition
+          // (`slot = partitionCount + partition + partitionCount·j`), so a
+          // delta from a peer holding a DIFFERENT partition of this batch —
+          // which is every other device of the account — is not comparable:
+          // folding it in would skip this lane past its own unused slots and
+          // then publish that as the partition's durable resume counter.
+          if (
+            message.batchId === this.postageBatchId &&
+            this.stamper &&
+            message.partitionCount === this.stamper.partitionCount &&
+            message.partition === (this.stamper.currentPartition ?? 0)
+          ) {
             // Apply delta update directly - no IndexedDB read needed
             this.stamper.applyUtilizationUpdate(message.buckets)
           }
@@ -1060,11 +1071,15 @@ export class SwarmIdProxy {
 
       await this.stamper.flush()
 
-      // Broadcast utilization update to other tabs with pre-captured buckets
+      // Broadcast the utilization update to peers with pre-captured buckets.
+      // The counters are per-partition, so the slot lane travels with them —
+      // only a peer on the same lane may fold them in (see the receive guard).
       if (this.postageBatchId && buckets.length > 0) {
         this.bus.publish({
           type: "utilization-updated",
           batchId: this.postageBatchId,
+          partition: this.stamper.currentPartition ?? 0,
+          partitionCount: this.stamper.partitionCount,
           buckets,
         })
       }
