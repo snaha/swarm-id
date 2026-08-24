@@ -3,7 +3,7 @@ title: Architecture
 description: Understanding how Swarm ID works
 ---
 
-Swarm ID uses an OAuth-style popup authentication flow. Chrome and Firefox work out of the box; Safari works in download-only mode (auth works, uploads disabled due to ITP storage partitioning). See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
+Swarm ID uses an OAuth-style popup authentication flow. Chrome and Firefox work out of the box; on Safari, where Intelligent Tracking Prevention partitions the proxy iframe's storage, the connect popup hands the iframe the account's upload credentials directly, so uploads work there too. See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.
 
 ## System Overview
 

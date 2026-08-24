@@ -13,7 +13,7 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; Safari works in download-only mode (auth works, uploads disabled due to ITP storage partitioning).
+The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; on Safari, where ITP partitions the iframe's storage, the connect popup hands the iframe the account's upload credentials directly, so uploads work there too ([Account bus](./docs/Account-Bus.md)).
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
@@ -94,7 +94,7 @@ Open http://localhost:3500 - that's it!
 - Identity UI runs on port 5500
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** Safari operates in download-only mode — authentication and downloads work, but uploads are disabled due to ITP storage partitioning. See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
+**Note:** On Safari the proxy iframe's storage is partitioned, so it is re-seeded by the connect popup on every load. Uploads work, but a session that was never handed credentials (an older identity deployment, or an account without a usable postage batch) stays download-only. See [Safari limitations](#safari-limitations).
 
 ### Development Mode (with hot reload)
 
@@ -200,11 +200,13 @@ tools would be spending real money.
 
 ### Safari limitations
 
-Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, which prevents access to signing keys and postage stamps. Safari operates in **download-only mode**: authentication and downloads work, but uploads are not available.
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads still work: the connect popup hands the iframe the account's synced projection (postage stamps including their signer keys), and cross-context coordination rides the [account bus](./docs/Account-Bus.md) instead of storage events. What remains:
 
-- **Safari private mode**: Sessions are ephemeral (lost when the private window closes)
+- **Credentials are per page load.** Nothing is persisted in the partition, so a reload re-runs the popup handshake.
+- **Live propagation needs a signaling server.** Without one configured, a partitioned iframe only talks to contexts in its own partition.
+- **Safari private mode**: Sessions are ephemeral (lost when the private window closes).
 
-See [#167](https://github.com/snaha/swarm-id/issues/167) for details.
+See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.
 
 ## Contribute
 

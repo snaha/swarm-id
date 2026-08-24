@@ -119,9 +119,11 @@ A batch exists on chain before the Bee node knows about it: until the node's cha
 
 After buying a postage stamp, wait ~30 seconds before using it. The stamp needs to be registered on the blockchain before the Bee node accepts it.
 
-### Safari Upload Limitations
+### Safari Storage Partitioning
 
-Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, which prevents access to stamps and signer keys. Safari operates in **download-only mode**. See [issue #167](https://github.com/snaha/swarm-id/issues/167) for details.
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads still work — the connect popup hands the iframe the account's stamps and signer keys — but nothing is persisted in the partition, so every page load re-runs the handshake. See [issue #277](https://github.com/snaha/swarm-id/issues/277) for the background.
+
+Locally, `pnpm dev` also starts the account-bus signaling server on port 5520; without it a partitioned iframe can only reach contexts in its own partition.
 
 Safari private browsing sessions are also ephemeral — data is lost when the window closes.
 
