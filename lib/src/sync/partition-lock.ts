@@ -32,7 +32,7 @@ import { Bee, PrivateKey, type Stamper } from "@ethersphere/bee-js"
 import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
-import { withTimeout } from "../utils/promise"
+import { sleep, withTimeout } from "../utils/promise"
 import { SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import { makePartitionLockIdentifier } from "../utils/lock-soc"
 import {
@@ -269,8 +269,7 @@ export async function acquirePartitionLock(opts: {
   readTimeoutMs?: number
 }): Promise<AcquirePartitionLockResult> {
   const now = opts.now ?? Date.now
-  const wait =
-    opts.wait ?? ((ms: number) => new Promise((r) => setTimeout(r, ms)))
+  const wait = opts.wait ?? sleep
   const readBounded = () =>
     withTimeout(
       readPartitionLock(opts),

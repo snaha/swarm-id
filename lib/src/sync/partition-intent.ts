@@ -65,7 +65,7 @@ import { Binary } from "cafe-utility"
 import { downloadEncryptedSOC } from "../proxy/download-data"
 import { uploadSOC, type UploadTarget } from "../proxy/upload"
 import { UtilizationAwareStamper } from "../utils/batch-utilization"
-import { TimeoutError, withTimeout } from "../utils/promise"
+import { TimeoutError, sleep, withTimeout } from "../utils/promise"
 import { INTENT_EPOCH_MS, SYNC_READ_TIMEOUT_MS } from "./timing-constants"
 import {
   PartitionIntentPayloadSchemaV1,
@@ -128,8 +128,6 @@ export const INTENT_GUARD_POLL_MS = 2500
  * bucket-bounded read window means this can never resurrect an aged-out beacon.
  */
 export const INTENT_LIVENESS_GRACE_MS = INTENT_EPOCH_MS
-
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 /** `floor(nowMs / INTENT_EPOCH_MS)` — the current intent epoch bucket. */
 export function intentEpochBucket(nowMs: number): number {

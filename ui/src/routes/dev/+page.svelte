@@ -15,6 +15,7 @@
     DEFAULT_GNOSIS_RPC_URL,
     derivePostageSignerKey,
     downloadEncryptedSOC,
+    sleep,
     uint8ArrayToHex,
     uploadSOC,
     withTimeout,
@@ -510,8 +511,6 @@
   function randomBytes(): Uint8Array {
     return crypto.getRandomValues(new Uint8Array(RANDOM_BYTES))
   }
-
-  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
   async function runRetrievabilityCheck() {
     selfCheckRunning = true

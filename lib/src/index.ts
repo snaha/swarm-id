@@ -497,7 +497,7 @@ export { buildAuthUrl, isHttpUrl } from "./utils/url"
 export { isWebKit } from "./utils/browser"
 
 // Promise utilities
-export { withTimeout, TimeoutError } from "./utils/promise"
+export { sleep, withTimeout, TimeoutError } from "./utils/promise"
 
 // Manifest builder utilities for /bzz/ feed compatibility
 export {
