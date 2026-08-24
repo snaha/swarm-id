@@ -3,7 +3,11 @@ title: Architecture
 description: Understanding how Swarm ID works
 ---
 
-Swarm ID uses an OAuth-style popup authentication flow. Chrome and Firefox work out of the box; on Safari, where Intelligent Tracking Prevention partitions the proxy iframe's storage, the connect popup hands the iframe the account's upload credentials directly, so uploads work there too. See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.
+Swarm ID uses an OAuth-style popup authentication flow. Chrome and Firefox work out of the box; where the browser partitions the proxy iframe's storage — Safari's Intelligent Tracking Prevention, or strict privacy settings elsewhere — the connect popup hands the iframe the account's upload credentials directly, so uploads keep working. See [#277](https://github.com/snaha/swarm-id/issues/277) for the background.
+
+:::caution[Safari support is unverified]
+The partitioned write path is verified on Chromium and Firefox with third-party storage partitioned, but not yet on real Safari. Until it is, treat Safari upload support as expected rather than confirmed — a session where the handover fails degrades to download-only rather than erroring.
+:::
 
 ## System Overview
 

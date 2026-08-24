@@ -2,7 +2,7 @@
 
 Web-based identity and key management for decentralized applications on the Swarm network.
 
-**Key Innovation**: Popup-based authentication flow using shared localStorage. In production (secure context), storage works immediately for Chrome/Firefox. On localhost, Chrome/Firefox can request shared storage access via Storage Access API (requires clicking iframe button first). On Safari, ITP partitions the iframe's storage, so the connect popup hands it the account's synced projection (stamps incl. signer keys) instead — uploads work, but credentials live only in memory and are re-seeded on every page load ([#277](https://github.com/snaha/swarm-id/issues/277), [docs/Account-Bus.md](docs/Account-Bus.md)). Safari private mode: sessions are ephemeral (lost when the private window closes).
+**Key Innovation**: Popup-based authentication flow using shared localStorage. In production (secure context), storage works immediately for Chrome/Firefox. On localhost, Chrome/Firefox can request shared storage access via Storage Access API (requires clicking iframe button first). Where the browser partitions the iframe's storage (Safari ITP, or strict privacy settings elsewhere), the connect popup hands it the account's synced projection (stamps incl. signer keys) instead — uploads keep working, but credentials live only in memory and are re-seeded on every page load ([#277](https://github.com/snaha/swarm-id/issues/277), [docs/Account-Bus.md](docs/Account-Bus.md)). **Unverified on real Safari** — the path is confirmed on Chromium and Firefox with third-party storage partitioned; do not state Safari upload support as fact until that check lands. Safari private mode: sessions are ephemeral (lost when the private window closes).
 
 ## Architecture
 

@@ -13,7 +13,7 @@ Cross-browser compatible authentication and identity management for Swarm dApps.
 
 ## Architecture
 
-The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; on Safari, where ITP partitions the iframe's storage, the connect popup hands the iframe the account's upload credentials directly, so uploads work there too ([Account bus](./docs/Account-Bus.md)).
+The project uses an OAuth-style popup authentication flow using the Storage Access API. Chrome and Firefox work out of the box; where the browser partitions the iframe's storage — Safari's ITP, or strict privacy settings elsewhere — the connect popup hands the iframe the account's upload credentials directly, so uploads keep working ([Account bus](./docs/Account-Bus.md)). This path is verified on Chromium and Firefox with third-party storage partitioned; confirmation on real Safari is still pending, see [Safari limitations](#safari-limitations).
 
 **Key Innovation**: The popup-based authentication allows dApps to securely derive app-specific secrets from a master identity, with browser-enforced storage partitioning providing cross-app isolation.
 
@@ -94,7 +94,7 @@ Open http://localhost:3500 - that's it!
 - Identity UI runs on port 5500
 - No HTTPS, certificates, or custom domains required (`localhost` is a secure context)
 
-**Note:** On Safari the proxy iframe's storage is partitioned, so it is re-seeded by the connect popup on every load. Uploads work, but a session that was never handed credentials (an older identity deployment, or an account without a usable postage batch) stays download-only. See [Safari limitations](#safari-limitations).
+**Note:** On Safari the proxy iframe's storage is partitioned, so it is re-seeded by the connect popup on every load. Uploads are expected to work, but a session that was never handed credentials (an older identity deployment, or an account without a usable postage batch) stays download-only. See [Safari limitations](#safari-limitations).
 
 ### Development Mode (with hot reload)
 
@@ -200,7 +200,11 @@ tools would be spending real money.
 
 ### Safari limitations
 
-Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads still work: the connect popup hands the iframe the account's synced projection (postage stamps including their signer keys), and cross-context coordination rides the [account bus](./docs/Account-Bus.md) instead of storage events. What remains:
+Safari's Intelligent Tracking Prevention (ITP) partitions storage for third-party iframes, so the proxy cannot read the trusted domain's localStorage. Uploads are designed to keep working regardless: the connect popup hands the iframe the account's synced projection (postage stamps including their signer keys), and cross-context coordination rides the [account bus](./docs/Account-Bus.md) instead of storage events.
+
+> **Status: not yet confirmed on real Safari.** The partitioned write path is verified on Chromium and Firefox with third-party storage partitioned, which exercises the same runtime-detected code path. What only real WebKit can settle is whether `window.opener` survives to a popup opened by a partitioned iframe under ITP — the credential handover depends on it, and if it does not hold, a Safari session falls back to download-only rather than failing loudly. Treat Safari upload support as expected-but-unverified until this section says otherwise.
+
+What remains regardless:
 
 - **Credentials are per page load.** Nothing is persisted in the partition, so a reload re-runs the popup handshake.
 - **Live propagation needs a signaling server.** Without one configured, a partitioned iframe only talks to contexts in its own partition.
