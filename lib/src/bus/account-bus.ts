@@ -2,9 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 /**
- * The account bus: a real-time message channel between all live contexts of an
- * account (proxy iframes, SwarmID tabs — later, via more transports, other
- * partitions and devices). Design: `docs/Account-Bus.md`.
+ * The account bus: a real-time message channel between the live contexts of an
+ * account. Today that is the proxy iframes — the only place it is constructed;
+ * SwarmID tabs are in scope per `docs/Account-Bus.md` but do not join one, and
+ * nothing yet needs them to (they are not batch writers, and account data
+ * reaches an unpartitioned iframe through storage events).
  *
  * Durable truth stays in storage; the bus only carries deltas and coordination
  * between live peers. Publishers never receive their own messages back.
