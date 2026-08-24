@@ -155,7 +155,7 @@ async function onConnectionChange(info: ConnectionInfo) {
   logStore.log(`Connection info: canUpload=${info.canUpload}, identity=${loggableIdentity}`)
   partition = info.partition
 
-  if (info.storagePartitioned) {
+  if (info.storagePartitioned && isAuthenticated && !info.canUpload) {
     logStore.log(
       'Read-only mode: browser storage partitioning limits this session to downloads only',
       'warn',
