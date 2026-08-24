@@ -1866,12 +1866,6 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Find the account + connected-app pair for the current parent origin, reading
-   * the nested account documents. Resolves ambiguity (the same app connected
-   * under multiple accounts) by sorting valid entries by `lastConnectedAt`
-   * descending and returning the most recent.
-   */
-  /**
    * True while the session is partitioned WITHOUT a hydrated account view —
    * the legacy download-only mode. A hydrated partition is a full writer.
    */
@@ -1879,6 +1873,12 @@ export class SwarmIdProxy {
     return this.storagePartitioned && !this.partitionAccount
   }
 
+  /**
+   * Find the account + connected-app pair for the current parent origin, reading
+   * the nested account documents. Resolves ambiguity (the same app connected
+   * under multiple accounts) by sorting valid entries by `lastConnectedAt`
+   * descending and returning the most recent.
+   */
   private findConnectionForParent():
     | { account: SignedInAccount; app: ConnectedApp }
     | undefined {
