@@ -60,6 +60,19 @@ jobs:
         working-directory: ./multichain
         run: pnpm test
 
+      # The account-bus signaling and relay service (docs/Account-Bus.md).
+      - name: Code linting (signaling)
+        working-directory: ./signaling
+        run: pnpm lint
+
+      - name: Typecheck (signaling)
+        working-directory: ./signaling
+        run: pnpm typecheck
+
+      - name: Run signaling unit tests
+        working-directory: ./signaling
+        run: pnpm test
+
       - name: Build ui
         working-directory: ./ui
         run: pnpm build
