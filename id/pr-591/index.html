@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta
+      name="description"
+      content="Create and manage your decentralized identity with Ethereum or Passkey. Sync across devices with Swarm network."
+    />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black" />
+    <meta name="apple-mobile-web-app-title" content="Swarm Identity" />
+    <link rel="icon" href="/id/pr-591/favicon.png" type="image/png" />
+    <link rel="manifest" href="/id/pr-591/manifest.json" />
+    
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/entry/start.ezzMibaN.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/nSwE6vTn.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/sUjskF8J.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/BOWa6bwA.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/B-B2-BXm.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/entry/app.CtbpGDSI.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/PPVm8Dsz.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/C9yDAQM2.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/Dbo5melK.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/Bd-o_GX5.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/X1yvibBd.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/BvlENsmO.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/immutable/chunks/DYJV0mQp.js">
+		<link rel="modulepreload" href="/id/pr-591/_app/env.js">
+  </head>
+  <body data-sveltekit-preload-data="hover">
+    <div style="display: contents">
+			<script>
+				{
+					__sveltekit_kilesd = {
+						base: "/id/pr-591",
+						assets: "/id/pr-591",
+						env: null
+					};
+
+					const element = document.currentScript.parentElement;
+
+					import("/id/pr-591/_app/env.js").then(({ env }) => {
+						__sveltekit_kilesd.env = env;
+
+						Promise.all([
+							import("/id/pr-591/_app/immutable/entry/start.ezzMibaN.js"),
+							import("/id/pr-591/_app/immutable/entry/app.CtbpGDSI.js")
+						]).then(([kit, app]) => {
+							kit.start(app, element);
+						});
+					});
+				}
+			</script>
+		</div>
+  </body>
+</html>
