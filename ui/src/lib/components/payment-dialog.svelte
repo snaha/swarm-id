@@ -47,8 +47,8 @@
    * rather than continuing through these screens.
    *
    * Which rail carries the money is the caller's choice (`resolve-rail.ts`),
-   * and nothing here depends on which one it is: the screens are driven by the
-   * rail's `chains`, `tokens` and quote, never by knowing which rail it is.
+   * and nothing here depends on which one it is — the screens are identical
+   * against Relay and against the direct transfer from Gnosis.
    *
    * The connected wallet only ever signs on the source chain — it never sees
    * the owner key, so passkey and password accounts use this unchanged.
@@ -94,9 +94,7 @@
   let tokenAddress = $state(untrack(() => rail.tokens(rail.chains[0].id)[0].address))
   let paymentQuote = $state<PaymentQuote | undefined>(undefined)
   let quoting = $state(false)
-  // Replaced by whatever the rail reports through `onStatus`; this is only what
-  // the wait screen says before the first report arrives.
-  let relayStatus = $state('Sending your payment')
+  let relayStatus = $state('Cross-swap xDAI on Relay')
   /**
    * The Gnosis-side quote in force, once the built-in method has priced one.
    * Undefined until then — the default method needs no quote of ours, so the

@@ -17,7 +17,7 @@ import {
  */
 describe('displayAmount', () => {
   it('cuts a rail’s raw precision down to significant digits', () => {
-    // A native-token amount as a rail hands it over: the full wei expansion.
+    // Relay's `amountFormatted` for a native token, verbatim.
     expect(displayAmount('0.000043465998997394')).toBe('0.00004347')
   })
 
@@ -78,9 +78,9 @@ describe('displayUsd', () => {
 
   /**
    * A rail whose source could not price the payment passes `''` rather than
-   * inventing a figure. Formatted as '0.00' it would read as "~0.00 USD total"
-   * under a blank cost line; empty is what every caller renders behind a
-   * truthiness test.
+   * inventing a figure — Relay's `currencyIn` is optional, so `relay.ts` does.
+   * Formatted as '0.00' it would read as "~0.00 USD total" under a blank cost
+   * line; empty is what every caller renders behind a truthiness test.
    */
   it('has nothing to show for a missing or non-positive figure', () => {
     expect(displayUsd('')).toBe('')
