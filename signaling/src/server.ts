@@ -196,6 +196,22 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     },
   })
 
+  // `ws` forwards the HTTP server's errors here, and once `listen` has resolved
+  // nothing else is listening for them — an unhandled 'error' is an uncaught
+  // exception. What arrives after the bind is an accept failure (EMFILE, when a
+  // flood of bare TCP connections exhausts the file descriptors), so the very
+  // load these bounds exist to survive would otherwise end the process through
+  // a door none of them cover. It is per-accept and transient: log it and keep
+  // serving. Note this must be on `wss`, not on the HTTP server — a listener
+  // there does not stop the forwarded copy from going unhandled.
+  wss.on('error', (error) => {
+    // Only once the bind has taken. A failure before that is already the
+    // caller's rejection, and logging it here would double-report it.
+    if (httpServer.listening) {
+      console.error('[signaling] server error:', error)
+    }
+  })
+
   wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
     // First, before any early return: `ws` reports every protocol-level fault
     // by emitting 'error' on the socket — a frame past `maxPayload`, a reserved

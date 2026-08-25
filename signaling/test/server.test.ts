@@ -1,6 +1,7 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import type { Server } from 'node:http'
 import { createConnection } from 'node:net'
 import type { Socket } from 'node:net'
 
@@ -20,6 +21,47 @@ const MESSAGE_TIMEOUT_MS = 2000
 const REFUSAL_DROP_TIMEOUT_MS = 4000
 /** Past the server's 64 KiB `maxPayload`. */
 const OVERSIZED_PAYLOAD_BYTES = 70_000
+/** How long a client that has blown its budget keeps writing, and how often. */
+const OVERRUN_WRITE_WINDOW_MS = 2500
+const OVERRUN_WRITE_EVERY_MS = 100
+
+/**
+ * Timers currently holding the event loop open. Unref'd timers are invisible
+ * here by design — `getActiveResourcesInfo` reports what keeps the loop alive —
+ * which is exactly the distinction the leak assertions care about.
+ */
+function activeTimers(): number {
+  return process.getActiveResourcesInfo().filter((resource) => resource === 'Timeout').length
+}
+
+/**
+ * The listening HTTP server behind a signaling server, found by port.
+ *
+ * `process._getActiveHandles()` is internal, and used here because there is no
+ * other way in: an accept failure is delivered by libuv to the listening
+ * server, the server is deliberately not part of the public surface, and the
+ * point of the test is what happens when something reports one. Matching on
+ * `listening` as well as the port keeps accepted sockets — which share the
+ * local port and also answer `address()` — out of the result.
+ */
+function listeningServerOn(port: number): Server {
+  const handles = (process as unknown as { _getActiveHandles(): unknown[] })._getActiveHandles()
+  const match = handles.find((handle): handle is Server => {
+    if (typeof handle !== 'object' || handle === null || !('listening' in handle)) return false
+    const address = (handle as Server).address()
+    return (
+      (handle as Server).listening === true && typeof address === 'object' && address?.port === port
+    )
+  })
+  if (!match) throw new Error(`no listening server on port ${port}`)
+  return match
+}
+
+/** A masked text frame, as a client must send. A zero mask key is still a mask. */
+function clientFrame(payload: string): Buffer {
+  const body = Buffer.from(payload)
+  return Buffer.concat([Buffer.from([0x81, 0x80 | body.length]), Buffer.alloc(4, 0), body])
+}
 
 /**
  * A WebSocket client that completes the handshake and then never answers
@@ -31,6 +73,9 @@ const OVERSIZED_PAYLOAD_BYTES = 70_000
 function rudeUpgrade(port: number, topic: string): Promise<Socket> {
   const key = Buffer.from(randomTopic(), 'hex').toString('base64')
   const socket = createConnection(port, '127.0.0.1')
+  // Writing to a socket the server has since destroyed is expected here, and an
+  // unhandled 'error' on a stream would take the runner down with it.
+  socket.on('error', () => {})
   socket.write(
     `GET /?topic=${topic} HTTP/1.1\r\n` +
       `Host: 127.0.0.1:${port}\r\n` +
@@ -361,6 +406,49 @@ describe('signaling server — heartbeat', () => {
       await beating.close()
     }
   })
+
+  // The only `clearInterval` lives in the `close` handed out on the success
+  // path, so a heartbeat armed before `listen` outlives a bind that fails: the
+  // caller gets a rejection and no handle, and the timer holds the event loop
+  // open for the life of the process.
+  // An accept failure — EMFILE under a flood of bare TCP connections is the
+  // realistic one — is reported on the listening server long after `listen`
+  // resolved, and `ws` forwards the http server's errors to the
+  // `WebSocketServer`. Neither had a listener left, so the flood these bounds
+  // exist to survive took the process down through a different door.
+  it('survives an accept failure reported after listen', async () => {
+    const running = await createSignalingServer({ port: 0 })
+    const uncaught: unknown[] = []
+    const record = (error: unknown): void => {
+      uncaught.push(error)
+    }
+    process.on('uncaughtException', record)
+    try {
+      const failure = Object.assign(new Error('accept EMFILE'), { code: 'EMFILE' })
+      listeningServerOn(running.port).emit('error', failure)
+      await new Promise((resolve) => setTimeout(resolve, 50))
+      expect(uncaught).toEqual([])
+      // Still serving.
+      const arrival = await connect(randomTopic(), running.port)
+      arrival.close()
+    } finally {
+      process.off('uncaughtException', record)
+      await running.close()
+    }
+  })
+
+  it('leaves no timer behind when the bind fails', async () => {
+    const occupied = await createSignalingServer({ port: 0 })
+    try {
+      const before = activeTimers()
+      await expect(
+        createSignalingServer({ port: occupied.port, heartbeatIntervalMs: 60_000 }),
+      ).rejects.toThrow()
+      expect(activeTimers()).toBe(before)
+    } finally {
+      await occupied.close()
+    }
+  })
 })
 
 // ============================================================================
@@ -495,6 +583,35 @@ describe('signaling server — limits', () => {
         receiver.close()
       }
     } finally {
+      await capped.close()
+    }
+  })
+
+  // The budget close has to drop the socket like every other refusal: a client
+  // that blows its budget is the one most likely to ignore the close frame and
+  // keep writing, and a peer whose socket lingers holds a connection-cap slot
+  // the heartbeat will not reclaim for two full intervals. Dropping must not
+  // wait for the flood to stop, so this keeps writing well past the linger.
+  it('drops a peer that keeps writing after its budget close', async () => {
+    const capped = await createSignalingServer({
+      port: 0,
+      messageRateLimit: 1,
+      messageRateWindowMs: 60_000,
+    })
+    const rude = await rudeUpgrade(capped.port, randomTopic())
+    const startedAt = Date.now()
+    const dropped = new Promise<number>((resolve) =>
+      rude.once('close', () => resolve(Date.now() - startedAt)),
+    )
+    // The second frame is over budget; everything after it lands post-close.
+    const writing = setInterval(() => {
+      if (!rude.destroyed) rude.write(clientFrame('{}'))
+    }, OVERRUN_WRITE_EVERY_MS)
+    try {
+      expect(await dropped).toBeLessThan(OVERRUN_WRITE_WINDOW_MS)
+    } finally {
+      clearInterval(writing)
+      rude.destroy()
       await capped.close()
     }
   })
