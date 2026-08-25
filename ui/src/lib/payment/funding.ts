@@ -6,9 +6,9 @@
  * Quote how much xDAI buys the missing BZZ on SushiSwap, add the gas, have the
  * rail deliver that xDAI to the owner, then swap it to BZZ with the owner key.
  *
- * The swap leg is the same wherever the money came from: the local chain
- * carries a real BZZ market at the mainnet addresses, so only the delivery is
- * the rail's business — see `payment-rail.ts`.
+ * The swap leg is the same on either rail: what differs is only how the xDAI
+ * got to the owner address — a plain transfer from Gnosis, or a Relay delivery
+ * from anywhere else. See `payment-rail.ts`.
  */
 import { withTimeout } from '@snaha/swarm-id'
 import type { SwapInput } from '@swarm-id/multichain'

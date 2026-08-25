@@ -1,15 +1,19 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 /**
- * The payment rail seam: what carries the user's money to native xDAI at the
- * batch-owner address on Gnosis.
+ * The payment rail seam: what carries the user's money from whatever chain
+ * they hold funds on to native xDAI at the batch-owner address on Gnosis.
  *
- * There is one today — the direct Gnosis transfer (`gnosis-direct.ts`), where
- * the source IS the destination and nothing is carried anywhere. It is a seam
- * rather than a function call because everything downstream of it is written
- * against the contract and not against that one rail: the delivered xDAI is
- * swapped to BZZ by `swapDelivered` and spent by the postage engine, and
- * neither knows how the money arrived.
+ * Two rails serve it. Paying from Gnosis is not carried anywhere at all — the
+ * destination is the source, so `gnosis-direct.ts` is a plain transfer, in any
+ * of the assets that chain has a route to BZZ in. Every other chain goes over
+ * Relay Protocol (`relay.ts`), an intent/solver network: the user deposits on
+ * their own chain and an off-chain solver delivers on Gnosis out of its own
+ * inventory.
+ *
+ * Everything downstream of a rail is untouched production code: whatever was
+ * delivered is swapped to BZZ by `swapDelivered` and spent by the postage
+ * engine, on both rails alike.
  *
  * This module is deliberately a LEAF — it defines the contract and imports no
  * rail. Picking one lives in `resolve-rail.ts`, which may import them all; a
@@ -18,7 +22,7 @@
  */
 import type { SwapInput } from '@swarm-id/multichain'
 import type { Chain } from 'viem'
-import { gnosis } from 'viem/chains'
+import { arbitrum, base, gnosis, mainnet, optimism, polygon } from 'viem/chains'
 
 /** Native-token sentinel for "the chain's own currency". */
 export const NATIVE_CURRENCY = '0x0000000000000000000000000000000000000000'
@@ -28,11 +32,11 @@ export const NATIVE_CURRENCY = '0x0000000000000000000000000000000000000000'
  * shows them.
  *
  * Lives here, in the leaf, because two unrelated modules need the same list and
- * neither may import the other: a rail offers these chains, and `onboard.ts`
+ * neither may import the other: the Relay rail offers them, and `onboard.ts`
  * has to DECLARE them or web3-onboard reports the user's network as
  * unsupported the moment they switch to one.
  */
-export const WALLET_CHAINS: Chain[] = [gnosis]
+export const WALLET_CHAINS: Chain[] = [mainnet, base, arbitrum, optimism, polygon, gnosis]
 
 /** A token the user can pay with on a given source chain. */
 export interface PaymentToken {
@@ -104,12 +108,12 @@ function significantDigits(amount: number, digits: number): string {
  * A source-token price as the screens show it: a few significant digits, no
  * trailing zeros.
  *
- * Normalising here rather than trusting each rail is the point. A rail's own
- * figure is whatever its source produced — a full wei expansion
- * (`0.000043465998997394` for a native token) as readily as a rounded one — and
- * the pay screen puts this directly above breakdown rows that ARE rounded.
- * Eighteen decimals over four reads as a different product depending on which
- * rail happens to be behind it.
+ * Normalising here rather than trusting each rail is the point. Rails hand back
+ * wildly different precision — Relay's `amountFormatted` carries the full wei
+ * expansion (`0.000043465998997394` for a native token), the direct rail
+ * derives its own — and the pay screen puts this figure directly above
+ * breakdown rows that ARE rounded. Eighteen decimals over four reads as a different product
+ * depending on which rail happens to be behind it.
  */
 export function displayAmount(value: string | number): string {
   const amount = Number(value)
@@ -165,10 +169,9 @@ export interface Delivery {
 
 export interface PaymentQuote {
   /**
-   * Rail-private payload, consumed only by the rail that produced it — the
-   * direct rail keeps the recipient and amount here. Opaque so a second rail
-   * can exist at all, and checked on the way back out: a handle from another
-   * rail is a bug, not a payment.
+   * Rail-private payload, consumed only by the rail that produced it — Relay
+   * keeps its SDK `Execute` here, the direct rail the recipient and amount.
+   * Opaque so a second rail can exist at all.
    */
   handle: unknown
   /**
@@ -193,16 +196,15 @@ export interface ExecutePaymentOptions {
   chainId: number
   /**
    * The token being paid with, as its {@link PaymentToken} address. Carried
-   * alongside the chain rather than implied by it, because one chain can offer
-   * several tokens and a rail serving only some of them has to be able to tell
-   * which was picked.
+   * even though no rail reads it, because the combined rail dispatches on it:
+   * one chain can be served by two rails, split by token.
    */
   currency: string
   /** The payer's address (their connected wallet). */
   address: string
   /**
    * Receives the rail's current step so the pending screen can name what is
-   * happening rather than showing an unlabelled spinner.
+   * happening (e.g. the design's "Cross-swap xDAI on Relay").
    */
   onStatus?: (status: string) => void
 }
