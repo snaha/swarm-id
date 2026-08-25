@@ -50,7 +50,10 @@ services:
       branch: main
       deploy_on_push: false
     source_dir: /
-    build_command: corepack enable && pnpm install --frozen-lockfile
+    # Filtered install: this service needs ws, zod and tsx, and nothing else in
+    # the workspace depends on it. An unfiltered root install would build every
+    # package — playwright, astro, rollup, the lot — on a 0.5 GB instance.
+    build_command: corepack enable && pnpm install --frozen-lockfile --filter @swarm-id/signaling...
     run_command: corepack enable && pnpm --filter @swarm-id/signaling start
     http_port: 8080
     instance_count: 1
