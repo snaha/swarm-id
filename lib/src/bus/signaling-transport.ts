@@ -51,6 +51,8 @@ const SignalPayloadSchema = z.discriminatedUnion("kind", [
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
+/** The server's close code for a topic it refuses (`signaling/src/server.ts`). */
+const WS_CLOSE_POLICY_VIOLATION = 1008
 
 export interface SignalingTransportOptions {
   /** Signaling server URL, e.g. `wss://swarm-id.snaha.net/bus`. */
@@ -150,13 +152,27 @@ export class SignalingTransport implements BusTransport {
     const socket = new WebSocket(url.toString())
     this.socket = socket
 
-    socket.addEventListener("open", () => {
-      this.reconnectDelayMs = RECONNECT_BASE_DELAY_MS
-    })
     socket.addEventListener("message", (event) => {
+      // Backoff resets here, not on `open`. The server accepts the socket and
+      // only then closes it on a policy or payload violation, so resetting on
+      // `open` made every such failure reconnect at the 1 s floor forever. A
+      // message received is proof the connection was actually useful.
+      this.reconnectDelayMs = RECONNECT_BASE_DELAY_MS
       void this.handleServerMessage(String(event.data))
     })
-    socket.addEventListener("close", () => this.scheduleReconnect())
+    socket.addEventListener("close", (event) => {
+      // A policy close is permanent for this topic (the server only sends it
+      // for a topic it will reject identically next time); retrying is a hot
+      // loop against an answer that will not change.
+      if (event.code === WS_CLOSE_POLICY_VIOLATION) {
+        console.error(
+          "[SignalingTransport] Signaling server rejected the topic; not reconnecting.",
+        )
+        this.closed = true
+        return
+      }
+      this.scheduleReconnect()
+    })
     socket.addEventListener("error", () => {
       // The close event follows and drives the reconnect.
     })
@@ -189,11 +205,23 @@ export class SignalingTransport implements BusTransport {
       this.options.encryptionKey,
     )
     for (const [peerId, peer] of this.peers) {
+      // Per peer, and never fatal to the rest of the fan-out: a `send` that
+      // throws (SCTP size limit, a channel torn down between the readyState
+      // read and the call) used to escape this loop and starve every peer
+      // after it — for a teardown `lease-released` that costs the waiter its
+      // whole poll interval. A failed channel falls through to the relay.
       if (peer.dataChannel?.readyState === "open") {
-        peer.dataChannel.send(ciphertext)
-      } else {
-        this.sendToServer({ type: "relay", to: peerId, payload: ciphertext })
+        try {
+          peer.dataChannel.send(ciphertext)
+          continue
+        } catch (error) {
+          console.warn(
+            "[SignalingTransport] DataChannel send failed; relaying:",
+            error,
+          )
+        }
       }
+      this.sendToServer({ type: "relay", to: peerId, payload: ciphertext })
     }
   }
 

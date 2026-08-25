@@ -133,6 +133,28 @@ describe("SignalingTransport — relay path", () => {
     }
   })
 
+  // The server closes with 1008 for a topic it refuses, and it will refuse the
+  // same topic identically next time — reconnecting is a hot loop against an
+  // answer that cannot change.
+  it("stops reconnecting after a policy close", async () => {
+    const rejected = new SignalingTransport({
+      url: serverUrl(),
+      topic: "not-a-valid-topic",
+      encryptionKey: context.encryptionKey,
+    })
+    try {
+      const closed = () =>
+        (rejected as unknown as { closed: boolean }).closed === true
+      await vi.waitFor(() => expect(closed()).toBe(true))
+      // Well past the 1 s reconnect floor: no new socket was opened.
+      await new Promise((resolve) => setTimeout(resolve, 1200))
+      expect(closed()).toBe(true)
+      expect(rejected.peerCount).toBe(0)
+    } finally {
+      rejected.close()
+    }
+  })
+
   it("publishes nothing when the room has no other peers", async () => {
     const lonely = makeTransport()
     try {
@@ -222,6 +244,42 @@ function fakeRtcFactory(): RTCPeerConnection {
 }
 
 describe("SignalingTransport — WebRTC upgrade", () => {
+  // A `send` that throws for one peer used to escape the fan-out loop and
+  // starve every peer after it. For a teardown `lease-released` that costs the
+  // waiter its whole poll interval — so the peer falls back to the relay and
+  // the others are unaffected.
+  it("relays past a peer whose data channel send throws", async () => {
+    const sender = makeTransport({ createPeerConnection: fakeRtcFactory })
+    const receiver = makeTransport({ createPeerConnection: fakeRtcFactory })
+    try {
+      const received = collect(receiver)
+      await waitForPeers(sender, 1)
+      await waitForPeers(receiver, 1)
+      await vi.waitFor(() =>
+        expect(
+          FakePeerConnection.channels.filter((c) => c.readyState === "open")
+            .length,
+        ).toBe(2),
+      )
+      for (const channel of FakePeerConnection.channels) {
+        channel.send = () => {
+          throw new Error("channel torn down")
+        }
+      }
+
+      sender.publish(UTILIZATION_MESSAGE)
+
+      // Delivered anyway — via the server relay this peer fell back to.
+      await vi.waitFor(() => expect(received.length).toBe(1))
+      expect(received[0]).toEqual(UTILIZATION_MESSAGE)
+    } finally {
+      sender.close()
+      receiver.close()
+      FakePeerConnection.registry.clear()
+      FakePeerConnection.channels = []
+    }
+  })
+
   it("moves delivery onto the data channel once the pair connects", async () => {
     const first = makeTransport({ createPeerConnection: fakeRtcFactory })
     const second = makeTransport({ createPeerConnection: fakeRtcFactory })
