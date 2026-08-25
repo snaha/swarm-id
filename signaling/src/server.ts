@@ -137,8 +137,13 @@ export interface SignalingServerOptions {
  * counting against the connection cap until the peer answers or `ws` gives up
  * 30 s later, and a refused socket joined no room, so the heartbeat cannot
  * reach it either (see `REFUSAL_LINGER_MS`).
+ *
+ * Only the first call does anything. A socket closed for outrunning its message
+ * budget keeps delivering whatever was already in flight, and arming a timer per
+ * frame would hand the flood we are refusing an allocation per message.
  */
 function refuse(socket: WebSocket, code: number, reason: string): void {
+  if (socket.readyState !== WebSocket.OPEN) return
   socket.close(code, reason)
   setTimeout(() => socket.terminate(), REFUSAL_LINGER_MS).unref()
 }
@@ -192,6 +197,15 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
   })
 
   wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+    // First, before any early return: `ws` reports every protocol-level fault
+    // by emitting 'error' on the socket — a frame past `maxPayload`, a reserved
+    // opcode, invalid UTF-8 in a text frame — and an unhandled 'error' on an
+    // EventEmitter is an uncaught exception. Without this, one oversized frame
+    // from any client that gets past `verifyClient` takes the whole service
+    // down. `ws` answers the bad frame with a close of its own, which would sit
+    // in `wss.clients` for 30 s; terminate instead, as with a refusal.
+    socket.on('error', () => socket.terminate())
+
     const url = new URL(request.url ?? '/', 'http://localhost')
     const topic = url.searchParams.get('topic') ?? ''
     if (!TOPIC_PATTERN.test(topic)) {
@@ -249,8 +263,13 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
         // 1013, not 1008: the client hard-codes a policy close as permanent and
         // stops reconnecting for the rest of the page's life, which would trade
         // one overrun for a context that never syncs again. The window will
-        // pass, so this genuinely is try-again-later; the reconnect backoff is
-        // what makes a client that keeps overrunning cheap to carry.
+        // pass, so this genuinely is try-again-later.
+        //
+        // Note that a client which keeps overrunning comes back at roughly the
+        // reconnect floor rather than backing off — the backoff resets on any
+        // message received, and `welcome` arrives on every accepted socket. It
+        // is the connection cap, not the backoff, that bounds that; the cost
+        // per cycle is one handshake, the same as any reconnect flood.
         refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'message rate exceeded')
         return
       }

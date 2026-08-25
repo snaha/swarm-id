@@ -18,6 +18,8 @@ import type { SignalingServer } from '../src/server'
 const MESSAGE_TIMEOUT_MS = 2000
 /** Comfortably over the server's refusal linger, well under `ws`'s 30 s. */
 const REFUSAL_DROP_TIMEOUT_MS = 4000
+/** Past the server's 64 KiB `maxPayload`. */
+const OVERSIZED_PAYLOAD_BYTES = 70_000
 
 /**
  * A WebSocket client that completes the handshake and then never answers
@@ -232,6 +234,38 @@ describe('signaling server', () => {
     } finally {
       sender.close()
       receiver.close()
+    }
+  })
+
+  // `ws` reports a frame past `maxPayload` by emitting 'error' on the socket,
+  // and an unhandled 'error' is an uncaught exception — so before the handler
+  // in `connection`, this single frame killed the process, not the connection.
+  it('survives a frame past the payload cap without taking the service down', async () => {
+    const topic = randomTopic()
+    const offender = await connect(topic)
+    const bystander = await connect(topic)
+    // Asserted directly rather than left to the runner: vitest installs its own
+    // `uncaughtException` listener, so the process survives here either way and
+    // the room-level assertions below pass with or without the fix. The escaped
+    // error is the defect, so it is the thing to assert on.
+    const uncaught: unknown[] = []
+    const record = (error: unknown): void => {
+      uncaught.push(error)
+    }
+    process.on('uncaughtException', record)
+    try {
+      offender.socket.send('x'.repeat(OVERSIZED_PAYLOAD_BYTES))
+      // The offender goes and the room is told — the connection dies, not us.
+      expect((await bystander.next((m) => m.type === 'peer-left')).peerId).toBe(offender.peerId)
+      expect(uncaught).toEqual([])
+      // And the server is still serving.
+      const arrival = await connect(topic)
+      expect(arrival.peersAtWelcome).toEqual([bystander.peerId])
+      arrival.close()
+    } finally {
+      process.off('uncaughtException', record)
+      offender.close()
+      bystander.close()
     }
   })
 
