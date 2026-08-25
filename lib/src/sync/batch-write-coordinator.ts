@@ -211,6 +211,13 @@ export class BatchWriteCoordinator {
   /** Resolver that wakes the current slot-wait poll sleep early (a peer
    *  announced a release over the bus); undefined outside slot-wait. */
   private slotWaitWake: (() => void) | undefined
+  /** Sticky companion to `slotWaitWake`. The resolver only exists while the
+   *  poll is actually sleeping, so an announcement landing during the
+   *  `acquire()` at the top of the loop — the LIKELY moment, since holders
+   *  yield in reply to the request we broadcast one line earlier — used to be
+   *  dropped, costing the waiter the full interval the fast path exists to
+   *  remove. Remembering it lets the next round skip its sleep. */
+  private slotMaybeFree: boolean = false
   /** Set by `teardown()`. Once disposed the coordinator must never re-acquire a
    *  partition or arm a refresh timer: an in-flight `withWrite` (e.g. a deferred
    *  publish, or a normal upload) can outlive a disconnect/sign-out, and without
@@ -359,6 +366,11 @@ export class BatchWriteCoordinator {
       clearInterval(this.partitionRefreshTimer)
       this.partitionRefreshTimer = undefined
     }
+    // Wake a slot poll so it sees `disposed` and stops, rather than sleeping
+    // out its interval first; the flag it consults is reset with it.
+    this.slotWaitWake?.()
+    this.slotWaitWake = undefined
+    this.slotMaybeFree = false
     const lease = this.partitionLease
     const stamper = this.deps.stamper
     if (lease) {
@@ -645,6 +657,18 @@ export class BatchWriteCoordinator {
     // time, only for `acquire()` to discard the claim — a pointless ghost
     // claim peers must wait out via the TTL.
     const epoch = this.leaseEpoch
+    // A wake left over from an earlier wait says nothing about this one.
+    this.slotMaybeFree = false
+    try {
+      await this.pollForSlot(deadline, epoch)
+    } finally {
+      // The resolver describes a sleep that is over however this exits — by
+      // return, by throw, or by the disposed check.
+      this.slotWaitWake = undefined
+    }
+  }
+
+  private async pollForSlot(deadline: number, epoch: number): Promise<void> {
     while (true) {
       await this.acquire()
       // Disposed mid-wait (disconnect during the slot poll): stop waiting for a
@@ -660,15 +684,25 @@ export class BatchWriteCoordinator {
       // Ask live holders to yield (re-broadcast every round — idempotent),
       // then sleep the poll interval, waking early on `notifySlotMaybeFree`.
       this.deps.onSlotWait?.()
-      await new Promise<void>((resolve) => {
-        const wake = () => {
-          clearTimeout(timer)
-          if (this.slotWaitWake === wake) this.slotWaitWake = undefined
-          resolve()
-        }
-        const timer = setTimeout(wake, LEASE_REFRESH_MS)
-        this.slotWaitWake = wake
-      })
+      if (this.slotMaybeFree) {
+        // A holder announced a release while we were mid-`acquire()`, so the
+        // scan above ran against the state BEFORE it let go. Go straight back
+        // round rather than sleeping out an interval we already know is stale.
+        // Not a busy loop: only a real peer announcement sets this, and every
+        // iteration pays a full network acquire, bounded by `deadline`.
+        this.slotMaybeFree = false
+      } else {
+        await new Promise<void>((resolve) => {
+          const wake = () => {
+            clearTimeout(timer)
+            if (this.slotWaitWake === wake) this.slotWaitWake = undefined
+            this.slotMaybeFree = false
+            resolve()
+          }
+          const timer = setTimeout(wake, LEASE_REFRESH_MS)
+          this.slotWaitWake = wake
+        })
+      }
       // Checked between the sleep and the next acquire: a fresh `acquire()`
       // call would capture the bumped epoch as its own baseline and commit.
       if (this.leaseEpoch !== epoch) return
@@ -1113,6 +1147,7 @@ export class BatchWriteCoordinator {
    * through the lock SOCs, so a spurious wake costs one extra read round.
    */
   notifySlotMaybeFree(): void {
+    this.slotMaybeFree = true
     this.slotWaitWake?.()
   }
 

@@ -235,6 +235,7 @@ type Internals = {
   acquire: () => Promise<void>
   acquireWithSlotWait: () => Promise<void>
   pauseLeaseBackgroundWork: () => void
+  slotWaitWake: (() => void) | undefined
 }
 
 describe("BatchWriteCoordinator.withWrite — wait fork", () => {
@@ -1491,6 +1492,115 @@ describe("BatchWriteCoordinator — bus-accelerated leases (docs/Account-Bus.md)
     expect(coordinator.currentPartition).toBe(2)
     // Woken by the bus, not by sleeping out the 10s poll interval.
     expect(Date.now() - started).toBeLessThan(LEASE_REFRESH_MS)
+  })
+
+  // The announcement usually lands DURING `acquire()`, not during the sleep:
+  // the holder yields in reply to the request this waiter broadcast one line
+  // earlier. `slotWaitWake` only exists while the poll sleeps, so a live
+  // resolver alone drops exactly the wake the fast path is for.
+  it("remembers a release announced while it was mid-acquire", async () => {
+    vi.useFakeTimers()
+    try {
+      const leaseOpts: Parameters<typeof makeLease>[0] = {
+        acquireResult: {
+          partition: undefined,
+          partitionCount: 4,
+          isReadOnly: true,
+        },
+      }
+      leaseController.lease = makeLease(leaseOpts)
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      let settled = false
+      const inFlight = internals.acquireWithSlotWait().then(() => {
+        settled = true
+      })
+      // Announced before the loop ever reaches its sleep.
+      coordinator.notifySlotMaybeFree()
+      leaseController.lease = makeLease({
+        acquireResult: {
+          partition: 2,
+          partitionCount: 4,
+          localCounter: new Uint32Array(8),
+          isReadOnly: false,
+        },
+      })
+
+      // No poll interval advanced: the remembered wake short-circuits the sleep.
+      await vi.advanceTimersByTimeAsync(0)
+      expect(settled).toBe(true)
+      await inFlight
+      expect(coordinator.currentPartition).toBe(2)
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("still sleeps the poll interval when nothing was announced", async () => {
+    vi.useFakeTimers()
+    try {
+      leaseController.lease = makeLease()
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      let settled = false
+      void internals.acquireWithSlotWait().then(() => {
+        settled = true
+      })
+      await vi.advanceTimersByTimeAsync(0)
+      expect(settled).toBe(false)
+      expect(leaseController.lease.acquire).toHaveBeenCalledTimes(1)
+
+      // Only the timer moves it on — no stale flag skipped the wait.
+      await vi.advanceTimersByTimeAsync(LEASE_REFRESH_MS)
+      expect(leaseController.lease.acquire).toHaveBeenCalledTimes(2)
+      coordinator.teardown()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it("teardown wakes a sleeping slot-wait and drops its resolver", async () => {
+    vi.useFakeTimers()
+    try {
+      leaseController.lease = makeLease()
+      const calls: string[] = []
+      const stamper = makeStamper(calls)
+      const coordinator = new BatchWriteCoordinator(
+        makeDeps({
+          stamper: stamper as unknown as BatchWriteCoordinatorDeps["stamper"],
+          mode: "oneshot",
+        }),
+      )
+      const internals = coordinator as unknown as Internals
+
+      const inFlight = internals.acquireWithSlotWait()
+      await vi.advanceTimersByTimeAsync(0)
+      expect(internals.slotWaitWake).toBeDefined()
+
+      coordinator.teardown()
+      await vi.advanceTimersByTimeAsync(0)
+      await inFlight
+      // The resolver describes a sleep that is over; it must not outlive it.
+      expect(internals.slotWaitWake).toBeUndefined()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it("notifySlotMaybeFree outside slot-wait is a no-op", () => {
