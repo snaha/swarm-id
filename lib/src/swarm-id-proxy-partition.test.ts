@@ -74,7 +74,10 @@ vi.mock("./sync/batch-write-coordinator", () => ({
       withWrite: vi.fn(),
       yieldForPeer: vi.fn(async () => 1),
       notifySlotMaybeFree: vi.fn(),
-      currentPartition: undefined,
+      currentPartition: undefined as number | undefined,
+      // The modulus for the yield rank order; a test sets `currentPartition`
+      // to place this holder in it.
+      partitionCount: 4,
     }
   }),
 }))
@@ -312,6 +315,115 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     } finally {
       busChannel.close()
     }
+  })
+
+  // A waiter needs exactly ONE slot, but the request names no partition. Every
+  // idle holder used to answer, so a 4-partition account dropped all four
+  // leases at once and whoever lost the re-race got "Uploads are unavailable".
+  // The request id gives every holder the same rank order; only rank 0 answers
+  // at once, and the rest stand down when they see its release.
+  describe("only one holder answers a lease-request", () => {
+    /** Seed 0, so rank == the holder's own partition index. */
+    const REQUEST_ID = "00000000"
+
+    async function hydrateHolder(partition: number): Promise<{
+      yieldForPeer: ReturnType<typeof vi.fn>
+      currentPartition: number | undefined
+      partitionCount: number
+    }> {
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+      })
+      const coordinator = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+        .value as {
+        yieldForPeer: ReturnType<typeof vi.fn>
+        currentPartition: number | undefined
+        partitionCount: number
+      }
+      coordinator.currentPartition = partition
+      coordinator.partitionCount = 4
+      coordinator.yieldForPeer.mockClear()
+      return coordinator
+    }
+
+    function postRequest(channel: BroadcastChannel, requestId?: string): void {
+      channel.postMessage({
+        type: "lease-request",
+        accountId: "aa".repeat(20),
+        fromDeviceId: "peer-device",
+        requestId,
+      })
+    }
+
+    it("answers immediately at rank 0", async () => {
+      const coordinator = await hydrateHolder(0)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        postRequest(busChannel, REQUEST_ID)
+        // No step waited: the ordinary one-holder handover must not get slower.
+        await vi.waitFor(() =>
+          expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("waits its step at a later rank, then answers if nobody else did", async () => {
+      const coordinator = await hydrateHolder(1)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        postRequest(busChannel, REQUEST_ID)
+        await new Promise((resolve) => setTimeout(resolve, 60))
+        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
+
+        // Rank 0 stayed silent (mid-write, say), so this holder still answers
+        // rather than costing the waiter a whole poll interval.
+        await vi.waitFor(
+          () => expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1),
+          { timeout: 2000 },
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("stands down when a peer answers the same request first", async () => {
+      const coordinator = await hydrateHolder(1)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        postRequest(busChannel, REQUEST_ID)
+        busChannel.postMessage({
+          type: "lease-released",
+          accountId: "aa".repeat(20),
+          partition: 0,
+          fromDeviceId: "peer-device",
+          requestId: REQUEST_ID,
+        })
+        // Well past this holder's step.
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        expect(coordinator.yieldForPeer).not.toHaveBeenCalled()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("schedules one answer however many times the request is delivered", async () => {
+      const coordinator = await hydrateHolder(1)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        // The same message reaches us over every attached transport, and the
+        // waiter re-broadcasts each round.
+        postRequest(busChannel, REQUEST_ID)
+        postRequest(busChannel, REQUEST_ID)
+        postRequest(busChannel, REQUEST_ID)
+        await new Promise((resolve) => setTimeout(resolve, 500))
+        expect(coordinator.yieldForPeer).toHaveBeenCalledTimes(1)
+      } finally {
+        busChannel.close()
+      }
+    })
   })
 
   it("announces the released partition when a teardown drops a held lease", async () => {

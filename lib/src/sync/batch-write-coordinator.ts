@@ -239,6 +239,12 @@ export class BatchWriteCoordinator {
     return this.readOnly
   }
 
+  /** The account's partition split — the modulus the proxy ranks holders by
+   *  when electing which one answers a peer's `lease-request`. */
+  get partitionCount(): number {
+    return this.deps.partitionCount
+  }
+
   /** The bound stamper — exposed for the proxy's `buildConnectionInfo`
    *  (appKey / uploadMode). */
   get stamperRef(): UtilizationAwareStamper {

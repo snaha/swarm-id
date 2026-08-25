@@ -172,6 +172,24 @@ const PUBLISH_DEBOUNCE_MS = 1500
  *  slot-wait loop's repeated acquires from hammering the feed). */
 const DEVICE_REGISTRY_REFRESH_THROTTLE_MS = 8_000
 
+/**
+ * Gap between consecutive ranks when holders take turns answering a peer's
+ * `lease-request` (`yieldRankDelayMs`). Long enough for the winner's
+ * `lease-released` to reach the others — instant over BroadcastChannel, a
+ * server round trip over signaling — and short enough that falling through a
+ * few ranks still beats the 10 s poll the fast path exists to skip.
+ */
+const PEER_YIELD_RANK_STEP_MS = 250
+
+/** Hex chars of request id — parsed straight into the rank seed. */
+const LEASE_REQUEST_ID_LENGTH = 8
+
+/** Identifies one slot-wait round, so every holder ranks itself the same way.
+ *  A UUID's first block is hex, so this is hex without any rewriting. */
+function newLeaseRequestId(): string {
+  return crypto.randomUUID().slice(0, LEASE_REQUEST_ID_LENGTH)
+}
+
 const DEFAULT_ACT_FILENAME = "index.bin"
 const DEFAULT_ACT_CONTENT_TYPE = "application/octet-stream"
 const SEQUENTIAL_INDEX_LOOKUP_TIMEOUT_MS = 2000
@@ -253,6 +271,9 @@ export class SwarmIdProxy {
   private busJoinGeneration = 0
   /** Account the live coordinator serves — routes bus lease messages. */
   private coordinatorAccountId: string | undefined
+  /** Scheduled answers to peers' `lease-request`s, by request id, so a peer
+   *  earlier in the rank order can call ours off (`yieldRankDelayMs`). */
+  private pendingYields = new Map<string, ReturnType<typeof setTimeout>>()
   /**
    * Utilization deltas that arrived while the stamper had no lane, held until
    * a bind names one (`applyPendingLaneUpdate`). Keyed by lane so a delta for
@@ -799,6 +820,8 @@ export class SwarmIdProxy {
   private teardownCoordinator(): void {
     const partition = this.coordinator?.currentPartition
     const accountId = this.coordinatorAccountId
+    // Scheduled answers describe a lease we are about to drop anyway.
+    this.cancelPendingYields()
     this.coordinator?.teardown()
     this.coordinator = undefined
     this.coordinatorAccountId = undefined
@@ -870,6 +893,66 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Run this holder's answer to a peer's `lease-request`, announcing the
+   * partition it gave up so the waiter (and holders further down the rank
+   * order) hear about it.
+   */
+  private answerLeaseRequest(accountId: string, requestId?: string): void {
+    const coordinator = this.coordinator
+    if (!coordinator) return
+    coordinator
+      .yieldForPeer()
+      .then((partition) => {
+        if (partition === undefined) return
+        this.bus.publish({
+          type: "lease-released",
+          accountId,
+          partition,
+          fromDeviceId: this.requireDeviceId(),
+          requestId,
+        })
+      })
+      .catch((error) => {
+        console.error("[Proxy] Peer lease yield failed:", error)
+      })
+  }
+
+  /**
+   * How long this holder waits before answering `requestId`.
+   *
+   * A waiter needs exactly ONE slot, but the request names no partition, so
+   * every idle holder used to release at once: with `partitionCount = 4` all
+   * four dropped their lease, each then paid a cold acquire on its next
+   * upload, and whoever lost the re-race got "Uploads are unavailable". The
+   * waiter re-broadcasts every round, so it repeated.
+   *
+   * The request id gives every holder the same permutation of the partitions,
+   * and each waits its own rank in it. Exactly one draws rank 0 and answers
+   * immediately — so the ordinary one-holder handover is not slowed at all —
+   * while the rest stand down as soon as they see its `lease-released`. If the
+   * rank-0 holder turns out to be mid-write it announces nothing, and rank 1
+   * answers a step later, which still beats waiting out a poll interval.
+   */
+  private yieldRankDelayMs(requestId: string): number {
+    const coordinator = this.coordinator
+    const partition = coordinator?.currentPartition
+    const partitionCount = coordinator?.partitionCount ?? 1
+    if (partition === undefined || partitionCount <= 1) return 0
+    // The id is hex, so the seed needs no hash function.
+    const seed = Number.parseInt(requestId.slice(0, 8), 16)
+    if (!Number.isFinite(seed)) return 0
+    return ((seed + partition) % partitionCount) * PEER_YIELD_RANK_STEP_MS
+  }
+
+  /** Drop every scheduled answer — nothing they would release is ours now. */
+  private cancelPendingYields(): void {
+    for (const timer of this.pendingYields.values()) {
+      clearTimeout(timer)
+    }
+    this.pendingYields.clear()
+  }
+
+  /**
    * Account-bus subscription: utilization deltas from other contexts, and the
    * lease fast path (docs/Account-Bus.md, bus-accelerated leases). The Swarm
    * lock-SOC protocol stays authoritative — these messages only shortcut its
@@ -933,21 +1016,21 @@ export class SwarmIdProxy {
           ) {
             return
           }
-          coordinator
-            .yieldForPeer()
-            .then((partition) => {
-              if (partition !== undefined) {
-                this.bus.publish({
-                  type: "lease-released",
-                  accountId: message.accountId,
-                  partition,
-                  fromDeviceId: this.requireDeviceId(),
-                })
-              }
-            })
-            .catch((error) => {
-              console.error("[Proxy] Peer lease yield failed:", error)
-            })
+          const { requestId } = message
+          if (requestId === undefined) {
+            // A peer on an older bundle: no rank order to join, so answer as
+            // we always did rather than leaving it unserved.
+            this.answerLeaseRequest(message.accountId)
+            return
+          }
+          // Idempotent per request: the same message reaches us over every
+          // attached transport, and the waiter re-broadcasts each round.
+          if (this.pendingYields.has(requestId)) return
+          const timer = setTimeout(() => {
+            this.pendingYields.delete(requestId)
+            this.answerLeaseRequest(message.accountId, requestId)
+          }, this.yieldRankDelayMs(requestId))
+          this.pendingYields.set(requestId, timer)
           return
         }
         case "lease-released": {
@@ -956,6 +1039,16 @@ export class SwarmIdProxy {
             message.accountId !== this.coordinatorAccountId
           ) {
             return
+          }
+          // A peer earlier in the rank order already answered this request —
+          // stand down rather than dropping a second lease for one waiter.
+          const answeredId = message.requestId
+          if (answeredId !== undefined) {
+            const scheduled = this.pendingYields.get(answeredId)
+            if (scheduled !== undefined) {
+              clearTimeout(scheduled)
+              this.pendingYields.delete(answeredId)
+            }
           }
           this.coordinator?.notifySlotMaybeFree()
           return
@@ -1102,11 +1195,15 @@ export class SwarmIdProxy {
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
       // Each slot-wait poll round, ask live holders over the account bus to
       // yield their partition (docs/Account-Bus.md, bus-accelerated leases).
+      // Fresh id per round: every holder derives the same rank order from it,
+      // so exactly one answers (see `yieldRankDelayMs`), and a new round is a
+      // new draw — a holder that was busy last time is not permanently first.
       onSlotWait: () =>
         this.bus.publish({
           type: "lease-request",
           accountId: accountInfo.accountId,
           fromDeviceId: this.requireDeviceId(),
+          requestId: newLeaseRequestId(),
         }),
       // On first acquiring a partition, announce this device by publishing the
       // account snapshot (which includes ourselves in metadata.devices) to the
