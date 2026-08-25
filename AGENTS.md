@@ -37,10 +37,15 @@ Master Key (from Passkey/SIWE challenge)
 
 ## Packages
 
-- **lib/**: TypeScript library (@snaha/swarm-id) — auth and Bee API operations
-- **ui/**: `@swarm-id/ui` — SvelteKit identity UI (trusted domain), hosts the keystore UI and management
+- **lib/** ([AGENTS.md](lib/AGENTS.md)): TypeScript library (`@snaha/swarm-id`) — auth and Bee API operations
+- **ui/** ([AGENTS.md](ui/AGENTS.md)): `@swarm-id/ui` — SvelteKit identity UI (trusted domain), hosts the keystore UI and management
 - **demo/**: Demo dApp showing library integration
-- **docs-site/**: Starlight (Astro) documentation website
+- **docs-site/** ([AGENTS.md](docs-site/AGENTS.md)): Starlight (Astro) documentation website
+- **signaling/**: `@swarm-id/signaling` — account-bus signaling and relay server
+
+Each package's own `AGENTS.md` holds what applies inside it, and is deliberately not repeated
+here: two copies of a rule is one copy that goes stale. `CLAUDE.md` imports them so they load
+with this file.
 
 ## Commands
 
@@ -58,9 +63,9 @@ pnpm clean            # Clean build outputs
 
 Before committing, you MUST pass `pnpm check:all` which runs filtered checks across packages:
 
-- **@snaha/swarm-id**: `format:check`, `lint`, `typecheck`, `test`
-- **@swarm-id/ui**: `lint` (includes license headers), `check`, `knip`
-- **@swarm-id/demo**: `lint`, `check`, `knip`
+- **`@snaha/swarm-id`**: `format:check`, `lint`, `typecheck`, `test`
+- **`@swarm-id/ui`**: `lint` (includes license headers), `check`, `knip`
+- **`@swarm-id/demo`**: `lint`, `check`, `knip`
 
 ## Code Style
 
