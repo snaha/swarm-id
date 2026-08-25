@@ -216,6 +216,13 @@ describe('signaling server', () => {
 // Liveness (#573)
 // ============================================================================
 
+/** Close code and reason of the first close event, for cap assertions. */
+function closeInfo(socket: WebSocket): Promise<{ code: number; reason: string }> {
+  return new Promise((resolve) => {
+    socket.addEventListener('close', (event) => resolve({ code: event.code, reason: event.reason }))
+  })
+}
+
 describe('signaling server — heartbeat', () => {
   it('terminates a socket that stops answering pings, and tells the room', async () => {
     const beating = await createSignalingServer({ port: 0, heartbeatIntervalMs: 50 })
@@ -264,6 +271,121 @@ describe('signaling server — heartbeat', () => {
       }
     } finally {
       await beating.close()
+    }
+  })
+})
+
+// ============================================================================
+// Overload bounds (#575)
+// ============================================================================
+
+describe('signaling server — limits', () => {
+  it('turns away a peer once the room is full, leaving the room intact', async () => {
+    const capped = await createSignalingServer({ port: 0, maxPeersPerRoom: 2 })
+    try {
+      const topic = randomTopic()
+      const first = await connect(topic, capped.port)
+      const second = await connect(topic, capped.port)
+      try {
+        const third = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${topic}`)
+        // 1013 (try again later), NOT 1008 — the client stops reconnecting on
+        // 1008, which is right for a bad topic and wrong for transient load.
+        expect((await closeInfo(third)).code).toBe(1013)
+
+        // The two already in the room still work.
+        first.socket.send(JSON.stringify({ type: 'relay', to: second.peerId, payload: 'ok' }))
+        expect((await second.next((m) => m.type === 'relay')).payload).toBe('ok')
+      } finally {
+        first.close()
+        second.close()
+      }
+    } finally {
+      await capped.close()
+    }
+  })
+
+  it('turns away a peer opening a room past the room cap', async () => {
+    const capped = await createSignalingServer({ port: 0, maxRooms: 1 })
+    try {
+      const resident = await connect(randomTopic(), capped.port)
+      try {
+        const newcomer = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${randomTopic()}`)
+        expect((await closeInfo(newcomer)).code).toBe(1013)
+      } finally {
+        resident.close()
+      }
+    } finally {
+      await capped.close()
+    }
+  })
+
+  it('lets a peer join an existing room even at the room cap', async () => {
+    const capped = await createSignalingServer({ port: 0, maxRooms: 1 })
+    try {
+      const topic = randomTopic()
+      const first = await connect(topic, capped.port)
+      try {
+        // Same room — the cap bounds rooms, not peers.
+        const second = await connect(topic, capped.port)
+        expect(second.peersAtWelcome).toEqual([first.peerId])
+        second.close()
+      } finally {
+        first.close()
+      }
+    } finally {
+      await capped.close()
+    }
+  })
+
+  it('closes a socket that exceeds its message budget, after honouring the budget', async () => {
+    const capped = await createSignalingServer({
+      port: 0,
+      messageRateLimit: 3,
+      messageRateWindowMs: 60_000,
+    })
+    try {
+      const topic = randomTopic()
+      const sender = await connect(topic, capped.port)
+      const receiver = await connect(topic, capped.port)
+      try {
+        const closed = closeInfo(sender.socket)
+        for (let i = 0; i < 4; i += 1) {
+          sender.socket.send(
+            JSON.stringify({ type: 'relay', to: receiver.peerId, payload: `m${i}` }),
+          )
+        }
+        expect((await closed).code).toBe(1008)
+        // The budget is honoured before it is enforced: three got through.
+        await receiver.next((m) => m.payload === 'm2')
+        expect(receiver.received.filter((m) => m.type === 'relay')).toHaveLength(3)
+      } finally {
+        sender.close()
+        receiver.close()
+      }
+    } finally {
+      await capped.close()
+    }
+  })
+
+  it('refuses a connection past the global cap before upgrading it', async () => {
+    const capped = await createSignalingServer({ port: 0, maxConnections: 1 })
+    try {
+      const resident = await connect(randomTopic(), capped.port)
+      try {
+        // Rejected in verifyClient, so the handshake itself fails — there is
+        // no WebSocket to carry a close code.
+        const socket = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${randomTopic()}`)
+        const opened = await new Promise<boolean>((resolve) => {
+          socket.addEventListener('open', () => resolve(true))
+          socket.addEventListener('error', () => resolve(false))
+          socket.addEventListener('close', () => resolve(false))
+        })
+        expect(opened).toBe(false)
+      } finally {
+        resident.close()
+      }
+    } finally {
+      await capped.close()
     }
   })
 })
