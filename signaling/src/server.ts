@@ -33,6 +33,13 @@ const TOPIC_PATTERN = /^[0-9a-f]{16,128}$/
 const MAX_PAYLOAD_BYTES = 65536
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
+/**
+ * Ping cadence. A socket that has not ponged by the following tick is
+ * terminated, so the worst case for noticing a half-open connection is two
+ * intervals.
+ */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
+
 const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
     type: z.literal('relay'),
@@ -49,6 +56,13 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
 interface Peer {
   id: string
   socket: WebSocket
+  /**
+   * Cleared before each ping and set by the pong. Still clear at the next tick
+   * means the socket never answered — `ws` cannot see a half-open TCP on its
+   * own, and backgrounded mobile Safari, NAT idle timeouts and sleeping
+   * laptops all produce them.
+   */
+  alive: boolean
 }
 
 export interface SignalingServer {
@@ -60,6 +74,8 @@ export interface SignalingServerOptions {
   port: number
   /** Origins allowed to connect; empty/absent allows all (dev). */
   allowedOrigins?: string[]
+  /** Override for the ping cadence, so tests can drive it in milliseconds. */
+  heartbeatIntervalMs?: number
 }
 
 function send(peer: Peer, message: Record<string, unknown>): void {
@@ -70,6 +86,7 @@ function send(peer: Peer, message: Record<string, unknown>): void {
 
 export function createSignalingServer(options: SignalingServerOptions): Promise<SignalingServer> {
   const rooms = new Map<string, Map<string, Peer>>()
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
 
   const httpServer: Server = createServer((request, response) => {
     if (request.url === '/healthz') {
@@ -99,9 +116,12 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       return
     }
 
-    const peer: Peer = { id: randomUUID(), socket }
+    const peer: Peer = { id: randomUUID(), socket, alive: true }
     const room = rooms.get(topic) ?? new Map<string, Peer>()
     rooms.set(topic, room)
+    socket.on('pong', () => {
+      peer.alive = true
+    })
 
     send(peer, {
       type: 'welcome',
@@ -154,6 +174,24 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     })
   })
 
+  // Reaping a ghost is not just tidiness: rooms are only reclaimed at size 0,
+  // so one ghost pins its room forever, every publisher keeps relaying to it,
+  // and its `peer-left` never fires — leaving every live peer holding a
+  // half-open RTCPeerConnection. `terminate()` fires 'close', so the existing
+  // teardown above does all of that for us.
+  const heartbeat = setInterval(() => {
+    for (const room of rooms.values()) {
+      for (const peer of room.values()) {
+        if (!peer.alive) {
+          peer.socket.terminate()
+          continue
+        }
+        peer.alive = false
+        peer.socket.ping()
+      }
+    }
+  }, heartbeatIntervalMs)
+
   return new Promise((resolve, reject) => {
     httpServer.once('error', reject)
     httpServer.listen(options.port, () => {
@@ -163,6 +201,7 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
         port,
         close: () =>
           new Promise<void>((resolveClose) => {
+            clearInterval(heartbeat)
             for (const client of wss.clients) {
               client.terminate()
             }

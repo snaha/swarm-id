@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
+import { WebSocket as WS } from 'ws'
 
 import { createSignalingServer } from '../src/server'
 import type { SignalingServer } from '../src/server'
@@ -31,8 +32,8 @@ interface TestClient {
   close(): void
 }
 
-function connect(topic: string): Promise<TestClient> {
-  const socket = new WebSocket(`ws://127.0.0.1:${server.port}/?topic=${topic}`)
+function connect(topic: string, port: number = server.port): Promise<TestClient> {
+  const socket = new WebSocket(`ws://127.0.0.1:${port}/?topic=${topic}`)
   const received: Record<string, unknown>[] = []
   const waiters: {
     predicate: (message: Record<string, unknown>) => boolean
@@ -207,6 +208,62 @@ describe('signaling server', () => {
       expect(failed).toBe(true)
     } finally {
       await guarded.close()
+    }
+  })
+})
+
+// ============================================================================
+// Liveness (#573)
+// ============================================================================
+
+describe('signaling server — heartbeat', () => {
+  it('terminates a socket that stops answering pings, and tells the room', async () => {
+    const beating = await createSignalingServer({ port: 0, heartbeatIntervalMs: 50 })
+    try {
+      const topic = randomTopic()
+      const live = await connect(topic, beating.port)
+      // `autoPong: false` is the whole point: the global WebSocket (and a stock
+      // `ws` client) answers pings at protocol level, so a half-open socket
+      // cannot be simulated with either.
+      const ghost = new WS(`ws://127.0.0.1:${beating.port}/?topic=${topic}`, {
+        autoPong: false,
+      })
+      try {
+        await new Promise((resolve) => ghost.on('open', resolve))
+        const joined = await live.next((m) => m.type === 'peer-joined')
+
+        // Round one pings both; round two finds the ghost never answered.
+        const left = await live.next((m) => m.type === 'peer-left')
+        expect(left.peerId).toBe(joined.peerId)
+      } finally {
+        live.close()
+        ghost.terminate()
+      }
+    } finally {
+      await beating.close()
+    }
+  })
+
+  it('does not terminate a socket that is answering', async () => {
+    const beating = await createSignalingServer({ port: 0, heartbeatIntervalMs: 20 })
+    try {
+      const topic = randomTopic()
+      const first = await connect(topic, beating.port)
+      const second = await connect(topic, beating.port)
+      try {
+        // Several heartbeat rounds with nothing else happening.
+        await new Promise((resolve) => setTimeout(resolve, 150))
+        expect(first.received.filter((m) => m.type === 'peer-left')).toEqual([])
+
+        first.socket.send(JSON.stringify({ type: 'relay', to: second.peerId, payload: 'alive' }))
+        const relayed = await second.next((m) => m.type === 'relay')
+        expect(relayed.payload).toBe('alive')
+      } finally {
+        first.close()
+        second.close()
+      }
+    } finally {
+      await beating.close()
     }
   })
 })
