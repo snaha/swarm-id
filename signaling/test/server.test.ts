@@ -1,11 +1,45 @@
 // Copyright 2026 The Swarm Authors. All rights reserved.
 // SPDX-License-Identifier: Apache-2.0
 
+import { createConnection } from 'node:net'
+import type { Socket } from 'node:net'
+
 import { describe, it, expect, beforeAll, afterAll } from 'vitest'
 import { WebSocket as WS } from 'ws'
 
-import { createSignalingServer } from '../src/server'
+import {
+  createSignalingServer,
+  WS_CLOSE_POLICY_VIOLATION,
+  WS_CLOSE_TRY_AGAIN_LATER,
+} from '../src/server'
 import type { SignalingServer } from '../src/server'
+
+/** Bound on a wait for a message the server should send within a tick or two. */
+const MESSAGE_TIMEOUT_MS = 2000
+/** Comfortably over the server's refusal linger, well under `ws`'s 30 s. */
+const REFUSAL_DROP_TIMEOUT_MS = 4000
+
+/**
+ * A WebSocket client that completes the handshake and then never answers
+ * anything — including a close frame. `ws` clients (and the global WebSocket)
+ * reply to a close at protocol level, so neither can stand in for the rude
+ * client this is about, the same way `autoPong: false` is the only stand-in
+ * for a dead socket in the heartbeat tests.
+ */
+function rudeUpgrade(port: number, topic: string): Promise<Socket> {
+  const key = Buffer.from(randomTopic(), 'hex').toString('base64')
+  const socket = createConnection(port, '127.0.0.1')
+  socket.write(
+    `GET /?topic=${topic} HTTP/1.1\r\n` +
+      `Host: 127.0.0.1:${port}\r\n` +
+      'Upgrade: websocket\r\n' +
+      'Connection: Upgrade\r\n' +
+      `Sec-WebSocket-Key: ${key}\r\n` +
+      'Sec-WebSocket-Version: 13\r\n\r\n',
+  )
+  // Resolve on the upgrade response; everything after it is ignored on purpose.
+  return new Promise((resolve) => socket.once('data', () => resolve(socket)))
+}
 
 // A fresh topic per test keeps rooms isolated — a shared room would leak
 // join/leave events from a previous test's closing sockets.
@@ -64,7 +98,23 @@ function connect(topic: string, port: number = server.port): Promise<TestClient>
         next(predicate) {
           const match = received.find(predicate)
           if (match) return Promise.resolve(match)
-          return new Promise((resolveNext) => waiters.push({ predicate, resolve: resolveNext }))
+          // Bounded: an unbounded wait turns a real regression into a test
+          // that hangs until vitest's own timeout, with nothing said about
+          // what never arrived.
+          return new Promise((resolveNext, rejectNext) => {
+            const waiter = { predicate, resolve: resolveNext }
+            waiters.push(waiter)
+            setTimeout(() => {
+              const index = waiters.indexOf(waiter)
+              if (index < 0) return
+              waiters.splice(index, 1)
+              rejectNext(
+                new Error(
+                  `no matching message within ${MESSAGE_TIMEOUT_MS}ms; got ${JSON.stringify(received)}`,
+                ),
+              )
+            }, MESSAGE_TIMEOUT_MS).unref()
+          })
         },
         close() {
           socket.close()
@@ -190,7 +240,7 @@ describe('signaling server', () => {
     const code = await new Promise<number>((resolve) => {
       socket.addEventListener('close', (event) => resolve(event.code))
     })
-    expect(code).toBe(1008)
+    expect(code).toBe(WS_CLOSE_POLICY_VIOLATION)
   })
 
   it('enforces the origin allowlist when configured', async () => {
@@ -251,15 +301,19 @@ describe('signaling server — heartbeat', () => {
     }
   })
 
+  // Deliberately slower than the test above: a peer is reaped after two ticks
+  // without a pong, so at a 20 ms cadence a CI stall past 40 ms can produce
+  // that from a perfectly healthy socket — failing the one test whose job is
+  // to prove over-reaping does not happen.
   it('does not terminate a socket that is answering', async () => {
-    const beating = await createSignalingServer({ port: 0, heartbeatIntervalMs: 20 })
+    const beating = await createSignalingServer({ port: 0, heartbeatIntervalMs: 200 })
     try {
       const topic = randomTopic()
       const first = await connect(topic, beating.port)
       const second = await connect(topic, beating.port)
       try {
         // Several heartbeat rounds with nothing else happening.
-        await new Promise((resolve) => setTimeout(resolve, 150))
+        await new Promise((resolve) => setTimeout(resolve, 700))
         expect(first.received.filter((m) => m.type === 'peer-left')).toEqual([])
 
         first.socket.send(JSON.stringify({ type: 'relay', to: second.peerId, payload: 'alive' }))
@@ -290,7 +344,7 @@ describe('signaling server — limits', () => {
         const third = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${topic}`)
         // 1013 (try again later), NOT 1008 — the client stops reconnecting on
         // 1008, which is right for a bad topic and wrong for transient load.
-        expect((await closeInfo(third)).code).toBe(1013)
+        expect((await closeInfo(third)).code).toBe(WS_CLOSE_TRY_AGAIN_LATER)
 
         // The two already in the room still work.
         first.socket.send(JSON.stringify({ type: 'relay', to: second.peerId, payload: 'ok' }))
@@ -310,7 +364,7 @@ describe('signaling server — limits', () => {
       const resident = await connect(randomTopic(), capped.port)
       try {
         const newcomer = new WebSocket(`ws://127.0.0.1:${capped.port}/?topic=${randomTopic()}`)
-        expect((await closeInfo(newcomer)).code).toBe(1013)
+        expect((await closeInfo(newcomer)).code).toBe(WS_CLOSE_TRY_AGAIN_LATER)
       } finally {
         resident.close()
       }
@@ -337,7 +391,11 @@ describe('signaling server — limits', () => {
     }
   })
 
-  it('closes a socket that exceeds its message budget, after honouring the budget', async () => {
+  // 1013, not 1008. The client treats a policy close as permanent for the whole
+  // page (`lib/src/bus/signaling-transport.ts`), so closing an overrun with 1008
+  // would trade one burst for a context that never syncs again — and a full room
+  // legitimately bursts, which is what the budget is now sized for.
+  it('closes a socket that exceeds its message budget with a retryable code', async () => {
     const capped = await createSignalingServer({
       port: 0,
       messageRateLimit: 3,
@@ -354,10 +412,50 @@ describe('signaling server — limits', () => {
             JSON.stringify({ type: 'relay', to: receiver.peerId, payload: `m${i}` }),
           )
         }
-        expect((await closed).code).toBe(1008)
+        expect((await closed).code).toBe(WS_CLOSE_TRY_AGAIN_LATER)
         // The budget is honoured before it is enforced: three got through.
         await receiver.next((m) => m.payload === 'm2')
         expect(receiver.received.filter((m) => m.type === 'relay')).toHaveLength(3)
+
+        // And the client is welcome back — the whole point of not using 1008.
+        const returning = await connect(topic, capped.port)
+        returning.socket.send(
+          JSON.stringify({ type: 'relay', to: receiver.peerId, payload: 'back' }),
+        )
+        expect((await receiver.next((m) => m.payload === 'back')).type).toBe('relay')
+        returning.close()
+      } finally {
+        sender.close()
+        receiver.close()
+      }
+    } finally {
+      await capped.close()
+    }
+  })
+
+  // The budget has to clear a full room's join burst: `welcome` makes a newcomer
+  // initiate toward every peer already there at once, at an offer plus ~15 ICE
+  // candidates each. A flat number that looks generous for a 4-peer room is
+  // below what a full room sends in its first seconds — which is why the budget
+  // is derived from the room cap rather than fixed.
+  it('sizes the default message budget to a full room negotiating', async () => {
+    const maxPeersPerRoom = 24
+    const capped = await createSignalingServer({ port: 0, maxPeersPerRoom })
+    try {
+      const topic = randomTopic()
+      const receiver = await connect(topic, capped.port)
+      const sender = await connect(topic, capped.port)
+      try {
+        // What negotiating with a full room already in it costs the newcomer.
+        const burst = (maxPeersPerRoom - 1) * 16
+        for (let i = 0; i < burst; i += 1) {
+          sender.socket.send(
+            JSON.stringify({ type: 'signal', to: receiver.peerId, payload: { kind: 'ice' } }),
+          )
+        }
+        sender.socket.send(JSON.stringify({ type: 'relay', to: receiver.peerId, payload: 'after' }))
+        expect((await receiver.next((m) => m.payload === 'after')).type).toBe('relay')
+        expect(sender.socket.readyState).toBe(WebSocket.OPEN)
       } finally {
         sender.close()
         receiver.close()
@@ -384,6 +482,26 @@ describe('signaling server — limits', () => {
       } finally {
         resident.close()
       }
+    } finally {
+      await capped.close()
+    }
+  })
+
+  // A refused socket is in no room, so the heartbeat cannot reach it, and `ws`
+  // holds it against the connection cap until the peer answers the close frame
+  // or 30 s pass. A client that simply never answers would therefore park a
+  // capacity slot for half a minute per TCP handshake — cheap enough to refuse
+  // every real user with. Hence the terminate behind each refusal.
+  it('drops a refused socket that ignores the close frame', async () => {
+    const capped = await createSignalingServer({ port: 0 })
+    try {
+      const rude = await rudeUpgrade(capped.port, 'not-a-topic')
+      const dropped = new Promise<boolean>((resolve) => {
+        rude.once('close', () => resolve(true))
+        setTimeout(() => resolve(false), REFUSAL_DROP_TIMEOUT_MS).unref()
+      })
+      expect(await dropped).toBe(true)
+      rude.destroy()
     } finally {
       await capped.close()
     }

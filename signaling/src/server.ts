@@ -35,10 +35,24 @@ const MAX_PAYLOAD_BYTES = 65536
 const HTTP_OK = 200
 const HTTP_NOT_FOUND = 404
 const HTTP_SERVICE_UNAVAILABLE = 503
-/** The client treats this as permanent and stops reconnecting. */
-const WS_CLOSE_POLICY_VIOLATION = 1008
+/**
+ * The client treats this as permanent and stops reconnecting for good, so it is
+ * reserved for the one thing that will never come right: a topic this server
+ * refuses and would refuse identically on every retry. Everything else — load,
+ * an exhausted budget — closes with 1013.
+ */
+export const WS_CLOSE_POLICY_VIOLATION = 1008
 /** Transient — the client backs off and comes back. */
-const WS_CLOSE_TRY_AGAIN_LATER = 1013
+export const WS_CLOSE_TRY_AGAIN_LATER = 1013
+
+/**
+ * `ws` keeps a closing socket in `wss.clients` for up to 30 s waiting for the
+ * peer's close frame, and the heartbeat below only walks `rooms` — a refused
+ * socket is in neither, so nothing reclaims its global-cap slot. A flood that
+ * ignores the close would refuse every real user for one TCP handshake each.
+ * Give the frame a moment to reach an honest client, then drop the socket.
+ */
+const REFUSAL_LINGER_MS = 1000
 
 /**
  * Ping cadence. A socket that has not ponged by the following tick is
@@ -58,12 +72,13 @@ const DEFAULT_MAX_ROOMS = 200
 /** An account with more than this many live contexts is pathological. */
 const DEFAULT_MAX_PEERS_PER_ROOM = 24
 /**
- * Generous on purpose. A WebRTC negotiation is an offer/answer plus ~15 ICE
- * candidates PER PEER, so a 4-peer room legitimately sends ~64 messages within
- * a couple of seconds of joining, before any relay traffic. A tight budget
- * would cut off real negotiation, which is exactly the path we want to keep.
+ * Outbound cost of negotiating with ONE peer: an offer/answer plus ~15 ICE
+ * candidates, doubled for renegotiation and relay traffic. The budget is sized
+ * from this times the room cap rather than fixed, because `welcome` makes a
+ * newcomer initiate toward every peer already in the room at once — a flat
+ * number that looks generous for a 4-peer room cuts off a full one mid-join.
  */
-const DEFAULT_MESSAGE_RATE_LIMIT = 200
+const MESSAGES_PER_PEER_NEGOTIATION = 40
 const DEFAULT_MESSAGE_RATE_WINDOW_MS = 10_000
 
 const ClientMessageSchema = z.discriminatedUnion('type', [
@@ -117,6 +132,17 @@ export interface SignalingServerOptions {
   messageRateWindowMs?: number
 }
 
+/**
+ * Turn a socket away and make sure it actually goes: `close` alone leaves it
+ * counting against the connection cap until the peer answers or `ws` gives up
+ * 30 s later, and a refused socket joined no room, so the heartbeat cannot
+ * reach it either (see `REFUSAL_LINGER_MS`).
+ */
+function refuse(socket: WebSocket, code: number, reason: string): void {
+  socket.close(code, reason)
+  setTimeout(() => socket.terminate(), REFUSAL_LINGER_MS).unref()
+}
+
 function send(peer: Peer, message: Record<string, unknown>): void {
   if (peer.socket.readyState === WebSocket.OPEN) {
     peer.socket.send(JSON.stringify(message))
@@ -129,7 +155,8 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
   const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
   const maxRooms = options.maxRooms ?? DEFAULT_MAX_ROOMS
   const maxPeersPerRoom = options.maxPeersPerRoom ?? DEFAULT_MAX_PEERS_PER_ROOM
-  const messageRateLimit = options.messageRateLimit ?? DEFAULT_MESSAGE_RATE_LIMIT
+  const messageRateLimit =
+    options.messageRateLimit ?? maxPeersPerRoom * MESSAGES_PER_PEER_NEGOTIATION
   const messageRateWindowMs = options.messageRateWindowMs ?? DEFAULT_MESSAGE_RATE_WINDOW_MS
 
   const httpServer: Server = createServer((request, response) => {
@@ -168,21 +195,19 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     const url = new URL(request.url ?? '/', 'http://localhost')
     const topic = url.searchParams.get('topic') ?? ''
     if (!TOPIC_PATTERN.test(topic)) {
-      socket.close(WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
+      refuse(socket, WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
       return
     }
 
-    // Both caps refuse with 1013, not 1008: the client stops reconnecting on a
-    // policy close, which is right for a topic that will never be valid and
-    // wrong for load that will pass.
+    // Both caps are load, so both refuse with 1013 (see the close codes above).
     const existing = rooms.get(topic)
     if (!existing && rooms.size >= maxRooms) {
-      socket.close(WS_CLOSE_TRY_AGAIN_LATER, 'too many rooms')
+      refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'too many rooms')
       return
     }
     const room = existing ?? new Map<string, Peer>()
     if (room.size >= maxPeersPerRoom) {
-      socket.close(WS_CLOSE_TRY_AGAIN_LATER, 'room full')
+      refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'room full')
       return
     }
 
@@ -209,9 +234,11 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     room.set(peer.id, peer)
 
     socket.on('message', (data) => {
-      // Counted before the parse, so a flood of garbage is bounded too. Sliding
-      // window rather than a token bucket: the burst that matters (WebRTC
-      // negotiation) is exactly what a window sized for it already allows.
+      // Counted before the parse, so a flood of garbage is bounded too. A
+      // fixed window that resets whole, not a sliding one or a token bucket:
+      // the burst that matters (WebRTC negotiation) is exactly what a window
+      // sized for it already allows, and the seam it leaves — up to two
+      // budgets across a window boundary — is still bounded.
       const now = Date.now()
       if (now - peer.windowStartedAt >= messageRateWindowMs) {
         peer.windowStartedAt = now
@@ -219,8 +246,12 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
       }
       peer.messagesInWindow += 1
       if (peer.messagesInWindow > messageRateLimit) {
-        // A client that outruns this budget is misbehaving, not unlucky.
-        socket.close(WS_CLOSE_POLICY_VIOLATION, 'message rate exceeded')
+        // 1013, not 1008: the client hard-codes a policy close as permanent and
+        // stops reconnecting for the rest of the page's life, which would trade
+        // one overrun for a context that never syncs again. The window will
+        // pass, so this genuinely is try-again-later; the reconnect backoff is
+        // what makes a client that keeps overrunning cheap to carry.
+        refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'message rate exceeded')
         return
       }
 
@@ -264,29 +295,33 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     })
   })
 
-  // Reaping a ghost is not just tidiness: rooms are only reclaimed at size 0,
-  // so one ghost pins its room forever, every publisher keeps relaying to it,
-  // and its `peer-left` never fires — leaving every live peer holding a
-  // half-open RTCPeerConnection. `terminate()` fires 'close', so the existing
-  // teardown below does all of that for us.
-  const heartbeat = setInterval(() => {
-    for (const room of rooms.values()) {
-      for (const peer of room.values()) {
-        if (!peer.alive) {
-          peer.socket.terminate()
-          continue
-        }
-        peer.alive = false
-        peer.socket.ping()
-      }
-    }
-  }, heartbeatIntervalMs)
-
   return new Promise((resolve, reject) => {
     httpServer.once('error', reject)
     httpServer.listen(options.port, () => {
       const address = httpServer.address()
       const port = typeof address === 'object' && address !== null ? address.port : options.port
+      // Armed here rather than above: `clearInterval` only ever runs from the
+      // `close` handed out below, so a timer started before `listen` outlives a
+      // failed bind (EADDRINUSE rejects with no handle) and holds the event
+      // loop open forever.
+      //
+      // Reaping a ghost is not just tidiness: rooms are only reclaimed at size
+      // 0, so one ghost pins its room forever, every publisher keeps relaying
+      // to it, and its `peer-left` never fires — leaving every live peer
+      // holding a half-open RTCPeerConnection. `terminate()` fires 'close', so
+      // the teardown above does all of that for us.
+      const heartbeat = setInterval(() => {
+        for (const room of rooms.values()) {
+          for (const peer of room.values()) {
+            if (!peer.alive) {
+              peer.socket.terminate()
+              continue
+            }
+            peer.alive = false
+            peer.socket.ping()
+          }
+        }
+      }, heartbeatIntervalMs)
       resolve({
         port,
         close: () =>

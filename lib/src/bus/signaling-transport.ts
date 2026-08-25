@@ -51,7 +51,14 @@ const SignalPayloadSchema = z.discriminatedUnion("kind", [
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
-/** The server's close code for a topic it refuses (`signaling/src/server.ts`). */
+/**
+ * The server's close code for a topic it refuses, and the only close it sends
+ * that is permanent — everything transient comes back as 1013. Mirrors the
+ * constant exported from `signaling/src/server.ts` rather than importing it:
+ * that module pulls in `ws` and `node:http`, and `@swarm-id/signaling` is a
+ * devDependency here, so an import would drag a Node-only server into the
+ * browser bundle for the sake of one number.
+ */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
 export interface SignalingTransportOptions {
