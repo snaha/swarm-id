@@ -197,7 +197,17 @@ export class Account {
       }
     }
     const { vault } = auth
-    const synced: SyncedAccount = {
+    return { ...this.toSyncedRecord(), ...vault }
+  }
+
+  /**
+   * The synced (vault-less) projection of this account — what travels to
+   * other devices, and what the connect popup hands a storage-partitioned
+   * proxy iframe (via `serializeSyncedAccount`, which also strips app
+   * secrets).
+   */
+  toSyncedRecord(): SyncedAccount {
+    return {
       id: this.id,
       name: this.name,
       createdAt: this.createdAt,
@@ -214,7 +224,6 @@ export class Account {
       lastModified: this.lastModified,
       partitionCount: this.partitionCount,
     }
-    return { ...synced, ...vault }
   }
 
   /** Active (non-revoked) connected apps — what the UI displays. */

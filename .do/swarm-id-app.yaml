@@ -41,10 +41,40 @@ static_sites:
       allow_credentials: true
       max_age: '600s'
 
+# Account-bus signaling and relay service (docs/Account-Bus.md, signaling/).
+# Reached at wss://swarm-id.snaha.net/bus; E2E-encrypted payloads only.
+services:
+  - name: bus-signaling
+    github:
+      repo: snaha/swarm-id
+      branch: main
+      deploy_on_push: false
+    source_dir: /
+    # Filtered install: this service needs ws, zod and tsx, and nothing else in
+    # the workspace depends on it. An unfiltered root install would build every
+    # package — playwright, astro, rollup, the lot — on a 0.5 GB instance.
+    build_command: corepack enable && pnpm install --frozen-lockfile --filter @swarm-id/signaling...
+    run_command: corepack enable && pnpm --filter @swarm-id/signaling start
+    http_port: 8080
+    instance_count: 1
+    instance_size_slug: apps-s-1vcpu-0.5gb
+    routes:
+      - path: /bus
+    health_check:
+      http_path: /healthz
+    envs:
+      - key: ALLOWED_ORIGINS
+        value: 'https://swarm-id.snaha.net'
+
 # Environment variables
 envs:
   - key: NODE_VERSION
     value: '24'
+
+  # Baked into the UI build: points the proxy iframe at the bus-signaling
+  # service above (docs/Account-Bus.md).
+  - key: PUBLIC_BUS_SIGNALING_URL
+    value: 'wss://swarm-id.snaha.net/bus'
 
   - key: NODE_ENV
     value: production

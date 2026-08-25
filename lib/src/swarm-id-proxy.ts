@@ -66,6 +66,13 @@ import {
   NULL_ADDRESS,
 } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "./chunk"
+import {
+  AccountBus,
+  BroadcastChannelTransport,
+  ORIGIN_TOPIC,
+} from "./bus/account-bus"
+import { SignalingTransport } from "./bus/signaling-transport"
+import { deriveBusContext } from "./bus/bus-context"
 import type { BeeRequestOptions } from "@ethersphere/bee-js"
 import {
   uploadData,
@@ -136,11 +143,13 @@ import { tryCreateTag } from "./utils/tag"
 import {
   DEFAULT_BEE_NODE_URL,
   DEFAULT_GNOSIS_RPC_URL,
-  UtilizationUpdateMessageSchema,
   isSignedOutAccount,
   type AccountStateSnapshot,
   type SignedInAccount,
+  type SyncedAccount,
+  type NetworkSettings,
 } from "./schemas"
+import { DEFAULT_SESSION_DURATION } from "./utils/constants"
 import { buildAuthUrl } from "./utils/url"
 import {
   createActForContent,
@@ -228,10 +237,36 @@ export class SwarmIdProxy {
   private storagePartitioned: boolean = false
   private pendingChallenge: string | undefined
   private storagePartitionedIdentity: ConnectionIdentity | undefined
+  /**
+   * Hydrated account view for the storage-partitioning fallback: the synced
+   * projection handed over by the connect popup (`AuthData.account`), held in
+   * memory only — the stored-account schema requires a vault, and partitioned
+   * sessions already re-handshake per iframe load. When set, the proxy is a
+   * first-class writer despite the partition (docs/Account-Bus.md, phase 3).
+   */
+  private partitionAccount: SignedInAccount | undefined
+  /** Topic of the currently attached bus signaling transport (dedup guard). */
+  private busSignalingTopic: string | undefined
+  private removeBusSignalingTransport: (() => void) | undefined
+  /** Bumped by every bus join and by `clearAuthData`, so a join whose key
+   *  derivation is still in flight can tell it has been superseded. */
+  private busJoinGeneration = 0
+  /** Account the live coordinator serves — routes bus lease messages. */
+  private coordinatorAccountId: string | undefined
+  /**
+   * Utilization deltas that arrived while the stamper had no lane, held until
+   * a bind names one (`applyPendingLaneUpdate`). Keyed by lane so a delta for
+   * a lane we do not end up binding cannot displace the one we do — the point
+   * of buffering is that nothing is silently lost. Buckets merge per index
+   * with `max`, matching `applyUtilizationUpdate`'s own monotonic rule.
+   * Bounded by the account's partition count.
+   */
+  private pendingLaneUpdates = new Map<string, Map<number, number>>()
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private gnosisRpcUrl: string
   private postageStampContractAddress: string
+  private signalingUrl: string | undefined
   private authButtonContainer: HTMLElement | undefined
   private buttonConfig: ButtonConfig | undefined
   private popupMode: "popup" | "window" = "window"
@@ -242,7 +277,7 @@ export class SwarmIdProxy {
   private lastConnectionInfo: ConnectionInfo | undefined
   private isConnecting: boolean = false
   private parentWindow: WindowProxy | undefined
-  private utilizationChannel: BroadcastChannel
+  private bus: AccountBus
   private subsidisedGatewayUrl: string | undefined
   /**
    * The write path (lock + partition lease + stamp flush) for the current
@@ -284,13 +319,22 @@ export class SwarmIdProxy {
     // bee-compose anvil deployment; defaults to the Gnosis mainnet contract.
     this.postageStampContractAddress =
       config?.postageStampContractAddress || POSTAGE_STAMP_CONTRACT_ADDRESS
+    this.signalingUrl = config?.signalingUrl
+    if (!this.signalingUrl) {
+      // Said out loud because the alternative is silence: without a URL the
+      // bus never leaves this origin+partition, and a static build that lost
+      // its `PUBLIC_BUS_SIGNALING_URL` looks exactly like a healthy one.
+      console.info(
+        "[Proxy] No account-bus signaling URL configured — cross-partition and cross-device coordination is off (docs/Account-Bus.md).",
+      )
+    }
     this.bee = new Bee(this.beeApiUrl)
     this.setupMessageListener()
     this.setupStorageListeners()
 
-    // Initialize multi-tab coordination via BroadcastChannel
-    this.utilizationChannel = new BroadcastChannel("swarm-id-utilization")
-    this.setupUtilizationListener()
+    // Multi-tab coordination rides the account bus (docs/Account-Bus.md).
+    this.bus = new AccountBus([new BroadcastChannelTransport(ORIGIN_TOPIC)])
+    this.setupBusListeners()
 
     // Announce readiness to parent window immediately
     // This signals that our message listener is ready to receive parentIdentify
@@ -370,7 +414,21 @@ export class SwarmIdProxy {
    * URL is unchanged, so an RPC-only change doesn't churn the client mid-op.
    */
   private applyNetworkSettings(): void {
-    const settings = createNetworkSettingsStorageManager().load()
+    this.applyNetworkSettingsValues(
+      createNetworkSettingsStorageManager().load(),
+    )
+  }
+
+  /**
+   * The body of `applyNetworkSettings`, taking the settings as a value: a
+   * partitioned session cannot read them from storage and is handed them by
+   * the connect popup instead (`hydratePartitionAccount`). One implementation,
+   * or the two paths drift — an RPC-only change is invisible to a `beeNodeUrl`
+   * guard, and the subsidised-gateway rules below are easy to forget.
+   */
+  private applyNetworkSettingsValues(
+    settings: NetworkSettings | undefined,
+  ): void {
     this.gnosisRpcUrl = settings?.gnosisRpcUrl || DEFAULT_GNOSIS_RPC_URL
 
     const beeNodeUrl = settings?.beeNodeUrl || DEFAULT_BEE_NODE_URL
@@ -448,9 +506,12 @@ export class SwarmIdProxy {
    * postage stamp is unchanged but the underlying account isn't.
    */
   private async refreshStampFromStorage(): Promise<void> {
-    if (this.storagePartitioned) {
+    if (this.isDownloadOnlyPartition) {
       return
     }
+
+    // A rebound account is a different bus topic.
+    this.joinAccountBus()
 
     const stamp = this.lookupPostageStampForApp()
     const nextBatchId = stamp?.batchID.toHex()
@@ -488,12 +549,14 @@ export class SwarmIdProxy {
     this.authenticated = true
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
+    this.partitionAccount = undefined
     this.authLoading = false
     this.isConnecting = false
     // Capture the device identity once, now, while we can read first-party
     // localStorage. Reused for every lease op so the identity never shifts
     // mid-session.
     this.deviceId = getOrCreateDeviceId()
+    this.joinAccountBus()
 
     // Look up postage stamp. When switching identities, the new identity may
     // not have a stamp at all — explicitly clear any prior stamper state so
@@ -574,9 +637,19 @@ export class SwarmIdProxy {
         }
       }
 
-      // No stamp lookup — localStorage is partitioned, stamps not accessible
-      this.postageBatchId = undefined
-      this.signerKey = undefined
+      if (message.data.account) {
+        // Full synced projection received — hydrate a first-class writer view
+        // (stamps incl. signer keys, derivationKey) instead of download-only.
+        await this.hydratePartitionAccount(
+          message.data.account,
+          message.data.secret,
+          message.data.networkSettings,
+        )
+      } else {
+        // Legacy secret-only payload — download-only mode, no stamp lookup.
+        this.postageBatchId = undefined
+        this.signerKey = undefined
+      }
 
       this.showAuthButton()
       this.sendToParent({
@@ -584,6 +657,107 @@ export class SwarmIdProxy {
         origin: this.parentOrigin!,
       })
       this.emitConnectionInfoIfChanged()
+    }
+  }
+
+  /**
+   * Build the in-memory account view for a partitioned session and initialize
+   * the write path from it. The vault fields are inert placeholders — the
+   * record never touches storage and the seed never leaves first-party
+   * context; `SignedInAccount` merely requires their presence.
+   */
+  private async hydratePartitionAccount(
+    account: SyncedAccount,
+    appSecret: string,
+    networkSettings: NetworkSettings | undefined,
+  ): Promise<void> {
+    const now = Date.now()
+    const connection: ConnectedApp = {
+      ...(account.connectedApps.find(
+        (app) => app.appUrl === this.parentOrigin,
+      ) ?? {
+        appUrl: this.parentOrigin!,
+        appName: this.appMetadata?.name ?? this.parentOrigin!,
+        lastConnectedAt: now,
+      }),
+      appSecret,
+      lastConnectedAt: now,
+      connectedUntil:
+        now +
+        (account.settings?.appSessionDuration ?? DEFAULT_SESSION_DURATION),
+    }
+    this.partitionAccount = {
+      ...account,
+      connectedApps: [
+        connection,
+        ...account.connectedApps.filter(
+          (app) => app.appUrl !== this.parentOrigin,
+        ),
+      ],
+      access: { type: "password", kdfSalt: "", kdfIterations: 0 },
+      encryptedSeed: "",
+    }
+
+    this.applyNetworkSettingsValues(networkSettings)
+
+    await this.refreshStampFromStorage()
+  }
+
+  /**
+   * Join the account bus for whatever connection is resolvable right now
+   * (idempotent per account). Called from every path that establishes or
+   * re-resolves a connection — the unpartitioned ones included, or the bus
+   * would never reach past this origin+partition outside Safari.
+   */
+  private joinAccountBus(): void {
+    // Before the storage read: this runs on every accounts storage event, and
+    // without a signaling URL there is nothing to join.
+    if (!this.signalingUrl) return
+    const connection = this.findConnectionForParent()
+    if (!connection) return
+    void this.ensureBusSignalingTransport(connection.account.derivationKey)
+  }
+
+  /**
+   * Attach the cross-partition/cross-device bus transport for the account
+   * (docs/Account-Bus.md). Idempotent per account; no-op without a configured
+   * signaling URL. Same code path on every browser — Safari is not special.
+   */
+  private async ensureBusSignalingTransport(
+    derivationKey: string,
+  ): Promise<void> {
+    const url = this.signalingUrl
+    if (!url) return
+    const generation = ++this.busJoinGeneration
+    try {
+      const context = await deriveBusContext(derivationKey)
+      // Superseded while the key derivation was in flight — by a later join
+      // (another account) or by `clearAuthData`, which drops the remover
+      // synchronously. Attaching now would put a socket in a room this
+      // session no longer belongs to, and overwrite a remover that a live
+      // join owns.
+      if (generation !== this.busJoinGeneration) return
+      if (this.busSignalingTopic === context.topic) return
+      this.removeBusSignalingTransport?.()
+      // Construct BEFORE latching the topic. `SignalingTransport` connects in
+      // its constructor, where `new URL` and `new WebSocket` throw
+      // synchronously on a malformed url or `ws://` from an https page. Marking
+      // the topic attached first would leave the dedup check above matching a
+      // transport that never existed — bus silently off for the whole session,
+      // with no retry on any later join.
+      const transport = new SignalingTransport({
+        url,
+        topic: context.topic,
+        encryptionKey: context.encryptionKey,
+        createPeerConnection:
+          typeof RTCPeerConnection !== "undefined"
+            ? () => new RTCPeerConnection()
+            : undefined,
+      })
+      this.removeBusSignalingTransport = this.bus.addTransport(transport)
+      this.busSignalingTopic = context.topic
+    } catch (error) {
+      console.error("[Proxy] Failed to attach bus signaling transport:", error)
     }
   }
 
@@ -599,38 +773,199 @@ export class SwarmIdProxy {
 
     // Release the partition lease (best-effort) so peers see this device
     // vacate its partition promptly.
-    this.coordinator?.teardown()
-    this.coordinator = undefined
+    this.teardownCoordinator()
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
 
-    // Clean up utilization channel
-    this.utilizationChannel.close()
+    // Retire any join still deriving its key — its continuation would
+    // otherwise attach a freshly-opened socket to the bus we are closing,
+    // with no handle left to close it. (`AccountBus.addTransport` also
+    // refuses once closed; this just avoids opening the socket at all.)
+    this.busJoinGeneration += 1
+    this.removeBusSignalingTransport = undefined
+    this.busSignalingTopic = undefined
+    this.bus.close()
   }
 
   /**
-   * Setup listener for utilization updates from other tabs.
-   * When another tab completes a write, it broadcasts an update.
-   * This tab applies the delta update directly from the message.
+   * Tear the write coordinator down, announcing the partition it held so
+   * waiting peers wake now instead of sleeping out their poll interval
+   * (docs/Account-Bus.md, bus-accelerated leases). The announcement races the
+   * Swarm release it describes, which is harmless: the lock SOCs stay the
+   * authority, so a peer woken too early just spends one extra read round.
    */
-  private setupUtilizationListener(): void {
-    this.utilizationChannel.onmessage = (event) => {
-      try {
-        const result = UtilizationUpdateMessageSchema.safeParse(event.data)
-        if (
-          result.success &&
-          result.data.batchId === this.postageBatchId &&
-          this.stamper
-        ) {
-          // Apply delta update directly - no IndexedDB read needed
-          this.stamper.applyUtilizationUpdate(result.data.buckets)
-        }
-      } catch (error) {
-        console.error("[Proxy] Failed to apply utilization update:", error)
-      }
+  private teardownCoordinator(): void {
+    const partition = this.coordinator?.currentPartition
+    const accountId = this.coordinatorAccountId
+    this.coordinator?.teardown()
+    this.coordinator = undefined
+    this.coordinatorAccountId = undefined
+    if (partition === undefined || !accountId || !this.deviceId) return
+    this.bus.publish({
+      type: "lease-released",
+      accountId,
+      partition,
+      fromDeviceId: this.deviceId,
+    })
+  }
+
+  private static laneKey(
+    batchId: string,
+    partition: number,
+    partitionCount: number,
+  ): string {
+    return `${batchId}:${partition}/${partitionCount}`
+  }
+
+  /**
+   * Hold a lane-scoped delta that arrived with no lane bound to compare it
+   * against, merged into whatever that lane already has.
+   */
+  private bufferLaneUpdate(message: {
+    batchId: string
+    partition: number
+    partitionCount: number
+    buckets: Array<{ index: number; value: number }>
+  }): void {
+    const key = SwarmIdProxy.laneKey(
+      message.batchId,
+      message.partition,
+      message.partitionCount,
+    )
+    const buckets =
+      this.pendingLaneUpdates.get(key) ?? new Map<number, number>()
+    for (const { index, value } of message.buckets) {
+      const current = buckets.get(index)
+      if (current === undefined || value > current) buckets.set(index, value)
     }
+    this.pendingLaneUpdates.set(key, buckets)
+  }
+
+  /**
+   * Fold the buffered delta for the lane we just bound in, then drop every
+   * buffered lane — the ones we did not bind are another device's business.
+   * Called on every lease acquire: on the cold path the counters are already
+   * seeded from the durable partition-state feed, so this is a harmless
+   * monotonic no-op; on the adopt fast path they are not, and this is the
+   * whole point.
+   */
+  private applyPendingLaneUpdate(): void {
+    const buffered = this.pendingLaneUpdates
+    this.pendingLaneUpdates = new Map()
+    const lane = this.stamper?.currentPartition
+    if (!this.stamper || !this.postageBatchId || lane === undefined) return
+    const buckets = buffered.get(
+      SwarmIdProxy.laneKey(
+        this.postageBatchId,
+        lane,
+        this.stamper.partitionCount,
+      ),
+    )
+    if (!buckets) return
+    this.stamper.applyUtilizationUpdate(
+      [...buckets].map(([index, value]) => ({ index, value })),
+    )
+  }
+
+  /**
+   * Account-bus subscription: utilization deltas from other contexts, and the
+   * lease fast path (docs/Account-Bus.md, bus-accelerated leases). The Swarm
+   * lock-SOC protocol stays authoritative — these messages only shortcut its
+   * timers.
+   */
+  private setupBusListeners(): void {
+    this.bus.subscribe((message) => {
+      switch (message.type) {
+        case "utilization-updated": {
+          // Same batch AND same slot lane. The counters are per-partition
+          // (`slot = partitionCount + partition + partitionCount·j`), so a
+          // delta from a peer holding a DIFFERENT partition of this batch —
+          // which is every other device of the account — is not comparable:
+          // folding it in would skip this lane past its own unused slots and
+          // then publish that as the partition's durable resume counter.
+          // An unbound stamper has no lane of its own, so only a legacy
+          // single-partition delta can apply. Spelled out rather than leaning
+          // on `currentPartition ?? 0` staying unreachable for multi-partition
+          // stampers (`unbindPartition` also resets the count to 1) — that
+          // coupling lives in another file and is exactly the assumption whose
+          // last violation caused the resume-pointer skip described above.
+          if (message.batchId !== this.postageBatchId || !this.stamper) return
+          const lane = this.stamper.currentPartition
+          if (lane === undefined) {
+            // Unbound: the lane this delta belongs to may well be the one we
+            // are about to bind. Dropping it loses it for good — the adopt
+            // fast path re-binds from THIS tab's in-memory counters
+            // (`buildLeaseLocalCounter`), not from durable state, so a sibling
+            // tab's writes would be invisible and we would re-issue slots it
+            // already consumed. Hold it until the bind names our lane.
+            // A legacy single-partition delta has no lease to wait for and
+            // applies immediately.
+            if (message.partition === 0 && message.partitionCount === 1) {
+              this.stamper.applyUtilizationUpdate(message.buckets)
+            } else {
+              this.bufferLaneUpdate(message)
+            }
+            return
+          }
+          // Bound: same batch AND same slot lane. The counters are
+          // per-partition (`slot = partitionCount + partition + partitionCount·j`),
+          // so a delta from a peer holding a DIFFERENT partition of this batch
+          // is not comparable: folding it in would skip this lane past its own
+          // unused slots and then publish that as the partition's durable
+          // resume counter.
+          if (
+            message.partition === lane &&
+            message.partitionCount === this.stamper.partitionCount
+          ) {
+            // Apply delta update directly - no IndexedDB read needed
+            this.stamper.applyUtilizationUpdate(message.buckets)
+          }
+          return
+        }
+        case "lease-request": {
+          const coordinator = this.coordinator
+          if (
+            !coordinator ||
+            message.accountId !== this.coordinatorAccountId ||
+            message.fromDeviceId === this.deviceId
+          ) {
+            return
+          }
+          coordinator
+            .yieldForPeer()
+            .then((partition) => {
+              if (partition !== undefined) {
+                this.bus.publish({
+                  type: "lease-released",
+                  accountId: message.accountId,
+                  partition,
+                  fromDeviceId: this.requireDeviceId(),
+                })
+              }
+            })
+            .catch((error) => {
+              console.error("[Proxy] Peer lease yield failed:", error)
+            })
+          return
+        }
+        case "lease-released": {
+          if (
+            message.fromDeviceId === this.deviceId ||
+            message.accountId !== this.coordinatorAccountId
+          ) {
+            return
+          }
+          this.coordinator?.notifySlotMaybeFree()
+          return
+        }
+        default:
+          // account-delta: no proxy-side consumer yet (durable truth arrives
+          // via storage events / the popup handshake).
+          return
+      }
+    })
   }
 
   /**
@@ -730,7 +1065,7 @@ export class SwarmIdProxy {
     // (`startLease`) so the first upload doesn't pay the acquire latency; a
     // concurrent first upload queues on the same write lock and then finds the
     // lease already held. Single-device accounts get a lock-only coordinator.
-    this.coordinator?.teardown()
+    this.teardownCoordinator()
     const backupKeyHex = await deriveSecret(
       uint8ArrayToHex(accountInfo.encryptionKey),
       "backup-key",
@@ -765,12 +1100,29 @@ export class SwarmIdProxy {
       flushStamperState: () => this.saveStamperStateIfNeeded(),
       getWorkerPool: (count) => this.getOrCreateWorkerPool(count),
       onLeaseChange: () => this.emitConnectionInfoIfChanged(),
+      // Each slot-wait poll round, ask live holders over the account bus to
+      // yield their partition (docs/Account-Bus.md, bus-accelerated leases).
+      onSlotWait: () =>
+        this.bus.publish({
+          type: "lease-request",
+          accountId: accountInfo.accountId,
+          fromDeviceId: this.requireDeviceId(),
+        }),
       // On first acquiring a partition, announce this device by publishing the
       // account snapshot (which includes ourselves in metadata.devices) to the
       // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
       // lock (the publish re-enters the lock via the coordinator).
-      onLeaseAcquired: () => this.schedulePublish("acquired"),
+      //
+      // Fold in any delta buffered while we had no lane FIRST, and
+      // synchronously: the bind that just happened may have seeded the counters
+      // from this tab's own in-memory state (the adopt fast path does), and the
+      // publish below reads those counters.
+      onLeaseAcquired: () => {
+        this.applyPendingLaneUpdate()
+        this.schedulePublish("acquired")
+      },
     })
+    this.coordinatorAccountId = accountInfo.accountId
     this.coordinator.startLease()
   }
 
@@ -857,18 +1209,36 @@ export class SwarmIdProxy {
     }
 
     try {
-      // Capture bucket updates BEFORE flush clears dirtyBuckets
+      // Capture bucket updates BEFORE flush clears dirtyBuckets — and the lane
+      // they belong to in the same breath. Reading the lane after the await
+      // instead lets a teardown landing mid-flush (`unbindPartition` resets the
+      // partition to undefined and the count to 1) relabel partition-p counters
+      // as the legacy `{0, 1}` lane, which every momentarily-unbound same-batch
+      // peer then folds — the exact resume-pointer skip the lane guard exists
+      // to prevent.
       const buckets = this.stamper.getBucketUpdatesForBroadcast()
+      const partition = this.stamper.currentPartition ?? 0
+      const partitionCount = this.stamper.partitionCount
 
       await this.stamper.flush()
 
-      // Broadcast utilization update to other tabs with pre-captured buckets
+      // Broadcast the utilization update to peers with pre-captured buckets.
+      // Local transports only: the counters are per-partition, and every peer
+      // a remote transport reaches is a different device holding a different
+      // lane, so a remote copy is dropped at the receive guard after paying for
+      // encryption and a frame the signaling server's payload cap may refuse
+      // outright (one entry per dirty bucket, up to NUM_BUCKETS of them).
       if (this.postageBatchId && buckets.length > 0) {
-        this.utilizationChannel.postMessage({
-          type: "utilization-updated",
-          batchId: this.postageBatchId,
-          buckets,
-        })
+        this.bus.publish(
+          {
+            type: "utilization-updated",
+            batchId: this.postageBatchId,
+            partition,
+            partitionCount,
+            buckets,
+          },
+          { localOnly: true },
+        )
       }
     } catch (error) {
       console.error("[Proxy] Failed to save stamper state:", error)
@@ -1225,6 +1595,7 @@ export class SwarmIdProxy {
       this.authenticated = true
       this.authLoading = false
       this.showAuthButton()
+      this.joinAccountBus()
 
       // Look up postage stamp from shared storage based on connected identity
       const stamp = this.lookupPostageStampForApp()
@@ -1319,8 +1690,12 @@ export class SwarmIdProxy {
    */
   private knownDeviceIdsForAccount(accountId: string): string[] {
     try {
-      const accounts = createAccountsStorageManager().load()
-      const account = accounts.find((a) => a.id.toHex() === accountId)
+      const account =
+        this.partitionAccount?.id.toHex() === accountId
+          ? this.partitionAccount
+          : createAccountsStorageManager()
+              .load()
+              .find((a) => a.id.toHex() === accountId)
       if (!account || isSignedOutAccount(account)) return []
       // Bound the partition rival set to recently-active devices: removed
       // (tombstoned) devices won't write, and long-dead ghosts from old sessions
@@ -1362,9 +1737,19 @@ export class SwarmIdProxy {
     }
     this.lastDeviceRegistryRefreshAt = nowMs
     try {
-      const manager = createAccountsStorageManager()
-      const accounts = manager.load()
-      const account = accounts.find((a) => a.id.toHex() === accountId)
+      // A partitioned session cannot see shared storage — the hydrated account
+      // view is both the source and the destination there. Without this branch
+      // the load below returns nothing and the refresh silently no-ops, leaving
+      // a Safari writer's rival set frozen at whatever the connect popup handed
+      // over: the intent round never sees a peer that signs in later, and the
+      // idle-yield (gated on a known rival) never fires. Mirrors the same
+      // branch in `knownDeviceIdsForAccount`.
+      const partitioned = this.partitionAccount?.id.toHex() === accountId
+      const manager = partitioned ? undefined : createAccountsStorageManager()
+      const accounts = manager?.load() ?? []
+      const account = partitioned
+        ? this.partitionAccount
+        : accounts.find((a) => a.id.toHex() === accountId)
       if (!account || isSignedOutAccount(account)) return
 
       // Feed owner = backup signer (derived from the swarm encryption key).
@@ -1388,11 +1773,17 @@ export class SwarmIdProxy {
       // Only persist when a peer actually appeared, to avoid needless cross-tab
       // storage-event churn.
       if (mergedDevices.length !== account.devices.length) {
-        manager.save(
-          accounts.map((a) =>
-            a.id.toHex() === accountId ? { ...a, devices: mergedDevices } : a,
-          ),
-        )
+        if (partitioned) {
+          // In-memory only, like the rest of the hydrated view: the stored
+          // schema requires a vault, and the session re-handshakes per load.
+          this.partitionAccount = { ...account, devices: mergedDevices }
+        } else {
+          manager!.save(
+            accounts.map((a) =>
+              a.id.toHex() === accountId ? { ...a, devices: mergedDevices } : a,
+            ),
+          )
+        }
       }
     } catch (error) {
       console.warn(
@@ -1417,7 +1808,7 @@ export class SwarmIdProxy {
       }
     | undefined
   > {
-    if (!this.parentOrigin || this.storagePartitioned) {
+    if (!this.parentOrigin || this.isDownloadOnlyPartition) {
       return undefined
     }
     try {
@@ -1589,6 +1980,14 @@ export class SwarmIdProxy {
   }
 
   /**
+   * True while the session is partitioned WITHOUT a hydrated account view —
+   * the legacy download-only mode. A hydrated partition is a full writer.
+   */
+  private get isDownloadOnlyPartition(): boolean {
+    return this.storagePartitioned && !this.partitionAccount
+  }
+
+  /**
    * Find the account + connected-app pair for the current parent origin, reading
    * the nested account documents. Resolves ambiguity (the same app connected
    * under multiple accounts) by sorting valid entries by `lastConnectedAt`
@@ -1599,6 +1998,16 @@ export class SwarmIdProxy {
     | undefined {
     if (!this.parentOrigin) {
       return undefined
+    }
+    // Partitioned session: shared storage is invisible; the popup-handed
+    // account view is the (only) source.
+    if (this.partitionAccount) {
+      const app = this.partitionAccount.connectedApps.find(
+        (candidate) =>
+          candidate.appUrl === this.parentOrigin &&
+          this.isConnectionValid(candidate),
+      )
+      return app ? { account: this.partitionAccount, app } : undefined
     }
     const accounts = createAccountsStorageManager().load()
     const matches: { account: SignedInAccount; app: ConnectedApp }[] = []
@@ -1685,17 +2094,24 @@ export class SwarmIdProxy {
     this.appSecret = undefined
     this.postageBatchId = undefined
     this.signerKey = undefined
+    // Before dropping `deviceId` — the release announcement is sent as us.
+    this.teardownCoordinator()
     this.deviceId = undefined
-    this.coordinator?.teardown()
-    this.coordinator = undefined
     if (this.publishTimer !== undefined) {
       clearTimeout(this.publishTimer)
       this.publishTimer = undefined
     }
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
+    this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
+    this.partitionAccount = undefined
+    this.removeBusSignalingTransport?.()
+    this.removeBusSignalingTransport = undefined
+    this.busSignalingTopic = undefined
+    // Retire any join still deriving its key, or it would re-attach behind us.
+    this.busJoinGeneration += 1
     this.pendingChallenge = undefined
 
     this.emitConnectionInfoIfChanged()
@@ -1729,7 +2145,7 @@ export class SwarmIdProxy {
     if (this.isSubsidisedModeActive()) {
       return
     }
-    if (this.storagePartitioned) {
+    if (this.isDownloadOnlyPartition) {
       throw new Error(
         "Uploads are unavailable in download-only mode due to browser storage partitioning.",
       )
@@ -1750,7 +2166,9 @@ export class SwarmIdProxy {
    */
   private isSubsidisedModeActive(): boolean {
     return (
-      (!this.postageBatchId || !this.signerKey || this.storagePartitioned) &&
+      (!this.postageBatchId ||
+        !this.signerKey ||
+        this.isDownloadOnlyPartition) &&
       !!this.subsidisedGatewayUrl
     )
   }
@@ -1810,7 +2228,7 @@ export class SwarmIdProxy {
     let identity: ConnectionInfo["identity"] = undefined
 
     if (this.authenticated && this.parentOrigin) {
-      if (this.storagePartitioned && this.storagePartitionedIdentity) {
+      if (this.isDownloadOnlyPartition && this.storagePartitionedIdentity) {
         identity = this.storagePartitionedIdentity
       } else {
         try {
@@ -1857,7 +2275,7 @@ export class SwarmIdProxy {
         this.postageBatchId &&
         this.signerKey &&
         this.stamper &&
-        !this.storagePartitioned
+        !this.isDownloadOnlyPartition
       ) {
         uploadMode = "user-stamp"
       } else if (this.subsidisedGatewayUrl) {
@@ -4172,6 +4590,12 @@ export interface ProxyConfig {
    * bee-compose anvil address when developing against a local chain.
    */
   postageStampContractAddress?: string
+  /**
+   * Account-bus signaling server URL (e.g. `wss://swarm-id.snaha.net/bus`,
+   * `ws://localhost:5520` in dev). Unset disables the cross-partition/
+   * cross-device bus transport (docs/Account-Bus.md).
+   */
+  signalingUrl?: string
 }
 
 /**

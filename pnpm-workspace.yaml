@@ -1,6 +1,7 @@
 packages:
   - 'lib'
   - 'multichain'
+  - 'signaling'
   - 'demo'
   - 'ui'
   - 'docs-site'

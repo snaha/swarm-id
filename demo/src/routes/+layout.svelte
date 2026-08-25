@@ -12,13 +12,9 @@
   import Sidebar from '$lib/components/layout/sidebar.svelte'
   import MobileMenuButton from '$lib/components/layout/mobile-menu-button.svelte'
   import ConsolePanel from '$lib/components/layout/console-panel.svelte'
-  import SafariWarning from '$lib/components/safari-warning.svelte'
   import StoragePartitionedBanner from '$lib/components/storage-partitioned-banner.svelte'
 
   let { children } = $props()
-
-  const isSafari =
-    typeof navigator !== 'undefined' && /^((?!chrome|android).)*safari/i.test(navigator.userAgent)
 
   onMount(() => {
     logStore.log('Demo application starting...')
@@ -54,10 +50,11 @@
     <!-- Scrollable page content -->
     <main class="flex-1 overflow-y-auto p-6 md:p-10">
       <div class="mx-auto max-w-[800px] space-y-6">
-        {#if clientStore.storagePartitioned}
+        <!-- Partitioned storage is no longer read-only by itself: a hydrated
+             session uploads with the account's own stamps. Warn only when
+             uploads are genuinely unavailable. -->
+        {#if clientStore.storagePartitioned && clientStore.authenticated && !clientStore.canUpload}
           <StoragePartitionedBanner />
-        {:else if isSafari && !clientStore.authenticated}
-          <SafariWarning />
         {/if}
         {@render children()}
       </div>

@@ -1,0 +1,318 @@
+// Copyright 2026 The Swarm Authors. All rights reserved.
+// SPDX-License-Identifier: Apache-2.0
+
+import { describe, it, expect, vi } from "vitest"
+import { BatchId, PrivateKey } from "@ethersphere/bee-js"
+
+import { AccountBus, BroadcastChannelTransport } from "./account-bus"
+import type { BusTransport } from "./account-bus"
+import type { BusMessage, BusMessageInput } from "./messages"
+import { serializeAccountStateSnapshot } from "../utils/account-state-snapshot"
+import { mergeSnapshotWithRemote } from "../sync/merge-snapshot"
+import type { AccountStateSnapshot } from "../schemas"
+
+const TOPIC = "test-topic"
+
+function makeBus(topic = TOPIC): AccountBus {
+  return new AccountBus([new BroadcastChannelTransport(topic)])
+}
+
+function collect(bus: AccountBus): BusMessage[] {
+  const received: BusMessage[] = []
+  bus.subscribe((message) => received.push(message))
+  return received
+}
+
+async function waitForMessages(
+  received: BusMessage[],
+  count: number,
+): Promise<void> {
+  await vi.waitFor(() => expect(received.length).toBeGreaterThanOrEqual(count))
+}
+
+const UTILIZATION_MESSAGE: BusMessageInput = {
+  type: "utilization-updated",
+  batchId: "ab".repeat(32),
+  partition: 0,
+  partitionCount: 2,
+  buckets: [{ index: 3, value: 7 }],
+}
+
+const LEASE_RELEASED_MESSAGE: BusMessageInput = {
+  type: "lease-released",
+  accountId: "aa".repeat(20),
+  partition: 1,
+  fromDeviceId: "device-remote",
+}
+
+function makeSnapshot(): AccountStateSnapshot {
+  return {
+    version: 1,
+    timestamp: 1_000_000,
+    accountId: "aa".repeat(20),
+    metadata: {
+      accountName: "test account",
+      defaultPostageStampBatchID: "cc".repeat(32),
+      publicKey: `02${"ab".repeat(32)}`,
+      createdAt: 1_000_000,
+      lastModified: 1_000_000,
+      devices: [
+        {
+          deviceId: "device-remote",
+          name: "Remote",
+          createdAt: 1_000_000,
+          lastSignedInAt: 2_000_000,
+        },
+      ],
+      partitionCount: 2,
+    },
+    connectedApps: [
+      {
+        appUrl: "https://dapp.example",
+        appName: "dApp",
+        lastConnectedAt: 2_000_000,
+        updatedAt: 2_000_000,
+      },
+    ],
+    postageStamps: [
+      {
+        batchID: new BatchId("cc".repeat(32)),
+        signerKey: new PrivateKey("22".repeat(32)),
+        utilization: 0,
+        usable: true,
+        depth: 24,
+        amount: BigInt(100),
+        bucketDepth: 16,
+        blockNumber: 1,
+        immutableFlag: true,
+        exists: true,
+        createdAt: 1_000_000,
+      },
+    ],
+  }
+}
+
+describe("AccountBus over BroadcastChannelTransport", () => {
+  it("delivers a published message to another bus on the same topic", async () => {
+    const sender = makeBus()
+    const receiver = makeBus()
+    try {
+      const received = collect(receiver)
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(received, 1)
+      expect(received[0]).toEqual(UTILIZATION_MESSAGE)
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
+  it("does not deliver a message back to the publishing bus", async () => {
+    const sender = makeBus()
+    const receiver = makeBus()
+    try {
+      const senderReceived = collect(sender)
+      const received = collect(receiver)
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(received, 1)
+      expect(senderReceived).toEqual([])
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
+  it("does not deliver across different topics", async () => {
+    const sender = makeBus("topic-a")
+    const other = makeBus("topic-b")
+    const same = makeBus("topic-a")
+    try {
+      const otherReceived = collect(other)
+      const sameReceived = collect(same)
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(sameReceived, 1)
+      expect(otherReceived).toEqual([])
+    } finally {
+      sender.close()
+      other.close()
+      same.close()
+    }
+  })
+
+  it("drops messages that fail schema validation", async () => {
+    const receiver = makeBus()
+    const rawChannel = new BroadcastChannel(receiver.channelName)
+    const sender = makeBus()
+    try {
+      const received = collect(receiver)
+      rawChannel.postMessage({ type: "garbage" })
+      rawChannel.postMessage("not even an object")
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(received, 1)
+      expect(received).toEqual([UTILIZATION_MESSAGE])
+    } finally {
+      rawChannel.close()
+      sender.close()
+      receiver.close()
+    }
+  })
+
+  it("stops delivering after unsubscribe", async () => {
+    const sender = makeBus()
+    const receiver = makeBus()
+    try {
+      const early: BusMessage[] = []
+      const unsubscribe = receiver.subscribe((message) => early.push(message))
+      const late = collect(receiver)
+      unsubscribe()
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(late, 1)
+      expect(early).toEqual([])
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
+  it("keeps notifying other handlers when one throws", async () => {
+    const sender = makeBus()
+    const receiver = makeBus()
+    try {
+      receiver.subscribe(() => {
+        throw new Error("handler bug")
+      })
+      const received = collect(receiver)
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(received, 1)
+      expect(received).toEqual([UTILIZATION_MESSAGE])
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
+  it("delivers via a transport added after construction, until removed", async () => {
+    const sender = makeBus("late-topic")
+    const receiver = new AccountBus([])
+    try {
+      const received = collect(receiver)
+      const remove = receiver.addTransport(
+        new BroadcastChannelTransport("late-topic"),
+      )
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(received, 1)
+
+      remove()
+      sender.publish(UTILIZATION_MESSAGE)
+      const settle = makeBus("late-topic")
+      const settleReceived = collect(settle)
+      sender.publish(UTILIZATION_MESSAGE)
+      await waitForMessages(settleReceived, 1)
+      settle.close()
+      expect(received).toHaveLength(1)
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+
+  // Every bus join is fire-and-forget (the proxy derives the account's bus key
+  // first), so one can land after the context tore down. Attaching then would
+  // put a live socket on a dead bus with nothing left holding a handle to it.
+  // `utilization-updated` carries per-partition counters, so only a context
+  // sharing this device's lane can fold it — never a remote peer. Publishing it
+  // off-device is pure waste, and one entry per dirty bucket easily exceeds the
+  // signaling server's 64 KB frame cap, which kills the socket (1009).
+  it("keeps a localOnly publish off transports that leave the profile", () => {
+    const remoteSent: BusMessageInput[] = []
+    const remote: BusTransport = {
+      local: false,
+      publish: (message) => remoteSent.push(message),
+      subscribe: () => () => {},
+      close: () => {},
+    }
+    const localSent: BusMessageInput[] = []
+    const local: BusTransport = {
+      local: true,
+      publish: (message) => localSent.push(message),
+      subscribe: () => () => {},
+      close: () => {},
+    }
+    const bus = new AccountBus([local, remote])
+    try {
+      bus.publish(UTILIZATION_MESSAGE, { localOnly: true })
+      expect(localSent).toEqual([UTILIZATION_MESSAGE])
+      expect(remoteSent).toEqual([])
+
+      // Everything else still fans out to both — the lease messages are the
+      // reason the remote transport exists.
+      bus.publish(LEASE_RELEASED_MESSAGE)
+      expect(remoteSent).toEqual([LEASE_RELEASED_MESSAGE])
+      expect(localSent).toHaveLength(2)
+    } finally {
+      bus.close()
+    }
+  })
+
+  it("closes a transport attached after close() instead of adopting it", () => {
+    const bus = makeBus()
+    bus.close()
+    const late = new BroadcastChannelTransport("late-join-topic")
+    const closeSpy = vi.spyOn(late, "close")
+    const remove = bus.addTransport(late)
+    expect(closeSpy).toHaveBeenCalledTimes(1)
+    // The remover is inert, and publishing on a closed bus is a no-op rather
+    // than an InvalidStateError from a closed BroadcastChannel.
+    expect(() => remove()).not.toThrow()
+    expect(() => bus.publish(UTILIZATION_MESSAGE)).not.toThrow()
+  })
+
+  it("delivers an account delta whose snapshot merges exactly like a device-state feed payload", async () => {
+    const sender = makeBus()
+    const receiver = makeBus()
+    try {
+      const received = collect(receiver)
+      const remote = makeSnapshot()
+      sender.publish({
+        type: "account-delta",
+        // The serializer returns an untyped record; the wire shape is the
+        // schema input, which the receiving bus validates.
+        snapshot: serializeAccountStateSnapshot({
+          accountId: remote.accountId,
+          metadata: remote.metadata,
+          connectedApps: remote.connectedApps,
+          postageStamps: remote.postageStamps,
+          timestamp: remote.timestamp,
+        }),
+      } as BusMessageInput)
+      await waitForMessages(received, 1)
+
+      const message = received[0]
+      if (message.type !== "account-delta") {
+        throw new Error("expected an account-delta message")
+      }
+      // Typed values are revived from the wire form.
+      expect(message.snapshot.postageStamps[0].batchID).toBeInstanceOf(BatchId)
+      expect(message.snapshot.postageStamps[0].amount).toBe(BigInt(100))
+
+      // The received snapshot folds identically to the original payload.
+      const local = makeSnapshot()
+      local.metadata.devices = [
+        {
+          deviceId: "device-local",
+          name: "Local",
+          createdAt: 1_000_000,
+          lastSignedInAt: 3_000_000,
+        },
+      ]
+      const viaBus = mergeSnapshotWithRemote(local, message.snapshot)
+      const direct = mergeSnapshotWithRemote(local, remote)
+      expect(viaBus.metadata.devices).toEqual(direct.metadata.devices)
+      expect(viaBus.connectedApps).toEqual(direct.connectedApps)
+      expect(viaBus.postageStamps).toEqual(direct.postageStamps)
+    } finally {
+      sender.close()
+      receiver.close()
+    }
+  })
+})
