@@ -8,7 +8,15 @@
  * download-only.
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  beforeEach,
+  afterEach,
+} from "vitest"
 
 // Rollup-only virtual module (see rollup.config.js) — not resolvable in vitest
 vi.mock("virtual:stamp-worker-code", () => ({ default: "" }))
@@ -194,6 +202,19 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     messageListener = listeners["message"] as MessageListener
   }
 
+  /**
+   * The bus channel for the test account. The transport is scoped to the
+   * account-derived topic, so a test that wants to speak on the proxy's bus
+   * has to derive the same one — posting on a fixed origin-wide name reaches
+   * nobody.
+   */
+  let busChannelName: string
+
+  beforeAll(async () => {
+    const { topic } = await deriveBusContext(makeSyncedAccount().derivationKey)
+    busChannelName = `swarm-id-bus-v1:${topic}`
+  })
+
   beforeEach(() => {
     vi.restoreAllMocks()
 
@@ -207,6 +228,21 @@ describe("SwarmIdProxy partitioned write enablement", () => {
   afterEach(() => {
     proxy.destroy()
   })
+
+  /**
+   * Both bus transports now hang off an async key derivation, so a message
+   * posted straight after an auth event can beat the channel into existence.
+   * Production tolerates that (see `ensureAccountBusTransports`); a test must
+   * not race it. `busTopic` is latched exactly when the transports go live, so
+   * it is the real post-condition rather than a promise that also resolves on
+   * failure.
+   */
+  const awaitBusJoin = () =>
+    vi.waitFor(() =>
+      expect(
+        (proxy as unknown as { busTopic: string | undefined }).busTopic,
+      ).toBeDefined(),
+    )
 
   const dispatch = (data: unknown, origin: string, source: unknown = {}) =>
     messageListener({ data, origin, source } as MessageEvent)
@@ -296,7 +332,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       yieldForPeer: ReturnType<typeof vi.fn>
       notifySlotMaybeFree: ReturnType<typeof vi.fn>
     }
-    const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+    await awaitBusJoin()
+    const busChannel = new BroadcastChannel(busChannelName)
     const published: Record<string, unknown>[] = []
     busChannel.onmessage = (event) =>
       published.push(event.data as Record<string, unknown>)
@@ -569,7 +606,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       .value as { currentPartition: number | undefined }
     coordinator.currentPartition = 2
 
-    const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+    await awaitBusJoin()
+    const busChannel = new BroadcastChannel(busChannelName)
     const published: Record<string, unknown>[] = []
     busChannel.onmessage = (event) =>
       published.push(event.data as Record<string, unknown>)
@@ -601,7 +639,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     }
     const ownDeviceId = localStorageFake.getItem("swarm-id-device-id")
     expect(ownDeviceId).toBeTruthy()
-    const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+    await awaitBusJoin()
+    const busChannel = new BroadcastChannel(busChannelName)
     try {
       // Own echo (same deviceId) and a foreign account: both ignored.
       busChannel.postMessage({
@@ -679,7 +718,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("drops a delta from a peer holding a different partition", async () => {
       await hydrateOnLane(0)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(busChannelName)
       try {
         // A peer device on partition 1 is far ahead in ITS lane. Folding its
         // `j` in would skip ~900 of our own partition-0 slots and publish that
@@ -713,7 +753,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
 
     it("drops a delta from a peer on a different partition count", async () => {
       await hydrateOnLane(0)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(busChannelName)
       try {
         // Same partition index, different split: `j` maps to a different slot
         // under `partitionCount + partition + partitionCount·j`.
@@ -752,7 +793,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       await hydrateOnLane(0)
       // Between leases: no lane to compare against.
       stamperStub.currentPartition = undefined
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(busChannelName)
       try {
         busChannel.postMessage({
           type: "utilization-updated",
@@ -804,7 +846,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     // momentarily-unbound peer then folds, the exact skip the guard prevents.
     it("labels a published delta with the lane held before the flush", async () => {
       await hydrateOnLane(1)
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(busChannelName)
       const seen: { partition: number; partitionCount: number }[] = []
       busChannel.onmessage = (event) => seen.push(event.data)
       try {
@@ -830,7 +873,8 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     it("discards the buffer when the bind lands on a different lane", async () => {
       await hydrateOnLane(0)
       stamperStub.currentPartition = undefined
-      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(busChannelName)
       try {
         busChannel.postMessage({
           type: "utilization-updated",
@@ -1067,9 +1111,16 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
     })
 
-    it("does not attach without a configured signaling url", async () => {
+    // The local transport is account-scoped too, so it must attach whether or
+    // not a bus server is configured — a build without one (GitHub Pages,
+    // plain `pnpm dev`) still has same-device tabs to serve, and losing that
+    // would silently stop cross-tab utilization from propagating.
+    it("still joins the local bus without a configured signaling url", async () => {
       seedConnectedAccount()
       vi.mocked(SignalingTransport).mockClear()
+      stamperStub.currentPartition = 0
+      stamperStub.partitionCount = 2
+      stamperStub.applyUtilizationUpdate.mockClear()
 
       await dispatch(
         { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
@@ -1078,6 +1129,61 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       )
 
       expect(SignalingTransport).not.toHaveBeenCalled()
+
+      await awaitBusJoin()
+      const busChannel = new BroadcastChannel(busChannelName)
+      try {
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: [{ index: 7, value: 6 }],
+        })
+        await vi.waitFor(() =>
+          expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The channel moved off the origin-wide name; anything still shouting on
+    // it is talking to nobody.
+    it("ignores traffic on the old origin-wide channel", async () => {
+      seedConnectedAccount()
+      stamperStub.currentPartition = 0
+      stamperStub.partitionCount = 2
+      stamperStub.applyUtilizationUpdate.mockClear()
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+
+      await awaitBusJoin()
+      const legacy = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const scoped = new BroadcastChannel(busChannelName)
+      try {
+        const delta = {
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: [{ index: 7, value: 6 }],
+        }
+        legacy.postMessage(delta)
+        // The account-scoped copy is the barrier: if the legacy one had landed
+        // it would have arrived ahead of this.
+        scoped.postMessage(delta)
+        await vi.waitFor(() =>
+          expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1),
+        )
+      } finally {
+        legacy.close()
+        scoped.close()
+      }
     })
   })
 })
