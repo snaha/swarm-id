@@ -49,6 +49,7 @@
     devChainFunds,
     sendFromFaucet,
   } from '$lib/dev/chain-funding'
+  import { localSourceRpcUrl, sourceEthBalance } from '$lib/dev/local-payment-rail'
   import { postageStampsStore } from '$lib/dev/postage-stamps.svelte'
   import { syncStore } from '$lib/dev/sync.svelte'
   import { chainIdentity, evictChainCaches, probeChainId } from '$lib/payment/chain'
@@ -254,24 +255,38 @@
 
   // Faucet panel. Amounts are what you type — no hidden multiplier, since the
   // point of the panel is to hand over an exact amount and watch it land.
+  const ETH_DECIMALS = 18
   const XDAI_DECIMALS = 18
   const BZZ_DECIMALS = 16
   const USDC_DECIMALS = 6
   const AMOUNT_PRECISION = 4
-  /** Stands in where the chain has no figure to give, rather than a lying zero. */
+  /** Stands in where a chain has no figure to give, rather than a lying zero. */
   const NO_FIGURE = '—'
+  /** The chains a send can target. Gnosis is where a drive is paid for; the
+   * source chain is what a rehearsed cross-chain payment is signed on. */
+  const FAUCET_CHAINS = [
+    { value: 'gnosis', label: 'Gnosis' },
+    { value: 'source', label: 'Fake mainnet' },
+  ]
   /**
    * The assets the faucet can hand over, and how to read an amount for each.
    *
-   * The two ERC20s are the ones a drive can be PAID in, which the bake stocks
-   * the faucet with — dispensing them is what makes a token payment testable
-   * without trading for the token first.
+   * The Gnosis ERC20s are the ones a drive can be PAID in, which the bake
+   * stocks the faucet with — dispensing them is what makes a token payment
+   * testable without trading for the token first.
    */
   const FAUCET_TOKENS = [
-    { value: 'xdai', label: 'xDAI', decimals: XDAI_DECIMALS, placeholder: '0.05' },
-    { value: 'bzz', label: 'BZZ', decimals: BZZ_DECIMALS, placeholder: '1' },
-    { value: 'wxdai', label: 'WXDAI', decimals: XDAI_DECIMALS, placeholder: '10' },
-    { value: 'usdc', label: 'USDC', decimals: USDC_DECIMALS, placeholder: '10' },
+    { value: 'xdai', chain: 'gnosis', label: 'xDAI', decimals: XDAI_DECIMALS, placeholder: '0.05' },
+    { value: 'bzz', chain: 'gnosis', label: 'BZZ', decimals: BZZ_DECIMALS, placeholder: '1' },
+    {
+      value: 'wxdai',
+      chain: 'gnosis',
+      label: 'WXDAI',
+      decimals: XDAI_DECIMALS,
+      placeholder: '10',
+    },
+    { value: 'usdc', chain: 'gnosis', label: 'USDC', decimals: USDC_DECIMALS, placeholder: '10' },
+    { value: 'eth', chain: 'source', label: 'ETH', decimals: ETH_DECIMALS, placeholder: '1' },
   ]
   /** Contract addresses for the ERC20 rows above, from the chain's own preset. */
   const FAUCET_TOKEN_ADDRESSES: Record<string, `0x${string}`> = {
@@ -279,6 +294,7 @@
     usdc: gnosisMainnetSettings().addresses.usdc,
   }
   let faucetTo = $state('')
+  let faucetChain = $state(FAUCET_CHAINS[0].value)
   let faucetToken = $state(FAUCET_TOKENS[0].value)
   let faucetTyped = $state('0.05')
   let faucetHelpOpen = $state(false)
@@ -295,6 +311,8 @@
    */
   let connectedWallet = $state<string | undefined>(undefined)
   let walletFunds = $state<FundsRow | undefined>(undefined)
+  /** Undefined means the source chain never answered — NOT a zero balance. */
+  let sourceEth = $state<bigint | undefined>(undefined)
   let fundsError = $state('')
 
   // The typed recipient, normalized. Undefined while it is not an address,
@@ -322,6 +340,12 @@
     }
   }
 
+  const faucetTokenOptions = $derived(
+    FAUCET_TOKENS.filter((token) => token.chain === faucetChain).map(({ value, label }) => ({
+      value,
+      label,
+    })),
+  )
   const faucetAsset = $derived(
     FAUCET_TOKENS.find((token) => token.value === faucetToken) ?? FAUCET_TOKENS[0],
   )
@@ -332,6 +356,15 @@
   // previous box over is a wrong default every time; each token brings its own.
   function pickFaucetToken(value: string) {
     faucetTyped = FAUCET_TOKENS.find((token) => token.value === value)?.placeholder ?? faucetTyped
+  }
+
+  // Switching chain re-points the token at one that chain actually has, so the
+  // pair can never be a combination the faucet cannot deliver.
+  function pickFaucetChain(value: string) {
+    const first = FAUCET_TOKENS.find((token) => token.chain === value)
+    if (!first) return
+    faucetToken = first.value
+    pickFaucetToken(first.value)
   }
 
   // Point the faucet at the selected account's signer, and re-point it when the
@@ -388,6 +421,7 @@
     if (!requested) {
       funds = undefined
       walletFunds = undefined
+      sourceEth = undefined
       fundsError = ''
       return
     }
@@ -403,6 +437,9 @@
     // is what stops the old numbers sitting under the new label meanwhile.
     if (untrack(() => funds)?.recipient.address !== requested) {
       funds = undefined
+      // The ETH figure carries no address of its own, so it follows the one
+      // that does — otherwise it is the same stale-number trap, one column over.
+      sourceEth = undefined
     }
     if (untrack(() => walletFunds)?.address !== wallet) {
       walletFunds = undefined
@@ -411,26 +448,37 @@
       faucetRecipient !== requested ||
       connectedWallet !== wallet ||
       networkSettingsStore.gnosisRpcUrl !== rpcUrl
-    try {
-      // Both reads together, and one staleness decision over the pair: a
-      // wallet column kept past a check the other columns failed would be
-      // figures from an address, or a chain, the table is no longer about.
-      const [read, walletRead] = await Promise.all([
-        devChainFunds(requested, rpcUrl),
-        wallet ? devAddressFunds(wallet, rpcUrl) : undefined,
-      ])
-      // Typing an address fires this per keystroke and two reads can land out
-      // of order — never show one address's balances under another.
-      if (stale()) return
-      funds = read
-      walletFunds = walletRead
+    // Settled rather than raced to a first failure: the three reads cover two
+    // chains and three addresses, and each is missing under ordinary
+    // conditions — no source chain running, no wallet connected. One losing
+    // may not cost the figures the others did return.
+    const [gnosis, walletRead, eth] = await Promise.allSettled([
+      devChainFunds(requested, rpcUrl),
+      wallet ? devAddressFunds(wallet, rpcUrl) : undefined,
+      sourceEthBalance(requested),
+    ])
+    // Typing an address fires this per keystroke and the reads can land out of
+    // order, so one staleness decision governs all three: a column kept past a
+    // check the others failed would be figures from an address, or a chain,
+    // the table is no longer about.
+    if (stale()) return
+    // The Gnosis read is the one the panel is about, so it alone owns the
+    // error line — a source chain or a wallet that did not answer says nothing
+    // about the figures on screen.
+    if (gnosis.status === 'fulfilled') {
+      funds = gnosis.value
       fundsError = ''
-    } catch (e) {
-      if (stale()) return
+    } else {
       funds = undefined
-      walletFunds = undefined
-      fundsError = e instanceof Error ? e.message : String(e)
+      fundsError = gnosis.reason instanceof Error ? gnosis.reason.message : String(gnosis.reason)
     }
+    // Dashes in that one column instead: the wallet is a separate address on a
+    // chain the other columns were read from successfully.
+    walletFunds = walletRead.status === 'fulfilled' ? walletRead.value : undefined
+    // A missing source chain is the ordinary case here — most sessions never
+    // start one — so it reads as a dash in the table, not an error over the
+    // Gnosis figures that did arrive.
+    sourceEth = eth.status === 'fulfilled' ? eth.value : undefined
   }
 
   // Re-read whenever the recipient changes; the Chain tab is the only consumer,
@@ -442,15 +490,38 @@
   })
 
   /**
+   * What one column of the table has to report from, across both dev chains.
+   *
+   * Two fields rather than one row because the chains fail independently: a
+   * source chain that is not running must still leave the Gnosis figures on
+   * screen, and vice versa.
+   */
+  interface ColumnHoldings {
+    /** The Gnosis-side read made FOR this column's address, if it landed. */
+    gnosis: FundsRow | undefined
+    /**
+     * Undefined means there is no ETH figure for this address — either the
+     * source chain never answered, or it is an address nothing reads there.
+     * Never a zero balance.
+     */
+    sourceEth: bigint | undefined
+  }
+
+  /**
    * The assets the table reports, down the left edge. Each carries how to read
    * itself off a read, so every column is formatted by walking this one list —
    * which is what keeps a column that comes and goes in step with the rest.
+   *
+   * An asset with nothing to report gives undefined rather than zero: a chain
+   * that did not answer and an address holding nothing are opposite facts, and
+   * only one of them is a reason to go start something.
    */
   const BALANCE_ASSETS = [
-    { label: 'xDAI', decimals: XDAI_DECIMALS, held: (row: FundsRow) => row.xdai },
-    { label: 'BZZ', decimals: BZZ_DECIMALS, held: (row: FundsRow) => row.bzz },
-    { label: 'WXDAI', decimals: XDAI_DECIMALS, held: (row: FundsRow) => row.wxdai },
-    { label: 'USDC', decimals: USDC_DECIMALS, held: (row: FundsRow) => row.usdc },
+    { label: 'ETH', decimals: ETH_DECIMALS, held: (held: ColumnHoldings) => held.sourceEth },
+    { label: 'xDAI', decimals: XDAI_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.xdai },
+    { label: 'BZZ', decimals: BZZ_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.bzz },
+    { label: 'WXDAI', decimals: XDAI_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.wxdai },
+    { label: 'USDC', decimals: USDC_DECIMALS, held: (held: ColumnHoldings) => held.gnosis?.usdc },
   ]
 
   interface BalanceColumn {
@@ -463,21 +534,18 @@
   /**
    * One column of the balances table.
    *
-   * `held` is the read made FOR `address`, or undefined when there is none yet
-   * — dashes then, since the alternative is another address's figures under
-   * this one's heading.
+   * `held` carries only reads made FOR `address` — dashes wherever there is
+   * none yet, since the alternative is another address's figures under this
+   * one's heading.
    */
-  function balanceColumn(
-    label: string,
-    address: string,
-    held: FundsRow | undefined,
-  ): BalanceColumn {
+  function balanceColumn(label: string, address: string, held: ColumnHoldings): BalanceColumn {
     return {
       label,
       address,
-      figures: BALANCE_ASSETS.map((asset) =>
-        held ? formatAmount(asset.held(held), asset.decimals) : NO_FIGURE,
-      ),
+      figures: BALANCE_ASSETS.map((asset) => {
+        const amount = asset.held(held)
+        return amount === undefined ? NO_FIGURE : formatAmount(amount, asset.decimals)
+      }),
     }
   }
 
@@ -493,19 +561,32 @@
    * The faucet leads: it is the column that is always there and the first one
    * worth checking — whether there is anything left to hand out — and the two
    * addresses that are the user's own follow it.
+   *
+   * Only the recipient carries an ETH figure. The faucet has no counterpart on
+   * the source chain and never will, since anvil mints there on request, and
+   * the wallet is not read there.
    */
   const balanceColumns = $derived.by(() => {
     // Nothing is read without a recipient, so there is nothing to show — not
     // even the faucet, whose figures come from that same read.
     if (!faucetRecipient) return []
     const shown = funds?.recipient.address === faucetRecipient ? funds : undefined
-    const columns = [balanceColumn('Faucet', DEV_FAUCET_ADDRESS, shown?.faucet)]
+    const columns = [
+      balanceColumn('Faucet', DEV_FAUCET_ADDRESS, {
+        gnosis: shown?.faucet,
+        sourceEth: undefined,
+      }),
+    ]
     // A wallet that is already the recipient would be the same column twice.
     if (connectedWallet && connectedWallet !== faucetRecipient) {
       const held = walletFunds?.address === connectedWallet ? walletFunds : undefined
-      columns.push(balanceColumn('Connected wallet', connectedWallet, held))
+      columns.push(
+        balanceColumn('Connected wallet', connectedWallet, { gnosis: held, sourceEth: undefined }),
+      )
     }
-    columns.push(balanceColumn('Recipient', faucetRecipient, shown?.recipient))
+    columns.push(
+      balanceColumn('Recipient', faucetRecipient, { gnosis: shown?.recipient, sourceEth }),
+    )
     return columns
   })
 
@@ -524,6 +605,7 @@
     try {
       const erc20 = FAUCET_TOKEN_ADDRESSES[faucetToken]
       await sendFromFaucet(to, {
+        eth: faucetToken === 'eth' ? faucetValue : 0n,
         xdai: faucetToken === 'xdai' ? faucetValue : 0n,
         bzzPlur: faucetToken === 'bzz' ? faucetValue : 0n,
         tokens: erc20 ? [{ token: erc20, amount: faucetValue }] : [],
@@ -1214,6 +1296,17 @@ Check console logs for details:
           >
           <CopyButton text={networkSettingsStore.gnosisRpcUrl} />
         </div>
+        <div class="flex items-center gap-2">
+          <StatusDot endpoint={localSourceRpcUrl()} method="json-rpc" />
+          <span class="font-mono text-sm">Ethereum Mainnet RPC (fake):</span>
+          <a
+            href={localSourceRpcUrl()}
+            target="_blank"
+            rel="noopener"
+            class="text-primary font-mono text-sm">{localSourceRpcUrl()}</a
+          >
+          <CopyButton text={localSourceRpcUrl()} />
+        </div>
         <!-- eslint-enable svelte/no-navigation-without-resolve -->
       </div>
 
@@ -1400,13 +1493,13 @@ Check console logs for details:
   <!-- Chain Tab -->
   {#if activeTab === 'chain'}
     <div class="flex flex-col gap-4">
-      <h3 class="text-lg font-semibold">Buying a drive</h3>
+      <h3 class="text-lg font-semibold">Simulated purchase</h3>
       <p class="text-muted-foreground text-sm">
         <strong>Add drive</strong> offers two payment methods, and they behave differently here. The
         <strong>built-in</strong> engine — which is also what extend and resize use — always buys
         for real, against whichever chain this page is pointed at: money reaches the batch owner
-        through a payment the user makes from Gnosis, which is a plain transfer with no bridge in
-        the way.
+        through a payment the user makes, from Gnosis directly, or — with a local source chain
+        running — through the payment screens and the local solver.
         <strong>fund.bzz.limo</strong>, the method the payment screen offers first, settles on
         Gnosis mainnet and nowhere else, so it cannot be exercised here at all — the simulated
         purchase below is what stands in for it. Nothing in the app settles an operation out of the
@@ -1478,14 +1571,16 @@ Check console logs for details:
       {#if faucetHelpOpen}
         <div class={CARD_CLASS}>
           <p class="text-muted-foreground text-sm">
-            Hands <em>any</em> address money on the dev chain — a plain transfer from the faucet the bake
-            stocked, since the BZZ pool here is real and thin and only a purchase is worth spending it
-            on.
+            On Gnosis a send is a plain transfer from the faucet the bake stocked — the BZZ pool
+            here is real and thin, and only a purchase is worth spending it on. The fake mainnet has
+            no faucet to transfer from, so ETH is minted there instead; that is the chain a
+            rehearsed payment is signed on, so it is the wallet account you connect with that needs
+            it.
           </p>
           <p class="text-muted-foreground text-sm">
-            <strong>Anvil account 0</strong> starts with 10 000 xDAI and no BZZ, which is the bake faucet's
-            to give. Importing its key into MetaMask is the shortcut to a wallet that already holds something
-            here.
+            <strong>Anvil account 0</strong> starts with 10 000 native on each chain — 10 000 ETH on the
+            fake mainnet, 10 000 xDAI on Gnosis — and no BZZ, which is the bake faucet's to give. Importing
+            its key into MetaMask is the shortcut to a wallet that already holds both.
           </p>
           {@render copyRow('Address', ANVIL_ACCOUNT.address)}
           {@render copyRow('Private key', ANVIL_ACCOUNT.privateKey)}
@@ -1545,6 +1640,13 @@ Check console logs for details:
       {:else}
         <p class="text-muted-foreground text-sm">Enter a recipient to see balances.</p>
       {/if}
+      {#if faucetRecipient && sourceEth === undefined}
+        <p class="text-muted-foreground text-xs">
+          No ETH figure — nothing is answering at
+          <span class="font-mono">{localSourceRpcUrl()}</span>. Start it with
+          <span class="font-mono">pnpm dev:source-chain</span>.
+        </p>
+      {/if}
 
       <div class="flex flex-wrap items-end gap-2">
         <!--
@@ -1558,14 +1660,25 @@ Check console logs for details:
         </label>
         <label class={LABEL_CLASS}>
           <span class={LABEL_TEXT_CLASS}>Token</span>
-          <!-- The token list itself: Select reads `value` and `label` and
-               ignores the rest, so there is nothing to map over. -->
+          <!-- Only the chosen chain's assets: ETH exists on the source chain
+               and xDAI/BZZ on the Gnosis one, so the whole list would offer
+               sends that cannot happen. -->
           <Select
-            options={FAUCET_TOKENS}
+            options={faucetTokenOptions}
             bind:value={faucetToken}
             class="w-32"
             disabled={faucetBusy}
             onchange={pickFaucetToken}
+          />
+        </label>
+        <label class={LABEL_CLASS}>
+          <span class={LABEL_TEXT_CLASS}>Chain</span>
+          <Select
+            options={FAUCET_CHAINS}
+            bind:value={faucetChain}
+            class="w-40"
+            disabled={faucetBusy}
+            onchange={pickFaucetChain}
           />
         </label>
         <Button
@@ -1589,9 +1702,10 @@ Check console logs for details:
 
       <h3 class="text-lg font-semibold">Wallet networks</h3>
       <p class="text-muted-foreground text-sm">
-        Adds the chains a payment can be signed on to MetaMask, so a balance shows before you reach
-        the payment screens. <strong>Gnosis Chain (fake)</strong> is the one to add: paying from it is
-        a plain transfer to the batch owner, with no bridge in the way.
+        Adds these chains to MetaMask, so a balance shows before you reach the payment screens.
+        <strong>Gnosis Chain (fake)</strong> is the one to add first — paying from it is a plain transfer
+        to the batch owner, with no bridge and no solver in the way. The other is only needed to rehearse
+        a bridged payment.
       </p>
       {#if walletChains.length === 0}
         <p class="text-muted-foreground text-sm">

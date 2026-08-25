@@ -10,7 +10,7 @@ paths:
 Docker-based local Bee cluster for development with postage stamps. Uses [@snaha/bee-compose](https://www.npmjs.com/package/@snaha/bee-compose) **≥ 0.3.0** — the release whose snapshot carries both BZZ routes (BZZ/WXDAI and BZZ/USDC) and a faucet stocked with WXDAI/USDC ([bee-compose#28](https://github.com/snaha/bee-compose/pull/28)). Against 0.2.x the cluster runs, but every purchase is routed through the thin pool — priced the expensive way, large drives refused locally — and token payments cannot be tested; 0.1.x's queen crashloops outright with `factory fail: abi: attempting to unmarshal an empty string`, which reads as a broken cluster rather than a stale dependency. Remember the bump note below: a version bump needs `--pull`, not just `--fresh`.
 
 ```bash
-pnpm dev:local        # cluster + chain + UI + demo  ← use this
+pnpm dev:local        # cluster + both chains + solver + UI + demo  ← use this
 pnpm dev:local:fresh  # the same, from a clean chain and empty node state
 pnpm dev:local:stop   # tear the containers down
 

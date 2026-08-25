@@ -26,6 +26,7 @@ import {
 } from '@swarm-id/multichain/dev'
 import { generatePrivateKey } from 'viem/accounts'
 
+import { mintSourceEth } from '$lib/dev/local-payment-rail'
 import { chainIdentity, postageChain } from '$lib/payment/chain'
 import { fetchExistingBatchFromChain } from '$lib/payment/contract'
 import { type PostageSigner, derivePostageSigner } from '$lib/payment/purchase'
@@ -36,13 +37,15 @@ import type { Account } from '$lib/types'
  * Anvil's first default account — the key every anvil prints on startup, so
  * publicly known and worth nothing off a dev chain.
  *
- * The dev chain is anvil, and anvil funds its ten default accounts at genesis
- * even when loading a state dump, so this address starts with 10 000 xDAI. It
- * holds no BZZ — that float is the bake's, and sits with `DEV_FAUCET_ADDRESS`.
+ * Both dev chains are anvil, and anvil funds its ten default accounts at
+ * genesis whether it is bare (the source chain) or loading a state dump (the
+ * Gnosis one), so this address starts with 10 000 native on EACH: 10 000 ETH on
+ * the fake mainnet, 10 000 xDAI on Gnosis. It holds no BZZ — that float is the
+ * bake's, and sits with `DEV_FAUCET_ADDRESS`.
  *
- * Importing it is never required; it is only the shortcut to a wallet showing
- * a balance from the start, instead of one that looks empty until the faucet
- * fills it.
+ * Importing it is never required: the dev rail tops up whatever account
+ * connects. It is only the shortcut to a wallet showing a balance from the
+ * start, instead of one that looks empty until the first payment funds it.
  */
 export const ANVIL_ACCOUNT = {
   address: '0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266',
@@ -104,8 +107,14 @@ async function assertDevChain(tool: string, rpcUrl: string): Promise<void> {
   }
 }
 
-/** What one faucet send delivers. A zero leg is skipped entirely. */
+/**
+ * What one faucet send delivers, across both dev chains. A zero leg is skipped
+ * entirely — which is what lets an ETH-only send work with no Gnosis chain
+ * running, and an xDAI/BZZ one with no source chain.
+ */
 export interface FaucetAmounts {
+  /** Source-chain ETH, in wei — the fake mainnet the payment rail signs on. */
+  eth: bigint
   /** Gnosis-side native xDAI, in wei. */
   xdai: bigint
   /** Gnosis-side BZZ, in PLUR. */
@@ -118,35 +127,50 @@ export interface FaucetAmounts {
 }
 
 /**
- * Hand any address money on the dev chain.
+ * Hand any address money on either dev chain, or both.
  *
- * A transfer from the baked faucet rather than a trade: every swap moves a real
- * and thin BZZ pool, and topping an address up is not the thing worth
- * simulating faithfully. The purchase path still trades — see
- * `createOwnedBatchOnChain`.
+ * The two legs come from different places because the chains do: on Gnosis this
+ * is a transfer from the baked faucet (every swap moves a real and thin BZZ
+ * pool, and topping an address up is not the thing worth simulating
+ * faithfully), while the source chain has no faucet to transfer from and mints
+ * instead. The purchase path still trades — see `createOwnedBatchOnChain`.
  *
- * Any address, not just a derived signer: reproducing a bug usually means
+ * Any address, not just a derived signer: rehearsing a payment needs ETH in
+ * whatever wallet account is connected, and reproducing a bug usually means
  * funding the one address that is stuck.
+ *
+ * The source-chain leg goes first so that a chain that is not running aborts
+ * the send before anything has moved. There is no partial delivery to explain,
+ * and the fix — start it and press Send again — costs nothing.
  */
 export async function sendFromFaucet(address: string, amounts: FaucetAmounts): Promise<void> {
   // Read once: the assertion and the transfer must be about the same chain.
   const rpcUrl = networkSettingsStore.gnosisRpcUrl
   const to = new EthAddress(address).toChecksum() as `0x${string}`
-  // Nothing to send is a mistyped amount, not a send: reporting "✅ Sent 0" for
-  // it reads as a transfer that happened.
+  // Nothing to send is a mistyped amount, not a send: reporting "✅ Sent 0"
+  // for it reads as a transfer that happened. Checked before the source leg, so
+  // a zero send never starts a chain it did not need.
   if (
+    amounts.eth <= 0n &&
     amounts.xdai <= 0n &&
     amounts.bzzPlur <= 0n &&
     amounts.tokens.every((entry) => entry.amount <= 0n)
   ) {
     throw new Error('Enter an amount above zero.')
   }
-  await assertDevChain('The faucet', rpcUrl)
-  const chain = await postageChain(rpcUrl)
-  await fundLocalAccount(
-    { to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur, tokens: amounts.tokens },
-    chain.settings,
-  )
+  if (amounts.eth > 0n) {
+    await mintSourceEth(to, amounts.eth)
+  }
+  // The Gnosis legs only: the guard probes the Gnosis endpoint, and an ETH-only
+  // send has to work with no Gnosis chain running at all.
+  if (amounts.xdai > 0n || amounts.bzzPlur > 0n || amounts.tokens.length > 0) {
+    await assertDevChain('The faucet', rpcUrl)
+    const chain = await postageChain(rpcUrl)
+    await fundLocalAccount(
+      { to, xdai: amounts.xdai, bzzPlur: amounts.bzzPlur, tokens: amounts.tokens },
+      chain.settings,
+    )
+  }
 }
 
 /** An address and what it holds on the Gnosis-side chain, for the faucet panel. */
@@ -181,6 +205,10 @@ async function fundsAt(address: `0x${string}`, chain: MultichainClient): Promise
 
 /**
  * What the faucet has left to give, and what `address` holds.
+ *
+ * Gnosis-side only. Source-chain ETH is read separately (`sourceEthBalance`)
+ * because the faucet has no counterpart there — anvil mints — and because that
+ * chain is often not running, which must not cost the balances that are.
  *
  * @param rpcUrl — the chain the figures are FROM. Passed in by a caller that
  *   must be able to tell whether the answer still belongs to the endpoint it

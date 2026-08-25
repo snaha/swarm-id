@@ -8,6 +8,8 @@
  * no risk of an initialisation cycle. This module is where knowing about every
  * rail is allowed.
  */
+import { chainIdentity } from '$lib/payment/chain'
+import { resolveLocalRail } from '$lib/payment/dev-funding'
 import { resolveGnosisDirectRail } from '$lib/payment/gnosis-direct'
 import type { PaymentRail, PaymentToken } from '$lib/payment/payment-rail'
 import { relayRail } from '$lib/payment/relay'
@@ -79,14 +81,46 @@ export function combineRails(rails: PaymentRail[]): PaymentRail {
  * from whatever else would have claimed it. Only xDAI: it is a plain transfer,
  * so Gnosis's other tokens stay with the bridged rail.
  *
- * Relay carries everything else, on every chain it serves — including the
- * tokens on Gnosis that a plain transfer cannot move.
+ * Then, for the other chains:
+ *
+ * - **A production build always pays for real.** Whatever chain it is pointed
+ *   at, a shipped bundle that faked a payment when an RPC blipped would be far
+ *   worse than one that fails. What keeps the dev rail out of the shipped
+ *   bundle is not this check — a dead branch does not remove a static import —
+ *   but the build-time swap behind `$lib/payment/dev-funding`.
+ * - **Gnosis mainnet always pays for real**, judged by genesis hash, since a
+ *   dev chain reports mainnet's chain id on purpose.
+ * - **On a PROVEN dev chain, a bridged rail exists only if the local source
+ *   chain is up.** Without one there is still the direct path, which needs
+ *   nothing but the chain the app is already talking to.
+ * - **An endpoint we could not identify gets no bridged rail at all.** "Not
+ *   proven mainnet" is not the same answer as "proven dev": a blipped probe
+ *   against a real Gnosis endpoint used to be handed the local rail, which
+ *   takes a deposit on a chain the destination has never heard of and then
+ *   waits out its two-minute delivery timeout blaming a solver that was never
+ *   involved. Nothing offered is the honest answer.
  *
  * @returns the rail to pay through, or undefined when there is none — which is
  *   an error at the funding seam, not a licence to conjure the money.
  */
 export async function resolvePaymentRail(): Promise<PaymentRail | undefined> {
   const direct = await resolveGnosisDirectRail()
-  const rails = [direct, relayRail].filter((rail) => rail !== undefined)
+  const bridged = await resolveBridgedRail()
+  const rails = [direct, bridged].filter((rail) => rail !== undefined)
   return rails.length > 0 ? combineRails(rails) : undefined
+}
+
+/** The rail for chains other than the destination itself. */
+async function resolveBridgedRail(): Promise<PaymentRail | undefined> {
+  if (!import.meta.env.DEV) {
+    return relayRail
+  }
+  const identity = await chainIdentity().catch(() => undefined)
+  if (identity?.kind === 'mainnet') {
+    return relayRail
+  }
+  // Proven, not merely "not mainnet" — the same rule `chain.ts` states for the
+  // dev answer, and the same one `resolveGnosisDirectRail` applies: an
+  // unidentified or non-Gnosis endpoint gets no local rail to sign into.
+  return identity?.kind === 'dev' ? resolveLocalRail() : undefined
 }
