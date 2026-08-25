@@ -794,6 +794,33 @@ describe("SwarmIdProxy partitioned write enablement", () => {
       expect(SignalingTransport).not.toHaveBeenCalled()
     })
 
+    // The constructor connects synchronously, so a malformed url (or `ws://`
+    // from an https page) throws right here. Latching the topic before that
+    // would make every later join dedup out against a transport that never
+    // existed — bus off for the session, with no retry.
+    it("does not latch the topic when the transport constructor throws", async () => {
+      seedConnectedAccount()
+      await remountWithSignaling()
+      vi.mocked(SignalingTransport).mockImplementationOnce(() => {
+        throw new SyntaxError("The URL's scheme must be 'ws' or 'wss'")
+      })
+
+      await dispatch(
+        { type: "parentIdentify", requestId: "r1", metadata: { name: "dApp" } },
+        PARENT_ORIGIN,
+        parentWindow,
+      )
+      await vi.waitFor(() =>
+        expect(SignalingTransport).toHaveBeenCalledTimes(1),
+      )
+
+      // A later join retries instead of dedup'ing against the failed attempt.
+      ;(proxy as unknown as { joinAccountBus(): void }).joinAccountBus()
+      await vi.waitFor(() =>
+        expect(SignalingTransport).toHaveBeenCalledTimes(2),
+      )
+    })
+
     it("does not attach without a configured signaling url", async () => {
       seedConnectedAccount()
       vi.mocked(SignalingTransport).mockClear()

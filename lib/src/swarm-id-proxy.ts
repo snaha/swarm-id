@@ -710,6 +710,9 @@ export class SwarmIdProxy {
    * would never reach past this origin+partition outside Safari.
    */
   private joinAccountBus(): void {
+    // Before the storage read: this runs on every accounts storage event, and
+    // without a signaling URL there is nothing to join.
+    if (!this.signalingUrl) return
     const connection = this.findConnectionForParent()
     if (!connection) return
     void this.ensureBusSignalingTransport(connection.account.derivationKey)
@@ -736,18 +739,23 @@ export class SwarmIdProxy {
       if (generation !== this.busJoinGeneration) return
       if (this.busSignalingTopic === context.topic) return
       this.removeBusSignalingTransport?.()
+      // Construct BEFORE latching the topic. `SignalingTransport` connects in
+      // its constructor, where `new URL` and `new WebSocket` throw
+      // synchronously on a malformed url or `ws://` from an https page. Marking
+      // the topic attached first would leave the dedup check above matching a
+      // transport that never existed — bus silently off for the whole session,
+      // with no retry on any later join.
+      const transport = new SignalingTransport({
+        url,
+        topic: context.topic,
+        encryptionKey: context.encryptionKey,
+        createPeerConnection:
+          typeof RTCPeerConnection !== "undefined"
+            ? () => new RTCPeerConnection()
+            : undefined,
+      })
+      this.removeBusSignalingTransport = this.bus.addTransport(transport)
       this.busSignalingTopic = context.topic
-      this.removeBusSignalingTransport = this.bus.addTransport(
-        new SignalingTransport({
-          url,
-          topic: context.topic,
-          encryptionKey: context.encryptionKey,
-          createPeerConnection:
-            typeof RTCPeerConnection !== "undefined"
-              ? () => new RTCPeerConnection()
-              : undefined,
-        }),
-      )
     } catch (error) {
       console.error("[Proxy] Failed to attach bus signaling transport:", error)
     }
