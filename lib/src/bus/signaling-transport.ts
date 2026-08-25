@@ -184,10 +184,15 @@ export class SignalingTransport implements BusTransport {
       peer.connection?.close()
     }
     this.peers.clear()
-    this.reconnectTimer = setTimeout(
-      () => this.connect(),
-      this.reconnectDelayMs,
-    )
+    // Equal jitter. Every client connected when the service restarts — a
+    // deploy, an OOM — schedules its retry from the same instant, so an
+    // undithered delay brings them all back in lockstep at exactly the moment
+    // the server can least take it. Spread the wait over the second half of
+    // the window; the undithered sequence stays the backoff of record so the
+    // doubling is still 1s → 2s → 4s.
+    const jittered =
+      this.reconnectDelayMs / 2 + Math.random() * (this.reconnectDelayMs / 2)
+    this.reconnectTimer = setTimeout(() => this.connect(), jittered)
     this.reconnectDelayMs = Math.min(
       this.reconnectDelayMs * 2,
       RECONNECT_MAX_DELAY_MS,
