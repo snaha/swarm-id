@@ -74,6 +74,7 @@ interface PeerState {
 }
 
 export class SignalingTransport implements BusTransport {
+  readonly local = false
   private options: SignalingTransportOptions
   private socket: WebSocket | undefined
   private peers = new Map<string, PeerState>()

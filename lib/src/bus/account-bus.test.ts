@@ -5,6 +5,7 @@ import { describe, it, expect, vi } from "vitest"
 import { BatchId, PrivateKey } from "@ethersphere/bee-js"
 
 import { AccountBus, BroadcastChannelTransport } from "./account-bus"
+import type { BusTransport } from "./account-bus"
 import type { BusMessage, BusMessageInput } from "./messages"
 import { serializeAccountStateSnapshot } from "../utils/account-state-snapshot"
 import { mergeSnapshotWithRemote } from "../sync/merge-snapshot"
@@ -35,6 +36,13 @@ const UTILIZATION_MESSAGE: BusMessageInput = {
   partition: 0,
   partitionCount: 2,
   buckets: [{ index: 3, value: 7 }],
+}
+
+const LEASE_RELEASED_MESSAGE: BusMessageInput = {
+  type: "lease-released",
+  accountId: "aa".repeat(20),
+  partition: 1,
+  fromDeviceId: "device-remote",
 }
 
 function makeSnapshot(): AccountStateSnapshot {
@@ -211,6 +219,41 @@ describe("AccountBus over BroadcastChannelTransport", () => {
   // Every bus join is fire-and-forget (the proxy derives the account's bus key
   // first), so one can land after the context tore down. Attaching then would
   // put a live socket on a dead bus with nothing left holding a handle to it.
+  // `utilization-updated` carries per-partition counters, so only a context
+  // sharing this device's lane can fold it — never a remote peer. Publishing it
+  // off-device is pure waste, and one entry per dirty bucket easily exceeds the
+  // signaling server's 64 KB frame cap, which kills the socket (1009).
+  it("keeps a localOnly publish off transports that leave the profile", () => {
+    const remoteSent: BusMessageInput[] = []
+    const remote: BusTransport = {
+      local: false,
+      publish: (message) => remoteSent.push(message),
+      subscribe: () => () => {},
+      close: () => {},
+    }
+    const localSent: BusMessageInput[] = []
+    const local: BusTransport = {
+      local: true,
+      publish: (message) => localSent.push(message),
+      subscribe: () => () => {},
+      close: () => {},
+    }
+    const bus = new AccountBus([local, remote])
+    try {
+      bus.publish(UTILIZATION_MESSAGE, { localOnly: true })
+      expect(localSent).toEqual([UTILIZATION_MESSAGE])
+      expect(remoteSent).toEqual([])
+
+      // Everything else still fans out to both — the lease messages are the
+      // reason the remote transport exists.
+      bus.publish(LEASE_RELEASED_MESSAGE)
+      expect(remoteSent).toEqual([LEASE_RELEASED_MESSAGE])
+      expect(localSent).toHaveLength(2)
+    } finally {
+      bus.close()
+    }
+  })
+
   it("closes a transport attached after close() instead of adopting it", () => {
     const bus = makeBus()
     bus.close()

@@ -253,6 +253,15 @@ export class SwarmIdProxy {
   private busJoinGeneration = 0
   /** Account the live coordinator serves — routes bus lease messages. */
   private coordinatorAccountId: string | undefined
+  /**
+   * Utilization deltas that arrived while the stamper had no lane, held until
+   * a bind names one (`applyPendingLaneUpdate`). Keyed by lane so a delta for
+   * a lane we do not end up binding cannot displace the one we do — the point
+   * of buffering is that nothing is silently lost. Buckets merge per index
+   * with `max`, matching `applyUtilizationUpdate`'s own monotonic rule.
+   * Bounded by the account's partition count.
+   */
+  private pendingLaneUpdates = new Map<string, Map<number, number>>()
   private utilizationStore: UtilizationStoreDB | undefined
   private beeApiUrl: string
   private gnosisRpcUrl: string
@@ -794,6 +803,64 @@ export class SwarmIdProxy {
     })
   }
 
+  private static laneKey(
+    batchId: string,
+    partition: number,
+    partitionCount: number,
+  ): string {
+    return `${batchId}:${partition}/${partitionCount}`
+  }
+
+  /**
+   * Hold a lane-scoped delta that arrived with no lane bound to compare it
+   * against, merged into whatever that lane already has.
+   */
+  private bufferLaneUpdate(message: {
+    batchId: string
+    partition: number
+    partitionCount: number
+    buckets: Array<{ index: number; value: number }>
+  }): void {
+    const key = SwarmIdProxy.laneKey(
+      message.batchId,
+      message.partition,
+      message.partitionCount,
+    )
+    const buckets =
+      this.pendingLaneUpdates.get(key) ?? new Map<number, number>()
+    for (const { index, value } of message.buckets) {
+      const current = buckets.get(index)
+      if (current === undefined || value > current) buckets.set(index, value)
+    }
+    this.pendingLaneUpdates.set(key, buckets)
+  }
+
+  /**
+   * Fold the buffered delta for the lane we just bound in, then drop every
+   * buffered lane — the ones we did not bind are another device's business.
+   * Called on every lease acquire: on the cold path the counters are already
+   * seeded from the durable partition-state feed, so this is a harmless
+   * monotonic no-op; on the adopt fast path they are not, and this is the
+   * whole point.
+   */
+  private applyPendingLaneUpdate(): void {
+    const buffered = this.pendingLaneUpdates
+    this.pendingLaneUpdates = new Map()
+    const lane = this.stamper?.currentPartition
+    if (!this.stamper || !this.postageBatchId || lane === undefined) return
+    const buckets = buffered.get(
+      SwarmIdProxy.laneKey(
+        this.postageBatchId,
+        lane,
+        this.stamper.partitionCount,
+      ),
+    )
+    if (!buckets) return
+    this.stamper.applyUtilizationUpdate(
+      [...buckets].map(([index, value]) => ({ index, value })),
+    )
+  }
+
   /**
    * Account-bus subscription: utilization deltas from other contexts, and the
    * lease fast path (docs/Account-Bus.md, bus-accelerated leases). The Swarm
@@ -816,16 +883,33 @@ export class SwarmIdProxy {
           // stampers (`unbindPartition` also resets the count to 1) — that
           // coupling lives in another file and is exactly the assumption whose
           // last violation caused the resume-pointer skip described above.
-          const lane = this.stamper?.currentPartition
-          const sameLane =
-            lane !== undefined
-              ? message.partition === lane &&
-                message.partitionCount === this.stamper?.partitionCount
-              : message.partition === 0 && message.partitionCount === 1
+          if (message.batchId !== this.postageBatchId || !this.stamper) return
+          const lane = this.stamper.currentPartition
+          if (lane === undefined) {
+            // Unbound: the lane this delta belongs to may well be the one we
+            // are about to bind. Dropping it loses it for good — the adopt
+            // fast path re-binds from THIS tab's in-memory counters
+            // (`buildLeaseLocalCounter`), not from durable state, so a sibling
+            // tab's writes would be invisible and we would re-issue slots it
+            // already consumed. Hold it until the bind names our lane.
+            // A legacy single-partition delta has no lease to wait for and
+            // applies immediately.
+            if (message.partition === 0 && message.partitionCount === 1) {
+              this.stamper.applyUtilizationUpdate(message.buckets)
+            } else {
+              this.bufferLaneUpdate(message)
+            }
+            return
+          }
+          // Bound: same batch AND same slot lane. The counters are
+          // per-partition (`slot = partitionCount + partition + partitionCount·j`),
+          // so a delta from a peer holding a DIFFERENT partition of this batch
+          // is not comparable: folding it in would skip this lane past its own
+          // unused slots and then publish that as the partition's durable
+          // resume counter.
           if (
-            message.batchId === this.postageBatchId &&
-            this.stamper &&
-            sameLane
+            message.partition === lane &&
+            message.partitionCount === this.stamper.partitionCount
           ) {
             // Apply delta update directly - no IndexedDB read needed
             this.stamper.applyUtilizationUpdate(message.buckets)
@@ -1020,7 +1104,15 @@ export class SwarmIdProxy {
       // account snapshot (which includes ourselves in metadata.devices) to the
       // shared feed. Debounced + deferred so it runs OUTSIDE the acquiring write
       // lock (the publish re-enters the lock via the coordinator).
-      onLeaseAcquired: () => this.schedulePublish("acquired"),
+      //
+      // Fold in any delta buffered while we had no lane FIRST, and
+      // synchronously: the bind that just happened may have seeded the counters
+      // from this tab's own in-memory state (the adopt fast path does), and the
+      // publish below reads those counters.
+      onLeaseAcquired: () => {
+        this.applyPendingLaneUpdate()
+        this.schedulePublish("acquired")
+      },
     })
     this.coordinatorAccountId = accountInfo.accountId
     this.coordinator.startLease()
@@ -1109,22 +1201,36 @@ export class SwarmIdProxy {
     }
 
     try {
-      // Capture bucket updates BEFORE flush clears dirtyBuckets
+      // Capture bucket updates BEFORE flush clears dirtyBuckets — and the lane
+      // they belong to in the same breath. Reading the lane after the await
+      // instead lets a teardown landing mid-flush (`unbindPartition` resets the
+      // partition to undefined and the count to 1) relabel partition-p counters
+      // as the legacy `{0, 1}` lane, which every momentarily-unbound same-batch
+      // peer then folds — the exact resume-pointer skip the lane guard exists
+      // to prevent.
       const buckets = this.stamper.getBucketUpdatesForBroadcast()
+      const partition = this.stamper.currentPartition ?? 0
+      const partitionCount = this.stamper.partitionCount
 
       await this.stamper.flush()
 
       // Broadcast the utilization update to peers with pre-captured buckets.
-      // The counters are per-partition, so the slot lane travels with them —
-      // only a peer on the same lane may fold them in (see the receive guard).
+      // Local transports only: the counters are per-partition, and every peer
+      // a remote transport reaches is a different device holding a different
+      // lane, so a remote copy is dropped at the receive guard after paying for
+      // encryption and a frame the signaling server's payload cap may refuse
+      // outright (one entry per dirty bucket, up to NUM_BUCKETS of them).
       if (this.postageBatchId && buckets.length > 0) {
-        this.bus.publish({
-          type: "utilization-updated",
-          batchId: this.postageBatchId,
-          partition: this.stamper.currentPartition ?? 0,
-          partitionCount: this.stamper.partitionCount,
-          buckets,
-        })
+        this.bus.publish(
+          {
+            type: "utilization-updated",
+            batchId: this.postageBatchId,
+            partition,
+            partitionCount,
+            buckets,
+          },
+          { localOnly: true },
+        )
       }
     } catch (error) {
       console.error("[Proxy] Failed to save stamper state:", error)
@@ -1989,6 +2095,7 @@ export class SwarmIdProxy {
     }
     this.stamper = undefined
     this.stamperAccountFingerprint = undefined
+    this.pendingLaneUpdates.clear()
     this.storagePartitioned = false
     this.storagePartitionedIdentity = undefined
     this.partitionAccount = undefined

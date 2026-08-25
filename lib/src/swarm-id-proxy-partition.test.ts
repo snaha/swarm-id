@@ -398,6 +398,29 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     const LANE_BUCKETS = [{ index: 7, value: 900 }]
     const OWN_BUCKETS = [{ index: 7, value: 6 }]
 
+    /**
+     * Deps of the coordinator the LIVE proxy built. The mock accumulates a
+     * result per construction across the whole file, and every earlier one is
+     * bound to a proxy that has since been destroyed (closed bus, no stamper),
+     * so calling into those hooks silently does nothing.
+     */
+    function liveCoordinatorDeps(): {
+      onLeaseAcquired: (partition: number) => void
+      flushStamperState: () => Promise<void>
+    } {
+      const results = vi.mocked(BatchWriteCoordinator).mock.results
+      const latest = results[results.length - 1]
+      expect(latest?.type).toBe("return")
+      return (
+        latest.value as {
+          deps: {
+            onLeaseAcquired: (partition: number) => void
+            flushStamperState: () => Promise<void>
+          }
+        }
+      ).deps
+    }
+
     async function hydrateOnLane(partition: number): Promise<void> {
       stamperStub.currentPartition = partition
       stamperStub.partitionCount = 2
@@ -468,6 +491,116 @@ describe("SwarmIdProxy partitioned write enablement", () => {
         expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledWith(
           OWN_BUCKETS,
         )
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // An unbound stamper cannot judge a lane yet, but the lane it is ABOUT to
+    // bind may be exactly the one the delta carries. Dropping it loses it for
+    // good: the coordinator's adopt fast path re-binds from this tab's own
+    // in-memory counters (`buildLeaseLocalCounter`), not from durable state, so
+    // a sibling tab's writes would be invisible and we would re-issue slots it
+    // already consumed.
+    it("holds a delta received while unbound and folds it in on lease acquire", async () => {
+      await hydrateOnLane(0)
+      // Between leases: no lane to compare against.
+      stamperStub.currentPartition = undefined
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: [{ index: 7, value: 6 }],
+        })
+        // A second delta for the same lane merges (max per bucket) rather than
+        // replacing — both writes have to survive the unbound window.
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: [
+            { index: 7, value: 4 },
+            { index: 9, value: 11 },
+          ],
+        })
+        // A different lane's delta must not leak into the buffer.
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 1,
+          partitionCount: 2,
+          buckets: [{ index: 7, value: 900 }],
+        })
+        await new Promise((resolve) => setTimeout(resolve, 20))
+        expect(stamperStub.applyUtilizationUpdate).not.toHaveBeenCalled()
+
+        // The bind names our lane; the coordinator fires `onLeaseAcquired`.
+        stamperStub.currentPartition = 0
+        liveCoordinatorDeps().onLeaseAcquired(0)
+
+        expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledTimes(1)
+        expect(stamperStub.applyUtilizationUpdate).toHaveBeenCalledWith([
+          { index: 7, value: 6 },
+          { index: 9, value: 11 },
+        ])
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The buckets are captured before `flush()`; the lane must be too. Reading
+    // it after the await lets a teardown landing mid-flush relabel
+    // partition-p counters as the legacy `{0, 1}` lane — which every
+    // momentarily-unbound peer then folds, the exact skip the guard prevents.
+    it("labels a published delta with the lane held before the flush", async () => {
+      await hydrateOnLane(1)
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      const seen: { partition: number; partitionCount: number }[] = []
+      busChannel.onmessage = (event) => seen.push(event.data)
+      try {
+        Object.assign(stamperStub, {
+          getBucketUpdatesForBroadcast: () => [{ index: 7, value: 6 }],
+          flush: async () => {
+            // A teardown lands while the flush is in flight: `unbindPartition`
+            // clears the partition AND resets the count to 1.
+            stamperStub.currentPartition = undefined
+            stamperStub.partitionCount = 1
+          },
+        })
+
+        await liveCoordinatorDeps().flushStamperState()
+
+        await vi.waitFor(() => expect(seen).toHaveLength(1))
+        expect(seen[0]).toMatchObject({ partition: 1, partitionCount: 2 })
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("discards the buffer when the bind lands on a different lane", async () => {
+      await hydrateOnLane(0)
+      stamperStub.currentPartition = undefined
+      const busChannel = new BroadcastChannel("swarm-id-bus-v1:origin")
+      try {
+        busChannel.postMessage({
+          type: "utilization-updated",
+          batchId: BATCH_ID_HEX,
+          partition: 0,
+          partitionCount: 2,
+          buckets: LANE_BUCKETS,
+        })
+        await new Promise((resolve) => setTimeout(resolve, 20))
+
+        // We ended up on partition 1 instead — partition 0's counters are not
+        // ours to fold.
+        stamperStub.currentPartition = 1
+        liveCoordinatorDeps().onLeaseAcquired(1)
+
+        expect(stamperStub.applyUtilizationUpdate).not.toHaveBeenCalled()
       } finally {
         busChannel.close()
       }

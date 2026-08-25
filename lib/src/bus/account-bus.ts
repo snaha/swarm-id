@@ -20,9 +20,21 @@ import type { BusMessage, BusMessageInput } from "./messages"
  * validate them — the bus does, in one place, on receive.
  */
 export interface BusTransport {
+  /**
+   * True when the transport only reaches contexts of this browser profile —
+   * i.e. peers that share this device's `deviceId` and therefore its slot
+   * lane. `AccountBus.publish(…, { localOnly: true })` uses this to keep
+   * lane-scoped traffic off the wire.
+   */
+  readonly local: boolean
   publish(message: BusMessageInput): void
   subscribe(handler: (raw: unknown) => void): () => void
   close(): void
+}
+
+/** Restricts a publish to transports that stay inside this browser profile. */
+export interface PublishOptions {
+  localOnly?: boolean
 }
 
 const CHANNEL_PREFIX = "swarm-id-bus-v1"
@@ -41,6 +53,7 @@ export const ORIGIN_TOPIC = "origin"
  * Safari tabs; delivery is per browsing-context, never back to the sender.
  */
 export class BroadcastChannelTransport implements BusTransport {
+  readonly local = true
   readonly channelName: string
   private channel: BroadcastChannel
   private handlers = new Set<(raw: unknown) => void>()
@@ -96,9 +109,18 @@ export class AccountBus {
       : ""
   }
 
-  publish(message: BusMessageInput): void {
+  /**
+   * `localOnly` keeps a message off transports that leave this browser
+   * profile. Used for lane-scoped traffic (`utilization-updated`): the
+   * counters are per-partition, every remote peer is a different device on a
+   * different lane, so a remote copy is dropped at the receive guard anyway —
+   * after paying for encryption and a frame the signaling server's payload cap
+   * may refuse outright.
+   */
+  publish(message: BusMessageInput, options?: PublishOptions): void {
     if (this.closed) return
     for (const transport of this.transports) {
+      if (options?.localOnly && !transport.local) continue
       transport.publish(message)
     }
   }
