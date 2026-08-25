@@ -24,6 +24,20 @@ const OVERSIZED_PAYLOAD_BYTES = 70_000
 /** How long a client that has blown its budget keeps writing, and how often. */
 const OVERRUN_WRITE_WINDOW_MS = 2500
 const OVERRUN_WRITE_EVERY_MS = 100
+/** Long enough for an emitted event to have been dispatched, or not. */
+const EVENT_SETTLE_MS = 50
+/**
+ * What negotiating with one peer costs the initiator on the wire: an offer plus
+ * ~15 ICE candidates. Half of the server's own `MESSAGES_PER_PEER_NEGOTIATION`,
+ * which doubles this for renegotiation and relay headroom — so a burst built
+ * from it is a real room's traffic, not the budget restated as its own test.
+ */
+const FRAMES_PER_PEER_NEGOTIATION = 16
+
+/** A client text frame: FIN + opcode 1, then the mandatory mask bit and length. */
+const FRAME_FIN_TEXT = 0x81
+const FRAME_MASKED = 0x80
+const FRAME_MASK_BYTES = 4
 
 /**
  * Timers currently holding the event loop open. Unref'd timers are invisible
@@ -60,7 +74,11 @@ function listeningServerOn(port: number): Server {
 /** A masked text frame, as a client must send. A zero mask key is still a mask. */
 function clientFrame(payload: string): Buffer {
   const body = Buffer.from(payload)
-  return Buffer.concat([Buffer.from([0x81, 0x80 | body.length]), Buffer.alloc(4, 0), body])
+  return Buffer.concat([
+    Buffer.from([FRAME_FIN_TEXT, FRAME_MASKED | body.length]),
+    Buffer.alloc(FRAME_MASK_BYTES, 0),
+    body,
+  ])
 }
 
 /**
@@ -426,7 +444,7 @@ describe('signaling server — heartbeat', () => {
     try {
       const failure = Object.assign(new Error('accept EMFILE'), { code: 'EMFILE' })
       listeningServerOn(running.port).emit('error', failure)
-      await new Promise((resolve) => setTimeout(resolve, 50))
+      await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
       expect(uncaught).toEqual([])
       // Still serving.
       const arrival = await connect(randomTopic(), running.port)
@@ -569,7 +587,7 @@ describe('signaling server — limits', () => {
       const sender = await connect(topic, capped.port)
       try {
         // What negotiating with a full room already in it costs the newcomer.
-        const burst = (maxPeersPerRoom - 1) * 16
+        const burst = (maxPeersPerRoom - 1) * FRAMES_PER_PEER_NEGOTIATION
         for (let i = 0; i < burst; i += 1) {
           sender.socket.send(
             JSON.stringify({ type: 'signal', to: receiver.peerId, payload: { kind: 'ice' } }),
