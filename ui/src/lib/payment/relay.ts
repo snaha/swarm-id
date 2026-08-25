@@ -144,6 +144,10 @@ async function quotePayment(request: QuoteRequest): Promise<PaymentQuote> {
     handle: quote,
     amountFormatted: displayAmount(currencyIn?.amountFormatted ?? ''),
     amountUsd: displayUsd(currencyIn?.amountUsd ?? ''),
+    // A bridged rail delivers native xDAI and nothing else — carrying the
+    // user's own token across would mean holding inventory in it. The gas
+    // share arrives as xDAI too but is not swapped, so only the rest is.
+    delivers: { input: 'xdai', amount: request.xdaiWei - request.gasXdaiWei },
   }
 }
 

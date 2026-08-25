@@ -9,6 +9,7 @@
 import Onboard from '@web3-onboard/core'
 import injectedModule from '@web3-onboard/injected-wallets'
 
+import { devWalletChains } from '$lib/payment/dev-funding'
 import { WALLET_CHAINS } from '$lib/payment/payment-rail'
 
 const injected = injectedModule()
@@ -33,6 +34,13 @@ const chains = [
     label: chain.name,
     rpcUrl: chain.rpcUrls.default.http[0],
   })),
+  // The local dev rail's source chain (`pnpm dev:source-chain`), so onboard
+  // recognises the wallet's network when a payment is rehearsed against it
+  // rather than reporting an unsupported chain. Empty in a production build —
+  // via the seam rather than an `import.meta.env.DEV` branch here, because a
+  // dead branch still leaves the import, and this module is loaded on every
+  // page that can connect a wallet.
+  ...devWalletChains,
 ]
 const appMetadata = {
   name: 'Swarm ID',

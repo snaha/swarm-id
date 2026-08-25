@@ -54,7 +54,7 @@
    *
    * Which rail carries the money is the caller's choice (`resolve-rail.ts`),
    * and nothing here depends on which one it is — the screens are identical
-   * against Relay and against the direct transfer from Gnosis.
+   * against Relay and against the local dev rail.
    *
    * The connected wallet only ever signs on the source chain — it never sees
    * the owner key, so passkey and password accounts use this unchanged.

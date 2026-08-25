@@ -4,12 +4,18 @@
  * The payment rail seam: what carries the user's money from whatever chain
  * they hold funds on to native xDAI at the batch-owner address on Gnosis.
  *
- * Two rails serve it. Paying from Gnosis is not carried anywhere at all — the
- * destination is the source, so `gnosis-direct.ts` is a plain transfer, in any
- * of the assets that chain has a route to BZZ in. Every other chain goes over
- * Relay Protocol (`relay.ts`), an intent/solver network: the user deposits on
- * their own chain and an off-chain solver delivers on Gnosis out of its own
- * inventory.
+ * Two rails serve it in production. Paying from Gnosis is not carried anywhere
+ * at all — the destination is the source, so `gnosis-direct.ts` is a plain
+ * transfer, in any of the assets that chain has a route to BZZ in. Every other
+ * chain goes over Relay Protocol (`relay.ts`), an intent/solver network: the
+ * user deposits on their own chain and an off-chain solver delivers on Gnosis
+ * out of its own inventory.
+ *
+ * Relay cannot run locally — a local chain is invisible to a hosted quoting API
+ * and to solvers paying out on real Gnosis — so the dev rail
+ * (`$lib/dev/local-payment-rail`) stands in for it, taking a genuine signature
+ * on a local source chain and having the baked faucet play the solver. The
+ * direct rail needs no stand-in: it is the same code locally.
  *
  * Everything downstream of a rail is untouched production code: whatever was
  * delivered is swapped to BZZ by `swapDelivered` and spent by the postage
@@ -110,9 +116,9 @@ function significantDigits(amount: number, digits: number): string {
  *
  * Normalising here rather than trusting each rail is the point. Rails hand back
  * wildly different precision — Relay's `amountFormatted` carries the full wei
- * expansion (`0.000043465998997394` for a native token), the direct rail
- * derives its own — and the pay screen puts this figure directly above
- * breakdown rows that ARE rounded. Eighteen decimals over four reads as a different product
+ * expansion (`0.000043465998997394` for a native token), the dev rail derives
+ * its own — and the pay screen puts this figure directly above breakdown rows
+ * that ARE rounded. Eighteen decimals over four reads as a different product
  * depending on which rail happens to be behind it.
  */
 export function displayAmount(value: string | number): string {
@@ -170,8 +176,8 @@ export interface Delivery {
 export interface PaymentQuote {
   /**
    * Rail-private payload, consumed only by the rail that produced it — Relay
-   * keeps its SDK `Execute` here, the direct rail the recipient and amount.
-   * Opaque so a second rail can exist at all.
+   * keeps its SDK `Execute` here, the dev rail its own record. Opaque so a
+   * second rail can exist at all.
    */
   handle: unknown
   /**

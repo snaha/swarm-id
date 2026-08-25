@@ -31,7 +31,12 @@ describe('relay execute', () => {
   it('fails the payment when the SDK stops reporting, rather than spinning forever', async () => {
     vi.useFakeTimers()
     const payment = relayRail.execute({
-      quote: { handle: {}, amountFormatted: '0.001', amountUsd: '0.01' },
+      quote: {
+        handle: {},
+        amountFormatted: '0.001',
+        amountUsd: '0.01',
+        delivers: { input: 'xdai', amount: 0n },
+      },
       provider: { request: () => Promise.resolve(undefined) },
       chainId: 8453,
       currency: NATIVE_CURRENCY,
