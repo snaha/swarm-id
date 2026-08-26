@@ -15,16 +15,38 @@ import { z } from "zod"
 
 import {
   AccountStateSnapshotSchemaV1,
+  ConnectedAppSchemaV1,
   UtilizationUpdateMessageSchema,
 } from "../schemas"
 
 /**
- * A full account-state snapshot from another live context. Merged with
- * `mergeSnapshotWithRemote`, i.e. exactly like a device-state feed payload.
+ * A connected app as it travels the bus: without the per-context session
+ * material. Zod drops unknown keys, so this ENFORCES the rule rather than
+ * trusting it — a publisher that forgets to strip has its `appSecret` and
+ * `connectedUntil` removed here, before any receiver sees them.
+ *
+ * Worth enforcing on receive because the cost of one forgetful publisher is
+ * high on both counts: every partitioned iframe on the account would learn
+ * every dApp's secret (the leak the strip exists to prevent), and an entry for
+ * the receiving app carrying a live `connectedUntil` with a different secret
+ * would drive the reconcile into `authenticateFromStorage`, which drops the
+ * hydrated view a partitioned session cannot rebuild without a reload.
+ */
+const BusConnectedAppSchema = ConnectedAppSchemaV1.omit({
+  appSecret: true,
+  connectedUntil: true,
+})
+
+/**
+ * A full account-state snapshot from another live context. Merged with the
+ * same LWW primitives as a device-state feed payload, minus the session
+ * material above.
  */
 export const AccountDeltaMessageSchema = z.object({
   type: z.literal("account-delta"),
-  snapshot: AccountStateSnapshotSchemaV1,
+  snapshot: AccountStateSnapshotSchemaV1.extend({
+    connectedApps: z.array(BusConnectedAppSchema),
+  }),
 })
 
 /** One slot-wait round, as every holder must read it: lower-case hex of a
@@ -95,6 +117,8 @@ export const BusMessageSchema = z.discriminatedUnion("type", [
 ])
 
 export type AccountDeltaMessage = z.infer<typeof AccountDeltaMessageSchema>
+/** The wire form of a delta: hex strings, not revived `BatchId`/`PrivateKey`. */
+export type AccountDeltaInput = z.input<typeof AccountDeltaMessageSchema>
 export type BusMessage = z.infer<typeof BusMessageSchema>
 /** What publishers hand to the bus: the JSON-serializable wire form. */
 export type BusMessageInput = z.input<typeof BusMessageSchema>

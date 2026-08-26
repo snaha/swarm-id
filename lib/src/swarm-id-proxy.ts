@@ -95,7 +95,15 @@ import {
   publishDeviceState,
   readRoster,
 } from "./sync"
-import { mergeDevicesList } from "./sync/merge-snapshot"
+import {
+  mergeConnectedApps,
+  mergeDevicesList,
+  mergePostageStamps,
+} from "./sync/merge-snapshot"
+import {
+  accountDeltaSnapshot,
+  restoreLocalSessionFields,
+} from "./bus/account-delta"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
 import { UtilizationStoreDB } from "./storage/utilization-store"
 import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
@@ -496,6 +504,19 @@ export class SwarmIdProxy {
    * stamp purchased, account rename) — all of which now live in one document.
    */
   private async handleAccountStorageChange(): Promise<void> {
+    await this.reevaluateConnection("storage")
+  }
+
+  /**
+   * Re-resolve this origin's connection and reconcile the session with it.
+   *
+   * `source` is where the news came from, and only the disconnect branch cares.
+   * A partitioned iframe cannot see connected apps in storage, so a storage
+   * event saying "no valid connection" means nothing there — but an
+   * `account-delta` from a peer is authoritative, and acting on it is the whole
+   * point of that message (docs/Account-Bus.md).
+   */
+  private async reevaluateConnection(source: "storage" | "bus"): Promise<void> {
     if (!this.parentOrigin) {
       return
     }
@@ -509,27 +530,41 @@ export class SwarmIdProxy {
         await this.authenticateFromStorage(app)
       } else {
         // Same connection — related metadata (default stamp, per-app batch
-        // override, rename) may have changed.
-        if (!this.storagePartitioned) {
+        // override, rename) may have changed. A partitioned session skips this
+        // for a storage event, whose account document it cannot read; after a
+        // bus fold it must NOT skip it, because the hydrated view it just
+        // folded into is exactly what the refresh reads (the same call
+        // `hydratePartitionAccount` makes). Otherwise a rotated signer key or a
+        // deleted stamp updates the view and leaves the live stamper stale for
+        // the page's life — which is most of the reason signer keys are on the
+        // wire at all.
+        if (!this.storagePartitioned || source === "bus") {
           await this.refreshStampFromStorage()
         }
         this.emitConnectionInfoIfChanged()
       }
 
-      // If we hold a partition, propagate the account-state change to peers.
-      // Debounced so a burst collapses into one feed write.
-      if (this.coordinator?.currentPartition !== undefined) {
+      // Propagate the account-state change to peers: over the bus always, and
+      // to the shared feed when we hold a partition. Debounced so a burst
+      // collapses into one of each. A delta we folded ourselves is not
+      // re-broadcast (`source === "bus"`) — the publisher already reached
+      // everyone in the room, and echoing it back is a loop.
+      if (source === "storage" && this.coordinator) {
         this.schedulePublish("change")
       }
-    } else if (this.authenticated && !this.storagePartitioned) {
-      // No valid connection in storage, but we're authenticated - disconnect.
-      // Skip when storage is partitioned: the iframe can't see connected apps,
-      // but auth was established via postMessage. `clearAuthData` emits the
-      // ConnectionInfo update; no need to do so again.
+    } else if (
+      this.authenticated &&
+      (!this.storagePartitioned || source === "bus")
+    ) {
+      // No valid connection any more, and we're authenticated — disconnect.
+      // A storage event is skipped while partitioned: the iframe can't see
+      // connected apps, and auth was established via postMessage. A bus delta
+      // is not — it IS the channel a revoke reaches a partitioned session by.
+      // `clearAuthData` emits the ConnectionInfo update; no need to do so again.
       this.clearAuthData()
       this.sendToParent({
         type: "disconnectResponse",
-        requestId: "storage-event",
+        requestId: source === "bus" ? "account-delta" : "storage-event",
         success: true,
       })
     }
@@ -1203,12 +1238,60 @@ export class SwarmIdProxy {
           this.coordinator?.notifySlotMaybeFree()
           return
         }
-        default:
-          // account-delta: no proxy-side consumer yet (durable truth arrives
-          // via storage events / the popup handshake).
+        case "account-delta": {
+          this.applyAccountDelta(message.snapshot)
           return
+        }
       }
     })
+  }
+
+  /**
+   * Fold a peer's account snapshot into this session's view and reconcile.
+   *
+   * This is the only push channel a partitioned iframe has: it cannot see
+   * shared storage, so without this a revoke reaches it only when the page
+   * closes — and since #547 that session is a full writer holding every stamp's
+   * signer key (docs/Account-Bus.md, `account-delta`).
+   *
+   * Durable truth is unchanged. An unpartitioned session still owns its state
+   * through storage; the delta only drives the reconcile, and `clearAuthData`
+   * invalidates the stored entry if the outcome is a disconnect.
+   */
+  private applyAccountDelta(snapshot: AccountStateSnapshot): void {
+    const connection = this.findConnectionForParent()
+    // A delta for an account this origin is not connected to says nothing
+    // about this session. (The topic is account-derived, so this is a
+    // belt-and-braces check rather than the boundary.)
+    if (!connection || snapshot.accountId !== connection.account.id.toHex()) {
+      return
+    }
+
+    // Only a partitioned session folds. The hydrated view IS its state, and it
+    // has no other way to learn this. An unpartitioned session's record is
+    // shared storage, which this message did not write, so folding into memory
+    // would only diverge the two — it reconciles from storage below instead.
+    // (Which means a cross-device revoke does not yet reach an unpartitioned
+    // session: that needs the UI to consume deltas and write them, part 3.)
+    const { account } = connection
+    if (this.partitionAccount) {
+      // The shared LWW primitives, not a second set of rules: per `appUrl` with
+      // a `revokedAt` tombstone, per `batchID` with `deletedAt`. In-memory,
+      // like the roster merge in `refreshKnownDeviceIds`.
+      this.partitionAccount = {
+        ...this.partitionAccount,
+        connectedApps: restoreLocalSessionFields(
+          mergeConnectedApps(account.connectedApps, snapshot.connectedApps),
+          account.connectedApps,
+        ),
+        postageStamps: mergePostageStamps(
+          account.postageStamps,
+          snapshot.postageStamps,
+        ),
+      }
+    }
+
+    void this.reevaluateConnection("bus")
   }
 
   /**
@@ -2041,6 +2124,61 @@ export class SwarmIdProxy {
   }
 
   /**
+   * Assemble the current account-state snapshot for the connected app's
+   * account. Split out of `buildAccountStateSnapshotForPublish` so the bus
+   * publish — which needs no feed signing key — doesn't pay two key
+   * derivations to send one message.
+   */
+  private buildAccountStateSnapshot(): AccountStateSnapshot | undefined {
+    if (!this.parentOrigin || this.isDownloadOnlyPartition) return undefined
+    const connection = this.findConnectionForParent()
+    if (!connection) return undefined
+    const { account } = connection
+
+    const defaultStampBatchID = account.defaultPostageStampBatchID
+    if (!defaultStampBatchID) return undefined
+
+    return {
+      version: 1,
+      timestamp: Date.now(),
+      accountId: account.id.toHex(),
+      metadata: {
+        accountName: account.name,
+        defaultPostageStampBatchID: defaultStampBatchID.toHex(),
+        publicKey: account.publicKey,
+        settings: account.settings,
+        // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
+        // device editing a *different* field must not restamp an unchanged
+        // scalar and clobber a peer's concurrent edit under per-field LWW (§9.3).
+        accountNameAt: account.accountNameAt ?? account.createdAt,
+        defaultStampAt: account.defaultStampAt ?? account.createdAt,
+        settingsAt: account.settingsAt ?? account.createdAt,
+        createdAt: account.createdAt,
+        lastModified: Date.now(),
+        devices: account.devices,
+        partitionCount: account.partitionCount ?? 1,
+      },
+      connectedApps: account.connectedApps,
+      postageStamps: account.postageStamps,
+    }
+  }
+
+  /**
+   * Announce this session's account state to the account's other live contexts
+   * (docs/Account-Bus.md, `account-delta`). Unlike the feed write below it
+   * needs no partition and no lock — it is a message, not a write — so a
+   * read-only session still relays what it can see to peers that cannot.
+   */
+  private publishAccountDelta(): void {
+    const snapshot = this.buildAccountStateSnapshot()
+    if (!snapshot) return
+    this.bus.publish({
+      type: "account-delta",
+      snapshot: accountDeltaSnapshot(snapshot),
+    })
+  }
+
+  /**
    * Assemble the current account-state snapshot for the connected app's account
    * from shared localStorage (the same shape `sync-account` builds from its DI
    * stores). Returns the snapshot plus the feed signing key + owner. Undefined
@@ -2061,42 +2199,17 @@ export class SwarmIdProxy {
     try {
       const connection = this.findConnectionForParent()
       if (!connection) return undefined
-      const { account } = connection
-
-      const defaultStampBatchID = account.defaultPostageStampBatchID
-      if (!defaultStampBatchID) return undefined
+      const snapshot = this.buildAccountStateSnapshot()
+      if (!snapshot) return undefined
 
       const encryptionKey = await deriveSwarmEncryptionKey(
-        account.derivationKey,
+        connection.account.derivationKey,
       )
       const accountKey = new PrivateKey(
         await deriveSecret(encryptionKey, "backup-key"),
       )
       const owner = accountKey.publicKey().address()
 
-      const snapshot: AccountStateSnapshot = {
-        version: 1,
-        timestamp: Date.now(),
-        accountId: account.id.toHex(),
-        metadata: {
-          accountName: account.name,
-          defaultPostageStampBatchID: defaultStampBatchID.toHex(),
-          publicKey: account.publicKey,
-          settings: account.settings,
-          // Unedited scalar → STABLE createdAt, never the fresh lastModified: a
-          // device editing a *different* field must not restamp an unchanged
-          // scalar and clobber a peer's concurrent edit under per-field LWW (§9.3).
-          accountNameAt: account.accountNameAt ?? account.createdAt,
-          defaultStampAt: account.defaultStampAt ?? account.createdAt,
-          settingsAt: account.settingsAt ?? account.createdAt,
-          createdAt: account.createdAt,
-          lastModified: Date.now(),
-          devices: account.devices,
-          partitionCount: account.partitionCount ?? 1,
-        },
-        connectedApps: account.connectedApps,
-        postageStamps: account.postageStamps,
-      }
       return { snapshot, encryptionKey, accountKey, owner }
     } catch (error) {
       console.error("[Proxy] Failed to assemble account-state snapshot:", error)
@@ -2124,20 +2237,27 @@ export class SwarmIdProxy {
   }
 
   /**
-   * Publish the account snapshot to the shared feed via the coordinator (same
-   * write lock + held partition). Only publishes while a partition is held
-   * (multi-device); single-device accounts are published by the SwarmID UI.
-   * Re-arms if a publish is already in flight so the latest state still lands.
+   * Publish the account snapshot: to the account's live peers over the bus,
+   * and to the shared feed via the coordinator (same write lock + held
+   * partition). The feed write needs a partition; the bus message does not, so
+   * it goes out first and a read-only session still relays to peers that
+   * cannot see storage at all. Single-device accounts' feeds are published by
+   * the SwarmID UI. Re-arms if a publish is already in flight so the latest
+   * state still lands.
    */
   private async runAccountStatePublish(
     reason: "acquired" | "change",
   ): Promise<void> {
-    const coordinator = this.coordinator
-    if (!coordinator || coordinator.currentPartition === undefined) return
+    // Ahead of the partition gate (a message needs no lease) but behind the
+    // in-flight re-arm, which re-runs this whole method — publishing first
+    // would send the same delta twice for one change.
     if (this.publishInFlight) {
       this.schedulePublish(reason)
       return
     }
+    if (reason === "change") this.publishAccountDelta()
+    const coordinator = this.coordinator
+    if (!coordinator || coordinator.currentPartition === undefined) return
     this.publishInFlight = true
     try {
       const assembled = await this.buildAccountStateSnapshotForPublish()
