@@ -167,6 +167,71 @@ describe("SignalingTransport — relay path", () => {
   })
 })
 
+describe("SignalingTransport — reconnect backoff", () => {
+  // Every client connected when the service restarts schedules its retry from
+  // the same instant, so an undithered delay brings them all back together at
+  // the moment the server can least take it.
+  it("jitters the delay without changing the backoff sequence", () => {
+    const transport = makeTransport()
+    const internals = transport as unknown as {
+      scheduleReconnect(): void
+      reconnectDelayMs: number
+    }
+    // Spy only after construction, so the transport's own connect is unaffected.
+    const delays: number[] = []
+    const timers = vi.spyOn(globalThis, "setTimeout").mockImplementation(((
+      handler: unknown,
+      ms?: number,
+    ) => {
+      void handler
+      delays.push(ms ?? 0)
+      return 0 as unknown as ReturnType<typeof setTimeout>
+    }) as unknown as typeof setTimeout)
+    try {
+      for (let attempt = 0; attempt < 20; attempt += 1) {
+        internals.reconnectDelayMs = 1000
+        internals.scheduleReconnect()
+      }
+      expect(delays).toHaveLength(20)
+      // Equal jitter: never longer than the nominal delay, never so short that
+      // the backoff stops backing off.
+      expect(Math.min(...delays)).toBeGreaterThanOrEqual(500)
+      expect(Math.max(...delays)).toBeLessThanOrEqual(1000)
+      // The point of the change: no two clients pile up on one instant.
+      expect(new Set(delays).size).toBeGreaterThan(1)
+    } finally {
+      timers.mockRestore()
+      transport.close()
+    }
+  })
+
+  it("still doubles the underlying delay up to the cap", () => {
+    const transport = makeTransport()
+    const internals = transport as unknown as {
+      scheduleReconnect(): void
+      reconnectDelayMs: number
+    }
+    const timers = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation(
+        (() =>
+          0 as unknown as ReturnType<
+            typeof setTimeout
+          >) as unknown as typeof setTimeout,
+      )
+    try {
+      expect(internals.reconnectDelayMs).toBe(1000)
+      internals.scheduleReconnect()
+      expect(internals.reconnectDelayMs).toBe(2000)
+      internals.scheduleReconnect()
+      expect(internals.reconnectDelayMs).toBe(4000)
+    } finally {
+      timers.mockRestore()
+      transport.close()
+    }
+  })
+})
+
 // ============================================================================
 // WebRTC upgrade with an in-memory fake RTCPeerConnection pair
 // ============================================================================

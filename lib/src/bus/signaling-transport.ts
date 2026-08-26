@@ -51,7 +51,14 @@ const SignalPayloadSchema = z.discriminatedUnion("kind", [
 const RECONNECT_BASE_DELAY_MS = 1000
 const RECONNECT_MAX_DELAY_MS = 30000
 const DATA_CHANNEL_LABEL = "bus"
-/** The server's close code for a topic it refuses (`signaling/src/server.ts`). */
+/**
+ * The server's close code for a topic it refuses, and the only close it sends
+ * that is permanent — everything transient comes back as 1013. Mirrors the
+ * constant exported from `signaling/src/server.ts` rather than importing it:
+ * that module pulls in `ws` and `node:http`, and `@swarm-id/signaling` is a
+ * devDependency here, so an import would drag a Node-only server into the
+ * browser bundle for the sake of one number.
+ */
 const WS_CLOSE_POLICY_VIOLATION = 1008
 
 export interface SignalingTransportOptions {
@@ -184,10 +191,15 @@ export class SignalingTransport implements BusTransport {
       peer.connection?.close()
     }
     this.peers.clear()
-    this.reconnectTimer = setTimeout(
-      () => this.connect(),
-      this.reconnectDelayMs,
-    )
+    // Equal jitter. Every client connected when the service restarts — a
+    // deploy, an OOM — schedules its retry from the same instant, so an
+    // undithered delay brings them all back in lockstep at exactly the moment
+    // the server can least take it. Spread the wait over the second half of
+    // the window; the undithered sequence stays the backoff of record so the
+    // doubling is still 1s → 2s → 4s.
+    const jittered =
+      this.reconnectDelayMs / 2 + Math.random() * (this.reconnectDelayMs / 2)
+    this.reconnectTimer = setTimeout(() => this.connect(), jittered)
     this.reconnectDelayMs = Math.min(
       this.reconnectDelayMs * 2,
       RECONNECT_MAX_DELAY_MS,

@@ -31,7 +31,55 @@ import { z } from 'zod'
 const TOPIC_PATTERN = /^[0-9a-f]{16,128}$/
 // Bus envelopes are small (< a few KB); cap generously to bound abuse.
 const MAX_PAYLOAD_BYTES = 65536
-const WS_CLOSE_POLICY_VIOLATION = 1008
+
+const HTTP_OK = 200
+const HTTP_NOT_FOUND = 404
+const HTTP_SERVICE_UNAVAILABLE = 503
+/**
+ * The client treats this as permanent and stops reconnecting for good, so it is
+ * reserved for the one thing that will never come right: a topic this server
+ * refuses and would refuse identically on every retry. Everything else — load,
+ * an exhausted budget — closes with 1013.
+ */
+export const WS_CLOSE_POLICY_VIOLATION = 1008
+/** Transient — the client backs off and comes back. */
+export const WS_CLOSE_TRY_AGAIN_LATER = 1013
+
+/**
+ * `ws` keeps a closing socket in `wss.clients` for up to 30 s waiting for the
+ * peer's close frame, and the heartbeat below only walks `rooms` — a refused
+ * socket is in neither, so nothing reclaims its global-cap slot. A flood that
+ * ignores the close would refuse every real user for one TCP handshake each.
+ * Give the frame a moment to reach an honest client, then drop the socket.
+ */
+const REFUSAL_LINGER_MS = 1000
+
+/**
+ * Ping cadence. A socket that has not ponged by the following tick is
+ * terminated, so the worst case for noticing a half-open connection is two
+ * intervals.
+ */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 30_000
+/**
+ * Bounds for a single 1 vCPU / 0.5 GB instance with no autoscale. Deliberately
+ * not per-IP: this service sits behind the platform's ingress, so the socket's
+ * remote address is the proxy and the client address only exists in a
+ * spoofable `X-Forwarded-For`. A global cap protects the same resource with
+ * nothing to misattribute.
+ */
+const DEFAULT_MAX_CONNECTIONS = 500
+const DEFAULT_MAX_ROOMS = 200
+/** An account with more than this many live contexts is pathological. */
+const DEFAULT_MAX_PEERS_PER_ROOM = 24
+/**
+ * Outbound cost of negotiating with ONE peer: an offer/answer plus ~15 ICE
+ * candidates, doubled for renegotiation and relay traffic. The budget is sized
+ * from this times the room cap rather than fixed, because `welcome` makes a
+ * newcomer initiate toward every peer already in the room at once — a flat
+ * number that looks generous for a 4-peer room cuts off a full one mid-join.
+ */
+const MESSAGES_PER_PEER_NEGOTIATION = 40
+const DEFAULT_MESSAGE_RATE_WINDOW_MS = 10_000
 
 const ClientMessageSchema = z.discriminatedUnion('type', [
   z.object({
@@ -49,6 +97,16 @@ const ClientMessageSchema = z.discriminatedUnion('type', [
 interface Peer {
   id: string
   socket: WebSocket
+  /**
+   * Cleared before each ping and set by the pong. Still clear at the next tick
+   * means the socket never answered — `ws` cannot see a half-open TCP on its
+   * own, and backgrounded mobile Safari, NAT idle timeouts and sleeping
+   * laptops all produce them.
+   */
+  alive: boolean
+  /** Start of the current message-rate window, and its running count. */
+  windowStartedAt: number
+  messagesInWindow: number
 }
 
 export interface SignalingServer {
@@ -60,6 +118,34 @@ export interface SignalingServerOptions {
   port: number
   /** Origins allowed to connect; empty/absent allows all (dev). */
   allowedOrigins?: string[]
+  /**
+   * Overrides for the bounds above. Present so tests can drive them in
+   * milliseconds and single digits; the deployed service uses the defaults —
+   * env wiring would buy nothing, since changing a DO env var redeploys the
+   * service anyway.
+   */
+  heartbeatIntervalMs?: number
+  maxConnections?: number
+  maxRooms?: number
+  maxPeersPerRoom?: number
+  messageRateLimit?: number
+  messageRateWindowMs?: number
+}
+
+/**
+ * Turn a socket away and make sure it actually goes: `close` alone leaves it
+ * counting against the connection cap until the peer answers or `ws` gives up
+ * 30 s later, and a refused socket joined no room, so the heartbeat cannot
+ * reach it either (see `REFUSAL_LINGER_MS`).
+ *
+ * Only the first call does anything. A socket closed for outrunning its message
+ * budget keeps delivering whatever was already in flight, and arming a timer per
+ * frame would hand the flood we are refusing an allocation per message.
+ */
+function refuse(socket: WebSocket, code: number, reason: string): void {
+  if (socket.readyState !== WebSocket.OPEN) return
+  socket.close(code, reason)
+  setTimeout(() => socket.terminate(), REFUSAL_LINGER_MS).unref()
 }
 
 function send(peer: Peer, message: Record<string, unknown>): void {
@@ -70,38 +156,102 @@ function send(peer: Peer, message: Record<string, unknown>): void {
 
 export function createSignalingServer(options: SignalingServerOptions): Promise<SignalingServer> {
   const rooms = new Map<string, Map<string, Peer>>()
+  const heartbeatIntervalMs = options.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS
+  const maxConnections = options.maxConnections ?? DEFAULT_MAX_CONNECTIONS
+  const maxRooms = options.maxRooms ?? DEFAULT_MAX_ROOMS
+  const maxPeersPerRoom = options.maxPeersPerRoom ?? DEFAULT_MAX_PEERS_PER_ROOM
+  const messageRateLimit =
+    options.messageRateLimit ?? maxPeersPerRoom * MESSAGES_PER_PEER_NEGOTIATION
+  const messageRateWindowMs = options.messageRateWindowMs ?? DEFAULT_MESSAGE_RATE_WINDOW_MS
 
   const httpServer: Server = createServer((request, response) => {
     if (request.url === '/healthz') {
-      response.writeHead(200, { 'content-type': 'text/plain' })
+      response.writeHead(HTTP_OK, { 'content-type': 'text/plain' })
       response.end('ok')
       return
     }
-    response.writeHead(404)
+    response.writeHead(HTTP_NOT_FOUND)
     response.end()
   })
 
   const wss = new WebSocketServer({
     server: httpServer,
     maxPayload: MAX_PAYLOAD_BYTES,
-    verifyClient: ({ origin }: { origin?: string }) => {
+    verifyClient: (
+      { origin }: { origin?: string },
+      callback: (accept: boolean, code?: number, message?: string) => void,
+    ) => {
       const allowed = options.allowedOrigins
-      if (!allowed || allowed.length === 0) return true
-      return origin !== undefined && allowed.includes(origin)
+      if (allowed && allowed.length > 0 && (origin === undefined || !allowed.includes(origin))) {
+        callback(false)
+        return
+      }
+      // Refused here rather than after the upgrade so a flood never pays for a
+      // WebSocket allocation.
+      if (wss.clients.size >= maxConnections) {
+        callback(false, HTTP_SERVICE_UNAVAILABLE, 'at capacity')
+        return
+      }
+      callback(true)
     },
   })
 
+  // `ws` forwards the HTTP server's errors here, and once `listen` has resolved
+  // nothing else is listening for them — an unhandled 'error' is an uncaught
+  // exception. What arrives after the bind is an accept failure (EMFILE, when a
+  // flood of bare TCP connections exhausts the file descriptors), so the very
+  // load these bounds exist to survive would otherwise end the process through
+  // a door none of them cover. It is per-accept and transient: log it and keep
+  // serving. Note this must be on `wss`, not on the HTTP server — a listener
+  // there does not stop the forwarded copy from going unhandled.
+  wss.on('error', (error) => {
+    // Only once the bind has taken. A failure before that is already the
+    // caller's rejection, and logging it here would double-report it.
+    if (httpServer.listening) {
+      console.error('[signaling] server error:', error)
+    }
+  })
+
   wss.on('connection', (socket: WebSocket, request: IncomingMessage) => {
+    // First, before any early return: `ws` reports every protocol-level fault
+    // by emitting 'error' on the socket — a frame past `maxPayload`, a reserved
+    // opcode, invalid UTF-8 in a text frame — and an unhandled 'error' on an
+    // EventEmitter is an uncaught exception. Without this, one oversized frame
+    // from any client that gets past `verifyClient` takes the whole service
+    // down. `ws` answers the bad frame with a close of its own, which would sit
+    // in `wss.clients` for 30 s; terminate instead, as with a refusal.
+    socket.on('error', () => socket.terminate())
+
     const url = new URL(request.url ?? '/', 'http://localhost')
     const topic = url.searchParams.get('topic') ?? ''
     if (!TOPIC_PATTERN.test(topic)) {
-      socket.close(WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
+      refuse(socket, WS_CLOSE_POLICY_VIOLATION, 'invalid topic')
       return
     }
 
-    const peer: Peer = { id: randomUUID(), socket }
-    const room = rooms.get(topic) ?? new Map<string, Peer>()
+    // Both caps are load, so both refuse with 1013 (see the close codes above).
+    const existing = rooms.get(topic)
+    if (!existing && rooms.size >= maxRooms) {
+      refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'too many rooms')
+      return
+    }
+    const room = existing ?? new Map<string, Peer>()
+    if (room.size >= maxPeersPerRoom) {
+      refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'room full')
+      return
+    }
+
+    const peer: Peer = {
+      id: randomUUID(),
+      socket,
+      alive: true,
+      windowStartedAt: Date.now(),
+      messagesInWindow: 0,
+    }
     rooms.set(topic, room)
+    socket.on('pong', () => {
+      peer.alive = true
+    })
 
     send(peer, {
       type: 'welcome',
@@ -114,6 +264,32 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     room.set(peer.id, peer)
 
     socket.on('message', (data) => {
+      // Counted before the parse, so a flood of garbage is bounded too. A
+      // fixed window that resets whole, not a sliding one or a token bucket:
+      // the burst that matters (WebRTC negotiation) is exactly what a window
+      // sized for it already allows, and the seam it leaves — up to two
+      // budgets across a window boundary — is still bounded.
+      const now = Date.now()
+      if (now - peer.windowStartedAt >= messageRateWindowMs) {
+        peer.windowStartedAt = now
+        peer.messagesInWindow = 0
+      }
+      peer.messagesInWindow += 1
+      if (peer.messagesInWindow > messageRateLimit) {
+        // 1013, not 1008: the client hard-codes a policy close as permanent and
+        // stops reconnecting for the rest of the page's life, which would trade
+        // one overrun for a context that never syncs again. The window will
+        // pass, so this genuinely is try-again-later.
+        //
+        // Note that a client which keeps overrunning comes back at roughly the
+        // reconnect floor rather than backing off — the backoff resets on any
+        // message received, and `welcome` arrives on every accepted socket. It
+        // is the connection cap, not the backoff, that bounds that; the cost
+        // per cycle is one handshake, the same as any reconnect flood.
+        refuse(socket, WS_CLOSE_TRY_AGAIN_LATER, 'message rate exceeded')
+        return
+      }
+
       let parsed: unknown
       try {
         parsed = JSON.parse(String(data))
@@ -159,10 +335,33 @@ export function createSignalingServer(options: SignalingServerOptions): Promise<
     httpServer.listen(options.port, () => {
       const address = httpServer.address()
       const port = typeof address === 'object' && address !== null ? address.port : options.port
+      // Armed here rather than above: `clearInterval` only ever runs from the
+      // `close` handed out below, so a timer started before `listen` outlives a
+      // failed bind (EADDRINUSE rejects with no handle) and holds the event
+      // loop open forever.
+      //
+      // Reaping a ghost is not just tidiness: rooms are only reclaimed at size
+      // 0, so one ghost pins its room forever, every publisher keeps relaying
+      // to it, and its `peer-left` never fires — leaving every live peer
+      // holding a half-open RTCPeerConnection. `terminate()` fires 'close', so
+      // the teardown above does all of that for us.
+      const heartbeat = setInterval(() => {
+        for (const room of rooms.values()) {
+          for (const peer of room.values()) {
+            if (!peer.alive) {
+              peer.socket.terminate()
+              continue
+            }
+            peer.alive = false
+            peer.socket.ping()
+          }
+        }
+      }, heartbeatIntervalMs)
       resolve({
         port,
         close: () =>
           new Promise<void>((resolveClose) => {
+            clearInterval(heartbeat)
             for (const client of wss.clients) {
               client.terminate()
             }
