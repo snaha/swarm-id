@@ -9,8 +9,8 @@ importers:
   .:
     devDependencies:
       '@snaha/bee-compose':
-        specifier: ^0.2.0
-        version: 0.2.0
+        specifier: ^0.3.0
+        version: 0.3.0
       '@trivago/prettier-plugin-sort-imports':
         specifier: ^6.0.2
         version: 6.0.2(prettier-plugin-svelte@3.4.0(prettier@3.8.1)(svelte@5.48.2))(prettier@3.8.1)(svelte@5.48.2)
@@ -1878,8 +1878,8 @@ packages:
   '@sideway/pinpoint@2.0.0':
     resolution: {integrity: sha512-RNiOoTPkptFtSVzQevY/yWtZwf/RxyVnPy/OcA9HBM3MlGDnBEYL5B41H0MTn0Uec8Hi+2qUtTfG2WWZBmMejQ==}
 
-  '@snaha/bee-compose@0.2.0':
-    resolution: {integrity: sha512-6svciJ8QVmiy6ncJWXtfDTFQVc2MRGTJJu+rhguaZVkO1iIyNvisMCDJFwgPNF2quPE2Xi62V/dcKNINvDNtGw==}
+  '@snaha/bee-compose@0.3.0':
+    resolution: {integrity: sha512-H0c+8nJGjS94NCN0myaCzYB9odiMVSmqfQx/mom1gmT1MElFdz+Gk+LS9Sf2PN2luta+Pzuwkxj0IaruPE0EAw==}
     engines: {node: '>=18'}
     hasBin: true
 
@@ -2894,6 +2894,7 @@ packages:
   eslint@9.39.1:
     resolution: {integrity: sha512-BhHmn2yNOFA9H9JmmIVKJmd288g9hrVRDkdoIgRCRuSySRUHH7r/DI6aAXW9T1WwUuY3DFgrcaqB+deURBLR5g==}
     engines: {node: ^18.18.0 || ^20.9.0 || >=21.1.0}
+    deprecated: This version is no longer supported. Please see https://eslint.org/version-support for other options.
     hasBin: true
     peerDependencies:
       jiti: '*'
@@ -6251,7 +6252,7 @@ snapshots:
 
   '@sideway/pinpoint@2.0.0': {}
 
-  '@snaha/bee-compose@0.2.0':
+  '@snaha/bee-compose@0.3.0':
     dependencies:
       commander: 12.1.0
 

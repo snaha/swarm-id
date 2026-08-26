@@ -62,7 +62,7 @@ describe.skipIf(!forkUp)("full purchase path on a Gnosis fork", () => {
   // Deliberately no snapshot/revert around this suite. A Bee node following the
   // chain records the block it has processed and never re-scans below it, so
   // rewinding under a running cluster desyncs it permanently. The run costs
-  // 0.05 xDAI of a pool with ~50 xDAI of warmed range, and `pnpm bake` in
+  // 0.05 xDAI of a pool with ~9 xDAI of warmed range, and `pnpm bake` in
   // bee-compose resets it outright.
   beforeAll(async () => {
     expect(await client.getChainId()).toBe(settings.chainId)
