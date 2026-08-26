@@ -98,6 +98,10 @@ export class SignalingTransport implements BusTransport {
   private peers = new Map<string, PeerState>()
   private handlers = new Set<(raw: unknown) => void>()
   private closed = false
+  /** Set after a server refuses the join frame — one that predates it reads the
+   *  topic from the URL only. Sticky for the transport's life: having learned
+   *  which server it is talking to, there is nothing to re-probe. */
+  private legacyTopicInUrl = false
   private reconnectDelayMs = RECONNECT_BASE_DELAY_MS
   private reconnectTimer: ReturnType<typeof setTimeout> | undefined
   /** In-flight `deliver` calls, awaited by `close()` so a teardown
@@ -163,10 +167,22 @@ export class SignalingTransport implements BusTransport {
   // ==========================================================================
 
   private connect(): void {
+    // The topic travels in the first frame, not the query string: query strings
+    // are recorded by every ingress and proxy access log as a matter of course,
+    // and the topic IS the room capability — anything reading those logs can
+    // join (#577). Payload confidentiality is unaffected either way (topic and
+    // envelope key come from separate HMAC contexts); what a topic buys is
+    // membership: presence, traffic patterns, ciphertext to keep, and a
+    // position to inject from.
     const url = new URL(this.options.url)
-    url.searchParams.set("topic", this.options.topic)
+    if (this.legacyTopicInUrl) url.searchParams.set("topic", this.options.topic)
     const socket = new WebSocket(url.toString())
     this.socket = socket
+
+    socket.addEventListener("open", () => {
+      if (this.legacyTopicInUrl) return
+      this.sendToServer({ type: "join", topic: this.options.topic })
+    })
 
     socket.addEventListener("message", (event) => {
       // Backoff resets here, not on `open`. The server accepts the socket and
@@ -181,6 +197,15 @@ export class SignalingTransport implements BusTransport {
       // for a topic it will reject identically next time); retrying is a hot
       // loop against an answer that will not change.
       if (event.code === WS_CLOSE_POLICY_VIOLATION) {
+        // Unless it is a server from before the join frame existed, which
+        // refuses a socket that named no topic in the URL. Retry once the old
+        // way rather than leave this context bus-less for the life of the page
+        // — the deploy window is exactly when a reload happens.
+        if (!this.legacyTopicInUrl) {
+          this.legacyTopicInUrl = true
+          this.connect()
+          return
+        }
         console.error(
           "[SignalingTransport] Signaling server rejected the topic; not reconnecting.",
         )

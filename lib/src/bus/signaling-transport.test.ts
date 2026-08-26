@@ -339,6 +339,76 @@ function fakeRtcFactory(): RTCPeerConnection {
   return new FakePeerConnection() as unknown as RTCPeerConnection
 }
 
+// The topic is the room capability, and a query string is recorded by every
+// ingress and proxy access log there is. It goes in the first frame instead —
+// but a server that predates the change is still out there during a deploy, so
+// a refusal has to fall back rather than leave the context bus-less for the
+// life of the page (#577).
+describe("SignalingTransport — joining a room", () => {
+  it("keeps the room topic out of the URL", async () => {
+    const urls: string[] = []
+    const RealWebSocket = globalThis.WebSocket
+    vi.stubGlobal(
+      "WebSocket",
+      class extends RealWebSocket {
+        constructor(url: string | URL) {
+          urls.push(String(url))
+          super(url)
+        }
+      },
+    )
+    const first = makeTransport()
+    const second = makeTransport()
+    try {
+      // The room still forms, so the join frame reached the server.
+      await waitForPeers(first, 1)
+      expect(urls).toHaveLength(2)
+      for (const url of urls) {
+        expect(url).not.toContain(context.topic)
+      }
+    } finally {
+      vi.unstubAllGlobals()
+      first.close()
+      second.close()
+    }
+  })
+
+  // A server that only reads `?topic=` refuses the frame-only socket with a
+  // policy close, which the transport treats as permanent. Retrying once with
+  // the legacy URL is what keeps a mid-deploy reload from losing its bus until
+  // the page is closed.
+  it("falls back to the query string when the server refuses the frame", async () => {
+    const opened: { url: string; socket: FakeSocket }[] = []
+    class FakeSocket extends EventTarget {
+      static OPEN = 1
+      readyState = 0
+      constructor(readonly url: string) {
+        super()
+        opened.push({ url, socket: this })
+      }
+      send(): void {}
+      close(): void {}
+    }
+    vi.stubGlobal("WebSocket", FakeSocket)
+    const transport = makeTransport()
+    try {
+      await vi.waitFor(() => expect(opened).toHaveLength(1))
+      expect(opened[0].url).not.toContain(context.topic)
+
+      // The old server's answer to a socket that named no topic.
+      opened[0].socket.dispatchEvent(
+        Object.assign(new Event("close"), { code: 1008 }),
+      )
+
+      await vi.waitFor(() => expect(opened).toHaveLength(2))
+      expect(opened[1].url).toContain(`topic=${context.topic}`)
+    } finally {
+      vi.unstubAllGlobals()
+      transport.close()
+    }
+  })
+})
+
 describe("SignalingTransport — WebRTC upgrade", () => {
   // A `send` that throws for one peer used to escape the fan-out loop and
   // starve every peer after it. For a teardown `lease-released` that costs the

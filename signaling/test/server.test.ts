@@ -132,7 +132,11 @@ interface TestClient {
 }
 
 function connect(topic: string, port: number = server.port): Promise<TestClient> {
-  const socket = new WebSocket(`ws://127.0.0.1:${port}/?topic=${topic}`)
+  return clientFromSocket(new WebSocket(`ws://127.0.0.1:${port}/?topic=${topic}`))
+}
+
+/** Wrap an already-opening socket as a test client, resolving on `welcome`. */
+function clientFromSocket(socket: WebSocket): Promise<TestClient> {
   const received: Record<string, unknown>[] = []
   const waiters: {
     predicate: (message: Record<string, unknown>) => boolean
@@ -338,6 +342,93 @@ describe('signaling server', () => {
       socket.addEventListener('close', (event) => resolve(event.code))
     })
     expect(code).toBe(WS_CLOSE_POLICY_VIOLATION)
+  })
+
+  // The topic is the room capability, and a query string is recorded by every
+  // ingress and proxy access log there is — DigitalOcean's included. Anything
+  // reading those logs learns which rooms exist and can join them. So it moves
+  // into the first frame, with the socket held in a pre-join state until it
+  // arrives (#577).
+  describe('joining by frame instead of query string', () => {
+    /** Connect with no `?topic=`, send the join frame, resolve on `welcome`. */
+    function joinByFrame(topic: string, port: number = server.port): Promise<TestClient> {
+      const socket = new WebSocket(`ws://127.0.0.1:${port}/`)
+      socket.addEventListener('open', () => {
+        socket.send(JSON.stringify({ type: 'join', topic }))
+      })
+      return clientFromSocket(socket)
+    }
+
+    it('welcomes a peer that names its topic in the first frame', async () => {
+      const topic = randomTopic()
+      const client = await joinByFrame(topic)
+      try {
+        expect(client.peerId).toBeTruthy()
+        expect(client.peersAtWelcome).toEqual([])
+      } finally {
+        client.close()
+      }
+    })
+
+    // The deploy window: a cached client bundle still puts the topic in the
+    // URL. Both have to land in the same room, or a mid-deploy reload silently
+    // stops seeing its own other tabs.
+    it('puts a query-string peer and a frame peer in the same room', async () => {
+      const topic = randomTopic()
+      const legacy = await connect(topic)
+      const modern = await joinByFrame(topic)
+      try {
+        expect(modern.peersAtWelcome).toEqual([legacy.peerId])
+        await legacy.next((message) => message.type === 'peer-joined')
+      } finally {
+        legacy.close()
+        modern.close()
+      }
+    })
+
+    it('refuses a join frame naming an invalid topic', async () => {
+      const socket = new WebSocket(`ws://127.0.0.1:${server.port}/`)
+      socket.addEventListener('open', () => {
+        socket.send(JSON.stringify({ type: 'join', topic: 'nope' }))
+      })
+      const code = await new Promise<number>((resolve) => {
+        socket.addEventListener('close', (event) => resolve(event.code))
+      })
+      expect(code).toBe(WS_CLOSE_POLICY_VIOLATION)
+    })
+
+    // A socket that never joins holds a connection slot for nothing, which is
+    // a cheaper flood than any the caps in #575 bound.
+    it('drops a socket that never sends its join frame', async () => {
+      const quick = await createSignalingServer({ port: 0, preJoinTimeoutMs: 100 })
+      try {
+        const socket = new WebSocket(`ws://127.0.0.1:${quick.port}/`)
+        const code = await new Promise<number>((resolve) => {
+          socket.addEventListener('close', (event) => resolve(event.code))
+        })
+        expect(code).toBe(WS_CLOSE_POLICY_VIOLATION)
+      } finally {
+        await quick.close()
+      }
+    })
+
+    // Relaying before joining would let an unjoined socket address a room it
+    // never named.
+    it('ignores traffic sent before the join frame', async () => {
+      const topic = randomTopic()
+      const joined = await connect(topic)
+      const socket = new WebSocket(`ws://127.0.0.1:${server.port}/`)
+      try {
+        await new Promise<void>((resolve) => socket.addEventListener('open', () => resolve()))
+        socket.send(JSON.stringify({ type: 'relay', to: joined.peerId, payload: 'before-join' }))
+        await new Promise((resolve) => setTimeout(resolve, EVENT_SETTLE_MS))
+
+        expect(joined.received.some((m) => m.payload === 'before-join')).toBe(false)
+      } finally {
+        socket.close()
+        joined.close()
+      }
+    })
   })
 
   it('enforces the origin allowlist when configured', async () => {
