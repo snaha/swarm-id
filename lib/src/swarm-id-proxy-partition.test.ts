@@ -139,6 +139,7 @@ import {
 } from "./utils/storage-managers"
 import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import { STORAGE_CHALLENGE_KEY, STORAGE_KEY_ACCOUNTS } from "./types"
+import { KNOWN_DEVICE_MAX_AGE_MS } from "./utils/active-devices"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
 import type {
   ConnectedApp,
@@ -1261,6 +1262,51 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     await deps.refreshKnownDeviceIds()
 
     expect(deps.knownDeviceIds()).toContain(peer.deviceId)
+  })
+
+  // The harm the length check caused: a peer ALREADY in the view, gone stale
+  // (`activeDeviceIds` prunes past `KNOWN_DEVICE_MAX_AGE_MS`), is refreshed by
+  // the roster — same list length, so the merge was discarded and the peer
+  // stayed pruned. It then never gets an intent read, which is the dual-acquire
+  // the refresh exists to prevent (#586).
+  it("folds a refreshed sign-in for a peer already in the view", async () => {
+    const staleSignIn = Date.now() - 2 * KNOWN_DEVICE_MAX_AGE_MS
+    const peerId = "peer-device-already-known"
+    // Our own device has to be in the list already, or `mergeDevices` adds it
+    // and the length changes — which is the one case the old guard did catch.
+    const selfId = "self-device-already-known"
+    localStorageFake.setItem("swarm-id-device-id", selfId)
+    const account = makeSyncedAccount()
+    account.devices = [
+      { deviceId: selfId, createdAt: staleSignIn, lastSignedInAt: Date.now() },
+      { deviceId: peerId, createdAt: staleSignIn, lastSignedInAt: staleSignIn },
+    ]
+
+    rosterDevices.length = 0
+    rosterDevices.push({
+      deviceId: peerId,
+      createdAt: staleSignIn,
+      lastSignedInAt: Date.now(),
+    })
+
+    const challenge = await startPartitionedConnect()
+    await sendSetSecret(challenge, {
+      account: serializeSyncedAccount(account),
+    })
+
+    const { deps } = vi.mocked(BatchWriteCoordinator).mock.results.at(-1)!
+      .value as {
+      deps: {
+        knownDeviceIds: () => string[]
+        refreshKnownDeviceIds: () => Promise<void>
+      }
+    }
+    // Aged out of the rival set, though the account view lists it.
+    expect(deps.knownDeviceIds()).not.toContain(peerId)
+
+    await deps.refreshKnownDeviceIds()
+
+    expect(deps.knownDeviceIds()).toContain(peerId)
   })
 
   // Hydration must go through the same network-settings path as the storage-

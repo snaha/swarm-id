@@ -2,7 +2,11 @@
 // SPDX-License-Identifier: Apache-2.0
 
 import { afterEach, describe, it, expect, vi } from "vitest"
-import { detectDeviceName, mergeDevices } from "./device-id"
+import {
+  detectDeviceName,
+  deviceRegistryChanged,
+  mergeDevices,
+} from "./device-id"
 import { createDevice, TEST_DEVICE_ID } from "../test-fixtures"
 
 describe("mergeDevices", () => {
@@ -224,5 +228,49 @@ describe("detectDeviceName", () => {
   it("returns 'Unknown Device' when navigator is undefined", () => {
     vi.stubGlobal("navigator", undefined)
     expect(detectDeviceName()).toBe("Unknown Device")
+  })
+})
+
+// The device-registry refresh used to persist only when the list got LONGER,
+// so a merge that refreshed a peer's `lastSignedInAt` or set a tombstone was
+// thrown away — and `knownDeviceIds` prunes on exactly those fields, so a peer
+// the roster shows as live could still age out of the stored copy and be
+// skipped by the partition-intent round (#586).
+describe("deviceRegistryChanged", () => {
+  const SELF = "self-device"
+  const PEER = "peer-device"
+  const self = createDevice({ deviceId: SELF, lastSignedInAt: 1000 })
+  const peer = createDevice({ deviceId: PEER, lastSignedInAt: 1000 })
+
+  it("is true when a peer's sign-in was refreshed", () => {
+    const merged = [self, { ...peer, lastSignedInAt: 5000 }]
+    expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(true)
+  })
+
+  it("is true when a peer gained a tombstone", () => {
+    const merged = [self, { ...peer, removedAt: 5000 }]
+    expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(true)
+  })
+
+  it("is true when a device appeared", () => {
+    expect(deviceRegistryChanged([self], [self, peer], SELF)).toBe(true)
+  })
+
+  it("is true when a device was replaced, not just counted", () => {
+    const other = createDevice({ deviceId: "third-device" })
+    expect(deviceRegistryChanged([self, peer], [self, other], SELF)).toBe(true)
+  })
+
+  it("is false for an identical registry", () => {
+    expect(deviceRegistryChanged([self, peer], [self, peer], SELF)).toBe(false)
+  })
+
+  // `mergeDevices` stamps our own `lastSignedInAt` on every call, so counting
+  // it would persist on every refresh — a storage event in every other tab,
+  // every poll round. Our heartbeat reaches peers through the roster publish,
+  // not through this local save.
+  it("is false when only our own heartbeat moved", () => {
+    const merged = [{ ...self, lastSignedInAt: 9000 }, peer]
+    expect(deviceRegistryChanged([self, peer], merged, SELF)).toBe(false)
   })
 })

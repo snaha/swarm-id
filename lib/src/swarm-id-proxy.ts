@@ -110,6 +110,7 @@ import type { PartitionLeaseStateSnapshot } from "./sync/partition-lease"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import {
   getOrCreateDeviceId,
+  deviceRegistryChanged,
   mergeDevices,
   detectDeviceName,
 } from "./utils/device-id"
@@ -2100,9 +2101,18 @@ export class SwarmIdProxy {
         this.requireDeviceId(),
         detectDeviceName(),
       )
-      // Only persist when a peer actually appeared, to avoid needless cross-tab
-      // storage-event churn.
-      if (mergedDevices.length !== account.devices.length) {
+      // Persist when anything the rival set reads actually moved — a peer
+      // appearing, a refreshed sign-in, a tombstone — not merely when the list
+      // got longer, which discarded the timestamp-only merges `activeDeviceIds`
+      // prunes on (#586). Our own heartbeat is excluded, so this still avoids
+      // the cross-tab storage-event churn the length check was really for.
+      if (
+        deviceRegistryChanged(
+          account.devices,
+          mergedDevices,
+          this.requireDeviceId(),
+        )
+      ) {
         if (partitioned) {
           // In-memory only, like the rest of the hydrated view: the stored
           // schema requires a vault, and the session re-handshakes per load.

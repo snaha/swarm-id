@@ -129,3 +129,37 @@ export function detectDeviceName(): string {
 
   return `${browser} on ${device}`
 }
+
+/**
+ * Whether a merged device registry is worth persisting over the stored one.
+ *
+ * The old test was "did the list get LONGER", which threw away every merge that
+ * only refreshed a peer's `lastSignedInAt` or set a `removedAt` tombstone — and
+ * those are exactly the fields `activeDeviceIds` prunes the rival set on. A peer
+ * the roster shows as live could therefore age out of the stored copy, drop out
+ * of the rival set, and never get an intent read: the dual-acquire the registry
+ * refresh exists to prevent (#586).
+ *
+ * Our OWN `lastSignedInAt` is deliberately excluded. `mergeDevices` stamps it on
+ * every call, so counting it would report a change on every refresh — a save, and
+ * a storage event in every other tab, every poll round. That churn is what the
+ * length check was really avoiding, and our heartbeat reaches peers through the
+ * roster publish, not through this local save.
+ */
+export function deviceRegistryChanged(
+  stored: Device[],
+  merged: Device[],
+  selfDeviceId: string,
+): boolean {
+  if (stored.length !== merged.length) return true
+  const before = new Map(stored.map((device) => [device.deviceId, device]))
+  return merged.some((device) => {
+    const previous = before.get(device.deviceId)
+    if (!previous) return true
+    if (previous.removedAt !== device.removedAt) return true
+    if (previous.name !== device.name) return true
+    if (previous.createdAt !== device.createdAt) return true
+    if (device.deviceId === selfDeviceId) return false
+    return previous.lastSignedInAt !== device.lastSignedInAt
+  })
+}
