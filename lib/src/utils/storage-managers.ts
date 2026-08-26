@@ -99,14 +99,9 @@ export function serializeSyncedAccount(
     publicKey: data.publicKey,
     defaultPostageStampBatchID: data.defaultPostageStampBatchID?.toString(),
     devices: data.devices,
-    connectedApps: data.connectedApps.map((app) => {
-      const {
-        appSecret: _appSecret,
-        connectedUntil: _connectedUntil,
-        ...portable
-      } = serializeConnectedApp(app)
-      return portable
-    }),
+    connectedApps: data.connectedApps.map((app) =>
+      portableConnectedApp(serializeConnectedApp(app)),
+    ),
     postageStamps: data.postageStamps.map(serializePostageStamp),
     settings: data.settings,
     accountNameAt: data.accountNameAt,
@@ -170,6 +165,26 @@ export function serializeConnectedApp(
     updatedAt: app.updatedAt,
     revokedAt: app.revokedAt,
   }
+}
+
+/**
+ * A serialized connected app without its per-context session material.
+ *
+ * `appSecret` is the app's own credential and `connectedUntil` is the deadline
+ * of the session that established it — both belong to one context, and neither
+ * survives leaving it. Every channel that carries an account to another context
+ * uses this: the popup handshake (`serializeSyncedAccount`) and the account bus
+ * (`accountDeltaSnapshot`). One rule, one place, so the two cannot drift.
+ */
+export function portableConnectedApp(
+  app: Record<string, unknown>,
+): Record<string, unknown> {
+  const {
+    appSecret: _appSecret,
+    connectedUntil: _connectedUntil,
+    ...rest
+  } = app
+  return rest
 }
 
 /**

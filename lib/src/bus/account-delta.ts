@@ -11,7 +11,9 @@
 
 import { serializeAccountStateSnapshot } from "../utils/account-state-snapshot"
 import type { AccountStateSnapshot } from "../utils/account-state-snapshot"
+import { portableConnectedApp } from "../utils/storage-managers"
 import type { ConnectedApp } from "../schemas"
+import type { AccountDeltaInput } from "./messages"
 
 /**
  * The wire form of an account snapshot: everything except the per-context
@@ -33,21 +35,19 @@ import type { ConnectedApp } from "../schemas"
  */
 export function accountDeltaSnapshot(
   snapshot: AccountStateSnapshot,
-): Record<string, unknown> {
+): AccountDeltaInput["snapshot"] {
   const wire = serializeAccountStateSnapshot(snapshot)
   return {
     ...wire,
     connectedApps: (wire.connectedApps as Record<string, unknown>[]).map(
-      (app) => {
-        const {
-          appSecret: _appSecret,
-          connectedUntil: _connectedUntil,
-          ...portable
-        } = app
-        return portable
-      },
+      portableConnectedApp,
     ),
-  }
+    // Serialization is hand-written per field, so the compiler cannot see that
+    // it produces the schema's shape. `publishes a wire form the receive schema
+    // accepts` is what actually holds the two together — a drift would
+    // otherwise be invisible, since a receiver drops an unparseable message in
+    // silence.
+  } as unknown as AccountDeltaInput["snapshot"]
 }
 
 /**
@@ -61,6 +61,13 @@ export function accountDeltaSnapshot(
  * A revoked entry is the exception, and the reason this is not simply "keep
  * local": clearing the secret and the deadline is precisely what a revoke is,
  * so a tombstoned winner keeps its cleared fields and the session ends.
+ *
+ * Ours WINS over anything incoming, rather than filling a gap. Under the wire
+ * contract there is nothing to lose — the incoming entry has neither field —
+ * but a session's own credential and deadline are not a peer's to set, so
+ * preferring the incoming value would put a forgetful publisher (or anything
+ * that reached the room) one message away from replacing them. The receive
+ * schema already drops both; this is the same rule stated where it is used.
  */
 export function restoreLocalSessionFields(
   merged: ConnectedApp[],
@@ -73,8 +80,8 @@ export function restoreLocalSessionFields(
     if (!ours) return app
     return {
       ...app,
-      appSecret: app.appSecret ?? ours.appSecret,
-      connectedUntil: app.connectedUntil ?? ours.connectedUntil,
+      appSecret: ours.appSecret ?? app.appSecret,
+      connectedUntil: ours.connectedUntil ?? app.connectedUntil,
     }
   })
 }

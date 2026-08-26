@@ -67,7 +67,6 @@ import {
 } from "@ethersphere/bee-js"
 import { makeContentAddressedChunk } from "./chunk"
 import { AccountBus, BroadcastChannelTransport } from "./bus/account-bus"
-import type { BusMessageInput } from "./bus/messages"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { deriveBusContext } from "./bus/bus-context"
 import type { BusContext } from "./bus/bus-context"
@@ -531,8 +530,15 @@ export class SwarmIdProxy {
         await this.authenticateFromStorage(app)
       } else {
         // Same connection — related metadata (default stamp, per-app batch
-        // override, rename) may have changed.
-        if (!this.storagePartitioned) {
+        // override, rename) may have changed. A partitioned session skips this
+        // for a storage event, whose account document it cannot read; after a
+        // bus fold it must NOT skip it, because the hydrated view it just
+        // folded into is exactly what the refresh reads (the same call
+        // `hydratePartitionAccount` makes). Otherwise a rotated signer key or a
+        // deleted stamp updates the view and leaves the live stamper stale for
+        // the page's life — which is most of the reason signer keys are on the
+        // wire at all.
+        if (!this.storagePartitioned || source === "bus") {
           await this.refreshStampFromStorage()
         }
         this.emitConnectionInfoIfChanged()
@@ -1261,27 +1267,27 @@ export class SwarmIdProxy {
       return
     }
 
+    // Only a partitioned session folds. The hydrated view IS its state, and it
+    // has no other way to learn this. An unpartitioned session's record is
+    // shared storage, which this message did not write, so folding into memory
+    // would only diverge the two — it reconciles from storage below instead.
+    // (Which means a cross-device revoke does not yet reach an unpartitioned
+    // session: that needs the UI to consume deltas and write them, part 3.)
     const { account } = connection
-    // The shared LWW primitives, not a second set of rules: per `appUrl` with a
-    // `revokedAt` tombstone, per `batchID` with `deletedAt`.
-    const connectedApps = restoreLocalSessionFields(
-      mergeConnectedApps(account.connectedApps, snapshot.connectedApps),
-      account.connectedApps,
-    )
-    const postageStamps = mergePostageStamps(
-      account.postageStamps,
-      snapshot.postageStamps,
-    )
-
-    // Partitioned: the hydrated view IS this session's state, so fold into it
-    // (in-memory, like the roster merge in `refreshKnownDeviceIds`).
-    // Unpartitioned: storage stays the record — re-reading it is what the
-    // reconcile below does anyway.
     if (this.partitionAccount) {
+      // The shared LWW primitives, not a second set of rules: per `appUrl` with
+      // a `revokedAt` tombstone, per `batchID` with `deletedAt`. In-memory,
+      // like the roster merge in `refreshKnownDeviceIds`.
       this.partitionAccount = {
         ...this.partitionAccount,
-        connectedApps,
-        postageStamps,
+        connectedApps: restoreLocalSessionFields(
+          mergeConnectedApps(account.connectedApps, snapshot.connectedApps),
+          account.connectedApps,
+        ),
+        postageStamps: mergePostageStamps(
+          account.postageStamps,
+          snapshot.postageStamps,
+        ),
       }
     }
 
@@ -2169,7 +2175,7 @@ export class SwarmIdProxy {
     this.bus.publish({
       type: "account-delta",
       snapshot: accountDeltaSnapshot(snapshot),
-    } as BusMessageInput)
+    })
   }
 
   /**
@@ -2242,13 +2248,16 @@ export class SwarmIdProxy {
   private async runAccountStatePublish(
     reason: "acquired" | "change",
   ): Promise<void> {
-    if (reason === "change") this.publishAccountDelta()
-    const coordinator = this.coordinator
-    if (!coordinator || coordinator.currentPartition === undefined) return
+    // Ahead of the partition gate (a message needs no lease) but behind the
+    // in-flight re-arm, which re-runs this whole method — publishing first
+    // would send the same delta twice for one change.
     if (this.publishInFlight) {
       this.schedulePublish(reason)
       return
     }
+    if (reason === "change") this.publishAccountDelta()
+    const coordinator = this.coordinator
+    if (!coordinator || coordinator.currentPartition === undefined) return
     this.publishInFlight = true
     try {
       const assembled = await this.buildAccountStateSnapshotForPublish()

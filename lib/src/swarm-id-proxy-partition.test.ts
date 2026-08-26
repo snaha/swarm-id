@@ -129,6 +129,7 @@ import { SwarmIdProxy } from "./swarm-id-proxy"
 import type { ProxyConfig } from "./swarm-id-proxy"
 import { SignalingTransport } from "./bus/signaling-transport"
 import { busChannelName } from "./bus/account-bus"
+import { BusMessageSchema } from "./bus/messages"
 import { deriveBusContext } from "./bus/bus-context"
 import { BatchWriteCoordinator } from "./sync/batch-write-coordinator"
 import { UtilizationAwareStamper } from "./utils/batch-utilization"
@@ -860,6 +861,133 @@ describe("SwarmIdProxy partitioned write enablement", () => {
           expect(app.connectedUntil).toBeUndefined()
         }
       } finally {
+        busChannel.close()
+      }
+    })
+
+    // The wire form carries no session material — but "the only publisher today
+    // strips it" is an invariant one forgetful publisher away from breaking,
+    // and part 3 is about to write the second one. A leaked entry for THIS app
+    // (live `connectedUntil`, different secret) drives the reconcile into
+    // `authenticateFromStorage`, which drops `partitionAccount` and clears
+    // `storagePartitioned` — a Safari session bricked until reload.
+    it("ignores session material a publisher failed to strip", async () => {
+      const busChannel = await hydratedSession()
+      const internals = proxy as unknown as {
+        storagePartitioned: boolean
+        partitionAccount: unknown
+        appSecret: string | undefined
+      }
+      const secretBefore = internals.appSecret
+      try {
+        busChannel.postMessage(
+          accountDelta({
+            connectedApps: [
+              {
+                appUrl: PARENT_ORIGIN,
+                appName: "dApp",
+                lastConnectedAt: Date.now(),
+                updatedAt: Date.now(),
+                appSecret: "99".repeat(32),
+                connectedUntil: Date.now() + 60_000,
+              },
+            ],
+          }),
+        )
+        await flushBus()
+
+        expect(internals.storagePartitioned).toBe(true)
+        expect(internals.partitionAccount).toBeDefined()
+        expect(internals.appSecret).toBe(secretBefore)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // Keeping signer keys on the wire is only worth anything if a receiver
+    // acts on them: the fold updates the hydrated view, so the stamper has to
+    // be rebuilt from it. `refreshStampFromStorage` is already proven safe
+    // while partitioned — `hydratePartitionAccount` calls it.
+    it("rebinds the stamper when a delta rotates the stamp's signer key", async () => {
+      const busChannel = await hydratedSession()
+      const rotated = "ee".repeat(32)
+      try {
+        const before = vi.mocked(UtilizationAwareStamper.create).mock.calls
+          .length
+        const stamp = makeSyncedAccount().postageStamps[0]
+        busChannel.postMessage(
+          accountDelta({
+            postageStamps: [
+              {
+                ...stamp,
+                signerKey: new PrivateKey(rotated),
+                updatedAt: Date.now(),
+              },
+            ],
+          }),
+        )
+        await vi.waitFor(() =>
+          expect(
+            vi.mocked(UtilizationAwareStamper.create).mock.calls.length,
+          ).toBeGreaterThan(before),
+        )
+        const lastCall = vi
+          .mocked(UtilizationAwareStamper.create)
+          .mock.calls.at(-1)!
+        expect(String(lastCall[0])).toBe(rotated)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // A `safeParse` failure is silent by design, so a serializer that drifts
+    // from the schema would kill revoke propagation with no signal anywhere.
+    it("publishes a wire form the receive schema accepts", async () => {
+      const busChannel = await hydratedSession()
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      try {
+        await (
+          proxy as unknown as {
+            handleAccountStorageChange(): Promise<void>
+          }
+        ).handleAccountStorageChange()
+        await vi.waitFor(
+          () =>
+            expect(
+              published.filter((m) => m.type === "account-delta"),
+            ).toHaveLength(1),
+          { timeout: 3000 },
+        )
+
+        const delta = published.find((m) => m.type === "account-delta")
+        expect(() => BusMessageSchema.parse(delta)).not.toThrow()
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The feed publish re-arms when one is already in flight; the delta must
+    // not ride along a second time.
+    it("does not re-send the delta when a publish is already in flight", async () => {
+      const busChannel = await hydratedSession()
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      const internals = proxy as unknown as {
+        publishInFlight: boolean
+        runAccountStatePublish(reason: "acquired" | "change"): Promise<void>
+      }
+      try {
+        internals.publishInFlight = true
+        await internals.runAccountStatePublish("change")
+        await flushBus()
+        expect(
+          published.filter((m) => m.type === "account-delta"),
+        ).toHaveLength(0)
+      } finally {
+        internals.publishInFlight = false
         busChannel.close()
       }
     })
