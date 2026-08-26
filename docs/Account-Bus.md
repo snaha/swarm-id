@@ -159,12 +159,37 @@ Each phase is an independent PR chain:
 3. **Safari write enablement**: widen `AuthData` and `sendSecretToOpener`, hydration in
    `handlePopupMessage`, roster naming/expiry for partition devices, flip the upload gate.
 4. **Bus-accelerated leases**: a slot-waiting acquire broadcasts `lease-request` each poll
-   round (`onSlotWait` dep); an idle live holder yields immediately via the normal
-   idle-yield release path (`yieldForPeer`, guarded by `PEER_YIELD_MIN_IDLE_MS` and the
-   in-flight upload count, under the write lock) and answers `lease-released`, which wakes
-   the waiter's poll sleep (`notifySlotMaybeFree`) — handover in ~one bus round-trip
-   instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol is untouched
-   as the authority and offline fallback.
+   round (`onSlotWait` dep) with a fresh 8-hex `requestId`; an idle live holder yields via
+   the normal idle-yield release path (`yieldForPeer`, guarded by `PEER_YIELD_MIN_IDLE_MS`
+   and the in-flight upload count, under the write lock) and answers `lease-released`,
+   which wakes the waiter's poll sleep (`notifySlotMaybeFree`) — handover in ~one bus
+   round-trip instead of the 10 s `LEASE_REFRESH_MS` poll. The Swarm lock-SOC protocol is
+   untouched as the authority and offline fallback.
+
+   **Exactly one holder answers** (#576). A waiter needs one slot, but the request names no
+   partition, so every idle holder used to release at once and whoever lost the re-race got
+   "Uploads are unavailable". Every holder that would presently yield (`canYieldForPeer`)
+   derives the same permutation of the partitions from the `requestId` and waits its own
+   rank in it — `rank = (requestId₁₆ + partition) % partitionCount`, `PEER_YIELD_RANK_STEP_MS`
+   apart. Rank 0 answers immediately, so a single-holder handover is not slowed at all.
+
+   The winner publishes **`lease-claim` before it starts releasing**, and later ranks stand
+   down on that: releasing is two stamped Swarm writes, so a signal sent on completion would
+   reach them only after they had all begun releasing too. `lease-released` still carries
+   the `requestId` and also stands holders down, covering a missed claim. If the winner then
+   declines (an upload slipped in), the round goes unanswered and the next one draws a fresh
+   id. `requestId` is optional on the wire — a peer on an older bundle is answered the way
+   it always was — but a present one must be `^[0-9a-f]{8}$`, since it is parsed straight
+   into the rank seed.
+
+   The waiter's wake is **sticky for one round** (#582): the answer usually lands during the
+   `acquire()` at the top of the poll loop — it is a reply to the request that loop
+   broadcast one line earlier — where there is no sleep to wake and the scan it interrupts
+   read the state from before the release. The flag lives on a per-wait state object, so a
+   wait left running detached by `ensureLease`'s timeout race cannot clear the live one's,
+   and it skips at most one sleep per wait (each round re-broadcasts, so an unconditional
+   skip would be one acquire per bus round-trip).
+
 5. **SWIP-60 transport adapter** once bee/bee-js release it.
 
 ## Verification

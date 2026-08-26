@@ -182,6 +182,29 @@ export interface BatchWriteCoordinatorDeps {
  */
 export const PEER_YIELD_MIN_IDLE_MS = 3000
 
+/** One slot-wait's poll state. Scoped to the wait rather than the coordinator
+ *  because waits overlap: `ensureLease` races this loop against a timeout and
+ *  cannot cancel the loser, so a detached wait's timer and its exit must not
+ *  be able to touch the live wait's. */
+type SlotWaitState = {
+  /** Resolves the current poll sleep early; set only while actually asleep. */
+  wake?: () => void
+  /** A peer announced a release. Sticky, because the announcement usually
+   *  lands during the `acquire()` at the top of the loop — holders yield in
+   *  reply to the request this loop broadcast one line earlier — where there
+   *  is no sleep to wake, and the scan it interrupts already read the state
+   *  from before the release. */
+  maybeFree: boolean
+  /** Whether the sticky flag has already bought a round. Every round
+   *  re-broadcasts a `lease-request`, and its answer re-arms the flag, so
+   *  skipping the sleep unconditionally turns this into one full acquire per
+   *  bus round-trip — with every round making another holder drop a
+   *  partition. One skip is the mid-acquire case this exists for; a second in
+   *  the same wait means the releases aren't reaching us, and hammering the
+   *  network won't change that. */
+  fastRoundUsed: boolean
+}
+
 export class BatchWriteCoordinator {
   private readonly deps: BatchWriteCoordinatorDeps
 
@@ -208,9 +231,12 @@ export class BatchWriteCoordinator {
    *  exceeds one pointer epoch, `refreshTick` demotes. Reset on a successful
    *  heartbeat and whenever the lease binding changes. */
   private pointerHeartbeatFailingSince: number | undefined = undefined
-  /** Resolver that wakes the current slot-wait poll sleep early (a peer
-   *  announced a release over the bus); undefined outside slot-wait. */
-  private slotWaitWake: (() => void) | undefined
+  /** The live slot-wait's state; undefined outside slot-wait. Held as ONE
+   *  object per wait, and every touch goes through this field, so a DETACHED
+   *  wait — `ensureLease` races the poll against a `withTimeout`, and the
+   *  loser keeps running — owns a different object and cannot reach into the
+   *  live wait's wake or flag. */
+  private slotWait: SlotWaitState | undefined
   /** Set by `teardown()`. Once disposed the coordinator must never re-acquire a
    *  partition or arm a refresh timer: an in-flight `withWrite` (e.g. a deferred
    *  publish, or a normal upload) can outlive a disconnect/sign-out, and without
@@ -237,6 +263,12 @@ export class BatchWriteCoordinator {
   /** True when every partition is held by a live peer and this device cannot write. */
   get isReadOnly(): boolean {
     return this.readOnly
+  }
+
+  /** The account's partition split — the modulus the proxy ranks holders by
+   *  when electing which one answers a peer's `lease-request`. */
+  get partitionCount(): number {
+    return this.deps.partitionCount
   }
 
   /** The bound stamper — exposed for the proxy's `buildConnectionInfo`
@@ -353,6 +385,9 @@ export class BatchWriteCoordinator {
       clearInterval(this.partitionRefreshTimer)
       this.partitionRefreshTimer = undefined
     }
+    // Wake a slot poll so it sees `disposed` and stops, rather than sleeping
+    // out its interval first. The wait clears its own state on the way out.
+    this.slotWait?.wake?.()
     const lease = this.partitionLease
     const stamper = this.deps.stamper
     if (lease) {
@@ -639,6 +674,26 @@ export class BatchWriteCoordinator {
     // time, only for `acquire()` to discard the claim — a pointless ghost
     // claim peers must wait out via the TTL.
     const epoch = this.leaseEpoch
+    // Fresh state per wait: a wake left over from an earlier one says nothing
+    // about this one, and this one's must not be clobbered by an earlier one
+    // still running detached.
+    const state: SlotWaitState = { maybeFree: false, fastRoundUsed: false }
+    this.slotWait = state
+    try {
+      await this.pollForSlot(deadline, epoch, state)
+    } finally {
+      // However this exits — return, throw, or the disposed check — this
+      // wait's state describes a sleep that is over. Only clear it if it is
+      // still the live one: a detached wait outlives the wait that replaced it.
+      if (this.slotWait === state) this.slotWait = undefined
+    }
+  }
+
+  private async pollForSlot(
+    deadline: number,
+    epoch: number,
+    state: SlotWaitState,
+  ): Promise<void> {
     while (true) {
       await this.acquire()
       // Disposed mid-wait (disconnect during the slot poll): stop waiting for a
@@ -654,15 +709,29 @@ export class BatchWriteCoordinator {
       // Ask live holders to yield (re-broadcast every round — idempotent),
       // then sleep the poll interval, waking early on `notifySlotMaybeFree`.
       this.deps.onSlotWait?.()
-      await new Promise<void>((resolve) => {
-        const wake = () => {
-          clearTimeout(timer)
-          if (this.slotWaitWake === wake) this.slotWaitWake = undefined
-          resolve()
-        }
-        const timer = setTimeout(wake, LEASE_REFRESH_MS)
-        this.slotWaitWake = wake
-      })
+      const skipSleep = state.maybeFree && !state.fastRoundUsed
+      state.maybeFree = false
+      if (skipSleep) {
+        // A holder announced a release while we were mid-`acquire()`, so the
+        // scan above ran against the state BEFORE it let go. Go straight back
+        // round rather than sleeping out an interval we already know is stale.
+        // Not a busy loop: only a real peer announcement sets the flag, this
+        // spends it once per wait, and every iteration pays a full network
+        // acquire, bounded by `deadline`.
+        state.fastRoundUsed = true
+      } else {
+        await new Promise<void>((resolve) => {
+          const wake = () => {
+            clearTimeout(timer)
+            state.wake = undefined
+            // Consumed by this wake — it is the reason we are awake.
+            state.maybeFree = false
+            resolve()
+          }
+          const timer = setTimeout(wake, LEASE_REFRESH_MS)
+          state.wake = wake
+        })
+      }
       // Checked between the sleep and the next acquire: a fresh `acquire()`
       // call would capture the bumped epoch as its own baseline and commit.
       if (this.leaseEpoch !== epoch) return
@@ -1107,7 +1176,26 @@ export class BatchWriteCoordinator {
    * through the lock SOCs, so a spurious wake costs one extra read round.
    */
   notifySlotMaybeFree(): void {
-    this.slotWaitWake?.()
+    const state = this.slotWait
+    if (!state) return
+    state.maybeFree = true
+    state.wake?.()
+  }
+
+  /**
+   * Whether a peer's `lease-request` would presently be answered — a partition
+   * held, nothing in flight, and idle for `PEER_YIELD_MIN_IDLE_MS`. The proxy
+   * checks it before taking a rank in the yield election, so a holder mid-burst
+   * doesn't occupy the front of the order only to decline in silence.
+   *
+   * Advisory: `yieldForPeer` re-checks under the write lock, where an upload
+   * that slipped in between can still turn the answer into a no-op.
+   */
+  get canYieldForPeer(): boolean {
+    if (this.disposed) return false
+    if (this.partitionLease?.currentPartition === undefined) return false
+    if (this.activeUploadCount !== 0) return false
+    return Date.now() - this.lastLeaseActivityAt >= PEER_YIELD_MIN_IDLE_MS
   }
 
   /**
@@ -1119,13 +1207,10 @@ export class BatchWriteCoordinator {
    * or undefined when nothing was (or could safely be) yielded.
    */
   async yieldForPeer(): Promise<number | undefined> {
+    if (!this.canYieldForPeer) return undefined
     const lease = this.partitionLease
     const partition = lease?.currentPartition
-    if (this.disposed || !lease || partition === undefined) return undefined
-    if (this.activeUploadCount !== 0) return undefined
-    if (Date.now() - this.lastLeaseActivityAt < PEER_YIELD_MIN_IDLE_MS) {
-      return undefined
-    }
+    if (!lease || partition === undefined) return undefined
     let released: number | undefined
     await this.lock(async () => {
       if (this.disposed || this.partitionLease !== lease) return
