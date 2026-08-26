@@ -136,9 +136,15 @@ import {
   serializeAccount,
   serializeSyncedAccount,
 } from "./utils/storage-managers"
+import { serializeAccountStateSnapshot } from "./utils/account-state-snapshot"
 import { STORAGE_CHALLENGE_KEY, STORAGE_KEY_ACCOUNTS } from "./types"
 import { DEFAULT_BEE_NODE_URL } from "./schemas"
-import type { SignedInAccount, SyncedAccount } from "./schemas"
+import type {
+  ConnectedApp,
+  PostageStamp,
+  SignedInAccount,
+  SyncedAccount,
+} from "./schemas"
 
 const PARENT_ORIGIN = "https://dapp.example.com"
 const ID_ORIGIN = "https://id.example.com"
@@ -717,6 +723,162 @@ describe("SwarmIdProxy partitioned write enablement", () => {
     } finally {
       busChannel.close()
     }
+  })
+
+  // A revoke reaches a live proxy only through the browser `storage` event, and
+  // `handleAccountStorageChange` skips the disconnect while partitioned — the
+  // iframe cannot see connected apps. So on Safari a revoked session kept its
+  // hydrated account view, stamp signer keys included, for the life of the
+  // page. `account-delta` is the push channel that closes that.
+  describe("account-delta from a peer", () => {
+    /** The wire form: what a publisher puts on the bus. */
+    function accountDelta(overrides?: {
+      accountId?: string
+      connectedApps?: ConnectedApp[]
+      postageStamps?: PostageStamp[]
+    }): Record<string, unknown> {
+      const account = makeSyncedAccount()
+      return {
+        type: "account-delta",
+        snapshot: serializeAccountStateSnapshot({
+          accountId: overrides?.accountId ?? account.id.toHex(),
+          metadata: {
+            accountName: account.name,
+            defaultPostageStampBatchID: BATCH_ID_HEX,
+            publicKey: account.publicKey,
+            settings: undefined,
+            createdAt: account.createdAt,
+            lastModified: Date.now(),
+            devices: [],
+            partitionCount: 2,
+          },
+          connectedApps: overrides?.connectedApps ?? [],
+          postageStamps: overrides?.postageStamps ?? account.postageStamps,
+          timestamp: Date.now(),
+        }),
+      }
+    }
+
+    /** A revoke as the UI writes it: auth material cleared, tombstoned. */
+    function revoked(appUrl: string): ConnectedApp {
+      const now = Date.now()
+      return {
+        appUrl,
+        appName: "dApp",
+        lastConnectedAt: now - 1000,
+        appSecret: undefined,
+        connectedUntil: undefined,
+        updatedAt: now,
+        revokedAt: now,
+      }
+    }
+
+    async function hydratedSession(): Promise<BroadcastChannel> {
+      const challenge = await startPartitionedConnect()
+      await sendSetSecret(challenge, {
+        account: serializeSyncedAccount(makeSyncedAccount()),
+      })
+      await awaitBusJoin()
+      return new BroadcastChannel(accountChannelName)
+    }
+
+    it("disconnects a partitioned session when the delta revokes this app", async () => {
+      const busChannel = await hydratedSession()
+      try {
+        busChannel.postMessage(
+          accountDelta({ connectedApps: [revoked(PARENT_ORIGIN)] }),
+        )
+        await vi.waitFor(() =>
+          expect(messagesOfType("disconnectResponse")).toHaveLength(1),
+        )
+        const infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1].canUpload).toBe(false)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The wire form carries no `appSecret`/`connectedUntil` — they are
+    // per-context session material, stripped at publish. A merged entry that
+    // wins on recency would otherwise take this session's own auth with it,
+    // and every unrelated account change would log the dApp out.
+    it("keeps this session's own secret when the delta revokes another app", async () => {
+      const busChannel = await hydratedSession()
+      try {
+        busChannel.postMessage(
+          accountDelta({
+            connectedApps: [
+              revoked("https://other-dapp.example.com"),
+              // Our app, as a publisher would send it: no secret, no session.
+              {
+                appUrl: PARENT_ORIGIN,
+                appName: "dApp",
+                lastConnectedAt: Date.now(),
+                updatedAt: Date.now(),
+              },
+            ],
+          }),
+        )
+        await flushBus()
+        expect(messagesOfType("disconnectResponse")).toHaveLength(0)
+
+        // Still a writer: the session kept the secret the handshake gave it.
+        const infos = messagesOfType("connectionInfoChanged")
+        expect(infos[infos.length - 1].canUpload).toBe(true)
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    // The other half: a context that CAN see the change relays it. Nothing on
+    // the wire may carry `appSecret` — the receiver may be an iframe embedded
+    // by a different dApp, which the popup handshake never hands one to.
+    it("publishes a delta on an account change, without any app secret", async () => {
+      const busChannel = await hydratedSession()
+      const published: Record<string, unknown>[] = []
+      busChannel.onmessage = (event) =>
+        published.push(event.data as Record<string, unknown>)
+      try {
+        await (
+          proxy as unknown as {
+            handleAccountStorageChange(): Promise<void>
+          }
+        ).handleAccountStorageChange()
+
+        await vi.waitFor(
+          () =>
+            expect(
+              published.filter((m) => m.type === "account-delta"),
+            ).toHaveLength(1),
+          { timeout: 3000 },
+        )
+        const snapshot = published.find((m) => m.type === "account-delta")!
+          .snapshot as { connectedApps: Record<string, unknown>[] }
+        expect(snapshot.connectedApps.length).toBeGreaterThan(0)
+        for (const app of snapshot.connectedApps) {
+          expect(app.appSecret).toBeUndefined()
+          expect(app.connectedUntil).toBeUndefined()
+        }
+      } finally {
+        busChannel.close()
+      }
+    })
+
+    it("ignores a delta for a different account", async () => {
+      const busChannel = await hydratedSession()
+      try {
+        busChannel.postMessage(
+          accountDelta({
+            accountId: "bb".repeat(20),
+            connectedApps: [revoked(PARENT_ORIGIN)],
+          }),
+        )
+        await flushBus()
+        expect(messagesOfType("disconnectResponse")).toHaveLength(0)
+      } finally {
+        busChannel.close()
+      }
+    })
   })
 
   // `buckets` carry the PER-PARTITION counter `j`, not an absolute slot, so a

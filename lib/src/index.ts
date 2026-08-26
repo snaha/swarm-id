@@ -163,6 +163,23 @@ export type {
   AccountStateSnapshotResult,
 } from "./utils/account-state-snapshot"
 
+// Account bus (docs/Account-Bus.md). The proxy constructs its own; this is for
+// the SwarmID UI, which is where a revoke happens and which lives in a
+// different storage partition from the dApp iframe it has to reach — so it
+// needs the signaling transport, not the BroadcastChannel one. `"."` is the
+// only subpath `lib/package.json` exposes, so there is no other way in.
+export {
+  AccountBus,
+  BroadcastChannelTransport,
+  busChannelName,
+} from "./bus/account-bus"
+export type { BusTransport, PublishOptions } from "./bus/account-bus"
+export { SignalingTransport } from "./bus/signaling-transport"
+export { deriveBusContext } from "./bus/bus-context"
+export type { BusContext } from "./bus/bus-context"
+export { accountDeltaSnapshot } from "./bus/account-delta"
+export type { BusMessage, BusMessageInput } from "./bus/messages"
+
 // Encrypted backup (.swarmid) support
 export {
   deriveBackupEncryptionKey,
